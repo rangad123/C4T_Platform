@@ -13,7 +13,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TaskOffer } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
-import { getAgentServices, KEY_HAS_NO_RUNNER, noRunnerWaitMs, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, TEAM_RUNNER_REFUSED } from "../src/platform/agent-services.js";
+import { getAgentServices, KEY_HAS_NO_RUNNER, noRunnerWaitMs, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_TOKEN_GONE } from "../src/platform/agent-services.js";
 import { hashToken, newAgentToken, QUEUE_MAX_MS } from "../src/platform/agent-store.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { runAs } from "../src/platform/auth/actor.js";
@@ -115,7 +115,7 @@ beforeAll(async () => {
         ids[who] = (await as(who, "GET", "/api/auth/state")).body.me.id as string;
         if (who !== "t-ada") accessControlOf(app).projects.store.addMember(projectId, ids[who]!, { role: "owner", projectAdmin: false, source: "added", addedBy: "test" });
     }
-    svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+    svc().store.setRunner(projectId, { runOn: "agent" });
 }, 60_000);
 
 afterAll(async () => {
@@ -333,7 +333,7 @@ describe("one runner per person", () => {
 
     it("setting up a computer again retires the one before (one runner per person), and the old one is refused at hello", async () => {
         const again = await setUp("t-tess");
-        expect(svc().store.getToken(tess.runnerId)!.revokedAt).not.toBeNull();
+        expect(svc().store.getToken(tess.runnerId)).toBeUndefined();
         expect((await tess.agent!.hello({ machineId: tess.machineId })).status).toBe(404);
         expect((await as("t-tess", "GET", "/api/me/runner")).body.runner.id).toBe(again.runnerId);
         expect((await as("t-tess", "GET", `/api/me/runner/enrollments/${tess.enrollmentId}`)).body).toEqual({ status: "used" });
@@ -363,22 +363,16 @@ describe("one runner per person", () => {
         const vic = await setUp("t-vic", false);
         expect((await as("t-vic", "GET", "/api/me/runner")).body.runner.id).toBe(vic.runnerId);
         expect((await as("t-vic", "POST", "/api/me/runner/retire")).status).toBe(200);
-        expect(svc().store.getToken(vic.runnerId)!.revokedAt).not.toBeNull();
+        expect(svc().store.getToken(vic.runnerId)).toBeUndefined();
     });
 
-    it("a team or project credential installed before is refused at hello with a 401 and the sentence; a team code cannot be traded", async () => {
-        const secret = newAgentToken();
-        platform.db.run("INSERT INTO agent_tokens (id, project_id, organization_id, label, token_hash, hint, created_at, kind) VALUES (?,?,?,?,?,?,?,?)", randomUUID(), projectId, null, "Lab PC", hashToken(secret), secret.slice(-4), new Date().toISOString(), "team");
-        const team = new FakeAgent(viaFetch(BASE), secret, { name: "lab-pc" });
-        const h = await team.hello();
-        expect(h.status).toBe(401);
-        expect(h.text).toContain(TEAM_RUNNER_REFUSED);
-        expect((await team.poll(1)).status).toBe(401);
-        const code = `aite_${"x".repeat(43)}`;
-        platform.db.run("INSERT INTO runner_enrollments (id, code_hash, hint, kind, created_at, expires_ms) VALUES (?,?,?,?,?,?)", randomUUID(), hashToken(code), "xxxx", "team", new Date().toISOString(), Date.now() + 60_000);
-        const res = await fetch(`${BASE}/api/agent/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name: "lab-pc", machineId: randomUUID() }) });
-        expect(res.status).toBe(410);
-        expect(await res.text()).toContain(TEAM_RUNNER_REFUSED);
+    it("a credential from before the update (removed by migration 57) is refused at hello with a 404 and what to do", async () => {
+        const old = new FakeAgent(viaFetch(BASE), newAgentToken(), { name: "lab-pc" });
+        const h = await old.hello();
+        expect(h.status).toBe(404);
+        expect(h.text).toContain(RUNNER_TOKEN_GONE);
+        expect(h.text).toContain("Download the new runner in Settings, Your runner");
+        expect((await old.poll(1)).status).toBe(404);
     });
 
     it("the removed routes are gone", async () => {

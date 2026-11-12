@@ -324,7 +324,7 @@ export class RunnerUpdates {
     }
 
     /** Called with what a runner reports (hello and poll): writes the outcome of an update to Activity once, and settles a request. */
-    observe(agent: Pick<AgentRecord, "id" | "name" | "projectId">, caps: Capabilities | undefined): void {
+    observe(agent: Pick<AgentRecord, "id" | "name">, caps: Capabilities | undefined): void {
         const u = caps?.update;
         if (!u || !u.at || !["updated", "failed", "rolled-back", "needs-manual"].includes(u.state)) return;
         const key = `${u.state}|${u.at}`;
@@ -336,12 +336,12 @@ export class RunnerUpdates {
         const error = u.error ? redactCredentials(u.error).slice(0, 300) : "";
         const row: ActivityRow =
             u.state === "updated"
-                ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-updated", detail: `Runner “${agent.name}” updated itself from ${u.from ?? "an earlier version"} to ${u.to ?? caps?.kitVersion ?? "the platform's version"}.` }
+                ? { projectId: null, agentId: agent.id, agentName: agent.name, action: "runner-updated", detail: `Runner “${agent.name}” updated itself from ${u.from ?? "an earlier version"} to ${u.to ?? caps?.kitVersion ?? "the platform's version"}.` }
                 : u.state === "failed"
-                  ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” could not update${u.to ? ` to ${u.to}` : ""}: ${error || "no reason given"} Still on version ${caps?.kitVersion ?? "unknown"}.` }
+                  ? { projectId: null, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” could not update${u.to ? ` to ${u.to}` : ""}: ${error || "no reason given"} Still on version ${caps?.kitVersion ?? "unknown"}.` }
                   : u.state === "needs-manual"
-                    ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” did not install version ${u.to ?? "the platform's version"} by itself: ${error || "its signature could not be checked."} It keeps running version ${caps?.kitVersion ?? "unknown"}. Download the runner again from Settings.` }
-                  : { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-rolled-back", detail: `Runner “${agent.name}” went back to version ${caps?.kitVersion ?? u.from ?? "unknown"}${u.to ? ` from ${u.to}` : ""}: ${error || "no reason given"}` };
+                    ? { projectId: null, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” did not install version ${u.to ?? "the platform's version"} by itself: ${error || "its signature could not be checked."} It keeps running version ${caps?.kitVersion ?? "unknown"}. Download the runner again from Settings.` }
+                  : { projectId: null, agentId: agent.id, agentName: agent.name, action: "runner-rolled-back", detail: `Runner “${agent.name}” went back to version ${caps?.kitVersion ?? u.from ?? "unknown"}${u.to ? ` from ${u.to}` : ""}: ${error || "no reason given"}` };
         try {
             this.activity?.(row);
         } catch {

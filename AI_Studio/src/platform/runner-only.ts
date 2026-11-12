@@ -47,8 +47,11 @@ export const RUNNER_OFFLINE = "Your runner is offline. Start it on your computer
 export const KEY_HAS_NO_RUNNER = "Runs started with the server's access key have no owner. Use your own API token, so the run goes to your runner.";
 export const SCHEDULE_HAS_NO_OWNER = "This schedule has no owner. Open it and save it again to run it on your computer.";
 export const TRIGGER_HAS_NO_OWNER = "This deploy trigger has no owner. Make a new deploy trigger token, so its runs go to your computer.";
-/** A team runner, Crowd4Test's shared runner or a project's runner token (all removed in round 45), at every runner route. */
-export const TEAM_RUNNER_REFUSED = "This runner was set up for a team or a project, and those runners are no longer used. Set up your own runner from Settings in AI Studio.";
+/**
+ * A runner credential the platform does not know (removed, replaced by another computer, or from before migration 57 removed every runner),
+ * at every runner route. An installed runner prints it after "The platform no longer accepts this runner." and stops.
+ */
+export const RUNNER_TOKEN_GONE = "This runner's token is no longer valid: the runner was removed or replaced. Download the new runner in Settings, Your runner, and use that one instead.";
 /** The typed refusal codes of a run that cannot start on its owner's runner (details.code), each linkable to Settings. */
 export type RunnerRefusalCode = "RUNNER_NOT_SET_UP" | "RUNNER_OFFLINE" | "RUNNER_CANNOT_RUN";
 export const runnerRefusal = (code: RunnerRefusalCode, message: string): HttpError => new HttpError(409, message, { code, link: RUNNER_SETTINGS_LINK });

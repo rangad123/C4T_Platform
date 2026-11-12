@@ -20,7 +20,7 @@ import zlib from "node:zlib";
 import { z } from "zod";
 import { REPO_ROOT } from "../config.js";
 import type { InstallerPart } from "./runner-installer.js";
-import { kitCredentialFile, type Bundle } from "./runner-kit.js";
+import { KIT_SLUG, kitCredentialFile, type Bundle } from "./runner-kit.js";
 import { readme, START_CMD, START_COMMAND, START_SH, withLineEnding } from "./runner-kit-scripts.js";
 import { CHECK_FILES } from "./runner-check-scripts.js";
 
@@ -162,8 +162,8 @@ export function loadComplete(target: CompleteTarget, bundle: Extract<Bundle, { o
 
 // ── the zip ─────────────────────────────────────────────────────────────────
 
-export const completeFolder = (slug: string, target: CompleteTarget): string => `runner-${slug}-${target}`;
-export const completeFileName = (slug: string, target: CompleteTarget): string => `${completeFolder(slug, target)}.zip`;
+export const completeFolder = (target: CompleteTarget): string => `runner-${KIT_SLUG}-${target}`;
+export const completeFileName = (target: CompleteTarget): string => `${completeFolder(target)}.zip`;
 
 interface ZipEntry {
     name: Buffer;
@@ -223,9 +223,6 @@ export interface BuildCompleteInput {
     installer?: Extract<InstallerPart, { ok: true }>;
     /** Left out: the runner uses the computer's own name (round 45). */
     runnerName?: string;
-    /** @deprecated Shown in the README only when given. */
-    projectName?: string;
-    projectSlug: string;
     platformUrl: string;
     /** The single-use enrollment code (aite_...), written as runner.enroll; every download carries one (round 39). See runner-kit.ts kitCredentialFile. */
     enrollCode?: string;
@@ -242,7 +239,7 @@ export interface BuildCompleteInput {
 export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; bytes: number } {
     const { manifest } = i.build;
     const target = i.build.target;
-    const dir = completeFolder(i.projectSlug, target);
+    const dir = completeFolder(target);
     const win = target.startsWith("win");
     const time = manifest.dosTime;
     const date = manifest.dosDate;
@@ -280,7 +277,6 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     if (i.installer) for (const f of i.installer.files) small(f.name, f.data, f.mode);
     const readmeText = readme({
         platform: win ? "windows" : "unix",
-        ...(i.projectName ? { projectName: i.projectName } : {}),
         ...(i.runnerName ? { runnerName: i.runnerName } : {}),
         platformUrl: i.platformUrl,
         kitVersion,

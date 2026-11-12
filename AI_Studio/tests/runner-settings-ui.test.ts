@@ -55,6 +55,8 @@ describe("the rules (no browser)", () => {
 
     it("says what to do on each system, and how to bring a runner back", () => {
         expect(startSteps("windows").steps.join(" ")).toContain("AITestingRunnerSetup.exe");
+        // Round 49: the Windows download is the setup program itself.
+        expect(startSteps("windows").steps.join(" ")).not.toMatch(/Unzip/);
         expect(startSteps("mac").steps.join(" ")).toContain("AI Testing Runner");
         expect(startSteps("linux").command).toBe("sh start-runner.sh");
         expect(startSteps("windows", "files").steps.join(" ")).toContain("start-runner.cmd");

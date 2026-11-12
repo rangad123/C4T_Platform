@@ -41,17 +41,20 @@ One runner per person, set up once in **Settings, Your runner**, used automatica
 
 ## Deliberately retained
 
-- **Security:** the runner switches (code scripts, private addresses, connected phone) and the code-scripts notice; one-time codes with expiry; machine binding and credential rotation; the confirmation on "Remove this computer"; `authenticate` refusing team credentials (401) and old team codes (410); the owner checks, including the Crowd4Test check before schedule and trigger runs; the private-address checks on platform and runner; the guard that stops the platform running tests in production.
+- **Security:** the runner switches (code scripts, private addresses, connected phone) and the code-scripts notice; one-time codes with expiry; machine binding and credential rotation; the confirmation on "Remove this computer"; `authenticate` refusing team credentials (401) and old team codes (410) (round 49: no such credential or code exists any more after the runner reset); the owner checks, including the Crowd4Test check before schedule and trigger runs; the private-address checks on platform and runner; the guard that stops the platform running tests in production.
 - **Reliability:** signed updates with rollback and every update state; the sweep (accept timeout, one re-offer, lost runner); device reservations; the hand-over on restart; the result outbox; the live run view rebuilt from stored events.
 - **Compatibility:** the runner protocol (versions 1 and 2), hello's fields, `--token`, `runner.token` and `--allow-custom-scripts` (accepted; the Settings switch decides); `GET /api/projects/:id/runner` (local mode) and `GET /api/projects/:id/agents` (kept for tests, no longer read by the website); the Windows and macOS installers.
 
-## Deferred (proposed, not done)
+## Done in round 49 (were deferred)
 
-- **BE-4:** a one-time change keeping only each person's most recently seen runner. It changes live data for people with two computers from before one-runner-per-person; it needs the production count first.
-- **BE-6:** dropping the unused `runner_access` table (and later the dead columns): a schema change, best done with the PostgreSQL move.
-- **BE-10:** trimming the download information to what the website reads: left, because tests check those fields and file names and nobody sees the difference.
-- **BE-11:** no longer building Windows "complete" downloads: measure on production first.
-- **BE-14:** removing the one-time owner backfill at start-up: confirm on production that nothing is left to attribute.
+The owner decided on 2026-11-12 to remove every existing runner: everyone downloads the new runner from Settings, Your runner.
+
+- **The runner reset (migration 57):** every runner credential, computer, enrollment code, device reservation and per-runner update setting is deleted, and `runner_access` is dropped. A task claimed by or running on a removed runner (and a recording or phone session queued for one) ends as failed with "The runner this run was on was removed in an update. Download the new runner in Settings, Your runner, then start the run again.", also as an event of its run; a queued task nobody claimed waits for its owner's new runner (30-minute rule). A run without a "where it ran" snapshot gets one first, so history still names the runner. An installed old runner gets 404 with "This runner's token is no longer valid: the runner was removed or replaced. Download the new runner in Settings, Your runner, and use that one instead." and stops (exit code 3), as every runner program has since the first release.
+- **BE-6:** migration 57 rebuilds `agent_tokens` (no `kind`, project, organisation or revoked state; `owner_id` unique), `agents` (no project), `runner_enrollments`, `runner_settings` (only `run_on`) and `runner_update_settings` (no `auto`). The late-filled-slot repair now runs before the slots still to run and tells slot 42 by `device_reservations`; the column patch for slot 51 is gone. `pg/baseline.sql` is at version 57.
+- **BE-4:** one credential per person by construction. `runnerOf`, `setTokenSwitches`, `sessionHosts` read one row; "Remove this computer" deletes it (`retire`); a new enrolment replaces the old one in the same transaction.
+- **BE-10:** the download information answers only what Settings reads; the folder name is one constant (`runner-my-computer-...`), no project name or slug through the builders.
+- **BE-11:** the deploy builds complete downloads for Mac and Linux only; a Windows download never carries one (its fallback is the plain files).
+- **BE-14:** the owner attribution of old schedules and trigger tokens ran once, in migration 57; the start-up calls and the methods are gone.
 
 ## Tests executed
 
@@ -72,7 +75,6 @@ Node 24.22.3 (the version CI uses):
 
 ## Still needs attention
 
-- The deferred items above, which need production numbers or a schema decision.
 - The update-signing key does not exist yet, so runners cannot update themselves; people re-download from Settings until it does.
 - Someone who keeps an active Crowd4Test account but loses only the "run tests" permission is stopped at their next visit, not at their next scheduled run (the Crowd4Test people service does not report permissions).
 - A schedule run that fails because its creator's computer stayed off does not update the schedule's "last outcome".

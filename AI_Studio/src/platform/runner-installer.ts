@@ -8,6 +8,8 @@
  * what the manifest names, verifies every checksum, and puts them in a zip next to the same runner bundle, `runner.json` and
  * `runner.enroll` (a single-use enrollment code) a files kit holds. Nothing from the server's environment, `.env`, database or data folder is ever read.
  *
+ * Windows (round 49): the download is the setup program itself with the kit appended (buildInstallerExe); a signed exe gets the zip.
+ *
  * If the installer was not built (or the part for the chosen system is missing or damaged) the caller falls back to the files kit and says so.
  */
 import { createHash } from "node:crypto";
@@ -18,7 +20,7 @@ import { z } from "zod";
 import { REPO_ROOT } from "../config.js";
 import { NODE_MIN_MAJOR, withLineEnding, type KitPlatform } from "./runner-kit-scripts.js";
 import { CHECK_FILES } from "./runner-check-scripts.js";
-import { kitCredentialFile, type Bundle } from "./runner-kit.js";
+import { KIT_SLUG, kitCredentialFile, type Bundle } from "./runner-kit.js";
 
 export type KitKind = "installer" | "files";
 
@@ -127,13 +129,11 @@ export function installerInfo(loaded: LoadedInstaller = loadInstaller()): { wind
 
 // ── the zip ─────────────────────────────────────────────────────────────────
 
-export const installerFolder = (slug: string, platform: KitPlatform): string => `runner-${slug}-${platform === "windows" ? "windows" : "mac"}-setup`;
-export const installerFileName = (slug: string, platform: KitPlatform): string => `${installerFolder(slug, platform)}.zip`;
+export const installerFolder = (platform: KitPlatform): string => `runner-${KIT_SLUG}-${platform === "windows" ? "windows" : "mac"}-setup`;
+export const installerFileName = (platform: KitPlatform): string => `${installerFolder(platform)}.zip`;
 
 export interface InstallerReadmeInput {
     platform: KitPlatform;
-    /** @deprecated Downloads are for a person's own computer (round 45); a line is shown only when given. */
-    projectName?: string;
     /** Left out: the runner uses the computer's own name. */
     runnerName?: string;
     platformUrl: string;
@@ -165,7 +165,7 @@ To take this runner's access away, open Settings, Your runner in the platform an
 export function installerReadme(i: InstallerReadmeInput): string {
     const steps = i.platform === "windows" ? WINDOWS_STEPS : MAC_STEPS;
     return `AI Testing Platform runner${i.runnerName ? ` "${i.runnerName}"` : ""}
-${i.projectName ? `Project: ${i.projectName}\n` : ""}Platform: ${i.platformUrl}
+Platform: ${i.platformUrl}
 Kit version: ${i.kitVersion}
 
 ${steps}
@@ -185,9 +185,6 @@ export interface BuildInstallerInput {
     platform: KitPlatform;
     /** Left out: the runner uses the computer's own name (round 45). */
     runnerName?: string;
-    /** @deprecated Shown in the README only when given. */
-    projectName?: string;
-    projectSlug: string;
     platformUrl: string;
     /** The single-use enrollment code (aite_...), written as runner.enroll; every download carries one (round 39). See runner-kit.ts kitCredentialFile. */
     enrollCode?: string;
@@ -197,8 +194,9 @@ export interface BuildInstallerInput {
     token?: string;
 }
 
-export function buildInstallerZip(i: BuildInstallerInput): Uint8Array {
-    const dir = installerFolder(i.projectSlug, i.platform);
+/** What the zip holds, under one top folder. `oneFile`: only the kit Setup reads from its own end (no program, check scripts or README). */
+function installerEntries(i: BuildInstallerInput, oneFile: boolean): Zippable {
+    const dir = installerFolder(i.platform);
     const text = (s: string): Uint8Array => new TextEncoder().encode(s);
     const kitVersion = i.bundle.manifest.kitVersion;
     const entries: Zippable = {};
@@ -206,7 +204,7 @@ export function buildInstallerZip(i: BuildInstallerInput): Uint8Array {
         entries[`${dir}/${name}`] = [data, { os: 3, attrs: mode(perm), level: 6 }];
     };
     // The installer program (or app) with the modes the build recorded.
-    for (const f of i.part.files) add(f.name, f.data, f.mode);
+    if (!oneFile) for (const f of i.part.files) add(f.name, f.data, f.mode);
     // The same runner bundle as a files kit: the exact prebuilt bytes.
     for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) add(name, i.bundle.files.get(name)!);
     // The test tools' lock file (from round 39 on): the start scripts and installers install from it with npm ci.
@@ -216,8 +214,55 @@ export function buildInstallerZip(i: BuildInstallerInput): Uint8Array {
     add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, ...(i.runnerName ? { name: i.runnerName } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
     const credential = kitCredentialFile(i);
     add(credential.name, text(credential.text), 0o600);
+    if (oneFile) return entries;
     // "Check this computer" (docs/features/runner-check.md): checks the runner the installer set up; Setup runs the same check at its end.
     for (const f of CHECK_FILES) add(f.name, text(withLineEnding(f.text, f.eol)), 0o755);
-    add("README.txt", text(withLineEnding(installerReadme({ platform: i.platform, ...(i.projectName ? { projectName: i.projectName } : {}), ...(i.runnerName ? { runnerName: i.runnerName } : {}), platformUrl: i.platformUrl, kitVersion }), i.platform === "windows" ? "\r\n" : "\n")));
-    return zipSync(entries);
+    add("README.txt", text(withLineEnding(installerReadme({ platform: i.platform, ...(i.runnerName ? { runnerName: i.runnerName } : {}), platformUrl: i.platformUrl, kitVersion }), i.platform === "windows" ? "\r\n" : "\n")));
+    return entries;
+}
+
+export function buildInstallerZip(i: BuildInstallerInput): Uint8Array {
+    return zipSync(installerEntries(i, false));
+}
+
+// ── the one-file Windows download (round 49) ────────────────────────────────
+
+export const WINDOWS_EXE_NAME = "AITestingRunnerSetup.exe";
+/**
+ * The trailer after the program: the kit as a zip (one top folder), then a 16-byte footer: the zip's length (uint32 LE), the format (uint32 LE)
+ * and these 8 ASCII bytes. installer/win/Common.cs (Stamp) reads the same layout.
+ */
+export const STAMP_MAGIC = "AITP-KIT";
+export const STAMP_FORMAT = 1;
+export const STAMP_FOOTER_BYTES = 16;
+
+/** Does this PE file carry an Authenticode signature (a non-empty certificate table, data directory 4)? Anything that is not a PE file says no. */
+export function peSigned(exe: Uint8Array): boolean {
+    const b = Buffer.from(exe.buffer, exe.byteOffset, exe.byteLength);
+    if (b.length < 0x40 || b.toString("latin1", 0, 2) !== "MZ") return false;
+    const pe = b.readUInt32LE(0x3c);
+    if (pe + 24 + 2 > b.length || b.toString("latin1", pe, pe + 4) !== "PE\0\0") return false;
+    const opt = pe + 24;
+    const plus = b.readUInt16LE(opt) === 0x20b;
+    const count = opt + (plus ? 108 : 92);
+    const cert = opt + (plus ? 112 : 96) + 4 * 8;
+    if (cert + 8 > b.length || b.readUInt32LE(count) <= 4) return false;
+    return b.readUInt32LE(cert + 4) > 0;
+}
+
+/**
+ * The Windows download as one program: the CI-built AITestingRunnerSetup.exe (the same bytes for everyone) with this download's kit appended
+ * (runner files, runner.json, runner.enroll). Setup finds it at its own end, unpacks it privately and copies only the program part into the
+ * install folder. Undefined when the exe is signed: bytes after an Authenticode signature break it, so the caller sends the zip.
+ */
+export function buildInstallerExe(i: BuildInstallerInput): Uint8Array | undefined {
+    const exe = i.part.files.find((f) => f.name === WINDOWS_EXE_NAME)!.data;
+    // shortcut: a signed exe gets the zip; when signing starts, put the kit inside the certificate table's padding instead (as Chrome's tagged installers do).
+    if (peSigned(exe)) return undefined;
+    const payload = zipSync(installerEntries(i, true));
+    const footer = Buffer.alloc(STAMP_FOOTER_BYTES);
+    footer.writeUInt32LE(payload.length, 0);
+    footer.writeUInt32LE(STAMP_FORMAT, 4);
+    footer.write(STAMP_MAGIC, 8, "latin1");
+    return Buffer.concat([exe, payload, footer]);
 }

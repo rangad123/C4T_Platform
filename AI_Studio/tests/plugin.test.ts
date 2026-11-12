@@ -255,12 +255,12 @@ describe("adapter plug-ins switched on (ALLOW_ADAPTER_PLUGINS=true with an API k
         }
         // A project whose tests run on a runner agent: the agent has no copy of the plug-in.
         const svc = getAgentServices(e.platform);
-        svc.store.setRunner(projectId, { runOn: "agent", agentId: null });
+        svc.store.setRunner(projectId, { runOn: "agent" });
         try {
             const attempt = create({ mode: "validate", testIds: [tests.list] });
             await expect(attempt()).rejects.toThrow(/runs on the platform computer only: runners do not have plug-ins. This project runs its tests on runners/);
         } finally {
-            svc.store.setRunner(projectId, { runOn: "platform", agentId: null });
+            svc.store.setRunner(projectId, { runOn: "platform" });
         }
     });
 

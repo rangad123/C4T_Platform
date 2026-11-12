@@ -302,9 +302,7 @@ export interface DownloadSystem {
     os: RunnerOs;
     arch: RunnerArch;
     available: boolean;
-    kind?: "installer" | "files";
-    /** It carries its own Node.js and test tools. */
-    ownNode?: boolean;
+    /** Set when it carries its own Node.js and test tools. */
     bytes?: number;
     note?: string;
     reason?: string;
@@ -314,11 +312,8 @@ export interface DownloadSystem {
 export interface DownloadInfo {
     available?: boolean;
     reason?: string;
-    kitVersion?: string;
-    platformUrl?: string;
     urlOk?: boolean;
     urlWarning?: string;
-    nodeMin?: number;
     /** false: show `refusal` (for example a session signed in with the server's access key) instead of the button. */
     mayDownload?: boolean;
     refusal?: string;
@@ -431,7 +426,7 @@ export function saveBlob(blob: Blob, fileName: string): void {
 /** "14:32", in the person's own clock. */
 export const clockTime = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-/** What to do on the computer once the zip is saved: the installer on Windows and Mac, the plain files on Linux. `code` words are typed. */
+/** What to do on the computer once the download is saved (on Windows the setup program itself, round 49): the installer on Windows and Mac, the plain files on Linux. `code` words are typed. */
 export function startSteps(os: RunnerOs, kind: "installer" | "files" = os === "linux" ? "files" : "installer"): { steps: string[]; command?: string } {
     if (kind === "files" && os === "windows") {
         return { steps: ["Unzip the download and open the folder.", "Double-click start-runner.cmd. Leave the window open: the runner runs while it is open."] };
@@ -442,8 +437,8 @@ export function startSteps(os: RunnerOs, kind: "installer" | "files" = os === "l
     if (os === "windows") {
         return {
             steps: [
-                "Unzip the download and open the folder.",
-                "Double-click AITestingRunnerSetup.exe. If Windows says “Windows protected your PC”, choose More info, then Run anyway: the installer is not signed yet.",
+                "Open AITestingRunnerSetup.exe from your downloads. There is nothing to unzip.",
+                "If Windows says “Windows protected your PC”, choose More info, then Run anyway: the installer is not signed yet.",
                 "Choose Install and start. It downloads only what this computer is missing, then the runner starts by itself whenever you sign in.",
             ],
         };
@@ -464,7 +459,9 @@ export function startSteps(os: RunnerOs, kind: "installer" | "files" = os === "l
 }
 
 /** The last line under the steps: what to open when the runner does not connect. */
-export function checkComputerHelp(os: RunnerOs): string {
+export function checkComputerHelp(os: RunnerOs, kind: "installer" | "files" = os === "linux" ? "files" : "installer"): string {
+    // The one-file Windows download has no folder: Setup runs the same check when it finishes and shows it in its window.
+    if (os === "windows" && kind === "installer") return "If it does not connect, open the runner's window (its icon next to the clock, or AI Testing Runner in the Start menu). Setup checked this computer when it finished and says there what to fix.";
     if (os === "windows") return "If it does not connect, double-click check-computer.cmd in the unzipped folder. It checks this computer and says what to fix.";
     if (os === "mac") return "If it does not connect, double-click check-computer.command in the unzipped folder. It checks this Mac and says what to fix.";
     return "If it does not connect, run `sh check-computer.sh` in the same folder. It checks this computer and says what to fix, and changes nothing.";

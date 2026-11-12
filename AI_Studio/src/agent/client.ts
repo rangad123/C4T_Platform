@@ -41,7 +41,7 @@ import { noteServerTime, runnerCheckReport } from "./computer-check.js";
 import { networkCapabilities, noteNetworkProblem, proxyUsedFor } from "./net.js";
 
 /** What the runner says when the platform refuses its credential without a sentence of its own. */
-export const ACCESS_REMOVED = "The platform no longer accepts this runner: it was removed, or another computer was set up in its place. Set up your runner again from Settings, Your runner.";
+export const ACCESS_REMOVED = "The platform no longer accepts this runner: it was removed or replaced. Download the new runner in Settings, Your runner, and use that one instead.";
 
 /**
  * auth       the credential is not accepted any more: retired, replaced by another computer, or a team credential (stop)

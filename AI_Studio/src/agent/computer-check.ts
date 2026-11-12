@@ -207,7 +207,7 @@ export function tokenLine(a: TokenAnswer): CheckLine {
     if (a.status >= 200 && a.status < 300) return line("token", "ok", `The platform accepts this runner's token${a.project ? ` (project "${a.project}")` : ""}; the token is not shown`);
     // Round 45: a team or project credential is refused with 401 and the platform's own sentence (set up your own runner); that is shown.
     if (a.status === 401 && a.sentence && !/token/i.test(a.sentence)) return line("token", "missing", `The platform does not accept this runner: ${a.sentence.replace(/\.$/, "")}`, "Set up your runner from the platform (Settings, Your runner).");
-    if ((a.status === 404 || a.status === 401) && /token/i.test(a.sentence ?? "")) return line("token", "missing", "The platform does not accept this runner's credential: it was removed, or another computer was set up in its place", "Set up your runner again from the platform (Settings, Your runner).");
+    if ((a.status === 404 || a.status === 401) && /token/i.test(a.sentence ?? "")) return line("token", "missing", "The platform does not accept this runner's credential: it was removed, or another computer was set up in its place", "Download the new runner in Settings, Your runner, and use that one instead.");
     if (a.status === 429) return line("token", "optional", "The platform asked to slow down, so the token was not checked", "Run this check again in a minute.");
     return line("token", "optional", `The platform cannot check the token without connecting (it answered HTTP ${a.status}; it may be an older version)`, "Start the runner: it says plainly when the token is not accepted.");
 }

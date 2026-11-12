@@ -553,7 +553,7 @@ export async function startDeviceTask(svc: AgentService, o: StartDeviceOptions):
     const maxActions = Math.min(500, Math.max(1, o.maxActions ?? SESSION_DEFAULTS.maxActions));
     // A person's own computer: the plugged-in phone only when its owner turned "Use my connected phone" on, and what the session installed there is removed after.
     const token = svc.store.getToken(o.agent.tokenId);
-    const personal = token?.kind === "personal";
+    const personal = true;
     const maxMinutes = Math.min(120, Math.max(1, o.maxMinutes ?? SESSION_DEFAULTS.maxMinutes));
     let offer: TaskOffer;
     try {
@@ -637,7 +637,7 @@ export async function openDeviceSession(opts: OpenDeviceOptions, host: DeviceHos
                 ...(host.agentId ? { agentId: host.agentId } : {}),
                 ...(host.runnerId ? { runnerId: host.runnerId } : {}),
                 runner: host.agents.store.getRunner(host.projectId),
-                agents: sessionHosts(host.agents.store, host.projectId, host.startedBy ?? null, host.agents.clock()),
+                agents: sessionHosts(host.agents.store, host.projectId, host.startedBy ?? null),
                 caller: host.startedBy ?? null,
                 ...(localDeviceProblem(env) ? { localProblem: localDeviceProblem(env)! } : {}),
             });

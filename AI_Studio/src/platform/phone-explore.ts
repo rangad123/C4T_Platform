@@ -23,5 +23,5 @@ export function assertPhoneExploration(projectId: string, mobile: MobileTarget |
     // Where the phone is comes from the project's runner choice, exactly as it will when the job starts.
     // The person starting it: their own computer may host it, another person's never.
     const caller = callerIdOf(currentActor());
-    chooseDeviceHost({ runner: svc.store.getRunner(projectId), agents: sessionHosts(svc.store, projectId, caller, svc.clock()), caller, ...(local ? { localProblem: local } : {}) });
+    chooseDeviceHost({ runner: svc.store.getRunner(projectId), agents: sessionHosts(svc.store, projectId, caller), caller, ...(local ? { localProblem: local } : {}) });
 }

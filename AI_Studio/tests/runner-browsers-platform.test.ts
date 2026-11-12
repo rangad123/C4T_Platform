@@ -87,7 +87,7 @@ describe("a run's browser", () => {
     beforeAll(async () => {
         projectId = await newProject("Run browsers");
         agent = await connect(projectId, "maya-laptop", defaultCaps({ browser: EDGE }));
-        svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+        svc().store.setRunner(projectId, { runOn: "agent" });
     });
 
     const runOnce = async (browser: unknown) => {

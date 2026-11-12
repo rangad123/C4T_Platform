@@ -64,11 +64,11 @@ describe("agent tokens", () => {
         expect(store.findToken(secret)?.ownerId).toBe(OPEN_OWNER_ID);
         expect(store.findToken(secret + "x")).toBeUndefined();
         expect(store.findToken("aitg_" + "A".repeat(43))).toBeUndefined();
-        expect(store.retireToken(record.id)).toBe(true);
+        expect(store.retire(OPEN_OWNER_ID)).toBe(true);
         expect(store.findToken(secret)).toBeUndefined();
-        expect(store.retireToken(record.id)).toBe(false);
-        // the row stays, marked retired
-        expect(store.getToken(record.id)?.revokedAt).toBeTruthy();
+        expect(store.retire(OPEN_OWNER_ID)).toBe(false);
+        // removing a runner deletes its row
+        expect(store.getToken(record.id)).toBeUndefined();
     });
 
     it("last_used_at is written at most every 30 seconds", () => {
@@ -160,9 +160,10 @@ describe("the task state machine", () => {
         store.enqueue({ id, projectId: over.project ?? projectId, jobId: over.job ?? "job-" + id, adapterId: over.adapter ?? "playwright", payloadEnc: "enc", files: [], ownerId: OPEN_OWNER_ID });
         return id;
     };
+    /** A computer of the open server's one runner (one credential per person: a second computer under the same credential). */
     const agentFor = (name: string) => {
-        const { record } = personalToken(name);
-        return { token: record, agent: store.upsertAgent(record, hello(name)) };
+        const token = store.runnerOf(OPEN_OWNER_ID)?.token ?? personalToken(name).record;
+        return { token, agent: store.upsertAgent(token, hello(name)) };
     };
     const LEASE = 60_000;
 
@@ -321,12 +322,12 @@ describe("the task state machine", () => {
     });
 
     it("the runner setting defaults to the platform and is kept per project; a pinned runner is no longer read (round 45)", () => {
-        expect(store.getRunner(projectId)).toEqual({ runOn: "platform", agentId: null });
-        store.setRunner(projectId, { runOn: "agent", agentId: "abc" });
-        expect(store.getRunner(projectId)).toEqual({ runOn: "agent", agentId: null });
+        expect(store.getRunner(projectId)).toEqual({ runOn: "platform" });
+        store.setRunner(projectId, { runOn: "agent" });
+        expect(store.getRunner(projectId)).toEqual({ runOn: "agent" });
         expect(store.getRunner(otherProject).runOn).toBe("platform");
-        store.setRunner(projectId, { runOn: "platform", agentId: "abc" });
-        expect(store.getRunner(projectId)).toEqual({ runOn: "platform", agentId: null });
+        store.setRunner(projectId, { runOn: "platform" });
+        expect(store.getRunner(projectId)).toEqual({ runOn: "platform" });
     });
 });
 

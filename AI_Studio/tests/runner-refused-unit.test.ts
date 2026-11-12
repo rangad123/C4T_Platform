@@ -3,7 +3,8 @@
  * platform with a plain sentence. The runner shows that sentence and stops with exit code 3 ("access removed"), and never asks again:
  *   - a team enrollment code at /api/agent/enroll: HTTP 410 with the sentence;
  *   - a team or project credential at hello: HTTP 401 with the sentence;
- *   - a retired personal credential at hello: 404, with or without a sentence.
+ *   - a retired personal credential at hello: 404, with or without a sentence;
+ *   - a credential removed by the runner reset (migration 57): 404 at hello with the platform's sentence (download the new runner).
  * No network: the platform is a stand-in fetch that counts the requests it gets.
  */
 import fs from "node:fs";
@@ -15,6 +16,7 @@ import { CapabilityProbe } from "../src/agent/capabilities.js";
 import { ACCESS_REMOVED } from "../src/agent/client.js";
 import type { AgentConfig } from "../src/agent/config.js";
 import { memoryLogger } from "../src/agent/log.js";
+import { RUNNER_TOKEN_GONE } from "../src/platform/runner-only.js";
 
 const TEAM = "This runner was set up for a team or a project, and those runners are no longer used. Set up your own runner from Settings in AI Studio.";
 const CODE = `aite_${"T".repeat(43)}`;
@@ -74,5 +76,15 @@ describe("a refused runner stops with the platform's sentence", () => {
         expect(r.code).toBe(EXIT.token);
         expect(r.out).toContain(ACCESS_REMOVED);
         expect(fake.asked.filter((a) => a.endsWith("/api/agent/hello")).length).toBe(1);
+    });
+
+    it("a credential removed by the update (404 at hello, the platform's sentence): download the new runner, exit 3, never asked again", async () => {
+        const fake = platform(404, { error: RUNNER_TOKEN_GONE });
+        const r = await runAgent({ token: `aitg_${"o".repeat(40)}`, tokenSource: "env" }, fake);
+        expect(r.code).toBe(EXIT.token);
+        expect(r.out).toContain(`The platform no longer accepts this runner. ${RUNNER_TOKEN_GONE}`);
+        expect(r.out).toContain("Download the new runner in Settings, Your runner");
+        expect(fake.asked.filter((a) => a.endsWith("/api/agent/hello")).length).toBe(1);
+        expect(fake.asked.some((a) => a.endsWith("/api/agent/poll"))).toBe(false);
     });
 });

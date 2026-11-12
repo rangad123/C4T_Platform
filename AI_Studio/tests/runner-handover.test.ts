@@ -73,7 +73,7 @@ async function setup(name: string, concurrency = 2) {
     const token = personalRunner(platform, { ownerId, label: `${name} pc` }).secret;
     const agent = new FakeAgent(viaInject(server), token, { name: `${name} pc`, capabilities: defaultCaps(), concurrency });
     expect((await agent.hello()).status).toBe(200);
-    svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+    svc().store.setRunner(projectId, { runOn: "agent" });
     return { projectId, agent };
 }
 const jobFor = (projectId: string, over: Partial<typeof DEFAULT_JOB_OPTIONS> = {}): Promise<JobRow> =>

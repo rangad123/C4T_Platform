@@ -1,9 +1,9 @@
 /**
- * Runner agents: the tables behind them (migration slot 19) and the store that reads and writes them.
+ * Runner agents: the tables behind them (migration slots 19, 42, 51, 53, rebuilt by 57) and the store that reads and writes them.
  *
- *  agent_tokens   runner credentials (round 45: one live credential per person, kind "personal"). Only the SHA-256 hash is kept
- *                 (a token is 32 random bytes, so there is nothing to guess); the hint is the last 4 characters.
- *  agents         the registry: what each connected agent said about itself, and when it was last seen.
+ *  agent_tokens   runner credentials: at most one per person (owner_id is unique). Only the SHA-256 hash is kept (a token is 32 random
+ *                 bytes, so there is nothing to guess); the hint is the last 4 characters. Removing a runner deletes its row.
+ *  agents         the registry: what the computer that connected with a credential said about itself, and when it was last seen.
  *  runner_settings where a project's tests run ("platform" or "agent"), kept here and not in `projects`.
  *  agent_tasks    the queue: one row per batch of scripts handed to an agent. The payload (it holds credentials) and the
  *                 result are encrypted with SecretBox; the plaintext never reaches the database.
@@ -11,9 +11,8 @@
  *
  * Every state change that two parties could race for (claiming a task, finishing it) is a single conditional UPDATE.
  *
- * Round 45 (one runner per person, set up in Settings): only kind "personal" credentials are made, connect and take work, and only their
- * owner's tasks. Team, shared and project rows (and runner_access, runner_settings.agent_id and .allow_personal) are kept as they are and
- * no longer read; such a credential is refused at every runner route (agent-services.ts authenticate). No table or column was dropped.
+ * Migration 57 removed every runner made before it (team, shared, project and personal alike) and rebuilt the tables without the team-era
+ * columns: everyone downloads the new runner from Settings, Your runner.
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { AGENT_TOKEN_PREFIX, ENROLLMENT_CODE_PREFIX, FINAL_TASK_PHASES, type AgentPhase, type Capabilities, type TaskPhase } from "../agent-protocol/schema.js";
@@ -247,30 +246,6 @@ export function ownerIdOfActor(actor: { kind: string; id?: string | undefined })
     return null;
 }
 
-/**
- * Migration 51's columns, added again where a table was rebuilt after it ran (slot 42's late repair rebuilds agent_tokens and agents on a
- * database that opened while 42 was reserved). Idempotent: a column that exists is left alone. Called by db.ts after its repairs.
- */
-export function repairPersonalRunnerColumns(raw: { exec(sql: string): void }, columnExists: (table: string, column: string) => boolean): void {
-    const columns: Array<[string, string, string]> = [
-        ["agent_tokens", "kind", "TEXT NOT NULL DEFAULT 'team'"],
-        ["agent_tokens", "owner_id", "TEXT"],
-        ["agent_tokens", "allow_code_scripts", "INTEGER NOT NULL DEFAULT 0"],
-        ["agent_tokens", "allow_private_targets", "INTEGER NOT NULL DEFAULT 1"],
-        ["agent_tokens", "allow_real_phone", "INTEGER NOT NULL DEFAULT 0"],
-        ["agent_tokens", "machine_id", "TEXT"],
-        ["agent_tokens", "rotated_at", "TEXT"],
-        ["agent_tokens", "previous_hash", "TEXT"],
-        ["agent_tokens", "previous_until_ms", "INTEGER"],
-        ["agents", "os_version", "TEXT"],
-        ["agents", "machine_id", "TEXT"],
-        // Slot 53's column on agents (RUNNER_LIFECYCLE_MIGRATION) is lost the same way.
-        ["agents", "protocol", "INTEGER NOT NULL DEFAULT 1"],
-    ];
-    for (const [table, column, type] of columns) if (!columnExists(table, column)) raw.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    raw.exec("CREATE INDEX IF NOT EXISTS idx_agent_tokens_owner ON agent_tokens(owner_id); CREATE INDEX IF NOT EXISTS idx_agent_tokens_previous ON agent_tokens(previous_hash);");
-}
-
 /** The owner of everything done on a server in open mode (no accounts): the open server acts as one person. */
 export const OPEN_OWNER_ID = "open";
 
@@ -286,34 +261,19 @@ export const ROTATE_AFTER_MS = 30 * 24 * 60 * 60_000;
 export interface EnrollmentRecord {
     id: string;
     hint: string;
-    kind: "personal" | "team";
-    ownerId: string | null;
-    organizationId: string | null;
-    projectId: string | null;
-    projectIds: string[];
+    /** The person whose computer the code sets up. */
+    ownerId: string;
     label: string | null;
     createdBy: string | null;
-    createdById: string | null;
     createdAt: string;
     expiresMs: number;
     usedMs: number | null;
     tokenId: string | null;
 }
 
-const toEnrollment = (r: Record<string, any>): EnrollmentRecord => {
-    let projectIds: string[] = [];
-    try {
-        const v = JSON.parse(String(r.project_ids_json ?? "[]")) as unknown;
-        if (Array.isArray(v)) projectIds = v.filter((x): x is string => typeof x === "string");
-    } catch {
-        projectIds = [];
-    }
-    return { id: r.id, hint: r.hint, kind: r.kind === "personal" ? "personal" : "team", ownerId: r.owner_id ?? null, organizationId: r.organization_id ?? null, projectId: r.project_id ?? null, projectIds, label: r.label ?? null, createdBy: r.created_by ?? null, createdById: r.created_by_id ?? null, createdAt: r.created_at, expiresMs: Number(r.expires_ms), usedMs: r.used_ms ?? null, tokenId: r.token_id ?? null };
-};
+const toEnrollment = (r: Record<string, any>): EnrollmentRecord => ({ id: r.id, hint: r.hint, ownerId: r.owner_id, label: r.label ?? null, createdBy: r.created_by ?? null, createdAt: r.created_at, expiresMs: Number(r.expires_ms), usedMs: r.used_ms ?? null, tokenId: r.token_id ?? null });
 
-export type RedeemOutcome =
-    | { ok: true; secret: string; token: AgentTokenRecord; enrollment: EnrollmentRecord; again?: true; retired?: number }
-    | { ok: false; reason: "unknown" | "expired" | "used" | "team" };
+export type RedeemOutcome = { ok: true; secret: string; token: AgentTokenRecord; enrollment: EnrollmentRecord; again?: true; replaced?: boolean } | { ok: false; reason: "unknown" | "expired" | "used" };
 
 /**
  * Migration slot 53: a runner task's phases and attempts, and its live events (protocol 2; docs/features/runner-protocol-2.md).
@@ -351,6 +311,142 @@ CREATE TABLE agent_task_events (
 );
 `;
 
+/** What a run that was on a runner removed by migration 57 says (its task ends with it). */
+export const RUNNER_REMOVED_IN_UPDATE = "The runner this run was on was removed in an update. Download the new runner in Settings, Your runner, then start the run again.";
+
+/** Now in epoch milliseconds, in SQLite (migration 57 runs as plain SQL). */
+const NOW_MS_SQL = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
+/** 10 seconds apart or less, as the owner attribution below reads Activity (same rule as before, when it ran at every start). */
+const near = (a: string, b: string): string => `abs(julianday(${a}) - julianday(${b})) * 86400000 <= 10000`;
+/** An Activity row's person as a runner owner: a person by their id, the open server as OPEN_OWNER_ID ("open"), anyone else nobody. */
+const actorOwner = (row: string): string => `CASE ${row}.actor_kind WHEN 'user' THEN ${row}.actor_id WHEN 'open' THEN 'open' END`;
+/** Only an owner that exists: the open server, or a person still on this server. */
+const knownOwner = (expr: string): string => `(SELECT x.id FROM (SELECT 'open' AS id UNION ALL SELECT id FROM users) x WHERE x.id = ${expr} LIMIT 1)`;
+
+/**
+ * Migration slot 57: every runner made before it is removed, and the runner tables are rebuilt without the team-era columns
+ * (docs/runner-implementation/RUNNER_ARCHITECTURE.md, "The runner reset"). Everyone downloads the new runner from Settings, Your runner.
+ *
+ *  - A task claimed by or running on a removed runner (and a recording or phone session queued for one: only that computer could take it)
+ *    ends as failed with RUNNER_REMOVED_IN_UPDATE, and its run gets the same sentence as an event. A queued task nobody claimed stays queued:
+ *    it waits for its owner's new runner under the usual 30-minute rule.
+ *  - A run that names no runner yet gets a snapshot of where it ran (generation_jobs.ran_on_json), so its history still names the runner.
+ *  - Deleted: every credential, runner, enrollment code, device reservation and per-runner update setting; runner_access is dropped.
+ *  - Rebuilt: agent_tokens (one per person: owner_id unique; no project, organisation, kind or revoked state: removing a runner deletes it),
+ *    agents (no project), runner_enrollments (a person's code only), runner_settings (no runner pin, no "allow people's own computers"),
+ *    runner_update_settings (no "update automatically").
+ *  - Schedules and deploy trigger tokens with no recorded creator get one from Activity where that is certain, once (it ran at every
+ *    start before): a schedule's latest successful change by a person names them (a change by anyone else: not certain); without one, the
+ *    one successful create in its project within 10 seconds of it, by a person, when no other one of the project was made in that window.
+ *    Everything else stays without an owner and is refused at its next run with a sentence.
+ *
+ * SQLite only (julianday, json_object): a PostgreSQL database starts from pg/baseline.sql, which already has this schema.
+ */
+export const RUNNER_RESET_MIGRATION = `
+UPDATE agent_tasks SET status = 'failed', error = '${RUNNER_REMOVED_IN_UPDATE}', finished_ms = ${NOW_MS_SQL}, lease_until = NULL, phase = 'failed', phase_ms = ${NOW_MS_SQL}
+    WHERE status = 'running' OR (status = 'queued' AND (adapter_id LIKE 'record:%' OR adapter_id LIKE 'device:%'));
+INSERT INTO agent_events (job_id, stage, kind, level, message, data_json, created_at)
+    SELECT DISTINCT job_id, 'validation', 'runner_removed', 'warn', '${RUNNER_REMOVED_IN_UPDATE}', NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    FROM agent_tasks WHERE error = '${RUNNER_REMOVED_IN_UPDATE}' AND job_id IN (SELECT id FROM generation_jobs);
+UPDATE generation_jobs SET ran_on_json = (
+        SELECT json_object('agentId', a.id, 'tokenId', a.token_id, 'name', COALESCE(NULLIF(TRIM(k.label), ''), a.name), 'taskId', t.id, 'attempt', t.attempt, 'phase', t.phase)
+        FROM agent_tasks t JOIN agents a ON a.id = t.agent_id LEFT JOIN agent_tokens k ON k.id = a.token_id
+        WHERE t.job_id = generation_jobs.id ORDER BY t.created_ms DESC LIMIT 1)
+    WHERE ran_on_json IS NULL AND EXISTS (SELECT 1 FROM agent_tasks t JOIN agents a ON a.id = t.agent_id WHERE t.job_id = generation_jobs.id);
+DROP TABLE device_reservations;
+DROP TABLE runner_access;
+DROP TABLE agents;
+DROP TABLE agent_tokens;
+DROP TABLE runner_enrollments;
+DROP TABLE runner_update_settings;
+CREATE TABLE agent_tokens (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL UNIQUE,        -- the person (a users.id, or OPEN_OWNER_ID): one runner per person
+    label TEXT,
+    token_hash TEXT NOT NULL UNIQUE,      -- SHA-256 of the token; the token itself is never stored
+    hint TEXT NOT NULL,                   -- last 4 characters
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    last_used_at TEXT,
+    last_used_ms INTEGER,
+    allow_code_scripts INTEGER NOT NULL DEFAULT 1,
+    allow_private_targets INTEGER NOT NULL DEFAULT 0,
+    allow_real_phone INTEGER NOT NULL DEFAULT 0,
+    machine_id TEXT,                      -- the install id of the computer that first used it; another computer is refused
+    rotated_at TEXT,
+    previous_hash TEXT,                   -- the credential before the latest rotation, valid until previous_until_ms or the new one's first use
+    previous_until_ms INTEGER
+);
+CREATE INDEX idx_agent_tokens_previous ON agent_tokens(previous_hash);
+CREATE TABLE agents (
+    id TEXT PRIMARY KEY,
+    token_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    os TEXT NOT NULL,
+    arch TEXT NOT NULL,
+    node TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL,
+    concurrency INTEGER NOT NULL,
+    first_seen_ms INTEGER NOT NULL,
+    last_seen_ms INTEGER NOT NULL,
+    os_version TEXT,
+    machine_id TEXT,
+    protocol INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (token_id, name)
+);
+CREATE INDEX idx_agents_token ON agents(token_id);
+CREATE TABLE device_reservations (
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    family TEXT NOT NULL,                 -- android | ios
+    device TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    reserved_ms INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, family, device)
+);
+CREATE INDEX idx_device_reservations_task ON device_reservations(task_id);
+CREATE TABLE runner_enrollments (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL UNIQUE,       -- SHA-256 of the code; the code itself is never stored
+    hint TEXT NOT NULL,
+    owner_id TEXT NOT NULL,               -- the person whose computer it sets up
+    label TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    expires_ms INTEGER NOT NULL,
+    used_ms INTEGER,
+    token_id TEXT
+);
+CREATE INDEX idx_runner_enrollments_owner ON runner_enrollments(owner_id);
+CREATE TABLE runner_update_settings (
+    agent_id TEXT PRIMARY KEY,
+    requested_at BIGINT,
+    reported TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE runner_settings_r57 (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    run_on TEXT NOT NULL,                 -- platform | agent
+    updated_at TEXT NOT NULL
+);
+INSERT INTO runner_settings_r57 (project_id, run_on, updated_at) SELECT project_id, run_on, updated_at FROM runner_settings;
+DROP TABLE runner_settings;
+ALTER TABLE runner_settings_r57 RENAME TO runner_settings;
+UPDATE schedules SET created_by = ${knownOwner(`CASE
+        WHEN EXISTS (SELECT 1 FROM activity e WHERE e.action = 'PATCH /api/projects/:id/schedules/:sid' AND e.path = '/api/projects/' || schedules.project_id || '/schedules/' || schedules.id AND e.status < 400)
+        THEN (SELECT ${actorOwner("e")} FROM activity e WHERE e.action = 'PATCH /api/projects/:id/schedules/:sid' AND e.path = '/api/projects/' || schedules.project_id || '/schedules/' || schedules.id AND e.status < 400 ORDER BY e.id DESC LIMIT 1)
+        WHEN (SELECT COUNT(*) FROM schedules s WHERE s.project_id = schedules.project_id AND ${near("s.created_at", "schedules.created_at")}) = 1
+        THEN (SELECT CASE WHEN COUNT(*) = 1 THEN MAX(${actorOwner("c")}) END FROM activity c WHERE c.action = 'POST /api/projects/:id/schedules' AND c.project_id = schedules.project_id AND c.status < 400 AND ${near("c.at", "schedules.created_at")})
+    END`)}
+    WHERE created_by IS NULL;
+UPDATE trigger_tokens SET created_by = ${knownOwner(`CASE
+        WHEN (SELECT COUNT(*) FROM trigger_tokens s WHERE s.project_id = trigger_tokens.project_id AND ${near("s.created_at", "trigger_tokens.created_at")}) = 1
+        THEN (SELECT CASE WHEN COUNT(*) = 1 THEN MAX(${actorOwner("c")}) END FROM activity c WHERE c.action = 'POST /api/projects/:id/triggers' AND c.project_id = trigger_tokens.project_id AND c.status < 400 AND ${near("c.at", "trigger_tokens.created_at")})
+    END`)}
+    WHERE created_by IS NULL;
+`;
+
 export const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex");
 export const newAgentToken = (): string => AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
 
@@ -359,19 +455,12 @@ export const ONLINE_MS = 45_000;
 
 export interface AgentTokenRecord {
     id: string;
-    /** Rows from before round 45 only: the project a team runner was registered from. Null for a person's runner; no longer read for routing. */
-    projectId: string | null;
-    /** Rows from before round 45 only: a team runner's organisation. Null for a person's runner; no longer read. */
-    organizationId: string | null;
+    /** The person the runner belongs to (OPEN_OWNER_ID on an open server). A person has at most one. */
+    ownerId: string;
     label: string | null;
     hint: string;
     createdAt: string;
     lastUsedAt: string | null;
-    revokedAt: string | null;
-    /** "personal": one person's own computer, the only kind made and accepted since round 45; "team": a row from before, refused at every runner route. */
-    kind: "team" | "personal";
-    /** The person the runner belongs to (OPEN_OWNER_ID on an open server); null only for a team row from before round 45. */
-    ownerId: string | null;
     /** Code scripts may go to it: its owner's switch, on by default. */
     allowCodeScripts: boolean;
     /** Runs against private and local addresses may go to it: its owner's switch, off by default. */
@@ -388,17 +477,13 @@ export interface AgentTokenRecord {
 
 const toToken = (r: Record<string, any>): AgentTokenRecord => ({
     id: r.id,
-    projectId: r.project_id ?? null,
-    organizationId: r.organization_id ?? null,
+    ownerId: r.owner_id,
     label: r.label,
     hint: r.hint,
     createdAt: r.created_at,
     lastUsedAt: r.last_used_at,
-    revokedAt: r.revoked_at,
-    kind: r.kind === "personal" ? "personal" : "team",
-    ownerId: r.owner_id ?? null,
     allowCodeScripts: Number(r.allow_code_scripts ?? 0) === 1,
-    allowPrivateTargets: Number(r.allow_private_targets ?? 1) === 1,
+    allowPrivateTargets: Number(r.allow_private_targets ?? 0) === 1,
     allowRealPhone: Number(r.allow_real_phone ?? 0) === 1,
     machineId: r.machine_id ?? null,
     createdBy: r.created_by ?? null,
@@ -407,8 +492,6 @@ const toToken = (r: Record<string, any>): AgentTokenRecord => ({
 
 export interface AgentRecord {
     id: string;
-    /** The project its token was registered from, or null (see AgentTokenRecord.projectId); no longer read for routing. */
-    projectId: string | null;
     tokenId: string;
     name: string;
     version: string;
@@ -426,7 +509,6 @@ export interface AgentRecord {
 
 const toAgent = (r: Record<string, any>): AgentRecord => ({
     id: r.id,
-    projectId: r.project_id ?? null,
     tokenId: r.token_id,
     name: r.name,
     version: r.version,
@@ -560,7 +642,6 @@ export interface DeviceReservation extends DeviceNeed {
 
 export interface RunnerSetting {
     runOn: "platform" | "agent";
-    agentId: string | null;
     /** EXECUTION_MODE=runners: every project runs on runners whatever was stored, and nothing may be started on the server (runner-only.ts). */
     runnersOnly?: true;
 }
@@ -600,15 +681,20 @@ export class AgentStore {
 
     // ── tokens ──────────────────────────────────────────────────────────────
 
-    /** One person's own computer: what it may take follows its owner (their runs, in projects they may still run tests in). */
-    createPersonalToken(o: { ownerId: string; label: string; createdBy: string; machineId?: string }): { secret: string; record: AgentTokenRecord } {
+    /**
+     * One person's own computer: what it may take follows its owner (their runs, in projects they may still run tests in). It replaces the
+     * person's earlier credential, if any (one per person: owner_id is unique), and with it that computer's rows. redeemEnrollment calls it
+     * inside its transaction.
+     */
+    createPersonalToken(o: { ownerId: string; label: string; createdBy: string; machineId?: string }): { secret: string; record: AgentTokenRecord; replaced: boolean } {
         const secret = newAgentToken();
         const id = randomUUID();
+        const replaced = this.retire(o.ownerId);
         this.db.run(
-            "INSERT INTO agent_tokens (id, project_id, organization_id, label, token_hash, hint, created_at, created_by, kind, owner_id, allow_code_scripts, allow_private_targets, machine_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            id, null, null, o.label.trim() || null, hashToken(secret), secret.slice(-4), new Date(this.clock()).toISOString(), o.createdBy, "personal", o.ownerId, 1, 0, o.machineId ?? null,
+            "INSERT INTO agent_tokens (id, owner_id, label, token_hash, hint, created_at, created_by, machine_id) VALUES (?,?,?,?,?,?,?,?)",
+            id, o.ownerId, o.label.trim() || null, hashToken(secret), secret.slice(-4), new Date(this.clock()).toISOString(), o.createdBy, o.machineId ?? null,
         );
-        return { secret, record: this.getToken(id)! };
+        return { secret, record: this.getToken(id)!, replaced };
     }
 
     getToken(id: string): AgentTokenRecord | undefined {
@@ -616,48 +702,33 @@ export class AgentStore {
         return r ? toToken(r) : undefined;
     }
 
-    /** A person's own computers, retired ones included, newest first. */
-    personalTokensOf(ownerId: string): AgentTokenRecord[] {
-        return this.db.all(`SELECT * FROM agent_tokens WHERE kind = 'personal' AND owner_id = ? ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`, ownerId).map(toToken);
+    /** "Remove this computer": the person's credential stops working at once, and its computer's rows go with it. False when they had none. */
+    retire(ownerId: string): boolean {
+        return Number(this.db.run("DELETE FROM agent_tokens WHERE owner_id = ?", ownerId).changes) > 0;
     }
 
-    /** Retire every live credential of this person except `keepId` (one runner per person). Returns how many were retired. */
-    retireOtherPersonal(ownerId: string, keepId: string | null): number {
-        const at = new Date(this.clock()).toISOString();
-        return Number(this.db.run("UPDATE agent_tokens SET revoked_at = ? WHERE kind = 'personal' AND owner_id = ? AND revoked_at IS NULL AND id IS DISTINCT FROM ?", at, ownerId, keepId).changes);
-    }
-
-    /**
-     * The person's runner: their newest live credential that a computer has connected with (else their newest live one), with that computer
-     * as it last reported itself and whether it is online. Undefined: not set up. A person who had several computers before round 45 keeps
-     * them working until they set one up again; the one they used last is the one shown.
-     */
+    /** The person's runner, with the computer that last connected with it and whether it is online. Undefined: not set up. */
     runnerOf(ownerId: string): { token: AgentTokenRecord; agent: AgentRecord | undefined; online: boolean } | undefined {
-        const live = this.personalTokensOf(ownerId).filter((t) => !t.revokedAt);
-        if (live.length === 0) return undefined;
-        const withAgent = live.map((t) => ({ token: t, agent: this.agentsOfToken(t.id)[0] })).sort((a, b) => (b.agent?.lastSeenMs ?? -1) - (a.agent?.lastSeenMs ?? -1));
-        const best = withAgent.find((x) => x.agent) ?? withAgent[0]!;
-        return { ...best, online: Boolean(best.agent) && this.clock() - best.agent!.lastSeenMs <= ONLINE_MS };
+        const r = this.db.get("SELECT * FROM agent_tokens WHERE owner_id = ?", ownerId);
+        if (!r) return undefined;
+        const token = toToken(r);
+        const agent = this.agentsOfToken(token.id)[0];
+        return { token, agent, online: Boolean(agent) && this.clock() - agent!.lastSeenMs <= ONLINE_MS };
     }
 
-    /** Every live person's runner, for the admins' list (one row per live credential, newest first). */
-    allPersonalTokens(): AgentTokenRecord[] {
-        return this.db.all(`SELECT * FROM agent_tokens WHERE kind = 'personal' AND revoked_at IS NULL ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`).map(toToken);
+    /** Every person's runner, for the admins' list, newest first. */
+    allTokens(): AgentTokenRecord[] {
+        return this.db.all(`SELECT * FROM agent_tokens ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`).map(toToken);
     }
 
-    /**
-     * The owner's switches. Only what is given changes. A personal credential's switches change on every live credential of its owner at
-     * once (a person who still has two computers from before round 45 would otherwise switch only one). False when the runner is retired or unknown.
-     */
+    /** The owner's switches. Only what is given changes. False when the runner is unknown (removed). */
     setTokenSwitches(id: string, s: { allowCodeScripts?: boolean; allowPrivateTargets?: boolean; allowRealPhone?: boolean }): boolean {
-        if (s.allowCodeScripts === undefined && s.allowPrivateTargets === undefined && s.allowRealPhone === undefined) return Boolean(this.db.get("SELECT 1 AS x FROM agent_tokens WHERE id = ? AND revoked_at IS NULL", id));
         const bit = (v: boolean | undefined) => (v === undefined ? null : v ? 1 : 0);
         const r = this.db.run(
-            "UPDATE agent_tokens SET allow_code_scripts = COALESCE(?, allow_code_scripts), allow_private_targets = COALESCE(?, allow_private_targets), allow_real_phone = COALESCE(?, allow_real_phone) WHERE revoked_at IS NULL AND (id = ? OR (kind = 'personal' AND owner_id = (SELECT owner_id FROM agent_tokens WHERE id = ? AND kind = 'personal' AND revoked_at IS NULL)))",
+            "UPDATE agent_tokens SET allow_code_scripts = COALESCE(?, allow_code_scripts), allow_private_targets = COALESCE(?, allow_private_targets), allow_real_phone = COALESCE(?, allow_real_phone) WHERE id = ?",
             bit(s.allowCodeScripts),
             bit(s.allowPrivateTargets),
             bit(s.allowRealPhone),
-            id,
             id,
         );
         return Number(r.changes) > 0;
@@ -676,8 +747,8 @@ export class AgentStore {
         const now = this.clock();
         const presentedHash = hashToken(presented);
         return this.db.tx(() => {
-            const r = this.db.get<{ token_hash: string; previous_hash: string | null; previous_until_ms: number | null; revoked_at: string | null }>("SELECT token_hash, previous_hash, previous_until_ms, revoked_at FROM agent_tokens WHERE id = ?", id);
-            if (!r || r.revoked_at) return undefined;
+            const r = this.db.get<{ token_hash: string; previous_hash: string | null; previous_until_ms: number | null }>("SELECT token_hash, previous_hash, previous_until_ms FROM agent_tokens WHERE id = ?", id);
+            if (!r) return undefined;
             const secret = newAgentToken();
             const at = new Date(now).toISOString();
             if (r.previous_hash && r.previous_hash === presentedHash && Number(r.previous_until_ms ?? 0) > now) {
@@ -701,16 +772,16 @@ export class AgentStore {
     // ── enrollment codes ────────────────────────────────────────────────────
 
     /**
-     * One person's runner (round 45: the only kind made now). A single-use code for the download from Settings; trading it makes the
-     * person's one runner credential and retires every older one of theirs (redeemEnrollment). The plaintext is returned here once and never kept.
+     * A single-use code for the download from Settings; trading it makes the person's one runner credential, replacing the one they had
+     * (redeemEnrollment). The plaintext is returned here once and never kept.
      */
     createPersonalEnrollment(o: { ownerId: string; createdBy: string; label?: string | null }): { code: string; record: EnrollmentRecord } {
         const code = newEnrollmentCode();
         const id = randomUUID();
         const now = this.clock();
         this.db.run(
-            "INSERT INTO runner_enrollments (id, code_hash, hint, kind, owner_id, organization_id, project_id, project_ids_json, label, created_by, created_by_id, created_at, expires_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            id, hashToken(code), code.slice(-4), "personal", o.ownerId, null, null, "[]", o.label?.trim() || null, o.createdBy, o.ownerId, new Date(now).toISOString(), now + ENROLLMENT_TTL_MS,
+            "INSERT INTO runner_enrollments (id, code_hash, hint, owner_id, label, created_by, created_at, expires_ms) VALUES (?,?,?,?,?,?,?,?)",
+            id, hashToken(code), code.slice(-4), o.ownerId, o.label?.trim() || null, o.createdBy, new Date(now).toISOString(), now + ENROLLMENT_TTL_MS,
         );
         return { code, record: this.getEnrollment(id)! };
     }
@@ -722,8 +793,8 @@ export class AgentStore {
 
     /**
      * Trade a code for a runner credential, once. In one transaction: the code is checked (constant time, single use, not expired), the
-     * person's runner is made and bound to the computer's install id, every older credential of that person is retired (one runner per
-     * person), and the code is marked used.
+     * person's runner is made and bound to the computer's install id, replacing the one they had (one runner per person), and the code is
+     * marked used.
      */
     redeemEnrollment(code: string, machine: { name: string; machineId?: string }): RedeemOutcome {
         const hash = hashToken(code);
@@ -737,23 +808,17 @@ export class AgentStore {
             if (e.usedMs !== null) {
                 // The answer was lost on the way: within the code's life, the same computer (same install id) asking again gets a fresh
                 // credential for the same runner, and the one made before stops working. Only while that one was never used; anyone else: "used".
-                const t = e.tokenId ? this.db.get<{ machine_id: string | null; last_used_ms: number | null; revoked_at: string | null }>("SELECT machine_id, last_used_ms, revoked_at FROM agent_tokens WHERE id = ?", e.tokenId) : undefined;
+                const t = e.tokenId ? this.db.get<{ machine_id: string | null; last_used_ms: number | null }>("SELECT machine_id, last_used_ms FROM agent_tokens WHERE id = ?", e.tokenId) : undefined;
                 const sameComputer = Boolean(machine.machineId) && t?.machine_id === machine.machineId;
-                if (!t || !sameComputer || t.revoked_at || t.last_used_ms !== null || this.clock() >= e.expiresMs) return { ok: false, reason: "used" };
+                if (!t || !sameComputer || t.last_used_ms !== null || this.clock() >= e.expiresMs) return { ok: false, reason: "used" };
                 const secret = newAgentToken();
                 this.db.run("UPDATE agent_tokens SET token_hash = ?, hint = ?, previous_hash = NULL, previous_until_ms = NULL WHERE id = ?", hashToken(secret), secret.slice(-4), e.tokenId);
                 return { ok: true, secret, token: this.getToken(e.tokenId!)!, enrollment: e, again: true };
             }
             if (this.clock() >= e.expiresMs) return { ok: false, reason: "expired" };
-            // Round 45: only a person's own runner is made. A team code made before (a project's kit, the Runners page) no longer works.
-            if (e.kind !== "personal") return { ok: false, reason: "team" };
-            if (!e.ownerId) return { ok: false, reason: "unknown" };
-            const label = e.label ?? machine.name;
-            // One runner per person: setting up a computer (this one again, or a new one) retires every credential they had before.
-            const retired = this.retireOtherPersonal(e.ownerId, null);
-            const made = this.createPersonalToken({ ownerId: e.ownerId, label, createdBy: e.createdBy ?? "Enrollment code", ...(machine.machineId ? { machineId: machine.machineId } : {}) });
+            const made = this.createPersonalToken({ ownerId: e.ownerId, label: e.label ?? machine.name, createdBy: e.createdBy ?? "Enrollment code", ...(machine.machineId ? { machineId: machine.machineId } : {}) });
             this.db.run("UPDATE runner_enrollments SET used_ms = ?, token_id = ? WHERE id = ?", this.clock(), made.record.id, e.id);
-            return { ok: true, secret: made.secret, token: this.getToken(made.record.id)!, enrollment: this.getEnrollment(e.id)!, retired };
+            return { ok: true, secret: made.secret, token: made.record, enrollment: this.getEnrollment(e.id)!, replaced: made.replaced };
         });
     }
 
@@ -768,23 +833,16 @@ export class AgentStore {
     }
 
     renameToken(id: string, label: string): boolean {
-        return Number(this.db.run("UPDATE agent_tokens SET label = ? WHERE id = ? AND revoked_at IS NULL", label.trim() || null, id).changes) === 1;
+        return Number(this.db.run("UPDATE agent_tokens SET label = ? WHERE id = ?", label.trim() || null, id).changes) === 1;
     }
 
-    /** Retire a runner: its token stops working at once, for every project. The rows stay (history, Activity). */
-    retireToken(id: string): boolean {
-        return Number(this.db.run("UPDATE agent_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", new Date(this.clock()).toISOString(), id).changes) === 1;
-    }
-
-    // ── which projects a runner serves ──────────────────────────────────────
-
-    /** Whether a token still works: a retired runner's open poll stops at once (routes/agents.ts). */
+    /** Whether a token still works: a removed runner's open poll stops at once (routes/agents.ts). */
     tokenLive(id: string): boolean {
-        return Boolean(this.db.get("SELECT 1 AS x FROM agent_tokens WHERE id = ? AND revoked_at IS NULL", id));
+        return Boolean(this.db.get("SELECT 1 AS x FROM agent_tokens WHERE id = ?", id));
     }
 
     /**
-     * The live token for a presented one, or undefined (unknown and revoked look the same). Hash compared in constant time. The credential
+     * The token for a presented one, or undefined. Hash compared in constant time. The credential
      * before the latest rotation still counts until its grace ends (`viaPrevious`); the first use of the new one ends that grace at once.
      */
     findToken(presented: string): AgentTokenRecord | undefined {
@@ -796,12 +854,12 @@ export class AgentStore {
         };
         const r = this.db.get("SELECT * FROM agent_tokens WHERE token_hash = ?", hash);
         if (r) {
-            if (!same(r.token_hash) || r.revoked_at) return undefined;
+            if (!same(r.token_hash)) return undefined;
             if (r.previous_hash) this.db.run("UPDATE agent_tokens SET previous_hash = NULL, previous_until_ms = NULL WHERE id = ? AND token_hash = ?", r.id, hash);
             return toToken(r);
         }
         const old = this.db.get("SELECT * FROM agent_tokens WHERE previous_hash = ? AND previous_until_ms > ?", hash, this.clock());
-        if (!old || !same(old.previous_hash) || old.revoked_at) return undefined;
+        if (!old || !same(old.previous_hash)) return undefined;
         return { ...toToken(old), viaPrevious: true };
     }
 
@@ -823,7 +881,7 @@ export class AgentStore {
         const now = this.clock();
         const caps = JSON.stringify(hello.capabilities);
         const osVersion = hello.capabilities.osVersion ?? null;
-        // The same computer under a new name (its install id matches) keeps its row, so a project's pin and the runner's history stay.
+        // The same computer under a new name (its install id matches) keeps its row, so the runner's history stays.
         const existing =
             this.db.get<{ id: string }>("SELECT id FROM agents WHERE token_id = ? AND name = ?", token.id, hello.name) ??
             (hello.machineId ? this.db.get<{ id: string }>("SELECT id FROM agents WHERE token_id = ? AND machine_id = ? ORDER BY last_seen_ms DESC LIMIT 1", token.id, hello.machineId) : undefined);
@@ -835,7 +893,7 @@ export class AgentStore {
             return this.getAgent(existing.id)!;
         }
         const id = randomUUID();
-        this.db.run("INSERT INTO agents (id, project_id, token_id, name, version, os, arch, node, capabilities_json, concurrency, first_seen_ms, last_seen_ms, os_version, machine_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, token.projectId, token.id, hello.name, hello.version, hello.capabilities.os, hello.capabilities.arch, hello.capabilities.node, caps, hello.concurrency, now, now, osVersion, hello.machineId ?? null);
+        this.db.run("INSERT INTO agents (id, token_id, name, version, os, arch, node, capabilities_json, concurrency, first_seen_ms, last_seen_ms, os_version, machine_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", id, token.id, hello.name, hello.version, hello.capabilities.os, hello.capabilities.arch, hello.capabilities.node, caps, hello.concurrency, now, now, osVersion, hello.machineId ?? null);
         return this.getAgent(id)!;
     }
 
@@ -863,11 +921,10 @@ export class AgentStore {
     // ── where a project's tests run ─────────────────────────────────────────
 
     getRunner(projectId: string): RunnerSetting {
-        const r = this.db.get<{ run_on: string; agent_id: string | null }>("SELECT run_on, agent_id FROM runner_settings WHERE project_id = ?", projectId);
-        // Runners only: the effective setting is "on a runner". Round 45: a project pins no runner (agent_id is no longer read): every
-        // run goes to its owner's own runner.
-        if (this.runnersOnly) return { runOn: "agent", agentId: null, runnersOnly: true };
-        return r ? { runOn: r.run_on === "agent" ? "agent" : "platform", agentId: null } : { runOn: "platform", agentId: null };
+        // Runners only: the effective setting is "on a runner". Every run goes to its owner's own runner.
+        if (this.runnersOnly) return { runOn: "agent", runnersOnly: true };
+        const r = this.db.get<{ run_on: string }>("SELECT run_on FROM runner_settings WHERE project_id = ?", projectId);
+        return { runOn: r?.run_on === "agent" ? "agent" : "platform" };
     }
 
     /**
@@ -899,10 +956,9 @@ export class AgentStore {
 
     setRunner(projectId: string, s: RunnerSetting): void {
         this.db.run(
-            "INSERT INTO runner_settings (project_id, run_on, agent_id, updated_at) VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET run_on = excluded.run_on, agent_id = excluded.agent_id, updated_at = excluded.updated_at",
+            "INSERT INTO runner_settings (project_id, run_on, updated_at) VALUES (?,?,?) ON CONFLICT(project_id) DO UPDATE SET run_on = excluded.run_on, updated_at = excluded.updated_at",
             projectId,
             s.runOn,
-            s.runOn === "agent" ? s.agentId : null,
             new Date(this.clock()).toISOString(),
         );
     }
@@ -963,7 +1019,7 @@ export class AgentStore {
             const now = this.clock();
             const open = this.openMode() ? 1 : 0;
             const r = this.db.get(
-                "UPDATE agent_tasks SET status = 'running', agent_id = ?, claimed_ms = ?, lease_until = ?, last_beat_ms = ?, offers = offers + 1 WHERE id = ? AND status = 'queued' AND EXISTS (SELECT 1 FROM agent_tokens k WHERE k.id = ? AND k.revoked_at IS NULL AND k.kind = 'personal' AND k.owner_id = agent_tasks.owner_id AND ((k.owner_id = ? AND ? = 1) OR EXISTS (SELECT 1 FROM users u WHERE u.id = k.owner_id AND u.status = 'active' AND u.role IS NOT NULL AND (u.project_access IS DISTINCT FROM 'only' OR EXISTS (SELECT 1 FROM user_projects m WHERE m.user_id = u.id AND m.project_id = agent_tasks.project_id))))) RETURNING *",
+                "UPDATE agent_tasks SET status = 'running', agent_id = ?, claimed_ms = ?, lease_until = ?, last_beat_ms = ?, offers = offers + 1 WHERE id = ? AND status = 'queued' AND EXISTS (SELECT 1 FROM agent_tokens k WHERE k.id = ? AND k.owner_id = agent_tasks.owner_id AND ((k.owner_id = ? AND ? = 1) OR EXISTS (SELECT 1 FROM users u WHERE u.id = k.owner_id AND u.status = 'active' AND u.role IS NOT NULL AND (u.project_access IS DISTINCT FROM 'only' OR EXISTS (SELECT 1 FROM user_projects m WHERE m.user_id = u.id AND m.project_id = agent_tasks.project_id))))) RETURNING *",
                 agent.id, now, now + leaseMs, now, taskId, agent.tokenId, OPEN_OWNER_ID, open,
             );
             if (!r) return undefined;

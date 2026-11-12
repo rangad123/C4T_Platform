@@ -16,7 +16,7 @@ import { parseAgentArgs } from "../src/agent/config.js";
 import { CapabilityProbe } from "../src/agent/capabilities.js";
 import { filesLine } from "../src/agent/computer-check.js";
 import { Capabilities } from "../src/agent-protocol/schema.js";
-import { buildKitZip, decideAddress, DownloadRequest, loadBundle, projectSlugOf, type Bundle } from "../src/platform/runner-kit.js";
+import { buildKitZip, decideAddress, DownloadRequest, loadBundle, type Bundle } from "../src/platform/runner-kit.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner, KIT_DEPENDENCIES, KIT_OPTIONAL } from "../scripts/build-runner.mjs";
 
@@ -52,8 +52,8 @@ afterAll(() => {
 });
 
 const request = (platform: "windows" | "unix", name: string | undefined = "Maya's laptop") => ({ platform, ...(name ? { name } : {}) });
-const makeZip = (platform: "windows" | "unix", over: { name?: string; noName?: boolean; projectName?: string; url?: string } = {}) =>
-    buildKitZip({ bundle, request: request(platform, over.noName ? undefined : over.name), projectName: over.projectName ?? "Shop Checkout", projectSlug: projectSlugOf(over.projectName ?? "Shop Checkout"), platformUrl: over.url ?? "https://tests.example.com", token: TOKEN });
+const makeZip = (platform: "windows" | "unix", over: { name?: string; noName?: boolean; url?: string } = {}) =>
+    buildKitZip({ bundle, request: request(platform, over.noName ? undefined : over.name), platformUrl: over.url ?? "https://tests.example.com", token: TOKEN });
 const entries = (zip: Uint8Array) => unzipSync(zip);
 const text = (b: Uint8Array) => Buffer.from(b).toString("utf8");
 
@@ -134,20 +134,20 @@ describe("the zip a download produces", () => {
         // check-computer.*: "Check this computer" in every download (docs/features/runner-check.md).
         const files = ["LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package-lock.json", "package.json", "record-child.mjs", "runner.json", "runner.mjs", "runner.token", "start-runner.cmd", "start-runner.command", "start-runner.sh", "task-child.mjs"];
         const win = entries(makeZip("windows"));
-        expect(Object.keys(win).sort()).toEqual(files.map((n) => `runner-shop-checkout-windows/${n}`).sort());
+        expect(Object.keys(win).sort()).toEqual(files.map((n) => `runner-my-computer-windows/${n}`).sort());
         const unix = entries(makeZip("unix"));
-        expect(Object.keys(unix).sort()).toEqual(files.map((n) => `runner-shop-checkout-unix/${n}`).sort());
+        expect(Object.keys(unix).sort()).toEqual(files.map((n) => `runner-my-computer-unix/${n}`).sort());
         // The program is the prebuilt bytes, untouched.
-        for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs"]) expect(Buffer.from(win[`runner-shop-checkout-windows/${n}`]!).equals(Buffer.from(bundle.files.get(n)!)), n).toBe(true);
+        for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs"]) expect(Buffer.from(win[`runner-my-computer-windows/${n}`]!).equals(Buffer.from(bundle.files.get(n)!)), n).toBe(true);
     });
 
     it("writes runner.json and the one-line token file", () => {
         const z = entries(makeZip("windows", { url: "https://tests.example.com/app", name: "Maya's laptop" }));
-        const dir = "runner-shop-checkout-windows";
+        const dir = "runner-my-computer-windows";
         expect(JSON.parse(text(z[`${dir}/runner.json`]!))).toEqual({ url: "https://tests.example.com/app", name: "Maya's laptop", kitVersion: bundle.manifest.kitVersion });
         expect(text(z[`${dir}/runner.token`]!)).toBe(`${TOKEN}\n`);
         // Round 45: a download from Settings names no runner, so the runner takes the computer's own name; its README says no name either.
-        const nameless = entries(buildKitZip({ bundle, request: { platform: "unix" }, projectSlug: "my-computer", platformUrl: "https://tests.example.com", enrollCode: "aite_NamelessDownloadCode0123456789abcdefghij" }));
+        const nameless = entries(buildKitZip({ bundle, request: { platform: "unix" }, platformUrl: "https://tests.example.com", enrollCode: "aite_NamelessDownloadCode0123456789abcdefghij" }));
         expect(JSON.parse(text(nameless["runner-my-computer-unix/runner.json"]!))).toEqual({ url: "https://tests.example.com", kitVersion: bundle.manifest.kitVersion });
         const readme = text(nameless["runner-my-computer-unix/README.txt"]!);
         expect(readme.split("\n")[0]).toBe("AI Testing Platform runner");
@@ -157,7 +157,7 @@ describe("the zip a download produces", () => {
 
     it("passes the computer check's file comparison as it comes out of the zip, lock file included (it once said every download was damaged)", () => {
         const z = entries(makeZip("windows"));
-        const dir = "runner-shop-checkout-windows";
+        const dir = "runner-my-computer-windows";
         expect(z[`${dir}/package-lock.json`], "this build has a lock file").toBeDefined();
         const read = (n: string) => (z[`${dir}/${n}`] ? Buffer.from(z[`${dir}/${n}`]!) : undefined);
         const kitVersion = JSON.parse(text(z[`${dir}/runner.json`]!)).kitVersion as string;
@@ -174,7 +174,7 @@ describe("the zip a download produces", () => {
         // Read from the zip's central directory: "version made by" is 3 (Unix) and the mode is in the high half of the external attributes.
         for (const platform of ["unix", "windows"] as const) {
             const m = modes(makeZip(platform));
-            const dir = `runner-shop-checkout-${platform}`;
+            const dir = `runner-my-computer-${platform}`;
             expect(m[`${dir}/start-runner.sh`], platform).toEqual({ mode: 0o755, unix: true });
             expect(m[`${dir}/start-runner.command`], platform).toEqual({ mode: 0o755, unix: true });
             expect(m[`${dir}/start-runner.cmd`], platform).toEqual({ mode: 0o755, unix: true });
@@ -186,27 +186,28 @@ describe("the zip a download produces", () => {
 
     it("uses CRLF in the Windows script and README, LF in the Unix script and README", () => {
         const win = entries(makeZip("windows"));
-        const cmd = text(win["runner-shop-checkout-windows/start-runner.cmd"]!);
+        const cmd = text(win["runner-my-computer-windows/start-runner.cmd"]!);
         expect(cmd).toContain("\r\n");
         expect(cmd.replace(/\r\n/g, "")).not.toMatch(/[\r\n]/); // every line break is CRLF
-        expect(text(win["runner-shop-checkout-windows/README.txt"]!).replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
+        expect(text(win["runner-my-computer-windows/README.txt"]!).replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
         // The Unix scripts are LF in either variant (a CR before the shebang makes a Mac say "bad interpreter").
         for (const platform of ["unix", "windows"] as const) {
             const z = entries(makeZip(platform));
-            for (const n of ["start-runner.sh", "start-runner.command"]) expect(text(z[`runner-shop-checkout-${platform}/${n}`]!), `${platform} ${n}`).not.toContain("\r");
-            expect(text(z[`runner-shop-checkout-${platform}/start-runner.sh`]!).startsWith("#!/bin/sh\n")).toBe(true);
+            for (const n of ["start-runner.sh", "start-runner.command"]) expect(text(z[`runner-my-computer-${platform}/${n}`]!), `${platform} ${n}`).not.toContain("\r");
+            expect(text(z[`runner-my-computer-${platform}/start-runner.sh`]!).startsWith("#!/bin/sh\n")).toBe(true);
         }
-        expect(text(entries(makeZip("unix"))["runner-shop-checkout-unix/README.txt"]!)).not.toContain("\r");
+        expect(text(entries(makeZip("unix"))["runner-my-computer-unix/README.txt"]!)).not.toContain("\r");
         // ASCII only: cmd.exe reads the file in the computer's code page.
         expect(cmd).toMatch(/^[\x09\x0a\x0d\x20-\x7e]*$/);
     });
 
     it("explains itself in the README without printing the token", () => {
-        const readme = text(entries(makeZip("windows", { name: "Maya's laptop", projectName: "Shop Checkout" }))["runner-shop-checkout-windows/README.txt"]!);
-        for (const needle of ["Maya's laptop", "Shop Checkout", "https://tests.example.com", "start-runner.cmd", "Connected to the platform", "runner.enroll", "one-time code", "30 minutes", "Node.js 24", "Remove this computer", "--forget-credential", "Ctrl+C", bundle.manifest.kitVersion]) expect(readme, needle).toContain(needle);
+        const readme = text(entries(makeZip("windows", { name: "Maya's laptop" }))["runner-my-computer-windows/README.txt"]!);
+        expect(readme).not.toContain("Project:");
+        for (const needle of ["Maya's laptop", "https://tests.example.com", "start-runner.cmd", "Connected to the platform", "runner.enroll", "one-time code", "30 minutes", "Node.js 24", "Remove this computer", "--forget-credential", "Ctrl+C", bundle.manifest.kitVersion]) expect(readme, needle).toContain(needle);
         expect(readme).not.toContain(TOKEN);
         // Each README leads with its own system's way and still mentions the other, because both scripts are in the folder.
-        const unixReadme = text(entries(makeZip("unix"))["runner-shop-checkout-unix/README.txt"]!);
+        const unixReadme = text(entries(makeZip("unix"))["runner-my-computer-unix/README.txt"]!);
         expect(unixReadme).not.toContain(TOKEN);
         expect(unixReadme.indexOf("sh start-runner.sh")).toBeGreaterThan(-1);
         expect(unixReadme.indexOf("sh start-runner.sh")).toBeLessThan(unixReadme.indexOf("start-runner.cmd"));
@@ -231,28 +232,25 @@ describe("the zip a download produces", () => {
         // The token appears in exactly one place: runner.token.
         const z = entries(makeZip("windows"));
         const holders = Object.entries(z).filter(([, b]) => Buffer.from(b).toString("latin1").includes(TOKEN)).map(([n]) => n);
-        expect(holders).toEqual(["runner-shop-checkout-windows/runner.token"]);
+        expect(holders).toEqual(["runner-my-computer-windows/runner.token"]);
     });
 
     it("keeps hostile names out of the scripts", () => {
         // The name is allowed to hold quotes, percent signs and ampersands; it must only ever appear as text in runner.json and the README.
         const name = `Bob & "Co" %PATH% ^ ! (x)`;
         const z = entries(makeZip("windows", { name }));
-        const cmd = text(z["runner-shop-checkout-windows/start-runner.cmd"]!);
+        const cmd = text(z["runner-my-computer-windows/start-runner.cmd"]!);
         expect(cmd).not.toContain("Bob");
         // %PATH% appears once, in the script's own line that puts the chosen Node.js first on the PATH; the name adds none.
         expect(cmd.split("%PATH%").length - 1).toBe(1);
         expect(cmd).toContain('set "PATH=%NODE_DIR%;%PATH%"');
-        expect(JSON.parse(text(z["runner-shop-checkout-windows/runner.json"]!)).name).toBe(name);
-        const sh = text(entries(makeZip("unix", { name }))["runner-shop-checkout-unix/start-runner.sh"]!);
+        expect(JSON.parse(text(z["runner-my-computer-windows/runner.json"]!)).name).toBe(name);
+        const sh = text(entries(makeZip("unix", { name }))["runner-my-computer-unix/start-runner.sh"]!);
         expect(sh).not.toContain("Bob");
     });
 
-    it("names the folder after the project, with a safe fallback", () => {
-        expect(projectSlugOf("Shop Checkout")).toBe("shop-checkout");
-        expect(projectSlugOf("../../etc/passwd")).toBe("etc-passwd");
-        expect(projectSlugOf("   ")).toBe("general");
-        expect(projectSlugOf("日本語")).toBe("general");
+    it("names the folder the same for everyone: a download is for the person's own computer", () => {
+        expect(Object.keys(entries(makeZip("unix"))).every((n) => n.startsWith("runner-my-computer-unix/"))).toBe(true);
     });
 });
 
@@ -390,7 +388,7 @@ describe("the start scripts", () => {
     it.skipIf(!bash)("start-runner.sh and start-runner.command pass a syntax check (bash -n)", () => {
         const dir = fs.mkdtempSync(path.join(tmp, "sh-"));
         const z = entries(makeZip("unix"));
-        for (const n of ["start-runner.sh", "start-runner.command"]) fs.writeFileSync(path.join(dir, n), z[`runner-shop-checkout-unix/${n}`]!);
+        for (const n of ["start-runner.sh", "start-runner.command"]) fs.writeFileSync(path.join(dir, n), z[`runner-my-computer-unix/${n}`]!);
         for (const n of ["start-runner.sh", "start-runner.command"]) {
             const r = spawnSync(bash!, ["-n", n], { cwd: dir, encoding: "utf8", timeout: 20_000 });
             expect(r.status, `${n}: ${r.stderr}`).toBe(0);
@@ -398,7 +396,7 @@ describe("the start scripts", () => {
     });
 
     it("the Windows script has a label for every goto (no jump into nothing)", () => {
-        const cmd = text(entries(makeZip("windows"))["runner-shop-checkout-windows/start-runner.cmd"]!);
+        const cmd = text(entries(makeZip("windows"))["runner-my-computer-windows/start-runner.cmd"]!);
         const labels = new Set([...cmd.matchAll(/^:([a-z]+)\s*$/gim)].map((m) => m[1]!.toLowerCase()));
         const targets = [...cmd.matchAll(/goto ([a-z]+)/gi)].map((m) => m[1]!.toLowerCase());
         expect(targets.length).toBeGreaterThan(10);
@@ -414,12 +412,12 @@ describe("the start scripts", () => {
 
     it("both scripts honour AITP_KIT_SKIP_INSTALL, restart after a crash, and stop for good on a revoked token", () => {
         const z = entries(makeZip("unix"));
-        const sh = text(z["runner-shop-checkout-unix/start-runner.sh"]!);
+        const sh = text(z["runner-my-computer-unix/start-runner.sh"]!);
         expect(sh).toContain('"$AITP_KIT_SKIP_INSTALL" != "1"');
         expect(sh).toContain("sleep 5");
         expect(sh).toMatch(/3\)[\s\S]*fail 3/);
         expect(sh).toContain("brew install node");
-        const cmd = text(entries(makeZip("windows"))["runner-shop-checkout-windows/start-runner.cmd"]!);
+        const cmd = text(entries(makeZip("windows"))["runner-my-computer-windows/start-runner.cmd"]!);
         expect(cmd).toContain('if "%CODE%"=="3" goto revoked');
         expect(cmd).toContain("goto loop");
     });

@@ -4,7 +4,7 @@ import { checkComputerHelp, type RunnerOs } from "./my-runner";
 
 /**
  * "Still blocked?" under the start steps. The downloads are not code-signed yet: the steps already say how to get past the first warning
- * of the installer, so this keeps only the other cases (a browser that holds the download, the plain files, a blocked zip) and the check.
+ * of the installer, so this keeps only the other cases (a browser that holds the download, the plain files, a blocked file) and the check.
  */
 export function StillBlocked({ os, kind }: { os: RunnerOs; kind: "installer" | "files" }) {
     return (
@@ -25,10 +25,14 @@ export function StillBlocked({ os, kind }: { os: RunnerOs; kind: "installer" | "
                                     When you start <code>start-runner.cmd</code>, SmartScreen shows <b>Windows protected your PC</b>: the files are not signed yet. Choose <b>More info</b>, then <b>Run anyway</b>.
                                 </li>
                             )}
-                            <li>If nothing happens or Windows still blocks it: right-click the zip before you unzip it, choose Properties, tick Unblock, choose OK, then unzip it again.</li>
+                            {kind === "installer" ? (
+                                <li>If nothing happens or Windows still blocks it: right-click AITestingRunnerSetup.exe, choose Properties, tick Unblock, choose OK, then open it again.</li>
+                            ) : (
+                                <li>If nothing happens or Windows still blocks it: right-click the zip before you unzip it, choose Properties, tick Unblock, choose OK, then unzip it again.</li>
+                            )}
                         </>
                     )}
-                    <li>{boldScripts(checkComputerHelp(os))}</li>
+                    <li>{boldScripts(checkComputerHelp(os, kind))}</li>
                 </ul>
             </div>
         </details>

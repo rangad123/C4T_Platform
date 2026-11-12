@@ -119,11 +119,11 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
         const owner = ownerIdOfActor(who(req));
         const e = svc.store.getEnrollment(enrollmentId);
         // The person it was made for only; anyone else gets the same answer as for an unknown id.
-        if (!e || !owner || e.kind !== "personal" || e.ownerId !== owner) throw new HttpError(404, "Enrollment code not found");
+        if (!e || !owner || e.ownerId !== owner) throw new HttpError(404, "Enrollment code not found");
         if (e.usedMs === null) return { status: svc.clock() >= e.expiresMs ? "expired" : "waiting" };
         const t = e.tokenId ? svc.store.getToken(e.tokenId) : undefined;
         // Connected: the computer traded the code and its credential still works. Used: that credential was removed since.
-        return { status: t && !t.revokedAt ? "connected" : "used" };
+        return { status: t ? "connected" : "used" };
     });
 
     /** The caller's live runner, or 404 (none set up). */
@@ -152,8 +152,8 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
 
     app.post("/api/me/runner/retire", async (req) => {
         const { owner, token } = liveMine(req);
-        // "Remove this computer": every credential of the person stops working at once (a person has one runner).
-        svc.store.retireOtherPersonal(owner, null);
+        // "Remove this computer": the person's credential stops working at once.
+        svc.store.retire(owner);
         note(who(req), "runner-retired", `Their runner “${token.label ?? `…${token.hint}`}” was removed.`);
         return { runner: null };
     });
@@ -187,7 +187,7 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
         refuseUnlessAdmin(req);
         const now = svc.clock();
         return {
-            runners: svc.store.allPersonalTokens().map((t) => {
+            runners: svc.store.allTokens().map((t) => {
                 const latest = svc.store.agentsOfToken(t.id)[0];
                 return {
                     id: t.id,
@@ -207,8 +207,8 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
         const actor = refuseUnlessAdmin(req);
         const { runnerId } = req.params as { runnerId: string };
         const t = svc.store.getToken(runnerId);
-        if (!t || t.kind !== "personal") throw new HttpError(404, RUNNER_NOT_FOUND);
-        if (!svc.store.retireToken(t.id)) throw new HttpError(409, RUNNER_RETIRED);
+        if (!t) throw new HttpError(404, RUNNER_NOT_FOUND);
+        svc.store.retire(t.ownerId);
         note(actor, "runner-retired", `${personName(t.ownerId)}'s runner “${t.label ?? `…${t.hint}`}” was removed by an admin.`);
         return { ok: true };
     });

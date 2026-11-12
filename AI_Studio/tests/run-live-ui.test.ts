@@ -146,7 +146,7 @@ beforeAll(async () => {
     const hi = await maya.hello({ protocols: [1, 2] });
     expect(hi.status, hi.text).toBe(200);
     expect(hi.json.protocol).toBe(2);
-    getAgentServices(platform).store.setRunner(projectId, { runOn: "agent", agentId: null });
+    getAgentServices(platform).store.setRunner(projectId, { runOn: "agent" });
 
     browser = await chromium.launch();
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } });

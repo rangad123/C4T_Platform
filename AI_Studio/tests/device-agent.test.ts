@@ -350,7 +350,7 @@ describe("agents that cannot or should not host a phone", { timeout: 60_000 }, (
         const driver = await startDeviceTask(svc, { projectId, agent: svc.store.getAgent(a.agent.agentId)!, appPackage: SHOP, startedBy: OPEN_OWNER_ID });
         const offer = (await a.agent.next(10_000)) as TaskOffer;
         // "Remove this computer" (Settings): the credential stops working at once.
-        expect(svc.store.retireOtherPersonal(OPEN_OWNER_ID, null)).toBeGreaterThan(0);
+        expect(svc.store.retire(OPEN_OWNER_ID)).toBe(true);
         const r = await a.agent.send("POST", `/api/agent/tasks/${offer.taskId}/device`, { headers: { authorization: `Bearer ${a.secret}`, "content-type": "application/json" }, body: JSON.stringify({ status: "ready" }) });
         expect(r.status).toBe(404);
         // the platform side: nothing is heard from the agent any more, so the session ends in words (the claim and contact limits are short in tests)

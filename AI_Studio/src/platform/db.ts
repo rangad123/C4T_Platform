@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
-import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, repairPersonalRunnerColumns, RUNNER_LIFECYCLE_MIGRATION, RUNNER_SHARING_MIGRATION } from "./agent-store.js";
+import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, RUNNER_LIFECYCLE_MIGRATION, RUNNER_RESET_MIGRATION, RUNNER_SHARING_MIGRATION } from "./agent-store.js";
 import { BLOCKS_MIGRATION } from "./block-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
@@ -296,16 +296,20 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 54: what an approved test version depends on (shared steps, helpers, elements), so a change there holds it back (schema lives in approval-deps.ts; existing approved versions have no record and get one the first time a run checks them) */ APPROVAL_DEPS_MIGRATION,
     /* 55: one runner per person: who made each deploy trigger token, so its runs go to that person's runner (trigger-store.ts; existing tokens have none: null, and their runs are refused with a sentence) */ `ALTER TABLE trigger_tokens ADD COLUMN created_by TEXT;`,
     /* 56: whether a Crowd4Test account held ai_studio.tests.run at its latest arrival, so a schedule or trigger stops running in its name once it lost it (project-access-store.ts; existing people have none: null, which counts as yes until they arrive again) */ `ALTER TABLE users ADD COLUMN c4t_runs_tests INTEGER;`,
+    /* 57: every runner made before is removed and the runner tables lose their team-era columns; runs on a removed runner end with a sentence; schedules and trigger tokens get their owner from Activity once (schema lives in agent-store.ts) */ RUNNER_RESET_MIGRATION,
 ];
 
-/** Slots that were reserved before their SQL existed: the slot number and a table only that slot creates. */
+/**
+ * Slots that were reserved before their SQL existed: the slot number and a table only that slot creates (and no later slot drops: slot 42's
+ * runner_access was dropped by 57, so 42 is told by device_reservations, which 57 makes again).
+ */
 const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
     { slot: 14, table: "runbooks" },
     { slot: 22, table: "custom_tests" },
     { slot: 23, table: "spec_versions" },
     { slot: 40, table: "test_versions" },
     { slot: 41, table: "project_folders" },
-    { slot: 42, table: "runner_access" },
+    { slot: 42, table: "device_reservations" },
     { slot: 44, table: "objective_runs" },
     { slot: 43, table: "ai_configurations" },
     { slot: 47, table: "project_app_details" },
@@ -340,6 +344,8 @@ export class Db {
         this.raw.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)");
         const row = this.raw.prepare("SELECT MAX(version) AS v FROM schema_version").get() as { v: number | null };
         let current = row.v ?? 0;
+        // Before the slots still to run, so those run on the schema they were written for.
+        this.repairSkippedMigrations(current);
         while (current < MIGRATIONS.length) {
             this.raw.exec("BEGIN");
             try {
@@ -352,9 +358,6 @@ export class Db {
             }
             current++;
         }
-        this.repairSkippedMigrations();
-        // Slot 51's columns where a late repair above rebuilt agent_tokens or agents (agent-store.ts); idempotent.
-        if (this.dialect.tableExists(this.raw, "runner_enrollments")) repairPersonalRunnerColumns(this.raw, (t, c) => this.dialect.columnExists(this.raw, t, c));
         // Older audit tables say who acted (people and access, user-store.ts); after the repair, so a repaired table gets it too.
         addActorColumns(this.raw);
         // Prompt-cache counts and prices on the AI usage tables (usage-store.ts); idempotent, no numbered migration.
@@ -364,11 +367,12 @@ export class Db {
     /**
      * A database that was opened while a slot was still a reserved placeholder has that slot's version recorded, so its real SQL
      * never ran when it was written later (slots 14, 22 and 23 were filled in after reservation). For those slots, when the
-     * slot's main table is missing, none of its tables exist (each slot ran in one transaction), so the SQL runs now.
+     * slot's main table is missing, none of its tables exist (each slot ran in one transaction), so the SQL runs now, before the later
+     * slots this open still runs (`recorded`: the version the database had). A slot not recorded yet runs in order anyway.
      */
-    private repairSkippedMigrations(): void {
+    private repairSkippedMigrations(recorded: number): void {
         for (const { slot, table } of LATE_FILLED_SLOTS) {
-            if (this.dialect.tableExists(this.raw, table)) continue;
+            if (slot > recorded || this.dialect.tableExists(this.raw, table)) continue;
             this.raw.exec("BEGIN");
             try {
                 this.raw.exec(MIGRATIONS[slot - 1]!);

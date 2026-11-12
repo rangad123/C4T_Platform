@@ -28,8 +28,7 @@ export function testPerson(p: Platform, role: "owner" | "editor" | "viewer" = "o
 export function personalRunner(p: Platform, o: { ownerId?: string; label?: string; privateTargets?: boolean; codeScripts?: boolean; realPhone?: boolean; machineId?: string; replace?: boolean } = {}): { secret: string; id: string } {
     const store = getAgentServices(p).store;
     const ownerId = o.ownerId ?? runOwner();
-    // As setting up a computer does: the person's earlier runner is retired (one runner per person).
-    if (o.replace) store.retireOtherPersonal(ownerId, null);
+    // As setting up a computer does, it replaces the person's earlier runner (one runner per person).
     const { secret, record } = store.createPersonalToken({ ownerId, label: o.label ?? "Test runner", createdBy: "test", ...(o.machineId ? { machineId: o.machineId } : {}) });
     store.setTokenSwitches(record.id, { allowPrivateTargets: o.privateTargets ?? true, allowCodeScripts: o.codeScripts ?? true, allowRealPhone: o.realPhone ?? false });
     return { secret, id: record.id };

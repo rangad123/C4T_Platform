@@ -16,8 +16,9 @@ import { TaskOffer as TaskOfferSchema } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
-import { personalRunner, runOwner, testPerson } from "./helpers/personal-runner.js";
+import { personalRunner, testPerson } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
+import { UserStore } from "../src/platform/user-store.js";
 import { recorderOptions } from "../src/platform/routes/recorder.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, viaFetch } from "./fixtures/fake-agent.js";
@@ -168,6 +169,7 @@ describe("a recording on an agent", () => {
     let projectId: string;
     let agent: FakeAgent;
     let bystander: FakeAgent;
+    let bystanderId = "";
     let rid = "";
     let offer: TaskOffer;
 
@@ -175,7 +177,9 @@ describe("a recording on an agent", () => {
         projectId = await newProject("Agent recording");
         platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, { username: "tester", password: PASSWORD });
         agent = await connect(projectId, "Maya's laptop");
-        bystander = await connect(projectId, "Bystander");
+        // One runner per person: the bystander is a colleague's computer (another runner of the same person would replace this one).
+        bystanderId = new UserStore(platform.db).create({ email: "bystander@people.example", name: "Bystander", role: "owner" }).id;
+        bystander = await connect(projectId, "Bystander", undefined, bystanderId);
         const r = await start(projectId, { agentId: agent.agentId });
         expect(r.status, r.text).toBe(201);
         rid = r.body.id;
@@ -198,11 +202,11 @@ describe("a recording on an agent", () => {
     });
 
     it("only the claiming agent may push, and only to a record task; the route is an exact match", async () => {
-        const foreign = await connect(await newProject("Foreign"), "Foreign agent");
+        const foreign = await connect(await newProject("Foreign"), "Foreign agent", undefined, "someone-foreign");
         const body = JSON.stringify({ status: "recording", steps: [gotoStep()] });
         const json = (token: string) => ({ authorization: `Bearer ${token}`, "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) });
         expect((await push(foreign, offer.taskId)).status).toBe(404);
-        expect((await push(bystander, offer.taskId)).status).toBe(404); // same project, not the agent that claimed it
+        expect((await push(bystander, offer.taskId)).status).toBe(404); // not the agent that claimed it
         expect((await raw("POST", `/api/agent/tasks/${offer.taskId}/recording`, { "content-type": "application/json" }, Buffer.from(body))).status).toBe(401);
         expect((await raw("POST", `/api/agent/tasks/${offer.taskId}/recording`, { authorization: "Bearer aitg_notarealtoken0000000000000000", "content-type": "application/json" }, Buffer.from(body))).status).toBe(404);
         // An admin API key is not an agent token.
@@ -230,7 +234,7 @@ describe("a recording on an agent", () => {
         // A run task is not a recording.
         const runId = randomUUID();
         svc().store.enqueue({
-            id: runId, projectId, jobId: "run-job-x", adapterId: "playwright", files: [], ownerId: runOwner(),
+            id: runId, projectId, jobId: "run-job-x", adapterId: "playwright", files: [], ownerId: bystanderId,
             payloadEnc: svc().encrypt(TaskOfferSchema.parse({ taskId: runId, jobId: "run-job-x", adapterId: "playwright", leaseSeconds: 3, workers: 1, scripts: [{ testId: "t", filename: "t.spec.ts", content: "x" }], env: { baseUrl: APP, headless: true } })),
         });
         const run = await bystander.next(5000);

@@ -54,9 +54,10 @@ const call = async (method: string, url: string, body?: unknown, base = BASE) =>
 };
 const jobCount = (projectId: string) => platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM generation_jobs WHERE project_id = ?", projectId)!.n;
 const newProject = async (name: string) => (await call("POST", "/api/projects", { name })).body.id as string;
-const connect = async (projectId: string, name: string) => {
+/** The person's runner (one per person: a new one replaces the one before). */
+const connect = async (projectId: string, name: string, concurrency = 1) => {
     const token = personalRunner(platform, { label: name }).secret;
-    const agent = new FakeAgent(viaFetch(BASE), token, { name, capabilities: defaultCaps(), concurrency: 1 });
+    const agent = new FakeAgent(viaFetch(BASE), token, { name, capabilities: defaultCaps(), concurrency });
     expect((await agent.hello()).status).toBe(200);
     return agent;
 };
@@ -174,9 +175,11 @@ describe("runners only: a run goes to the runner", () => {
         expect(serverRunRefusals()).toBe(before); // nothing even tried to open a browser or run a script here
     }, 60_000);
 
-    it("looks after several runs at once: a slow runner does not hold up another project's run", async () => {
+    it("looks after several runs at once: a slow run does not hold up another project's run", async () => {
         const [a, b] = [await newProject("Slow"), await newProject("Quick")];
-        const [slow, quick] = [await connect(a, "slow-pc"), await connect(b, "quick-pc")];
+        // One runner per person: one computer with two slots takes both runs.
+        const slow = await connect(a, "two-slot-pc", 2);
+        const quick = slow;
         const [ta] = await importTests(a, ["Health answers"]);
         const [tb] = await importTests(b, ["Health answers"]);
         const ja = (await call("POST", `/api/projects/${a}/runs`, { testIds: [ta!.id] })).body.jobId as string;

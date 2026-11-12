@@ -414,9 +414,9 @@ describe("check-computer in every download", () => {
     }
 
     it("the plain files and the installer zips hold check-computer.cmd (CRLF), .sh and .command (LF), all executable, and the READMEs say when to use them", () => {
-        const kit = buildKitZip({ bundle, request: { name: "Office PC", platform: "windows" }, projectName: "Shop", projectSlug: "shop", platformUrl: "https://tests.example.com", token: TOKEN });
-        const inst = buildInstallerZip({ bundle, part: { ok: true, files: [{ name: "AITestingRunnerSetup.exe", mode: 0o755, data: Buffer.from("MZ") }] }, platform: "windows", runnerName: "Office PC", projectName: "Shop", projectSlug: "shop", platformUrl: "https://tests.example.com", token: TOKEN });
-        for (const [zip, dir] of [[kit, "runner-shop-windows"], [inst, "runner-shop-windows-setup"]] as const) {
+        const kit = buildKitZip({ bundle, request: { name: "Office PC", platform: "windows" }, platformUrl: "https://tests.example.com", token: TOKEN });
+        const inst = buildInstallerZip({ bundle, part: { ok: true, files: [{ name: "AITestingRunnerSetup.exe", mode: 0o755, data: Buffer.from("MZ") }] }, platform: "windows", runnerName: "Office PC", platformUrl: "https://tests.example.com", token: TOKEN });
+        for (const [zip, dir] of [[kit, "runner-my-computer-windows"], [inst, "runner-my-computer-windows-setup"]] as const) {
             const z = unzipSync(zip);
             const m = modes(zip);
             const text = (n: string) => Buffer.from(z[`${dir}/${n}`]!).toString("utf8");

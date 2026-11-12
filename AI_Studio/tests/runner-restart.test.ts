@@ -136,7 +136,6 @@ let ownerId = "";
 const runnerOfPerson = (label: string): string =>
     withDb((db) => {
         const store = new AgentStore(db);
-        store.retireOtherPersonal(ownerId, null);
         const made = store.createPersonalToken({ ownerId, label, createdBy: "test" });
         store.setTokenSwitches(made.record.id, { allowPrivateTargets: true });
         return made.secret;

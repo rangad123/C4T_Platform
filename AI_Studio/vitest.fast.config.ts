@@ -19,6 +19,7 @@ export default defineConfig({
             "tests/agent-platform-unit.test.ts",
             "tests/runner-handover.test.ts",
             "tests/runner-owner-unit.test.ts",
+            "tests/runner-reset-migration.test.ts",
             "tests/trace-scrub-unit.test.ts",
             "tests/runner-resources-unit.test.ts",
             "tests/runner-untrusted-unit.test.ts",

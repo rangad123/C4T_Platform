@@ -269,7 +269,7 @@ describe("M1: tests of an unavailable plug-in are left out of automated runs", (
 
     it("on a project that runs on a runner agent, plug-in tests are left out of automated runs and the rest runs", async () => {
         const svc = getAgentServices(platform);
-        svc.store.setRunner(pid, { runOn: "agent", agentId: null });
+        svc.store.setRunner(pid, { runOn: "agent" });
         try {
             // an agent that can run these tests is not connected; the policy is judged first, so look at the plug-in part only
             const { pluginSkips } = await import("../src/platform/plugin-policy.js");
@@ -278,7 +278,7 @@ describe("M1: tests of an unavailable plug-in are left out of automated runs", (
             expect(skipped.note).toMatch(/runners do not have plug-ins/);
             expect(await runnableTestIds(platform.repo, pid)).not.toContain(plug);
         } finally {
-            svc.store.setRunner(pid, { runOn: "platform", agentId: null });
+            svc.store.setRunner(pid, { runOn: "platform" });
         }
         expect(await runnableTestIds(platform.repo, pid)).toContain(plug);
     });

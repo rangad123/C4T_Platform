@@ -61,6 +61,8 @@ namespace AITestingRunner
             {
                 if (o.Stop) return RunStop(lay, log);
                 if (o.Uninstall) return RunUninstall(o, lay, log);
+                // A one-file download carries its kit at its end: unpack it privately and go on as if started from the unzipped folder.
+                Stamp.Unpack(System.Reflection.Assembly.GetExecutingAssembly().Location, lay);
                 if (o.Check) return RunCheck(o, lay, log);
                 if (o.UiSmoke) return UiSmoke.Run(o, lay, log);
                 // From here on something may be written to the install folder.
@@ -75,6 +77,7 @@ namespace AITestingRunner
                 if (!o.NoUi && !console) { try { MessageBox.Show(m, Product.Name, MessageBoxButtons.OK, MessageBoxIcon.Error); } catch (Exception) { } }
                 return 1;
             }
+            finally { Stamp.Cleanup(); }
         }
 
         // ── console plumbing ────────────────────────────────────────────────
@@ -165,6 +168,36 @@ namespace AITestingRunner
             catch (Exception) { return false; }
         }
 
+        /// <summary>
+        /// A one-file download opened while an older copy runs for the same install folder (the common case after every runner was removed:
+        /// the old icon says "Access removed"). That copy is asked to close the way --stop asks it (the named stop event every build listens
+        /// to), its mutex is waited for, a runner it left is ended (pid and start time checked), and this copy carries on. Null when done.
+        /// onMain runs an action on the thread that must own the mutex.
+        /// </summary>
+        static string TakeOver(Single one, Layout lay, FileLog log, Action<Action> onMain)
+        {
+            log.Line("Closing the older runner on this computer\u2026");
+            one.StopEvent.Set();
+            bool free = false;
+            DateTime end = DateTime.UtcNow.AddSeconds(60);
+            while (!free && DateTime.UtcNow < end)
+            {
+                try { free = one.Mutex.WaitOne(500); }
+                catch (AbandonedMutexException) { free = true; }
+            }
+            one.StopEvent.Reset();
+            if (!free) return "The older runner on this computer did not close. Choose Close this program from its icon next to the clock, then open AITestingRunnerSetup.exe again.";
+            // Owned by the thread that waited; hand it to the thread that keeps it (and releases it at the end).
+            one.Mutex.ReleaseMutex();
+            onMain(delegate
+            {
+                try { one.Mutex.WaitOne(5000); } catch (AbandonedMutexException) { }
+                one.Mine = true;
+            });
+            RunnerHost.ReapRecorded(lay, log);
+            return null;
+        }
+
         static int RunStop(Layout lay, FileLog log)
         {
             if (!IsRunning(lay)) { Print("No copy of the " + Product.Name + " is running for " + lay.Root + "."); return 0; }
@@ -210,10 +243,15 @@ namespace AITestingRunner
         {
             using (Single one = Claim(lay))
             {
-                if (!one.Mine)
+                if (!one.Mine && Stamp.Dir == null)
                 {
                     Print("The " + Product.Name + " is already running for " + lay.Root + ". Nothing to do.");
                     return 0;
+                }
+                if (!one.Mine)
+                {
+                    string why = TakeOver(one, lay, log, delegate(Action a) { a(); });
+                    if (why != null) { Print(why); return 1; }
                 }
                 Cancel cancel = new Cancel();
                 Controller ctl = new Controller(o, lay, new ConsoleReport(log), cancel, log);
@@ -260,13 +298,13 @@ namespace AITestingRunner
         {
             using (Single one = Claim(lay))
             {
-                if (!one.Mine)
+                if (!one.Mine && Stamp.Dir == null)
                 {
                     // The runner is already there: bring its window forward.
                     one.Show.Set();
                     return 0;
                 }
-                UiApp app = new UiApp(o, lay, log, false);
+                UiApp app = null;
                 Thread listener = new Thread(delegate()
                 {
                     WaitHandle[] both = new WaitHandle[] { one.Show, one.StopEvent };
@@ -278,7 +316,21 @@ namespace AITestingRunner
                     }
                 });
                 listener.IsBackground = true;
-                listener.Start();
+                // A one-file download replaces an older copy first (TakeOver), in the window; the listener starts once this copy owns the folder.
+                if (one.Mine)
+                {
+                    app = new UiApp(o, lay, log, false, null);
+                    listener.Start();
+                }
+                else
+                {
+                    app = new UiApp(o, lay, log, false, delegate(UiApp ui)
+                    {
+                        string why = TakeOver(one, lay, log, ui.OnUiAndWait);
+                        if (why == null) listener.Start();
+                        return why;
+                    });
+                }
                 Application.Run(app);
                 if (app.Host != null) app.Host.Stop();
                 return 0;

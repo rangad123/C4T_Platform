@@ -2,6 +2,7 @@
  * Round 45 helpers for tests that start a real runner from a real download: one runner per person, set up from Settings.
  *  - personToken: a person (an owner) with their own API token, made in the platform's user store (no sign-in page needed).
  *  - downloadRunner: POST /api/me/runner/download as that person, the way Settings, Your runner does.
+ *  - splitStampedExe: the one-file Windows download taken apart (program, kit zip, format).
  *  - myRunner / retireMyRunner: GET /api/me/runner and POST /api/me/runner/retire ("Remove this computer").
  *  - enrollByHand: trade a download's runner.enroll at /api/agent/enroll the way the runner does, and keep the credential in this computer's
  *    store for that folder with the install id in runner.machine (exactly what the runner leaves behind), for tests that need a working
@@ -25,6 +26,14 @@ export async function downloadRunner(base: string, token: string, os: "windows" 
     const res = await fetch(`${base}/api/me/runner/download`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ os, arch }) });
     const buf = Buffer.from(await res.arrayBuffer());
     return { status: res.status, headers: res.headers, buf, text: buf.toString("utf8") };
+}
+
+/** A one-file Windows download (round 49) taken apart: the program, the kit zip after it, and the footer's format (runner-installer.ts buildInstallerExe). Undefined without the footer. */
+export function splitStampedExe(b: Uint8Array): { program: Buffer; payload: Buffer; format: number } | undefined {
+    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+    if (buf.length < 16 || buf.toString("latin1", buf.length - 8) !== "AITP-KIT") return undefined;
+    const len = buf.readUInt32LE(buf.length - 16);
+    return { program: buf.subarray(0, buf.length - 16 - len), payload: buf.subarray(buf.length - 16 - len, buf.length - 16), format: buf.readUInt32LE(buf.length - 12) };
 }
 
 export type MyRunner = { id: string; name: string; status: string; update?: Record<string, unknown> & { state?: string }; check?: { at: string; items: Array<{ id: string; status: string; title: string }> }; version?: string };

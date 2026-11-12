@@ -116,14 +116,13 @@ describe("sign-in details on an environment", () => {
 });
 
 describe("hand-written scripts and runners that are no longer used", () => {
-    it("a team or shared runner left in the database is offered nothing, even one that allows code scripts; the owner's own runner gets them", async () => {
+    it("a credential the platform no longer knows (every runner from before the reset) is refused; the owner's own runner gets code scripts", async () => {
         const fs = await import("node:fs");
         const os = await import("node:os");
         const path = await import("node:path");
-        const { randomUUID } = await import("node:crypto");
         const { bootstrap } = await import("../src/platform/bootstrap.js");
         const { getAgentServices } = await import("../src/platform/agent-services.js");
-        const { hashToken, newAgentToken, OPEN_OWNER_ID } = await import("../src/platform/agent-store.js");
+        const { newAgentToken, OPEN_OWNER_ID } = await import("../src/platform/agent-store.js");
         const { TaskOffer } = await import("../src/agent-protocol/schema.js");
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-b33-shared-"));
         const p = bootstrap(loadConfig({ DATA_DIR: dir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", SECRET_KEY: "b33-shared-runner-secret-key-0123456789" }));
@@ -135,14 +134,8 @@ describe("hand-written scripts and runners that are no longer used", () => {
             const caps = { os: "linux", arch: "x64", node: "24", browsers: ["chromium"], record: false, customScripts: true, runnerSwitches: true } as never;
             const offer = TaskOffer.parse({ taskId: "11111111-1111-4111-8111-111111111111", jobId, adapterId: "playwright", leaseSeconds: 60, workers: 1, scripts: [{ testId: "WEB-001", filename: "web-001.spec.ts", content: "//", custom: true }], env: { baseUrl: "http://x.example", headless: true } });
             svc.store.enqueue({ id: offer.taskId, projectId, jobId, adapterId: "playwright", payloadEnc: svc.encrypt(offer), files: [] });
-            // A team runner of the project (as rounds 34-44 made them), with every switch on: it is offered nothing.
-            const secret = newAgentToken();
-            const teamId = randomUUID();
-            p.db.run("INSERT INTO agent_tokens (id, project_id, label, token_hash, hint, created_at, kind, allow_code_scripts) VALUES (?,?,?,?,?,?,?,?)", teamId, projectId, "Lab", hashToken(secret), secret.slice(-4), new Date().toISOString(), "team", 1);
-            const team = svc.store.upsertAgent(svc.store.getToken(teamId)!, { name: "lab", version: "1", capabilities: caps, concurrency: 1 });
-            expect(svc.offerTo(team, 1)).toBeUndefined();
-            expect(svc.store.claimFor(offer.taskId, team, 60_000)).toBeUndefined();
-            expect(() => svc.authenticate(`Bearer ${secret}`)).toThrow(/Set up your own runner from Settings/);
+            // A credential from before migration 57 (team, shared or personal): unknown, so refused with what to do.
+            expect(() => svc.authenticate(`Bearer ${newAgentToken()}`)).toThrow(/Download the new runner in Settings, Your runner/);
             // The open server's own runner, code scripts on: it gets the task.
             const { record } = svc.store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: "mine", createdBy: "test" });
             const own = svc.store.upsertAgent(record, { name: "mine", version: "1", capabilities: caps, concurrency: 1 });

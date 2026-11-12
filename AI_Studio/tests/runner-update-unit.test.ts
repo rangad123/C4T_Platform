@@ -175,9 +175,7 @@ let versionB: string;
 let rows: ActivityRow[];
 let updates: RunnerUpdates;
 let db: Db;
-/** An "update automatically" off (0) left by an earlier release: no longer read. */
-const setAuto = (on: Db, agentId: string, auto: boolean) =>
-    on.run("INSERT INTO runner_update_settings (agent_id, auto, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET auto = excluded.auto", agentId, auto ? null : 0, new Date().toISOString());
+
 
 beforeEach(() => {
     platformDir = fresh("platform");
@@ -244,11 +242,10 @@ describe("the platform's side", () => {
         for (const name of ["runner.json", "runner.token", "manifest.json", "update-manifest.json", "update-manifest.sig", "complete-win-x64-node_modules.json", "../x"]) expect(updates.file(name), name).toBeUndefined();
     });
 
-    it("updates are always on here: an old \"update automatically\" off is not read; a request is settled by the runner's report; Activity once per report", () => {
+    it("updates are always on here; a request is settled by the runner's report; Activity once per report", () => {
         const kit = writeKit(bundleA, versionA);
         const { u } = runnerOn(kit);
-        const agent = { id: "a2", name: "Maya", projectId: "p1", node: process.version, capabilities: caps(u, versionA) };
-        setAuto(db, "a2", false);
+        const agent = { id: "a2", name: "Maya", node: process.version, capabilities: caps(u, versionA) };
         expect(updates.wanted(agent)).toBe("auto");
         expect(updates.publicView(agent)).toMatchObject({ can: true, auto: true, outOfDate: true, latest: versionB, requested: false });
         updates.request("a2");
@@ -262,7 +259,7 @@ describe("the platform's side", () => {
         updates.observe(agent, failed);
         updates.observe(agent, failed);
         expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({ action: "runner-update-failed", projectId: "p1", agentName: "Maya" });
+        expect(rows[0]).toMatchObject({ action: "runner-update-failed", projectId: null, agentName: "Maya" });
         expect(rows[0]!.detail).toContain(`Still on version ${versionA}`);
         // Settled: back to the automatic offer (the runner's own backoff paces the retry).
         expect(updates.wanted({ ...agent, capabilities: failed })).toBe("auto");
@@ -498,7 +495,7 @@ describe("the runner's updater", () => {
 });
 
 describe("signed updates (round 39)", () => {
-    const agentOf = (u: RunnerUpdater) => ({ id: "agent-s", name: "Signed", projectId: "p1", node: process.version, capabilities: caps(u, u.version) });
+    const agentOf = (u: RunnerUpdater) => ({ id: "agent-s", name: "Signed", node: process.version, capabilities: caps(u, u.version) });
 
     it("the platform offers nothing without a signature, with a key the runners do not trust, or when a file changed after signing, and says why", () => {
         const kit = writeKit(bundleA, versionA);
@@ -559,8 +556,8 @@ describe("signed updates (round 39)", () => {
             expect(lines.join("\n"), label).toMatch(/was not installed: .* Choose Update now in Settings, Your runner, or download the runner again there\./);
             // The platform writes it to Activity once and Settings can say "download the new version".
             rows.length = 0;
-            updates.observe({ id: "agent-1", name: "Maya", projectId: "p1" }, caps(u, versionA));
-            updates.observe({ id: "agent-1", name: "Maya", projectId: "p1" }, caps(u, versionA));
+            updates.observe({ id: "agent-1", name: "Maya" }, caps(u, versionA));
+            updates.observe({ id: "agent-1", name: "Maya" }, caps(u, versionA));
             expect(rows, label).toHaveLength(1);
             expect(rows[0]!.detail, label).toMatch(/did not install version .* by itself: .*\./);
             expect(updates.publicView({ id: "agent-1", capabilities: caps(u, versionA) }).state, label).toBe("needs-manual");

@@ -146,7 +146,8 @@ namespace AITestingRunner
 
         public void DetectSource()
         {
-            string exeDir = Path.GetDirectoryName(ExePath);
+            // A one-file download unpacked its kit (Stamp); otherwise the kit is the folder this program was started from.
+            string exeDir = Stamp.Dir ?? Path.GetDirectoryName(ExePath);
             bool credential = File.Exists(Path.Combine(exeDir, "runner.enroll")) || File.Exists(Path.Combine(exeDir, "runner.token"));
             bool kit = File.Exists(Path.Combine(exeDir, "runner.mjs")) && File.Exists(Path.Combine(exeDir, "runner.json")) && credential && !Util.SamePath(exeDir, L.App);
             SourceDir = kit ? exeDir : null;
@@ -356,6 +357,8 @@ namespace AITestingRunner
 
                 // 7. The runner's own "Check this computer" (docs/features/runner-check.md): its lines in the details and the log
                 RunComputerCheck();
+                // Done with a one-file download's unpacked kit (and its copy of the one-time code).
+                Stamp.Cleanup();
                 return null;
             }
             catch (OperationCanceledException)
@@ -527,9 +530,14 @@ namespace AITestingRunner
                 copied++;
             }
             // This program copies itself next to the runner, so it can start the runner again after the unzipped folder is deleted.
+            // Only the program part: a one-file download's appended kit (with its one-time code) is left out.
             try
             {
-                if (!Util.SamePath(ExePath, L.SelfCopy) && !Util.SameFile(ExePath, L.SelfCopy)) File.Copy(ExePath, L.SelfCopy, true);
+                if (!Util.SamePath(ExePath, L.SelfCopy))
+                {
+                    byte[] me = Stamp.ProgramBytes(ExePath);
+                    if (!File.Exists(L.SelfCopy) || Util.Sha256File(L.SelfCopy) != Util.Sha256Bytes(me)) File.WriteAllBytes(L.SelfCopy, me);
+                }
             }
             catch (IOException) { Say("I could not update my own copy in " + L.Root + " (it may be running). It will be updated the next time."); }
             Set("files", copied == 0 ? S.Found : S.Done, copied == 0 ? "Already copied to " + L.App : copied + (copied == 1 ? " file" : " files") + " copied to " + L.App);

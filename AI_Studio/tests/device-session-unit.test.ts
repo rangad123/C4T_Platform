@@ -564,7 +564,7 @@ describe("where a phone session runs (decision table)", () => {
         const idle = agent("idle", { activeTasks: 0 });
         const incapable = agent("inc", { capabilities: caps({ deviceSession: undefined, android: { adb: false, devices: [], avds: [] } }), activeTasks: 0 });
         expect(chooseDeviceHost({ runner: agentRunner, agents: [busy, idle] })).toMatchObject({ agent: { id: "busy" } });
-        expect(chooseDeviceHost({ runner: { runOn: "agent", agentId: "busy" }, agents: [idle, busy] })).toMatchObject({ agent: { id: "idle" } });
+        expect(chooseDeviceHost({ runner: { runOn: "agent" }, agents: [idle, busy] })).toMatchObject({ agent: { id: "idle" } });
         expect(() => chooseDeviceHost({ runner: agentRunner, agents: [incapable, idle] })).toThrowError(/Agent inc can.t be used to explore a phone/);
     });
 

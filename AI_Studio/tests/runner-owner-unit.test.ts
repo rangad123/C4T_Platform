@@ -1,6 +1,6 @@
 /**
  * Round 45, who a run belongs to (no HTTP): the open server acts as one person (OPEN_OWNER_ID) and its runner takes its runs only while the
- * server is open; schedules made before their creator was recorded are attributed from Activity only where that is certain; a deploy
+ * server is open; (schedules and trigger tokens made before their creator was recorded are attributed once, by migration 57: runner-reset-migration.test.ts); a deploy
  * trigger token keeps its creator, and its runs are theirs.
  */
 import { randomUUID } from "node:crypto";
@@ -39,7 +39,7 @@ beforeAll(() => {
     platform = bootstrap(loadConfig({ DATA_DIR: tmp, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", SECRET_KEY: "owner-unit-secret-key-0123456789abc" }));
     projectId = platform.repo.createProject({ name: "Open shop" }).id as string;
     platform.db.run("INSERT INTO applications (id, project_id, url, origin, config_json, created_at) VALUES (?,?,?,?,?,?)", "app-1", projectId, "https://app.example", "https://app.example", "{}", new Date().toISOString());
-    svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+    svc().store.setRunner(projectId, { runOn: "agent" });
 });
 
 afterAll(() => {
@@ -78,27 +78,6 @@ describe("who a run belongs to", () => {
         platform.db.run("INSERT INTO users (id, email, name, created_at, role, status) VALUES (?,?,?,?,?,?)", "u-first", "first@people.example", "First", new Date().toISOString(), "owner", "active");
         expect(svc().store.claimFor(queue(), { id: agent.id, tokenId: record.id }, 60_000)).toBeUndefined();
         platform.db.run("DELETE FROM users WHERE id = 'u-first'");
-    });
-
-    it("a schedule with no creator is attributed from Activity only where certain", () => {
-        const store = new ScheduleStore(platform.db);
-        platform.db.run("INSERT INTO users (id, email, name, created_at, role, status) VALUES (?,?,?,?,?,?)", "u-ann", "ann@people.example", "Ann", new Date().toISOString(), "editor", "active");
-        const cadence = { type: "daily", time: "02:00" } as const;
-        const edited = store.create({ projectId, name: "Edited", kind: "validate", cadence, createdBy: null });
-        const lone = store.create({ projectId: platform.repo.createProject({ name: "Lone" }).id as string, name: "Lone", kind: "validate", cadence, createdBy: null });
-        const keyEdited = store.create({ projectId, name: "Key edited", kind: "validate", cadence, createdBy: null });
-        const add = (o: { kind: string; id: string | null; action: string; path: string | null; project: string | null; at?: string }) =>
-            platform.db.run("INSERT INTO activity (at, actor_kind, actor_id, actor_name, action, path, project_id, status) VALUES (?,?,?,?,?,?,?,?)", o.at ?? new Date().toISOString(), o.kind, o.id, "x", o.action, o.path, o.project, 200);
-        add({ kind: "user", id: "u-ann", action: "PATCH /api/projects/:id/schedules/:sid", path: `/api/projects/${projectId}/schedules/${edited.id}`, project: projectId });
-        add({ kind: "user", id: "u-ann", action: "POST /api/projects/:id/schedules", path: `/api/projects/${lone.projectId}/schedules`, project: lone.projectId, at: lone.createdAt });
-        add({ kind: "user", id: "u-ann", action: "PATCH /api/projects/:id/schedules/:sid", path: `/api/projects/${projectId}/schedules/${keyEdited.id}`, project: projectId });
-        add({ kind: "key", id: null, action: "PATCH /api/projects/:id/schedules/:sid", path: `/api/projects/${projectId}/schedules/${keyEdited.id}`, project: projectId });
-        expect(store.backfillOwners()).toBe(2);
-        expect(store.get(edited.id)!.createdBy).toBe("u-ann");
-        expect(store.get(lone.id)!.createdBy).toBe("u-ann");
-        // The latest change was by the shared key: not certain, so it stays without an owner (refused at its next fire).
-        expect(store.get(keyEdited.id)!.createdBy).toBeNull();
-        expect(store.backfillOwners()).toBe(0);
     });
 
     it("a deploy trigger token keeps its creator (migration 55)", () => {
@@ -175,20 +154,6 @@ describe("who a run belongs to", () => {
         }
     });
 
-    it("schedules and trigger tokens the open server made are attributed to it from Activity", () => {
-        const at = new Date().toISOString();
-        platform.db.run("INSERT INTO schedules (id, project_id, name, kind, cadence_json, enabled, retry_failures, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", "s-open-made", projectId, "Open made", "validate", JSON.stringify({ type: "daily", time: "04:00" }), 0, 1, null, null, at, at);
-        platform.db.run("INSERT INTO activity (at, actor_kind, actor_id, actor_name, action, path, project_id, status) VALUES (?,?,?,?,?,?,?,?)", at, "open", null, "Open access", "PATCH /api/projects/:id/schedules/:sid", `/api/projects/${projectId}/schedules/s-open-made`, projectId, 200);
-        expect(new ScheduleStore(platform.db).backfillOwners()).toBeGreaterThanOrEqual(1);
-        expect(new ScheduleStore(platform.db).get("s-open-made")!.createdBy).toBe(OPEN_OWNER_ID);
-        const other = platform.repo.createProject({ name: "Trigger open" }).id as string;
-        const triggers = new TriggerStore(platform.db, new SecretBox(tmp, "owner-unit-secret-key-0123456789abc"));
-        const { record } = triggers.create(other, { label: "CI" });
-        platform.db.run("INSERT INTO activity (at, actor_kind, actor_id, actor_name, action, path, project_id, status) VALUES (?,?,?,?,?,?,?,?)", record.createdAt, "open", null, "Open access", "POST /api/projects/:id/triggers", `/api/projects/${other}/triggers`, other, 201);
-        expect(triggers.backfillOwners()).toBe(1);
-        expect(triggers.get(record.id)!.createdBy).toBe(OPEN_OWNER_ID);
-    });
-
     it("a runbook linked to a schedule runs as the run's owner: the Run now clicker's runner, with their code tests (round 47)", async () => {
         const at = new Date().toISOString();
         for (const [id, name] of [["u-maker", "Maker"], ["u-clicker", "Clicker"]]) {
@@ -198,7 +163,7 @@ describe("who a run belongs to", () => {
         }
         const pid = platform.repo.createProject({ name: "Runbook owner" }).id as string;
         platform.repo.createApplication(pid, "https://app.example", {});
-        svc().store.setRunner(pid, { runOn: "agent", agentId: null });
+        svc().store.setRunner(pid, { runOn: "agent" });
         const spec = TestSpecSchema.parse({ testId: "API-001", title: "Health", kind: "api", category: "API", priority: "high", steps: [{ action: "request", method: "GET", path: "/health" }, { action: "assertResponse", check: "status", expected: 200 }] });
         const testId = platform.repo.insertTest({ projectId: pid, suiteId: platform.repo.getOrCreateSuite(pid, "API", "api"), jobId: null, spec, framework: "playwright-api", validationStatus: "VALIDATED" });
         platform.db.run("INSERT INTO custom_tests (test_case_id, project_id, origin, since) VALUES (?,?,?,?)", testId, pid, "written", at);

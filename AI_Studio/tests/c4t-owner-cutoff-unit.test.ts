@@ -110,11 +110,12 @@ describe("runner switches", () => {
         const a = store.createPersonalToken({ ownerId: "u-two", label: "Laptop", createdBy: "test" }).record;
         const b = store.createPersonalToken({ ownerId: "u-two", label: "Desktop", createdBy: "test" }).record;
         const other = store.createPersonalToken({ ownerId: "u-else", label: "Theirs", createdBy: "test" }).record;
-        expect(store.setTokenSwitches(a.id, { allowCodeScripts: false, allowRealPhone: true })).toBe(true);
-        for (const t of [a, b]) expect(store.getToken(t.id)).toMatchObject({ allowCodeScripts: false, allowRealPhone: true });
+        // One per person: the second replaced the first.
+        expect(store.getToken(a.id)).toBeUndefined();
+        expect(store.setTokenSwitches(b.id, { allowCodeScripts: false, allowRealPhone: true })).toBe(true);
+        expect(store.getToken(b.id)).toMatchObject({ allowCodeScripts: false, allowRealPhone: true });
         expect(store.getToken(other.id)).toMatchObject({ allowCodeScripts: true, allowRealPhone: false });
-        // A retired credential changes nothing, its owner's live ones included.
-        store.retireOtherPersonal("u-two", b.id);
+        // A removed credential changes nothing.
         expect(store.setTokenSwitches(a.id, { allowCodeScripts: true })).toBe(false);
         expect(store.getToken(b.id)).toMatchObject({ allowCodeScripts: false });
     });

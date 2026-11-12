@@ -68,7 +68,7 @@ const newProject = async (name: string) => {
     await admin("PUT", `/api/projects/${id}/review-policy`, { edits: false });
     return id;
 };
-/** Round 45: a runner of the test's person (every run here is theirs); several may be live at once for the routing tests below. */
+/** A runner of the test's person (every run here is theirs). One per person: a new one replaces the one before. */
 const newToken = async (_projectId: string, label?: string) => personalRunner(platform, { label: label ?? "Test runner" }).secret;
 const connect = async (projectId: string, name: string, caps = defaultCaps(), concurrency = 1) => {
     const agent = new FakeAgent(viaFetch(BASE), await newToken(projectId, name), { name, capabilities: caps, concurrency });
@@ -157,12 +157,12 @@ describe("tokens and who may call the agent routes", () => {
         const agent = new FakeAgent(viaFetch(BASE), made.secret, { name: "revoked-one" });
         expect((await agent.hello()).status).toBe(200);
         expect((await agent.poll()).status).not.toBe(404);
-        expect(getAgentServices(platform).store.retireToken(made.id)).toBe(true);
+        const store = getAgentServices(platform).store;
+        expect(store.getToken(made.id)!.lastUsedAt).toBeTruthy();
+        expect(store.retire(store.getToken(made.id)!.ownerId)).toBe(true);
         expect((await agent.hello()).status).toBe(404);
         expect((await agent.poll()).status).toBe(404);
-        const t = getAgentServices(platform).store.getToken(made.id)!;
-        expect(t.revokedAt).toBeTruthy();
-        expect(t.lastUsedAt).toBeTruthy();
+        expect(store.getToken(made.id)).toBeUndefined();
     });
 
     it("path tricks never get past the API key: only the six exact routes skip it", async () => {
@@ -292,7 +292,7 @@ describe("routing a run and refusing it", () => {
         expect(imp.status).toBe(202);
         const testId = imp.body.tests[0].id as string;
         // forced: the setting says agent, and the person's runners were last seen long ago (offline)
-        svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+        svc().store.setRunner(projectId, { runOn: "agent" });
         platform.db.run("UPDATE agents SET last_seen_ms = 0");
         const message = "Your runner is offline. Start it on your computer, then try again.";
         const one = await admin("POST", `/api/tests/${testId}/validate`);
@@ -309,7 +309,7 @@ describe("routing a run and refusing it", () => {
         // nothing was queued
         expect((await admin("GET", `/api/projects/${projectId}/jobs`)).body.filter((j: { status: string }) => j.status === "QUEUED")).toEqual([]);
         // back on the platform: the setting is honoured again
-        svc().store.setRunner(projectId, { runOn: "platform", agentId: null });
+        svc().store.setRunner(projectId, { runOn: "platform" });
         endJob(await platform.repo.createJob(projectId, appOf(projectId), { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "generate" }));
     });
 
@@ -328,11 +328,11 @@ describe("routing a run and refusing it", () => {
         expect(status.unavailableReason).toMatch(/Web and API tests can't run: it has no browsers installed/);
         // a mobile test needs an Android phone or emulator on the agent
         expect((await admin("PUT", `/api/projects/${projectId}/mobile-app`, { appPackage: "com.example.shop" })).status).toBe(200);
-        svc().store.setRunner(projectId, { runOn: "platform", agentId: null });
+        svc().store.setRunner(projectId, { runOn: "platform" });
         const mob = await admin("POST", `/api/projects/${projectId}/specs`, { validate: false, mobile: { appPackage: "com.example.shop" }, specs: [{ title: "Shop opens", kind: "mobile", category: "Mobile", steps: [{ action: "assert", check: "visible", locator: { by: "text", value: "Shop" } }] }] });
         expect(mob.status).toBe(202);
         await connect(projectId, "with-browser", defaultCaps());
-        svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+        svc().store.setRunner(projectId, { runOn: "agent" });
         const m = await admin("POST", `/api/tests/${mob.body.tests[0].id}/validate`);
         expect(m.status).toBe(409);
         expect(m.body.error).toMatch(/cannot run phone tests: it has no Android tools/);
@@ -351,7 +351,7 @@ describe("a task, from claim to result", () => {
     beforeAll(async () => {
         projectId = await newProject("Tasks");
         agent = await connect(projectId, "worker-1");
-        svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+        svc().store.setRunner(projectId, { runOn: "agent" });
     });
 
     it("the agent gets the scripts, the credentials, baselines and cleanup on the agent; uploads come back as local files; the run looks like a local one", async () => {
@@ -431,7 +431,7 @@ describe("a task, from claim to result", () => {
         const apk = Buffer.concat([Buffer.from("PK\x03\x04"), Buffer.alloc(5000, 7)]);
         fs.writeFileSync(apkAbs, apk);
         const phone = await connect(projectId, "phone-host", defaultCaps({ android: { adb: true, devices: [{ serial: "R58M", state: "device", emulator: false }], avds: ["Pixel_7"] } }));
-        svc().store.setRunner(projectId, { runOn: "agent", agentId: phone.agentId });
+        svc().store.setRunner(projectId, { runOn: "agent" });
         const mobile = { target: { appPackage: "com.example.shop", apkPath: apkAbs }, avd: "Pixel_7", keepEmulator: true };
         const logged: string[] = [];
         const pending = settle(svc().executorFor({ projectId, jobId: job.id }).execute("taqwright", { scratchDir: batch().scratchDir, scripts: [script("MOB-001")] }, { ...runEnv(), mobile: { ...mobile, log: (m) => logged.push(m) } }, { workers: 1 }));
@@ -457,16 +457,25 @@ describe("a task, from claim to result", () => {
         // no device in the run: the same plain answer a local run gives
         const none = await svc().executorFor({ projectId, jobId: job.id }).execute("taqwright", batch("MOB-003"), runEnv(), { workers: 1 });
         expect(none[0]).toMatchObject({ status: "error", error: "No Android device is set up for this run." });
-        svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+        svc().store.setRunner(projectId, { runOn: "agent" });
         endJob(job);
+        // The phone host replaced the person's runner (one per person): the tests below use a fresh one.
+        agent = await connect(projectId, "worker-1");
     });
 
     it("only the claiming agent can touch a task: another agent of the project, an agent of another project, and the API key are all refused", async () => {
         const job = await jobFor(projectId);
         const pending = settle(apiExec(projectId, job, batch("API-010")));
         const offer = (await agent.next())!;
-        const mate = await connect(projectId, "worker-2");
-        const stranger = await connect(await newProject("Stranger"), "stranger");
+        // One runner per person: a colleague's computer, and a stranger's (a second runner of the same person would replace this one).
+        const other = async (ownerId: string, name: string) => {
+            const a = new FakeAgent(viaFetch(BASE), personalRunner(platform, { ownerId, label: name }).secret, { name, capabilities: defaultCaps(), concurrency: 1 });
+            expect((await a.hello()).status).toBe(200);
+            return a;
+        };
+        await newProject("Stranger");
+        const mate = await other("a-colleague", "worker-2");
+        const stranger = await other("a-stranger", "stranger");
         for (const other of [mate, stranger]) {
             // nothing for them to claim, and everything about the task is "not found"
             expect((await other.poll()).status).toBe(204);
@@ -614,7 +623,7 @@ describe("a task, from claim to result", () => {
     it("a run for which no capable agent shows up is given up after a short wait", async () => {
         const lonely = await newProject("Lonely");
         const job = await jobFor(lonely);
-        svc().store.setRunner(lonely, { runOn: "agent", agentId: null });
+        svc().store.setRunner(lonely, { runOn: "agent" });
         platform.db.run("UPDATE agents SET last_seen_ms = 0");
         const started = Date.now();
         const out = await settle(apiExec(lonely, job, batch("API-070")));
@@ -630,7 +639,7 @@ describe("a task, from claim to result", () => {
         const a = new FakeAgent(viaFetch(BASE), personalRunner(platform, { ownerId: "someone-else", label: "a" }).secret, { name: "a", capabilities: defaultCaps(), concurrency: 1 });
         expect((await a.hello()).status).toBe(200);
         const b = await connect(proj, "b", defaultCaps(), 1);
-        svc().store.setRunner(proj, { runOn: "agent", agentId: null });
+        svc().store.setRunner(proj, { runOn: "agent" });
         const job = await jobFor(proj);
         const p1 = settle(apiExec(proj, job, batch("API-081")));
         await new Promise((r) => setTimeout(r, 150));

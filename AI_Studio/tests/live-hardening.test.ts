@@ -260,7 +260,8 @@ describe("4 and 5. runner tokens", () => {
         task(2);
         expect((await as("t-ann", "POST", "/api/me/runner/retire", {})).status).toBe(200);
         // What the open poll's loop asks on its next turn: it does not authenticate again.
-        expect(svc.offerTo(svc.store.getAgent(agent.id)!, 1)).toBeUndefined();
+        expect(svc.store.getAgent(agent.id)).toBeUndefined();
+        expect(svc.offerTo(agent, 1)).toBeUndefined();
         expect(svc.store.claimFor("11111111-1111-4111-8111-111111111112", agent, 60_000)).toBeUndefined();
         expect(svc.store.tokenLive(record.id)).toBe(false);
     });

@@ -7,8 +7,8 @@ import { runnerUpdatesFor } from "../runner-update.js";
 import { RateLimiter } from "../agent-routing.js";
 import { HttpError } from "../http-error.js";
 import { mayHaveRunner } from "../runner-health.js";
-import { buildInstallerZip, installerFileName, loadInstaller, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
-import { buildKitZip, decideAddress, DownloadRequest, kitFileName, loadBundle, NODE_MIN_MAJOR, type Bundle } from "../runner-kit.js";
+import { buildInstallerExe, buildInstallerZip, installerFileName, loadInstaller, WINDOWS_EXE_NAME, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
+import { buildKitZip, decideAddress, DownloadRequest, kitFileName, loadBundle, type Bundle } from "../runner-kit.js";
 import { buildCompleteZip, completeFileName, loadComplete, MAX_COMPLETE_AT_ONCE, targetOf, type CompleteBuild, type CompleteTarget } from "../runner-kit-complete.js";
 import type { RouteCtx } from "./types.js";
 
@@ -20,10 +20,10 @@ import type { RouteCtx } from "./types.js";
  *
  * One download per system, nothing to choose: Windows gets the setup program, a Mac the app, Linux the plain files with the start scripts.
  * The Mac app and the Linux files also carry their own Node.js and every test tool (the complete build, runner-kit-complete.ts) when this
- * server has built it for that system and processor (the Mac app is then put inside it). The Windows installer never does: it finds or
+ * server has built it for that system and processor (the Mac app is then put inside it). Windows never does: its installer finds or
  * downloads Node.js and installs the test tools with npm ci, because a complete node_modules copied into its install folder passes
- * Windows' 260-character path limit. Only a Windows download that falls back to the plain files (no installer built here) carries them. A server without the installer for a system sends the plain files and
- * says so (x-runner-kit-note). The runner is named after the computer (runner.json holds no name).
+ * Windows' 260-character path limit. A server without the installer for a system sends the plain files and says so (x-runner-kit-note).
+ * The runner is named after the computer (runner.json holds no name).
  *
  * The zip holds a single-use code (runner.enroll), never a credential: the runner trades it once at /api/agent/enroll for this person's one
  * runner credential, which retires every older one of theirs (agent-store.ts). The answer names the code's record (x-runner-enrollment-id,
@@ -48,14 +48,14 @@ interface Plan {
 }
 
 function planFor(req: DownloadRequest, bundle: Extract<Bundle, { ok: true }>, installers: LoadedInstaller | undefined, completes: (t: CompleteTarget) => CompleteBuild): Plan {
-    const target = targetOf(req.os, req.arch);
-    const build = completes(target);
-    const complete = build.ok ? build : undefined;
+    // Windows never gets the complete parts: its installer installs the test tools itself (npm ci), because a complete node_modules copied
+    // into the install folder runs past Windows' 260-character path limit, so they are not built for Windows, and its fallback is
+    // the plain files.
+    const build = req.os === "windows" ? undefined : completes(targetOf(req.os, req.arch));
+    const complete = build?.ok ? build : undefined;
     if (req.os === "linux") return { kind: "files", ...(complete ? { complete } : {}) };
     const part = installers ? (req.os === "windows" ? installers.windows : installers.mac) : undefined;
-    // The Windows installer installs the test tools itself (npm ci): copying a complete node_modules into the install folder runs past
-    // Windows' 260-character path limit, so the Windows installer download never carries the complete parts. The Mac app does.
-    if (part?.ok) return { kind: "installer", installer: part, ...(complete && req.os === "mac" ? { complete } : {}) };
+    if (part?.ok) return { kind: "installer", installer: part, ...(complete ? { complete } : {}) };
     return { kind: "files", ...(complete ? { complete } : {}), note: `${part && !part.ok ? part.reason : ""} The plain files were sent instead.`.trim() };
 }
 
@@ -91,17 +91,16 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
         const bundle = loadBundle();
         const address = addressOf(req);
         const installers = bundle.ok ? loadInstaller() : undefined;
+        // Only what Settings reads (web/src/features/runners/my-runner.ts DownloadInfo).
         const systems = (["windows", "mac", "linux"] as const).flatMap((os) =>
             (["x64", "arm64"] as const).map((arch) => {
-                if (!bundle.ok) return { os, arch, available: false, kind: "files" as KitKind, ownNode: false, reason: bundle.reason };
+                if (!bundle.ok) return { os, arch, available: false, reason: bundle.reason };
                 const plan = planFor({ os, arch }, bundle, installers, (t) => loadComplete(t, bundle));
                 return {
                     os,
                     arch,
                     available: address.urlOk,
-                    kind: plan.kind,
-                    // Carries its own Node.js and test tools: nothing to install first, nothing downloaded at the first start.
-                    ownNode: Boolean(plan.complete),
+                    // The size of a download that carries its own Node.js and test tools.
                     ...(plan.complete ? { bytes: plan.complete.manifest.packBytes + plan.complete.manifest.files.length * 120 + 2 * 1024 * 1024 } : {}),
                     ...(plan.note ? { note: plan.note } : {}),
                     ...(!address.urlOk && address.urlWarning ? { reason: address.urlWarning } : {}),
@@ -118,11 +117,9 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
         }
         return {
             available: bundle.ok,
-            ...(bundle.ok ? { kitVersion: bundle.manifest.kitVersion } : { reason: bundle.reason }),
-            platformUrl: address.platformUrl,
+            ...(bundle.ok ? {} : { reason: bundle.reason }),
             urlOk: address.urlOk,
             ...(address.urlWarning ? { urlWarning: address.urlWarning } : {}),
-            nodeMin: NODE_MIN_MAJOR,
             mayDownload,
             ...(refusal ? { refusal } : {}),
             systems,
@@ -155,7 +152,6 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
         k: { request: DownloadRequest; plan: Plan; bundle: Extract<Bundle, { ok: true }>; platformUrl: string; enrollment: { code: string; record: EnrollmentRecord } },
     ) {
         const { request, plan, bundle, enrollment } = k;
-        const slug = "my-computer";
         const platform = request.os === "windows" ? "windows" : "unix";
         const common = {
             "x-runner-enrollment-id": enrollment.record.id,
@@ -176,7 +172,7 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
             const target = plan.complete.target;
             let zip: ReturnType<typeof buildCompleteZip> | undefined;
             try {
-                zip = buildCompleteZip({ bundle, build: plan.complete, ...(plan.installer ? { installer: plan.installer } : {}), projectSlug: slug, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() });
+                zip = buildCompleteZip({ bundle, build: plan.complete, ...(plan.installer ? { installer: plan.installer } : {}), platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() });
             } catch {
                 failed();
             }
@@ -197,22 +193,27 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
                 .headers(common)
                 .header("content-type", "application/zip")
                 .header("content-length", String(zip!.bytes))
-                .header("content-disposition", `attachment; filename="${completeFileName(slug, target)}"`)
+                .header("content-disposition", `attachment; filename="${completeFileName(target)}"`)
                 .header("x-runner-kit-target", target)
                 .send(stream);
         }
         let zip: Uint8Array | undefined;
+        let exe = false;
         try {
-            const base = { bundle, projectSlug: slug, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() };
-            zip = plan.installer ? buildInstallerZip({ ...base, part: plan.installer, platform }) : buildKitZip({ ...base, request: { platform } });
+            const base = { bundle, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() };
+            // Windows (round 49): the setup program itself with the kit appended; a signed program gets the zip (runner-installer.ts).
+            const stamped = plan.installer && platform === "windows" ? buildInstallerExe({ ...base, part: plan.installer, platform }) : undefined;
+            if (plan.installer && platform === "windows" && !stamped) req.log.info({ enrollmentId: enrollment.record.id }, "the Windows installer is signed: sending the zip");
+            exe = Boolean(stamped);
+            zip = stamped ?? (plan.installer ? buildInstallerZip({ ...base, part: plan.installer, platform }) : buildKitZip({ ...base, request: { platform } }));
         } catch {
             failed();
         }
-        logged(`${request.os} ${request.arch}, ${plan.kind}`);
+        logged(`${request.os} ${request.arch}, ${plan.kind}${exe ? ", one program" : ""}`);
         return reply
             .headers(common)
-            .header("content-type", "application/zip")
-            .header("content-disposition", `attachment; filename="${plan.installer ? installerFileName(slug, platform) : kitFileName(slug, platform)}"`)
+            .header("content-type", exe ? "application/vnd.microsoft.portable-executable" : "application/zip")
+            .header("content-disposition", `attachment; filename="${exe ? WINDOWS_EXE_NAME : plan.installer ? installerFileName(platform) : kitFileName(platform)}"`)
             .send(Buffer.from(zip!));
     }
 }

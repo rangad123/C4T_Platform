@@ -670,7 +670,8 @@ export async function runSmoke(opts, deps = {}) {
             if (decision.fail) throw new Error(decision.fail);
             // The download holds the person's one-time code; their runner is made when the runner trades it, and found once it is connected.
             const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "runner.zip";
-            if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName)) throw new Error(`Unexpected file name ${fileName}`);
+            // Windows' installer download is one program with the kit appended (round 49); everything else is a zip.
+            if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName) && !(target.system === "windows" && fileName === "AITestingRunnerSetup.exe")) throw new Error(`Unexpected file name ${fileName}`);
             zipFile = path.join(downloads, fileName);
             fs.renameSync(path.join(downloads, "download.part"), zipFile);
             return `${fileName}, ${(res.bytes / 1048576).toFixed(1)} MB`;
@@ -679,6 +680,21 @@ export async function runSmoke(opts, deps = {}) {
         await step("Unpack it", async () => {
             // A space and brackets on purpose: that is what a second download in a Downloads folder looks like.
             const dest = path.join(tmp, "Downloads", "smoke runner (1)");
+            if (zipFile.endsWith(".exe")) {
+                // Nothing to unpack: Setup reads the kit from its own end. The code inside is kept to check that no output shows it.
+                fs.mkdirSync(dest, { recursive: true });
+                kitDir = dest;
+                fs.renameSync(zipFile, path.join(dest, path.basename(zipFile)));
+                const { unzipSync } = await import("fflate");
+                const b = fs.readFileSync(path.join(dest, path.basename(zipFile)));
+                if (b.toString("latin1", b.length - 8) !== "AITP-KIT") throw new Error("The program download carries no kit at its end.");
+                const len = b.readUInt32LE(b.length - 16);
+                const kit = unzipSync(new Uint8Array(b.subarray(b.length - 16 - len, b.length - 16)));
+                const code = Object.entries(kit).find(([n]) => n.endsWith("/runner.enroll"))?.[1];
+                if (!code) throw new Error("The kit at the end of the program has no runner.enroll.");
+                secrets.push(Buffer.from(code).toString("utf8").trim());
+                return "one program, nothing to unpack";
+            }
             const tool = await unpackZip(zipFile, dest);
             const top = fs.readdirSync(dest);
             if (top.length !== 1 || !fs.statSync(path.join(dest, top[0])).isDirectory()) throw new Error(`The zip should hold one folder, it holds: ${top.join(", ")}`);

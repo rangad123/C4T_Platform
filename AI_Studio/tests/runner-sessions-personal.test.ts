@@ -171,12 +171,8 @@ describe("phone sessions on a person's own computer", () => {
         // The computer is removed (Settings, "Remove this computer"): the session ends within one heartbeat. The heartbeat itself is no
         // longer accepted with a removed credential, so the platform's side is what this checks.
         expect((await annLaptop.heartbeat(offer!.taskId, {})).json).toMatchObject({ cancel: false });
-        platform.db.run("UPDATE agent_tokens SET revoked_at = ? WHERE id = ?", new Date().toISOString(), annTokenId);
-        try {
-            expect(svc().sessionAccessProblem({ projectId, startedBy: annId, tokenId: annTokenId, personal: true })).toMatch(/removed as a runner/);
-        } finally {
-            platform.db.run("UPDATE agent_tokens SET revoked_at = NULL WHERE id = ?", annTokenId);
-        }
+        expect(svc().sessionAccessProblem({ projectId, startedBy: annId, tokenId: annTokenId, personal: true })).toBeUndefined();
+        expect(svc().sessionAccessProblem({ projectId, startedBy: annId, tokenId: "a-removed-runner", personal: true })).toMatch(/removed as a runner/);
         await annLaptop.result(offer!.taskId, { ok: false, error: "The platform ended this session.", runs: [] });
     });
 

@@ -26,7 +26,7 @@ import type { TaskOffer } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { personalRunner } from "./helpers/personal-runner.js";
-import { buildKitZip, loadBundle, projectSlugOf } from "../src/platform/runner-kit.js";
+import { buildKitZip, loadBundle } from "../src/platform/runner-kit.js";
 import { buildServer } from "../src/platform/server.js";
 import { ConnectProxy, tlsFront } from "./fixtures/connect-proxy.js";
 import { FakePlatform } from "./fixtures/fake-platform.js";
@@ -329,7 +329,7 @@ describe.skipIf(!COMPANY)("the platform", () => {
             // The runner program carries the company-network code (it is bundled from src/agent and src/engine).
             expect(Buffer.from(bundle.files.get("runner.mjs")!).toString("utf8")).toContain("setGlobalProxyFromEnv");
             for (const platformKind of ["windows", "unix"] as const) {
-                const zip = buildKitZip({ bundle, request: { name: "Net runner", platform: platformKind }, projectName: "Net project", projectSlug: projectSlugOf("Net project"), platformUrl: "https://tests.example.com", token: TOKEN });
+                const zip = buildKitZip({ bundle, request: { name: "Net runner", platform: platformKind }, platformUrl: "https://tests.example.com", token: TOKEN });
                 for (const [name, bytes] of Object.entries(unzipSync(zip))) {
                     const text = Buffer.from(bytes).toString("latin1");
                     expect(text, name).not.toContain(PASSWORD);

@@ -1,6 +1,6 @@
 /**
  * The runner download from Settings (round 45), platform side (no browser, no ports: requests go through server.inject). One download per
- * system, nothing to choose: Windows gets the setup program, a Mac the app, Linux the plain files; a system whose installer is not built
+ * system, nothing to choose: Windows gets the setup program (since round 49 the program itself with the kit appended; a signed one gets the zip), a Mac the app, Linux the plain files; a system whose installer is not built
  * here gets the plain files with a plain note. Who may download (a person who may run tests, the open server; never the shared access
  * key), what is inside (runner.json without a name, so the runner takes the computer's name; runner.enroll with this person's one-time
  * code, owner-bound), the info answer, the rate limit, and that neither the server's secrets nor the code (outside runner.enroll) are inside.
@@ -22,6 +22,7 @@ import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CANNOT_DOWNLOAD, KEY_CANNOT_DOWNLOAD } from "../src/platform/routes/runner-kits.js";
 import { buildServer } from "../src/platform/server.js";
+import { splitStampedExe } from "./fixtures/runner-person.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
 // @ts-expect-error plain JavaScript build script (no type declarations)
@@ -54,7 +55,7 @@ async function callOn(app: Awaited<ReturnType<typeof buildServer>>, headers: Rec
 const as = (who: keyof typeof people, method: "GET" | "POST", url: string, body?: unknown) => callOn(server, { authorization: `Bearer ${people[who].token}` }, method, url, body);
 const asKey = (method: "GET" | "POST", url: string, body?: unknown) => callOn(server, { "x-api-key": API_KEY }, method, url, body);
 const download = (who: keyof typeof people, os: "windows" | "mac" | "linux", arch: "x64" | "arm64" = "x64") => as(who, "POST", "/api/me/runner/download", { os, arch });
-const enrollment = (id: string) => platform.db.get<{ kind: string; owner_id: string | null; project_id: string | null; label: string | null; used_ms: number | null }>("SELECT kind, owner_id, project_id, label, used_ms FROM runner_enrollments WHERE id = ?", id);
+const enrollment = (id: string) => platform.db.get<{ owner_id: string | null; label: string | null; used_ms: number | null }>("SELECT owner_id, label, used_ms FROM runner_enrollments WHERE id = ?", id);
 
 /** Unix permission bits of each entry from the zip's central directory (fflate's unzip does not expose them). */
 function modes(zip: Uint8Array): Record<string, number> {
@@ -70,14 +71,29 @@ function modes(zip: Uint8Array): Record<string, number> {
 }
 
 /** What `npm run build:installer` writes, in miniature: a stand-in program and a stand-in Mac app, with a manifest. */
-function writeStandIns(dir: string): void {
-    const put = (rel: string, body: string, mode: number) => {
+/** A PE file whose certificate table (data directory 4) is not empty: what a signed program looks like to the server. */
+function signedPe(): Buffer {
+    const pe = 0x40;
+    const opt = pe + 24;
+    const b = Buffer.alloc(opt + 112 + 16 * 8);
+    b.write("MZ", 0, "latin1");
+    b.writeUInt32LE(pe, 0x3c);
+    b.write("PE\0\0", pe, "latin1");
+    b.writeUInt16LE(0x20b, opt);
+    b.writeUInt32LE(16, opt + 108);
+    b.writeUInt32LE(b.length, opt + 112 + 32);
+    b.writeUInt32LE(64, opt + 112 + 36);
+    return Buffer.concat([b, Buffer.alloc(64)]);
+}
+
+function writeStandIns(dir: string, program: Buffer | string = "MZ stand-in program\n"): void {
+    const put = (rel: string, body: string | Buffer, mode: number) => {
         const f = path.join(dir, ...rel.split("/"));
         fs.mkdirSync(path.dirname(f), { recursive: true });
         fs.writeFileSync(f, body);
         return { path: rel.replace(/^mac\//, ""), mode, sha256: sha(Buffer.from(body)) };
     };
-    put("win/AITestingRunnerSetup.exe", "MZ stand-in program\n", 0o755);
+    put("win/AITestingRunnerSetup.exe", program, 0o755);
     const entries = [
         put(`mac/${APP}/Contents/Info.plist`, "<plist/>\n", 0o644),
         put(`mac/${APP}/Contents/MacOS/AITestingRunner`, "#!/bin/sh\nexit 0\n", 0o755),
@@ -135,12 +151,12 @@ describe("who may download", () => {
         const r = await download("maya", "linux");
         expect(r.status, r.text.slice(0, 200)).toBe(200);
         const e = enrollment(r.headers["x-runner-enrollment-id"]!);
-        expect(e).toMatchObject({ kind: "personal", owner_id: people.maya.id, project_id: null, label: null, used_ms: null });
+        expect(e).toMatchObject({ owner_id: people.maya.id, label: null, used_ms: null });
         expect(Date.parse(r.headers["x-runner-enrollment-expires"]!)).toBeGreaterThan(Date.now());
         // An editor may run tests: the same.
         const editor = await download("rita", "windows");
         expect(editor.status).toBe(200);
-        expect(enrollment(editor.headers["x-runner-enrollment-id"]!)).toMatchObject({ kind: "personal", owner_id: people.rita.id });
+        expect(enrollment(editor.headers["x-runner-enrollment-id"]!)).toMatchObject({ owner_id: people.rita.id });
 
         const key = await asKey("POST", "/api/me/runner/download", { os: "windows", arch: "x64" });
         expect(key.status).toBe(403);
@@ -164,7 +180,7 @@ describe("who may download", () => {
             expect(info.body).toMatchObject({ available: true, mayDownload: true });
             const r = await callOn(app, {}, "POST", "/api/me/runner/download", { os: "mac", arch: "arm64" });
             expect(r.status, r.text.slice(0, 200)).toBe(200);
-            expect(open.db.get("SELECT kind, owner_id FROM runner_enrollments WHERE id = ?", r.headers["x-runner-enrollment-id"])).toEqual({ kind: "personal", owner_id: OPEN_OWNER_ID });
+            expect(open.db.get("SELECT owner_id FROM runner_enrollments WHERE id = ?", r.headers["x-runner-enrollment-id"])).toEqual({ owner_id: OPEN_OWNER_ID });
         } finally {
             await app.close();
             open.db.close();
@@ -206,19 +222,12 @@ describe("who may download", () => {
 });
 
 describe("info", () => {
-    it("says, per system and processor, what the download is here, and whether this person may download", async () => {
+    it("says, per system and processor, whether it can be downloaded here, and whether this person may download: only what Settings reads", async () => {
         const info = (await as("maya", "GET", "/api/me/runner/download/info")).body;
-        expect(info).toMatchObject({ available: true, platformUrl: "https://tests.example.com", urlOk: true, nodeMin: 24, mayDownload: true });
-        expect(info.kitVersion).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{10}$/);
-        const kinds = Object.fromEntries((info.systems as Array<{ os: string; arch: string; kind: string; ownNode: boolean; available: boolean }>).map((s) => [`${s.os}-${s.arch}`, [s.kind, s.ownNode, s.available]]));
-        expect(kinds).toEqual({
-            "windows-x64": ["installer", false, true],
-            "windows-arm64": ["installer", false, true],
-            "mac-x64": ["installer", false, true],
-            "mac-arm64": ["installer", false, true],
-            "linux-x64": ["files", false, true],
-            "linux-arm64": ["files", false, true],
-        });
+        expect(info).toEqual({ available: true, urlOk: true, mayDownload: true, systems: expect.any(Array) });
+        // Installers built and no complete build: each system just "available", with no note and no size.
+        for (const sys of info.systems as Array<Record<string, unknown>>) expect(Object.keys(sys).sort(), `${sys.os}-${sys.arch}`).toEqual(["arch", "available", "os"]);
+        expect((info.systems as Array<{ os: string; arch: string; available: boolean }>).map((x) => `${x.os}-${x.arch}:${x.available}`)).toEqual(["windows-x64:true", "windows-arm64:true", "mac-x64:true", "mac-arm64:true", "linux-x64:true", "linux-arm64:true"]);
         const viewer = (await as("vic", "GET", "/api/me/runner/download/info")).body;
         expect(viewer).toMatchObject({ mayDownload: false, refusal: CANNOT_DOWNLOAD });
         expect((await asKey("GET", "/api/me/runner/download/info")).body).toMatchObject({ mayDownload: false, refusal: KEY_CANNOT_DOWNLOAD });
@@ -230,7 +239,7 @@ describe("info", () => {
             process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "nothing-here");
             const none = (await as("maya", "GET", "/api/me/runner/download/info")).body;
             const win = none.systems.find((s: { os: string; arch: string }) => s.os === "windows" && s.arch === "x64");
-            expect(win).toMatchObject({ kind: "files", available: true });
+            expect(win).toMatchObject({ available: true });
             expect(win.note).toMatch(/Windows installer has not been built[\s\S]*npm run build:installer[\s\S]*The plain files were sent instead\./);
             expect(none.systems.find((s: { os: string }) => s.os === "mac").note).toMatch(/Mac installer has not been built/);
             // A Mac app with one file edited after the build is refused, and the Windows program is still offered.
@@ -239,9 +248,8 @@ describe("info", () => {
             fs.appendFileSync(path.join(copy, "mac", APP, "Contents", "Info.plist"), "tampered");
             process.env.RUNNER_INSTALLER_DIR = copy;
             const mixed = (await as("maya", "GET", "/api/me/runner/download/info")).body;
-            expect(mixed.systems.find((s: { os: string }) => s.os === "windows").kind).toBe("installer");
+            expect(mixed.systems.find((s: { os: string }) => s.os === "windows").note).toBeUndefined();
             const mac = mixed.systems.find((s: { os: string }) => s.os === "mac");
-            expect(mac.kind).toBe("files");
             expect(mac.note).toMatch(/damaged/);
         } finally {
             process.env.RUNNER_INSTALLER_DIR = saved;
@@ -266,27 +274,23 @@ describe("info", () => {
 });
 
 describe("the Windows download", () => {
-    it("is the installer: the program, the runner bundle, runner.json without a name, runner.enroll and a README, with the right modes", async () => {
+    it("is the setup program itself (round 49): the program's bytes, then the kit (runner bundle, runner.json without a name, runner.enroll), with the right file name", async () => {
         const r = await download("maya", "windows");
         expect(r.status, r.text).toBe(200);
-        expect(r.headers["content-type"]).toBe("application/zip");
-        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-windows-setup.zip"');
+        expect(r.headers["content-type"]).toBe("application/vnd.microsoft.portable-executable");
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="AITestingRunnerSetup.exe"');
         expect(r.headers["x-runner-kit-kind"]).toBe("installer");
         expect(r.headers["x-runner-kit-note"]).toBeUndefined();
         expect(r.headers["x-runner-kit-target"]).toBeUndefined();
         expect(r.headers["cache-control"]).toBe("no-store");
         expect(r.headers["access-control-expose-headers"]).toContain("x-runner-enrollment-id");
-        const z = unzipSync(new Uint8Array(r.buf));
+        const parts = splitStampedExe(r.buf)!;
+        expect(parts.format).toBe(1);
+        expect(parts.program.toString()).toBe("MZ stand-in program\n");
+        const z = unzipSync(new Uint8Array(parts.payload));
         const dir = "runner-my-computer-windows-setup";
-        expect(Object.keys(z).filter((n) => !n.endsWith("/package-lock.json")).sort()).toEqual(
-            // check-computer.* (package-lock.json comes with newer bundles): "Check this computer" in every download (docs/features/runner-check.md).
-            ["AITestingRunnerSetup.exe", "LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package.json", "record-child.mjs", "runner.enroll", "runner.json", "runner.mjs", "task-child.mjs"].map((n) => `${dir}/${n}`),
-        );
-        const m = modes(new Uint8Array(r.buf));
-        expect(m[`${dir}/AITestingRunnerSetup.exe`]).toBe(0o755);
-        expect(m[`${dir}/runner.enroll`]).toBe(0o600);
-        expect(m[`${dir}/runner.mjs`]).toBe(0o644);
-        expect(Buffer.from(z[`${dir}/AITestingRunnerSetup.exe`]!).toString()).toBe("MZ stand-in program\n");
+        expect(Object.keys(z).filter((n) => !n.endsWith("/package-lock.json")).sort()).toEqual(["LICENSES.txt", "package.json", "record-child.mjs", "runner.enroll", "runner.json", "runner.mjs", "task-child.mjs"].map((n) => `${dir}/${n}`));
+        expect(modes(new Uint8Array(parts.payload))[`${dir}/runner.enroll`]).toBe(0o600);
         const cfg = JSON.parse(Buffer.from(z[`${dir}/runner.json`]!).toString());
         // No name: the runner is named after the computer (the person can rename it in Settings).
         expect(Object.keys(cfg).sort()).toEqual(["kitVersion", "url"]);
@@ -298,23 +302,49 @@ describe("the Windows download", () => {
         for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) expect(Buffer.from(z[`${dir}/${n}`]!).equals(Buffer.from(fz[`runner-my-computer-unix/${n}`]!)), n).toBe(true);
     });
 
-    it("has a README that says, in plain words, what to click, what the SmartScreen prompt means, where the runner shows and how to remove it", async () => {
-        const r = await download("maya", "windows", "arm64");
-        const z = unzipSync(new Uint8Array(r.buf));
-        const readme = Buffer.from(z["runner-my-computer-windows-setup/README.txt"]!).toString("utf8");
-        expect(readme).toContain("\r\n");
-        expect(readme.replace(/\r\n/g, "\n")).not.toMatch(/\r/);
-        expect(readme.split("\r\n")[0]).toBe("AI Testing Platform runner");
-        for (const needle of ["AITestingRunnerSetup.exe", "Windows protected your PC", "More info", "Run anyway", "not signed", "only downloads what is missing", "Node.js", "does not need administrator rights", "--uninstall", "Settings, Your runner", "Remove this computer", "each person has one runner"]) expect(readme, needle).toContain(needle);
-        for (const gone of ["Project:", "Runners", "revoke its token", "start-runner"]) expect(readme, gone).not.toContain(gone);
-        expect(readme).not.toMatch(/seamless|leverage|unlock|empower/i);
+    it("a signed program gets the zip instead (bytes after a signature break it): the program, the bundle, runner.enroll and a README with the right modes and plain words", async () => {
+        const saved = process.env.RUNNER_INSTALLER_DIR;
+        const signed = path.join(tmp, "signed-installer");
+        writeStandIns(signed, signedPe());
+        process.env.RUNNER_INSTALLER_DIR = signed;
+        try {
+            const r = await download("maya", "windows", "arm64");
+            expect(r.status, r.text).toBe(200);
+            expect(r.headers["content-type"]).toBe("application/zip");
+            expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-windows-setup.zip"');
+            expect(r.headers["x-runner-kit-kind"]).toBe("installer");
+            expect(splitStampedExe(r.buf)).toBeUndefined();
+            expect(logged.some((l) => l.includes("the Windows installer is signed: sending the zip"))).toBe(true);
+            const z = unzipSync(new Uint8Array(r.buf));
+            const dir = "runner-my-computer-windows-setup";
+            expect(Object.keys(z).filter((n) => !n.endsWith("/package-lock.json")).sort()).toEqual(
+                // check-computer.* : "Check this computer" in every zip download (docs/features/runner-check.md).
+                ["AITestingRunnerSetup.exe", "LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package.json", "record-child.mjs", "runner.enroll", "runner.json", "runner.mjs", "task-child.mjs"].map((n) => `${dir}/${n}`),
+            );
+            const m = modes(new Uint8Array(r.buf));
+            expect(m[`${dir}/AITestingRunnerSetup.exe`]).toBe(0o755);
+            expect(m[`${dir}/runner.enroll`]).toBe(0o600);
+            expect(m[`${dir}/runner.mjs`]).toBe(0o644);
+            expect(Buffer.from(z[`${dir}/AITestingRunnerSetup.exe`]!).equals(signedPe())).toBe(true);
+            const readme = Buffer.from(z[`${dir}/README.txt`]!).toString("utf8");
+            expect(readme).toContain("\r\n");
+            expect(readme.replace(/\r\n/g, "\n")).not.toMatch(/\r/);
+            expect(readme.split("\r\n")[0]).toBe("AI Testing Platform runner");
+            for (const needle of ["AITestingRunnerSetup.exe", "Windows protected your PC", "More info", "Run anyway", "not signed", "only downloads what is missing", "Node.js", "does not need administrator rights", "--uninstall", "Settings, Your runner", "Remove this computer", "each person has one runner"]) expect(readme, needle).toContain(needle);
+            for (const gone of ["Project:", "Runners", "revoke its token", "start-runner"]) expect(readme, gone).not.toContain(gone);
+            expect(readme).not.toMatch(/seamless|leverage|unlock|empower/i);
+        } finally {
+            process.env.RUNNER_INSTALLER_DIR = saved;
+        }
     });
 
     it("carries this person's single-use code in runner.enroll only, never a runner credential, and logs no code", async () => {
         const r = await download("maya", "windows");
-        const z = unzipSync(new Uint8Array(r.buf));
+        const parts = splitStampedExe(r.buf)!;
+        const z = unzipSync(new Uint8Array(parts.payload));
         const code = Buffer.from(z["runner-my-computer-windows-setup/runner.enroll"]!).toString("utf8").trim();
         expect(code).toMatch(/^aite_/);
+        expect(parts.program.includes(code)).toBe(false);
         for (const [name, bytes] of Object.entries(z)) {
             if (!name.endsWith("runner.enroll")) expect(Buffer.from(bytes).includes(code), name).toBe(false);
             expect(/aitg_[A-Za-z0-9_-]{20,}/.test(Buffer.from(bytes).toString("latin1")), name).toBe(false);
@@ -327,6 +357,11 @@ describe("the Windows download", () => {
         const rows = platform.db.all<{ action: string; detail: string }>("SELECT action, detail FROM activity WHERE action = 'runner-download'");
         expect(rows.length).toBeGreaterThan(0);
         expect(JSON.stringify(rows)).not.toContain(code);
+        // Single use, as before (after the log checks: this file's log capture also serializes inject's raw request, body included).
+        const trade = (machineId: string) => callOn(server, {}, "POST", "/api/agent/enroll", { code, name: "test-computer", machineId });
+        const first = await trade("11111111-1111-4111-8111-111111111111");
+        expect(first.status, first.text).toBe(201);
+        expect((await trade("22222222-2222-4222-8222-222222222222")).status).toBeGreaterThanOrEqual(400);
     });
 });
 
@@ -387,7 +422,10 @@ describe("secrets", () => {
         for (const system of ["windows", "mac", "linux"] as const) {
             const r = await download("maya", system);
             expect(r.status).toBe(200);
-            for (const [name, bytes] of Object.entries(unzipSync(new Uint8Array(r.buf)))) {
+            // Windows: the program part is checked as one more entry, the kit at its end like any zip.
+            const parts = splitStampedExe(r.buf);
+            const entries = parts ? { "AITestingRunnerSetup.exe (program part)": new Uint8Array(parts.program), ...unzipSync(new Uint8Array(parts.payload)) } : unzipSync(new Uint8Array(r.buf));
+            for (const [name, bytes] of Object.entries(entries)) {
                 if (name.endsWith("runner.enroll")) continue;
                 const body = Buffer.from(bytes).toString("latin1");
                 for (const s of forbidden) expect(body.includes(s), `${s.slice(0, 8)}... in ${name}`).toBe(false);

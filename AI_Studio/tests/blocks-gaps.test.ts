@@ -384,7 +384,7 @@ describe("4. a plug-in framework test that uses a block of API steps", () => {
 
     it("is still refused in words on a runner agent, naming the plug-in framework and saying plug-ins run on the platform computer only", async () => {
         const svc = getAgentServices(platform);
-        svc.store.setRunner(pid, { runOn: "agent", agentId: null });
+        svc.store.setRunner(pid, { runOn: "agent" });
         try {
             const app = platform.repo.getLatestApplicationPublic(pid)!;
             const attempt = () => platform.repo.createJob(pid, app.id as string, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [testId] } as never);
@@ -396,7 +396,7 @@ describe("4. a plug-in framework test that uses a block of API steps", () => {
             expect(run.status).toBe(409);
             expect(run.body.error).toMatch(/runs on the platform computer only/);
         } finally {
-            svc.store.setRunner(pid, { runOn: "platform", agentId: null });
+            svc.store.setRunner(pid, { runOn: "platform" });
         }
     });
 });

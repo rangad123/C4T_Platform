@@ -29,6 +29,7 @@ const RULES: Array<{ id: string; re: RegExp; allowedIn: string[] }> = [
 
 /** Whole files exempt from one rule, with the reason. Keep it short. */
 const ALLOW: Record<string, { rule: string; why: string }[]> = {
+    "platform/agent-store.ts": [{ rule: "julianday", why: "Migration slot 57 (the runner reset) runs as plain SQL on SQLite only; a PostgreSQL database starts from pg/baseline.sql, past it." }],
     "platform/ops/backup-schedule.ts": [{ rule: "PRAGMA", why: "Verifies a copied SQLite backup file (journal mode, quick_check). SQLite-only by nature; RDS snapshots replace it on PostgreSQL (§4.6)." }],
 };
 

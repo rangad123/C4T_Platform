@@ -15,7 +15,7 @@ import { describeRecStep } from "../engine/recorder/describe.js";
 import { hasSavableSteps, reindex } from "../engine/recorder/normalise.js";
 import { clip, locatorKey, REC_LIMITS, SECRET_PLACEHOLDERS, type RecAssertCheck, type RecStep, type SecretKind } from "../engine/recorder/model.js";
 import { checkPatch, describeStep, type ActOutcome, type StepPatch } from "../engine/recorder/session.js";
-import { ONLINE_MS, ownerIdOfActor, type AgentRecord, type AgentTokenRecord, type RunnerSetting } from "./agent-store.js";
+import { ownerIdOfActor, type AgentRecord, type AgentTokenRecord, type RunnerSetting } from "./agent-store.js";
 import { RateLimiter, scrubSecrets } from "./agent-routing.js";
 import { HttpError } from "./http-error.js";
 import type { Recording, RecorderDriver } from "./recorder-service.js";
@@ -55,20 +55,17 @@ export type SessionHost = AgentRecord & { online: boolean; activeTasks?: number;
 
 /** What sessionHosts needs of the runner store (agent-store.ts). */
 export interface SessionHostStore {
-    personalTokensOf(ownerId: string): Array<Pick<AgentTokenRecord, "id" | "revokedAt" | "ownerId" | "allowRealPhone">>;
-    agentsOfToken(tokenId: string): AgentRecord[];
+    runnerOf(ownerId: string): { token: Pick<AgentTokenRecord, "allowRealPhone">; agent: AgentRecord | undefined; online: boolean } | undefined;
     ownerMayRun(ownerId: string, projectId: string): boolean;
     runningCount(agentId: string): number;
 }
 
-/** The machines `callerId` may open a session on in this project: the caller's own computer (one per person; older extra ones still listed). */
-export function sessionHosts(store: SessionHostStore, _projectId: string, callerId: string | null, now: number = Date.now()): SessionHost[] {
-    if (!callerId || !store.ownerMayRun(callerId, _projectId)) return [];
-    return store
-        .personalTokensOf(callerId)
-        .filter((t) => !t.revokedAt && t.ownerId === callerId)
-        .flatMap((t) => store.agentsOfToken(t.id).slice(0, 1).map((a) => ({ ...a, online: now - a.lastSeenMs <= ONLINE_MS, activeTasks: store.runningCount(a.id), personal: true, ownerId: callerId, allowRealPhone: t.allowRealPhone })))
-        .sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeenMs - a.lastSeenMs);
+/** The machine `callerId` may open a session on in this project: the caller's own computer (one per person), or none. */
+export function sessionHosts(store: SessionHostStore, projectId: string, callerId: string | null): SessionHost[] {
+    if (!callerId || !store.ownerMayRun(callerId, projectId)) return [];
+    const r = store.runnerOf(callerId);
+    if (!r?.agent) return [];
+    return [{ ...r.agent, online: r.online, activeTasks: store.runningCount(r.agent.id), personal: true, ownerId: callerId, allowRealPhone: r.token.allowRealPhone }];
 }
 
 /** Only the caller's own computers: another person's computer is dropped (defence in depth: sessionHosts never lists one). */

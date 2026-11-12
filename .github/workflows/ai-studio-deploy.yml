@@ -100,8 +100,9 @@ jobs:
       run:
         working-directory: AI_Studio
     env:
-      # Windows and Mac on both processors, and Linux on Intel or AMD. About 60 MB each.
-      RUNNER_TARGETS: win-x64,win-arm64,mac-arm64,mac-x64,linux-x64
+      # The complete downloads (own Node.js and test tools): Mac on both processors, and Linux on Intel or AMD. About 60 MB each. None for
+      # Windows: its installer installs the test tools itself, and its plain files fallback never carries them (routes/runner-kits.ts).
+      RUNNER_TARGETS: mac-arm64,mac-x64,linux-x64
     steps:
       - uses: actions/checkout@v4
         with:

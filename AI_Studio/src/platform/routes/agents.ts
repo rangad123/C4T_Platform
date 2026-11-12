@@ -163,7 +163,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         // EXECUTION_MODE=runners: nothing runs on this server, so a project cannot be set to run here (runner-only.ts).
         if (body.runOn === "platform" && runnersOnly(ctx.p.config)) throw new HttpError(409, PLATFORM_SETTING_REFUSED, { executionMode: "runners" });
         await ctx.assertNoActiveJob(id);
-        svc.store.setRunner(id, { runOn: body.runOn, agentId: null });
+        svc.store.setRunner(id, { runOn: body.runOn });
         return svc.runnerStatus(id);
     });
 
@@ -197,7 +197,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             const out = svc.enroll(body, clientAddress(req));
             const t = svc.store.getToken(out.runnerId);
             // Who added which runner, where people look (Activity); the code and the credential are never written anywhere.
-            if (t) accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-enrolled", detail: `Their runner “${t.label ?? body.name.slice(0, 64)}” connected with its one-time code. Any runner they had before was removed.`, projectId: t.projectId });
+            if (t) accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-enrolled", detail: `Their runner “${t.label ?? body.name.slice(0, 64)}” connected with its one-time code. Any runner they had before was removed.`, projectId: null });
             req.log.info({ audit: "runner-enrolled", tokenId: out.runnerId, kind: out.kind }, "runner enrolled");
             return reply.code(201).send(out);
         });
@@ -224,7 +224,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             const out = svc.rotate(token(req), req.headers.authorization);
             // Where people look (Activity): which runner changed its credential. Never the credential itself.
             const t = token(req);
-            accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-credential-rotated", detail: `The runner “${t.label ?? `…${t.hint}`}” changed its credential. The previous one stops working once the new one is used, or after 24 hours.`, projectId: t.projectId });
+            accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-credential-rotated", detail: `The runner “${t.label ?? `…${t.hint}`}” changed its credential. The previous one stops working once the new one is used, or after 24 hours.`, projectId: null });
             req.log.info({ audit: "runner-credential-rotated", tokenId: t.id }, "runner credential rotated");
             return out;
         });
@@ -238,7 +238,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
                 // A credential used from another computer: refused, and written down where people look (Activity). Never the credential.
                 if (e instanceof MachineRefused) {
                     const t = e.token;
-                    accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-refused", detail: `Runner “${t.label ?? t.hint}” was refused: its credential was used from another computer (“${body.name.slice(0, 64)}”, ${clientAddress(req)}).`, projectId: t.projectId });
+                    accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-refused", detail: `Runner “${t.label ?? t.hint}” was refused: its credential was used from another computer (“${body.name.slice(0, 64)}”, ${clientAddress(req)}).`, projectId: null });
                 }
                 throw e;
             }
@@ -251,17 +251,10 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         });
 
         // "Check this computer" (docs/features/runner-check.md): the hook above already decided whether the token is accepted. Nothing is made or
-        // changed (no runner row); the answer names the project so the check can say which one the download belongs to.
+        // changed (no runner row).
         scope.post("/api/agent/check", async (req) => {
             other(req);
-            let project = "";
-            try {
-                const home = token(req).projectId;
-                if (home) project = String((ctx.project(home) as { name?: unknown }).name ?? "").slice(0, 120);
-            } catch {
-                /* the name is only for the sentence */
-            }
-            return { ok: true, ...(project ? { project } : {}) };
+            return { ok: true };
         });
 
         scope.post("/api/agent/poll", async (req, reply) => {

@@ -2,6 +2,7 @@
  * The Windows runner installer without a platform (fast tier): the build script finds csc.exe and compiles the C# program, the result is a
  * small GUI program with a no-administrator manifest, an icon and no local paths; the plain message when csc.exe is missing; the manifest that
  * merges the Windows program with the Mac app's file list; and the platform's loader that verifies every checksum before it hands a file out.
+ * The one-file Windows download (round 49: the program with the kit appended) is built here from a stand-in PE file and, with csc.exe, the real program.
  * The zip a download produces and the routes are in tests/runner-installer-kit.test.ts; the real runs of the program are in tests/installer-win.test.ts.
  *
  * Skipped with a clear reason where csc.exe does not exist (every Windows computer has it; no other system does). No ports, no browser.
@@ -12,7 +13,10 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { installerInfo, loadInstaller, MAC_MISSING, WINDOWS_MISSING } from "../src/platform/runner-installer.js";
+import { unzipSync } from "fflate";
+import { buildInstallerExe, buildInstallerZip, installerInfo, loadInstaller, MAC_MISSING, peSigned, STAMP_FORMAT, WINDOWS_MISSING, type BuildInstallerInput } from "../src/platform/runner-installer.js";
+import type { Bundle } from "../src/platform/runner-kit.js";
+import { splitStampedExe } from "./fixtures/runner-person.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildInstallerWin, EXE_NAME, findCsc, makeIcon, NO_CSC_MESSAGE, SOURCES } from "../scripts/build-installer-win.mjs";
 // @ts-expect-error plain JavaScript build script (no type declarations)
@@ -206,5 +210,67 @@ describe("the platform's loader", () => {
         } finally {
             fs.writeFileSync(path.join(out, "win", EXE_NAME), exe);
         }
+    });
+});
+
+// ── the one-file Windows download (round 49) ────────────────────────────────
+
+/** A minimal PE file (PE32+), with a certificate table (data directory 4) of the given size: 0 is unsigned. */
+function standInPe(certBytes: number): Buffer {
+    const pe = 0x40;
+    const opt = pe + 24;
+    const b = Buffer.alloc(opt + 112 + 16 * 8);
+    b.write("MZ", 0, "latin1");
+    b.writeUInt32LE(pe, 0x3c);
+    b.write("PE\0\0", pe, "latin1");
+    b.writeUInt16LE(0x20b, opt);
+    b.writeUInt32LE(16, opt + 108);
+    b.writeUInt32LE(certBytes ? b.length : 0, opt + 112 + 4 * 8);
+    b.writeUInt32LE(certBytes, opt + 112 + 4 * 8 + 4);
+    return Buffer.concat([b, Buffer.alloc(certBytes)]);
+}
+
+describe("the one-file Windows download: the program with the kit appended", () => {
+    const CODE = "aite_OneFileCodeSentinel0123456789abcdef";
+    const bundle: Extract<Bundle, { ok: true }> = {
+        ok: true,
+        manifest: { format: 1, platformVersion: "0.1.0", hash: "0".repeat(64), kitVersion: "0.1.0+0000000000", nodeMin: 24, files: [] },
+        files: new Map(["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt", "package-lock.json"].map((n) => [n, Buffer.from(`// ${n}\n`)])),
+    };
+    const input = (program: Uint8Array): BuildInstallerInput => ({ bundle, part: { ok: true, files: [{ name: EXE_NAME, mode: 0o755, data: program }] }, platform: "windows", platformUrl: "https://tests.example.com", enrollCode: CODE, updateSequence: 7 });
+
+    it("is the program's exact bytes, then a zip of the kit, then the footer; the footer reads back to the zip's entries without the program, scripts or README", () => {
+        const program = standInPe(0);
+        const exe = buildInstallerExe(input(program))!;
+        expect(exe).toBeDefined();
+        const parts = splitStampedExe(exe)!;
+        expect(parts.format).toBe(STAMP_FORMAT);
+        expect(Buffer.compare(parts.program, program)).toBe(0);
+        expect(parts.program.length + parts.payload.length + 16).toBe(exe.length);
+        const kit = unzipSync(parts.payload);
+        const zip = unzipSync(buildInstallerZip(input(program)));
+        const top = "runner-my-computer-windows-setup/";
+        expect(Object.keys(kit).sort()).toEqual(Object.keys(zip).filter((n) => !/AITestingRunnerSetup\.exe$|README\.txt$|check-computer\./.test(n)).sort());
+        expect(Object.keys(kit).sort()).toEqual(["LICENSES.txt", "package-lock.json", "package.json", "record-child.mjs", "runner.enroll", "runner.json", "runner.mjs", "task-child.mjs"].map((n) => top + n));
+        for (const [name, data] of Object.entries(kit)) expect(Buffer.compare(Buffer.from(data), Buffer.from(zip[name]!)), name).toBe(0);
+        expect(Buffer.from(kit[`${top}runner.enroll`]!).toString("utf8")).toContain(CODE);
+        expect(JSON.parse(Buffer.from(kit[`${top}runner.json`]!).toString("utf8"))).toEqual({ url: "https://tests.example.com", kitVersion: "0.1.0+0000000000", updateSequence: 7 });
+        // The code is in the kit zip only: nowhere in the program part.
+        expect(parts.program.includes(CODE)).toBe(false);
+        // A plain zip download and an exe that is not a PE file carry no footer.
+        expect(splitStampedExe(buildInstallerZip(input(program)))).toBeUndefined();
+    });
+
+    it("a signed program (a certificate table) is not stamped: the caller sends the zip, because bytes after a signature break it", () => {
+        expect(peSigned(standInPe(0))).toBe(false);
+        expect(peSigned(standInPe(256))).toBe(true);
+        expect(peSigned(Buffer.from("MZ stand-in program\n"))).toBe(false);
+        expect(buildInstallerExe(input(standInPe(256)))).toBeUndefined();
+    });
+
+    it.skipIf(!HAS_CSC)("the real build is unsigned and is stamped the same way", () => {
+        expect(peSigned(exe)).toBe(false);
+        const parts = splitStampedExe(buildInstallerExe(input(exe))!)!;
+        expect(sha(parts.program)).toBe(sha(exe));
     });
 });

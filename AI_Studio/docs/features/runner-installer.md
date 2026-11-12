@@ -11,7 +11,7 @@ Since round 45 it is the one download for Windows and a Mac, from **Settings, Yo
 
 ## What the person sees (Windows)
 
-1. Unzip the download. The folder holds `AITestingRunnerSetup.exe`, `runner.json`, `runner.enroll` (the one-time code), the runner files and a `README.txt`.
+1. The download is one file, `AITestingRunnerSetup.exe` (round 49): there is nothing to unzip. The runner files, `runner.json` and `runner.enroll` (the one-time code) are appended to the program by the platform (see "Round 49: one file" below). A server whose program is signed sends the older zip instead: unzip it, the folder holds the same program, those files and a `README.txt`.
 2. Double-click `AITestingRunnerSetup.exe`. **Windows will say "Windows protected your PC"** (SmartScreen, "unknown publisher") because the program is not signed; choose **More info**, then **Run anyway**. See "Signing" below.
 3. A window lists six rows, each with a state (Checking, Found and skipped, Missing and will download, Downloading n%, Installing, Done, Failed) and a detail:
 
@@ -42,8 +42,8 @@ Since round 45 it is the one download for Windows and a Mac, from **Settings, Yo
 | `app\` | The runner files, `runner.json`, `runner.token`, `node_modules\`, and `work\` (the runner's task folders and cache; kept when files are updated) |
 | `node\` | The private Node.js, only if none was found |
 | `logs\` | `setup.log` (what Setup did) and `runner.log` (the runner's output, rotated at 2 MB). The token is never in them |
-| `downloads\` | The Node.js zip while it is being checked; empty afterwards |
-| `AITestingRunner.exe` | A copy of the setup program |
+| `downloads\` | The Node.js zip while it is being checked, and a one-file download's unpacked kit (`kit-<random>\`, readable only by this user) while Setup runs; empty afterwards |
+| `AITestingRunner.exe` | A copy of the setup program: only the program part, never the kit a one-file download carries |
 | `installer.json` | What Setup created (private Node.js or not, shortcuts) and the id and start time of the runner it started. Uninstall and "stop" read it |
 
 Outside that folder it writes only the shortcuts the person ticked: `AI Testing Runner.lnk` in the Startup folder and in the Start menu programs folder. It makes **no registry writes** and no changes to the system or user PATH. (The Start menu shortcut goes slightly beyond the first brief, which named only the Startup shortcut; without it there is no way back to the window after the unzipped folder is deleted.)
@@ -96,11 +96,11 @@ Rebuild after updating the platform, as with `npm run build:runner`.
 
 ## The platform side
 
-`POST /api/me/runner/download` `{ os: "windows" | "mac", arch }` makes the installer zip when the installer for that system is built here (`x-runner-kit-kind: installer`); otherwise the plain files with `x-runner-kit-kind: files` and `x-runner-kit-note` (a plain sentence). The zip is named `runner-my-computer-windows-setup.zip` (or `-mac-setup.zip`; a Mac download that carries its own Node.js is `runner-my-computer-mac-<arch>.zip`). It holds the program (modes from the manifest), the same prebuilt runner files as the plain kit, `runner.json` (no name: the runner uses the computer's name), `runner.enroll` (mode 0600) and a `README.txt`. `GET /api/me/runner/download/info` says per system and processor whether it is the installer (`kind`) and why not (`note`). Nothing from the server's `.env`, database or data folder enters the zip, and the code is made per download and appears in `runner.enroll` only.
+`POST /api/me/runner/download` `{ os: "windows" | "mac", arch }` makes the installer download when the installer for that system is built here (on Windows the one program, `AITestingRunnerSetup.exe`, see round 49 below) (`x-runner-kit-kind: installer`); otherwise the plain files with `x-runner-kit-kind: files` and `x-runner-kit-note` (a plain sentence). The zip is named `runner-my-computer-windows-setup.zip` (or `-mac-setup.zip`; a Mac download that carries its own Node.js is `runner-my-computer-mac-<arch>.zip`). It holds the program (modes from the manifest), the same prebuilt runner files as the plain kit, `runner.json` (no name: the runner uses the computer's name), `runner.enroll` (mode 0600) and a `README.txt`. `GET /api/me/runner/download/info` says per system and processor whether it is the installer (`kind`) and why not (`note`). Nothing from the server's `.env`, database or data folder enters the zip, and the code is made per download and appears in `runner.enroll` only.
 
 ## Tests
 
-- `tests/installer-win-unit.test.ts` (fast): the build finds csc and compiles; the exe is a small PE file with the GUI subsystem, an asInvoker manifest, DPI and UTF-8 settings, version info, an icon and no local path; the message when csc is missing; a compile error is reported plainly; the manifest merge with the Mac part; the loader's checksum checks.
+- `tests/installer-win-unit.test.ts` (fast): the one-file download (program bytes, then the kit zip, then the footer, which reads back to the zip's entries; a signed-looking program is not stamped), on every system; with csc: the build finds csc and compiles; the exe is a small PE file with the GUI subsystem, an asInvoker manifest, DPI and UTF-8 settings, version info, an icon and no local path; the message when csc is missing; a compile error is reported plainly; the manifest merge with the Mac part; the loader's checksum checks.
 - `tests/runner-installer-kit.test.ts` (no browser): the routes, the zips (entries, modes, README, fallback, validation, secrets).
 - `tests/installer-win.test.ts` (browser lock; ports 8815, 8816, 8817): real runs of the compiled program against a real platform, with a local HTTP server standing in for nodejs.org: `--check` results and exit codes; Node.js found, too old, or missing; download, checksum check and unpack; wrong checksum, cut-short download, missing checksum line and a stop during the download all end cleanly; the pinned version when the index is unreadable; a second run that skips everything; the hidden runner connecting with the token from the kit and running an API test and web tests; one copy at a time; `--stop`; a decoy process and a stale recorded pid untouched; revoked token ending with exit code 3; uninstall removing only what it created; shortcuts; the token file's access list; the token in no output or log; running again from the installed copy after the unzipped folder is gone; and the window created and painted off screen.
 - `tests/add-runner-ui.test.ts`: the panel with the installer choice, in light and dark, at phone width, with the keyboard.
@@ -116,3 +116,24 @@ Rebuild after updating the platform, as with `npm run build:runner`.
 - **Uninstall** first runs `node runner.mjs --forget-credential` so the runner deletes its saved credential, then deletes any `runner.enroll` / `runner.token` and the folders it created.
 - **Code signing.** The deploy workflow signs `AITestingRunnerSetup.exe` with Authenticode (`signtool`, secrets `WIN_CERT_PFX` as base64 and `WIN_CERT_PASSWORD`) when the secrets exist, and says in the log when they do not. No certificate exists yet, so Windows still shows "unknown publisher".
 - **Not run here.** None of the round 39 C# changes were compiled or run on this machine (no C# compiler on Linux): `tests/runner-stop-file-unit.test.ts` reads the sources, and `tests/installer-win.test.ts` plus `.github/workflows/runner-matrix.yml` (Windows Server 2022 and 2025) run them. GitHub's machines are not Windows 10 or 11 desktops: a pass on a real Windows 11 PC is still needed.
+
+## Round 49: one file for Windows
+
+The Windows download is `AITestingRunnerSetup.exe` itself; a person double-clicks it and nothing is unzipped. Mac and Linux are unchanged.
+
+- **The server stamps it at download time** (`buildInstallerExe` in `src/platform/runner-installer.ts`). The program built by CI is the same for everyone; each download is those exact bytes, then a zip of this download's kit, then a 16-byte footer:
+
+  | Bytes | What |
+  |---|---|
+  | program | `AITestingRunnerSetup.exe` as built, unchanged |
+  | payload | A zip with one top folder (`runner-my-computer-windows-setup/`) holding `runner.mjs`, `task-child.mjs`, `record-child.mjs`, `package.json`, `package-lock.json`, `LICENSES.txt`, `runner.json` and `runner.enroll`: the zip download's entries without the program, the check scripts and the README |
+  | 4 | The payload's length, unsigned 32-bit little-endian |
+  | 4 | The format, unsigned 32-bit little-endian: `1` |
+  | 8 | The ASCII bytes `AITP-KIT` |
+
+  The answer is `application/vnd.microsoft.portable-executable` with `Content-Disposition: attachment; filename="AITestingRunnerSetup.exe"`, `x-runner-kit-kind: installer`. The one-time code rules are unchanged (single use, 30 minutes, deleted by the runner when it connects); the code is in the payload only.
+- **Setup reads itself** (`Stamp` in `installer/win/Common.cs`). On start (except `--stop` and `--uninstall`) it looks at its own last 16 bytes. With the footer it copies the payload into a new folder `downloads\kit-<random>\` in the install folder (created with an access list that names only the current user, like `runner.token`), unpacks it there (paths that climb out of the folder are refused, as for the Node.js zip) and goes on exactly as if it had been started from that unzipped folder. It deletes the folder when the install is done, and in any case when it exits (a folder an abruptly ended run left behind is deleted by the next start after an hour). A footer that does not fit the file says "This download is damaged. Download the runner again from the platform." Without the footer nothing changes: an older zip download's folder and the installed copy work as before.
+- **An older copy still running is replaced.** When a one-file download is opened while another copy runs for the same install folder (after every runner was removed, the old icon says "Access removed"), Setup shows "Closing the older runner on this computer…", asks that copy to close through the same named stop event `--stop` uses (every build since round 39 listens to it), waits up to a minute for it to let go of the folder, ends a runner it left (pid and start time checked) and installs. If it does not close, Setup says to choose Close this program from its icon and open the file again. Without a kit (an unzipped folder, the installed copy) it brings the running copy's window forward as before.
+- **The installed copy has no code.** Setup writes only the program part to `AITestingRunner.exe` in the install folder, so the one-time code never lives on there (tested: the installed copy hashes the same as the built program).
+- **Signed programs get the zip.** Bytes after an Authenticode signature break it. If the program carries a signature (its PE certificate table, data directory 4, is not empty) the server sends the zip download instead and logs one line. None is signed today. The upgrade when signing starts: put the kit inside the certificate table's padding, the way Chrome's tagged installers do.
+- **Proven where.** Linux (here): the stamping, the footer, the signed check, the route. Windows only (`tests/installer-win.test.ts`, run by `.github/workflows/runner-matrix.yml` on Windows Server 2022 and 2025): the stamped program started alone with no unzipped folder, installing and connecting, the installed copy without the trailer, the unpacked kit deleted, and a damaged footer refused plainly. The C# change was not compiled on the computer where it was written (no csc on Linux).

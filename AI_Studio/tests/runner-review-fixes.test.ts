@@ -97,7 +97,7 @@ beforeAll(async () => {
     app = await buildServer(platform);
     await app.listen({ port: PORT, host: "127.0.0.1" });
     projectId = (await asKey("POST", "/api/projects", { name: "Shared shop" })).body.id as string;
-    svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
+    svc().store.setRunner(projectId, { runOn: "agent" });
     const spec = { title: "Health answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/health" }, { action: "assertResponse", check: "status", expected: 200 }] };
     expect((await asKey("POST", `/api/projects/${projectId}/specs`, { baseUrl: "https://app.example", validate: false, specs: [spec] })).status).toBe(202);
     for (const who of ["t-tess", "t-tom", "t-cora", "t-ada"]) ids[who] = (await as(who, "GET", "/api/auth/state")).body.me.id as string;

@@ -13,7 +13,8 @@
  * removed in Settings ending it with exit code 3 and a plain message; uninstalling only what it created
  * (a sentinel in the install folder, a sentinel outside it, the Node.js it found elsewhere and a linked node_modules survive); shortcuts in
  * folders the test chooses; the copied code readable only by this user and the code never in any output or log; running again from the
- * installed copy after the unzipped folder is deleted; and a window smoke test (created and painted off screen, never shown).
+ * installed copy after the unzipped folder is deleted; the one-file download (round 49: the program with the kit appended) started alone,
+ * installing and connecting, its installed copy without the trailer and the unpacked kit deleted; and a window smoke test (created and painted off screen, never shown).
  *
  * NOT covered here (said plainly in docs/features/runner-installer.md): the real nodejs.org and npm registry downloads, the npm install and
  * browser download steps themselves (skipped with the test switches), a computer without Node.js at all, SmartScreen, antivirus reactions to an
@@ -35,7 +36,7 @@ import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { buildServer } from "../src/platform/server.js";
-import { allowPrivateAddresses, downloadRunner, myOnlineRunner, personToken, retireMyRunner } from "./fixtures/runner-person.js";
+import { allowPrivateAddresses, downloadRunner, myOnlineRunner, personToken, retireMyRunner, splitStampedExe } from "./fixtures/runner-person.js";
 import { Worker } from "../src/platform/worker.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
@@ -117,9 +118,15 @@ interface Kit {
     /** The one-time code in runner.enroll: a secret that must appear in no output. */
     token: string;
     name: string;
+    /** The download itself when it was the one-file program (round 49): AITestingRunnerSetup.exe with the kit appended, alone in its folder. */
+    exe?: string;
 }
 
-/** The real download (default kind, so the installer zip), unzipped into  <tmp>/<n>/Maya Singh [kit]/<folder>  (spaces and brackets on purpose). */
+/**
+ * The real download, laid out as an unzipped folder in  <tmp>/<n>/Maya Singh [kit]/<folder>  (spaces and brackets on purpose). Since round 49
+ * the Windows download is one program with the kit appended: it is also saved as it came, alone in  <tmp>/<n>/Downloads (x)/, and the folder
+ * gets the program part and the unpacked kit (what an older zip download holds), so the folder tests keep covering that path.
+ */
 async function makeKit(name: string): Promise<Kit> {
     const projectId = await newProject(`Installer ${name}`);
     // One runner per person: the one the last test left is removed first, so "online" always means this kit's runner.
@@ -127,16 +134,26 @@ async function makeKit(name: string): Promise<Kit> {
     const r = await downloadRunner(BASE, person.token, "windows");
     expect(r.status, r.text).toBe(200);
     expect(r.headers.get("x-runner-kit-kind")).toBe("installer");
-    const parent = path.join(tmp, String(++counter), "Maya Singh [kit]");
+    const n = ++counter;
+    const parent = path.join(tmp, String(n), "Maya Singh [kit]");
+    const stamped = splitStampedExe(r.buf);
+    let exe: string | undefined;
+    if (stamped) {
+        expect(r.headers.get("content-disposition")).toBe(`attachment; filename="${EXE_NAME}"`);
+        exe = path.join(tmp, String(n), "Downloads (x)", EXE_NAME);
+        fs.mkdirSync(path.dirname(exe), { recursive: true });
+        fs.writeFileSync(exe, r.buf);
+    }
     let top = "";
-    for (const [entry, bytes] of Object.entries(unzipSync(new Uint8Array(r.buf)))) {
+    for (const [entry, bytes] of Object.entries(unzipSync(new Uint8Array(stamped ? stamped.payload : r.buf)))) {
         top = entry.split("/")[0]!;
         const dest = path.join(parent, entry);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.writeFileSync(dest, bytes);
     }
     const dir = path.join(parent, top);
-    return { dir, projectId, token: fs.readFileSync(path.join(dir, "runner.enroll"), "utf8").trim(), name: NAME };
+    if (stamped) fs.writeFileSync(path.join(dir, EXE_NAME), stamped.program);
+    return { dir, projectId, token: fs.readFileSync(path.join(dir, "runner.enroll"), "utf8").trim(), name: NAME, ...(exe ? { exe } : {}) };
 }
 
 const freshInstallDir = (): string => path.join(tmp, String(++counter), "Local [data]", "AI Runner");
@@ -773,6 +790,106 @@ describeWin("--silent starts the runner hidden; it connects, runs real tests and
         expect(alive(decoy.pid!)).toBe(true);
         killOurs(decoy);
     }, 400_000);
+});
+
+// ── the one-file download (round 49) ────────────────────────────────────────
+
+describeWin("the one-file download: AITestingRunnerSetup.exe alone, with the kit appended", () => {
+    it("started with no unzipped folder it installs and connects; the installed copy is the program only, and the unpacked kit is gone", async () => {
+        const kit = await makeKit("one file");
+        expect(kit.exe, "the Windows download is one program").toBeDefined();
+        const exe = kit.exe!;
+        // Only the program is in its folder (the unzipped copy of the kit is somewhere else and is deleted first).
+        fs.rmSync(path.dirname(kit.dir), { recursive: true, force: true });
+        expect(fs.readdirSync(path.dirname(exe))).toEqual([EXE_NAME]);
+        const inst = freshInstallDir();
+        withTools(inst);
+        const check = launch(exe, ["--check", "--install-dir", inst], path.dirname(exe));
+        expect(await check.exited, output(check)).toBe(0);
+        expect(output(check)).toMatch(/Runner files: Out of date, will copy\. \d+ files will be copied to /);
+        // --check changed nothing: no unpacked kit left behind.
+        expect(fs.existsSync(path.join(inst, "downloads")) ? fs.readdirSync(path.join(inst, "downloads")) : []).toEqual([]);
+
+        const main = launch(exe, ["--silent", "--install-dir", inst], path.dirname(exe));
+        await until("the runner to be online", async () => (await onlineAgents(kit.projectId))[0], 120_000).catch((e) => {
+            throw new Error(`${e.message}\n--- output ---\n${output(main)}`);
+        });
+        expect(output(main)).toMatch(/Runner files: Done\. \d+ files copied to /);
+        expect(output(main).includes(kit.token)).toBe(false);
+        // The unpacked kit (with its copy of the code) is deleted once the install is done, while the runner keeps running.
+        expect(fs.existsSync(path.join(inst, "downloads")) ? fs.readdirSync(path.join(inst, "downloads")) : []).toEqual([]);
+        // The installed copy is exactly the program part: no trailer, no code.
+        const installed = fs.readFileSync(path.join(inst, "AITestingRunner.exe"));
+        expect(splitStampedExe(installed)).toBeUndefined();
+        expect(sha(installed)).toBe(sha(fs.readFileSync(setupExe)));
+        expect(installed.includes(kit.token)).toBe(false);
+        expect(fs.existsSync(path.join(inst, "app", "runner.enroll"))).toBe(false);
+
+        const stop = launch(exe, ["--stop", "--install-dir", inst], path.dirname(exe));
+        expect(await stop.exited, output(stop)).toBe(0);
+        expect(await Promise.race([main.exited, sleep(30_000).then(() => "timeout")]), output(main)).toBe(0);
+        // The download is used up: the installed copy starts the same runner without it.
+        fs.rmSync(path.dirname(exe), { recursive: true, force: true });
+        const again = launch(path.join(inst, "AITestingRunner.exe"), ["--silent"], inst);
+        await until("the runner to be online again from the installed copy", async () => (await onlineAgents(kit.projectId))[0], 120_000).catch((e) => {
+            throw new Error(`${e.message}\n--- output ---\n${output(again)}`);
+        });
+        const stopAgain = launch(path.join(inst, "AITestingRunner.exe"), ["--stop"], inst);
+        expect(await stopAgain.exited, output(stopAgain)).toBe(0);
+        expect(await Promise.race([again.exited, sleep(30_000).then(() => "timeout")]), output(again)).toBe(0);
+    }, 400_000);
+
+    it("opened while an older copy still runs for the same folder, it closes that copy, installs and connects", async () => {
+        // The older copy: installed from a folder, then started from the install folder as a person's computer has it.
+        const oldKit = await makeKit("one file older copy");
+        const inst = freshInstallDir();
+        withTools(inst);
+        const first = await run(oldKit, ["--silent", "--no-start"], inst, {}, 120_000);
+        expect(first.code, first.text).toBe(0);
+        const old = launch(path.join(inst, "AITestingRunner.exe"), ["--silent"], inst);
+        await until("the older runner to be online", async () => (await onlineAgents(oldKit.projectId))[0], 120_000).catch((e) => {
+            throw new Error(`${e.message}\n--- output ---\n${output(old)}`);
+        });
+        // A new one-file download (not retired first: the older copy keeps running until the new runner replaces it).
+        const r = await downloadRunner(BASE, person.token, "windows");
+        expect(r.status, r.text).toBe(200);
+        const parts = splitStampedExe(r.buf)!;
+        const code = Buffer.from(Object.entries(unzipSync(new Uint8Array(parts.payload))).find(([n]) => n.endsWith("/runner.enroll"))![1]).toString("utf8").trim();
+        const exe = path.join(tmp, String(++counter), "Downloads (y)", EXE_NAME);
+        fs.mkdirSync(path.dirname(exe), { recursive: true });
+        fs.writeFileSync(exe, r.buf);
+        const main = launch(exe, ["--silent", "--install-dir", inst], path.dirname(exe));
+        // The older copy is asked to close the way --stop asks it, and ends cleanly.
+        expect(await Promise.race([old.exited, sleep(90_000).then(() => "timeout")]), output(old)).toBe(0);
+        await until("the new runner to connect", () => output(main).includes(`Connected to 127.0.0.1 as ${NAME}`), 120_000).catch((e) => {
+            throw new Error(`${e.message}\n--- output ---\n${output(main)}`);
+        });
+        expect(output(main)).toContain("Closing the older runner on this computer\u2026");
+        expect(output(main)).toMatch(/Runner files: Done\. \d+ files? copied to /);
+        expect(output(main)).not.toContain("is already running for");
+        // The new code was used (and deleted), the installed copy was replaced by the program part only.
+        expect(fs.existsSync(path.join(inst, "app", "runner.enroll"))).toBe(false);
+        expect(splitStampedExe(fs.readFileSync(path.join(inst, "AITestingRunner.exe")))).toBeUndefined();
+        expect(output(main).includes(code) || output(old).includes(code)).toBe(false);
+        expect(await onlineAgents(oldKit.projectId)).toHaveLength(1);
+        const stop = launch(exe, ["--stop", "--install-dir", inst], path.dirname(exe));
+        expect(await stop.exited, output(stop)).toBe(0);
+        expect(await Promise.race([main.exited, sleep(30_000).then(() => "timeout")]), output(main)).toBe(0);
+    }, 400_000);
+
+    it("a damaged download says so plainly and leaves nothing behind", async () => {
+        const kit = await makeKit("one file damaged");
+        const exe = kit.exe!;
+        const b = fs.readFileSync(exe);
+        // The footer says the kit is longer than the file.
+        b.writeUInt32LE(b.length, b.length - 16);
+        fs.writeFileSync(exe, b);
+        const inst = freshInstallDir();
+        const r = launch(exe, ["--check", "--install-dir", inst], path.dirname(exe));
+        expect(await r.exited, output(r)).toBe(1);
+        expect(output(r)).toContain("This download is damaged. Download the runner again from the platform.");
+        expect(fs.existsSync(path.join(inst, "downloads")) ? fs.readdirSync(path.join(inst, "downloads")) : []).toEqual([]);
+    }, 120_000);
 });
 
 // ── uninstall and shortcuts ─────────────────────────────────────────────────

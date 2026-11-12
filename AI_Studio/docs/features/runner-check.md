@@ -47,7 +47,7 @@ Exit code 0 when nothing required is missing, 1 when something is, 2 when the ch
 | Firefox and WebKit | Optional. |
 | Network | The proxy (password as `***`) and where it came from, including the Windows setting (company-networks.md), and the certificates trusted. A proxy with a Node.js older than 24.14 is missing. Windows notes (PAC, `<local>`) are printed as notes. |
 | Platform | `GET /api/health` at the address in runner.json, through the proxy and the trusted certificates: unreachable, an untrusted certificate, a proxy wanting a password, a web filter, a redirect (the runner does not follow redirects) and a server error each have their sentence. |
-| Token | `POST /api/agent/check` (new, additive route): accepted (with the project's name), revoked or the project deleted (missing), or "this platform cannot check the token without connecting" for an older platform (optional). |
+| Token | `POST /api/agent/check` (new, additive route): accepted, removed or replaced (missing), or "this platform cannot check the token without connecting" for an older platform (optional). |
 | Disk | Free space where the runner keeps its work folder; under 1 GB is missing. |
 | Clock | Against the platform's `Date` header (the runner: the hello answer's `serverTime`); more than 5 minutes off is missing. |
 | Phone tools | Optional: adb found, the runner's own tools (phone-setup-simple.md), or "the runner gets them when a phone test needs them". adb is looked for as a file, never run. |

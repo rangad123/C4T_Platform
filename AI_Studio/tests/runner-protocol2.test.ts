@@ -79,7 +79,7 @@ async function project(name: string): Promise<{ id: string; pass: string; fail: 
         ],
     });
     expect(imp.status, imp.text).toBe(202);
-    svc().store.setRunner(id, { runOn: "agent", agentId: null });
+    svc().store.setRunner(id, { runOn: "agent" });
     return { id, pass: imp.body.tests[0].id, fail: imp.body.tests[1].id };
 }
 
@@ -268,7 +268,7 @@ describe("stopping the agent with the stop file", () => {
     it("stop.request in its folder stops it like SIGTERM: the running task is reported as stopped, and the agent exits 0", async () => {
         const id = (await admin("POST", "/api/projects", { name: "Stop file" })).body.id as string;
         const imp = await admin("POST", `/api/projects/${id}/specs`, { baseUrl: APP, validate: false, specs: [{ title: "A slow page", kind: "web", category: "Web", steps: [{ action: "navigate", url: `${APP}/slow` }] }] });
-        svc().store.setRunner(id, { runOn: "agent", agentId: null });
+        svc().store.setRunner(id, { runOn: "agent" });
         const { secret } = personalRunner(platform, { label: "stop", replace: true });
         const stopDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-p2-stop-"));
         work.push(stopDir);

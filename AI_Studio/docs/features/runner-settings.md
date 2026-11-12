@@ -7,7 +7,8 @@ sessions on people's own computers (round 45).
 
 ## The model
 
-- **One runner per person.** Setting up a new computer retires the person's previous runner as soon as the new one connects. There
+- **One runner per person.** Setting up a new computer replaces the person's previous runner as soon as the new one connects
+  (the database holds at most one per person). Every runner from before migration 57 was removed: everyone downloads the new one here. There
   is no list to manage and no limit to reach.
 - **No team or shared runners.** Organisation machines, Crowd4Test's shared runner, per-project runner tokens and kits, and team
   enrollment are gone. A runner still installed with such a credential is refused when it connects, with a sentence that tells the

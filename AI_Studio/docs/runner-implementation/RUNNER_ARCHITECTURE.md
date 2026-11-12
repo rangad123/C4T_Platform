@@ -66,7 +66,7 @@ In `runners` mode (`docs/features/runner-only-mode.md`):
 
 ## One runner per person
 
-A runner is a credential (`agent_tokens` row, `kind` "personal", `owner_id`). The computer that connected with it is an `agents` row. A person has one: setting up a computer again (a new download, a new one-time code) retires their earlier credential.
+A runner is a credential (`agent_tokens` row with its `owner_id`). The computer that connected with it is an `agents` row. A person has at most one (`owner_id` is unique): setting up a computer again (a new download, a new one-time code) replaces their earlier credential, and "Remove this computer" deletes it.
 
 - **Who may have one:** a signed-in person who may run tests (`ai_studio.tests.run`) in at least one project they can open, Crowd4Test testers included (`mayHaveRunner`, `src/platform/runner-health.ts`). On an open server (no access key, nobody signed up yet) the server acts as one person (`OPEN_OWNER_ID`, "open"). The shared access key is nobody's and has no runner.
 - **Whose runs it takes:** a run is its starter's; a schedule's or deploy trigger's is its creator's (`jobOwnerId`). The runner is offered only its owner's tasks (`AgentStore.queuedOfOwner`), and the claim checks the owner again, while the owner may still run that project's tests (`ownerMayRun`). Never anyone else's run.
@@ -76,7 +76,19 @@ A runner is a credential (`agent_tokens` row, `kind` "personal", `owner_id`). Th
 - **Sessions:** a recording, a live session or a phone session opens on the caller's own runner (`ownHostFor`, `src/platform/agent-record.ts`): not set up, offline, can't (with the reason), or ok. It is its starter's alone (`maySeeSession`).
 - **The owner's switches** (Settings, Your runner; `PATCH /api/me/runner`): code scripts (hand-written, imported, Git; on by default), private and local addresses (off by default), "Use my connected phone" (off: emulators only). They are enforced when a task is offered (`mayRunCodeScripts`, `targetAllowed`) and again on the runner (`src/agent/address-guard.ts`, `task-runner.ts`). The runner's old `--allow-custom-scripts` flag is accepted and does nothing for a person's runner.
 - **Admins:** platform admins with `ai_studio.runners.manage` see everyone's runners and may remove one (`GET /api/admin/runners`, `seesEveryRunner`: one rule for the route and the page).
-- **Credentials from before one runner per person** (team, shared and project runners) are refused at every runner route with HTTP 401 and a sentence sending the person to Settings (the runner stops, exit code 3). Their tables and columns stay; nothing reads them.
+- **A credential the platform does not know** (removed, replaced, or from before the runner reset below) is answered 404 at every runner route with `RUNNER_TOKEN_GONE`: "This runner's token is no longer valid: the runner was removed or replaced. Download the new runner in Settings, Your runner, and use that one instead." Every runner program since the first release stops on it at hello (exit code 3) and prints it after "The platform no longer accepts this runner."; its launchers do not start it again.
+
+## The runner reset (migration 57)
+
+Every runner made before migration 57 was removed: everyone downloads the new runner from Settings, Your runner, and uses only that one. Until then a person has no runner, and the website shows the set-up prompt. The migration (`RUNNER_RESET_MIGRATION`, `src/platform/agent-store.ts`):
+
+- ends a task that was claimed by or running on a removed runner (and a recording or phone session queued for one) as failed with `RUNNER_REMOVED_IN_UPDATE`: "The runner this run was on was removed in an update. Download the new runner in Settings, Your runner, then start the run again." The run gets the same sentence as an event. A queued task nobody claimed stays queued and waits for its owner's new runner under the 30-minute rule;
+- writes where a run ran (`generation_jobs.ran_on_json`) for a run that had no snapshot yet, so history still names the runner;
+- deletes every credential, computer, enrollment code, device reservation and per-runner update setting, and drops `runner_access`;
+- rebuilds `agent_tokens` (no `kind`, `project_id`, `organization_id` or `revoked_at`; `owner_id` unique), `agents` (no `project_id`), `runner_enrollments` (a person's code only), `runner_settings` (only `run_on`) and `runner_update_settings` (no `auto`);
+- gives schedules and deploy trigger tokens with no recorded creator one from Activity, once, where that is certain (this ran at every start before).
+
+`pg/baseline.sql` already has this schema, so a PostgreSQL database never runs slot 57.
 
 Routes: `GET/PATCH /api/me/runner`, `POST /api/me/runner/retire` ("Remove this computer"), `POST /api/me/runner/update`, `GET /api/me/runner/enrollments/:id`, `GET /api/me/runner/download/info`, `POST /api/me/runner/download`; admins: `GET /api/admin/runners`, `POST /api/admin/runners/:id/retire`. `GET /api/projects/:id/runner` says where a project's tests run (local mode). `GET /api/projects/:id/agents` lists the caller's own computer with its raw capabilities; the website no longer reads it, tests do.
 
@@ -87,7 +99,7 @@ No download or installer carries a long-lived credential.
 1. In Settings, Your runner, the person downloads the runner for their computer (`POST /api/me/runner/download`). The backend makes a single-use enrollment code: `aite_` plus 32 random bytes, stored hashed, valid 30 minutes (`runner_enrollments`).
 2. The download embeds the code as `runner.enroll` (mode 0600) and answers with `x-runner-enrollment-id` and `x-runner-enrollment-expires`; the page never sees the code and follows it with `GET /api/me/runner/enrollments/:id`.
 3. The installer starts the runner with `--enroll-file`.
-4. At first contact the runner calls `POST /api/agent/enroll` with the code, its name and a random install id (`machineId`, kept in `runner.machine`). The answer is `{ token, runnerId, kind }`: the runner credential (`aitg_`), given once. If the answer is lost, the same install id may ask again while the code is valid and the first credential was never used.
+4. At first contact the runner calls `POST /api/agent/enroll` with the code, its name and a random install id (`machineId`, kept in `runner.machine`). The answer is `{ token, runnerId, kind }` (`kind` is always "personal"): the runner credential (`aitg_`), given once. If the answer is lost, the same install id may ask again while the code is valid and the first credential was never used.
 5. The runner saves the credential in the operating system's store and deletes the code file. An expired or used code gets a plain answer: download the runner again from Settings.
 
 Rotation: the runner asks `POST /api/agent/rotate` for a new credential when the hello answer says `rotate: true` (30 days old); a runner that stays connected says hello once a day to check. The old credential keeps working until the new one is first used, for at most 24 hours.
@@ -159,7 +171,7 @@ Live step events (built): a small Playwright reporter (`LIVE_REPORTER`, `src/eng
 
 | Data | Where |
 |---|---|
-| A person's runner and its credential hash | `agent_tokens` (`kind`, `owner_id`, `allow_code_scripts`, `allow_private_targets`, `allow_real_phone`, `machine_id`, rotation columns) |
+| A person's runner and its credential hash | `agent_tokens` (`owner_id`, unique; `allow_code_scripts`, `allow_private_targets`, `allow_real_phone`, `machine_id`, rotation columns) |
 | The computer, its capabilities, last seen | `agents` |
 | Enrollment codes (hashed) | `runner_enrollments` |
 | Where a project's tests run (local mode) | `runner_settings.run_on` |
@@ -170,9 +182,7 @@ Live step events (built): a small Playwright reporter (`LIVE_REPORTER`, `src/eng
 | Job events (progress, live steps, screenshots) | `agent_events`, kept with the job |
 | Files sent to and from the runner | Object store: `<project>/_agent/<task>/in/` and `.../out/<name>`, with size and SHA-256 in `agent_task_files` |
 | Artifacts people see | Copied to `<project>/_artifacts/<test>/job-…/attempt-n/` with an `artifacts` row |
-| Updates: a pending "Update now" and the last report written to Activity | `runner_update_settings` (its `auto` column is no longer read) |
-
-Unused since one runner per person, kept until the PostgreSQL move: `runner_access`, `runner_settings.agent_id` and `.allow_personal`, team columns of `agent_tokens` (`organization_id`, `project_id`).
+| Updates: a pending "Update now" and the last report written to Activity | `runner_update_settings` |
 
 The runner never receives a storage path or a storage credential, only safe file names and hashes. Every file is streamed through the API.
 
@@ -240,7 +250,7 @@ On the runner, `AITP_*` variables (`src/agent/config.ts`, `--help`) mirror its c
 ## What this design does not cover yet
 
 - S3 storage and time-limited links.
-- PostgreSQL for the runner tables (and dropping the unused ones above).
+- PostgreSQL for the runner tables (the baseline has them; nothing runs on it yet).
 - AI authoring and exploring on runners: refused in `runners` mode.
 - Run sequences (runbooks) across a restart: a sequence is not resumed; the test run of its current step, when it already runs on a runner, carries on (`docs/features/runner-restarts.md`).
 - OS-level isolation of test processes (sandbox, separate user): tests run with the rights of the person's account.

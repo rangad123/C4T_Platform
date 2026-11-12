@@ -47,12 +47,6 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
     if (hit) return hit;
 
     const store = new ScheduleStore(p.db, opts.clock);
-    // Round 45: schedules made before their creator was recorded get one from Activity where that is certain (else refused at their next fire).
-    try {
-        store.backfillOwners();
-    } catch {
-        /* a database without the activity table yet: nothing to attribute */
-    }
     const alertStore = new AlertStore(p.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY), () => serverSmtp(p.config));
     const alerts = new AlertService({ store: alertStore, config: p.config, delivery: opts.delivery });
     const startPlain = opts.startRun ?? ((s: Schedule) => startScheduledJob(p.repo, s));

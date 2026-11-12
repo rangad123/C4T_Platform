@@ -292,7 +292,7 @@ describe("the remote driver", () => {
 
 describe("where a recording runs (decision table)", () => {
     const agent = (over: Partial<AgentRecord> & { online?: boolean; activeTasks?: number } = {}): AgentRecord & { online: boolean; activeTasks: number } => ({
-        id: "a1", projectId: "p1", tokenId: "t1", name: "Maya's laptop", version: "1", os: "win32", arch: "x64", node: "v24", concurrency: 1, firstSeenMs: 0, lastSeenMs: 0,
+        id: "a1", tokenId: "t1", name: "Maya's laptop", version: "1", os: "win32", arch: "x64", node: "v24", concurrency: 1, firstSeenMs: 0, lastSeenMs: 0,
         capabilities: { os: "win32", arch: "x64", node: "v24", browsers: ["chromium"], record: true, recordHeaded: true }, online: true, activeTasks: 0, ...over,
     });
     const platformRunner = { runOn: "platform" as const, agentId: null };

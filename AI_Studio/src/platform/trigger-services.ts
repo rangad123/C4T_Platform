@@ -92,12 +92,6 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
     const minGap = opts.minGapMs ?? MIN_RUN_GAP_MS;
     const secrets = new SecretBox(p.config.dataDir, p.config.SECRET_KEY);
     const store = new TriggerStore(p.db, secrets, clock);
-    // Round 45: tokens made before their creator was recorded get one from Activity where that is certain (else their runs are refused).
-    try {
-        store.backfillOwners();
-    } catch {
-        /* a database without the activity table yet: nothing to attribute */
-    }
 
     const failuresOf = (job: JobRow, skip: Set<string> = new Set()) =>
         (job.options.testIds ?? [])

@@ -115,7 +115,9 @@ jobs:
         run: |
           sh scripts/build-runner-pkg.sh --out dist/installer-pkg
           sh scripts/make-dmg.sh --out dist/installer-pkg
+      # Not on Windows: there is no complete download for Windows (its installer installs the test tools itself).
       - name: Build the complete download for ${{ matrix.target }}
+        if: runner.os != 'Windows'
         run: npm run build:runner -- --complete --targets ${{ matrix.target }}
       - name: Installer, unattended, with stop, restart, uninstall
         if: matrix.installer
@@ -138,6 +140,13 @@ jobs:
           else
             npx vitest run tests/installer-mac-unit.test.ts
           fi
+      # The compiled setup program really run against a platform in this job (tests/installer-win.test.ts): the unzipped-folder path and the
+      # one-file download (round 49: AITestingRunnerSetup.exe with the kit appended, started alone; its installed copy has no trailer).
+      - name: Windows setup program, real runs
+        if: (success() || failure()) && matrix.installer && runner.os == 'Windows'
+        timeout-minutes: 25
+        # Only the one-file download's tests: the whole file would not fit in the job's 75 minutes after the smoke runs.
+        run: npx vitest run tests/installer-win.test.ts -t "one-file download"
       - name: Upload the report and logs
         if: always()
         uses: actions/upload-artifact@v4

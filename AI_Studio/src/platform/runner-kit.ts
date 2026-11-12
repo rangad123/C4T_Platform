@@ -17,7 +17,6 @@ import { isPrivateHost } from "../agent/config.js";
 import { REPO_ROOT } from "../config.js";
 import { NODE_MIN_MAJOR, readme, START_CMD, START_COMMAND, START_SH, withLineEnding, type KitPlatform } from "./runner-kit-scripts.js";
 import { CHECK_FILES } from "./runner-check-scripts.js";
-import { slugify } from "./storage.js";
 
 export { NODE_MIN_MAJOR, type KitPlatform };
 
@@ -147,10 +146,6 @@ export interface KitTarget {
 export interface BuildKitInput {
     bundle: Extract<Bundle, { ok: true }>;
     request: KitTarget;
-    /** @deprecated Downloads are for a person's own computer now (round 45); only shown in the README when given. */
-    projectName?: string;
-    /** A folder-safe word for the file name and the folder inside the zip. */
-    projectSlug: string;
     platformUrl: string;
     /**
      * The single-use enrollment code (aite_...) the runner trades for its own credential at first contact, written as runner.enroll (0600).
@@ -173,12 +168,13 @@ export function kitCredentialFile(i: { enrollCode?: string; token?: string }): {
 /** `rwxr-xr-x`, `rw-r--r--` and `rw-------` as ZIP external attributes (the permission bits live in the high 16 bits; `*` avoids a negative 32-bit shift). */
 const mode = (m: number): number => (0o100000 | m) * 65536;
 
-export const kitFolder = (slug: string, platform: KitPlatform): string => `runner-${slug}-${platform}`;
-export const kitFileName = (slug: string, platform: KitPlatform): string => `${kitFolder(slug, platform)}.zip`;
-export const projectSlugOf = (name: string): string => slugify(name) || "project";
+/** The word in every download's file and folder name (runner-my-computer-...): a download is for the person's own computer. */
+export const KIT_SLUG = "my-computer";
+export const kitFolder = (platform: KitPlatform): string => `runner-${KIT_SLUG}-${platform}`;
+export const kitFileName = (platform: KitPlatform): string => `${kitFolder(platform)}.zip`;
 
 export function buildKitZip(i: BuildKitInput): Uint8Array {
-    const dir = kitFolder(i.projectSlug, i.request.platform);
+    const dir = kitFolder(i.request.platform);
     const text = (s: string): Uint8Array => new TextEncoder().encode(s);
     const kitVersion = i.bundle.manifest.kitVersion;
     const win = i.request.platform === "windows";
@@ -202,6 +198,6 @@ export function buildKitZip(i: BuildKitInput): Uint8Array {
     add("start-runner.command", text(withLineEnding(START_COMMAND, "\n")), 0o755);
     // "Check this computer" (docs/features/runner-check.md): double-clickable, in every download.
     for (const f of CHECK_FILES) add(f.name, text(withLineEnding(f.text, f.eol)), 0o755);
-    add("README.txt", text(withLineEnding(readme({ platform: i.request.platform, ...(i.projectName ? { projectName: i.projectName } : {}), ...(i.request.name ? { runnerName: i.request.name } : {}), platformUrl: i.platformUrl, kitVersion }), win ? "\r\n" : "\n")));
+    add("README.txt", text(withLineEnding(readme({ platform: i.request.platform, ...(i.request.name ? { runnerName: i.request.name } : {}), platformUrl: i.platformUrl, kitVersion }), win ? "\r\n" : "\n")));
     return zipSync(entries);
 }

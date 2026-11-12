@@ -35,7 +35,7 @@ async function project(name: string): Promise<{ id: string; appId: string }> {
     const id = (await asKey("POST", "/api/projects", { name })).body.id as string;
     const appId = randomUUID();
     platform.db.run("INSERT INTO applications (id, project_id, url, origin, config_json, created_at) VALUES (?,?,?,?,?,?)", appId, id, "https://app.example", "https://app.example", "{}", new Date().toISOString());
-    svc().store.setRunner(id, { runOn: "agent", agentId: null });
+    svc().store.setRunner(id, { runOn: "agent" });
     return { id, appId };
 }
 /** A person (an account of this server) and their own runner. */
@@ -114,7 +114,7 @@ describe("a task is its claiming runner's alone (protocol 2)", () => {
         const { taskId } = queue(a, owner.ownerId);
         const offer = (await owner.agent.poll(1)).offer!;
         expect((await json(owner.agent, `/api/agent/tasks/${taskId}/accept`, { attemptId: offer.attemptId })).status).toBe(200);
-        expect(svc().store.retireToken(owner.tokenId)).toBe(true);
+        expect(svc().store.retire(owner.ownerId)).toBe(true);
         queue(a, owner.ownerId);
         expect((await owner.agent.poll(1)).status).toBe(404);
         const after = await everyRoute(owner.agent, taskId, offer.attemptId!);

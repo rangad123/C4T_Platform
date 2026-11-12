@@ -15,7 +15,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -495,6 +497,120 @@ namespace AITestingRunner
                 File.AppendAllText(path, line + "\r\n", Util.Utf8);
             }
             catch (Exception) { /* a log that cannot be written must not stop the program */ }
+        }
+    }
+    /// <summary>
+    /// The one-file download (round 49): the platform appends this download's kit to the program (src/platform/runner-installer.ts
+    /// buildInstallerExe). Layout: the program, a zip of the kit under one top folder, then 16 bytes: the zip's length (uint32 LE), the
+    /// format (uint32 LE, 1) and the ASCII bytes "AITP-KIT". Setup unpacks the kit into a folder only this user can read and goes on as if it
+    /// had been started from the unzipped folder. A file without the footer (an older zip download, the installed copy) is all program.
+    /// </summary>
+    static class Stamp
+    {
+        const string Magic = "AITP-KIT";
+        const int FooterBytes = 16;
+        const long MaxPayload = 64L * 1024 * 1024;
+        const string Damaged = "This download is damaged. Download the runner again from the platform.";
+
+        /// <summary>The folder this run unpacked its kit into, or null.</summary>
+        public static string Dir;
+        static string madeRoot;
+
+        /// <summary>How many bytes at the start of the file are the program; payload is the kit's length (0 when none is appended).</summary>
+        static long ProgramLength(FileStream f, out long payload)
+        {
+            payload = 0;
+            long n = f.Length;
+            if (n < FooterBytes) return n;
+            byte[] foot = new byte[FooterBytes];
+            f.Seek(n - FooterBytes, SeekOrigin.Begin);
+            ReadExactly(f, foot, foot.Length);
+            if (Encoding.ASCII.GetString(foot, 8, 8) != Magic) return n;
+            long len = BitConverter.ToUInt32(foot, 0);
+            if (BitConverter.ToUInt32(foot, 4) != 1 || len == 0 || len > MaxPayload || len > n - FooterBytes) throw new PlainException(Damaged);
+            payload = len;
+            return n - FooterBytes - len;
+        }
+
+        static FileStream OpenRead(string file) { return new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); }
+
+        static void ReadExactly(Stream s, byte[] buf, int count)
+        {
+            int at = 0;
+            while (at < count)
+            {
+                int got = s.Read(buf, at, Math.Min(count - at, buf.Length - at));
+                if (got <= 0) throw new PlainException(Damaged);
+                at += got;
+            }
+        }
+
+        /// <summary>The program part of this file: what is copied into the install folder, so the one-time code never stays in the installed copy.</summary>
+        public static byte[] ProgramBytes(string exe)
+        {
+            using (FileStream f = OpenRead(exe))
+            {
+                long payload;
+                long n = ProgramLength(f, out payload);
+                byte[] b = new byte[n];
+                f.Seek(0, SeekOrigin.Begin);
+                ReadExactly(f, b, b.Length);
+                return b;
+            }
+        }
+
+        /// <summary>Unpacks an appended kit into a fresh private folder under the install folder's downloads; sets Dir. Nothing to do without one.</summary>
+        public static void Unpack(string exe, Layout lay)
+        {
+            using (FileStream f = OpenRead(exe))
+            {
+                long payload;
+                long start = ProgramLength(f, out payload);
+                if (payload == 0) return;
+                if (!Directory.Exists(lay.Root)) madeRoot = lay.Root;
+                Directory.CreateDirectory(lay.Downloads);
+                // A folder left behind by a run that was ended abruptly (its code expired long ago).
+                foreach (string old in Directory.GetDirectories(lay.Downloads, "kit-*"))
+                {
+                    try { if (Directory.GetCreationTimeUtc(old) < DateTime.UtcNow.AddHours(-1)) Directory.Delete(old, true); } catch (Exception) { }
+                }
+                string dir = Path.Combine(lay.Downloads, "kit-" + Guid.NewGuid().ToString("N").Substring(0, 12));
+                // Only the current user, like runner.token: the folder holds the one-time code.
+                DirectorySecurity ds = new DirectorySecurity();
+                ds.SetAccessRuleProtection(true, false);
+                ds.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+                Directory.CreateDirectory(dir, ds);
+                Dir = dir;
+                string zip = Path.Combine(dir, "kit.zip");
+                f.Seek(start, SeekOrigin.Begin);
+                byte[] buf = new byte[1 << 16];
+                using (FileStream z = new FileStream(zip, FileMode.CreateNew, FileAccess.Write))
+                {
+                    long left = payload;
+                    while (left > 0)
+                    {
+                        int got = f.Read(buf, 0, (int)Math.Min(buf.Length, left));
+                        if (got <= 0) throw new PlainException(Damaged);
+                        z.Write(buf, 0, got);
+                        left -= got;
+                    }
+                }
+                try { Net.ExtractDroppingTopFolder(zip, dir, new Cancel()); }
+                catch (InvalidDataException) { throw new PlainException(Damaged); }
+                File.Delete(zip);
+            }
+        }
+
+        /// <summary>Deletes the unpacked kit. Safe to call more than once.</summary>
+        public static void Cleanup()
+        {
+            string dir = Dir;
+            Dir = null;
+            if (dir == null) return;
+            try { Directory.Delete(dir, true); } catch (Exception) { }
+            // The downloads folder when empty, and the install folder when Unpack made it and it is still empty (a --check on a new computer).
+            try { Directory.Delete(Path.GetDirectoryName(dir)); if (madeRoot != null) Directory.Delete(madeRoot); } catch (Exception) { }
+            madeRoot = null;
         }
     }
 }

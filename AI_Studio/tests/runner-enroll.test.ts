@@ -237,7 +237,7 @@ describe("the real agent program", () => {
             expect(fs.existsSync(file)).toBe(false);
             const machineId = fs.readFileSync(path.join(dir, MACHINE_ID_FILE), "utf8").trim();
             const t = getAgentServices(platform).store.findToken(token!)!;
-            expect(t).toMatchObject({ kind: "personal", machineId });
+            expect(t).toMatchObject({ machineId });
             // The real agent reports that it applies the platform's switches (code scripts, private addresses).
             expect(getAgentServices(platform).store.agentsOfToken(t.id)[0]?.capabilities.runnerSwitches).toBe(true);
             // Neither the code nor the credential reached the agent's output.

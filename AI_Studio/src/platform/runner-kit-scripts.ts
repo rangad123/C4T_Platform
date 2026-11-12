@@ -660,8 +660,6 @@ exec sh "$(dirname "$0")/start-runner.sh"
 
 export interface ReadmeInput {
     platform: KitPlatform;
-    /** @deprecated Downloads are for a person's own computer (round 45); a line is shown only when given. */
-    projectName?: string;
     /** Left out: the runner uses the computer's own name. */
     runnerName?: string;
     platformUrl: string;
@@ -704,7 +702,7 @@ export function readme(i: ReadmeInput): string {
         : `You need Node.js ${NODE_MIN_MAJOR} or newer. The start script looks for it in the usual places and says which one it uses. It offers to install it if it is missing.
 If it says it cannot find Node.js but you have it, open a terminal (Terminal on a Mac, Command Prompt on Windows) and run  node --version  there. If that works, run the start script from that same window.`;
     return `AI Testing Platform runner${i.runnerName ? ` "${i.runnerName}"` : ""}
-${i.projectName ? `Project: ${i.projectName}\n` : ""}Platform: ${i.platformUrl}
+Platform: ${i.platformUrl}
 Kit version: ${i.kitVersion}${c ? `\nDownload: complete, for ${c.words} (${c.target})` : ""}
 
 1. Unzip this folder on the computer where your application can be reached.

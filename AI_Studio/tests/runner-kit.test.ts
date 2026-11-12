@@ -214,7 +214,7 @@ describe("before the kit is built", () => {
     it("info says it is not available and why; a download is a plain 503 that makes no code", async () => {
         const info = await admin("GET", "/api/me/runner/download/info");
         expect(info.status).toBe(200);
-        expect(info.body).toMatchObject({ available: false, reason: "The runner kit has not been built on this server. Run `npm run build:runner`.", nodeMin: 24 });
+        expect(info.body).toMatchObject({ available: false, reason: "The runner kit has not been built on this server. Run `npm run build:runner`." });
         const d = await download("windows");
         expect(d.status).toBe(503);
         expect(d.body.error ?? d.body.message).toContain("npm run build:runner");
@@ -241,11 +241,10 @@ describe("the routes", () => {
         expect(platform.db.all("SELECT id FROM runner_enrollments")).toEqual([]);
     });
 
-    it("info: available, the version, the address from PUBLIC_URL", async () => {
+    it("info: available, and what Settings says about the address from PUBLIC_URL", async () => {
         const info = await admin("GET", "/api/me/runner/download/info");
         expect(info.status).toBe(200);
-        expect(info.body).toMatchObject({ available: true, platformUrl: BASE, urlOk: true, nodeMin: 24, mayDownload: true });
-        expect(info.body.kitVersion).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{10}$/);
+        expect(info.body).toMatchObject({ available: true, urlOk: true, mayDownload: true });
         // PUBLIC_URL here is an address on this computer, which the page says plainly.
         expect(info.body.urlWarning).toMatch(/only a runner on this computer/i);
         expect(info.body.reason).toBeUndefined();
@@ -257,11 +256,11 @@ describe("the routes", () => {
         try {
             delete cfg.PUBLIC_URL;
             const lan = (await admin("GET", "/api/me/runner/download/info")).body;
-            expect(lan).toMatchObject({ available: true, platformUrl: BASE, urlOk: true });
+            expect(lan).toMatchObject({ available: true, urlOk: true });
             expect(lan.urlWarning).toMatch(/set PUBLIC_URL|only a runner on this computer/i);
             cfg.PUBLIC_URL = "http://tests.example.com";
             const pub = (await admin("GET", "/api/me/runner/download/info")).body;
-            expect(pub).toMatchObject({ urlOk: false, platformUrl: "http://tests.example.com" });
+            expect(pub).toMatchObject({ urlOk: false });
             expect(pub.urlWarning).toBe("Runners need an https address when the platform is not on your own network. Set PUBLIC_URL to the https address people use.");
             expect(pub.systems.every((x: { available: boolean }) => !x.available)).toBe(true);
         } finally {
@@ -308,7 +307,7 @@ describe("the routes", () => {
         const json = JSON.parse(Buffer.from(files["runner-my-computer-windows/runner.json"]!).toString("utf8"));
         expect(Object.keys(json).sort()).toEqual(["kitVersion", "url"]);
         expect(json.url).toBe(BASE);
-        expect(json.kitVersion).toBe((await admin("GET", "/api/me/runner/download/info")).body.kitVersion);
+        expect(json.kitVersion).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{10}$/);
     });
 
     it("the zip holds none of the server's secrets, paths or data", async () => {

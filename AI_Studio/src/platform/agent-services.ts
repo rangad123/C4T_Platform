@@ -11,7 +11,7 @@
  * from whatever the agent sends back before it is stored.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { KEY_HAS_NO_RUNNER, NO_RUNNER_MESSAGE, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_LINK, runnerRefusal, runnersOnly, SCHEDULE_HAS_NO_OWNER, TEAM_RUNNER_REFUSED, TRIGGER_HAS_NO_OWNER, type RunnerRefusalCode } from "./runner-only.js";
+import { KEY_HAS_NO_RUNNER, NO_RUNNER_MESSAGE, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_LINK, runnerRefusal, runnersOnly, RUNNER_TOKEN_GONE, SCHEDULE_HAS_NO_OWNER, TRIGGER_HAS_NO_OWNER, type RunnerRefusalCode } from "./runner-only.js";
 import { isHandedOver, isLeaseLoss, parkForHandover } from "./runner-handover.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -47,7 +47,7 @@ import { SecretBox } from "./secrets.js";
 
 /** A step of a runbook started by hand, resumed after a restart: its starter is not known here, so no runner may take it. */
 export const RUNBOOK_STARTER_UNKNOWN = "This runbook was started before the platform restarted, and who started it is not known any more. Start it again to run it on your computer.";
-export { KEY_HAS_NO_RUNNER, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_LINK, runnerRefusal, SCHEDULE_HAS_NO_OWNER, TEAM_RUNNER_REFUSED, TRIGGER_HAS_NO_OWNER, type RunnerRefusalCode };
+export { KEY_HAS_NO_RUNNER, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_LINK, runnerRefusal, RUNNER_TOKEN_GONE, SCHEDULE_HAS_NO_OWNER, TRIGGER_HAS_NO_OWNER, type RunnerRefusalCode };
 /** Live events kept per task attempt (whichever comes first); past them one note, and the rest only in the final result. */
 export const LIVE_EVENTS_MAX = 5_000;
 export const LIVE_EVENT_BYTES_MAX = 5 * 1024 * 1024;
@@ -236,14 +236,13 @@ export class AgentService {
 
     // ── who may connect ─────────────────────────────────────────────────────
 
-    /** The token behind an `Authorization` header. Missing or malformed: 401. Unknown or revoked: 404 (the two look the same). */
+    /** The token behind an `Authorization` header. Missing or malformed: 401. Unknown (removed, replaced, or from before migration 57): 404. */
     authenticate(header: string | string[] | undefined): AgentTokenRecord {
         const presented = bearerToken(header);
         if (!presented) throw new HttpError(401, "Missing runner token (send Authorization: Bearer aitg_...)");
         const token = this.store.findToken(presented);
-        if (!token) throw new HttpError(404, "This runner token is not valid or was revoked.");
-        // Round 45: only a person's own runner works. A team, shared or project runner is refused with the sentence (the runner stops, exit 3).
-        if (token.kind !== "personal") throw new HttpError(401, TEAM_RUNNER_REFUSED);
+        // Every runner program since the first release stops at hello on this answer (exit 3) and prints the sentence.
+        if (!token) throw new HttpError(404, RUNNER_TOKEN_GONE);
         this.store.touchToken(token.id);
         return token;
     }
@@ -272,14 +271,14 @@ export class AgentService {
         return {
             agentId: agent.id,
             // Always a string, as protocol 1 says (the wire format is kept). An installed runner only prints it; a person's runner has no project of its own.
-            projectId: token.projectId ?? "shared",
+            projectId: "shared",
             protocol: speak,
             pollSeconds: this.limits.pollSeconds,
             heartbeatSeconds: this.limits.heartbeatSeconds,
             maxFileBytes: this.limits.maxFileBytes,
             serverTime: new Date(this.clock()).toISOString(),
             // What this runner is and what its switches allow (additive; an older agent ignores it), and whether its credential is due for a new one.
-            runner: { id: token.id, kind: token.kind, ...this.runnerSwitches(token.id) },
+            runner: { id: token.id, kind: "personal" as const, ...this.runnerSwitches(token.id) },
             ...(this.store.rotationDue(token) || token.viaPrevious ? { rotate: true } : {}),
         };
     }
@@ -296,17 +295,16 @@ export class AgentService {
         if (!out.ok) {
             if (out.reason === "expired") throw new HttpError(410, "This code has expired. Download the runner again from Settings.");
             if (out.reason === "used") throw new HttpError(410, "This code was already used. Download the runner again from Settings.");
-            if (out.reason === "team") throw new HttpError(410, TEAM_RUNNER_REFUSED);
             throw new HttpError(404, "This enrollment code is not valid. Download the runner again from Settings.");
         }
-        return { token: out.secret, runnerId: out.token.id, kind: out.token.kind };
+        return { token: out.secret, runnerId: out.token.id, kind: "personal" };
     }
 
     /** POST /api/agent/rotate: a new credential; the presented one keeps working until the new one is first used, at most 24 hours. */
     rotate(token: AgentTokenRecord, header: string | string[] | undefined): RotateResponse {
         const presented = bearerToken(header);
         const out = presented ? this.store.rotateToken(token.id, presented) : undefined;
-        if (!out) throw new HttpError(404, "This runner token is not valid or was revoked.");
+        if (!out) throw new HttpError(404, RUNNER_TOKEN_GONE);
         return { token: out.secret, previousValidUntil: new Date(out.previousUntilMs).toISOString() };
     }
 
@@ -329,7 +327,7 @@ export class AgentService {
         }
         if (this.store.runningCount(agent.id) >= agent.concurrency) return undefined;
         const token = this.store.getToken(agent.tokenId);
-        if (!token || token.revokedAt || !token.ownerId) return undefined;
+        if (!token) return undefined;
         // A person's runner looks at its owner's runs, wherever they are (round 45: the only runner there is).
         const candidates = this.store.queuedOfOwner(token.ownerId);
         for (const t of candidates) {
@@ -379,7 +377,7 @@ export class AgentService {
     sessionAccessProblem(s: { projectId: string; startedBy: string | null; tokenId: string; personal: boolean }): string | undefined {
         if (s.personal) {
             const token = this.store.getToken(s.tokenId);
-            if (!token || token.revokedAt) return "This computer was removed as a runner, so the session ended.";
+            if (!token) return "This computer was removed as a runner, so the session ended.";
         }
         if (s.startedBy && !this.store.ownerMayRun(s.startedBy, s.projectId)) return "The person who started this session can no longer use this project, so the session ended.";
         return undefined;
@@ -418,7 +416,7 @@ export class AgentService {
 
     /** May hand-written (code) scripts go to this machine? The same rule for offering, the check when a run is made, and the executor's wait. */
     mayRunCodeScripts(agent: Pick<AgentRecord, "tokenId" | "capabilities">, token: AgentTokenRecord | undefined = this.store.getToken(agent.tokenId)): boolean {
-        if (!token || token.revokedAt) return false;
+        if (!token) return false;
         // Its owner's switch, applied by a runner that understands it (an older runner never gets them).
         return token.allowCodeScripts && agent.capabilities.runnerSwitches === true;
     }
@@ -426,7 +424,7 @@ export class AgentService {
     /** The switches as the platform holds them for a runner (the hello answer and, for protocol 2, heartbeats send them to it). */
     runnerSwitches(tokenId: string): { customScripts: boolean; privateTargets: boolean } {
         const t = this.store.getToken(tokenId);
-        if (!t || t.revokedAt) return { customScripts: false, privateTargets: false };
+        if (!t) return { customScripts: false, privateTargets: false };
         return { customScripts: t.allowCodeScripts, privateTargets: t.allowPrivateTargets };
     }
 
@@ -530,7 +528,7 @@ export class AgentService {
     shutdownWanted: (agent: AgentRecord) => boolean = (agent) => {
         // Retired (or unknown), or a person's own computer whose owner is gone or switched off here: finish what runs, take nothing new, exit.
         const t = this.store.getToken(agent.tokenId);
-        if (!t || t.revokedAt) return true;
+        if (!t) return true;
         // The open server's runner: while the server is open (it acts as one person).
         if (t.ownerId === OPEN_OWNER_ID) return !this.store.openMode();
         const owner = t.ownerId ? this.p.db.get<{ status: string | null }>("SELECT status FROM users WHERE id = ? AND role IS NOT NULL", t.ownerId) : undefined;
@@ -539,7 +537,7 @@ export class AgentService {
     runnerConfig: (agent: AgentRecord) => RunnerConfigPush | undefined = (agent) => {
         // What the runner should apply now: code scripts by the same rule as offering, and private addresses.
         const t = this.store.getToken(agent.tokenId);
-        if (!t || t.revokedAt) return undefined;
+        if (!t) return undefined;
         return { customScripts: this.mayRunCodeScripts(agent, t), privateTargets: t.allowPrivateTargets };
     };
     private readonly sentConfig = new Map<string, string>();
@@ -845,7 +843,8 @@ export class AgentService {
         });
         // Who started it is kept with the task (a person's own computer claims only its owner's) and with the session (only they may drive it there).
         const startedBy = o.startedBy ?? null;
-        const personal = this.store.getToken(o.agent.tokenId)?.kind === "personal";
+        // Every runner is a person's own computer: the session is its starter's alone.
+        const personal = true;
         this.store.enqueue({ id: taskId, projectId: o.projectId, jobId: offer.jobId, adapterId: offer.adapterId, payloadEnc: this.encrypt(offer), files: [], ownerId: startedBy });
         const init: RemoteInit = { id, projectId: o.projectId, taskId, agent: { id: o.agent.id, name: o.agent.name }, startUrl: o.startUrl, headed: o.headed, ...(o.environment ? { environment: o.environment } : {}), maxSteps: o.caps.maxSteps, ...(o.agent.capabilities.liveSession === true ? { live: true } : {}), startedBy, personal };
         const driver = new RemoteDriver(

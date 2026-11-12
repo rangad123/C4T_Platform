@@ -237,9 +237,14 @@ namespace AITestingRunner
         bool toldAboutTray, connectedOnce;
         readonly bool smoke;
 
-        public UiApp(Options o, Layout lay, FileLog log, bool smoke)
+        /// <summary>Runs before the first check, on the check's thread; a sentence stops the setup with it (Program.TakeOver).</summary>
+        readonly Func<UiApp, string> before;
+
+        public UiApp(Options o, Layout lay, FileLog log, bool smoke) : this(o, lay, log, smoke, null) { }
+
+        public UiApp(Options o, Layout lay, FileLog log, bool smoke, Func<UiApp, string> before)
         {
-            this.o = o; this.lay = lay; this.log = log; this.smoke = smoke;
+            this.o = o; this.lay = lay; this.log = log; this.smoke = smoke; this.before = before;
             ctl = null;
             Application.EnableVisualStyles();
             // The controller needs the window as its reporter, and the window needs the controller's rows.
@@ -262,6 +267,8 @@ namespace AITestingRunner
             BuildTray();
             if (smoke) return;
             tray.Visible = true;
+            // Created now, so OnUiAndWait works even when the window is never shown (--background).
+            IntPtr handle = win.Handle;
             SetupWindow w = win;
             Thread t = new Thread(Begin);
             t.IsBackground = true;
@@ -282,9 +289,19 @@ namespace AITestingRunner
 
         // ── the first moments ───────────────────────────────────────────────
 
+        /// <summary>Runs on the window's thread and waits for it.</summary>
+        public void OnUiAndWait(Action a) { win.Invoke(a); }
+
         public void Begin()
         {
-            CheckResult cr = ctl.Check();
+            CheckResult cr = null;
+            if (before != null)
+            {
+                OnUi(delegate { win.Status("Closing the older runner on this computer\u2026"); });
+                string problem = before(this);
+                if (problem != null) { cr = new CheckResult(); cr.CannotContinue = true; cr.Problem = problem; }
+            }
+            if (cr == null) cr = ctl.Check();
             if (quitting) return;
             if (cr.CannotContinue)
             {

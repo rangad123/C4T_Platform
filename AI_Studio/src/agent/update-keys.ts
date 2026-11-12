@@ -13,7 +13,9 @@
  *
  * Empty: this build installs no update by itself; a person downloads each new version (Settings, Your runner says so).
  */
-export const PINNED_UPDATE_KEYS: readonly string[] = [];
+export const PINNED_UPDATE_KEYS: readonly string[] = [
+    "ozFWHiNi0T3NeSH7ijT+8q4aJAZfvrAtt6hiHij5kPc=", // key 134d4136f40865a2
+];
 
 /** Replaced at build time only by tests (scripts/build-runner.mjs `updateKeys`), so a test build can trust a test key. */
 declare const __AITP_UPDATE_KEYS__: readonly string[] | undefined;

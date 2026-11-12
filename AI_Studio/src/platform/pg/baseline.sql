@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-56 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 56;
+-- Equal to SQLite migration slots 1-57 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 57;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -786,9 +786,7 @@ CREATE INDEX idx_quarantine_history_test ON quarantine_history (test_id, id);
 CREATE TABLE runner_settings (
     project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
     run_on TEXT NOT NULL,
-    agent_id TEXT,
-    updated_at TEXT NOT NULL,
-    allow_personal BIGINT NOT NULL DEFAULT 1
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE agent_tasks (
@@ -1325,7 +1323,6 @@ CREATE TABLE ops_heartbeats (
 
 CREATE TABLE runner_update_settings (
     agent_id TEXT PRIMARY KEY,
-    auto SMALLINT,
     requested_at BIGINT,
     reported TEXT,
     updated_at TEXT NOT NULL
@@ -1425,8 +1422,7 @@ CREATE TABLE user_preferences (
 
 CREATE TABLE agent_tokens (
     id TEXT PRIMARY KEY,
-    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
-    organization_id TEXT REFERENCES organizations(id),
+    owner_id TEXT NOT NULL,
     label TEXT,
     token_hash TEXT NOT NULL,
     hint TEXT NOT NULL,
@@ -1434,27 +1430,21 @@ CREATE TABLE agent_tokens (
     created_by TEXT,
     last_used_at TEXT,
     last_used_ms BIGINT,
-    revoked_at TEXT,
-    kind TEXT NOT NULL DEFAULT 'team',
-    owner_id TEXT,
-    allow_code_scripts BIGINT NOT NULL DEFAULT 0,
-    allow_private_targets BIGINT NOT NULL DEFAULT 1,
+    allow_code_scripts BIGINT NOT NULL DEFAULT 1,
+    allow_private_targets BIGINT NOT NULL DEFAULT 0,
+    allow_real_phone BIGINT NOT NULL DEFAULT 0,
     machine_id TEXT,
     rotated_at TEXT,
     previous_hash TEXT,
     previous_until_ms BIGINT,
-    allow_real_phone BIGINT NOT NULL DEFAULT 0,
     seq BIGINT GENERATED ALWAYS AS IDENTITY,
+    UNIQUE (owner_id),
     UNIQUE (token_hash)
 );
-CREATE INDEX idx_agent_tokens_org ON agent_tokens (organization_id);
-CREATE INDEX idx_agent_tokens_owner ON agent_tokens (owner_id);
 CREATE INDEX idx_agent_tokens_previous ON agent_tokens (previous_hash);
-CREATE INDEX idx_agent_tokens_project ON agent_tokens (project_id);
 
 CREATE TABLE agents (
     id TEXT PRIMARY KEY,
-    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
     token_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     version TEXT NOT NULL,
@@ -1470,17 +1460,7 @@ CREATE TABLE agents (
     protocol BIGINT NOT NULL DEFAULT 1,
     UNIQUE (token_id, name)
 );
-CREATE INDEX idx_agents_project ON agents (project_id, last_seen_ms);
 CREATE INDEX idx_agents_token ON agents (token_id);
-
-CREATE TABLE runner_access (
-    token_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    granted_by TEXT,
-    granted_at TEXT NOT NULL,
-    PRIMARY KEY (token_id, project_id)
-);
-CREATE INDEX idx_runner_access_project ON runner_access (project_id);
 
 CREATE TABLE device_reservations (
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -1696,21 +1676,16 @@ CREATE TABLE runner_enrollments (
     id TEXT PRIMARY KEY,
     code_hash TEXT NOT NULL,
     hint TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    owner_id TEXT,
-    organization_id TEXT,
-    project_id TEXT,
-    project_ids_json TEXT NOT NULL DEFAULT '[]',
+    owner_id TEXT NOT NULL,
     label TEXT,
     created_by TEXT,
-    created_by_id TEXT,
     created_at TEXT NOT NULL,
     expires_ms BIGINT NOT NULL,
     used_ms BIGINT,
     token_id TEXT,
     UNIQUE (code_hash)
 );
-CREATE INDEX idx_runner_enrollments_creator ON runner_enrollments (created_by_id);
+CREATE INDEX idx_runner_enrollments_owner ON runner_enrollments (owner_id);
 
 CREATE TABLE agent_task_events (
     task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
