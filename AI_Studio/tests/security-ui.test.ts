@@ -103,6 +103,8 @@ beforeEach(() => {
     fake.role = "owner";
     fake.testingTypeRoute = true;
     fake.requests.length = 0;
+    fake.runnersMode = false;
+    fake.me = null;
 });
 
 // ── the switch ────────────────────────────────────────────────────────────────
@@ -302,6 +304,27 @@ describe("assessments", () => {
         await pwExpect(page.getByTestId("na-limits")).toContainText("/admin/billing");
         await pwExpect(page.getByRole("button", { name: "Start assessment", exact: true })).toBeDisabled();
         await pwExpect(page.getByRole("link", { name: "Open the authorization", exact: true })).toHaveAttribute("href", `#/projects/${p.id}/security/applications/${app.id}?authorize=1`);
+    });
+
+    it("runners mode (round 52): says which runner it runs on, or what to fix with a link to Settings, before the click", async () => {
+        const { p, app } = seeded();
+        fake.runnersMode = true;
+        const ok = { ok: true };
+        const why = "Your runner “Maya’s laptop” is too old to run a security assessment. Update your runner in Settings, Your runner, then try again.";
+        const mine = (assessment: { ok: boolean; why?: string }) => ({ id: "r1", name: "Maya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), os: "linux", arch: "x64", switches: { codeScripts: true, privateTargets: true, realPhone: false }, can: { web: ok, phone: ok, ios: ok, windows: ok, record: ok, recordHeaded: ok, phoneSession: ok, assessment } });
+        fake.me = mine({ ok: false, why });
+        await visit(`#/projects/${p.id}/security/new?app=${app.id}`);
+        await pwExpect(page.getByText(why, { exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("link", { name: "Open Your runner in Settings", exact: true })).toHaveAttribute("href", "#/settings#runner");
+        await pwExpect(page.getByRole("button", { name: "Start assessment", exact: true })).toBeDisabled();
+        fake.me = null;
+        await visit(`#/projects/${p.id}/security/new?app=${app.id}`);
+        await pwExpect(page.getByText("Set up your runner in Settings to run tests.", { exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "Start assessment", exact: true })).toBeDisabled();
+        fake.me = mine(ok);
+        await visit(`#/projects/${p.id}/security/new?app=${app.id}`);
+        await pwExpect(page.getByTestId("na-runner")).toHaveText("Runs on your runner, Maya’s laptop. Its browser and every check are sent from that computer, never from the platform.");
+        await pwExpect(page.getByRole("button", { name: "Start assessment", exact: true })).toBeEnabled();
     });
 
     it("start, watch the progress in plain words, stop: what was found is kept", async () => {

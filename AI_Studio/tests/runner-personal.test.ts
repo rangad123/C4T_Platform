@@ -160,6 +160,11 @@ describe("one runner per person", () => {
             phoneSession: { ok: false, why: expect.stringMatching(new RegExp(`^${name} can't be used to explore a phone: `)) },
             // Round 51: this stand-in runner does not report `explore`, as a runner from before it.
             explore: { ok: false, why: exploreNeedsUpdate(name) },
+            // Round 52: nor the newer modes.
+            plain: { ok: false, why: `Your runner “${name}” is too old to build a test from your description. Update your runner in Settings, Your runner, then try again.` },
+            agent: { ok: false, why: `Your runner “${name}” is too old to do an agent run. Update your runner in Settings, Your runner, then try again.` },
+            phoneExplore: { ok: false, why: `Your runner “${name}” is too old to explore a phone app. Update your runner in Settings, Your runner, then try again.` },
+            assessment: { ok: false, why: `Your runner “${name}” is too old to run a security assessment. Update your runner in Settings, Your runner, then try again.` },
         });
         expect((await as("t-tess", "GET", `/api/me/runner/enrollments/${tess.enrollmentId}`)).body).toEqual({ status: "connected" });
         // Another person's code is "not found".
@@ -287,7 +292,7 @@ describe("one runner per person", () => {
         platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE token_id = ?", Date.now() - 10 * 60_000, tess.runnerId);
         const off = (await as("t-tess", "GET", "/api/me/runner")).body.runner;
         expect(off.status).toBe("offline");
-        expect(Object.values(off.can)).toEqual(Array(8).fill({ ok: false, why: RUNNER_OFFLINE }));
+        expect(Object.values(off.can)).toEqual(Array(12).fill({ ok: false, why: RUNNER_OFFLINE }));
         expect(refusal(() => gate(ids["t-tess"]!))).toMatchObject({ status: 409, message: RUNNER_OFFLINE, code: "RUNNER_OFFLINE" });
         // As the scheduler fires it (the "Schedule" actor); Run now is a person acting, and is told now like any run of theirs.
         const fired = runAs({ kind: "schedule", name: "Schedule", role: "editor" }, () => refusal(() => svc().assertJobAllowed(projectId, options({ kind: "schedule", id: "s1", ownerId: ids["t-tess"]! }))));

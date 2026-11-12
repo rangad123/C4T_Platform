@@ -75,8 +75,8 @@ export const WONT_DO = ["Pay for anything or subscribe", "Delete accounts or dat
 export const ACCOUNT_REMINDER = "If the app needs a login, add a test account under Advanced options.";
 export const NO_WHERE_TITLE = "No phone or emulator is ready";
 export const AI_MISSING = "The AI model isn’t set up on this server. Exploring a phone app needs it.";
-/** Runners mode: the platform refuses explorations (the AI's exploration does not run on runners yet). */
-export const EXPLORE_ON_RUNNERS = "This platform runs tests only on runners, and the AI’s exploration doesn’t run on them yet. Import your phone tests or write them by hand, then run them on a runner.";
+/** Runners mode (round 52): the exploration runs on the person's runner, on the phone or emulator attached to it. */
+export const EXPLORES_ON_YOUR_RUNNER = "It opens the phone or emulator attached to your runner’s computer. The AI works from the platform.";
 
 export const screensWords = (n: number): string => `${plural(n, "screen")} seen`;
 export const actionsWords = (n: number): string => plural(n, "action");
@@ -92,18 +92,19 @@ export interface WhereOption {
 }
 
 /**
- * Where an exploration runs: where the project runs its tests (local mode only; in runners mode it is switched off at the button). On the
- * person's runner the server's own sentence says whether it can (`can.phoneSession`); a server that does not say decides at the click.
+ * Where an exploration runs: where the project runs its tests, or in runners mode (round 52) always the person's runner, the whole exploration
+ * on it. On the person's runner the server's own sentence says whether it can (`can.phoneSession`; in runners mode `can.phoneExplore`, which
+ * also says when the runner program is too old); a server that does not say decides at the click.
  */
-export function phoneWhere(config: PlatformConfig | undefined, runOn: "platform" | "agent", runner: RunnerMine | null | undefined): WhereOption {
+export function phoneWhere(config: PlatformConfig | undefined, runOn: "platform" | "agent" | "runners", runner: RunnerMine | null | undefined): WhereOption {
     if (runOn === "platform") {
         const m = config?.mobile;
         return m?.available
             ? { label: "This server", can: true, detail: m.avds.length ? `An Android emulator is ready here (${m.avds[0]}).` : "An Android emulator is ready here." }
             : { label: "This server", can: false, detail: m?.reason ? `${m.reason.replace(/\.$/, "")}.` : "No Android emulator is set up on this server." };
     }
-    const why = runnerProblem({ runner: runner ?? null }, { can: ["phoneSession"] });
-    return { label: runner ? `Your runner, ${runner.name}` : "Your runner", can: !why, detail: why ?? "It opens the phone or emulator on your runner’s computer." };
+    const why = runnerProblem({ runner: runner ?? null }, { can: [runOn === "runners" ? "phoneExplore" : "phoneSession"] });
+    return { label: runner ? `Your runner, ${runner.name}` : "Your runner", can: !why, detail: why ?? (runOn === "runners" ? EXPLORES_ON_YOUR_RUNNER : "It opens the phone or emulator on your runner’s computer.") };
 }
 
 // ── starting ─────────────────────────────────────────────────────────────────

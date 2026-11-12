@@ -3,9 +3,10 @@
  *
  * In this mode the server never runs test code and never opens a browser for a run:
  *  - every project routes to runners, whatever its stored setting says (agent-store.ts `getRunner`); the stored setting is kept as it is;
- *  - jobs that need a browser on the server (a test described in words, an agent run) are refused when they are made;
- *  - an exploration runs on the runner of the person who started it, the AI staying on the server (round 51, explore-task.ts); a scheduled
- *    or triggered one, and one of a phone app, are refused for now;
+ *  - an exploration runs on the runner of the person who started it, the AI staying on the server (round 51, explore-task.ts); one a schedule
+ *    or a deploy trigger starts goes to its creator's runner, and so do a test described in words, an agent run and an exploration of a
+ *    phone app (on the phone attached to that runner) (round 52);
+ *  - a security assessment runs as a whole on its starter's runner, its checks leaving from there (src/security/assessment/on-runner.ts);
  *  - a dispatch worker in the API process takes only the jobs a runner can do and looks after several at once (worker.ts);
  *  - as the last line, the server's own browser launches and its local script runs throw, so a path that was missed fails loudly
  *    instead of running here. A report PDF is the one exception: the platform's own static page, scripts off (pdf.ts).
@@ -19,30 +20,24 @@ import { refuseLocalExecution } from "../engine/frameworks/executor.js";
 import type { AgentService } from "./agent-services.js";
 import type { Platform } from "./bootstrap.js";
 import { HttpError } from "./http-error.js";
-import { EXPLORE_ADAPTER_ID, PHONE_EXPLORE_ON_RUNNERS } from "./explore-task.js";
+import { EXPLORE_ADAPTER_ID, exploreProblem } from "./explore-task.js";
 import type { JobMode, JobOptions } from "./repo.js";
 
 export const runnersOnly = (config: Pick<Config, "EXECUTION_MODE">): boolean => config.EXECUTION_MODE === "runners";
 
 /**
  * Jobs a runner can do: the ones that only run existing tests (their scripts go to a runner), and from round 51 an exploration ("generate"),
- * which goes to the starter's runner as a whole (explore-task.ts). Nothing in them needs this server's browser.
+ * which goes to the starter's runner as a whole (explore-task.ts); from round 52 a test described in words ("plain") and an agent run ("agent"),
+ * the same way. Nothing in them needs this server's browser.
  */
-export const RUNNER_JOB_MODES: readonly JobMode[] = ["validate", "variants", "environment", "generate"];
+export const RUNNER_JOB_MODES: readonly JobMode[] = ["validate", "variants", "environment", "generate", "plain", "agent"];
 
 /** Databases a dispatch worker in this process is looking after right now (worker.ts adds and removes them; runsCanStartHere asks). */
 export const dispatching = new Set<object>();
 export const dispatchAlive = (db: object): boolean => dispatching.has(db);
 
-/** Why a job of this kind is not made here (the AI's own work needs a browser on the server). */
-export function serverWorkMessage(mode: JobMode): string {
-    if (mode === "plain") return PLAIN_ON_RUNNERS_MESSAGE;
-    if (mode === "agent") return "Agent runs are not available here yet: the AI works in a browser on the server, and this platform runs tests only on runners.";
-    return EXPLORING_ON_RUNNERS_MESSAGE;
-}
-/** Round 51: an exploration runs on the starter's runner; what is still refused (one started by a schedule or a deploy trigger) says this. */
-export const EXPLORING_ON_RUNNERS_MESSAGE = "Scheduled and triggered explorations are not available here yet: an exploration runs on the runner of the person who starts it. Start it yourself from the project, or build tests by hand, record them on a runner, or import them.";
-export const PLAIN_ON_RUNNERS_MESSAGE = "Describing a test in your own words is not available here yet: the AI builds and checks it with a browser on the server, and this platform runs tests only on runners. Build the steps by hand or write the test as text instead.";
+/** A job of a kind no runner does (none is left since round 52; kept for a kind added later). */
+export const SERVER_WORK_MESSAGE = "This kind of job is not available here: it would need a browser on the server, and this platform runs tests only on runners.";
 /** The dispatch worker is not alive (it starts with the API process): a run started now would wait and never start. */
 export const DISPATCH_DOWN_MESSAGE = "Runs cannot start right now: the part of this platform that hands runs to runners is not running. Try again in a minute. If it stays like this, tell the platform's administrator.";
 /** No runner this project may use is online (the job gate's answer in this mode). */
@@ -69,21 +64,29 @@ export const PLATFORM_SETTING_REFUSED = "Tests run only on runners on this platf
 export const SIGN_IN_BROWSER_REFUSED = "Checking or saving a sign-in in a browser is not available here: it would open a browser on the server, and this platform runs tests only on runners. The saved sign-in goes to the runner with the tests, and a test that finds it expired says so.";
 /** A recording or a phone session asked for on the server. */
 export const ON_SERVER_REFUSED = (what: "Recording" | "A phone session") => `${what} on the server is not available here: this platform runs tests only on runners. Use your runner instead.`;
-/** A security assessment opens a browser and sends its scans from the server. */
-export const ASSESSMENT_REFUSED = "Security assessments are not available here yet: they explore the application with a browser on the server and send their checks from it, and this platform runs tests only on runners.";
+/** Round 52: the external scanner tools (ZAP, nuclei...) run on the platform's computer, so an assessment on a runner leaves them out and says so. */
+export const SCANNERS_NOT_ON_RUNNER = "The external security scanners were not run: they run on the platform's computer, and this assessment ran on your runner, so nothing was sent from the platform.";
 /** What the last-line guard throws: a path that should have gone to a runner tried to run here. */
 export const SERVER_RUN_REFUSED = "This server does not run tests or open browsers (EXECUTION_MODE=runners): this work should have gone to a runner. Nothing was run here.";
 
 /** Refuse (409) a job that cannot go to a runner. Repo.createJob calls it for every way a job is made. */
-export function assertRunsOnRunner(config: Pick<Config, "EXECUTION_MODE">, options: Pick<JobOptions, "mode" | "startedBy" | "trigger" | "targets">): void {
+export function assertRunsOnRunner(config: Pick<Config, "EXECUTION_MODE">, options: Pick<JobOptions, "mode" | "targets">): void {
     if (!runnersOnly(config)) return;
     const mode = options.mode ?? "generate";
-    if (!RUNNER_JOB_MODES.includes(mode)) throw new HttpError(409, serverWorkMessage(mode), { cannotRunHere: true, executionMode: "runners" });
-    if (mode !== "generate") return;
-    // An exploration goes to its starter's runner (round 51). Not yet: one a schedule or a deploy trigger starts, nor one of a phone app.
-    const kind = options.startedBy?.kind ?? (options.trigger === "schedule" ? "schedule" : options.trigger === "deploy" ? "trigger" : undefined);
-    if (kind === "schedule" || kind === "trigger") throw new HttpError(409, EXPLORING_ON_RUNNERS_MESSAGE, { cannotRunHere: true, executionMode: "runners" });
-    if (options.targets?.includes("mobile")) throw new HttpError(409, PHONE_EXPLORE_ON_RUNNERS, { cannotRunHere: true, executionMode: "runners" });
+    if (!RUNNER_JOB_MODES.includes(mode)) throw new HttpError(409, SERVER_WORK_MESSAGE, { cannotRunHere: true, executionMode: "runners" });
+    // An exploration goes to its starter's runner (round 51), or a schedule's or deploy trigger's creator's (round 52), and so does one of a phone app.
+}
+
+/**
+ * Round 52: an exploration of a phone app runs on a runner that knows the "mobile" mode. Checked when the owner's runner is online (no runner, or
+ * an offline one, is the job gate's refusal, with its own words); whether that runner has a phone is the job gate's adapter check (taqwright).
+ */
+export function assertPhoneExploreRunner(agents: Pick<AgentService, "ownRunner">, ownerId: string | null, projectId: string, options: Pick<JobOptions, "mode" | "targets" | "fromPlan">): void {
+    if ((options.mode ?? "generate") !== "generate" || !options.targets?.includes("mobile")) return;
+    const own = agents.ownRunner(ownerId, projectId);
+    const agent = own?.online ? own.agent : undefined;
+    const why = agent ? exploreProblem(agent, "mobile") : undefined;
+    if (why) throw runnerRefusal("RUNNER_CANNOT_RUN", why);
 }
 
 /** Cancel the runner tasks of a job's earlier attempt (a job re-queued after its worker was lost): a runner must not run it twice. */
@@ -155,8 +158,10 @@ export function removeServerExecutionGuard(): void {
  */
 export function installRunnerOnly(p: Platform, agents: AgentService): void {
     p.repo.beforeRequeue = (jobId, o) => {
-        // An exploration on a runner is never picked up again (its browser and the AI's place in the work are gone with the attempt): stopped first.
-        for (const t of agents.store.tasksOfJob(jobId)) if (t.adapterId === EXPLORE_ADAPTER_ID && (t.status === "queued" || t.status === "running")) agents.store.requestCancel(t.id);
+        // A graceful restart hands an exploration over: its task keeps running and the next attempt picks it up (explore-dispatch.ts). Not after a
+        // crash, not when the job is given up, and not for an agent run (agent-run.ts never resumes one): then its task is stopped first.
+        const keepExplore = o.handedOver && !o.giveUp && p.repo.getJob(jobId)?.options.mode !== "agent";
+        if (!keepExplore) for (const t of agents.store.tasksOfJob(jobId)) if (t.adapterId === EXPLORE_ADAPTER_ID && (t.status === "queued" || t.status === "running")) agents.store.requestCancel(t.id);
         const live = agents.store.tasksOfJob(jobId).filter((t) => t.adapterId !== EXPLORE_ADAPTER_ID).filter((t) => t.status === "queued" || (t.status === "running" && !t.cancelRequested));
         // The next attempt picks up a runner task that is still alive, or one whose result is stored (agent-services.ts RemoteExecutor), so
         // the runner's work is neither lost nor done twice. Not when the job is given up, or no longer goes to a runner.
@@ -171,6 +176,10 @@ export function installRunnerOnly(p: Platform, agents: AgentService): void {
     };
     if (!runnersOnly(p.config)) return;
     agents.store.runnersOnly = true;
-    p.repo.executionGate = async (_projectId, options) => assertRunsOnRunner(p.config, options);
+    p.repo.executionGate = async (projectId, options) => {
+        assertRunsOnRunner(p.config, options);
+        const { ownerOfNewJob } = await import("./agent-services.js");
+        assertPhoneExploreRunner(agents, ownerOfNewJob(options), projectId, options);
+    };
     installServerExecutionGuard();
 }

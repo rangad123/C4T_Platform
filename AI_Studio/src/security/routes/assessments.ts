@@ -13,10 +13,16 @@
  *
  * The assessment loop (../assessment/runner.ts) runs in the API process when WORKER_EMBEDDED is on (the default), and is stopped with
  * the server. Its own work data never leaves the server.
+ *
+ * Round 52, EXECUTION_MODE=runners: the loop runs in the API process (as the dispatch worker does) and sends the steps that touch the
+ * application to the starter's runner (../assessment/on-runner.ts). A start is refused with the runs' codes when that runner cannot take
+ * it (not set up, offline, too old, a private address it does not open); every other rule of a start is the same.
  */
 import { z } from "zod";
-import { ASSESSMENT_REFUSED, runnersOnly } from "../../platform/runner-only.js";
-import { runAs, SYSTEM_ACTOR } from "../../platform/auth/actor.js";
+import { runnersOnly, SCANNERS_NOT_ON_RUNNER } from "../../platform/runner-only.js";
+import { ownerIdOfActor } from "../../platform/agent-store.js";
+import { assertAssessmentRunner, assessOnRunner } from "../assessment/on-runner.js";
+import { currentActor, runAs, SYSTEM_ACTOR } from "../../platform/auth/actor.js";
 import type { Db } from "../../platform/db.js";
 import { HttpError } from "../../platform/http-error.js";
 import { recordSecurityEvent } from "../audit.js";
@@ -58,6 +64,26 @@ export function recordFinished(db: Db, a: SecurityAssessment, app: SecurityAppli
 
 /** Loop dependencies for a platform (tests build their own with smaller limits and a stand-in browser). */
 export function loopDeps(ctx: Pick<SecurityRouteCtx, "p" | "settings">): RunnerDeps {
+    const scanners = scannerSettings(ctx.p.config as unknown as Record<string, string | undefined>);
+    // Round 52: on a platform that runs tests only on runners, the steps that touch the application run on the starter's runner. The external
+    // scanners run on this computer, so they are left out there (and the coverage list says so).
+    if (runnersOnly(ctx.p.config)) {
+        return {
+            db: ctx.p.db,
+            settings: ctx.settings,
+            headless: true,
+            guardFor: () => {
+                throw new Error("An assessment's requests are sent from the runner here, never from the platform.");
+            },
+            signInFor: (app) => resolveSignIn(ctx.p.db, ctx.p.config, app),
+            onFinished: (a, app) => {
+                recordFinished(ctx.p.db, a, app);
+                void notifyAssessmentFinished(ctx.p, a, app);
+            },
+            onRunner: assessOnRunner(ctx.p, ctx.settings),
+            ...(scanners.enabled.length ? { scannersLeftOut: SCANNERS_NOT_ON_RUNNER } : {}),
+        };
+    }
     return {
         db: ctx.p.db,
         settings: ctx.settings,
@@ -116,8 +142,8 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
     const view = (a: SecurityAssessment & { cancelRequested?: boolean }) => ({ ...a, cancelRequested: a.cancelRequested ?? false, applicationName: store.getApplication(a.applicationId)?.name ?? null });
 
     let loop: AssessmentLoop | undefined;
-    // EXECUTION_MODE=runners: an assessment explores with a browser on the server, so no loop runs and none is started (platform/runner-only.ts).
-    if (p.config.WORKER_EMBEDDED && !runnersOnly(p.config) && ctx.settings.enabled && !loops.has(p.db)) {
+    // EXECUTION_MODE=runners: the loop runs here whatever WORKER_EMBEDDED says (it opens no browser and sends nothing: the runner does).
+    if ((p.config.WORKER_EMBEDDED || runnersOnly(p.config)) && ctx.settings.enabled && !loops.has(p.db)) {
         loop = new AssessmentLoop(loopDeps(ctx), 1_500);
         loops.set(p.db, loop);
         // Started once the server is ready (not while routes are still being registered), stopped with it.
@@ -131,7 +157,6 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
     app.post(`${SECURITY_API}/applications/:appId/assessments`, async (req, reply) => {
         const a = ctx.application(params(req).appId!, req);
         const body = ctx.body(StartBody, req.body);
-        if (runnersOnly(p.config)) throw new HttpError(409, ASSESSMENT_REFUSED, { cannotRunHere: true, executionMode: "runners" });
         const auth = store.authorizationState(a);
         if (auth.state !== "current" || !auth.authorizationId) throw new HttpError(409, auth.message);
         const active = store.activeAssessment(a.id);
@@ -141,6 +166,10 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
             if (!original || original.applicationId !== a.id) throw new HttpError(404, "The assessment to retest was not found for this application.");
             if (original.state !== "COMPLETED" && original.state !== "PARTIALLY_COMPLETED") throw new HttpError(409, "Only a finished assessment can be retested. Wait for it to finish first.");
         }
+        // Round 52: it runs on the starter's runner: refused now, with the runs' sentences and the Settings link, when that runner cannot take it.
+        const actor = currentActor();
+        const ownerId = ownerIdOfActor(actor);
+        if (runnersOnly(p.config)) assertAssessmentRunner(p, { kind: actor.kind, ownerId }, a.projectId, a.targetUrl);
         const created = store.createAssessment({
             applicationId: a.id,
             authorizationId: auth.authorizationId,
@@ -148,6 +177,8 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
             retestOf: body.retestOf ?? null,
             progressText: body.retestOf ? "Waiting to start the retest." : "Waiting to start.",
         });
+        // Whose runner it goes to (kept with its work data, so a platform restart still knows).
+        if (runnersOnly(p.config)) store.setWorkData(created.id, { attempts: 0, ownerId });
         ctx.audit({
             projectId: a.projectId,
             applicationId: a.id,

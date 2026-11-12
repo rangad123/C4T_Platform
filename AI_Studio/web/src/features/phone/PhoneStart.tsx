@@ -10,20 +10,21 @@ import { go, routes } from "../../lib/router";
 import type { RunnerChoice } from "../runners/runners";
 import { reloadMyRunner, useMyRunner } from "../runners/my-runner";
 import { executionModeOf } from "../runs/runs-here";
-import { ACCOUNT_REMINDER, AI_MISSING, EXPLORE_ON_RUNNERS, IPHONE_NOTE, NEED_APP, NEED_PACKAGE, NO_WHERE_TITLE, PHONE_TITLE, WONT_DO, appLabel, appState, phoneWhere, startBody, willDo } from "./phone";
+import { ACCOUNT_REMINDER, AI_MISSING, IPHONE_NOTE, NEED_APP, NEED_PACKAGE, NO_WHERE_TITLE, PHONE_TITLE, WONT_DO, appLabel, appState, phoneWhere, startBody, willDo } from "./phone";
 import "./phone.css";
 
 /**
  * The panel before an exploration of a phone app starts: what will happen, what it needs, where it will run, and one button.
  * It runs where the project runs its tests (this server or the person's runner); this panel never changes that. It uses the plan mode,
- * so nothing is created until the person has seen the plan. Local mode only: in runners mode "Explore with AI" is switched off.
+ * so nothing is created until the person has seen the plan. In runners mode (round 52) it runs on the person's runner, on the phone attached to it.
  */
 export function PhoneStartDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
     const ref = useRef<HTMLDialogElement>(null);
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
     const runner = useFetch<RunnerChoice>(`/projects/${projectId}/runner`);
     const config = useConfig();
-    const onRunner = runner.data?.runOn === "agent";
+    const runnersOnly = executionModeOf(config) === "runners";
+    const onRunner = runnersOnly || runner.data?.runOn === "agent";
     const me = useMyRunner(15_000, onRunner);
     const aiReady = useProjectAiReady(projectId);
     const [username, setUsername] = useState("");
@@ -53,7 +54,7 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     }, [loading]);
     const failed = project.error ?? undefined;
     const m = project.data?.mobile ?? null;
-    const where = phoneWhere(config, onRunner ? "agent" : "platform", me.data?.runner);
+    const where = phoneWhere(config, runnersOnly ? "runners" : onRunner ? "agent" : "platform", me.data?.runner);
     const aiMissing = config ? !aiReady : false;
 
     async function start() {
@@ -162,17 +163,10 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
 
 /**
  * "Explore with AI" next to a phone app setting; also opens by itself when the page was reached with ?start=phone (right after the welcome
- * page saved the app). Runners mode: switched off with the reason, since the platform refuses explorations there.
+ * page saved the app). In runners mode the panel says which runner it runs on, or what to fix first.
  */
 export function ExploreWithAi({ projectId, auto }: { projectId: string; auto?: boolean }) {
-    const runnersOnly = executionModeOf(useConfig()) === "runners";
     const [open, setOpen] = useState(Boolean(auto));
-    if (runnersOnly)
-        return (
-            <Button icon={Sparkles} disabled data-tour="explore-phone" tip={EXPLORE_ON_RUNNERS}>
-                Explore with AI
-            </Button>
-        );
     return (
         <>
             <Button icon={Sparkles} onClick={() => setOpen(true)} data-tour="explore-phone" tip="Opens a panel that says what the AI will do and where it runs. Nothing starts until you choose Start exploring, and it stops at a plan for you to approve.">Explore with AI</Button>

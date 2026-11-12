@@ -5,7 +5,8 @@ import { Menu, MenuItem, MenuLabel } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { useProjectAiReady } from "../aiconfig/aiconfig";
 import { useHere } from "../auth/project-access";
-import { PLAIN_ON_RUNNERS, useExecutionMode, useRunsHere } from "../runs/runs-here";
+import { BUILDS_ON_RUNNER, useRunsHere } from "../runs/runs-here";
+import { useReadiness } from "../runners/my-runner";
 import { BuildTestDialog } from "../builder/BuildTestButton";
 import { WriteCodeDialog } from "../code/WriteCodeDialog";
 import { WriteTextDialog } from "../dsl/WriteAsText";
@@ -28,8 +29,9 @@ export function NewTestMenu({ projectId, onDescribe, onImport, onMade, variant =
     const PHONE = "Web and API only: this project tests a phone app.";
     // The AI writes a described test inside a run: while tests are switched off on this server it is said here, before the click.
     const runsHere = useRunsHere();
-    // Runners mode: the platform refuses a described test (the AI builds it with a browser on the server).
-    const runnersOnly = useExecutionMode() === "runners";
+    // Runners mode (round 52): the described test is built on the person's runner, so it needs one that is set up, online and new enough.
+    const ready = useReadiness({ can: ["web", "plain"] });
+    const runnersOnly = ready.mode === "runners";
     // Scripts from test cases: the AI writes and saves them (both permissions in this project, as the server asks), with the project's AI model.
     const here = useHere(projectId, project);
     const aiReady = useProjectAiReady(projectId);
@@ -42,7 +44,7 @@ export function NewTestMenu({ projectId, onDescribe, onImport, onMade, variant =
                 {(done) => (
                     <>
                         <MenuLabel>With help</MenuLabel>
-                        <MenuItem icon={PencilLine} description={webOnly ? PHONE : runnersOnly ? PLAIN_ON_RUNNERS : !runsHere ? "Tests are switched off on this server, and the AI writes a described test inside a run." : "The AI writes the steps from your words. Uses the AI model."} disabled={webOnly || !runsHere || runnersOnly} onClick={() => { done(); onDescribe(); }}>
+                        <MenuItem icon={PencilLine} description={webOnly ? PHONE : runnersOnly ? (ready.reason ?? BUILDS_ON_RUNNER) : !runsHere ? "Tests are switched off on this server, and the AI writes a described test inside a run." : "The AI writes the steps from your words. Uses the AI model."} disabled={webOnly || (runnersOnly ? !ready.ready : !runsHere)} onClick={() => { done(); onDescribe(); }}>
                             Describe it
                         </MenuItem>
                         <MenuItem icon={Sparkles} description={fromCasesWhy ?? "The AI writes a script for each Automated test case you choose. Uses the AI model."} disabled={!!fromCasesWhy} onClick={() => { done(); setDialog("cases"); }}>

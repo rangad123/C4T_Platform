@@ -7,14 +7,14 @@
  * is an opaque name the platform maps to its own test. Files travel as bytes (base64), never as paths.
  */
 import { z } from "zod";
-import { LocatorSchema, TestSpecSchema } from "../engine/spec/schema.js";
+import { LocatorSchema, StepSchema, TestSpecSchema } from "../engine/spec/schema.js";
 import { MemoryChangesSchema, SiteKnowledgeSchema } from "../engine/memory/types.js";
 import { ExploredOnSchema } from "../engine/mobile/phone-settings.js";
 import { CLEANUP_STATUSES } from "../engine/cleanup/ledger.js";
 import { EXTRA_VARIANT_IDS } from "../engine/validation/variants.js";
 import { SafeName } from "./schema.js";
 
-/** One file's bytes at most (raw, before base64). Evidence over it stays on the runner; a baseline over it is refused. */
+/** One file's bytes at most (raw, before base64) inside a call. Larger evidence is uploaded in chunks first (`fileChunk`); a baseline over it is refused. */
 export const EXPLORE_FILE_MAX_BYTES = 8 * 1024 * 1024;
 /** All files of one call at most (raw). The runner leaves out evidence that would pass it. */
 export const EXPLORE_CALL_FILES_MAX_BYTES = 16 * 1024 * 1024;
@@ -22,6 +22,8 @@ export const EXPLORE_CALL_FILES_MAX_BYTES = 16 * 1024 * 1024;
 export const EXPLORE_TASK_MAX_BYTES = 256 * 1024 * 1024;
 /** The largest request body the sink route must accept: one call at the file cap, base64, with room for its JSON. */
 export const EXPLORE_SINK_BODY_MAX = Math.ceil((EXPLORE_CALL_FILES_MAX_BYTES * 4) / 3) + 2 * 1024 * 1024;
+/** One chunk of an upload at most (raw). */
+export const EXPLORE_CHUNK_BYTES = 4 * 1024 * 1024;
 /** Calls in one batch at most. */
 export const EXPLORE_SINK_MAX_CALLS = 200;
 
@@ -36,6 +38,9 @@ const Base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/, "not base64");
 export const WireFile = z.object({ name: SafeName, data: Base64 });
 export type WireFile = z.infer<typeof WireFile>;
 
+/** An upload of this attempt (`fileChunk`), named by the runner: a short counter, never a path. */
+export const UploadId = z.string().regex(/^u[0-9]{1,6}$/);
+
 const ArtifactKind = z.enum(["screenshot", "trace", "video", "visual-actual", "visual-diff", "vision-shot", "evidence"]);
 
 /** What RepoSink keeps of a ScriptRun (src/engine/validation/runner.ts), with the evidence files as bytes. */
@@ -46,7 +51,8 @@ export const WireSinkRun = z.object({
     error: Text(4000).optional(),
     failedStepIndex: z.number().int(),
     steps: z.array(z.object({ index: z.number().int(), title: Text(500), status: z.enum(["passed", "failed"]), error: Text(2000).optional() })).max(500),
-    artifacts: z.array(z.object({ kind: ArtifactKind, file: WireFile })).max(50),
+    /** A file in the call, or one uploaded in chunks before it (`size`: its whole length, checked by the platform). */
+    artifacts: z.array(z.union([z.object({ kind: ArtifactKind, file: WireFile }), z.object({ kind: ArtifactKind, upload: z.object({ id: UploadId, name: SafeName, size: z.number().int().min(0) }) })])).max(50),
     notes: z.array(Text(500)).max(50).optional(),
     visionJudged: z.enum(["ok", "finding", "unavailable"]).optional(),
     responses: z.array(z.object({ method: Text(16), path: Text(2000), status: z.number(), obs: z.unknown().optional() })).max(500),
@@ -106,12 +112,28 @@ export const SinkCall = z.discriminatedUnion("method", [
     z.object({ method: z.literal("startAgentRun"), role: Id, subject: Text(500) }),
     z.object({ method: z.literal("agentAction"), runId: Id, a: z.object({ tool: Text(100), args: z.unknown(), ok: z.boolean(), observation: Text(20_000) }) }),
     z.object({ method: z.literal("finishAgentRun"), runId: Id, status: Text(40), summary: Text(4000).optional() }),
+    // Round 52: a piece of a large evidence file, written at `offset` (so sending it again changes nothing); a later run names it by `upload`.
+    z.object({ method: z.literal("fileChunk"), upload: UploadId, offset: z.number().int().min(0), data: Base64 }),
     z.object({ method: z.literal("rememberPhone"), d: z.object({ exploredOn: ExploredOnSchema.optional(), appActivity: z.object({ appPackage: Text(200), activity: Text(300) }).optional() }) }),
+    // Round 52: an AI agent run on the runner (agent-on-runner.ts). The run is the job's own (its options.agentRunId): no run id comes from the runner.
+    z.object({ method: z.literal("agentStep"), s: z.object({ seq: z.number().int().min(0), tool: Text(100), summary: Text(2000), status: z.enum(["done", "failed", "refused"]), detail: Text(4000).optional(), url: Text(4000), step: StepSchema.optional(), picture: WireFile.optional() }) }),
+    z.object({ method: z.literal("agentTokens"), used: z.object({ inputTokens: z.number().int().min(0), outputTokens: z.number().int().min(0) }) }),
+    z.object({ method: z.literal("agentApproval"), r: z.object({ action: Text(1000), kind: z.enum(["delete", "pay", "send", "submit"]), why: Text(1000), url: Text(4000), seconds: z.number().int().min(1).max(600) }) }),
+    z.object({ method: z.literal("approvalState"), id: Id }),
+    z.object({
+        method: z.literal("agentOutcome"),
+        o: z.object({ state: z.enum(["finished", "stopped"]), verdict: z.enum(["passed", "failed", "blocked", "inconclusive"]), reasoning: Text(8000), stopReason: Text(2000).optional(), failureCategory: z.enum(["application", "agent", "environment", "runner"]).optional(), inputTokens: z.number().int().min(0), outputTokens: z.number().int().min(0) }),
+    }),
 ]);
 export type SinkCall = z.infer<typeof SinkCall>;
 export type SinkMethod = SinkCall["method"];
 
-export const SinkRequest = z.object({ calls: z.array(SinkCall).min(1).max(EXPLORE_SINK_MAX_CALLS) });
+/**
+ * `seq` (round 52): the batch's number in this attempt, 1, 2, 3... The runner sends a batch again with the same number when it got no answer
+ * (the platform restarted); the platform applies each number once and answers a repeat with what it answered the first time. Uploads go
+ * without one (a chunk is written at its offset, so a repeat changes nothing).
+ */
+export const SinkRequest = z.object({ calls: z.array(SinkCall).min(1).max(EXPLORE_SINK_MAX_CALLS), seq: z.number().int().min(1).optional() });
 export type SinkRequest = z.infer<typeof SinkRequest>;
 
 /** One answer per call, in order. */
@@ -125,4 +147,6 @@ export const SinkAnswers = {
     startAgentRun: Id,
     loadMemory: z.object({ knowledge: SiteKnowledgeSchema.nullable(), warning: Text(1000).optional() }),
     loadBaselines: z.array(WireFile).max(200),
+    agentApproval: Id,
+    approvalState: z.enum(["pending", "approved", "refused", "timed_out", "stopped"]),
 } as const;

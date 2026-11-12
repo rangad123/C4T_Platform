@@ -3,8 +3,9 @@
  * sign-in when it runs, saving steps and pictures through the normal artifact path, waiting for a person's approval, and turning a finished run
  * into a draft test.
  *
- * Where it runs: in a job, so on the worker that takes the job. A job of this mode cannot go to a runner yet: the runner protocol carries finished
- * scripts and recordings driven step by step by a person, not a model loop. On a server with no worker or no AI key a run is refused at the start.
+ * Where it runs: in a job, so on the worker that takes the job. In runners mode (round 52) the objective is pursued on the starter's runner, as an
+ * explore task of mode "agent" (agent-on-runner.ts): everything else here stays on the platform. On a server with no worker or no AI key a run is
+ * refused at the start.
  */
 import path from "node:path";
 import type { Config } from "../config.js";
@@ -28,9 +29,14 @@ import { withJobStarter } from "./review-store.js";
 import { expandSecrets, totpCodesNear } from "./secret-variants.js";
 import type { ArtifactStore } from "./storage.js";
 import { runsCanStartHere } from "./suite-run.js";
-import { runnersOnly, serverWorkMessage } from "./runner-only.js";
+import { runnersOnly } from "./runner-only.js";
+import type { AgentOnRunnerRequest } from "../agent/agent-mode.js";
 
 export const NO_RUNNER_YET = "Agent runs use the browser of this platform's worker. They cannot go to a runner yet.";
+/** Round 52: where an agent run works in runners mode. */
+export const ON_YOUR_RUNNER = "Agent runs work in a browser on your runner, the one set up in Settings, Your runner. The AI stays on the platform.";
+/** The runner ended the run without saying how it went (an older runner, or it went away just then). */
+export const AGENT_NO_OUTCOME = "Your runner ended the agent run without saying how it went. Start the run again.";
 export const AGENT_NO_WORKER = "Agent runs do not start on this server: nothing here picks up a run, so it would wait in the queue and never start. Start it where tests run (your own installation, or once tests are switched on here).";
 /** Said on the page and in a refused start while agent runs are switched off on this server (AGENT_RUNS_ON_SERVER). */
 export const AGENT_RUNS_OFF = "Agent runs wait for runner support. Until a runner can take them they would use this server's own browser, so they are switched off here.";
@@ -45,11 +51,16 @@ export function agentRunStoreFor(p: Pick<Platform, "sql">): AgentRunStore {
 
 /** Can a run started now actually run? Said on the page before the form is used, and checked again at the start. */
 export async function agentRunsCanStart(p: Pick<Platform, "config" | "db" | "llm" | "sql">, projectId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
-    // First, whatever the worker state: the explicit setting (decision: AI browsers run only on runners).
-    if (!p.config.AGENT_RUNS_ON_SERVER) return { ok: false, reason: AGENT_RUNS_OFF };
-    // EXECUTION_MODE=runners: the server opens no browser, whatever AGENT_RUNS_ON_SERVER says (runner-only.ts).
-    if (runnersOnly(p.config)) return { ok: false, reason: serverWorkMessage("agent") };
-    if (!runsCanStartHere(p).ok) return { ok: false, reason: AGENT_NO_WORKER };
+    // EXECUTION_MODE=runners (round 52): the run goes to the starter's runner, so the server's own setting does not apply; the dispatch worker
+    // must be up, and the job gate says whether their runner can take it (with the runner's refusal codes).
+    if (runnersOnly(p.config)) {
+        const can = runsCanStartHere(p);
+        if (!can.ok) return can;
+    } else {
+        // First, whatever the worker state: the explicit setting (decision: AI browsers run only on runners).
+        if (!p.config.AGENT_RUNS_ON_SERVER) return { ok: false, reason: AGENT_RUNS_OFF };
+        if (!runsCanStartHere(p).ok) return { ok: false, reason: AGENT_NO_WORKER };
+    }
     // The project's AI: its own key counts, and a key that cannot be used says why.
     const ai = await projectAiGate(p, projectId);
     if (!ai.ok) return { ok: false, reason: ai.reason ?? AGENT_NO_MODEL };
@@ -91,6 +102,8 @@ export interface AgentJobArgs {
     storageState?: SessionOptions["storageState"];
     /** Used by tests; the worker launches a real browser. */
     launch?: () => ReturnType<typeof launchChromium>;
+    /** Round 52, runners mode: pursue the objective on the starter's runner instead (explore-dispatch.ts); the outcome comes back from it. */
+    onRunner?: (req: AgentOnRunnerRequest) => Promise<Omit<ObjectiveOutcome, "steps"> | undefined>;
 }
 
 const POLL_MS = 250;
@@ -111,7 +124,7 @@ export async function runAgentJob(args: AgentJobArgs): Promise<{ status: "COMPLE
     };
 
     // Switched off on this server: a job queued before the setting changed still does not start a browser.
-    if (!ctx.config.AGENT_RUNS_ON_SERVER) return end({ state: "finished", verdict: "blocked", stopReason: AGENT_RUNS_OFF, failureCategory: "environment" });
+    if (!args.onRunner && !ctx.config.AGENT_RUNS_ON_SERVER) return end({ state: "finished", verdict: "blocked", stopReason: AGENT_RUNS_OFF, failureCategory: "environment" });
     // A job picked up again after its worker went away: the first attempt may have done things, and an approved action must not happen twice.
     if (run.startedAt) return end({ state: "stopped", verdict: "inconclusive", stopReason: "The worker running this agent run went away. It was not started again, so nothing is done twice.", failureCategory: "runner" });
 
@@ -132,6 +145,30 @@ export async function runAgentJob(args: AgentJobArgs): Promise<{ status: "COMPLE
     }
 
     await runs.started(run.id);
+    const limits: ObjectiveLimits = { maxSteps: run.limits.maxSteps, maxMinutes: run.limits.maxMinutes, maxTokens: run.limits.budgetTokens, approvalSeconds: run.limits.approvalSeconds };
+    const signIn = credentials?.username && credentials.password ? { username: credentials.username, password: credentials.password, ...(credentials.totpSecret ? { totpSecret: credentials.totpSecret } : {}) } : undefined;
+    if (args.onRunner) {
+        // The runner records the steps, tokens and approvals as it goes (agent-on-runner.ts); here only the end is written, as below.
+        let got: Omit<ObjectiveOutcome, "steps"> | undefined;
+        try {
+            got = await args.onRunner({
+                url: baseUrl,
+                startAddress: run.startAddress,
+                objective: run.objective,
+                ...(run.successCriteria ? { successCriteria: run.successCriteria } : {}),
+                limits,
+                ...(signIn ? { credentials: signIn } : {}),
+                secrets: secretsOf(credentials, roles),
+                ...(args.storageState && !run.environment ? { storageState: args.storageState } : {}),
+            });
+        } catch (e) {
+            if (e instanceof Error && e.message === "Job cancelled") return end({ state: "stopped", verdict: "inconclusive", stopReason: repo.isCancelRequested(job.id) ? "A person stopped this run." : "The run went past its time limit." });
+            return end({ state: "finished", verdict: "inconclusive", stopReason: `The run could not go on: ${e instanceof Error ? e.message.slice(0, 300) : String(e)}`, failureCategory: "runner" });
+        }
+        if (!got) return end({ state: "stopped", verdict: "inconclusive", stopReason: AGENT_NO_OUTCOME, failureCategory: "runner" });
+        await runs.setTokens(run.id, { inputTokens: got.inputTokens, outputTokens: got.outputTokens });
+        return end({ state: got.state, verdict: got.verdict, ...(got.reasoning ? { reasoning: got.reasoning } : {}), ...(got.stopReason ? { stopReason: got.stopReason } : {}), ...(got.failureCategory ? { failureCategory: got.failureCategory } : {}) });
+    }
     let browser: Awaited<ReturnType<typeof launchChromium>>;
     try {
         browser = await (args.launch ?? (() => launchChromium(ctx.config.HEADLESS)))();
@@ -139,8 +176,6 @@ export async function runAgentJob(args: AgentJobArgs): Promise<{ status: "COMPLE
         return end({ state: "finished", verdict: "blocked", stopReason: `The browser could not start: ${e instanceof Error ? e.message.slice(0, 300) : String(e)}`, failureCategory: "runner" });
     }
 
-    const limits: ObjectiveLimits = { maxSteps: run.limits.maxSteps, maxMinutes: run.limits.maxMinutes, maxTokens: run.limits.budgetTokens, approvalSeconds: run.limits.approvalSeconds };
-    const signIn = credentials?.username && credentials.password ? { username: credentials.username, password: credentials.password, ...(credentials.totpSecret ? { totpSecret: credentials.totpSecret } : {}) } : undefined;
     let outcome: ObjectiveOutcome;
     try {
         outcome = await pursueObjective({

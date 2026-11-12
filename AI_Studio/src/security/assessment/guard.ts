@@ -13,7 +13,7 @@ import type { SecurityApplication } from "../contract.js";
 import { createScopeSession, guardedFetch, ScopeError, sessionOptionsFrom, type ScopeEvent, type ScopeSession, type ScopeSessionOptions } from "../scope.js";
 import { SecurityProxy, securityProxyFor } from "../proxy.js";
 import type { StorageState } from "../../engine/auth/storage-state.js";
-import { cookieHeaderFor, isSignOut, SIGN_OUT_REASON } from "../signin.js";
+import { cookieHeaderFor, isSignOut, SIGN_OUT_REASON } from "../signin-rules.js";
 import type { SecuritySettings } from "../settings.js";
 import { RefusedError, RequestCapError, type Guard, type GuardedAnswer, type GuardFetchInit } from "./types.js";
 

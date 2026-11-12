@@ -4,6 +4,9 @@ import { api } from "../../api";
 import { Button, Callout, Disclosure } from "../../components/ui";
 import type { AgentRun, AgentRunList } from "./agent-runs";
 import { describeApiError } from "../../lib/labels";
+import { RunStartError } from "../runners/RunnerRefusal";
+import { isRunnerRefusal, useReadiness } from "../runners/my-runner";
+import { RunnerNotReady } from "../runs/RunnerNotReady";
 
 /** Start an agent run: the objective in plain words, where it starts, and the limits. The token limit shows only to people who may see AI usage. */
 export function AgentRunForm({ projectId, list, seesUsage, onStarted }: { projectId: string; list: AgentRunList; seesUsage: boolean; onStarted: (r: AgentRun) => void }) {
@@ -16,13 +19,18 @@ export function AgentRunForm({ projectId, list, seesUsage, onStarted }: { projec
     const [budgetTokens, setBudgetTokens] = useState(list.limits.budgetTokens?.default ?? 0);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-    const blocked = list.canStart.ok ? (list.agentModeOn ? undefined : "Agent mode is off for this project.") : list.canStart.reason;
+    const [refusal, setRefusal] = useState<unknown>(null);
+    // Runners mode (round 52): the run works in a browser on the person's runner, so it needs one that is set up, online and new enough.
+    const ready = useReadiness({ can: ["web", "agent"] });
+    const runnerWhy = ready.mode === "runners" ? ready.reason : null;
+    const blocked = list.canStart.ok ? (list.agentModeOn ? (runnerWhy ?? undefined) : "Agent mode is off for this project.") : list.canStart.reason;
 
     async function submit(e: React.FormEvent) {
         e.preventDefault();
         if (objective.trim().length < 10) return setError("Say in a few words what the agent should achieve.");
         setBusy(true);
         setError("");
+        setRefusal(null);
         try {
             const run = await api<AgentRun>(`/projects/${projectId}/agent-runs`, {
                 method: "POST",
@@ -36,7 +44,8 @@ export function AgentRunForm({ projectId, list, seesUsage, onStarted }: { projec
             });
             onStarted(run);
         } catch (err) {
-            setError(describeApiError(err));
+            if (isRunnerRefusal(err)) setRefusal(err);
+            else setError(describeApiError(err));
             setBusy(false);
         }
     }
@@ -89,6 +98,8 @@ export function AgentRunForm({ projectId, list, seesUsage, onStarted }: { projec
                     )}
                 </div>
             </Disclosure>
+            {list.canStart.ok && <RunnerNotReady reason={runnerWhy} testId="agent-runner-problem" />}
+            {Boolean(refusal) && <RunStartError error={refusal} />}
             {error && (
                 <Callout tone="danger" title="The run did not start">
                     {error}

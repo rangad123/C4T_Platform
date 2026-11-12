@@ -1,6 +1,7 @@
 import { Ban, Check, ChevronLeft, CircleAlert, CircleCheck, CircleSlash, FilePlus2, FileText, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, artifactUrl, type ProjectDetail } from "../../api";
+import { api, artifactUrl, type Job, type ProjectDetail } from "../../api";
+import { useExecutionMode, workingOn } from "../runs/runs-here";
 import { Badge, Button, Callout, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
 import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
@@ -18,6 +19,10 @@ export function AgentRunDetail({ projectId, runId }: { projectId: string; runId:
     const canWrite = !access || access.includes("ai_studio.tests.write");
     const [busy, setBusy] = useState("");
     const [error, setError] = useState("");
+    // Runners mode (round 52): the run works on the starter's runner, which its job names once it is handed out.
+    const runners = useExecutionMode() === "runners";
+    const jobOf = useFetch<Job>(runners && run.data?.jobId && isActive(run.data) ? `/test-generation/${run.data.jobId}` : null, () => 3000);
+    const ranOn = jobOf.data?.ranOn?.kind === "agent" ? jobOf.data.ranOn.name : undefined;
 
     const send = async (name: string, path: string, body?: unknown) => {
         setBusy(name);
@@ -63,6 +68,11 @@ export function AgentRunDetail({ projectId, runId }: { projectId: string; runId:
                 <p className="t-secondary">
                     Started by {d.startedBy.name} {relativeTime(d.createdAt)}, on {d.environment ? `“${d.environment}”` : d.startAddress}. {plural(d.stepsTaken, "step")} of at most {d.limits.maxSteps}, at most {plural(d.limits.maxMinutes, "minute")}.
                 </p>
+                {runners && active && (
+                    <p className="t-secondary" data-testid="agent-on-runner">
+                        {workingOn("agent", ranOn)}.
+                    </p>
+                )}
             </section>
 
             {error && (

@@ -3,19 +3,20 @@
  * itself. The runner end (agent/remote-sink.ts) talks to the platform end (platform/explore-sink.ts) through a post that sends the
  * body as JSON, as the wire does; the platform end writes to a real RepoSink on a temporary database.
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { EXPLORE_FILE_MAX_BYTES } from "../src/agent-protocol/explore-sink.js";
+import { EXPLORE_CHUNK_BYTES, EXPLORE_FILE_MAX_BYTES } from "../src/agent-protocol/explore-sink.js";
 import type { ExplorePost } from "../src/agent/explore-transport.js";
 import { remoteGenerationSink } from "../src/agent/remote-sink.js";
 import { MEMORY_VERSION, type SiteKnowledge } from "../src/engine/memory/types.js";
 import { TestSpecSchema, type TestSpec } from "../src/engine/spec/schema.js";
 import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
-import { exploreRepoSink, forgetExploreSink, handleExploreSink } from "../src/platform/explore-sink.js";
+import { exploreRepoSink, forgetExploreSink, handleExploreSink, handOverExploreSinks } from "../src/platform/explore-sink.js";
 import type { ExploreTaskRef } from "../src/platform/explore-task.js";
 import { HttpError } from "../src/platform/http-error.js";
 import { localPathOf } from "../src/platform/object-store.js";
@@ -294,17 +295,41 @@ describe("the platform end refuses", () => {
         await forgetExploreSink(task.taskId);
     });
 
-    it("leaves oversized evidence on the runner instead of failing the job", async () => {
+    it("uploads evidence larger than one call in chunks, and it arrives whole; evidence past the attempt's cap stays on the runner", async () => {
         const { task } = await newTask();
         const w = wire(task);
         const sink = remoteGenerationSink({ post: w.post });
         const h = await sink.createTest({ spec: spec("WEB-001"), framework: "playwright", validation: "PENDING" });
-        const big = file("video.webm", Buffer.alloc(EXPLORE_FILE_MAX_BYTES + 1));
+        const bytes = Buffer.alloc(EXPLORE_FILE_MAX_BYTES + EXPLORE_CHUNK_BYTES + 17);
+        for (let i = 0; i < bytes.length; i += 4096) bytes[i] = i % 251;
+        const big = file("video.webm", bytes);
         await sink.recordExecution(h, null, 1, run("WEB-001", [{ kind: "video", path: big }, { kind: "screenshot", path: file("s.png", "png") }]), "x");
         await sink.flush();
+        // Four chunks (4 MB, 4 MB, 4 MB, 17 bytes), each on its own, before the call that names the upload.
+        expect(w.methods().filter((m) => m === "fileChunk")).toHaveLength(4);
+        expect(w.methods().indexOf("recordExecution")).toBeGreaterThan(w.methods().lastIndexOf("fileChunk"));
         const dbId = platform.repo.listTests(task.projectId)[0]!.id;
-        const execs = platform.repo.listExecutions(dbId) as Array<{ artifacts: Array<{ kind: string }> }>;
-        expect(execs[0]!.artifacts.map((a) => a.kind)).toEqual(["screenshot"]);
+        const arts = platform.repo.listArtifacts({ testId: dbId }) as Array<{ kind: string; path: string }>;
+        expect(arts.map((a) => a.kind).sort()).toEqual(["screenshot", "video"]);
+        const got = fs.readFileSync(localPathOf(platform.store, arts.find((a) => a.kind === "video")!.path)!);
+        expect(got.length).toBe(bytes.length);
+        expect(createHash("sha256").update(got).digest("hex")).toBe(createHash("sha256").update(bytes).digest("hex"));
+        await forgetExploreSink(task.taskId);
+    });
+
+    it("a chunk sent again changes nothing, and an upload that did not arrive whole is refused", async () => {
+        const { task } = await newTask();
+        const h = ((await handleExploreSink(platform, task, { calls: [{ method: "createTest", spec: spec("WEB-001"), framework: "playwright", validation: "PENDING" }] })) as { results: Array<{ id: string; testId: string }> }).results[0]!;
+        const data = Buffer.from("abcdef").toString("base64");
+        await handleExploreSink(platform, task, { calls: [{ method: "fileChunk", upload: "u1", offset: 0, data }] });
+        await handleExploreSink(platform, task, { calls: [{ method: "fileChunk", upload: "u1", offset: 0, data }] });
+        await refusal(handleExploreSink(platform, task, { calls: [{ method: "fileChunk", upload: "u1", offset: 99, data }] }));
+        const wireRun = { testId: "WEB-001", status: "passed", durationMs: 1, failedStepIndex: -1, steps: [], responses: [] };
+        await refusal(handleExploreSink(platform, task, { calls: [{ method: "recordExecution", h, scriptId: null, attempt: 1, startedAt: "x", run: { ...wireRun, artifacts: [{ kind: "video", upload: { id: "u1", name: "v.webm", size: 7 } }] } }] }));
+        await handleExploreSink(platform, task, { calls: [{ method: "recordExecution", h, scriptId: null, attempt: 1, startedAt: "x", run: { ...wireRun, artifacts: [{ kind: "video", upload: { id: "u1", name: "v.webm", size: 6 } }] } }] });
+        const dbId = platform.repo.listTests(task.projectId)[0]!.id;
+        const video = (platform.repo.listArtifacts({ testId: dbId }) as Array<{ kind: string; path: string }>).find((a) => a.kind === "video")!;
+        expect(fs.readFileSync(localPathOf(platform.store, video.path)!, "utf8")).toBe("abcdef");
         await forgetExploreSink(task.taskId);
     });
 
@@ -313,5 +338,76 @@ describe("the platform end refuses", () => {
         const h = ((await handleExploreSink(platform, task, { calls: [{ method: "createTest", spec: spec("WEB-001"), framework: "playwright", validation: "PENDING" }] })) as { results: Array<{ id: string; testId: string }> }).results[0]!;
         await refusal(handleExploreSink(platform, { ...task, attempt: 2 }, { calls: [{ method: "restoreTest", h }] }));
         await forgetExploreSink(task.taskId);
+    });
+});
+
+describe("a platform restart while a runner explores (round 52)", () => {
+    const refusal = (p: Promise<unknown>) => expect(p).rejects.toBeInstanceOf(HttpError);
+    const create = (testId: string) => ({ method: "createTest", spec: spec(testId), framework: "playwright", validation: "PENDING" });
+
+    it("a batch sent again with its number is applied once and answered as the first time", async () => {
+        const { task } = await newTask();
+        const first = (await handleExploreSink(platform, task, { seq: 1, calls: [create("WEB-001"), { method: "loadMemory", origin: "http://127.0.0.1:9045" }] })) as { results: unknown[] };
+        const again = (await handleExploreSink(platform, task, { seq: 1, calls: [create("WEB-001"), { method: "loadMemory", origin: "http://127.0.0.1:9045" }] })) as { results: unknown[] };
+        expect(again.results).toEqual(first.results);
+        expect(platform.repo.listTests(task.projectId)).toHaveLength(1);
+        // A number skipped or one from before the last is refused.
+        await refusal(handleExploreSink(platform, task, { seq: 3, calls: [create("WEB-002")] }));
+        await handleExploreSink(platform, task, { seq: 2, calls: [create("WEB-002")] });
+        await refusal(handleExploreSink(platform, task, { seq: 1, calls: [create("WEB-001"), { method: "loadMemory", origin: "x" }] }));
+        expect(platform.repo.listTests(task.projectId)).toHaveLength(2);
+        await forgetExploreSink(task.taskId, platform);
+    });
+
+    it("after a hand-over the next process knows the handles, the scripts and the last batch from the task's row", async () => {
+        const { task } = await newTask();
+        const h = ((await handleExploreSink(platform, task, { seq: 1, calls: [create("WEB-001")] })) as { results: Array<{ id: string; testId: string }> }).results[0]!;
+        const sid = ((await handleExploreSink(platform, task, { seq: 2, calls: [{ method: "saveScript", h, script: { framework: "playwright", filename: "a.spec.ts", content: "test()", language: "typescript" }, executable: true }] })) as { results: string[] }).results[0]!;
+        // The process lets go of the task (a graceful restart); everything it knew is now read back from the database.
+        await handOverExploreSinks(task.jobId);
+        expect(exploreRepoSink(task.taskId)).toBeUndefined();
+        // The answer to batch 2 was lost: the runner sends it again and gets the same script id, and nothing new is saved.
+        const again = (await handleExploreSink(platform, task, { seq: 2, calls: [{ method: "saveScript", h, script: { framework: "playwright", filename: "a.spec.ts", content: "test()", language: "typescript" }, executable: true }] })) as { results: string[] };
+        expect(again.results[0]).toBe(sid);
+        await handleExploreSink(platform, task, { seq: 3, calls: [{ method: "updateTest", h, patch: { validation: "VALIDATED" } }, { method: "recordExecution", h, scriptId: sid, attempt: 1, startedAt: "x", run: { testId: "WEB-001", status: "passed", durationMs: 1, failedStepIndex: -1, steps: [], responses: [], artifacts: [] } }] });
+        const dbId = platform.repo.listTests(task.projectId)[0]!.id;
+        expect(platform.repo.getTest(dbId)!.validationStatus).toBe("VALIDATED");
+        expect(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM generated_scripts WHERE test_case_id = ?", dbId)?.n).toBe(1);
+        await forgetExploreSink(task.taskId, platform);
+        expect(platform.db.get<{ s: string | null }>("SELECT sink_json AS s FROM explore_task_state WHERE task_id = ?", task.taskId)?.s).toBeNull();
+    });
+
+    it("the runner sends a batch again while the platform is away, and the exploration carries on", { timeout: 20_000 }, async () => {
+        const { task } = await newTask();
+        let away = 2;
+        const bodies: Array<{ seq?: number }> = [];
+        const post: ExplorePost = async (_route, body) => {
+            const sent = JSON.parse(JSON.stringify(body));
+            bodies.push(sent);
+            const answer = JSON.parse(JSON.stringify(await handleExploreSink(platform, task, sent)));
+            // The platform applied it, then went away before the answer reached the runner.
+            if (away-- > 0) throw Object.assign(new Error("The platform had a problem (HTTP 503)."), { name: "ExplorePostError", status: 503 });
+            return answer;
+        };
+        // Tried again after 1 s and 2 s (explore-transport.ts).
+        const sink = remoteGenerationSink({ post });
+        const h = await sink.createTest({ spec: spec("WEB-001"), framework: "playwright", validation: "PENDING" });
+        expect(h.testId).toBe("WEB-001");
+        await sink.flush();
+        expect(bodies.map((b) => b.seq)).toEqual([1, 1, 1]);
+        expect(platform.repo.listTests(task.projectId)).toHaveLength(1);
+        await forgetExploreSink(task.taskId, platform);
+    });
+
+    it("a refusal of the platform's own is not sent again", async () => {
+        let posts = 0;
+        const post: ExplorePost = async () => {
+            posts++;
+            throw Object.assign(new Error("The platform refused (HTTP 400)."), { name: "ExplorePostError", status: 400 });
+        };
+        const sink = remoteGenerationSink({ post });
+        await sink.phase("DISCOVERING", "discovery", "running");
+        await expect(sink.flush()).rejects.toThrow(/HTTP 400/);
+        expect(posts).toBe(1);
     });
 });

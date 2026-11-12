@@ -16,6 +16,7 @@
  * process's usage is not visible, and one call already running when a cap is reached still finishes, so a cap can be passed
  * by about one call per running process. Accounting errors never break a job: if the store cannot be read, calls go ahead.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { EngineEvent } from "../context.js";
 import type { LlmClient, Usage } from "./provider.js";
@@ -42,6 +43,12 @@ export interface MeterOptions {
     /** Who pays for this job's calls, written on every usage row; left out, Crowd4Test. */
     billing?: UsageBilling;
 }
+
+/**
+ * The purpose of a direct model call (`client.model`), when the caller knows it: a model call an exploration on a runner proxies through the
+ * platform says what it was for (platform/explore-llm.ts). Left unset, a direct call is the authoring agent's.
+ */
+export const modelCallPurpose = new AsyncLocalStorage<LlmPurpose>();
 
 export class JobMeter {
     private readonly backend: MeterBackend;
@@ -120,17 +127,18 @@ export class JobMeter {
         return {
             specificationVersion: "v3" as const,
             wrapGenerate: async ({ doGenerate }: { doGenerate: () => PromiseLike<any> }) => {
-                const token = this.enter("authoring", 0);
+                const purpose = modelCallPurpose.getStore() ?? "authoring";
+                const token = this.enter(purpose, 0);
                 const slot: { model?: string } = {};
                 try {
                     const out = await answeredSlot.run(slot, () => doGenerate());
                     this.answered(slot);
                     // Tokens arrive through the client's `usage` (the agent adds each step's numbers); only the call is counted here.
-                    this.leave(token, "authoring", { ok: true, images: 0, count: true, estimate: false });
+                    this.leave(token, purpose, { ok: true, images: 0, count: true, estimate: false });
                     return out;
                 } catch (e) {
                     this.answered(slot);
-                    this.leave(token, "authoring", { ok: false, images: 0, count: true, estimate: false });
+                    this.leave(token, purpose, { ok: false, images: 0, count: true, estimate: false });
                     throw e;
                 }
             },

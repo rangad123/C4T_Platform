@@ -33,10 +33,14 @@ export const NO_RUN_PERMISSION = "Running tests needs permission to run tests in
  */
 export const exploresOnRunner = (name: string): string => `Explores on your runner, ${name}. The browser opens on that computer; the AI works from the platform.`;
 export const exploringOn = (name: string | undefined): string => (name ? `Exploring on ${name}` : "Exploring on your runner");
+/** Round 52: the same for a described test being built and an agent run, by the job's mode. */
+export const workingOn = (mode: string | undefined, name: string | undefined): string =>
+    mode === "plain" ? (name ? `Building the test on ${name}` : "Building the test on your runner") : mode === "agent" ? (name ? `Working on ${name}` : "Working on your runner") : exploringOn(name);
 
-/** What the platform answers in runners mode when a scheduled exploration or a described test is asked for (src/platform/runner-only.ts), said before the click. */
-export const EXPLORING_ON_RUNNERS = "Scheduled and triggered explorations are not available here yet: an exploration runs on the runner of the person who starts it. Start it yourself from the project, or build tests by hand, record them on a runner, or import them.";
-export const PLAIN_ON_RUNNERS = "Describing a test in your own words is not available here yet: the AI builds and checks it with a browser on the server, and this platform runs tests only on runners. Build the steps by hand or write the test as text instead.";
+/** Round 52: a scheduled exploration in runners mode runs on the runner of the person who made the schedule. */
+export const SCHEDULED_EXPLORE_ON = "Explores on the runner of the person who made this schedule. If that runner is offline when the schedule fires, the exploration waits for it.";
+/** Round 52: a described test and an agent run in runners mode work in a browser on the person's runner. */
+export const BUILDS_ON_RUNNER = "The AI writes the steps from your words and checks them in a browser on your runner. Uses the AI model.";
 
 /** Before a run sends code scripts to the person's own computer. */
 export function codeScriptsNotice(authors: string[]): string {

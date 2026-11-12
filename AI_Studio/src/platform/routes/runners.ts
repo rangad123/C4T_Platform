@@ -60,7 +60,7 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
 
     /** What the runner can start now, in the words of the server's refusals (assertJobAllowed, chooseRecorder, chooseDeviceHost). */
     const canOf = (t: AgentTokenRecord, latest: AgentRecord | undefined, online: boolean) => {
-        const kinds = ["web", "phone", "ios", "windows", "record", "recordHeaded", "phoneSession", "explore"] as const;
+        const kinds = ["web", "phone", "ios", "windows", "record", "recordHeaded", "phoneSession", "explore", "plain", "agent", "phoneExplore", "assessment"] as const;
         if (!latest || !online) return Object.fromEntries(kinds.map((k) => [k, can(RUNNER_OFFLINE)])) as Record<(typeof kinds)[number], Can>;
         const tests = (id: string) => {
             const adapter = getAdapter(id);
@@ -77,6 +77,13 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
             phoneSession: can(hostDeviceProblem({ ...latest, personal: true, allowRealPhone: t.allowRealPhone })),
             // Round 51: exploring an application on this runner (the AI stays on the platform; explore-task.ts). An older runner: "Update your runner".
             explore: can(exploreProblem(latest)),
+            // Round 52: a test described in words, and an AI agent run, on this runner (the same kind of task).
+            plain: can(exploreProblem(latest, "plain")),
+            agent: can(exploreProblem(latest, "agent")),
+            // Round 52: exploring a phone app on the phone attached to this runner (a program that knows it, and a phone or an emulator), and a
+            // security assessment run from this runner (a program that knows it, and a browser).
+            phoneExplore: can(exploreProblem(latest, "mobile") ?? hostDeviceProblem({ ...latest, personal: true, allowRealPhone: t.allowRealPhone })),
+            assessment: can(exploreProblem(latest, "assessment") ?? tests("playwright").why),
         };
     };
 

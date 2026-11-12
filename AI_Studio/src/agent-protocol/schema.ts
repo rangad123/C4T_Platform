@@ -95,6 +95,13 @@ export const Capabilities = z.object({
      */
     explore: z.boolean().optional(),
     /**
+     * Round 52 (additive, optional): the other job kinds this agent runs as an explore task, beside an exploration: "plain" (a test described in
+     * words) and "agent" (an AI agent run); "mobile" (an exploration of a phone app on this computer's phone) and "assessment" (a security
+     * assessment, its checks sent from this computer). The platform offers such a task only to an agent that lists the mode; an older one is
+     * told to update.
+     */
+    exploreModes: z.array(z.enum(["plain", "agent", "mobile", "assessment"])).max(8).optional(),
+    /**
      * The runner's own Android phone tools (additive, optional; see docs/features/phone-setup-simple.md): "can-fetch" means this computer has no adb
      * yet and the runner gets Google's platform-tools itself when a phone session arrives; "ready" means it uses the ones it fetched. Reported only
      * when the runner's setting allows it and no other adb is found. Never a path.
@@ -706,7 +713,14 @@ export type DevicePush = z.infer<typeof DevicePush>;
  * account secrets: the agent registers `secrets` with its log scrubber and never writes the offer to disk.
  */
 export const ExploreTask = z.object({
-    /** The engine's GenerationRequest as JSON (no functions: the runner adds its own cleanup guard). Checked by the engine itself. */
+    /**
+     * Round 52: which engine entry runs. Absent or "generate": runGeneration (an exploration). "plain": runPlainAuthoring (a test described in
+     * words). "agent": pursueObjective (an AI agent run). "mobile": runGeneration of a phone app, on the phone attached to this computer.
+     * "assessment": a security assessment's steps (security/assessment/probe.ts runAssessmentOnRunner); its findings come back in the
+     * result (`explore.model.assessment`). Offered only to an agent that lists the mode in `exploreModes`.
+     */
+    mode: z.enum(["generate", "plain", "agent", "mobile", "assessment"]).optional(),
+    /** The engine's request as JSON for that mode (no functions: the runner adds its own cleanup guard). Checked by the engine itself. */
     request: z.record(z.string(), z.unknown()),
     /** The name the job's model goes by (informational: the platform decides which model answers). */
     modelName: z.string().max(200),

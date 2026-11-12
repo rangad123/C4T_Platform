@@ -21,7 +21,9 @@ import { guardedFetch } from "./guarded-fetch.js";
 import { isLoadSpec } from "../engine/performance/load.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { prepareEnvironmentRun } from "./environment-run.js";
-import { runPlainJob } from "./plain-run.js";
+import { plainRequestOf, runPlainJob } from "./plain-run.js";
+import { takeAgentOutcome } from "./agent-on-runner.js";
+import type { AgentOnRunnerRequest } from "../agent/agent-mode.js";
 import { runAgentJob } from "./agent-run.js";
 import { resetBeforeRun } from "./test-data-reset-run.js";
 import { DataSetStore } from "./environments-store.js";
@@ -48,6 +50,9 @@ import { configuredLlmForJob, resolveProjectAi, type ProjectAi } from "./ai-conf
 import { jobPersonGate } from "./phone-person-gate.js";
 import { agentServiceOf, RunnerAgentError } from "./agent-services.js";
 import { exploreOnRunner } from "./explore-dispatch.js";
+import { handOverExploreLlm } from "./explore-llm.js";
+import { handOverExploreSinks } from "./explore-sink.js";
+import { EXPLORE_ADAPTER_ID } from "./explore-task.js";
 import { runnersOnly } from "./runner-only.js";
 import { LEASE_LOST, onHandover } from "./runner-handover.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
@@ -195,6 +200,14 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         clearInterval(ticker);
         clearTimeout(deadline);
         await Promise.allSettled([...going]);
+        // An exploration on a runner: the saves still being applied are stored and its AI usage written; the next process carries on (explore-sink.ts).
+        await handOverExploreSinks(job.id).catch(() => undefined);
+        await handOverExploreLlm(job.id).catch(() => undefined);
+        // An agent run is not taken up again after a restart (agent-run.ts ends one that had started): its runner task is stopped, not left going.
+        if (job.options.mode === "agent") {
+            const svc = agentServiceOf(job.projectId);
+            for (const t of svc?.store.tasksOfJob(job.id) ?? []) if (t.adapterId === EXPLORE_ADAPTER_ID && (t.status === "queued" || t.status === "running")) svc!.store.requestCancel(t.id);
+        }
         await sink.writes.flush();
         const restored = await sink.restoreInterrupted();
         sink.event({ stage: "orchestration", kind: "job_handed_over", level: "warn", message: `The platform is restarting. This run carries on on its runner, and the platform takes it up again when it is back. A test is not run again unless it changed meanwhile.${restored ? ` ${restored === 1 ? "One test without a result yet is" : `${restored} tests without a result yet are`} back to what ${restored === 1 ? "it was" : "they were"} until then.` : ""}` });
@@ -310,9 +323,23 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             await finish("FAILED", signIn.stop);
             return;
         }
+        // Round 52: on a platform that runs tests only on runners, a described test and an agent run go to the starter's runner as an explore task
+        // of their mode (explore-dispatch.ts), the AI and the saving staying here. Elsewhere they run here, as before.
+        const onRunner = runnersOnly(config) ? agentServiceOf(job.projectId) : undefined;
         if (o.mode === "agent") {
             // The AI pursues an objective and keeps its own record (agent-run.ts): the job only says how it ended.
-            const ended = await runAgentJob({ repo, store, config, ctx, job, app, roles, ...(signIn.savedSession ? { storageState: signIn.savedSession.storageState } : {}) });
+            const runId = o.agentRunId ?? "";
+            const pursue = onRunner
+                ? async (request: AgentOnRunnerRequest) => {
+                      try {
+                          await exploreOnRunner(onRunner, { deps, job, mode: "agent", request, secrets: request.secrets, modelName: llm.modelName, frameworkSettings: frameworkSettingsOf(repo, job.projectId), signal: abort.signal, emit });
+                          return takeAgentOutcome(runId);
+                      } finally {
+                          takeAgentOutcome(runId);
+                      }
+                  }
+                : undefined;
+            const ended = await runAgentJob({ repo, store, config, ctx, job, app, roles, ...(signIn.savedSession ? { storageState: signIn.savedSession.storageState } : {}), ...(pursue ? { onRunner: pursue } : {}) });
             await finish(ended.status, ended.error);
             return;
         }
@@ -335,7 +362,10 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         } else if (o.mode === "plain") {
             // One test described in plain words: built, run for real, stored (see engine/authoring/plain.ts).
             const model = app.model ?? repo.getLatestAppModel(job.projectId);
-            summary = await runPlainJob({ repo, config, ctx, job, app: { ...app, model }, roles, sink: engineSink, cleanup, dataSets, deleteOps: projectDeleteOps(model?.apis) });
+            const plain = { repo, config, job, app: { ...app, model }, roles, cleanup, dataSets, deleteOps: projectDeleteOps(model?.apis) };
+            summary = onRunner
+                ? await exploreOnRunner(onRunner, { deps, job, mode: "plain", request: await plainRequestOf(plain), modelName: llm.modelName, frameworkSettings: frameworkSettingsOf(repo, job.projectId), signal: abort.signal, emit })
+                : await runPlainJob({ ...plain, ctx, sink: engineSink });
         } else if (o.mode === "variants") {
             // Compatibility checks only: the tests' own validation status is never touched.
             const tests: VariantTest[] = [];
@@ -430,9 +460,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             };
             // Round 51: on a platform that runs tests only on runners, the exploration runs on its starter's runner and the AI stays here
             // (explore-dispatch.ts); its model calls and what it saves come back through the explore routes. Elsewhere it runs here, as before.
-            const svc = runnersOnly(config) ? agentServiceOf(job.projectId) : undefined;
-            summary = svc
-                ? await exploreOnRunner(svc, { deps, job, request, modelName: llm.modelName, frameworkSettings: frameworkSettingsOf(repo, job.projectId), signal: abort.signal, emit })
+            summary = onRunner
+                ? await exploreOnRunner(onRunner, { deps, job, request, modelName: llm.modelName, frameworkSettings: frameworkSettingsOf(repo, job.projectId), signal: abort.signal, emit })
                 : await runGeneration(ctx, request, engineSink);
         }
 

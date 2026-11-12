@@ -596,13 +596,15 @@ export class Repo {
             } catch (err) {
                 console.warn(`[job ${String(s.id).slice(0, 8)}] could not look after the earlier attempt's runner tasks:`, err);
             }
+            // A graceful restart handed over an exploration whose runner task carries on (explore-dispatch.ts picks it up): what it saved is kept.
+            const keepsWork = handedOver && !!this.db.get("SELECT 1 FROM agent_tasks WHERE job_id = ? AND adapter_id = 'explore' AND status IN ('queued','running','done') AND cancel_requested = 0", s.id);
             this.db.tx(() => {
                 if (s.mode === "validate") {
                     // Losing the worker is not a verdict on any test, the third time either: tests without a result go back to not run yet
                     // (what they were before the run is known only to the process that was lost), and the job says why it was given up.
                     const ids: string[] = s.test_ids ? JSON.parse(s.test_ids) : [];
                     this.resetValidatingTests(ids, "PENDING", null);
-                } else {
+                } else if (!keepsWork) {
                     this.db.run("DELETE FROM test_cases WHERE job_id = ?", s.id);
                 }
                 if (giveUp) {
@@ -611,7 +613,7 @@ export class Repo {
                     this.db.run(
                         "UPDATE generation_jobs SET status='QUEUED', progress_json=?, counters_json=?, lease_until=NULL, lease_owner=NULL, updated_at=? WHERE id=?",
                         JSON.stringify(emptyProgress()),
-                        JSON.stringify(emptyCounters()),
+                        keepsWork ? (this.db.get<Row>("SELECT counters_json FROM generation_jobs WHERE id = ?", s.id)!.counters_json as string) : JSON.stringify(emptyCounters()),
                         now(),
                         s.id,
                     );

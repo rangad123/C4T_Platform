@@ -38,7 +38,7 @@ import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecret
 import { DeviceHub, deviceAgentOf, isDeviceAdapter } from "./agent-device.js";
 import { isRecordAdapter, RecordHub, RemoteDriver, recordAdapterId, recordAgentOf, recordJobId, type RemoteInit } from "./agent-record.js";
 import { IdentityStore } from "./identity-store.js";
-import { exploreProblem, isExploreAdapter, type ExploreTaskRef } from "./explore-task.js";
+import { exploreProblem, isExploreAdapter, isExploreMode, offerMode, type ExploreMode, type ExploreTaskRef } from "./explore-task.js";
 import { CleanupStore } from "./cleanup-store.js";
 import { HttpError } from "./http-error.js";
 import { hashObject, keyOfStoredFile, localCopyIn, validKey } from "./object-store.js";
@@ -345,7 +345,7 @@ export class AgentService {
             // address only where they are allowed. It holds no phone.
             if (isExploreAdapter(t.adapterId)) {
                 // Its calls are fenced by attempt, so only a protocol-2 agent (every one that reports `explore` speaks it).
-                if (exploreProblem(agent) || this.store.agentProtocol(agent.id) < 2 || !this.targetAllowed(token, t)) continue;
+                if (exploreProblem(agent, this.exploreModeOf(t.jobId, t.payloadEnc)) || this.store.agentProtocol(agent.id) < 2 || !this.targetAllowed(token, t)) continue;
                 const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000);
                 if (claimed) return this.handOut(agent, claimed);
                 continue;
@@ -625,6 +625,8 @@ export class AgentService {
         let count = this.store.liveEventCount(taskId, body.attemptId);
         let bytes = this.liveEventBytes.get(key) ?? 0;
         let full = count >= LIVE_EVENTS_MAX || bytes >= LIVE_EVENT_BYTES_MAX;
+        // Round 52: an assessment's explore task has no job (job_id `sec-<id>`, security/assessment/on-runner.ts): its live events are taken and not kept.
+        const jobless = isExploreAdapter(t.adapterId) && !this.p.repo.getJob(t.jobId);
         this.p.db.tx(() => {
             for (const raw of [...body.events].sort((a, b) => a.seq - b.seq)) {
                 if (full) break;
@@ -639,7 +641,7 @@ export class AgentService {
                     if (!isExploreAdapter(t.adapterId)) continue;
                     const data = { ...(e.data ?? {}), taskId, attempt: t.attempt };
                     const text = JSON.stringify(data);
-                    this.p.repo.addEvent(t.jobId, { stage: e.stage, kind: e.kind, level: e.level ?? "info", message: e.message, ...(text.length <= 20_000 ? { data } : { data: { taskId, attempt: t.attempt } }) });
+                    if (!jobless) this.p.repo.addEvent(t.jobId, { stage: e.stage, kind: e.kind, level: e.level ?? "info", message: e.message, ...(text.length <= 20_000 ? { data } : { data: { taskId, attempt: t.attempt } }) });
                     stored++;
                     count++;
                     bytes += e.message.length + Math.min(text.length, 20_000);
@@ -651,7 +653,7 @@ export class AgentService {
                 const level = (e.type === "test_finished" && e.status !== "passed" && e.status !== "skipped") || (e.type === "step_finished" && e.status === "failed") ? "warn" : "info";
                 const message = liveEventMessage(e, name).slice(0, 400);
                 const data = { ...liveEventData(e), taskId, attempt: t.attempt };
-                this.p.repo.addEvent(t.jobId, { stage: "validation", kind: LIVE_EVENT_KINDS[e.type], level, message, data });
+                if (!jobless) this.p.repo.addEvent(t.jobId, { stage: "validation", kind: LIVE_EVENT_KINDS[e.type], level, message, data });
                 stored++;
                 count++;
                 bytes += message.length + JSON.stringify(data).length;
@@ -659,7 +661,7 @@ export class AgentService {
             }
             // Once per attempt (seq -1 is never sent by a runner): say the live view stops here.
             if (full && this.store.noteLiveEvent(taskId, body.attemptId, -1)) {
-                this.p.repo.addEvent(t.jobId, { stage: "validation", kind: "runner_events_truncated", level: "warn", message: LIVE_EVENTS_TRUNCATED, data: { taskId, attempt: t.attempt } });
+                if (!jobless) this.p.repo.addEvent(t.jobId, { stage: "validation", kind: "runner_events_truncated", level: "warn", message: LIVE_EVENTS_TRUNCATED, data: { taskId, attempt: t.attempt } });
             }
         });
         if (this.liveEventBytes.size >= 5_000 && !this.liveEventBytes.has(key)) this.liveEventBytes.delete(this.liveEventBytes.keys().next().value!);
@@ -667,6 +669,26 @@ export class AgentService {
         if (lines.length || phase) this.store.heartbeat(taskId, t.agentId!, this.limits.leaseSeconds * 1000, { log: lines.length ? lines : undefined }, phase);
         if (phase) this.notePhase(t);
         return { ok: true, stored, duplicates };
+    }
+
+    /**
+     * Round 52: which engine entry an explore task runs: its offer's own mode (an assessment's task has no job; a phone exploration's offer
+     * says "mobile"), else its job's mode (an unreadable one: an exploration). Nothing of the offer is logged: it carries the job's secrets.
+     */
+    exploreModeOf(jobId: string, payloadEnc?: string): ExploreMode {
+        if (payloadEnc) {
+            try {
+                return offerMode(this.secrets.decrypt<TaskOffer>(payloadEnc));
+            } catch {
+                /* the job's mode below */
+            }
+        }
+        try {
+            const mode = this.p.repo.getJob(jobId)?.options.mode;
+            return mode === "plain" || mode === "agent" ? mode : "generate";
+        } catch {
+            return "generate";
+        }
     }
 
     /**
@@ -987,8 +1009,9 @@ export class AgentService {
      * owner's runner is off is made and waits for it (it fails at the wait limit with a sentence naming the owner, RemoteExecutor.waitFor).
      */
     assertJobAllowed(projectId: string, options: JobOptions): void {
-        // An agent run uses the worker's own browser and cannot go to a runner yet (agent-run.ts), so no runner is needed for it.
-        if (options.mode === "agent") return;
+        // An agent run uses the worker's own browser outside runners mode (agent-run.ts), so no runner is needed for it there. In runners mode it goes
+        // to the starter's runner (round 52), like an exploration.
+        if (options.mode === "agent" && !runnersOnly(this.p.config)) return;
         // Windows desktop tests start an application: the computer that runs them must be set up for it (allow-list), whoever runs them.
         const desktop = this.adaptersFor(options).includes("windows-uia") ? desktopApps(this.specsOf(options)) : [];
         const runsIos = this.adaptersFor(options).includes(IOS_ADAPTER_ID);
@@ -1028,9 +1051,11 @@ export class AgentService {
         if (address && looksPrivateAddress(address) && !own.token.allowPrivateTargets) {
             throw runnerRefusal("RUNNER_CANNOT_RUN", "This project's address is a private or local one (such as localhost or a computer on your network), and your runner does not open those. Switch on private addresses for your runner in Settings.");
         }
-        // Round 51: in runners mode an exploration runs on this runner as a whole, so it must be one that can explore.
-        if (runnersOnly(this.p.config) && (options.mode ?? "generate") === "generate") {
-            const why = exploreProblem(agent);
+        // Round 51: in runners mode an exploration runs on this runner as a whole, so it must be one that can explore. Round 52: a described test
+        // and an agent run likewise, each on a runner that knows that mode.
+        const mode = options.mode ?? "generate";
+        if (runnersOnly(this.p.config) && isExploreMode(mode)) {
+            const why = exploreProblem(agent, mode);
             if (why) throw runnerRefusal("RUNNER_CANNOT_RUN", why);
         }
         const farm = farmChosen(this.p.db, projectId);
@@ -1156,7 +1181,7 @@ export class AgentService {
         const mode = job.options.mode ?? "generate";
         const tasks = this.store.tasksOfJob(job.id);
         // Round 51: an exploration that went to a runner says where, as a run does.
-        const explored = mode === "generate" && (tasks.some((t) => isExploreAdapter(t.adapterId)) || (runnersOnly(this.p.config) && job.options.runOn === "agent"));
+        const explored = isExploreMode(mode) && (tasks.some((t) => isExploreAdapter(t.adapterId)) || (runnersOnly(this.p.config) && job.options.runOn === "agent"));
         if (mode !== "validate" && mode !== "variants" && mode !== "environment" && !explored) return undefined;
         const latest = tasks[tasks.length - 1];
         const stored = this.store.ranOnOf(job.id);

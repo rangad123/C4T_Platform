@@ -8,7 +8,7 @@
  */
 import type * as tls from "node:tls";
 import { evaluateSecurity, loadSecurityRuntime, SECURITY_FAILURE_PREFIX, TLS_WARN_DAYS, type SecurityCall, type SecurityCheck } from "../../engine/security/checks.js";
-import { fromCheckFailure, type RawResult } from "../findings/ingest.js";
+import { fromCheckFailure, type RawResult } from "../findings/normalize.js";
 
 /** The problem part of a line ("- [low] X is missing, so ... Add X." → "x is missing"), digits folded so day counts do not matter. */
 export function lineKey(check: string, line: string): string {

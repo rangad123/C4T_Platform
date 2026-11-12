@@ -24,8 +24,8 @@ import { llmClientFromModel } from "../src/engine/llm/provider.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
-import { EXPLORE_RUNNER_GONE, exploreNeedsUpdate } from "../src/platform/explore-task.js";
-import { EXPLORING_ON_RUNNERS_MESSAGE, removeServerExecutionGuard, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, serverRunRefusals } from "../src/platform/runner-only.js";
+import { EXPLORE_RUNNER_GONE, exploreNeedsUpdate, modeNeedsUpdate } from "../src/platform/explore-task.js";
+import { removeServerExecutionGuard, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, serverRunRefusals } from "../src/platform/runner-only.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { personalRunner, testPerson } from "./helpers/personal-runner.js";
@@ -215,9 +215,9 @@ describe("an exploration goes to its starter's runner", () => {
         // The page's readiness check says the same before anything is started.
         expect((await call("GET", "/api/me/runner", undefined, old.token)).body.runner.can.explore).toEqual({ ok: false, why: exploreNeedsUpdate("Old laptop") });
         expect((await call("GET", "/api/me/runner", undefined, offline.token)).body.runner.can.explore).toEqual({ ok: false, why: RUNNER_OFFLINE });
-        // Still refused for now: a scheduled one and a phone app.
+        // Round 52: a phone app is explored on the runner too, so an older runner is told to update (phone-explore-on-runner.test.ts has the rest).
         const app = platform.repo.createApplication(old.project, SITE, {} as never, undefined);
-        await expect(platform.repo.createJob(old.project, app, { targets: ["web"], trigger: "schedule" } as never)).rejects.toMatchObject({ status: 409, message: EXPLORING_ON_RUNNERS_MESSAGE });
+        await expect(platform.repo.createJob(old.project, app, { targets: ["mobile"], startedBy: { kind: "user", id: old.id } } as never)).rejects.toMatchObject({ status: 409, message: modeNeedsUpdate("Old laptop", "mobile"), details: { code: "RUNNER_CANNOT_RUN" } });
         for (const p of [noRunner, offline, old]) expect(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM generation_jobs WHERE project_id = ?", p.project)!.n).toBe(0);
     });
 

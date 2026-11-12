@@ -48,8 +48,7 @@ export function sameSite(appUrl: string, envBaseUrl: string): boolean {
     }
 }
 
-/** Run one plain-English job: resolve its inputs at the time it runs (an environment may have changed since it was queued), then build and run the test. */
-export async function runPlainJob(args: {
+type PlainJobArgs = {
     repo: Repo;
     config: Pick<Config, "dataDir" | "SECRET_KEY">;
     ctx: EngineContext;
@@ -60,7 +59,15 @@ export async function runPlainJob(args: {
     cleanup: CleanupRequest;
     dataSets: Record<string, DataSet>;
     deleteOps: string[];
-}): Promise<GenerationSummary> {
+};
+
+/** Run one plain-English job: resolve its inputs at the time it runs (an environment may have changed since it was queued), then build and run the test. */
+export async function runPlainJob(args: PlainJobArgs): Promise<GenerationSummary> {
+    return runPlainAuthoring(args.ctx, await plainRequestOf(args), args.sink);
+}
+
+/** The engine's request for a plain-English job, resolved now. Round 52: also what goes to the starter's runner in runners mode. */
+export async function plainRequestOf(args: Omit<PlainJobArgs, "ctx" | "sink">): Promise<PlainRequest> {
     const { repo, job, app } = args;
     const o = job.options;
     if (!o.plainDescription) throw new Error("This job has no description to build a test from.");
@@ -90,23 +97,19 @@ export async function runPlainJob(args: {
     // An environment has its own sign-in: its secrets must not show in the Explorer view either.
     frameHub.addSecrets(job.id, [credentials?.password, credentials?.totpSecret, ...roles.flatMap((r) => [r.password, r.totpSecret])]);
 
-    return runPlainAuthoring(
-        args.ctx,
-        {
-            description: o.plainDescription,
-            kind: o.plainKind ?? "web",
-            url,
-            apiBaseUrl,
-            model: app.model,
-            credentials,
-            roles,
-            allowChanges: o.allowMutatingApiTests === true,
-            ...(o.environment ? { environment: o.environment } : {}),
-            dataSets: args.dataSets,
-            deleteOps: args.deleteOps,
-            cleanup: args.cleanup,
-            replace,
-        },
-        args.sink,
-    );
+    return {
+        description: o.plainDescription,
+        kind: o.plainKind ?? "web",
+        url,
+        apiBaseUrl,
+        model: app.model,
+        credentials,
+        roles,
+        allowChanges: o.allowMutatingApiTests === true,
+        ...(o.environment ? { environment: o.environment } : {}),
+        dataSets: args.dataSets,
+        deleteOps: args.deleteOps,
+        cleanup: args.cleanup,
+        replace,
+    };
 }

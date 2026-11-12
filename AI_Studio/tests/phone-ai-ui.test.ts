@@ -291,19 +291,26 @@ describe("start: the panel", () => {
         expect(post(new RegExp(`/projects/${p.id}/test-generation$`))).toHaveLength(1);
     });
 
-    it("runners mode: Explore with AI is off at the button with the reason, and ?start=phone opens nothing", async () => {
+    it("runners mode (round 52): the panel opens and runs it on the person's runner, or says what to fix with a link to Settings", async () => {
         fake.config.executionMode = "runners";
         const p = fake.addProject("Shop");
+        const ok = { ok: true };
+        const why = "Your runner “Maya’s laptop” is too old to explore a phone app. Update your runner in Settings, Your runner, then try again.";
+        const mine = (phoneExplore: { ok: boolean; why?: string }) => ({ id: "r1", name: "Maya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), os: "win32", arch: "x64", switches: { codeScripts: true, privateTargets: false, realPhone: false }, can: { web: ok, phone: ok, ios: ok, windows: ok, record: ok, recordHeaded: ok, phoneSession: ok, phoneExplore } });
+        fake.me = mine({ ok: false, why });
         await visit(startHash(p.id));
-        const btn = page.getByRole("button", { name: "Explore with AI", exact: true }).first();
-        await pwExpect(btn).toBeVisible();
-        await pwExpect(btn).toHaveAttribute("aria-disabled", "true");
-        await btn.hover();
-        await pwExpect(page.locator('[role="tooltip"]:not([hidden])')).toContainText("the AI’s exploration doesn’t run on them yet");
-        await page.waitForTimeout(300);
-        expect(await dialog().count()).toBe(0);
-        await btn.click({ force: true });
-        expect(await dialog().count()).toBe(0);
+        await pwExpect(dialog()).toBeVisible();
+        await pwExpect(dialog()).toContainText(`Your runner, Maya’s laptop: ${why}`);
+        await pwExpect(dialog().getByRole("link", { name: "Open Your runner in Settings", exact: true })).toHaveAttribute("href", "#/settings#runner");
+        await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeDisabled();
+
+        fake.me = mine(ok);
+        await visit(startHash(p.id));
+        await pwExpect(dialog().getByTestId("phone-where")).toContainText("Your runner, Maya’s laptop. It opens the phone or emulator attached to your runner’s computer. The AI works from the platform.");
+        await dialog().getByRole("button", { name: "Start exploring", exact: true }).click();
+        await pwExpect(page).toHaveURL(new RegExp(`#/projects/${p.id}$`));
+        expect(fake.called("PUT", /\/runner$/)).toEqual([]);
+        expect(post(new RegExp(`/projects/${p.id}/test-generation$`))).toHaveLength(1);
     });
 
     it("when the AI model is not set up it says so, links to Settings and does not start", async () => {

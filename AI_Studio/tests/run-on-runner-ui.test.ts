@@ -23,8 +23,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
-import { EXPLORING_ON_RUNNERS_MESSAGE, PLAIN_ON_RUNNERS_MESSAGE } from "../src/platform/runner-only.js";
-import { codeScriptsNotice, EXPLORING_ON_RUNNERS, executionModeOf, PLAIN_ON_RUNNERS, DISPATCH_OFF, RUNS_OFF_TIP } from "../web/src/features/runs/runs-here.js";
+import { modeNeedsUpdate } from "../src/platform/explore-task.js";
+import { BUILDS_ON_RUNNER, codeScriptsNotice, executionModeOf, DISPATCH_OFF, RUNS_OFF_TIP } from "../web/src/features/runs/runs-here.js";
 import { isRunnerRefusal, needOfTest, readiness, refusalLink, runnerProblem, RUNNER_CODE_OFF, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, type RunnerMine } from "../web/src/features/runners/my-runner.js";
 import { ApiError } from "../web/src/api.js";
 
@@ -101,9 +101,7 @@ describe("the rules (no browser)", () => {
     it("says who wrote the code scripts that go to your computer, when known, and the platform's own words for refused AI work", () => {
         expect(codeScriptsNotice([])).toBe("This run includes code scripts. They run on your computer with your user’s rights.");
         expect(codeScriptsNotice(["Ana", "Ben", "Chen"])).toBe("This run includes code scripts written by Ana, Ben and Chen. They run on your computer with your user’s rights.");
-        expect(EXPLORING_ON_RUNNERS.length).toBeGreaterThan(20);
-        expect(PLAIN_ON_RUNNERS).toBe(PLAIN_ON_RUNNERS_MESSAGE);
-        expect(typeof EXPLORING_ON_RUNNERS_MESSAGE).toBe("string");
+        expect(BUILDS_ON_RUNNER).toContain("on your runner");
     });
 
 });
@@ -487,15 +485,25 @@ describe("phone tests on a project's device farm", () => {
     }, 120_000);
 });
 
-describe("AI work the platform refuses in runners mode", () => {
-    it("Describe it says so before the click and cannot be started; exploring goes to your runner", async () => {
+describe("AI work on your runner in runners mode", () => {
+    it("Describe it builds on your runner, and says to update a runner too old for it; exploring goes to your runner", async () => {
+        // Round 52: a described test is built on the person's runner.
         setMine(MINE);
         await scripts();
         await page.getByRole("button", { name: "New test script", exact: true }).click();
         const describeIt = page.getByRole("menuitem", { name: /Describe it/ });
-        await pwExpect(describeIt).toBeDisabled();
-        await pwExpect(describeIt).toContainText("Describing a test in your own words is not available here yet");
+        await pwExpect(describeIt).toContainText(BUILDS_ON_RUNNER);
+        await pwExpect(describeIt).toBeEnabled();
         await page.keyboard.press("Escape");
+        // A runner too old for it: the server's own sentence, before the click.
+        const OLD_WHY = modeNeedsUpdate("Office laptop", "plain");
+        setMine(runnerOf({ can: { ...CAN_ALL, plain: { ok: false, why: OLD_WHY } } }));
+        await scripts();
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
+        await pwExpect(describeIt).toBeDisabled();
+        await pwExpect(describeIt).toContainText(OLD_WHY);
+        await page.keyboard.press("Escape");
+        setMine(MINE);
         // Round 51: exploring runs on the person's own runner (tests/explore-on-runner-ui.test.ts has its states).
         await visit(`#/new?project=${projectId}`);
         await pwExpect(page.getByTestId("explore-on-hint")).toContainText("Explores on your runner, Office laptop.");

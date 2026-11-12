@@ -8,7 +8,8 @@ import { useFetch } from "../../lib/hooks";
 import { help } from "../../lib/help";
 import { friendlyError, describeApiError } from "../../lib/labels";
 import { duration, relativeTime } from "../../lib/format";
-import { go, useRoute } from "../../lib/router";
+import { go, routes, useRoute } from "../../lib/router";
+import { isRunnerRefusal, refusalLink, useReadiness } from "../runners/my-runner";
 import { AuthTag, SecurityLayout, StateTag, canRun, stateKey, useRole } from "./SecurityChrome";
 import { AUTH_WORDS, SEC, STATE_WORDS, STEPS, authStateOf, isRunning, listOf, oneOf, sec, useApps, useAssessments, useSecurityStatus, when, type AppRow, type AssessmentRow, type AssessmentState, type SecurityAssessment, type SecurityAuthorization } from "./security";
 
@@ -20,10 +21,13 @@ const DOES = [
     "Asks for a short list of well-known files that should not be public (for example .env) and notes directory listings.",
     "Notes pages, forms (field names and types only) and API calls it sees, and says plainly what it could not inspect.",
 ];
+/** Runners mode (round 52): where the assessment runs, before the click. */
+export const assessesOnRunner = (name: string): string => `Runs on your runner, ${name}. Its browser and every check are sent from that computer, never from the platform.`;
+
 const DOES_NOT = [
     "Never submits forms, signs in, or clicks anything that changes data.",
     "Never sends attack payloads, guesses passwords or tries to break in.",
-    "Never requests addresses outside the scope, excluded paths, or private network addresses.",
+    "Never requests addresses outside the scope or excluded paths. Private network addresses only where they are allowed (your runner’s setting, or this server’s), and never cloud metadata addresses.",
     "Never uses an AI model on the application.",
 ];
 
@@ -38,6 +42,10 @@ export function NewAssessmentPage({ id }: { id: string }) {
     const auths = useFetch<unknown>(chosen ? `${SEC}/applications/${chosen.id}/authorizations` : null);
     const [busy, setBusy] = useState(false);
     const [problem, setProblem] = useState("");
+    const [problemLink, setProblemLink] = useState<string | null>(null);
+    // Round 52: on a platform that runs tests only on runners, the assessment runs on the person's runner (a start is refused without one).
+    const ready = useReadiness({ can: ["assessment"] });
+    const runnerBlocks = ready.mode === "runners" && !ready.ready;
     const auth = chosen ? authStateOf(chosen, listOf<SecurityAuthorization>(auths.data, "authorizations")) : "none";
     const limits = status?.limits ?? {};
     const cap = typeof limits.maxRequestsPerAssessment === "number" ? limits.maxRequestsPerAssessment : typeof limits.requestCap === "number" ? limits.requestCap : undefined;
@@ -47,11 +55,14 @@ export function NewAssessmentPage({ id }: { id: string }) {
         if (!chosen) return;
         setBusy(true);
         setProblem("");
+        setProblemLink(null);
         try {
             const answer = await api<unknown>(`${SEC}/applications/${chosen.id}/assessments`, { method: "POST", body: retestOf ? { retestOf } : {} });
             go(sec.assessment(id, oneOf<SecurityAssessment>(answer, "assessment")!.id));
         } catch (e) {
             setProblem(describeApiError(e));
+            setProblemLink(refusalLink(e));
+            if (isRunnerRefusal(e)) void ready.reload();
             setBusy(false);
         }
     }
@@ -132,13 +143,20 @@ export function NewAssessmentPage({ id }: { id: string }) {
                         {AUTH_WORDS[auth].text}
                     </Callout>
                 )}
+                {ready.mode === "runners" && !ready.loading && (ready.reason ? (
+                    <Callout tone="warning" title="Your runner can’t take this assessment" actions={ready.runnerReason ? <LinkButton size="sm" href={routes.yourRunner}>Open Your runner in Settings</LinkButton> : undefined}>
+                        {ready.reason}
+                    </Callout>
+                ) : ready.runner ? (
+                    <p className="hint" data-testid="na-runner">{assessesOnRunner(ready.runner.name)}</p>
+                ) : null)}
                 {problem && (
-                    <Callout tone="danger" title="The assessment did not start">
+                    <Callout tone="danger" title="The assessment did not start" actions={problemLink ? <LinkButton size="sm" href={problemLink}>Open Your runner in Settings</LinkButton> : undefined}>
                         {problem}
                     </Callout>
                 )}
                 <div className="row">
-                    <Button variant="primary" size="lg" icon={Play} loading={busy} disabled={!chosen || auth !== "current" || !canRun(role)} onClick={() => void start()}>
+                    <Button variant="primary" size="lg" icon={Play} loading={busy} disabled={!chosen || auth !== "current" || !canRun(role) || runnerBlocks} onClick={() => void start()}>
                         {retestOf ? "Start retest" : "Start assessment"}
                     </Button>
                     {!canRun(role) && <span className="hint">Editors and owners can start assessments.</span>}

@@ -17,10 +17,10 @@ import { loadConfig } from "../src/config.js";
 import { isLlmCallError, LlmCallError } from "../src/engine/llm/errors.js";
 import { llmClientFromModel, LlmNotConfiguredError } from "../src/engine/llm/provider.js";
 import { isBudgetExceeded } from "../src/engine/llm/usage.js";
-import { withRoute } from "../src/engine/llm/routing.js";
+import { escalateRoute, withRoute } from "../src/engine/llm/routing.js";
 import { AI_REFUSED } from "../src/platform/ai-config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
-import { AI_NOT_SET_UP, errorOf, forgetExploreLlm, handleExploreLlm } from "../src/platform/explore-llm.js";
+import { AI_NOT_SET_UP, errorOf, forgetExploreLlm, handleExploreLlm, handOverExploreLlm } from "../src/platform/explore-llm.js";
 import type { ExploreTaskRef } from "../src/platform/explore-task.js";
 import { HttpError } from "../src/platform/http-error.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
@@ -201,6 +201,57 @@ describe("remote AI client", () => {
         await forgetExploreLlm(task.taskId);
         const row = platform.db.get<{ i: number; o: number }>("SELECT SUM(input_tokens) AS i, SUM(output_tokens) AS o FROM ai_usage WHERE job_id = ?", task.jobId);
         expect(row).toEqual({ i: 180, o: 33 });
+        // Each call is metered with what it was for (round 52): the engine's purpose, a look at images as vision, none as authoring.
+        const purposes = platform.db.all<{ purpose: string; calls: number }>("SELECT purpose, SUM(calls) AS calls FROM ai_usage WHERE job_id = ? GROUP BY purpose ORDER BY purpose", task.jobId);
+        expect(purposes).toEqual([
+            { purpose: "authoring", calls: 1 },
+            { purpose: "planning", calls: 1 },
+            { purpose: "vision", calls: 1 },
+        ]);
+    });
+
+    it("an unknown purpose is metered as authoring", async () => {
+        const task = await taskOn(platform);
+        next = async () => ({ content: [{ type: "text", text: "x" }], finishReason: { unified: "stop", raw: "end_turn" }, usage: usage(1, 1), warnings: [] });
+        const deps = { repo: platform.repo, config: platform.config, makeLlm: () => llmClientFromModel(mock as unknown as LanguageModel, "main-model") };
+        const a = await handleExploreLlm(deps, task, { options: { prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] }, purpose: "made-up" });
+        expect(a.ok).toBe(true);
+        await forgetExploreLlm(task.taskId);
+        expect(platform.db.all<{ purpose: string }>("SELECT DISTINCT purpose FROM ai_usage WHERE job_id = ?", task.jobId)).toEqual([{ purpose: "authoring" }]);
+    });
+
+    it("a request that closes stops the provider call (round 52)", async () => {
+        const task = await taskOn(platform);
+        let signal: AbortSignal | undefined;
+        next = (o) =>
+            new Promise((_resolve, reject) => {
+                signal = o.abortSignal;
+                o.abortSignal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+            });
+        const deps = { repo: platform.repo, config: platform.config, makeLlm: () => llmClientFromModel(mock as unknown as LanguageModel, "main-model") };
+        const gone = new AbortController();
+        const answer = handleExploreLlm(deps, task, { options: { prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } }, gone.signal);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(signal?.aborted).toBe(false);
+        gone.abort();
+        expect((await answer).ok).toBe(false);
+        expect(signal?.aborted).toBe(true);
+        await forgetExploreLlm(task.taskId);
+    });
+
+    it("provider names keep their aliases after the platform hands the task over (round 52)", async () => {
+        const task = await taskOn(platform);
+        const deps = { repo: platform.repo, config: platform.config, makeLlm: () => llmClientFromModel(mock as unknown as LanguageModel, "main-model") };
+        let seen: Parameters<Gen>[0] | undefined;
+        next = async (o) => ((seen = o), { content: [{ type: "text", text: "x" }], finishReason: { unified: "stop", raw: "end_turn" }, usage: usage(1, 1), warnings: [], providerMetadata: { [PROVIDER]: { id: "r1" } } });
+        const first = await handleExploreLlm(deps, task, { options: { prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } });
+        expect(first.ok && first.result.providerMetadata).toEqual({ p1: { id: "r1" } });
+        await handOverExploreLlm(task.jobId);
+        await handleExploreLlm(deps, task, { options: { prompt: [{ role: "user", content: [{ type: "text", text: "again", providerOptions: { p1: { id: "r1" } } }] }] } });
+        const part = (seen!.prompt[0]!.content as Array<{ providerOptions?: Record<string, unknown> }>)[0]!;
+        expect(part.providerOptions).toEqual({ [PROVIDER]: { id: "r1" } });
+        await forgetExploreLlm(task.taskId, deps);
+        expect(platform.db.get<{ l: string | null }>("SELECT llm_json AS l FROM explore_task_state WHERE task_id = ?", task.taskId)?.l).toBeNull();
     });
 
     it("a tool-calling agent works: the tool runs on the runner, the model on the platform", async () => {
@@ -372,6 +423,19 @@ describe("remote AI client", () => {
         });
         // A fast step; a failed fast step answered by the main model; the rest of that scenario on the main model.
         expect(log).toEqual(["fast", "fast", "main", "main"]);
+        // Round 52: the runner's own agent loop moves a scenario to the main model: the job is told once and it is counted once.
+        log.length = 0;
+        await withRoute({ task: "authoring", what: "Scenario S-002" }, async () => {
+            await step();
+            escalateRoute("made no progress for 6 steps");
+            await step();
+            await step();
+        });
+        expect(log).toEqual(["fast", "main", "main"]);
+        const told = p.db.all<{ message: string }>("SELECT message FROM agent_events WHERE job_id = ? AND kind = 'ai_model_escalated'", task.jobId).map((e) => e.message);
+        expect(told.filter((m) => m.startsWith("Scenario S-002"))).toEqual(["Scenario S-002: the fast AI model fast-model made no progress for 6 steps, so the main model main-model does the rest of it."]);
+        // Both escalations (the failed fast step of S-001 and S-002's) are counted.
+        expect(p.db.get<{ n: number }>("SELECT SUM(calls) AS n FROM ai_usage WHERE job_id = ? AND purpose = 'escalation'", task.jobId)?.n).toBe(2);
         await forgetExploreLlm(task.taskId);
         p.db.close();
     });

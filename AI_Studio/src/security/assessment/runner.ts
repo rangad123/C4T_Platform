@@ -20,9 +20,10 @@ import { ingest, retestTargets, type RawResult } from "../findings/ingest.js";
 import { buildReport } from "../findings/report.js";
 import type { SecuritySettings } from "../settings.js";
 import { SecurityStore } from "../store.js";
-import { checkSignInPlain, discover, emptyDiscovery, SIGN_IN_RECHECK_EVERY, type DiscoverOptions } from "./discover.js";
-import { scan, type ScanStepOutcome } from "./scan.js";
-import { RequestCapError, type DiscoveryResult, type Guard } from "./types.js";
+import { emptyDiscovery, SIGN_IN_RECHECK_EVERY, type DiscoverOptions } from "./discover.js";
+import type { ScanStepOutcome } from "./scan.js";
+import type { DiscoveryResult, Guard } from "./types.js";
+import { probe, type AssessmentOnRunnerOutcome, type AssessmentOnRunnerRequest, type ProbeProgress, type ProbeRequest } from "./probe.js";
 import { apiDocumentText, sensitivePrefixes } from "../extras.js";
 import { cookieHeaderFor, scrubSecrets, type ResolvedSignIn } from "../signin.js";
 import type { GuardSignIn } from "./guard.js";
@@ -75,6 +76,22 @@ export interface RunnerDeps {
         adapters?: ScannerAdapter[];
         log?(event: string, data: Record<string, unknown>): void;
     };
+    /**
+     * Round 52, EXECUTION_MODE=runners: the steps that touch the application (probe.ts) run on the starter's runner instead of here
+     * (on-runner.ts). Resolves with what the runner found; rejects with the plain reason it could not, or once `signal` ends it. The task
+     * is stopped then, unless `keepTask` says the platform is only stopping (the next loop picks the same task up).
+     */
+    /** Round 52: the external scanners were left out because the steps run on a runner: this sentence goes in the coverage list. */
+    scannersLeftOut?: string;
+    onRunner?(o: {
+        assessment: SecurityAssessment;
+        ownerId: string | null;
+        request: Omit<AssessmentOnRunnerRequest, "settings">;
+        secrets: string[];
+        signal: AbortSignal;
+        keepTask(): boolean;
+        update(patch: ProbeProgress): void;
+    }): Promise<AssessmentOnRunnerOutcome>;
     /** For tests: how the browser is started. */
     launch?: DiscoverOptions["launch"];
     log?(event: string, data: Record<string, unknown>): void;
@@ -83,6 +100,8 @@ export interface RunnerDeps {
 /** RUN's scratch data kept with the assessment (bounded by the discovery caps). Never shown as it is. */
 interface WorkData {
     attempts: number;
+    /** Round 52 (runners mode): the person who started it (a users.id): its steps run on their runner. Set when it is created. */
+    ownerId?: string | null;
     discovery?: DiscoveryResult;
     discoveryDone?: boolean;
     scan?: { results: RawResult[]; outcomes: ScanStepOutcome[]; capReached: boolean; requested: number };
@@ -314,118 +333,50 @@ export class AssessmentLoop {
                 ...(app.signInAccount ? { signIn: { label: signIn?.label ?? app.signInAccount, used: Boolean(signIn?.state), ...(signIn?.problem ? { problem: signIn.problem } : !signIn ? { problem: "Signed-in pages were not inspected: saved sign-ins cannot be read here." } : {}) } } : {}),
                 ...(app.sensitiveWorkflows?.length ? { sensitive: app.sensitiveWorkflows } : {}),
             };
-            const guard = this.deps.guardFor(scoped, abort.signal, signIn?.state ? { state: signIn.state, refuseSignOut: true } : {});
-            // The company proxy (SECURITY_USE_PROXY) is checked before the first request: a proxy that may not be used fails the assessment with the reason.
-            await guard.ready?.();
-            const extra: string[] = [];
+            const extra: string[] = this.deps.scannersLeftOut ? [this.deps.scannersLeftOut] : [];
             const retest = a.retestOf ? retestTargets(this.deps.db, a.retestOf) : undefined;
-            log("claimed", { assessment: id, attempt: work.attempts, retest: Boolean(a.retestOf) });
-
-            // ── DISCOVERING ──
-            // Discovery interrupted half-way starts again from the beginning (its queue is not kept); a finished one is reused.
-            const discovery = work.discoveryDone && work.discovery ? work.discovery : emptyDiscovery(app.targetUrl);
-            work.discovery = discovery;
-            // Round 21: picked up again after the saved sign-in had stopped working: nothing more goes out signed in.
-            if (discovery.signInEnded) guard.endSignIn?.();
-            if (retest) {
-                discovery.startUrl = app.targetUrl;
-                work.discoveryDone = true;
-                extra.push(`This retest re-checked only the ${plural(new Set(retest.flatMap((t) => t.urls)).size, "address", "addresses")} where the earlier assessment's open findings were seen.`);
-            }
-            if (!work.discoveryDone) {
-                update({ state: "DISCOVERING", progress: 5, progressText: "Opening the application in a browser (read-only)." });
+            const document = work.discoveryDone || retest ? undefined : apiDocumentText(this.deps.db, app.id);
+            const request: ProbeRequest = {
+                app: scoped,
+                ...(signIn?.state ? { signIn: { state: signIn.state, ...(signIn.checkUrl ? { checkUrl: signIn.checkUrl } : {}) } } : {}),
+                limits,
+                ...(retest ? { retest: retest.map((t) => ({ urls: t.urls, category: t.category })) } : {}),
+                ...(document ? { document: { text: document.text, fileName: document.summary.fileName } } : {}),
+            };
+            let ended: "done" | "aborted";
+            if (this.deps.onRunner) {
+                // Round 52 (EXECUTION_MODE=runners): the steps that touch the application run on the starter's runner (on-runner.ts); nothing
+                // is requested from here. What it found comes back with its result and goes on below exactly as a local one.
+                log("claimed", { assessment: id, attempt: work.attempts, retest: Boolean(a.retestOf), onRunner: true });
+                if (!work.discoveryDone) update({ state: "DISCOVERING", progress: 5, progressText: "Waiting for your runner to take the assessment." });
                 try {
-                    await discover(
-                        guard,
-                        {
-                            startUrl: app.targetUrl,
-                            excludedPaths: scoped.excludedPaths,
-                            apiSpecUrl: app.apiSpecUrl,
-                            ...(signIn?.state ? { signedIn: { storageState: signIn.state, ...(signIn.checkUrl ? { checkUrl: signIn.checkUrl } : {}), recheckEvery: limits.signInCheckEvery } } : {}),
-                            maxPages: limits.maxPages,
-                            maxDepth: limits.maxDepth,
-                            maxPerPattern: limits.maxPerPattern,
-                            headless: this.deps.headless,
-                            signal: abort.signal,
-                            launch: this.deps.launch,
-                            onProgress: (seen, current) => {
-                                let path = current;
-                                try {
-                                    path = new URL(current).pathname;
-                                } catch {
-                                    /* keep it */
-                                }
-                                update({ progress: 5 + Math.round((seen / limits.maxPages) * 40), progressText: `Looking at page ${seen + 1} (at most ${limits.maxPages}): ${path.slice(0, 120)}` });
-                            },
-                        },
-                        discovery,
-                    );
-                } catch (e) {
-                    if (e instanceof RequestCapError) extra.push("The most requests one assessment may send was reached while looking at the pages, so discovery stopped early.");
-                    else if (!abort.signal.aborted) throw e;
-                }
-                // Round 20 (SIGN): the uploaded API document's GET operations without required parameters, through the guard.
-                const document = abort.signal.aborted ? undefined : apiDocumentText(this.deps.db, app.id);
-                if (document) {
-                    update({ progress: 46, progressText: "Requesting the API document's read-only operations." });
-                    try {
-                        await requestDocumentOperations(guard, { text: document.text, fileName: document.summary.fileName }, scoped, discovery, abort.signal, (done, total, path) =>
-                            update({ progressText: `Requesting API operation ${done + 1} of ${total} (GET only): ${path.slice(0, 120)}` }),
-                        );
-                    } catch (e) {
-                        if (e instanceof RequestCapError) extra.push("The most requests one assessment may send was reached while requesting the API document's operations.");
-                        else if (!abort.signal.aborted) throw e;
-                    }
-                }
-                save();
-                if (abort.signal.aborted) return await this.endEarly(id, reason!, work, discovery, extra, limits, finish, cov, secrets);
-                work.discoveryDone = true;
-                save();
-            }
-
-            // ── SCANNING ──
-            if (!work.scan) {
-                // Round 21: the read-only checks carry the saved sign-in's cookies: first make sure it still works (never signing in again).
-                if (signIn?.state && !discovery.signInEnded && discovery.signedInCheck?.ok !== false) {
-                    update({ progress: 48, progressText: "Checking that the saved sign-in still works." });
-                    let verdict: { ok: boolean; reason: string } | undefined;
-                    try {
-                        if (signIn.checkUrl) verdict = await checkSignInPlain(guard, signIn.checkUrl, abort.signal);
-                        else if (signIn.state.cookies.length && signIn.state.cookies.every((c) => c.expires > 0 && c.expires * 1000 <= Date.now())) verdict = { ok: false, reason: "its cookies ran out" };
-                    } catch (e) {
-                        if (!(e instanceof RequestCapError) && !abort.signal.aborted) throw e;
-                    }
-                    if (abort.signal.aborted) return await this.endEarly(id, reason!, work, discovery, extra, limits, finish, cov, secrets);
-                    if (verdict?.ok) discovery.signInConfirmedAfter = discovery.pages.length;
-                    else if (verdict) {
-                        discovery.signInEnded = {
-                            when: "before-checks",
-                            afterPages: discovery.pages.length,
-                            lastOkAfterPages: discovery.signInConfirmedAfter ?? 0,
-                            url: signIn.checkUrl ? new URL(signIn.checkUrl).pathname.slice(0, 300) : null,
-                            reason: verdict.reason,
-                        };
-                        guard.endSignIn?.();
-                    }
-                    save();
-                }
-                update({ state: "SCANNING", progress: 50, progressText: "Making the read-only checks." });
-                try {
-                    const s = await scan(guard, discovery, {
+                    const out = await this.deps.onRunner({
+                        assessment: a,
+                        ownerId: work.ownerId ?? null,
+                        request: { ...request, url: app.targetUrl, work: { ...(work.discoveryDone && work.discovery ? { discovery: work.discovery, discoveryDone: true } : {}), ...(work.scan ? { scan: work.scan } : {}) } },
+                        secrets,
                         signal: abort.signal,
-                        excludedPaths: scoped.excludedPaths,
-                        retries: limits.retries,
-                        only: retest ? { urls: [...new Set(retest.flatMap((t) => t.urls))], categories: [...new Set(retest.map((t) => t.category))] } : undefined,
-                        onProgress: (done, total, text) => update({ progress: 50 + Math.round((done / Math.max(1, total)) * 30), progressText: text }),
+                        keepTask: () => reason === "lease",
+                        update,
                     });
-                    work.scan = { results: s.results, outcomes: s.outcomes, capReached: s.capReached, requested: s.requested.length };
+                    Object.assign(work, out.work);
+                    extra.push(...out.extra);
+                    save();
+                    ended = "done";
                 } catch (e) {
                     if (!abort.signal.aborted) throw e;
-                    return await this.endEarly(id, reason!, work, discovery, extra, limits, finish, cov, secrets);
+                    work.discovery ??= emptyDiscovery(app.targetUrl);
+                    ended = "aborted";
                 }
-                save();
+            } else {
+                const guard = this.deps.guardFor(scoped, abort.signal, signIn?.state ? { state: signIn.state, refuseSignOut: true } : {});
+                // The company proxy (SECURITY_USE_PROXY) is checked before the first request: a proxy that may not be used fails the assessment with the reason.
+                await guard.ready?.();
+                log("claimed", { assessment: id, attempt: work.attempts, retest: Boolean(a.retestOf) });
+                ended = await probe({ ...request, guard, headless: this.deps.headless, launch: this.deps.launch, signal: abort.signal, update, save }, work, extra);
             }
-            if (abort.signal.aborted) return await this.endEarly(id, reason!, work, discovery, extra, limits, finish, cov, secrets);
+            const discovery = work.discovery!;
+            if (ended === "aborted" || !work.scan) return await this.endEarly(id, reason ?? "lease", work, discovery, extra, limits, finish, cov, secrets);
 
             // ── EXTERNAL SCANNERS (SCAN) ──
             // Run after the platform's own read-only checks and before VALIDATING, so a scanner's findings go through exactly the

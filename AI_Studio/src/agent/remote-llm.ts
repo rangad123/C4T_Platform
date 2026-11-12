@@ -14,7 +14,7 @@ import { llmClientFromModel, LlmNotConfiguredError, type LlmClient } from "../en
 import { ResilientModel, type ModelV3 } from "../engine/llm/resilience.js";
 import { currentRoute } from "../engine/llm/routing.js";
 import { BudgetExceeded, type CapHit } from "../engine/llm/usage.js";
-import type { ExplorePost } from "./explore-transport.js";
+import { retrying, type ExplorePost } from "./explore-transport.js";
 
 type CallOptions = Parameters<ModelV3["doGenerate"]>[0];
 type Result = Awaited<ReturnType<ModelV3["doGenerate"]>>;
@@ -75,11 +75,19 @@ class RemoteModel extends ResilientModel {
         const route = currentRoute();
         const p = purposeOf.getStore();
         // As routing on the platform would decide (engine/llm/routing.ts): images go to the main model, an agent scope wins over a purpose.
-        const hint = p?.images ? { task: "vision" } : route ? { task: route.task, what: route.what, escalated: route.escalated } : p?.purpose ? { task: p.purpose } : undefined;
+        const hint = p?.images
+            ? { task: "vision" }
+            : route
+              ? { task: route.task, what: route.what, escalated: route.escalated, ...(route.escalated && route.reason ? { reason: route.reason.slice(0, 300) } : {}) }
+              : p?.purpose
+                ? { task: p.purpose }
+                : undefined;
+        // What the call is for, as the meter on the platform labels it (an agent's own steps have none: authoring).
+        const purpose = p?.images ? (p.purpose ?? "vision") : p?.purpose;
         const signals = [this.signal, abortSignal].filter((s): s is AbortSignal => !!s);
         const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
         signal?.throwIfAborted();
-        const raw = await this.post("llm", { options: encodeBytes(rest), ...(hint ? { hint } : {}) }, signal ? { signal } : {});
+        const raw = await this.post("llm", { options: encodeBytes(rest), ...(hint ? { hint } : {}), ...(purpose ? { purpose: purpose.slice(0, 40) } : {}) }, signal ? { signal } : {});
         const answer = ExploreLlmAnswerSchema.parse(raw);
         if (!answer.ok) throw errorFromAnswer(answer.error, this.name);
         // The platform moved this work to the main model: the rest of it stays there.
@@ -112,9 +120,9 @@ class RemoteModel extends ResilientModel {
     }
 }
 
-/** The exploration's AI client on a runner. `modelName` comes from the task offer; `signal` (the job's) cancels a call in flight. */
-export function remoteLlmClient(o: { post: ExplorePost; modelName: string; signal?: AbortSignal }): LlmClient {
-    const inner = llmClientFromModel(new RemoteModel(o.post, o.modelName, o.signal), o.modelName);
+/** The exploration's AI client on a runner. `modelName` comes from the task offer; `signal` (the job's) cancels a call in flight. A call is tried again while the platform restarts. */
+export function remoteLlmClient(o: { post: ExplorePost; modelName: string; signal?: AbortSignal; /** How long a call is tried again while the platform is away (explore-transport.ts). */ retryMs?: number }): LlmClient {
+    const inner = llmClientFromModel(new RemoteModel(retrying(o.post, o.retryMs), o.modelName, o.signal), o.modelName);
     const client: LlmClient = {
         modelName: inner.modelName,
         model: inner.model,

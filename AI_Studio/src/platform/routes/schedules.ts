@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { getAgentServices } from "../agent-services.js";
 import { ownerIdOfActor } from "../agent-store.js";
-import { runnersOnly } from "../runner-only.js";
 import { SEVERITIES } from "../../engine/validation/severity.js";
 import { ALERT_EVENTS, API_DRIFT_EVENT, type AlertChannel } from "../alerts.js";
 import { assertSmtpHostAllowed, fromInput, mergeSmtp, NO_MAIL_SERVER_MESSAGE, publicSmtp, Recipients, serverSmtp, SmtpInput, SmtpPatch } from "../alert-email.js";
@@ -23,8 +22,6 @@ import type { RouteCtx } from "./types.js";
 
 const MAX_SCHEDULES = 10;
 /** EXECUTION_MODE=runners: an "Explore again" schedule would fail at every fire (exploring needs a browser on the server). */
-/** Round 51: an exploration runs on the runner of the person who starts it, so a schedule cannot start one yet (runner-only.ts EXPLORING_ON_RUNNERS_MESSAGE). */
-export const EXPLORE_SCHEDULE_REFUSED = "Schedules here can only re-run tests: scheduled explorations are not available yet. An exploration runs on the runner of the person who starts it, so start it yourself from the project.";
 const MAX_CHANNELS = 10;
 
 const KIND_LABEL = { validate: "Re-run all tests", generate: "Analyze again" } as const;
@@ -117,7 +114,6 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
     };
     /** Refuse a schedule that could never run, with the reason in plain words (as its maker's runs: their runner, their code tests). */
     const assertRunnable = async (projectId: string, kind: Schedule["kind"]) => {
-        if (kind === "generate" && runnersOnly(p.config)) throw new HttpError(409, EXPLORE_SCHEDULE_REFUSED);
         if (!repo.getLatestApplicationPublic(projectId)) throw new HttpError(409, "This project has no application yet. Run an analysis first.");
         if (kind === "validate" && (await runnableTestIds(repo, projectId, "validate", ownerIdOfActor(currentActor()))).length === 0) throw new HttpError(409, "This project has no tests that can be run yet.");
     };

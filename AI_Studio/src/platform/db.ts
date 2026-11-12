@@ -297,6 +297,13 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 55: one runner per person: who made each deploy trigger token, so its runs go to that person's runner (trigger-store.ts; existing tokens have none: null, and their runs are refused with a sentence) */ `ALTER TABLE trigger_tokens ADD COLUMN created_by TEXT;`,
     /* 56: whether a Crowd4Test account held ai_studio.tests.run at its latest arrival, so a schedule or trigger stops running in its name once it lost it (project-access-store.ts; existing people have none: null, which counts as yes until they arrive again) */ `ALTER TABLE users ADD COLUMN c4t_runs_tests INTEGER;`,
     /* 57: every runner made before is removed and the runner tables lose their team-era columns; runs on a removed runner end with a sentence; schedules and trigger tokens get their owner from Activity once (schema lives in agent-store.ts) */ RUNNER_RESET_MIGRATION,
+    /* 58: an exploration on a runner carries on across a platform restart: per runner task, what its saves and AI calls need to remember (explore-sink.ts: the handles made, the last batch applied and its answers; explore-llm.ts: provider name aliases) */ `CREATE TABLE explore_task_state (
+    task_id TEXT PRIMARY KEY,
+    attempt INTEGER NOT NULL,
+    sink_json TEXT,
+    llm_json TEXT,
+    updated_at TEXT NOT NULL
+);`,
 ];
 
 /**

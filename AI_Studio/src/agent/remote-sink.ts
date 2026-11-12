@@ -5,16 +5,19 @@
  * One ordered queue, sent in batches: the methods that return nothing resolve at once and are sent with the next batch; the ones that
  * return a value (a test key, a test handle, a script id, an agent run id, site memory, baselines) wait for the platform's answer, so the
  * runner never invents an id. The first refused or failed batch ends the job: every later call, and flush(), reject with it. Files
- * (evidence, baselines) are read when the engine hands them over and travel as bytes; baselines that come back are written into this
- * task's own folder.
+ * (evidence, baselines) are read when the engine hands them over and travel as bytes; evidence too large for one call is uploaded in
+ * chunks first and named in the call. Baselines that come back are written into this task's own folder.
+ *
+ * Round 52: each batch carries its number (`seq`), and a batch or chunk that got no answer because the platform was away (a restart) is
+ * sent again, the same, for a couple of minutes (explore-transport.ts); the platform applies each number once.
  */
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { GenerationSink, TestHandle } from "../engine/orchestrator.js";
 import type { ScriptRun } from "../engine/validation/runner.js";
-import { EXPLORE_CALL_FILES_MAX_BYTES, EXPLORE_FILE_MAX_BYTES, EXPLORE_SINK_MAX_CALLS, EXPLORE_TASK_MAX_BYTES, SinkAnswers, SinkResponse, type SinkCall, type WireFile, type WireSinkRun } from "../agent-protocol/explore-sink.js";
-import type { ExplorePost } from "./explore-transport.js";
+import { EXPLORE_CALL_FILES_MAX_BYTES, EXPLORE_CHUNK_BYTES, EXPLORE_FILE_MAX_BYTES, EXPLORE_SINK_MAX_CALLS, EXPLORE_TASK_MAX_BYTES, SinkAnswers, SinkResponse, type SinkCall, type WireFile, type WireSinkRun } from "../agent-protocol/explore-sink.js";
+import { retrying, type ExplorePost } from "./explore-transport.js";
 
 /** Calls stop being added to a batch once its JSON reaches this size (a single larger call still goes alone). */
 const BATCH_BYTES = 2 * 1024 * 1024;
@@ -31,8 +34,16 @@ export function wireName(name: string): string {
     return (n || "file").slice(0, 120);
 }
 
-export function remoteGenerationSink(o: { post: ExplorePost; signal?: AbortSignal; /** Where baselines from the platform are written (default: a new temporary folder). */ dir?: string }): GenerationSink & { flush(): Promise<void> } {
+export function remoteGenerationSink(o: {
+    post: ExplorePost;
+    signal?: AbortSignal;
+    /** Where baselines from the platform are written (default: a new temporary folder). */ dir?: string;
+    /** How long a call is tried again while the platform is away (explore-transport.ts). */ retryMs?: number;
+}): GenerationSink & { flush(): Promise<void> } {
+    const post = retrying(o.post, o.retryMs);
     const queue: Entry[] = [];
+    let seq = 0;
+    let uploads = 0;
     let failed: unknown;
     let sending: Promise<void> | undefined;
     let sentBytes = 0;
@@ -63,7 +74,7 @@ export function remoteGenerationSink(o: { post: ExplorePost; signal?: AbortSigna
                         for (const b of batch) b.e.fail?.(failed);
                         break;
                     }
-                    const answer = SinkResponse.parse(await o.post("sink", { calls: batch.map((b) => b.c) }, { signal: o.signal }));
+                    const answer = SinkResponse.parse(await post("sink", { calls: batch.map((b) => b.c), seq: ++seq }, { signal: o.signal }));
                     batch.forEach((b, i) => b.e.done?.(answer.results[i] ?? null));
                 }
             } catch (e) {
@@ -104,9 +115,30 @@ export function remoteGenerationSink(o: { post: ExplorePost; signal?: AbortSigna
         });
     };
 
+    /** A file in chunks, ahead of the call that names it (each chunk on its own: written at its offset, it may be sent again). */
+    const upload = async (file: string, size: number): Promise<{ id: string; name: string; size: number }> => {
+        const id = `u${++uploads}`;
+        sentBytes += size;
+        const fh = await fs.open(file, "r");
+        let offset = 0;
+        try {
+            do {
+                const buf = Buffer.alloc(Math.min(EXPLORE_CHUNK_BYTES, size - offset));
+                const { bytesRead } = await fh.read(buf, 0, buf.length, offset);
+                if (bytesRead === 0 && offset > 0) break;
+                SinkResponse.parse(await post("sink", { calls: [{ method: "fileChunk", upload: id, offset, data: buf.subarray(0, bytesRead).toString("base64") }] }, { signal: o.signal }));
+                offset += bytesRead;
+                if (bytesRead === 0) break;
+            } while (offset < size);
+        } finally {
+            await fh.close();
+        }
+        return { id, name: wireName(file), size: offset };
+    };
+
     const read = async (file: string, budget: { left: number }, required: boolean): Promise<WireFile | undefined> => {
         const st = await fs.stat(file).catch(() => undefined);
-        // Evidence over the caps stays here, as a vanished artifact would; a baseline goes anyway and the platform says no.
+        // Evidence over the task's cap stays here, as a vanished artifact would; a baseline goes anyway and the platform says no.
         if (!st || (!required && (st.size > EXPLORE_FILE_MAX_BYTES || st.size > budget.left || sentBytes + st.size > EXPLORE_TASK_MAX_BYTES))) {
             if (required) throw new Error(`The file ${path.basename(file)} could not be read.`);
             return undefined;
@@ -123,7 +155,16 @@ export function remoteGenerationSink(o: { post: ExplorePost; signal?: AbortSigna
         const artifacts: WireSinkRun["artifacts"] = [];
         for (const a of run.artifacts.slice(0, 50)) {
             const file = await read(a.path, budget, false);
-            if (file) artifacts.push({ kind: a.kind, file });
+            if (file) {
+                artifacts.push({ kind: a.kind, file });
+                continue;
+            }
+            // Too large for this call: uploaded first, if the attempt's cap allows it.
+            const size = (await fs.stat(a.path).catch(() => undefined))?.size;
+            if (size === undefined || sentBytes + size > EXPLORE_TASK_MAX_BYTES) continue;
+            // An upload that fails leaves the file here, as a vanished artifact would; a stopped job or a refused task ends at the next batch.
+            const up = await upload(a.path, size).catch(() => undefined);
+            if (up) artifacts.push({ kind: a.kind, upload: up });
         }
         return {
             testId: run.testId,

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { AGENT_LIMITS } from "../../engine/agent/objective.js";
 import { misuseRefusal } from "../../engine/authoring/describe.js";
-import { agentRunsCanStart, agentRunStoreFor, draftFromRun, NO_RUNNER_YET, reconcileRun } from "../agent-run.js";
+import { agentRunsCanStart, agentRunStoreFor, draftFromRun, NO_RUNNER_YET, ON_YOUR_RUNNER, reconcileRun } from "../agent-run.js";
+import { runnersOnly } from "../runner-only.js";
 import { isActiveRun, type AgentRun } from "../agent-run-store.js";
 import { accessControlOf } from "../auth/access.js";
 import { currentActor } from "../auth/actor.js";
@@ -58,7 +59,7 @@ export function registerAgentRunRoutes(ctx: RouteCtx): void {
             runs,
             canStart: await agentRunsCanStart(p, id),
             agentModeOn: projectSetupOf(project).testingModes.includes("agent"),
-            whereItRuns: NO_RUNNER_YET,
+            whereItRuns: runnersOnly(p.config) ? ON_YOUR_RUNNER : NO_RUNNER_YET,
             // Named as a cost field, so people who may not see AI usage do not get the token bounds.
             limits: { steps: AGENT_LIMITS.steps, minutes: AGENT_LIMITS.minutes, budgetTokens: AGENT_LIMITS.tokens, approvalSeconds: AGENT_LIMITS.approvalSeconds },
             address: repo.getLatestApplicationPublic(id)?.url ?? null,

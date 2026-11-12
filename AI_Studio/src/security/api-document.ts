@@ -12,7 +12,7 @@
  *   API_DOCUMENT_MAX_REQUESTS                the most operations one assessment requests
  */
 import { parseSpecText } from "../engine/api/openapi.js";
-import { isSignOut } from "./signin.js";
+import { isSignOut } from "./signin-rules.js";
 
 export const API_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024;
 /** Operations requested by one assessment at most (the request budget applies as well). */

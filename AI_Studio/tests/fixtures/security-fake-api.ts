@@ -29,6 +29,9 @@ export const RISK_RULES = [
 
 export class SecurityFake {
     enabled = true;
+    /** Round 52: a platform that runs tests only on runners, and the person's runner as GET /api/me/runner answers it (null: none set up). */
+    runnersMode = false;
+    me: unknown = null;
     role: "owner" | "editor" | "viewer" = "owner";
     /** When false, the testing-type route answers 404 (a platform without it). */
     testingTypeRoute = true;
@@ -271,7 +274,8 @@ export class SecurityFake {
     private route(method: string, p: string, url: URL, body: any): { status?: number; body: any; type?: string; headers?: Record<string, string> } | undefined {
         let m: RegExpMatchArray | null;
         if (method === "GET" && p === "/auth/state") return { body: { mode: "open", accessKeyConfigured: false, hasPeople: false, sso: { enabled: false, label: "" }, me: { kind: "open", name: "Anyone (open access)", role: this.role } } };
-        if (method === "GET" && p === "/config") return { body: { llm: { provider: "anthropic", model: "scripted", configured: true }, authRequired: false, browsers: { chromium: true, firefox: false, webkit: false }, variants: [], frameworks: [], adapters: [] } };
+        if (method === "GET" && p === "/config") return { body: { llm: { provider: "anthropic", model: "scripted", configured: true }, authRequired: false, browsers: { chromium: true, firefox: false, webkit: false }, variants: [], frameworks: [], adapters: [], ...(this.runnersMode ? { executionMode: "runners", runsHere: true } : {}) } };
+        if (method === "GET" && p === "/me/runner") return { body: { runner: this.me } };
         // Round 37's places that a project's General settings ask for: no agents listed, none applying, and no app details yet.
         if (method === "GET" && p === "/testing-agents") return { body: { agents: [], canRun: { ok: false, reason: "Not in this fake." }, ai: { configured: true } } };
         if (method === "GET" && p === "/projects") return { body: [...this.projects.values()].map((x) => this.publicProject(x)) };

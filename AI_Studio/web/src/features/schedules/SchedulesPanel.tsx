@@ -9,7 +9,7 @@ import { useHere } from "../auth/project-access";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { DISPATCH_OFF, EXPLORING_ON_RUNNERS, RUNS_OFF_TIP, executionModeOf, useExecutionMode } from "../runs/runs-here";
+import { DISPATCH_OFF, SCHEDULED_EXPLORE_ON, RUNS_OFF_TIP, executionModeOf, useExecutionMode } from "../runs/runs-here";
 import { WEEKDAYS, utcOffsetText, whenText, type Cadence, type Schedule, type ScheduleKind, type ScheduleList } from "./schedules";
 import "./schedules.css";
 
@@ -147,7 +147,7 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock, mayChang
                 {!s.runbookName && !s.suiteName && s.kind === "validate" && s.retryFailures > 0 && <span>A failing test is run again once to spot unreliable tests</span>}
                 {runnersOnly && s.ownerName && <span data-testid="schedule-owner">Runs on {s.ownerName}’s runner</span>}
             </div>
-            {runnersOnly && s.kind === "generate" && <Callout tone="warning">{EXPLORING_ON_RUNNERS}</Callout>}
+            {runnersOnly && s.kind === "generate" && <p className="t-secondary">{SCHEDULED_EXPLORE_ON}</p>}
             {s.lastOutcome === "skipped" && s.lastNote && <Callout tone="warning">Skipped {relativeTime(s.lastOutcomeAt)}: {s.lastNote}.</Callout>}
             {s.lastOutcome === "error" && s.lastNote && <Callout tone="danger" title="The last run couldn’t start">{s.lastNote}</Callout>}
             {started && <Callout tone="success">Run started. Follow it in <a href={routes.runs(projectId)}>Runs</a>; the results appear below when it finishes.</Callout>}

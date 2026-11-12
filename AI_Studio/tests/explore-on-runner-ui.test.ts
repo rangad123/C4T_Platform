@@ -25,8 +25,8 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { exploreNeedsUpdate } from "../src/platform/explore-task.js";
-import { EXPLORING_ON_RUNNERS_MESSAGE, RUNNER_NOT_SET_UP as SERVER_NOT_SET_UP, RUNNER_OFFLINE as SERVER_OFFLINE, RUNNER_SETTINGS_LINK } from "../src/platform/runner-only.js";
-import { EXPLORING_ON_RUNNERS, exploresOnRunner, exploringOn } from "../web/src/features/runs/runs-here.js";
+import { RUNNER_NOT_SET_UP as SERVER_NOT_SET_UP, RUNNER_OFFLINE as SERVER_OFFLINE, RUNNER_SETTINGS_LINK } from "../src/platform/runner-only.js";
+import { exploresOnRunner, exploringOn } from "../web/src/features/runs/runs-here.js";
 import { readiness, runnerProblem, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, type RunnerMine } from "../web/src/features/runners/my-runner.js";
 
 const PORT = 9055;
@@ -57,8 +57,6 @@ describe("the rules (no browser)", () => {
         expect(RUNNER_NOT_SET_UP).toBe(SERVER_NOT_SET_UP);
         expect(RUNNER_OFFLINE).toBe(SERVER_OFFLINE);
         expect(RUNNER_SETTINGS_LINK).toBe(SETTINGS);
-        // A scheduled exploration is still refused in runners mode: the schedule says the server's sentence.
-        expect(EXPLORING_ON_RUNNERS).toBe(EXPLORING_ON_RUNNERS_MESSAGE);
         const needs = { can: ["web", "explore"] as const };
         expect(runnerProblem({ runner: null }, needs)).toBe(RUNNER_NOT_SET_UP);
         expect(runnerProblem({ runner: OFF }, needs)).toBe(RUNNER_OFFLINE);

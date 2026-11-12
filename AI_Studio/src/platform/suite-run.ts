@@ -20,7 +20,7 @@ import type { Schedule } from "./schedule-store.js";
 import { activeJobOf, OverlapError, runnableTestIds, scheduleStarter } from "./scheduler.js";
 import { SuiteStore, type Suite, type SuiteSettings } from "./suite-store.js";
 import { ReviewStore } from "./review-store.js";
-import { dispatchAlive, DISPATCH_DOWN_MESSAGE, PLAIN_ON_RUNNERS_MESSAGE, runnersOnly } from "./runner-only.js";
+import { dispatchAlive, DISPATCH_DOWN_MESSAGE, runnersOnly } from "./runner-only.js";
 
 /** A worker that last said it was alive longer ago than this is gone (GET /readyz uses the same 90 seconds). */
 const WORKER_GONE_MS = 90_000;
@@ -58,10 +58,8 @@ export const EXPLORING_OFF_MESSAGE = "Tests are switched off on this server: not
  */
 export function refuseUnlessRunsStart(p: Pick<Platform, "config" | "db">, message: string = RUNS_OFF_MESSAGE): void {
     if (runnersOnly(p.config)) {
-        // Describing a test needs the server's browser: refused in this mode whatever else is up, before anything is saved. An exploration goes to
-        // the starter's runner (round 51), so it needs the dispatch worker like a run; the job gate says whether their runner can take it.
-        const serverWork = message === PLAIN_OFF_MESSAGE ? PLAIN_ON_RUNNERS_MESSAGE : undefined;
-        if (serverWork) throw new HttpError(409, serverWork, { cannotRunHere: true, executionMode: "runners" });
+        // An exploration and a described test go to the starter's runner (rounds 51 and 52), so they need the dispatch worker like a run; the job
+        // gate says whether their runner can take it.
         const can = runsCanStartHere(p);
         if (!can.ok) throw new HttpError(409, can.reason, { cannotRunHere: true, executionMode: "runners" });
         return;

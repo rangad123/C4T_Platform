@@ -24,9 +24,13 @@ export interface Can {
     ok: boolean;
     why?: string;
 }
-export type RunnerNeed = "web" | "phone" | "ios" | "windows" | "record" | "recordHeaded" | "phoneSession" | "explore";
-/** `explore` (round 51): whether it can explore an application (an older runner says "Update your runner"); missing from an older server. */
-export type RunnerCan = Record<Exclude<RunnerNeed, "explore">, Can> & { explore?: Can };
+export type RunnerNeed = "web" | "phone" | "ios" | "windows" | "record" | "recordHeaded" | "phoneSession" | "explore" | "plain" | "agent" | "phoneExplore" | "assessment";
+/**
+ * `explore` (round 51): whether it can explore an application (an older runner says "Update your runner"); `plain` and `agent` (round 52): a test
+ * described in words and an AI agent run; `phoneExplore` and `assessment` (round 52): exploring a phone app on the runner's phone and a security
+ * assessment run from the runner. Missing from an older server.
+ */
+export type RunnerCan = Record<Exclude<RunnerNeed, "explore" | "plain" | "agent" | "phoneExplore" | "assessment">, Can> & { explore?: Can; plain?: Can; agent?: Can; phoneExplore?: Can; assessment?: Can };
 
 /** GET /api/me/runner → runner (null until the person has set one up). */
 export interface RunnerMine {

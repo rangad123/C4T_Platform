@@ -289,6 +289,9 @@ export class CapabilityProbe {
         caps.runnerSwitches = true;
         // Round 51: this agent runs an exploration task (the engine in a child process, the AI on the platform: explore-child.ts).
         caps.explore = true;
+        // Round 52: and a test described in words, and an AI agent run, as the same kind of task (explore-child.ts runs the matching engine entry).
+        // Also a phone app's exploration (on this computer's phone; whether one is attached is `android`) and a security assessment.
+        caps.exploreModes = ["plain", "agent", "mobile", "assessment"];
 
         const parsed = Capabilities.safeParse(caps);
         // A value the protocol cannot carry is a bug here, not a reason to stop: fall back to the part that is certainly valid.

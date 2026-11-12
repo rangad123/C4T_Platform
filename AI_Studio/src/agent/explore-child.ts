@@ -1,5 +1,7 @@
 /**
- * Round 51: one exploration on this runner (an `explore` task; docs/features/explore-on-runner.md). Runs inside the task's own process
+ * Round 51: one exploration on this runner (an `explore` task; docs/features/explore-on-runner.md). Round 52: the same task also builds a test
+ * from a description (mode "plain", runPlainAuthoring) or does an AI agent run (mode "agent", agent-mode.ts), with the same AI and saving, explores
+ * a phone app on this computer's phone (mode "mobile") or runs a security assessment's steps (mode "assessment"). Runs inside the task's own process
  * (task-child.ts hands an `explore` message here), so a cancel kills it and everything it started, as for a run.
  *
  * The engine's runGeneration runs here exactly as on the platform: its browser, crawler, sign-in, authoring agents and validation runs are this
@@ -15,7 +17,11 @@ import { localExecutor } from "../engine/frameworks/index.js";
 import { withFrameworkSettings } from "../engine/frameworks/settings-executor.js";
 import { describeDeviations, effectiveSettings, firstTurnedOff, normalizeSettings } from "../engine/frameworks/settings.js";
 import type { ScriptExecutor } from "../engine/frameworks/types.js";
-import { runGeneration, type GenerationRequest } from "../engine/orchestrator.js";
+import { runGeneration, type GenerationRequest, type GenerationSummary } from "../engine/orchestrator.js";
+import { runPlainAuthoring, type PlainRequest } from "../engine/authoring/plain.js";
+import { openLocalDeviceSession } from "../engine/mobile/device/session.js";
+import { runAssessmentOnRunner, type AssessmentOnRunnerRequest } from "../security/assessment/probe.js";
+import { runAgentObjective, type AgentOnRunnerRequest } from "./agent-mode.js";
 import { addressProblem } from "./address-guard.js";
 import type { ChildExplore, ExploreAnswer, FromChild } from "./child-protocol.js";
 import type { ExplorePost } from "./explore-transport.js";
@@ -129,8 +135,30 @@ export async function runExplore(m: ChildExplore, io: { send(m: FromChild): Prom
                       : {}),
               }
             : undefined;
-        const req = { ...(m.explore.request as unknown as GenerationRequest), ...(cleanup ? { cleanup } : {}) };
-        const summary = await runGeneration(ctx, req, sink);
+        // Round 52: the job's kind picks the engine entry, as job-runner.ts does on a server worker.
+        const mode = m.explore.mode ?? "generate";
+        const none: GenerationSummary = { model: null, testsGenerated: 0, testsValidated: 0, testsFailedValidation: 0, testsNeedingReview: 0, errors: [] };
+        if (mode === "assessment") {
+            // A security assessment's steps, its checks sent from this computer under this runner's address rule. No AI and nothing saved on
+            // the way: what it found goes back in the result, and the platform judges, stores and reports it (security/assessment/runner.ts).
+            const assessment = await runAssessmentOnRunner(m.explore.request as unknown as AssessmentOnRunnerRequest, { signal: io.signal, refusePrivate: m.refusePrivate === true, log: (line) => void io.send({ type: "log", line: line.slice(0, 300) }) });
+            await io.send({ type: "explored", summary: { ...none, model: { assessment } as unknown as GenerationSummary["model"] } });
+            return;
+        }
+        if (mode === "mobile") {
+            // The phone attached to this computer (adb, or an emulator it starts). A plugged-in phone only when the runner's owner allowed it.
+            const realPhone = (m.explore.request as { runnerPhone?: { realPhone?: boolean } }).runnerPhone?.realPhone === true;
+            ctx.openDevice = (opts) => openLocalDeviceSession({ ...opts, ...(realPhone ? {} : { noRealPhone: true }), env: io.env ?? process.env });
+        }
+        if (mode === "agent") {
+            await runAgentObjective(ctx, m.explore.request as unknown as AgentOnRunnerRequest, { post: io.post, signal: io.signal });
+            await io.send({ type: "explored", summary: none });
+            return;
+        }
+        const summary =
+            mode === "plain"
+                ? await runPlainAuthoring(ctx, { ...(m.explore.request as unknown as PlainRequest), ...(cleanup ? { cleanup } : {}) }, sink)
+                : await runGeneration(ctx, { ...(m.explore.request as unknown as GenerationRequest), ...(cleanup ? { cleanup } : {}) }, sink);
         // Everything it saved is accepted by the platform before the result says it is done.
         await sink.flush();
         await io.send({ type: "explored", summary });

@@ -340,6 +340,14 @@ are kept in the assessment's work data, so a restarted loop continues from the l
 times fails with that reason. Logs are one JSON line per event with ids, states and counts only (no addresses with queries, headers or
 bodies). No temporary files are written (the browser's profile is Playwright's own and goes with the browser).
 
+**On a runner (round 52, `EXECUTION_MODE=runners`).** The loop runs in the API process whatever `WORKER_EMBEDDED` says and keeps every rule
+above, but sends the steps that touch the application (`assessment/probe.ts`: discovery, the API document's operations, the sign-in check,
+the read-only checks) to the starter's runner as an explore task of mode `assessment` (`assessment/on-runner.ts`); the platform requests
+nothing itself. The runner builds the same scope guard, with private addresses under its owner's switch instead of
+`SECURITY_ALLOW_PRIVATE_TARGETS` (which registration then does not apply either; cloud metadata stays refused). A start is refused with the
+runs' codes when the runner is not set up, offline, too old, has no browser, or does not open a private target. External scanners are left
+out and the coverage says so. Details: [explore-on-runner.md](explore-on-runner.md).
+
 ### API (RUN part)
 
 All under `/api/v1/security`.

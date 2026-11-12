@@ -32,16 +32,37 @@ export const exploreNeedsUpdate = (runner: string): string => `Your runner “${
 export const EXPLORE_RUNNER_GONE = "Your runner stopped answering while it explored, so the exploration ended. Its browser went with it, so the work is not moved to another computer. Start the exploration again.";
 export const EXPLORE_PLATFORM_RESTART = "The platform restarted while your runner explored, so the exploration ended. Start it again.";
 export const EXPLORE_NO_SUMMARY = "Your runner finished the exploration but did not say what it found. Update your runner in Settings, Your runner, then try again.";
-/** Phone apps are not explored on a runner yet: the phone explorer drives the phone from the platform (agent-device.ts). */
-export const PHONE_EXPLORE_ON_RUNNERS = "Exploring a phone app is not available here yet: this platform runs tests only on runners. Explore the website or API instead, or record the phone test on your runner.";
+/**
+ * Round 52: the job kinds that run on a runner as an explore task. "generate" is an exploration; the others need `exploreModes`: "plain" and
+ * "agent" (builder A), "mobile" (an exploration of a phone app, on the phone attached to the runner) and "assessment" (a security assessment,
+ * src/security/assessment/on-runner.ts: its task has no job).
+ */
+export type ExploreMode = "generate" | "plain" | "agent" | "mobile" | "assessment";
+export const isExploreMode = (mode: string | undefined): mode is ExploreMode => mode === undefined || mode === "generate" || mode === "plain" || mode === "agent" || mode === "mobile" || mode === "assessment";
+const MODE_WORDS: Record<Exclude<ExploreMode, "generate">, string> = {
+    plain: "build a test from your description",
+    agent: "do an agent run",
+    mobile: "explore a phone app",
+    assessment: "run a security assessment",
+};
+export const modeNeedsUpdate = (runner: string, mode: Exclude<ExploreMode, "generate">): string => `Your runner “${runner}” is too old to ${MODE_WORDS[mode]}. Update your runner in Settings, Your runner, then try again.`;
 
-/** Why this computer cannot explore (its runner program is older than round 51), or undefined. */
-export function exploreProblem(agent: { name: string; capabilities: { explore?: boolean } }): string | undefined {
-    return agent.capabilities.explore === true ? undefined : exploreNeedsUpdate(agent.name);
+/** Why this computer cannot do this kind of job (its runner program is older than round 51, or round 52 for the other modes), or undefined. */
+export function exploreProblem(agent: { name: string; capabilities: { explore?: boolean; exploreModes?: string[] } }, mode: ExploreMode = "generate"): string | undefined {
+    if (agent.capabilities.explore !== true) return mode === "generate" ? exploreNeedsUpdate(agent.name) : modeNeedsUpdate(agent.name, mode);
+    if (mode === "generate" || agent.capabilities.exploreModes?.includes(mode)) return undefined;
+    return modeNeedsUpdate(agent.name, mode);
 }
 
+/** An exploration job's mode on a runner: "mobile" when its targets include a phone app (the request's own targets), else the job's. */
+export const exploreModeOfRequest = (mode: ExploreMode | undefined, request: { targets?: unknown }): ExploreMode =>
+    (mode ?? "generate") === "generate" && Array.isArray(request.targets) && request.targets.includes("mobile") ? "mobile" : (mode ?? "generate");
+
+/** The mode of an explore task's offer (absent: an exploration). */
+export const offerMode = (offer: { explore?: { mode?: ExploreMode } }): ExploreMode => offer.explore?.mode ?? "generate";
+
 /** Every secret the request carries, as exact strings (the runner masks them in what it logs and sends; the platform scrubs its lines). */
-export function requestSecrets(req: GenerationRequest, more: string[] = []): string[] {
+export function requestSecrets(req: Partial<Pick<GenerationRequest, "credentials" | "roles" | "savedSession">>, more: string[] = []): string[] {
     const c = req.credentials;
     const out = [c?.password, c?.totpSecret, c?.apiToken, c?.apiAuthHeader, c?.oauth2?.clientSecret, ...(req.roles ?? []).flatMap((r) => [r.password, r.totpSecret, r.apiToken]), ...more];
     // A saved sign-in's cookies and stored values are secrets too.
@@ -51,10 +72,18 @@ export function requestSecrets(req: GenerationRequest, more: string[] = []): str
     return [...new Set(out.filter((s): s is string => typeof s === "string" && s.length >= 4))].slice(0, 500);
 }
 
+/**
+ * What an explore task carries, by mode: the engine's GenerationRequest (generate), PlainRequest (plain), or the agent run's facts (agent,
+ * AgentOnRunnerRequest in agent-on-runner.ts). Each has the address it works on as `url`, so the offer's address rules apply to all three.
+ */
+export type ExploreRequest = { url: string; apiBaseUrl?: string; cleanup?: { enabled: boolean } };
+
 /** The offer of an explore task: the request as data (the runner adds its own cleanup guard), with everything to mask. */
-export function exploreOffer(o: { taskId: string; job: Pick<JobRow, "id">; request: GenerationRequest; modelName: string; frameworkSettings?: unknown; secrets: string[]; leaseSeconds: number }): TaskOffer {
+export function exploreOffer(o: { taskId: string; job: Pick<JobRow, "id">; mode?: ExploreMode; request: ExploreRequest; modelName: string; frameworkSettings?: unknown; secrets: string[]; leaseSeconds: number }): TaskOffer {
     const { cleanup, ...rest } = o.request;
+    const mode = o.mode ?? "generate";
     const explore: ExploreTask = {
+        ...(mode !== "generate" ? { mode } : {}),
         request: JSON.parse(JSON.stringify(rest)) as Record<string, unknown>,
         modelName: o.modelName.slice(0, 200),
         ...(cleanup?.enabled ? { cleanup: true } : {}),

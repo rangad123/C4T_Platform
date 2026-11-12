@@ -465,6 +465,14 @@ CREATE TABLE healing_proposals (
 );
 CREATE INDEX idx_healing_test ON healing_proposals (test_case_id, status);
 
+CREATE TABLE explore_task_state (
+    task_id TEXT PRIMARY KEY,
+    attempt BIGINT NOT NULL,
+    sink_json TEXT,
+    llm_json TEXT,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE trigger_tokens (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

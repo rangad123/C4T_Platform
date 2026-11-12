@@ -132,11 +132,15 @@ export const ExploreRouteHintSchema = z.object({
     task: z.string().max(40).optional(),
     what: z.string().max(200).optional(),
     escalated: z.boolean().optional(),
+    /** Why that work moved to the main model, when the runner's own agent loop decided it (the platform tells the job once). */
+    reason: z.string().max(300).optional(),
 });
 
 export const ExploreLlmRequestSchema = z.object({
     options: ExploreCallOptionsSchema,
     hint: ExploreRouteHintSchema.optional(),
+    /** What the engine's call is for (engine/llm/usage.ts purposes), so the usage row says so; anything else is counted as authoring. */
+    purpose: z.string().max(40).optional(),
 });
 export type ExploreLlmRequest = z.infer<typeof ExploreLlmRequestSchema>;
 

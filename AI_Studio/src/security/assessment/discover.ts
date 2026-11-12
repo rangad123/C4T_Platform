@@ -21,7 +21,7 @@ import { captureSnapshot } from "../../engine/discovery/snapshot.js";
 import type { SecurityCall } from "../../engine/security/checks.js";
 import { excludedBy } from "../scope.js";
 import type { StorageState } from "../../engine/auth/storage-state.js";
-import { isSignOut, judgeSignedInPage, SIGN_OUT_REASON } from "../signin.js";
+import { isSignOut, judgeSignedInPage, SIGN_OUT_REASON } from "../signin-rules.js";
 import { RefusedError, RequestCapError, type DiscoveryResult, type Guard } from "./types.js";
 
 export interface DiscoverOptions {

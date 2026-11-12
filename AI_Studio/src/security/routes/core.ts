@@ -19,6 +19,7 @@
 import net from "node:net";
 import { z } from "zod";
 import { HttpError } from "../../platform/http-error.js";
+import { runnersOnly } from "../../platform/runner-only.js";
 import { authorizationStatement } from "../authorization.js";
 import { ENVIRONMENTS, type SecurityApplication } from "../contract.js";
 import { METADATA_HOSTS, addressClass, staticTargetProblem } from "../scope.js";
@@ -202,22 +203,25 @@ const FIELD_WORDS: Record<keyof ApplicationPatch, string> = {
 
 export function registerSecurityCoreRoutes(ctx: SecurityRouteCtx): void {
     const { app, store, settings } = ctx;
+    // Round 52: on a platform that runs tests only on runners, nothing is sent from the platform: a private or local address is the runner's to
+    // allow (its owner's switch, checked when an assessment starts and again on the runner), so it is accepted here. Cloud metadata never is.
+    const allowPrivate = settings.allowPrivateTargets || runnersOnly(ctx.p.config);
     const params = (req: { params: unknown }) => req.params as Record<string, string>;
 
     /** Addresses that are never allowed, or not under the private-target setting: said at registration, checked again (with DNS) at every request. */
     const assertTargets = (fields: { targetUrl?: string; scope?: string[]; apiSpecUrl?: string | null }) => {
         if (fields.targetUrl) {
-            const problem = staticTargetProblem(fields.targetUrl, settings.allowPrivateTargets);
+            const problem = staticTargetProblem(fields.targetUrl, allowPrivate);
             if (problem) throw new HttpError(400, problem);
         }
         if (fields.apiSpecUrl) {
-            const problem = staticTargetProblem(fields.apiSpecUrl, settings.allowPrivateTargets);
+            const problem = staticTargetProblem(fields.apiSpecUrl, allowPrivate);
             if (problem) throw new HttpError(400, `API document address: ${problem}`);
         }
         for (const entry of fields.scope ?? []) {
             const host = (entry.includes("://") ? new URL(entry).hostname : entry.replace(/^\*\./, "").replace(/:\d+$/, "")).replace(/^\[|\]$/g, "");
             if (METADATA_HOSTS.has(host) || addressClass(host) === "cloud-metadata") throw new HttpError(400, `${entry} is a cloud metadata service; it can never be in scope.`);
-            if (!settings.allowPrivateTargets && (addressClass(host) || host === "localhost" || host.endsWith(".localhost"))) {
+            if (!allowPrivate && (addressClass(host) || host === "localhost" || host.endsWith(".localhost"))) {
                 throw new HttpError(400, `${entry} is a private or local address. Private targets are refused unless the platform setting SECURITY_ALLOW_PRIVATE_TARGETS is on.`);
             }
         }
@@ -240,7 +244,7 @@ export function registerSecurityCoreRoutes(ctx: SecurityRouteCtx): void {
         maxResponseBytes: settings.maxResponseBytes,
         assessmentMinutes: settings.assessmentMinutes,
         retentionDays: settings.retentionDays,
-        privateTargetsAllowed: settings.allowPrivateTargets,
+        privateTargetsAllowed: allowPrivate,
         scopeEntries: L.scopeEntries,
         excludedPaths: L.excludedPaths,
     });

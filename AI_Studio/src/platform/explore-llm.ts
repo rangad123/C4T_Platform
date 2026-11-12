@@ -6,6 +6,11 @@
  * One model per task attempt, built at its first call and dropped by `forgetExploreLlm` when the task ends (or when a newer attempt calls),
  * so the job's usage counters, budgets and routing behave as in a job run here. The route in front (routes/agents.ts) has checked the runner,
  * the task and the attempt.
+ *
+ * Round 52: each call is metered with the purpose the runner's engine gave it (unknown: authoring); an escalation the runner's own agent
+ * loop decided is told to the job and counted once, as on the server (the scope of that work is kept per task, so the routed client's
+ * own escalation path does it); a call whose request closes before its answer (the runner went away, the task was stopped) stops the
+ * provider call; the provider name aliases are kept in the task's row of explore_task_state, so they mean the same after a restart.
  */
 import type { LanguageModel } from "ai";
 import {
@@ -20,12 +25,12 @@ import {
 } from "../agent-protocol/explore-llm.js";
 import type { EngineEvent } from "../engine/context.js";
 import { isLlmCallError, toLlmCallError } from "../engine/llm/errors.js";
-import type { JobMeter } from "../engine/llm/metered.js";
+import { modelCallPurpose, type JobMeter } from "../engine/llm/metered.js";
 import { addUsage } from "../engine/llm/prompt-cache.js";
 import { LlmNotConfiguredError, type LlmClient } from "../engine/llm/provider.js";
 import type { ModelV3 } from "../engine/llm/resilience.js";
-import { currentRoute, ROUTE_TABLE, withRoute, type RouteTask } from "../engine/llm/routing.js";
-import { isBudgetExceeded } from "../engine/llm/usage.js";
+import { currentRoute, ROUTE_TABLE, withRoute, type RouteScope, type RouteTask } from "../engine/llm/routing.js";
+import { isBudgetExceeded, PURPOSES, type LlmPurpose } from "../engine/llm/usage.js";
 import { AI_NO_ANSWER, AI_NOT_AVAILABLE, AI_REFUSED, type ProjectAi } from "./ai-config.js";
 import type { ExploreTaskRef } from "./explore-task.js";
 import { HttpError } from "./http-error.js";
@@ -44,6 +49,9 @@ interface Built {
 }
 interface TaskState {
     attempt: number;
+    jobId: string;
+    /** The first platform scope of each piece of the runner's agent work (task + what): bound to the routed client, it tells an escalation once. */
+    scopes: Map<string, RouteScope>;
     built: Promise<Built>;
     calls: number;
     /** Provider names in provider metadata, as the runner sees them ("p1"), and back. */
@@ -59,12 +67,53 @@ const finishOf = (s: TaskState): Promise<void> =>
     );
 
 /** The task ended (or was given up): its usage is written and its model dropped. Never rejects; awaiting it is optional. */
-export function forgetExploreLlm(taskId: string): Promise<void> {
+export function forgetExploreLlm(taskId: string, p?: Pick<JobLlmDeps, "repo">): Promise<void> {
+    try {
+        p?.repo.db.run("UPDATE explore_task_state SET llm_json = NULL WHERE task_id = ?", taskId);
+    } catch {
+        // Only bookkeeping.
+    }
     const s = tasks.get(taskId);
     if (!s) return Promise.resolve();
     tasks.delete(taskId);
     return finishOf(s);
 }
+
+/** A graceful restart hands the job over (runner-handover.ts): the usage of its tasks is written, and the next process builds their model again. */
+export async function handOverExploreLlm(jobId: string): Promise<void> {
+    for (const [taskId, s] of [...tasks]) {
+        if (s.jobId !== jobId) continue;
+        tasks.delete(taskId);
+        await finishOf(s);
+    }
+}
+
+function loadAliases(p: JobLlmDeps, task: ExploreTaskRef): Map<string, string> {
+    try {
+        const row = p.repo.db.get<{ attempt: number; llm_json: string | null }>("SELECT attempt, llm_json FROM explore_task_state WHERE task_id = ?", task.taskId);
+        if (row?.llm_json && row.attempt === task.attempt) return new Map(JSON.parse(row.llm_json) as Array<[string, string]>);
+    } catch {
+        // None kept: names start again.
+    }
+    return new Map();
+}
+
+function saveAliases(p: JobLlmDeps, task: ExploreTaskRef, aliases: Map<string, string>): void {
+    try {
+        p.repo.db.run(
+            "INSERT INTO explore_task_state (task_id, attempt, llm_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET attempt = excluded.attempt, llm_json = excluded.llm_json, updated_at = excluded.updated_at",
+            task.taskId,
+            task.attempt,
+            JSON.stringify([...aliases]),
+            new Date().toISOString(),
+        );
+    } catch {
+        // Best effort: without it, a restart only renames providers again.
+    }
+}
+
+/** The purpose a call is metered with: one the engine knows, else authoring (what a direct model call is on the server). */
+const purposeOf = (p: string | undefined): LlmPurpose => (p && (PURPOSES as readonly string[]).includes(p) ? (p as LlmPurpose) : "authoring");
 
 function stateFor(p: JobLlmDeps, task: ExploreTaskRef): TaskState {
     const known = tasks.get(task.taskId);
@@ -86,16 +135,24 @@ function stateFor(p: JobLlmDeps, task: ExploreTaskRef): TaskState {
     });
     const s: TaskState = {
         attempt: task.attempt,
+        jobId: task.jobId,
+        scopes: new Map(),
         built,
         calls: 0,
-        aliases: new Map(),
+        aliases: loadAliases(p, task),
     };
     tasks.set(task.taskId, s);
     return s;
 }
 
-/** One model call of a runner's exploration. Throws HttpError 400/404/413/429; a failed model call is an answer (`ok: false`). */
-export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body: unknown): Promise<ExploreLlmAnswer> {
+/** The most pieces of agent work one task keeps a scope for (an exploration has a few dozen scenarios). */
+const MAX_SCOPES = 2000;
+
+/**
+ * One model call of a runner's exploration. Throws HttpError 400/404/413/429; a failed model call is an answer (`ok: false`). `signal`: the
+ * request closed before its answer, so the provider call is stopped.
+ */
+export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body: unknown, signal?: AbortSignal): Promise<ExploreLlmAnswer> {
     if (JSON.stringify(body ?? null).length > EXPLORE_LLM_MAX_BYTES) throw new HttpError(413, "This AI call is larger than the platform accepts.");
     const parsed = ExploreLlmRequestSchema.safeParse(body);
     if (!parsed.success) throw new HttpError(400, "This AI call could not be read.");
@@ -108,21 +165,33 @@ export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body
             ok: false,
             error: { kind: "unavailable", message: AI_NOT_SET_UP },
         };
-    const options = renameProviderKeys(decodeBytes(parsed.data.options), reverse(state.aliases)) as CallOptions;
+    const options = { ...(renameProviderKeys(decodeBytes(parsed.data.options), reverse(state.aliases)) as CallOptions), ...(signal ? { abortSignal: signal } : {}) };
     const hint = parsed.data.hint;
     const task_ = hint?.task && hint.task in ROUTE_TABLE ? (hint.task as RouteTask) : undefined;
+    const aliasCount = state.aliases.size;
     try {
         const model = llm.model as LanguageModel as ModelV3;
+        const generate = () => modelCallPurpose.run(purposeOf(parsed.data.purpose), () => model.doGenerate(options));
         let escalated: string | undefined;
         const result: Result = task_
             ? await withRoute({ task: task_, what: hint?.what ?? "" }, async () => {
                   const scope = currentRoute()!;
-                  if (hint?.escalated) scope.escalated = true;
-                  const r = await model.doGenerate(options);
+                  const key = `${task_}\u0000${hint?.what ?? ""}`;
+                  const first = state.scopes.get(key);
+                  if (hint?.escalated) {
+                      // The runner's agent loop moved this work to the main model: told to the job and counted once, through the scope the
+                      // routed client knows (a scope it moved itself is escalated already, and says nothing again).
+                      if (first && !first.escalated) first.escalate(hint.reason ?? "moved to the main model");
+                      scope.escalated = true;
+                  }
+                  const r = await generate();
                   if (!hint?.escalated && scope.escalated) escalated = scope.reason ?? "moved to the main model";
+                  if (!first) {
+                      if (state.scopes.size < MAX_SCOPES) state.scopes.set(key, scope);
+                  } else if (scope.escalated) first.escalated = true;
                   return r;
               })
-            : await model.doGenerate(options);
+            : await generate();
         // The engine counts the tokens of a call it makes itself; this call's are counted here, so the job's meter sees them (metered.ts).
         const u = result.usage;
         addUsage(llm.usage, {
@@ -133,9 +202,11 @@ export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body
                 cacheWriteTokens: u.inputTokens.cacheWrite ?? 0,
             },
         });
+        const cleaned = cleanResult(result, state.aliases);
+        if (state.aliases.size !== aliasCount) saveAliases(p, task, state.aliases);
         return {
             ok: true,
-            result: cleanResult(result, state.aliases) as never,
+            result: cleaned as never,
             ...(escalated ? { escalated } : {}),
         };
     } catch (e) {

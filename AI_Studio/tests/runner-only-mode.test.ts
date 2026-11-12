@@ -23,9 +23,8 @@ import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { personalRunner } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS, WORKER_LOST_GIVE_UP } from "../src/platform/repo.js";
-import { PLAIN_ON_RUNNERS_MESSAGE, PLATFORM_SETTING_REFUSED, DISPATCH_DOWN_MESSAGE, removeServerExecutionGuard, serverRunRefusals, SERVER_RUN_REFUSED } from "../src/platform/runner-only.js";
+import { PLATFORM_SETTING_REFUSED, DISPATCH_DOWN_MESSAGE, removeServerExecutionGuard, serverRunRefusals, SERVER_RUN_REFUSED } from "../src/platform/runner-only.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
-import { EXPLORE_SCHEDULE_REFUSED } from "../src/platform/routes/schedules.js";
 import { SecretBox } from "../src/platform/secrets.js";
 import { MAIN_ACCOUNT, SessionStore } from "../src/platform/session-store.js";
 import { ResetHookStore } from "../src/platform/test-data-reset-store.js";
@@ -131,15 +130,17 @@ describe("runners only: what is refused", () => {
         expect(jobCount(pid)).toBe(0);
     });
 
-    it("a described test and an agent run are refused when they are made, an exploration needs the starter's runner; the project cannot be set to run here", async () => {
+    it("an exploration, a described test and an agent run need the starter's runner; the project cannot be set to run here", async () => {
         const pid = await newProject("Server work");
         // Round 51: an exploration goes to the starter's runner, so without one it is refused as a run is (explore-on-runner.test.ts has the rest).
+        // Round 52: so do a described test and an agent run (jobs-on-runner.test.ts).
         const explore = await call("POST", `/api/projects/${pid}/test-generation`, { url: "https://shop.example.test" });
         expect(explore.status).toBe(409);
         expect(explore.body.details).toMatchObject({ code: "RUNNER_NOT_SET_UP" });
         const plain = await call("POST", `/api/projects/${pid}/plain-tests`, { description: "Open the home page and check the title" });
-        expect(plain.status).toBe(409);
-        expect(plain.body.error).toBe(PLAIN_ON_RUNNERS_MESSAGE);
+        // No AI model on this test platform: that is what stops it now, not the mode (the job gate below says the runner).
+        expect(plain.status).toBe(422);
+        expect(plain.body.details).toMatchObject({ modelMissing: true });
         // Every other way a job is made goes through createJob's gate.
         const app = platform.repo.createApplication(pid, "https://shop.example.test", { ...DEFAULT_JOB_OPTIONS }, undefined);
         for (const mode of ["generate", "plain", "agent"] as const) {
@@ -226,10 +227,9 @@ describe("runners only: a run goes to the runner", () => {
         expect(listed.schedulesFire).toBe(false); // SCHEDULER_ENABLED=false in this test platform: said, not hidden
         // Made on the open server: nobody's name to show.
         expect(listed.schedules[0]).not.toHaveProperty("ownerName");
-        // "Explore again" would fail at every fire here: refused when it is made, and when a schedule is changed to it.
-        const explore = await call("POST", `/api/projects/${pid}/schedules`, { kind: "generate", cadence: { type: "daily", time: "03:00" } });
-        expect(explore).toMatchObject({ status: 409, body: { error: EXPLORE_SCHEDULE_REFUSED } });
-        expect((await call("PATCH", `/api/projects/${pid}/schedules/${made.body.id}`, { kind: "generate" })).body.error).toBe(EXPLORE_SCHEDULE_REFUSED);
+        // Round 52: "Explore again" goes to the schedule's creator's runner, so it may be made here too (jobs-on-runner.test.ts runs one).
+        const explore = await call("POST", `/api/projects/${pid}/schedules`, { kind: "generate", cadence: { type: "daily", time: "03:00" }, enabled: false });
+        expect(explore.status, JSON.stringify(explore.body)).toBe(201);
         platform.db.run("UPDATE schedules SET next_run_at = ? WHERE id = ?", Date.now() - 1000, made.body.id);
         const ticked = await getScheduleServices(platform).scheduler.tick();
         const fired = ticked.find((x) => x.scheduleId === made.body.id)!;
