@@ -662,7 +662,7 @@ describeWin("--silent starts the runner hidden; it connects, runs real tests and
         expect(text()).toMatch(/Test tools \(npm packages\): Found, skipped/);
         expect(text()).toMatch(/Browser for web tests: Checked\. Left to the runner/);
         expect(text()).toContain("Runner started (process ");
-        await until("the connected line", () => text().includes(`Connected to 127.0.0.1 as ${NAME}`), 30_000);
+        await until("the connected line", () => text().includes("Connected to 127.0.0.1"), 30_000);
 
         // Hidden: neither this program nor the runner it started has a window.
         const state = readState(inst);
@@ -861,7 +861,8 @@ describeWin("the one-file download: AITestingRunnerSetup.exe alone, with the kit
         const main = launch(exe, ["--silent", "--install-dir", inst], path.dirname(exe));
         // The older copy is asked to close the way --stop asks it, and ends cleanly.
         expect(await Promise.race([old.exited, sleep(90_000).then(() => "timeout")]), output(old)).toBe(0);
-        await until("the new runner to connect", () => output(main).includes(`Connected to 127.0.0.1 as ${NAME}`), 120_000).catch((e) => {
+        // runner.json names no runner (round 45), so the line is "Connected to <platform>" without "as <name>".
+        await until("the new runner to connect", async () => output(main).includes("Connected to 127.0.0.1") && (await onlineAgents(oldKit.projectId))[0], 120_000).catch((e) => {
             throw new Error(`${e.message}\n--- output ---\n${output(main)}`);
         });
         expect(output(main)).toContain("Closing the older runner on this computer\u2026");

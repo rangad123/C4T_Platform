@@ -39,6 +39,8 @@ namespace AITestingRunner
             return Layout.DefaultRoot();
         }
 
+        static string SelfPath() { return System.Reflection.Assembly.GetExecutingAssembly().Location; }
+
         static string MutexName(Layout lay) { return "Local\\AITP-Runner-" + lay.Key(); }
 
         [STAThread]
@@ -61,8 +63,9 @@ namespace AITestingRunner
             {
                 if (o.Stop) return RunStop(lay, log);
                 if (o.Uninstall) return RunUninstall(o, lay, log);
-                // A one-file download carries its kit at its end: unpack it privately and go on as if started from the unzipped folder.
-                Stamp.Unpack(System.Reflection.Assembly.GetExecutingAssembly().Location, lay);
+                // A one-file download carries its kit at its end: unpack it privately and go on as if started from the unzipped folder. The
+                // installing modes unpack only after claiming the folder (RunHeadless, RunWindow), so a --stop sent right after the start finds them.
+                if (o.Check) Stamp.Unpack(SelfPath(), lay);
                 if (o.Check) return RunCheck(o, lay, log);
                 if (o.UiSmoke) return UiSmoke.Run(o, lay, log);
                 // From here on something may be written to the install folder.
@@ -243,6 +246,7 @@ namespace AITestingRunner
         {
             using (Single one = Claim(lay))
             {
+                Stamp.Unpack(SelfPath(), lay);
                 if (!one.Mine && Stamp.Dir == null)
                 {
                     Print("The " + Product.Name + " is already running for " + lay.Root + ". Nothing to do.");
@@ -298,6 +302,7 @@ namespace AITestingRunner
         {
             using (Single one = Claim(lay))
             {
+                Stamp.Unpack(SelfPath(), lay);
                 if (!one.Mine && Stamp.Dir == null)
                 {
                     // The runner is already there: bring its window forward.

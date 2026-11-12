@@ -693,6 +693,8 @@ export async function runSmoke(opts, deps = {}) {
                 const code = Object.entries(kit).find(([n]) => n.endsWith("/runner.enroll"))?.[1];
                 if (!code) throw new Error("The kit at the end of the program has no runner.enroll.");
                 secrets.push(Buffer.from(code).toString("utf8").trim());
+                // The program is the installer: there is no start script in it (the plain files come only from a server without the installer).
+                if (opts.kit !== "installer") throw new Skip(`The download for ${target.label} is the installer and has no start script here. Use --kit installer.`);
                 return "one program, nothing to unpack";
             }
             const tool = await unpackZip(zipFile, dest);
@@ -816,7 +818,8 @@ export async function runSmoke(opts, deps = {}) {
                 const t0 = Date.now();
                 await until("the runner to be online again", async () => {
                     if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
-                    return (await myRunner())?.id === tokenId;
+                    // On Windows the platform may still show the earlier run online: wait until this setup has started its own runner.
+                    return (await myRunner())?.id === tokenId && (target.system !== "windows" || runner.output.includes("Runner started"));
                 }, opts.onlineTimeout * 1000, 2000);
                 return `online again after ${fmtMs(Date.now() - t0)}, with the same access`;
             });
@@ -848,7 +851,7 @@ export async function runSmoke(opts, deps = {}) {
                     runner = children.start(name, cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
                     await until("the runner to be online again", async () => {
                         if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
-                        return (await myRunner())?.id === tokenId;
+                        return (await myRunner())?.id === tokenId && (target.system !== "windows" || runner.output.includes("Runner started"));
                     }, opts.onlineTimeout * 1000, 2000);
                 };
                 await step("Renew its credential (made due now) and start it again", async () => {
