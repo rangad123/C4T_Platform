@@ -229,7 +229,9 @@ describe("the microtask rule", () => {
         const sql = sqliteSql(db, { strict: false });
         const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
         await sql.tx(async (t) => {
-            await sleep(1);
+            // A yield that always lands after the rule's watch (an immediate queued after it). A 1 ms timer could fire first on a busy
+            // machine, before the watch, and then nothing is logged: that flaked in CI.
+            await new Promise<void>((resolve) => setImmediate(resolve));
             await t.run("INSERT INTO t (name) VALUES ('x')");
         });
         expect(names(db)).toEqual(["x"]);
