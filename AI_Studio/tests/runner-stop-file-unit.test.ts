@@ -79,7 +79,8 @@ describe("the Windows host (read, not run)", () => {
         expect(engine).toContain('if (name == "runner.enroll" && Util.Sha256File(src) == State.EnrollSha) return false;');
         expect(engine).toContain("State.EnrollSha = sha;");
         expect(engine).toContain('if (name == "runner.enroll" || name == "runner.token") RestrictToCurrentUser(dst);');
-        expect(engine).toContain('File.Delete(Path.Combine(L.App, "runner.token"))');
+        // A new code: the runner forgets its saved credential first (it prefers a saved one to a code), which also removes runner.token.
+        expect(engine).toContain("Say(ForgetCredential());");
     });
 
     it("starts at sign-in by default (window and silent), installs with npm ci --ignore-scripts from the lock file, and forgets the credential on uninstall", () => {
