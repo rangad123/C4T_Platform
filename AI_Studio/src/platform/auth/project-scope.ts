@@ -177,6 +177,7 @@ export const EXPLICIT_SCOPES: Record<string, Scope["kind"]> = {
     "POST /api/llm/check": "all",
     "PUT /api/llm/fallbacks": "all",
     "PUT /api/llm/fast-model": "all",
+    "PUT /api/llm/planning-model": "all",
     "PUT /api/llm/prompt-cache": "all",
     "PUT /api/llm/compact-snapshots": "all",
     "PUT /api/llm/without-ai": "all",
