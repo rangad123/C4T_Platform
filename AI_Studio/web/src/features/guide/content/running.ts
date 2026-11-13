@@ -170,7 +170,7 @@ export const running: Topic[] = [
         steps: [
             step("Open Settings and find Your runner.", "Settings", "Your runner"),
             step("Choose Download, or For another computer? first.", "For another computer?"),
-            step("Open it there: on Windows it is the setup program itself, on a Mac or Linux unzip it first. It gets only what is missing."),
+            step("Open it there: on Windows the setup program, on a Mac the installer package, on Linux run sh ai-testing-runner.sh. It gets only what is missing."),
             step("Wait until Your runner says Online.", "Online"),
         ],
         goodToKnow: [

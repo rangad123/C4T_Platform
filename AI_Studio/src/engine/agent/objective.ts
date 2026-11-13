@@ -23,7 +23,7 @@ import { ariaSnapshot, BrowserSession, settle, type SessionOptions } from "../di
 import { safeAddress } from "../frames/activity.js";
 import { shootPage } from "../frames/shoot.js";
 import { addUsage } from "../llm/prompt-cache.js";
-import { LLM_MAX_RETRIES, PROVIDER_OPTIONS, type Usage } from "../llm/provider.js";
+import { AGENT_STEP_MAX_OUTPUT_TOKENS, LLM_MAX_RETRIES, PROVIDER_OPTIONS, type Usage } from "../llm/provider.js";
 import { noteAgentStep, withRoute } from "../llm/routing.js";
 import { cleanBlock, cleanLine, credentialSlotOf, decideFill, HIDDEN, secretKindOfField } from "../recorder/act.js";
 import { COMPACT_SNAPSHOT_NOTE, RAW_SNAPSHOT_MAX, SnapshotView } from "../snapshots/compact.js";
@@ -505,6 +505,7 @@ ${snapshot}`;
             tools,
             providerOptions: PROVIDER_OPTIONS,
             maxRetries: LLM_MAX_RETRIES,
+            maxOutputTokens: AGENT_STEP_MAX_OUTPUT_TOKENS,
             // One turn more than the steps, so the agent can report after the last one.
             stopWhen: [stepCountIs(limits.maxSteps + 1), hasToolCall("finish"), () => end !== undefined],
             onStepFinish: async (e) => {

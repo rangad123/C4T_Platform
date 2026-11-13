@@ -19,7 +19,7 @@ import { z } from "zod";
 import type { EngineContext } from "../context.js";
 import { activityOfStep, activityLine, pathOf } from "../frames/activity.js";
 import type { FrameSink } from "../frames/sink.js";
-import { LLM_MAX_RETRIES, PROVIDER_OPTIONS } from "../llm/provider.js";
+import { AGENT_STEP_MAX_OUTPUT_TOKENS, LLM_MAX_RETRIES, PROVIDER_OPTIONS } from "../llm/provider.js";
 import { addUsage } from "../llm/prompt-cache.js";
 import { noteAgentStep, withRoute } from "../llm/routing.js";
 import { ariaSnapshot, BrowserSession, settle, type SessionEvents } from "../discovery/browser.js";
@@ -583,6 +583,7 @@ ${snapshot}`;
             tools,
             providerOptions: PROVIDER_OPTIONS,
             maxRetries: LLM_MAX_RETRIES,
+            maxOutputTokens: AGENT_STEP_MAX_OUTPUT_TOKENS,
             // Ends when finish was accepted (a pushed-back finish lets the agent go on).
             stopWhen: [stepCountIs(input.maxSteps ?? 28), () => outcome !== undefined],
             // Each step's tokens, prompt-cache reads and writes included (the instructions, tools and earlier steps are cached: llm/prompt-cache.ts).

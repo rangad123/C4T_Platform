@@ -9,8 +9,8 @@
  * `runner.enroll` (a single-use enrollment code) a files kit holds. Nothing from the server's environment, `.env`, database or data folder is ever read.
  *
  * Windows (round 49): the download is the setup program itself with the kit appended (buildInstallerExe); a signed exe gets the zip.
- * Mac (round 50): a zip holding only the app, the kit inside it under MAC_KIT_DIR (runner-kit-complete.ts buildCompleteZip, layout
- * "mac-app"); a signed app (Contents/_CodeSignature) gets the zip below with the kit beside the app.
+ * Mac (round 55): one installer package, ai-testing-runner-mac.pkg (runner-mac-pkg.ts), that installs for the person only; a signed app
+ * (Contents/_CodeSignature) gets the zip below with the kit beside the app.
  *
  * If the installer was not built (or the part for the chosen system is missing or damaged) the caller falls back to the files kit and says so.
  */
@@ -132,11 +132,7 @@ export function installerInfo(loaded: LoadedInstaller = loadInstaller()): { wind
 // ── the zip ─────────────────────────────────────────────────────────────────
 
 export const MAC_APP = "AI Testing Runner.app";
-/** Round 50: where the server puts the kit inside the app (the app reads it from there first; see runner-setup.sh find_kit). */
-export const MAC_KIT_DIR = `${MAC_APP}/Contents/Resources/kit`;
-/** The Mac download when it is the app alone (one item in the zip). */
-export const MAC_ZIP_NAME = "ai-testing-runner-mac.zip";
-/** Is the built app code-signed? Then a file added inside it breaks the signature, so it gets today's zip with the kit beside it. */
+/** Is the built app code-signed? Then it gets the zip with the kit beside it (the unsigned package would only add an unsigned step). */
 export const macAppSigned = (part: Extract<InstallerPart, { ok: true }>): boolean => part.files.some((f) => f.name.startsWith(`${MAC_APP}/Contents/_CodeSignature/`));
 
 export const installerFolder = (platform: KitPlatform): string => `runner-${KIT_SLUG}-${platform === "windows" ? "windows" : "mac"}-setup`;

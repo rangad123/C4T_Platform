@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import type { Readable } from "node:stream";
 import { getAgentServices } from "../agent-services.js";
 import { OPEN_OWNER_ID, type EnrollmentRecord } from "../agent-store.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
@@ -7,8 +8,9 @@ import { runnerUpdatesFor } from "../runner-update.js";
 import { RateLimiter } from "../agent-routing.js";
 import { HttpError } from "../http-error.js";
 import { mayHaveRunner } from "../runner-health.js";
-import { buildInstallerExe, buildInstallerZip, installerFileName, loadInstaller, MAC_ZIP_NAME, macAppSigned, peSigned, WINDOWS_EXE_NAME, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
+import { buildInstallerExe, buildInstallerZip, installerFileName, loadInstaller, macAppSigned, peSigned, WINDOWS_EXE_NAME, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
 import { LINUX_SCRIPT_NAME } from "../runner-linux-script.js";
+import { buildMacPkg, MAC_PKG_NAME } from "../runner-mac-pkg.js";
 import { buildKitZip, decideAddress, DownloadRequest, kitFileName, loadBundle, type Bundle } from "../runner-kit.js";
 import { buildCompleteZip, completeFileName, loadComplete, MAX_COMPLETE_AT_ONCE, targetOf, type CompleteBuild, type CompleteTarget } from "../runner-kit-complete.js";
 import type { RouteCtx } from "./types.js";
@@ -19,11 +21,12 @@ import type { RouteCtx } from "./types.js";
  *   GET  /api/me/runner/download/info   which systems can be downloaded here, and which address the runner would connect to
  *   POST /api/me/runner/download        { os: "windows" | "mac" | "linux", arch: "x64" | "arm64" } -> the zip with this person's one-time code
  *
- * One download per system, nothing to choose: Windows gets the setup program, a Mac the app, Linux the plain files with the start scripts.
- * Each is one thing (rounds 49 and 50): Windows the program with the kit appended, a Mac a zip holding only the app with the kit inside it,
- * Linux one `ai-testing-runner.sh` with the kit at its end. A signed program or app gets the zip with the kit beside it instead.
+ * One download per system, nothing to choose: Windows gets the setup program, a Mac the installer package, Linux the plain files with the
+ * start scripts. Each is one file (rounds 49, 50 and 55): Windows the program with the kit appended, a Mac `ai-testing-runner-mac.pkg`
+ * (runner-mac-pkg.ts: installs for the person only and runs the app's setup), Linux one `ai-testing-runner.sh` with the kit at its end.
+ * A signed program or app gets the zip with the kit beside it instead.
  * The Mac app and the Linux files also carry their own Node.js and every test tool (the complete build, runner-kit-complete.ts) when this
- * server has built it for that system and processor (the Mac app is then put inside it). Windows never does: its installer finds or
+ * server has built it for that system and processor (inside the package beside the app). Windows never does: its installer finds or
  * downloads Node.js and installs the test tools with npm ci, because a complete node_modules copied into its install folder passes
  * Windows' 260-character path limit. A server without the installer for a system sends the plain files and says so (x-runner-kit-note).
  * The runner is named after the computer (runner.json holds no name).
@@ -48,8 +51,8 @@ interface Plan {
     complete?: Extract<CompleteBuild, { ok: true }>;
     /** Why the download is not the installer, for Windows and Mac. */
     note?: string;
-    /** What is sent: the Windows program, the zip holding only the Mac app, the Linux script, or a zip with one folder. */
-    form: "exe" | "mac-app" | "linux" | "zip";
+    /** What is sent: the Windows program, the Mac installer package, the Linux script, or a zip with one folder. */
+    form: "exe" | "mac-pkg" | "linux" | "zip";
     fileName: string;
 }
 
@@ -70,7 +73,7 @@ function planFor(req: DownloadRequest, bundle: Extract<Bundle, { ok: true }>, in
             return { kind: "installer", installer: part, form: signed ? "zip" : "exe", fileName: signed ? installerFileName("windows") : WINDOWS_EXE_NAME };
         }
         if (macAppSigned(part)) return { kind: "installer", installer: part, ...has, form: "zip", fileName: complete ? completeFileName(complete.target) : installerFileName("unix") };
-        return { kind: "installer", installer: part, ...has, form: "mac-app", fileName: MAC_ZIP_NAME };
+        return { kind: "installer", installer: part, ...has, form: "mac-pkg", fileName: MAC_PKG_NAME };
     }
     const note = `${part && !part.ok ? part.reason : ""} The plain files were sent instead.`.trim();
     return { kind: "files", ...has, note, form: "zip", fileName: complete ? completeFileName(complete.target) : kitFileName(req.os === "windows" ? "windows" : "unix") };
@@ -164,7 +167,7 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
     });
 
     /** The zip with runner.enroll: streamed when it carries its own Node.js, else built in memory. A zip that cannot be built uses up its code. */
-    function send(
+    async function send(
         req: FastifyRequest,
         reply: FastifyReply,
         k: { request: DownloadRequest; plan: Plan; bundle: Extract<Bundle, { ok: true }>; platformUrl: string; enrollment: { code: string; record: EnrollmentRecord } },
@@ -186,13 +189,14 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
         };
         // Header values are single-line ASCII; the sentence is plain English without quotes or line breaks.
         if (plan.note) reply.header("x-runner-kit-note", plan.note.replace(/[^ -~]/g, " "));
-        if (plan.complete || plan.form === "mac-app" || plan.form === "linux") {
+        if (plan.complete || plan.form === "mac-pkg" || plan.form === "linux") {
             const target = plan.complete?.target;
             if (plan.form === "zip" && plan.installer && request.os === "mac") req.log.info({ enrollmentId: enrollment.record.id }, "the Mac app is signed: sending the zip with the kit beside it");
-            let zip: ReturnType<typeof buildCompleteZip> | undefined;
+            let zip: { stream: Readable; bytes: number } | undefined;
             try {
-                const layout = plan.form === "mac-app" ? "mac-app" : plan.form === "linux" ? "linux" : "folder";
-                zip = buildCompleteZip({ bundle, ...(plan.complete ? { build: plan.complete } : {}), ...(plan.installer ? { installer: plan.installer } : {}), layout, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() });
+                const input = { bundle, ...(plan.complete ? { build: plan.complete } : {}), ...(plan.installer ? { installer: plan.installer } : {}), platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() };
+                // The Mac package (round 55): the first one after a build or restart hashes the shared part once, so it is awaited.
+                zip = plan.form === "mac-pkg" ? await buildMacPkg(input) : buildCompleteZip({ ...input, layout: plan.form === "linux" ? "linux" : "folder" });
             } catch {
                 failed();
             }
@@ -213,7 +217,7 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
             }
             return reply
                 .headers(common)
-                .header("content-type", plan.form === "linux" ? "application/x-sh" : "application/zip")
+                .header("content-type", plan.form === "linux" ? "application/x-sh" : plan.form === "mac-pkg" ? "application/octet-stream" : "application/zip")
                 .header("content-length", String(zip!.bytes))
                 .header("content-disposition", `attachment; filename="${plan.fileName}"`)
                 .headers(target ? { "x-runner-kit-target": target } : {})

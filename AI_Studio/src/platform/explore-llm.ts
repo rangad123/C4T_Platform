@@ -24,7 +24,7 @@ import {
     type ExploreLlmError,
 } from "../agent-protocol/explore-llm.js";
 import type { EngineEvent } from "../engine/context.js";
-import { isLlmCallError, toLlmCallError } from "../engine/llm/errors.js";
+import { isLlmCallError, LOW_CREDIT_SENTENCE, toLlmCallError } from "../engine/llm/errors.js";
 import { modelCallPurpose, type JobMeter } from "../engine/llm/metered.js";
 import { addUsage } from "../engine/llm/prompt-cache.js";
 import { LlmNotConfiguredError, type LlmClient } from "../engine/llm/provider.js";
@@ -223,7 +223,7 @@ export function errorOf(e: unknown, ai?: Pick<ProjectAi, "blocked">): ExploreLlm
             message: ai?.blocked ?? (e.message === AI_NOT_AVAILABLE ? AI_NOT_AVAILABLE : AI_NOT_SET_UP),
         };
     const err = isLlmCallError(e) ? e : toLlmCallError(e);
-    const sentence = [AI_REFUSED, AI_NO_ANSWER].find((s) => err.message.startsWith(s));
+    const sentence = [AI_REFUSED, AI_NO_ANSWER, LOW_CREDIT_SENTENCE].find((s) => err.message.startsWith(s));
     return {
         kind: "llm",
         cls: err.cls,

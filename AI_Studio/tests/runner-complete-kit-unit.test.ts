@@ -28,10 +28,14 @@ import zlib from "node:zlib";
 import { unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { splitLinuxScript, splitStampedExe } from "./fixtures/runner-person.js";
+// @ts-expect-error plain JavaScript reader (no type declarations)
+import { expandMacPkg, readMacPkg } from "../scripts/mac-pkg-read.mjs";
+import { filesLine } from "../src/agent/computer-check.js";
 import { loadConfig } from "../src/config.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { START_CMD, START_SH } from "../src/platform/runner-kit-scripts.js";
+import { buildMacPkg, POSTINSTALL } from "../src/platform/runner-mac-pkg.js";
 import { buildServer } from "../src/platform/server.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
@@ -176,7 +180,7 @@ const complete = (osName: "windows" | "mac" | "linux", arch: string) => call("PO
 const systemOf = (info: { systems: Array<{ os: string; arch: string }> }, osName: string, arch: string) => info.systems.find((x) => x.os === osName && x.arch === arch) as unknown as { bytes?: number; note?: string; available: boolean };
 
 /** What `npm run build:installer` writes, in miniature: a stand-in Windows program and Mac app, with a manifest. */
-function writeInstallerStandIns(dir: string): void {
+function writeInstallerStandIns(dir: string, { signed = false, setup = "#!/bin/sh\nexit 0\n" }: { signed?: boolean; setup?: string } = {}): void {
     const put = (rel: string, body: string, mode: number) => {
         const f = path.join(dir, ...rel.split("/"));
         fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -185,7 +189,7 @@ function writeInstallerStandIns(dir: string): void {
     };
     put("win/AITestingRunnerSetup.exe", "MZ stand-in program\n", 0o755);
     const app = "AI Testing Runner.app";
-    const entries = [put(`mac/${app}/Contents/Info.plist`, "<plist/>\n", 0o644), put(`mac/${app}/Contents/MacOS/AITestingRunner`, "#!/bin/sh\nexit 0\n", 0o755), put(`mac/${app}/Contents/Resources/runner-setup.sh`, "#!/bin/sh\nexit 0\n", 0o755)];
+    const entries = [put(`mac/${app}/Contents/Info.plist`, "<plist/>\n", 0o644), put(`mac/${app}/Contents/MacOS/AITestingRunner`, "#!/bin/sh\nexit 0\n", 0o755), put(`mac/${app}/Contents/Resources/runner-setup.sh`, setup, 0o755), ...(signed ? [put(`mac/${app}/Contents/_CodeSignature/CodeResources`, "<plist/>\n", 0o644)] : [])];
     fs.writeFileSync(path.join(dir, "mac", "manifest-part.json"), JSON.stringify({ version: 1, entries }));
     writeManifest({ outDir: dir, platformVersion: "1.0.0" });
 }
@@ -560,7 +564,7 @@ describe("the download route", () => {
         expect(fs.readdirSync(temp)).toEqual([]);
     });
 
-    it("puts the Mac app inside when the server has it; the Windows installer download never carries the complete parts (260-character path limit)", async () => {
+    it("puts the Mac app and the kit in one package when the server has it; the Windows installer download never carries the complete parts (260-character path limit)", async () => {
         const saved = process.env.RUNNER_INSTALLER_DIR;
         const inst = path.join(tmp, "installer-stand-ins");
         if (!fs.existsSync(inst)) writeInstallerStandIns(inst);
@@ -579,24 +583,55 @@ describe("the download route", () => {
             expect(systemOf(info, "windows", "x64").bytes).toBeUndefined();
             expect(systemOf(info, "mac", "arm64").bytes).toBeGreaterThan(0);
 
-            // Mac (round 50): a zip holding only the app, with the complete kit inside it; no README or start scripts beside it.
+            // Mac (round 55): one installer package; the app and the complete kit in its Scripts, this download's code beside them.
             const mac = await complete("mac", "arm64");
             expect(mac.status, mac.text).toBe(200);
             expect(mac.headers["x-runner-kit-kind"]).toBe("installer");
             expect(mac.headers["x-runner-kit-note"]).toBeUndefined();
             expect(mac.headers["x-runner-kit-target"]).toBe("mac-arm64");
-            expect(mac.headers["content-disposition"]).toBe('attachment; filename="ai-testing-runner-mac.zip"');
+            expect(mac.headers["content-type"]).toBe("application/octet-stream");
+            expect(mac.headers["content-disposition"]).toBe('attachment; filename="ai-testing-runner-mac.pkg"');
             expect(Number(mac.headers["content-length"])).toBe(mac.buf.length);
-            const z = unzipSync(new Uint8Array(mac.buf));
+            // Every checksum is checked by the reader (the TOC's, each file's, the gzip CRC); it throws on any mismatch.
+            const pkg = readMacPkg(mac.buf);
+            expect([...pkg.files.keys()].sort()).toEqual(["Distribution", "runner.pkg", "runner.pkg/PackageInfo", "runner.pkg/Scripts"]);
+            expect(pkg.distribution).toContain('enable_currentUserHome="true"');
+            expect(pkg.distribution).toContain('enable_localSystem="false"');
+            expect(Object.keys(pkg.scripts).sort()).toEqual([".", "kit.zip", "postinstall", "runner.enroll", "runner.json"]);
+            expect(pkg.scripts["postinstall"]!.mode & 0o777).toBe(0o755);
+            expect(pkg.scripts["runner.enroll"]!.mode & 0o777).toBe(0o600);
+            const code = pkg.scripts["runner.enroll"]!.data.toString("utf8").trim();
+            expect(code).toMatch(/^aite_/);
+            const z = unzipSync(new Uint8Array(pkg.scripts["kit.zip"]!.data));
             const app = "AI Testing Runner.app";
-            const kit = `${app}/Contents/Resources/kit`;
-            expect([...new Set(Object.keys(z).map((n) => n.split("/")[0]))]).toEqual([app]);
-            for (const n of [`${app}/Contents/MacOS/AITestingRunner`, `${kit}/node/bin/node`, `${kit}/node_modules/.aitp-complete`, `${kit}/node_modules/mac-watcher/package.json`, `${kit}/complete-kit.json`, `${kit}/runner.mjs`, `${kit}/runner.json`, `${kit}/runner.enroll`]) expect(z[n], n).toBeDefined();
-            expect(Object.keys(z).some((n) => /start-runner|README\.txt$|check-computer/.test(n))).toBe(false);
-            const mm = modes(new Uint8Array(mac.buf));
-            expect(mm[`${kit}/node/bin/node`]).toEqual({ mode: 0o755, unix: true });
+            expect([...new Set(Object.keys(z).map((n) => n.split("/")[0]))].sort()).toEqual([app, "kit"]);
+            for (const n of [`${app}/Contents/MacOS/AITestingRunner`, "kit/node/bin/node", "kit/node_modules/.aitp-complete", "kit/node_modules/mac-watcher/package.json", "kit/complete-kit.json", "kit/runner.mjs", "kit/package-lock.json"]) expect(z[n], n).toBeDefined();
+            // The shared zip holds nothing of this download: no code, no address.
+            expect(Object.keys(z).some((n) => /runner\.(enroll|json|token)$|start-runner|README\.txt$|check-computer/.test(n))).toBe(false);
+            expect(Buffer.from(pkg.scripts["kit.zip"]!.data).includes(code)).toBe(false);
+            // The runner's own file check passes on the kit as the postinstall puts it together (kit/ plus runner.json).
+            const runnerJson = pkg.scripts["runner.json"]!.data;
+            const kitVersion = (JSON.parse(runnerJson.toString("utf8")) as { kitVersion: string }).kitVersion;
+            const filesCheck = filesLine(kitVersion, (n) => (n === "runner.json" ? runnerJson : z[`kit/${n}`] ? Buffer.from(z[`kit/${n}`]!) : undefined));
+            expect(filesCheck.status, filesCheck.title).toBe("ok");
+            const mm = modes(new Uint8Array(pkg.scripts["kit.zip"]!.data));
+            expect(mm["kit/node/bin/node"]).toEqual({ mode: 0o755, unix: true });
             expect(mm[`${app}/Contents/MacOS/AITestingRunner`]).toEqual({ mode: 0o755, unix: true });
-            expect(mm[`${kit}/runner.enroll`]!.mode).toBe(0o600);
+            // A second download: a new code, the same shared bytes, its own length.
+            const mac2 = await complete("mac", "arm64");
+            const pkg2 = readMacPkg(mac2.buf);
+            expect(Number(mac2.headers["content-length"])).toBe(mac2.buf.length);
+            expect(pkg2.scripts["runner.enroll"]!.data.toString("utf8").trim()).not.toBe(code);
+            expect(Buffer.compare(pkg2.scripts["kit.zip"]!.data, pkg.scripts["kit.zip"]!.data)).toBe(0);
+            // A signed app keeps the zip with the kit beside it (an unsigned package around it would only add an unsigned step).
+            const signedDir = path.join(tmp, "installer-signed");
+            if (!fs.existsSync(signedDir)) writeInstallerStandIns(signedDir, { signed: true });
+            process.env.RUNNER_INSTALLER_DIR = signedDir;
+            const signed = await complete("mac", "arm64");
+            expect(signed.status, signed.text).toBe(200);
+            expect(signed.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-mac-arm64.zip"');
+            expect(Object.keys(unzipSync(new Uint8Array(signed.buf)))).toContain(`runner-my-computer-mac-arm64/${app}/Contents/_CodeSignature/CodeResources`);
+            process.env.RUNNER_INSTALLER_DIR = inst;
             // Linux never gets an installer.
             const linux = await complete("linux", "x64");
             expect(linux.headers["x-runner-kit-kind"]).toBe("files");
@@ -670,6 +705,106 @@ describe("the download route", () => {
             expect(/aitg_[A-Za-z0-9_-]{20,}/.test(b.toString("latin1")), name).toBe(false);
             for (const f of forbidden) expect(b.includes(f), `${name} holds ${f.slice(0, 12)}`).toBe(false);
         }
+    });
+
+    it("the Mac package: no server secrets, readable by the system's gzip and cpio, and its postinstall sets up the runner from the kit as the person", async () => {
+        const saved = process.env.RUNNER_INSTALLER_DIR;
+        const inst = path.join(tmp, "installer-probe-setup");
+        // The app's setup stands in as a probe: it prints how it was started and what the kit folder holds.
+        const probe = '#!/bin/sh\nprintf "SETUP %s\\n" "$*"\nfor f in runner.mjs runner.json runner.enroll node/bin/node; do [ -f "$3/$f" ] && printf "HAS %s %s\\n" "$f" "$(stat -c %a "$3/$f")"; done\nexit 0\n';
+        if (!fs.existsSync(inst)) writeInstallerStandIns(inst, { setup: probe });
+        process.env.RUNNER_INSTALLER_DIR = inst;
+        try {
+            const r = await complete("mac", "arm64");
+            expect(r.status, r.text).toBe(200);
+            const pkg = readMacPkg(r.buf);
+            const code = pkg.scripts["runner.enroll"]!.data.toString("utf8").trim();
+            const forbidden = [...Object.values(SENTINELS), API_KEY, bearer, "platform.db", tmp, fwd(tmp), ROOT, fwd(ROOT)];
+            const parts: Record<string, Buffer> = { Distribution: Buffer.from(pkg.distribution), PackageInfo: Buffer.from(pkg.packageInfo), TOC: Buffer.from(pkg.toc), ...Object.fromEntries(Object.entries(pkg.scripts as Record<string, { data: Buffer }>).map(([n, e]) => [n, e.data])) };
+            for (const [name, b] of Object.entries(parts)) {
+                if (name !== "runner.enroll") expect(b.includes(code), name).toBe(false);
+                expect(/aitg_[A-Za-z0-9_-]{20,}/.test(b.toString("latin1")), name).toBe(false);
+                for (const f of forbidden) expect(b.includes(f), `${name} holds ${f.slice(0, 12)}`).toBe(false);
+            }
+            // The system's own tools read Scripts: gzip checks the stored blocks and the CRC, cpio lists the odc archive.
+            const dir = fs.mkdtempSync(path.join(tmp, "pkg-scripts-"));
+            fs.writeFileSync(path.join(dir, "Scripts"), pkg.scriptsGz);
+            if (fs.existsSync("/usr/bin/gzip")) expect(spawnSync("/usr/bin/gzip", ["-t", path.join(dir, "Scripts")], { encoding: "utf8" }).status).toBe(0);
+            if (fs.existsSync("/usr/bin/cpio")) {
+                fs.writeFileSync(path.join(dir, "Scripts.cpio"), pkg.cpio);
+                const list = spawnSync("sh", ["-c", 'cpio -it < "$1"', "sh", path.join(dir, "Scripts.cpio")], { encoding: "utf8" });
+                expect(list.status, list.stderr).toBe(0);
+                expect(list.stdout.split("\n").filter(Boolean)).toEqual([".", "./postinstall", "./kit.zip", "./runner.json", "./runner.enroll"]);
+            }
+            // The postinstall is plain sh, and does what it says when run as the person (Installer's home-folder install).
+            const post = path.join(dir, "postinstall");
+            for (const n of ["postinstall", "kit.zip", "runner.json", "runner.enroll"]) fs.writeFileSync(path.join(dir, n), pkg.scripts[n]!.data, { mode: pkg.scripts[n]!.mode & 0o777 });
+            expect(spawnSync("sh", ["-n", post], { encoding: "utf8" }).status).toBe(0);
+            if (process.platform !== "linux" || !fs.existsSync("/usr/bin/unzip")) return;
+            const shims = path.join(dir, "shims");
+            fs.mkdirSync(shims);
+            // ditto stands in as unzip (keeps modes) and cp -R, the two ways the postinstall uses it.
+            fs.writeFileSync(path.join(shims, "ditto"), '#!/bin/sh\nif [ "$1" = "-x" ]; then exec unzip -q -o "$3" -d "$4"; fi\nexec cp -R "$1" "$2"\n', { mode: 0o755 });
+            const home = path.join(dir, "home");
+            const temp = path.join(dir, "temp");
+            fs.mkdirSync(home);
+            fs.mkdirSync(temp);
+            const res = spawnSync("sh", [post, path.join(tmp, "x.pkg"), home, "/"], { cwd: tmp, encoding: "utf8", env: { PATH: `${shims}:/usr/bin:/bin`, HOME: home, TMPDIR: temp } });
+            const out = `${res.stdout}${res.stderr}`;
+            expect(res.status, out).toBe(0);
+            expect(out).toMatch(/^SETUP --silent --kit-dir \S+\/ai-testing-runner\.\w+\/kit$/m);
+            // With its own Node.js when the complete build for this target is here (the full file run builds it before this test).
+            for (const line of ["HAS runner.mjs 644", "HAS runner.json 644", "HAS runner.enroll 600", ...(r.headers["x-runner-kit-target"] ? ["HAS node/bin/node 755"] : [])]) expect(out, line).toContain(line);
+            expect(out).not.toContain(code);
+            const app = path.join(home, "Applications", "AI Testing Runner.app");
+            expect(fs.existsSync(path.join(app, "Contents", "Resources", "runner-setup.sh"))).toBe(true);
+            expect(fs.existsSync(path.join(app, "Contents", "Resources", "kit"))).toBe(false);
+            expect(fs.readdirSync(path.join(home, "Applications"))).toEqual(["AI Testing Runner.app"]);
+            // The private copy of the kit and its code is gone.
+            expect(fs.readdirSync(temp)).toEqual([]);
+            // The smoke check's reader puts the app back together with its kit inside, as the round 50 zip had it.
+            fs.writeFileSync(path.join(dir, "ai-testing-runner-mac.pkg"), r.buf);
+            const kitDir = expandMacPkg(path.join(dir, "ai-testing-runner-mac.pkg"), path.join(dir, "placed"));
+            expect(kitDir).toBe(path.join(dir, "placed", "AI Testing Runner.app", "Contents", "Resources", "kit"));
+            expect(fs.readFileSync(path.join(kitDir, "runner.enroll"), "utf8").trim()).toBe(code);
+            expect(fs.statSync(path.join(kitDir, "runner.enroll")).mode & 0o777).toBe(0o600);
+            expect(fs.statSync(path.join(dir, "placed", "AI Testing Runner.app", "Contents", "MacOS", "AITestingRunner")).mode & 0o777).toBe(0o755);
+            expect(fs.readdirSync(path.join(dir, "placed"))).toEqual(["AI Testing Runner.app"]);
+        } finally {
+            process.env.RUNNER_INSTALLER_DIR = saved;
+        }
+    });
+});
+
+describe("the Mac package, built directly", () => {
+    it("frames a shared part of several stored blocks, hashes it once, and gives each download its own exact length", async () => {
+        // Incompressible files, so kit.zip runs over several 65535-byte blocks and a block boundary falls inside a file.
+        const big = (n: number, seed: string) => {
+            const out = Buffer.alloc(n);
+            for (let at = 0, k = 0; at < n; k++) createHash("sha256").update(`${seed}${k}`).digest().copy(out, at), (at += 32);
+            return out;
+        };
+        const files = new Map<string, Uint8Array>([["runner.mjs", big(150_001, "r")], ["task-child.mjs", Buffer.from("t\n")], ["record-child.mjs", Buffer.from("c\n")], ["package.json", Buffer.from("{}\n")], ["LICENSES.txt", Buffer.from("MIT\n")]]);
+        const bundle = { ok: true as const, manifest: { kitVersion: "kv-1" } as never, files };
+        const installer = { ok: true as const, files: [{ name: "AI Testing Runner.app/Contents/Resources/runner-setup.sh", mode: 0o755, data: big(70_000, "s") }] };
+        const read = async (code: string) => {
+            const { stream, bytes } = await buildMacPkg({ bundle, installer, platformUrl: "https://ai.example.test", enrollCode: code });
+            const chunks: Buffer[] = [];
+            for await (const c of stream) chunks.push(c as Buffer);
+            const buf = Buffer.concat(chunks);
+            expect(buf.length).toBe(bytes);
+            return readMacPkg(buf);
+        };
+        const a = await read("aite_first_code_0001");
+        const b = await read("aite_second_code_0002");
+        expect(a.scripts["kit.zip"].data.length).toBeGreaterThan(3 * 65535);
+        expect(a.scripts["runner.enroll"].data.toString()).toBe("aite_first_code_0001\n");
+        expect(b.scripts["runner.enroll"].data.toString()).toBe("aite_second_code_0002\n");
+        expect(JSON.parse(a.scripts["runner.json"].data.toString())).toEqual({ url: "https://ai.example.test", kitVersion: "kv-1" });
+        const z = unzipSync(new Uint8Array(a.scripts["kit.zip"].data));
+        expect(Buffer.compare(Buffer.from(z["kit/runner.mjs"]!), Buffer.from(files.get("runner.mjs")!))).toBe(0);
+        expect(Buffer.compare(a.scripts["kit.zip"].data, b.scripts["kit.zip"].data)).toBe(0);
+        expect(spawnSync("sh", ["-n", "-c", POSTINSTALL]).status).toBe(0);
     });
 });
 

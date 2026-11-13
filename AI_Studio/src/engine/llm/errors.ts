@@ -73,7 +73,7 @@ export class LlmCallError extends Error {
     /** The model this failure is about (the last one tried). */
     readonly modelName?: string;
     constructor(info: LlmErrorInfo, opts: { modelName?: string; cause?: unknown; sentence?: string } = {}) {
-        super(describeLlmError(info, opts.sentence), opts.cause === undefined ? undefined : { cause: opts.cause });
+        super(describeLlmError(info, opts.sentence ?? (info.cls === "credit" && LOW_CREDIT.test(info.detail ?? "") ? LOW_CREDIT_SENTENCE : undefined)), opts.cause === undefined ? undefined : { cause: opts.cause });
         this.name = "LlmCallError";
         this.cls = info.cls;
         this.info = info;
@@ -82,6 +82,13 @@ export class LlmCallError extends Error {
 }
 
 export const isLlmCallError = (e: unknown): e is LlmCallError => e instanceof LlmCallError || (e instanceof Error && e.name === "LlmCallError" && typeof (e as { cls?: unknown }).cls === "string");
+
+/**
+ * OpenRouter's 402 "requires more credits, or fewer max_tokens ... can only afford N": the balance, or the key's own credit limit, cannot
+ * cover the longest answer the request allows. Credit is low, not gone, and the words say so.
+ */
+export const LOW_CREDIT_SENTENCE = "The AI provider has too little credit left for this request: OpenRouter holds back the cost of the longest answer a request allows. Add credit, or raise this key's credit limit, on openrouter.ai.";
+const LOW_CREDIT = /fewer max_tokens|can only afford/i;
 
 /** "The AI provider is out of credit. ... (via OpenRouter, upstream Google AI Studio: Insufficient credits)" */
 export function describeLlmError(info: LlmErrorInfo, sentence?: string): string {

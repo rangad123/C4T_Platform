@@ -557,6 +557,12 @@ export function scriptPayload(file, member) {
 /** Puts a downloaded file where a person has it and finds its one-time code: the Linux script as it is, a zip unpacked. */
 export async function placeDownload(file, dest, target) {
     fs.mkdirSync(dest, { recursive: true });
+    if (file.endsWith(".pkg")) {
+        // Round 55: the Mac package, read back into the app with its kit inside (scripts/mac-pkg-read.mjs checks every checksum).
+        const { expandMacPkg } = await import("./mac-pkg-read.mjs");
+        const filesDir = expandMacPkg(file, dest);
+        return { kitDir: dest, code: fs.readFileSync(path.join(filesDir, "runner.enroll"), "utf8").trim(), files: undefined, filesDir, tool: "the package, read back into the app with its kit" };
+    }
     if (file.endsWith(".sh")) {
         fs.renameSync(file, path.join(dest, path.basename(file)));
         return { kitDir: dest, code: scriptPayload(path.join(dest, path.basename(file)), "runner.enroll").trim(), files: scriptPayload(path.join(dest, path.basename(file))), tool: "one file, nothing to unpack" };
@@ -805,7 +811,7 @@ export async function runSmoke(opts, deps = {}) {
             // The download holds the person's one-time code; their runner is made when the runner trades it, and found once it is connected.
             const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "runner.zip";
             // Windows' installer download is one program with the kit appended (round 49); everything else is a zip.
-            if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName) && !(target.system === "windows" && fileName === "AITestingRunnerSetup.exe") && !(target.system === "linux" && fileName === LINUX_SCRIPT)) throw new Error(`Unexpected file name ${fileName}`);
+            if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName) && !(target.system === "windows" && fileName === "AITestingRunnerSetup.exe") && !(target.system === "linux" && fileName === LINUX_SCRIPT) && !(target.system === "mac" && fileName === "ai-testing-runner-mac.pkg")) throw new Error(`Unexpected file name ${fileName}`);
             zipFile = path.join(downloads, fileName);
             fs.renameSync(path.join(downloads, "download.part"), zipFile);
             return `${fileName}, ${(res.bytes / 1048576).toFixed(1)} MB`;

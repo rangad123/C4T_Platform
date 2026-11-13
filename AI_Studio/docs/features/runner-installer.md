@@ -5,7 +5,7 @@
 The runner kit used to be a zip with a start script. The **installer** is a real program for the same job. A person opens the downloaded folder, double-clicks one file and sees a short checklist. The program checks what the computer already has, **skips what is there**, **downloads only what is missing**, and ends with a runner that is connected to the platform. It needs no administrator rights and no Node.js installed first.
 
 - **Windows:** `AITestingRunnerSetup.exe`, a small WinForms program (about 130 KB) built with the C# compiler that ships with Windows. This document is mostly about it.
-- **Mac:** `AI Testing Runner.app`, built by another part of the same build (`scripts/build-installer-mac.mjs`, see `runner-installer-mac.md`). The platform packs both the same way.
+- **Mac:** `AI Testing Runner.app`, built by another part of the same build (`scripts/build-installer-mac.mjs`, see `runner-installer-mac.md`). Since round 55 the platform serves it inside one installer package, `ai-testing-runner-mac.pkg`, made per download on the server (`src/platform/runner-mac-pkg.ts`).
 
 Since round 45 it is the one download for Windows and a Mac, from **Settings, Your runner**; nothing is chosen (`runner-enrollment.md`). A server that has not built the installer for a system sends the plain files instead (`runner-kit.md`) and says so. On a Mac, when the server has the complete build for the computer's processor, the app comes inside that download and uses its Node.js and test tools (`runner-complete-kit.md`). The Windows installer download never carries them (a complete `node_modules` copied into the install folder passes Windows' 260-character path limit): Setup finds or downloads Node.js and installs the test tools with `npm ci`.
 
@@ -119,7 +119,7 @@ Rebuild after updating the platform, as with `npm run build:runner`.
 
 ## Round 49: one file for Windows
 
-The Windows download is `AITestingRunnerSetup.exe` itself; a person double-clicks it and nothing is unzipped. (Round 50 did the same for Mac and Linux: `runner-installer-mac.md`, `runner-kit.md`.)
+The Windows download is `AITestingRunnerSetup.exe` itself; a person double-clicks it and nothing is unzipped. (Round 50 did the same for Linux, `runner-kit.md`; round 55 for a Mac, `ai-testing-runner-mac.pkg`, `runner-installer-mac.md`.)
 
 - **The server stamps it at download time** (`buildInstallerExe` in `src/platform/runner-installer.ts`). The program built by CI is the same for everyone; each download is those exact bytes, then a zip of this download's kit, then a 16-byte footer:
 

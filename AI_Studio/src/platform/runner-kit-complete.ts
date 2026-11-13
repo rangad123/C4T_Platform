@@ -19,7 +19,7 @@ import { Readable } from "node:stream";
 import zlib from "node:zlib";
 import { z } from "zod";
 import { REPO_ROOT } from "../config.js";
-import { MAC_KIT_DIR, type InstallerPart } from "./runner-installer.js";
+import type { InstallerPart } from "./runner-installer.js";
 import { linuxScript } from "./runner-linux-script.js";
 import { KIT_SLUG, kitCredentialFile, type Bundle } from "./runner-kit.js";
 import { readme, START_CMD, START_COMMAND, START_SH, withLineEnding } from "./runner-kit-scripts.js";
@@ -217,11 +217,12 @@ export interface BuildCompleteInput {
     /** The installer program for this system, when the server has one: put next to the start scripts as the double-click alternative. */
     installer?: Extract<InstallerPart, { ok: true }>;
     /**
-     * How the download is laid out (round 50). "folder": one folder with the start scripts, the check and a README (today's zip).
-     * "mac-app": a zip holding only the app, with the kit inside it (MAC_KIT_DIR; needs `installer`). "linux": one sh script with the kit
-     * as a gzip tar at its end (runner-linux-script.ts).
+     * How the download is laid out. "folder": one folder with the start scripts, the check and a README (today's zip). "linux": one sh
+     * script with the kit as a gzip tar at its end (runner-linux-script.ts, round 50). "mac-pkg" (round 55): the part of the Mac package
+     * that is the same for everyone, a zip of the app and `kit/` WITHOUT runner.json and runner.enroll (runner-mac-pkg.ts adds those
+     * beside it, per download; needs `installer`).
      */
-    layout?: "folder" | "mac-app" | "linux";
+    layout?: "folder" | "mac-pkg" | "linux";
     /** Left out: the runner uses the computer's own name (round 45). */
     runnerName?: string;
     platformUrl: string;
@@ -237,7 +238,7 @@ export interface BuildCompleteInput {
  * The download, as a stream and its exact length. The big part is copied from the pack as it is (already compressed); the rest is
  * compressed here. Every entry carries Unix permissions: node and the start scripts 0755, runner.enroll 0600.
  */
-export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; bytes: number } {
+export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; bytes: number; again?: () => AsyncIterable<Buffer> } {
     const layout = i.layout ?? "folder";
     const manifest = i.build?.manifest;
     const target = i.build?.target;
@@ -245,7 +246,7 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     const kitVersion = i.bundle.manifest.kitVersion;
     // Where the kit's files go: one folder (today), inside the app, or the tar's root (the Linux script unpacks it into a folder of its own).
     if (layout === "folder" && !target) throw new Error("the folder layout is the complete download");
-    const prefix = layout === "mac-app" ? `${MAC_KIT_DIR}/` : layout === "linux" ? "" : `${completeFolder(target!)}/`;
+    const prefix = layout === "mac-pkg" ? "kit/" : layout === "linux" ? "" : `${completeFolder(target!)}/`;
     const files: PackedFile[] = [];
     const taken = new Set<string>();
     const push = (name: string, e: Omit<PackedFile, "name">): void => {
@@ -263,15 +264,15 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     if (manifest) for (const f of manifest.files) push(prefix + f.path, { mode: f.mode, crc: f.crc, size: f.size, csize: f.csize, packOffset: f.offset });
     // The runner programs: exactly the prebuilt bytes.
     for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) small(prefix + name, i.bundle.files.get(name)!);
+    // The lock file goes in every layout: the kit version counts it, so a download without it fails the runner's own file check
+    // ("Runner files do not match this download") although nothing is damaged. A complete download never runs npm with it.
     const lock = i.bundle.files.get("package-lock.json");
-    if (lock && !manifest) small(prefix + "package-lock.json", lock);
-    // What belongs to this download.
-    small(prefix + "runner.json", text(`${JSON.stringify({ url: i.platformUrl, ...(i.runnerName ? { name: i.runnerName } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
-    const credential = kitCredentialFile(i);
-    small(prefix + credential.name, text(credential.text), 0o600);
-    if (layout === "mac-app") {
-        // The app itself, the same bytes for everyone: the kit inside it is the only difference. No README, no start scripts beside it.
-        if (!i.installer) throw new Error("the Mac app layout needs the app");
+    if (lock) small(prefix + "package-lock.json", lock);
+    // What belongs to this download (the Mac package carries these outside its shared zip).
+    if (layout !== "mac-pkg") for (const f of personFiles(i)) small(prefix + f.name, f.data, f.mode);
+    if (layout === "mac-pkg") {
+        // The app itself, the same bytes for everyone. No README, no start scripts: the package's postinstall runs the app's setup.
+        if (!i.installer) throw new Error("the Mac package layout needs the app");
         for (const f of i.installer.files) small(f.name, f.data, f.mode);
     } else if (layout === "linux") {
         // The script's header runs start-runner.sh from the installed copy; check-computer.sh stays there for "If the runner does not connect".
@@ -295,8 +296,23 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
         small(prefix + "README.txt", text(withLineEnding(readmeText, win ? "\r\n" : "\n")));
     }
     if (layout === "linux") return linuxScript(files, i.build?.packPath);
-    return zipOf(files, i.build?.packPath, manifest ? { time: manifest.dosTime, date: manifest.dosDate } : dosNow());
+    // The Mac package's zip must come out byte for byte the same each time (its checksum is computed once): a fixed date without a build.
+    return zipOf(files, i.build?.packPath, manifest ? { time: manifest.dosTime, date: manifest.dosDate } : layout === "mac-pkg" ? FIXED_DOS : dosNow());
 }
+
+/** runner.json and the one-time code: the only files that differ from one download to the next. */
+export function personFiles(i: Pick<BuildCompleteInput, "bundle" | "runnerName" | "platformUrl" | "enrollCode" | "updateSequence" | "token">): { name: string; data: Buffer; mode: number }[] {
+    const kitVersion = i.bundle.manifest.kitVersion;
+    const runnerJson = `${JSON.stringify({ url: i.platformUrl, ...(i.runnerName ? { name: i.runnerName } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`;
+    const credential = kitCredentialFile(i);
+    return [
+        { name: "runner.json", data: Buffer.from(runnerJson, "utf8"), mode: 0o644 },
+        { name: credential.name, data: Buffer.from(credential.text, "utf8"), mode: 0o600 },
+    ];
+}
+
+/** 2026-01-01 00:00 as a DOS time and date. */
+const FIXED_DOS = { time: 0, date: ((2026 - 1980) << 9) | (1 << 5) | 1 };
 
 /** One file of a download, already compressed (raw deflate): its bytes are here (`body`) or in the complete build's pack (`packOffset`). */
 export interface PackedFile {
@@ -343,7 +359,7 @@ export async function* packedBodies(files: PackedFile[], packPath: string | unde
     }
 }
 
-function zipOf(files: PackedFile[], packPath: string | undefined, { time, date }: { time: number; date: number }): { stream: Readable; bytes: number } {
+function zipOf(files: PackedFile[], packPath: string | undefined, { time, date }: { time: number; date: number }): { stream: Readable; bytes: number; again: () => AsyncIterable<Buffer> } {
     const entries: ZipEntry[] = [];
     let offset = 0;
     for (const f of files) {
@@ -366,5 +382,6 @@ function zipOf(files: PackedFile[], packPath: string | undefined, { time, date }
         yield central;
         yield end;
     }
-    return { stream: Readable.from(body(), { objectMode: false }), bytes };
+    // `again`: the same bytes once more, without compressing the small files again (the Mac package streams its zip per download).
+    return { stream: Readable.from(body(), { objectMode: false }), bytes, again: body };
 }

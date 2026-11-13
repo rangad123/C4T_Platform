@@ -57,10 +57,12 @@ describe("the rules (no browser)", () => {
         expect(startSteps("windows").steps.join(" ")).toContain("AITestingRunnerSetup.exe");
         // Round 49: the Windows download is the setup program itself.
         expect(startSteps("windows").steps.join(" ")).not.toMatch(/Unzip/);
-        expect(startSteps("mac").steps.join(" ")).toContain("AI Testing Runner");
+        // Round 55: the Mac download is one installer package, nothing to unzip, installed for the person only.
+        expect(startSteps("mac").steps.join(" ")).toContain("ai-testing-runner-mac.pkg");
+        expect(startSteps("mac").steps.join(" ")).not.toMatch(/Unzip|unzip the/);
+        expect(startSteps("mac").steps.join(" ")).toContain("no administrator password");
         expect(startSteps("linux").command).toBe("sh ai-testing-runner.sh");
         expect(startSteps("linux").steps.join(" ")).not.toMatch(/Unzip/);
-        expect(startSteps("mac").steps.join(" ")).toContain("Open the download, then open “AI Testing Runner”");
         expect(startSteps("mac").steps.join(" ")).toContain("Open Anyway");
         expect(startSteps("windows", "files").steps.join(" ")).toContain("start-runner.cmd");
         expect(offlineSteps("windows")[0]).toContain("notification area");

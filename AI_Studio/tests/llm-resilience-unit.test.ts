@@ -3,16 +3,17 @@
  * fallback lists, the health summary, and the resilient model's retry / fallback / pause decisions with scripted model doubles
  * (no network, no real provider). The same behaviour over real HTTP is in llm-resilience.test.ts.
  */
+import { readFileSync } from "node:fs";
 import { APICallError } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { loadConfig } from "../src/config.js";
 import type { EngineEvent } from "../src/engine/context.js";
-import { classifyLlmError, CLASS_RULES, describeLlmError, LlmCallError, retryAfterMs, scrubDetail } from "../src/engine/llm/errors.js";
+import { classifyLlmError, CLASS_RULES, describeLlmError, LlmCallError, LOW_CREDIT_SENTENCE, retryAfterMs, scrubDetail, toLlmCallError } from "../src/engine/llm/errors.js";
 import { healthLog, summariseHealth } from "../src/engine/llm/health.js";
 import { JobMeter, type MeterBackend } from "../src/engine/llm/metered.js";
-import { describeFallbacks, llmClientFromModel, parseFallbackModels, policyFromConfig } from "../src/engine/llm/provider.js";
+import { AGENT_STEP_MAX_OUTPUT_TOKENS, describeFallbacks, llmClientFromModel, parseFallbackModels, policyFromConfig } from "../src/engine/llm/provider.js";
 import { backoffDelay, CircuitBreaker, resetBreakers, ResilientModel, type ChainEntry, type ModelV3 } from "../src/engine/llm/resilience.js";
 
 const api = (statusCode: number | undefined, body: unknown, headers: Record<string, string> = {}, message = "API error") =>
@@ -46,6 +47,25 @@ describe("error classes for each provider", () => {
         expect(classifyLlmError(api(503, { error: { code: 503, message: "The model is overloaded. Please try again later.", status: "UNAVAILABLE" } })).cls).toBe("overloaded");
         expect(classifyLlmError(api(504, { error: { code: 504, message: "Deadline expired", status: "DEADLINE_EXCEEDED" } })).cls).toBe("timeout");
         expect(classifyLlmError(api(400, { error: { code: 400, message: "Billing is not enabled for this project", status: "FAILED_PRECONDITION" } })).cls).toBe("credit");
+    });
+
+    it("OpenRouter's 'can only afford' answer says credit is low, not gone, in its own words", () => {
+        const e = toLlmCallError(api(402, { error: { code: 402, message: "This request requires more credits, or fewer max_tokens. You requested up to 64000 tokens, but can only afford 2950. To increase, visit https://openrouter.ai/settings/credits" } }));
+        expect(e.cls).toBe("credit");
+        expect(e.message.startsWith(LOW_CREDIT_SENTENCE)).toBe(true);
+        expect(e.message).toContain("can only afford 2950");
+        // A plain "out of credit" keeps the plain sentence.
+        expect(toLlmCallError(api(402, { error: { code: 402, message: "Insufficient credits" } })).message.startsWith(CLASS_RULES.credit.sentence)).toBe(true);
+    });
+
+    it("every agent loop caps one step's answer, so a request never asks for the model's whole output window", () => {
+        for (const f of ["src/engine/web/author.ts", "src/engine/agent/objective.ts"]) {
+            const src = readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+            const calls = src.split("await generateText({").slice(1);
+            expect(calls.length, f).toBeGreaterThan(0);
+            for (const c of calls) expect(c.slice(0, c.indexOf("});")), f).toContain("maxOutputTokens: AGENT_STEP_MAX_OUTPUT_TOKENS");
+        }
+        expect(AGENT_STEP_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(8192);
     });
 
     it("OpenRouter, including the bare 'Provider returned error'", () => {

@@ -24,7 +24,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CANNOT_DOWNLOAD, KEY_CANNOT_DOWNLOAD } from "../src/platform/routes/runner-kits.js";
 import { buildServer } from "../src/platform/server.js";
 import { spawnSync } from "node:child_process";
-import { splitLinuxScript, splitStampedExe } from "./fixtures/runner-person.js";
+import { splitLinuxScript, splitMacPkg, splitStampedExe } from "./fixtures/runner-person.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
 // @ts-expect-error plain JavaScript build script (no type declarations)
@@ -230,9 +230,9 @@ describe("info", () => {
         expect(info).toEqual({ available: true, urlOk: true, mayDownload: true, systems: expect.any(Array) });
         // Installers built and no complete build: each system just "available" and the name it is saved as, with no note and no size.
         for (const sys of info.systems as Array<Record<string, unknown>>) expect(Object.keys(sys).sort(), `${sys.os}-${sys.arch}`).toEqual(["arch", "available", "fileName", "os"]);
-        expect(Object.fromEntries((info.systems as Array<{ os: string; fileName: string }>).map((x) => [x.os, x.fileName]))).toEqual({ windows: "AITestingRunnerSetup.exe", mac: "ai-testing-runner-mac.zip", linux: "ai-testing-runner.sh" });
+        expect(Object.fromEntries((info.systems as Array<{ os: string; fileName: string }>).map((x) => [x.os, x.fileName]))).toEqual({ windows: "AITestingRunnerSetup.exe", mac: "ai-testing-runner-mac.pkg", linux: "ai-testing-runner.sh" });
         // The names match what the downloads are saved as.
-        for (const [osName, name] of [["windows", "AITestingRunnerSetup.exe"], ["mac", "ai-testing-runner-mac.zip"], ["linux", "ai-testing-runner.sh"]] as const) expect((await download("maya", osName)).headers["content-disposition"]).toBe(`attachment; filename="${name}"`);
+        for (const [osName, name] of [["windows", "AITestingRunnerSetup.exe"], ["mac", "ai-testing-runner-mac.pkg"], ["linux", "ai-testing-runner.sh"]] as const) expect((await download("maya", osName)).headers["content-disposition"]).toBe(`attachment; filename="${name}"`);
         expect((info.systems as Array<{ os: string; arch: string; available: boolean }>).map((x) => `${x.os}-${x.arch}:${x.available}`)).toEqual(["windows-x64:true", "windows-arm64:true", "mac-x64:true", "mac-arm64:true", "linux-x64:true", "linux-arm64:true"]);
         const viewer = (await as("vic", "GET", "/api/me/runner/download/info")).body;
         expect(viewer).toMatchObject({ mayDownload: false, refusal: CANNOT_DOWNLOAD });
@@ -371,28 +371,30 @@ describe("the Windows download", () => {
 });
 
 describe("the Mac download", () => {
-    const KIT = `${APP}/Contents/Resources/kit`;
-    it("is a zip holding only the app (round 50), with the kit inside it, the modes the build recorded, and nothing beside it", async () => {
+    it("is one installer package (round 55): the app and the kit in its Scripts, this download's code beside them, the modes the build recorded", async () => {
         const r = await download("maya", "mac", "arm64");
         expect(r.status, r.text).toBe(200);
-        expect(r.headers["content-type"]).toBe("application/zip");
-        expect(r.headers["content-disposition"]).toBe('attachment; filename="ai-testing-runner-mac.zip"');
+        expect(r.headers["content-type"]).toBe("application/octet-stream");
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="ai-testing-runner-mac.pkg"');
         expect(r.headers["x-runner-kit-kind"]).toBe("installer");
-        const z = unzipSync(new Uint8Array(r.buf));
-        // Exactly one top-level item: the app.
-        expect([...new Set(Object.keys(z).map((n) => n.split("/")[0]))]).toEqual([APP]);
-        expect(Object.keys(z).filter((n) => !n.startsWith(`${KIT}/`)).sort()).toEqual([`${APP}/Contents/Info.plist`, `${APP}/Contents/MacOS/AITestingRunner`, `${APP}/Contents/Resources/runner-setup.sh`]);
-        expect(Object.keys(z).filter((n) => n.startsWith(`${KIT}/`) && !n.endsWith("/package-lock.json")).sort()).toEqual(["LICENSES.txt", "package.json", "record-child.mjs", "runner.enroll", "runner.json", "runner.mjs", "task-child.mjs"].map((n) => `${KIT}/${n}`));
-        const m = modes(new Uint8Array(r.buf));
+        expect(Number(r.headers["content-length"])).toBe(r.buf.length);
+        const pkg = splitMacPkg(r.buf)!;
+        expect(pkg.distribution).toContain('enable_currentUserHome="true"');
+        const names = Object.keys(pkg.files);
+        expect(names.filter((n) => !n.startsWith("kit.zip/")).sort()).toEqual(["Distribution", "PackageInfo", "TOC", "kit.zip", "postinstall", "runner.enroll", "runner.json"]);
+        expect(names.filter((n) => n.startsWith(`kit.zip/${APP}/`)).sort()).toEqual([`${APP}/Contents/Info.plist`, `${APP}/Contents/MacOS/AITestingRunner`, `${APP}/Contents/Resources/runner-setup.sh`].map((n) => `kit.zip/${n}`));
+        expect(names.filter((n) => n.startsWith("kit.zip/kit/") && !n.endsWith("/package-lock.json")).sort()).toEqual(["LICENSES.txt", "package.json", "record-child.mjs", "runner.mjs", "task-child.mjs"].map((n) => `kit.zip/kit/${n}`));
+        const m = modes(new Uint8Array(pkg.files["kit.zip"]!));
         expect(m[`${APP}/Contents/MacOS/AITestingRunner`]).toBe(0o755);
         expect(m[`${APP}/Contents/Resources/runner-setup.sh`]).toBe(0o755);
         expect(m[`${APP}/Contents/Info.plist`]).toBe(0o644);
-        expect(m[`${KIT}/runner.mjs`]).toBe(0o644);
-        expect(m[`${KIT}/runner.enroll`]).toBe(0o600);
-        // The app itself is the same bytes for everyone: only the kit folder differs.
-        expect(Buffer.from(z[`${APP}/Contents/Resources/runner-setup.sh`]!).toString()).toBe("#!/bin/sh\nexit 0\n");
-        expect(Buffer.from(z[`${KIT}/runner.enroll`]!).toString().trim()).toMatch(/^aite_/);
-        expect(JSON.parse(Buffer.from(z[`${KIT}/runner.json`]!).toString()).url).toBe("https://tests.example.com");
+        expect(m["kit/runner.mjs"]).toBe(0o644);
+        expect(pkg.modes["runner.enroll"]).toBe(0o600);
+        expect(pkg.modes["postinstall"]).toBe(0o755);
+        // The app itself is the same bytes for everyone: only runner.json and runner.enroll differ.
+        expect(pkg.files[`kit.zip/${APP}/Contents/Resources/runner-setup.sh`]!.toString()).toBe("#!/bin/sh\nexit 0\n");
+        expect(pkg.files["runner.enroll"]!.toString().trim()).toMatch(/^aite_/);
+        expect(JSON.parse(pkg.files["runner.json"]!.toString()).url).toBe("https://tests.example.com");
     });
 
     it("a signed app gets today's zip with the kit beside it (a file inside would break the signature), and the server logs it", async () => {
@@ -493,7 +495,8 @@ describe("secrets", () => {
             // Windows: the program part is checked as one more entry, the kit at its end like any zip.
             const parts = splitStampedExe(r.buf);
             const script = splitLinuxScript(r.buf);
-            const entries = parts ? { "AITestingRunnerSetup.exe (program part)": new Uint8Array(parts.program), ...unzipSync(new Uint8Array(parts.payload)) } : script ? { "the script's header": Buffer.from(script.header), ...script.files } : unzipSync(new Uint8Array(r.buf));
+            const pkg = splitMacPkg(r.buf);
+            const entries = parts ? { "AITestingRunnerSetup.exe (program part)": new Uint8Array(parts.program), ...unzipSync(new Uint8Array(parts.payload)) } : script ? { "the script's header": Buffer.from(script.header), ...script.files } : pkg ? pkg.files : unzipSync(new Uint8Array(r.buf));
             for (const [name, bytes] of Object.entries(entries)) {
                 if (name.endsWith("runner.enroll")) continue;
                 const body = Buffer.from(bytes).toString("latin1");

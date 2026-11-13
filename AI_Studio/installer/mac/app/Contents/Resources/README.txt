@@ -2,8 +2,10 @@ AI Testing Runner
 =================
 
 This app sets up the AI Testing runner on your Mac and starts it. It runs your tests on this computer and reports the results to the
-platform. The download from the platform holds your runner files inside the app (Contents/Resources/kit), so the app is all you need:
-open the download, then open AI Testing Runner. (An older download had the files beside the app: open it from that unzipped folder.)
+platform. The download from the platform is one installer package, ai-testing-runner-mac.pkg: open it, choose Continue, then Install.
+It installs for you only (no administrator password), puts this app in the Applications folder in your home folder and sets up the
+runner with it. Open the app again later to see the runner's state or to uninstall it. (An older download was a zip with the files
+inside the app, or beside it: open the app from there.)
 
 What it does
   1. Looks for Node.js 24 or newer. If you have it (Homebrew, nvm, fnm, Volta and others are checked), it uses it and downloads nothing.
@@ -16,8 +18,8 @@ What it does
 It never asks for an administrator password and changes nothing outside its own folder, except the browser cache that Playwright shares
 (~/Library/Caches/ms-playwright) and, if you say yes, one start-at-sign-in entry (~/Library/LaunchAgents/app.aitesting.runner.plist).
 
-The first time: macOS says "Apple could not verify AI Testing Runner is free of malware". The app is not signed with an Apple
-Developer ID, so macOS blocks it until you allow it once:
+The first time: macOS says "Apple could not verify ... is free of malware". The package and the app are not signed with an Apple
+Developer ID, so macOS blocks them until you allow it once (the same steps work for ai-testing-runner-mac.pkg, open it again after):
   - macOS 15 and newer: choose Done, open System Settings, then Privacy & Security, scroll down to Security and choose
     Open Anyway next to "AI Testing Runner". Sign in with your Mac password, then open the app again.
   - macOS 14 and older: right-click the app, choose Open, then Open.

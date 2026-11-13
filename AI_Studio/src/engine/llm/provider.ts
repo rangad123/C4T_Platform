@@ -46,6 +46,12 @@ export const PROVIDER_OPTIONS = { openai: { strictJsonSchema: false } } as const
  * outage in a real run.
  */
 export const LLM_MAX_RETRIES = 5;
+/**
+ * The longest answer one step of an agent loop (test writing, agent runs) may give: a few tool calls or a short report. Without a limit
+ * the request asks for the model's whole output window (64,000 tokens and more), and OpenRouter refuses it with 402 "requires more credits,
+ * or fewer max_tokens" as soon as the balance could not pay for that much, although a step really costs a small part of it.
+ */
+export const AGENT_STEP_MAX_OUTPUT_TOKENS = 4096;
 
 export interface Usage {
     /** All input tokens, cache reads and writes included (as every provider reports them). */

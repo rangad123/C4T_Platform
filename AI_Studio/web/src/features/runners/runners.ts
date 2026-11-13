@@ -16,7 +16,7 @@ export function offlineSteps(os: RunnerOs | null | undefined): string[] {
     if (os === "mac") {
         return [
             "Sign in to that Mac. A runner set up with the app starts by itself when you sign in. A locked screen is fine.",
-            "If it still does not connect, open AI Testing Runner from Applications.",
+            "If it still does not connect, open AI Testing Runner from Applications (the one in your home folder when you used the installer package).",
             "If you started it with start-runner.sh, run it again in Terminal and leave the window open.",
         ];
     }

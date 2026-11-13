@@ -6,8 +6,9 @@
 # the computer, uninstall it and check that nothing is left (AI_Studio/scripts/smoke-runner.mjs --kit installer --lifecycle). The same
 # download started with its start script, and with no Node.js on the PATH (its own Node.js), is checked too (on Linux; Windows and a Mac
 # skip them plainly, their installer download has no start script). Each download is one thing (rounds 49 and 50) and is used as people
-# get it: Windows starts AITestingRunnerSetup.exe, a Mac unzips a zip that must hold only "AI Testing Runner.app" and opens it with
-# nothing beside it, Linux runs `sh ai-testing-runner.sh`. On a Mac and on Linux a second download is then started while the runner runs:
+# get it: Windows starts AITestingRunnerSetup.exe, a Mac's ai-testing-runner-mac.pkg (round 55) is read back into the app with its kit
+# for the smoke check and, in its own step, installed by macOS's Installer (`installer -pkg ... -target CurrentUserHomeDirectory`, no
+# sudo, scripts/smoke-mac-pkg.mjs), Linux runs `sh ai-testing-runner.sh`. On a Mac and on Linux a second download is then started while the runner runs:
 # the earlier runner must stop and the new one come online. Each machine then explores the sample app on its runner (round 51,
 # --explore): the platform's AI is a scripted model double served by the smoke script (no AI provider, no key), and the check is that
 # the exploration ran on the runner, made tests, and that the platform opened no browser itself (AI_Studio/docs/features/explore-on-runner.md).
@@ -29,7 +30,9 @@ on:
       - "AI_Studio/scripts/build-runner*"
       - "AI_Studio/scripts/build-installer*"
       - "AI_Studio/scripts/smoke-runner.mjs"
-      # What the server makes of a download (round 50: the Mac zip with the app alone, the Linux script).
+      - "AI_Studio/scripts/smoke-mac-pkg.mjs"
+      - "AI_Studio/scripts/mac-pkg-read.mjs"
+      # What the server makes of a download (round 50: the Linux script; round 55: the Mac package).
       - "AI_Studio/src/platform/runner-*.ts"
       - "AI_Studio/src/platform/routes/runner-kits.ts"
       - ".github/workflows/runner-matrix.yml"
@@ -41,7 +44,9 @@ on:
       - "AI_Studio/scripts/build-runner*"
       - "AI_Studio/scripts/build-installer*"
       - "AI_Studio/scripts/smoke-runner.mjs"
-      # What the server makes of a download (round 50: the Mac zip with the app alone, the Linux script).
+      - "AI_Studio/scripts/smoke-mac-pkg.mjs"
+      - "AI_Studio/scripts/mac-pkg-read.mjs"
+      # What the server makes of a download (round 50: the Linux script; round 55: the Mac package).
       - "AI_Studio/src/platform/runner-*.ts"
       - "AI_Studio/src/platform/routes/runner-kits.ts"
       - ".github/workflows/runner-matrix.yml"
@@ -143,6 +148,13 @@ jobs:
       - name: Complete download with no Node.js on the PATH
         if: success() || failure()
         run: node scripts/smoke-runner.mjs --kit complete --no-node-on-path --port 6956 --out smoke-report/complete
+      # Round 55: the Mac download is one installer package, written on the server without Apple's tools. Here Apple's own pkgutil
+      # must read it, and Installer must install it for this user (no sudo), its postinstall set up the runner, the runner write
+      # "Connected to the platform" to its own log, and a second package replace the running runner (scripts/smoke-mac-pkg.mjs).
+      - name: Mac package installed with installer -pkg
+        if: (success() || failure()) && matrix.installer && runner.os == 'macOS'
+        timeout-minutes: 25
+        run: node scripts/smoke-mac-pkg.mjs --port 6960 --out smoke-report/mac-pkg
       # The installer tests that need the real system (Windows: the C# compiler; macOS: the setup script under the Mac's own /bin/sh).
       # Informative on macOS: those tests were written to simulate a Mac elsewhere, so a failure there is read, not trusted blindly.
       - name: Installer tests on this system

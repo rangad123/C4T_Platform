@@ -5,6 +5,8 @@
  *  - splitStampedExe: the one-file Windows download taken apart (program, kit zip, format).
  *  - splitLinuxScript: the one-file Linux download taken apart (the sh header, and each file of its gzip tar with its mode), read here
  *    without the server's writer so the format is checked independently.
+ *  - splitMacPkg: the one-file Mac download (round 55, an installer package) taken apart with scripts/mac-pkg-read.mjs, which checks every
+ *    checksum: its package files, Scripts' files, and each file of the shared kit.zip as "kit.zip/<name>", with modes.
  *  - myRunner / retireMyRunner: GET /api/me/runner and POST /api/me/runner/retire ("Remove this computer").
  *  - enrollByHand: trade a download's runner.enroll at /api/agent/enroll the way the runner does, and keep the credential in this computer's
  *    store for that folder with the install id in runner.machine (exactly what the runner leaves behind), for tests that need a working
@@ -14,7 +16,10 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import { unzipSync } from "fflate";
 import { MACHINE_ID_FILE, saveCredential } from "../../src/agent/credential-store.js";
+// @ts-expect-error plain JavaScript reader (no type declarations)
+import { readMacPkg } from "../../scripts/mac-pkg-read.mjs";
 import { accessControlOf } from "../../src/platform/auth/access.js";
 
 export function personToken(app: object, email = "maya@people.example", name = "Maya"): { id: string; token: string } {
@@ -67,6 +72,22 @@ export function splitLinuxScript(b: Uint8Array): { header: string; files: Record
         modes[name] = parseInt(field(h, 100, 8), 8);
     }
     return { header: buf.subarray(0, start).toString("utf8"), files, modes };
+}
+
+/** A Mac package download taken apart; undefined when it is not a xar archive. */
+export function splitMacPkg(b: Uint8Array): { files: Record<string, Buffer>; modes: Record<string, number>; distribution: string } | undefined {
+    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+    if (buf.toString("latin1", 0, 4) !== "xar!") return undefined;
+    const pkg = readMacPkg(buf) as { distribution: string; packageInfo: string; toc: string; scripts: Record<string, { mode: number; data: Buffer }> };
+    const files: Record<string, Buffer> = { Distribution: Buffer.from(pkg.distribution), PackageInfo: Buffer.from(pkg.packageInfo), TOC: Buffer.from(pkg.toc) };
+    const modes: Record<string, number> = {};
+    for (const [name, e] of Object.entries(pkg.scripts)) {
+        if (name === ".") continue;
+        files[name] = e.data;
+        modes[name] = e.mode & 0o777;
+    }
+    for (const [name, data] of Object.entries(unzipSync(new Uint8Array(pkg.scripts["kit.zip"]!.data)))) files[`kit.zip/${name}`] = Buffer.from(data);
+    return { files, modes, distribution: pkg.distribution };
 }
 
 export type MyRunner = { id: string; name: string; status: string; update?: Record<string, unknown> & { state?: string }; check?: { at: string; items: Array<{ id: string; status: string; title: string }> }; version?: string };
