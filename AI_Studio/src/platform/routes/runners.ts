@@ -2,16 +2,14 @@
  * One runner per person, set up in Settings and used for every run they start (round 45; docs/features/runner-settings.md). The rows are
  * in agent-store.ts; the download that carries the one-time code is routes/runner-kits.ts (POST /api/me/runner/download).
  *
- *   GET    /api/me/runner                       → { runner: null | RunnerMine, canSeeEveryone }; RunnerMine.can says what it can start now
+ *   GET    /api/me/runner                       → { runner: null | RunnerMine }; RunnerMine.can says what it can start now
  *                                                 ({ ok, why? } per kind: the sentence the server's up-front refusal would give)
  *   GET    /api/me/runner/enrollments/:id       → { status: "waiting" | "connected" | "expired" | "used" }   (the code's owner only)
  *   PATCH  /api/me/runner                       { name?, switches?: { codeScripts?, privateTargets?, realPhone? } } → { runner }
  *   POST   /api/me/runner/retire                "Remove this computer": its credential stops working at once → { runner: null }
  *   POST   /api/me/runner/update                "Update now" → { runner }
- *   GET    /api/admin/runners                   every person's runner (platform admins, people who manage runners everywhere)
- *   POST   /api/admin/runners/:id/retire        an admin removes one (a lost laptop)
  *
- * The open server acts as one person (OPEN_OWNER_ID); the shared access key is no person and has no runner.
+ * The open server acts as one person; the shared access key is no person and has no runner.
  */
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -21,12 +19,12 @@ import { capabilityProblem } from "../agent-routing.js";
 import { cannotRunSentence, getAgentServices } from "../agent-services.js";
 import { getAdapter, IOS_ADAPTER_ID } from "../../engine/frameworks/index.js";
 import { RUNNER_OFFLINE } from "../runner-only.js";
-import { OPEN_OWNER_ID, ownerIdOfActor, type AgentRecord, type AgentTokenRecord } from "../agent-store.js";
+import { ownerIdOfActor, type AgentRecord, type AgentTokenRecord } from "../agent-store.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
 import { currentActor, type Actor } from "../auth/actor.js";
 import { exploreProblem } from "../explore-task.js";
 import { HttpError } from "../http-error.js";
-import { CANNOT_HAVE_RUNNER, checkView, KEY_CANNOT_HAVE_RUNNER, networkSentence, RUNNER_NOT_FOUND, RUNNER_RETIRED, runnerState, seesEveryRunner } from "../runner-health.js";
+import { CANNOT_HAVE_RUNNER, checkView, KEY_CANNOT_HAVE_RUNNER, networkSentence, RUNNER_NOT_FOUND, RUNNER_RETIRED, runnerState } from "../runner-health.js";
 import { runnerUpdatesFor } from "../runner-update.js";
 import { parsePlain } from "./project-settings.js";
 import type { RouteCtx } from "./types.js";
@@ -115,13 +113,10 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
     };
 
     app.get("/api/me/runner", async (req) => {
-        const actor = who(req);
-        const id = ownerIdOfActor(actor);
-        // Whether the admins' list (GET /api/admin/runners) answers this caller: the same rule as that route, so the page shows it exactly then.
-        const canSeeEveryone = seesEveryRunner(control.projects, actor);
-        if (!id) return { runner: null, canSeeEveryone };
+        const id = ownerIdOfActor(who(req));
+        if (!id) return { runner: null };
         const r = svc.store.runnerOf(id);
-        return { runner: r ? mine(r.token) : null, canSeeEveryone };
+        return { runner: r ? mine(r.token) : null };
     });
 
     app.get("/api/me/runner/enrollments/:enrollmentId", async (req) => {
@@ -179,47 +174,5 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
         if (!view.published) throw new HttpError(409, `${view.unpublished ?? "This server offers no signed runner update."} To update “${a.name}”, download the runner again from Settings.`);
         updates.request(a.id);
         return { runner: mine(token) };
-    });
-
-    // ── admins: everyone's runners ──────────────────────────────────────────
-    const refuseUnlessAdmin = (req: FastifyRequest): Actor => {
-        const actor = who(req);
-        if (!seesEveryRunner(control.projects, actor)) throw new HttpError(403, "Only platform admins can see everyone's runners.");
-        return actor;
-    };
-    const personName = (id: string | null): string => {
-        if (id === OPEN_OWNER_ID) return "Open access";
-        const u = id ? p.db.get<{ name: string | null; email: string | null }>("SELECT name, email FROM users WHERE id = ?", id) : undefined;
-        return u?.name || u?.email || "A person";
-    };
-
-    app.get("/api/admin/runners", async (req) => {
-        refuseUnlessAdmin(req);
-        const now = svc.clock();
-        return {
-            runners: svc.store.allTokens().map((t) => {
-                const latest = svc.store.agentsOfToken(t.id)[0];
-                return {
-                    id: t.id,
-                    name: t.label ?? latest?.name ?? "Unnamed runner",
-                    owner: { id: t.ownerId, name: personName(t.ownerId) },
-                    ownerName: personName(t.ownerId),
-                    status: latest ? runnerState(svc.store, latest, now) : ("not-connected" as const),
-                    lastSeenAt: latest ? new Date(latest.lastSeenMs).toISOString() : null,
-                    version: latest?.version ?? null,
-                    os: latest?.os ?? null,
-                };
-            }),
-        };
-    });
-
-    app.post("/api/admin/runners/:runnerId/retire", async (req) => {
-        const actor = refuseUnlessAdmin(req);
-        const { runnerId } = req.params as { runnerId: string };
-        const t = svc.store.getToken(runnerId);
-        if (!t) throw new HttpError(404, RUNNER_NOT_FOUND);
-        svc.store.retire(t.ownerId);
-        note(actor, "runner-retired", `${personName(t.ownerId)}'s runner “${t.label ?? `…${t.hint}`}” was removed by an admin.`);
-        return { ok: true };
     });
 }

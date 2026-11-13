@@ -49,7 +49,6 @@ This is the list of the platform's web interface (API) calls, for people who wri
 | GET · PUT · DELETE | `/usage` · `/jobs/:id/usage` · `/usage/prices` · `/usage/budgets` · `/projects/:id/usage-budget` | AI usage, prices and budgets |
 | GET · POST | `/projects/:id/quarantine` (`/suggestions`, `/history`, `/:qid/release`, `/:qid/review`) · `/tests/:id/quarantine` | Quarantine of flaky tests |
 | GET · PATCH · POST | `/me/runner` (`/retire`, `/update`, `/enrollments/:id`, `/download`, `/download/info`) | The person's own runner (one per person, set up in Settings): its state and switches, remove it, update it, the download with its one-time code |
-| GET · POST | `/admin/runners` (`/:runnerId/retire`) | Everyone's runners, for platform admins; remove one (a lost laptop) |
 | GET · POST · PUT · DELETE | `/projects/:id/objects` (`/:oid`, `/export`, `/import`, `/extract`) · POST `/tests/:id/steps/:index/share` | Shared UI elements (object repository), extraction of shared locators, "Make shared" for one step |
 | GET · PUT | `/projects/:id/framework-settings` | Per-project framework settings and what a run would effectively use |
 | GET · POST | `/tests/:id/take-over` · `/tests/:id/restore-generated` | What taking over costs, take over a test, go back to the generated version |

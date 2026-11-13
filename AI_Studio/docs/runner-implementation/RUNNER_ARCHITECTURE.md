@@ -75,7 +75,7 @@ A runner is a credential (`agent_tokens` row with its `owner_id`). The computer 
 - **What it can start now:** `GET /api/me/runner` answers the runner with `can: { web, phone, ios, windows, record, recordHeaded, phoneSession }`, each `{ ok, why? }`, in the words of the server's own refusals (`cannotRunSentence`, `recordProblem`, `hostDeviceProblem`; offline: `RUNNER_OFFLINE`). The website shows what the server would say.
 - **Sessions:** a recording, a live session or a phone session opens on the caller's own runner (`ownHostFor`, `src/platform/agent-record.ts`): not set up, offline, can't (with the reason), or ok. It is its starter's alone (`maySeeSession`).
 - **The owner's switches** (Settings, Your runner; `PATCH /api/me/runner`): code scripts (hand-written, imported, Git; on by default), private and local addresses (off by default), "Use my connected phone" (off: emulators only). They are enforced when a task is offered (`mayRunCodeScripts`, `targetAllowed`) and again on the runner (`src/agent/address-guard.ts`, `task-runner.ts`). The runner's old `--allow-custom-scripts` flag is accepted and does nothing for a person's runner.
-- **Admins:** platform admins with `ai_studio.runners.manage` see everyone's runners and may remove one (`GET /api/admin/runners`, `seesEveryRunner`: one rule for the route and the page).
+- **Nobody sees another person's runner**, admins included (2026-11-13): there is no list of everyone's runners and no way to remove someone else's. `ai_studio.runners.manage` stays a known code so Crowd4Test's grants stay valid, but no route needs it.
 - **A credential the platform does not know** (removed, replaced, or from before the runner reset below) is answered 404 at every runner route with `RUNNER_TOKEN_GONE`: "This runner's token is no longer valid: the runner was removed or replaced. Download the new runner in Settings, Your runner, and use that one instead." Every runner program since the first release stops on it at hello (exit code 3) and prints it after "The platform no longer accepts this runner."; its launchers do not start it again.
 
 ## The runner reset (migration 57)
@@ -90,7 +90,7 @@ Every runner made before migration 57 was removed: everyone downloads the new ru
 
 `pg/baseline.sql` already has this schema, so a PostgreSQL database never runs slot 57.
 
-Routes: `GET/PATCH /api/me/runner`, `POST /api/me/runner/retire` ("Remove this computer"), `POST /api/me/runner/update`, `GET /api/me/runner/enrollments/:id`, `GET /api/me/runner/download/info`, `POST /api/me/runner/download`; admins: `GET /api/admin/runners`, `POST /api/admin/runners/:id/retire`. `GET /api/projects/:id/runner` says where a project's tests run (local mode). `GET /api/projects/:id/agents` lists the caller's own computer with its raw capabilities; the website no longer reads it, tests do.
+Routes: `GET/PATCH /api/me/runner`, `POST /api/me/runner/retire` ("Remove this computer"), `POST /api/me/runner/update`, `GET /api/me/runner/enrollments/:id`, `GET /api/me/runner/download/info`, `POST /api/me/runner/download`. `GET /api/projects/:id/runner` says where a project's tests run (local mode). `GET /api/projects/:id/agents` lists the caller's own computer with its raw capabilities; the website no longer reads it, tests do.
 
 ## Enrollment and credentials
 

@@ -2,10 +2,10 @@
  * Your runner in Settings (round 45, docs/features/runner-settings.md), in a real browser against the real built UI (web/dist) and a
  * real platform underneath: one runner per person, set up once in Settings. The states (not set up, waiting for the computer,
  * connected, offline, needs an update), the download (`POST /api/me/runner/download` with exactly `{ os, arch }`, the code never on
- * the page), the server's refusal sentences shown as they are, the switches, rename, Remove this computer, Update now, and the
- * admins' list of everyone's runners. Also the pure rules behind the download step.
+ * the page), the server's refusal sentences shown as they are, the switches, rename, Remove this computer, Update now, and that nobody
+ * sees another person's runner, admins included. Also the pure rules behind the download step.
  *
- * Most tests stand in for the `/api/me/runner*` and `/api/admin/runners*` routes with browser routes shaped like the contract, so
+ * Most tests stand in for the `/api/me/runner*` routes (and the removed `/api/admin/runners`, to prove it is never asked) with browser routes shaped like the contract, so
  * every state can be driven; the last part takes the stand-ins away and uses the real routes, with a fake agent speaking the real
  * protocol (open mode: the server acts as one person, who may do everything). A sign-in inside the runner's check or proxy never
  * reaches the page.
@@ -189,12 +189,6 @@ beforeAll(async () => {
         const json = await res.json();
         if (!fake.permissions) return route.fulfill({ response: res, json });
         await route.fulfill({ response: res, json: { ...json, me: { ...(json.me ?? { kind: "open", name: "Open access", role: "owner" }), permissions: fake.permissions } } });
-    });
-    await page.route("**/api/admin/runners/*/retire", async (route) => {
-        record(route);
-        const id = new URL(route.request().url()).pathname.split("/").at(-2);
-        fake.admin = (fake.admin ?? []).filter((r) => r.id !== id);
-        await route.fulfill({ json: { ok: true } });
     });
 }, 120_000);
 
@@ -403,51 +397,20 @@ describe("offline and updates", () => {
     }, 60_000);
 });
 
-describe("everyone's runners (admins)", () => {
-    it("lists every person's runner and removes one", async () => {
-        fake.mine = runnerOf();
-        fake.admin = [
-            { id: "tok-mine", name: "Office laptop", status: "online", lastSeenAt: new Date().toISOString(), version: "2.1.0", ownerName: "Priya" },
-            { id: "tok-ana", name: "Ana’s Mac", status: "offline", lastSeenAt: new Date(Date.now() - 86_400_000).toISOString(), version: "2.0.0", ownerName: "Ana" },
-        ];
-        fake.canSeeEveryone = true;
-        calls.length = 0;
-        await visit();
-        // Its own section below Your runner, not inside it.
-        await pwExpect(section().getByTestId("everyones-runners")).toHaveCount(0);
-        const list = page.getByTestId("everyones-runners");
-        await pwExpect(list.getByRole("heading", { name: "Everyone’s runners (2)" })).toBeVisible();
-        await pwExpect(list).toContainText("Ana: Ana’s Mac");
-        await pwExpect(list).toContainText("version 2.0.0");
-        // Your own runner is removed from your own section, not from here.
-        await pwExpect(list.getByRole("button", { name: /Remove Priya’s runner/ })).toHaveCount(0);
-        await list.getByRole("button", { name: "Remove Ana’s runner Ana’s Mac…" }).click();
-        await list.getByRole("button", { name: "Remove Ana’s runner Ana’s Mac", exact: true }).click();
-        await pwExpect(list).toContainText("Ana’s runner Ana’s Mac was removed.");
-        expect(calls.filter((c) => c.path === "/api/admin/runners/tok-ana/retire").map((c) => c.method)).toEqual(["POST"]);
-        await axeBoth();
-        fake.admin = null;
-    }, 60_000);
-
-    it("shows nothing when the list is refused", async () => {
-        fake.admin = null;
-        await visit();
-        await pwExpect(page.getByTestId("everyones-runners")).toHaveCount(0);
-    }, 60_000);
-
-    it("is not shown, and never asked for, unless the server says canSeeEveryone (Manage runners alone is not enough)", async () => {
+describe("only your own runner, admins included", () => {
+    it("never lists or asks for anyone else's runner, even for an admin who may manage runners", async () => {
         fake.mine = runnerOf();
         fake.admin = [{ id: "tok-ana", name: "Ana’s Mac", status: "online", lastSeenAt: new Date().toISOString(), ownerName: "Ana" }];
-        fake.permissions = ["ai_studio.access", "ai_studio.tests.run", "ai_studio.runners.manage"];
-        for (const answer of [undefined, false] as const) {
-            fake.canSeeEveryone = answer;
-            adminCalls.length = 0;
-            await visit();
-            await pwExpect(section()).toHaveAttribute("data-state", "online");
-            await page.waitForTimeout(1500);
-            await pwExpect(page.getByTestId("everyones-runners")).toHaveCount(0);
-            expect(adminCalls, String(answer)).toEqual([]);
-        }
+        fake.permissions = ["ai_studio.access", "ai_studio.tests.run", "ai_studio.runners.manage", "ai_studio.platform.settings"];
+        // An older server's answer that still says canSeeEveryone changes nothing.
+        fake.canSeeEveryone = true;
+        adminCalls.length = 0;
+        await visit();
+        await pwExpect(section()).toHaveAttribute("data-state", "online");
+        await page.waitForTimeout(1500);
+        await pwExpect(page.getByTestId("everyones-runners")).toHaveCount(0);
+        await pwExpect(page.locator("body")).not.toContainText("Ana’s Mac");
+        expect(adminCalls).toEqual([]);
         fake.permissions = null;
         fake.canSeeEveryone = undefined;
         fake.admin = null;
@@ -504,7 +467,7 @@ describe("layout", () => {
 describe("against the real routes", () => {
     const PASSWORD = "Settings-Ui-Pr0xy-Secret";
     it("shows the person's own runner, changes a switch and removes it, never showing a sign-in from its check or proxy", async () => {
-        for (const glob of ["**/api/me/runner", "**/api/me/runner/retire", "**/api/me/runner/update", "**/api/me/runner/enrollments/*", "**/api/admin/runners", "**/api/admin/runners/*/retire"]) await page.unroute(glob);
+        for (const glob of ["**/api/me/runner", "**/api/me/runner/retire", "**/api/me/runner/update", "**/api/me/runner/enrollments/*", "**/api/admin/runners"]) await page.unroute(glob);
         const store = getAgentServices(platform).store;
         const { secret } = store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: "Maya’s laptop", createdBy: OPEN_OWNER_ID });
         const check = {

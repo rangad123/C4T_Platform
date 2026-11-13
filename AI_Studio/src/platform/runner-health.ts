@@ -1,9 +1,9 @@
 /**
  * One runner per person (round 45, docs/features/runner-settings.md): who may have a runner, who may change one, and the views of
- * GET /api/me/runner and the admins' list GET /api/admin/runners. Reads only; the rows live in agent-store.ts. A runner here is one person's
+ * GET /api/me/runner. Reads only; the rows live in agent-store.ts. A runner here is one person's
  * credential; what it reported about itself comes from the computer that connected with it most recently.
  */
-import { permissionsOf, sideOf, type Actor } from "./auth/actor.js";
+import { permissionsOf, type Actor } from "./auth/actor.js";
 import type { ProjectScope } from "./auth/project-scope.js";
 import type { AgentRecord, AgentStore } from "./agent-store.js";
 import { ONLINE_MS } from "./agent-store.js";
@@ -13,23 +13,6 @@ export const RUNNER_NOT_FOUND = "Runner not found";
 export const RUNNER_RETIRED = "This runner was removed. Set up your runner again in Settings.";
 export const CANNOT_HAVE_RUNNER = "Setting up a runner needs permission to run tests in at least one project.";
 export const KEY_CANNOT_HAVE_RUNNER = "Sign in with your own account to set up your runner.";
-
-/** Crowd4Test admins, and on a server without Crowd4Test sign-in its owners (people holding platform settings). */
-export function isPlatformAdmin(actor: Actor): boolean {
-    const side = sideOf(actor);
-    return side === "admin" || (side === "local" && permissionsOf(actor).has("ai_studio.platform.settings"));
-}
-
-/**
- * May this actor see every person's runner (GET /api/admin/runners) and remove one? People who manage runners (the route's permission) and are
- * platform admins or see every project. The one rule for the route and for the page (GET /api/me/runner canSeeEveryone).
- */
-export function seesEveryRunner(scope: Pick<ProjectScope, "allowed">, actor: Actor): boolean {
-    if (actor.kind !== "user" || !permissionsOf(actor).has("ai_studio.runners.manage")) return false;
-    if (isPlatformAdmin(actor)) return true;
-    const side = sideOf(actor);
-    return side !== "customer" && side !== "tester" && scope.allowed(actor) === null;
-}
 
 /**
  * May this person have a runner? Anyone signed in as a person who may run tests in at least one project they can open, Crowd4Test

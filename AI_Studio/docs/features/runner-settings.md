@@ -40,8 +40,7 @@ every few seconds and has these states:
   connected phone (off). The server enforces each when it hands out work, and the runner checks again. A person who still has more than
   one computer from before round 45 changes the switches of all of them at once.
 - **Rename** is `PATCH /api/me/runner` `{ name }`; **Remove this computer** is `POST /api/me/runner/retire`.
-- **Everyone's runners** (people who manage runners, and platform admins): its own section below Your runner, with owner, name,
-  status, last seen and version from `GET /api/admin/runners`, and **Remove** (`POST /api/admin/runners/:id/retire`).
+- **Only your own runner.** Every account, admins included, sees and sets up only its own runner; nobody lists or removes another person's.
 
 ## Elsewhere on the website
 

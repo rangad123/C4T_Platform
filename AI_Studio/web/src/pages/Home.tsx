@@ -12,8 +12,7 @@ import { useDocumentTitle, useFetch } from "../lib/hooks";
 import { routes, useRoute } from "../lib/router";
 import { NewProject } from "./NewProject";
 import type { FoldersAnswer } from "../features/workspace/FoldersPage";
-import { KIND_HELP, KIND_WORDS, KindChips, KindTile, PlatformMark } from "../components/ProjectKind";
-import { Tooltip } from "../components/Tooltip";
+import { KIND_HELP, KIND_WORDS, KindTile, PlatformMark, ProjectTags, shortAgentName, type TagAgent } from "../components/ProjectKind";
 import { AgentAvatar, type AgentId, type AgentList } from "../features/testing-agents/testing-agents";
 
 /** "all", "grouped", "none" (not in a folder) or a folder id. */
@@ -23,10 +22,6 @@ const NOT_EXPLORED = "The AI has not explored this application yet, so it has no
 const NO_SCRIPTS = "This code project has no test scripts yet. Add them on its Test scripts tab.";
 const NOT_RUN = "Its test scripts have not been run yet.";
 
-/** At most this many agent tiles on a row; the rest are "+N" with their names in a tip. */
-const AGENT_TILES = 3;
-/** "API Testing Agent" -> "API", for the tiles' tips and the legend. */
-const shortAgentName = (name: string) => name.replace(/ Testing Agent$| Agent$/, "");
 
 /** At most 40 ticks, in proportion; the rest are "waiting" because the project list only knows how many validated. */
 function projectTicks(validated: number, total: number): Tick[] {
@@ -235,32 +230,6 @@ function Legend({ agents }: { agents: Array<{ id: AgentId; name: string; availab
     );
 }
 
-/** A row's testing agents: at most three tiles, then "+N" naming the rest. */
-function AgentTiles({ ids, names }: { ids: AgentId[]; names: Map<AgentId, string> }) {
-    const shown = ids.slice(0, AGENT_TILES);
-    const rest = ids.slice(AGENT_TILES).map((id) => names.get(id) ?? id);
-    return (
-        <span className="pk-agents" data-testid="row-agents">
-            {shown.map((id) => (
-                <Tooltip key={id} content={names.get(id) ?? id}>
-                    <span className="pk-agent" data-agent={id}>
-                        <AgentAvatar id={id} size="sm" />
-                        <span className="sr-only">{names.get(id) ?? id}</span>
-                    </span>
-                </Tooltip>
-            ))}
-            {rest.length > 0 && (
-                <Tooltip content={rest.join(", ")}>
-                    <span className="pk-more" data-testid="row-agents-more">
-                        <span aria-hidden>+{rest.length}</span>
-                        <span className="sr-only">and {rest.length} more: {rest.join(", ")}</span>
-                    </span>
-                </Tooltip>
-            )}
-        </span>
-    );
-}
-
 /** The rows of either answer: a page, or the whole list (View all). */
 function rowsOf(d: ProjectPage | ProjectRow[] | undefined): ProjectRow[] {
     return Array.isArray(d) ? d : (d?.projects ?? []);
@@ -268,11 +237,11 @@ function rowsOf(d: ProjectPage | ProjectRow[] | undefined): ProjectRow[] {
 
 function ProjectItem({ p, agents, names }: { p: ProjectRow; agents: AgentId[] | undefined; names: Map<AgentId, string> }): ReactNode {
     const kind: ProjectKind = projectKind(p);
-    const platform = projectShape(p).platforms[0]!;
+    const tagAgents: TagAgent[] | undefined = agents?.map((id) => ({ id, name: names.get(id) ?? id }));
     return (
         <li>
             <a className="list-row" href={routes.project(p.id)} data-kind={kind}>
-                <KindTile kind={kind} />
+                <KindTile kind={kind} labelled />
                 <span className="main">
                     <span className="title truncate">{p.name}</span>
                     <span className="meta truncate">
@@ -288,13 +257,11 @@ function ProjectItem({ p, agents, names }: { p: ProjectRow; agents: AgentId[] | 
                     )}
                 </span>
                 <span className="pk-facts">
-                    <KindChips kind={kind} />
-                    <PlatformMark platform={platform} wordClass="pk-platform-word" />
-                    {kind !== "code" && agents && agents.length > 0 && <AgentTiles ids={agents} names={names} />}
+                    <ProjectTags kind={kind} platforms={projectShape(p).platforms} agents={tagAgents} row />
                 </span>
+                <span className="pk-ribbon">{p.test_count > 0 && <Ribbon small ticks={projectTicks(p.validated_count, p.test_count)} label={`${p.validated_count} of ${p.test_count} tests passing`} />}</span>
                 <span className="tail">
                     {p.archived_at && <Badge>Archived</Badge>}
-                    {p.test_count > 0 && <Ribbon small ticks={projectTicks(p.validated_count, p.test_count)} label={`${p.validated_count} of ${p.test_count} tests passing`} />}
                     {kind === "code" ? (
                         // A code project is never explored: it says what its test scripts have, not "Not explored yet".
                         p.test_count === 0 ? (

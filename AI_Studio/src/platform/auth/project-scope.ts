@@ -136,8 +136,6 @@ export const EXPLICIT_SCOPES: Record<string, Scope["kind"]> = {
     "GET /api/me/runner/enrollments/:enrollmentId": "none",
     "POST /api/me/runner/download": "none",
     "GET /api/me/runner/download/info": "none",
-    "GET /api/admin/runners": "none",
-    "POST /api/admin/runners/:runnerId/retire": "none",
     // ── lists narrowed to the allowed projects by their handlers ──
     "GET /api/projects": "list",
     "GET /api/dashboard": "list",

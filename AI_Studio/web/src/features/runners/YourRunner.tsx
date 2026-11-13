@@ -2,7 +2,6 @@ import { ChevronRight, Download, Laptop, Pencil, RefreshCw, Trash2 } from "lucid
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api";
 import { Badge, Button, Callout, ErrorState, Skeleton } from "../../components/ui";
-import { BadgeKey } from "../../components/Tooltip";
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
@@ -26,7 +25,6 @@ import {
     startSteps,
     systemAvailable,
     useMyRunner,
-    type AdminRunnerRow,
     type DownloadInfo,
     type DownloadMade,
     type EnrollmentStatus,
@@ -51,8 +49,7 @@ const nodeOs = (os: string | null | undefined): RunnerOs | null => {
 /**
  * "Your runner" in Settings (`#/settings#runner`; docs/features/runner-settings.md). A runner is the program on your computer that runs
  * your tests: the person sets it up once here and every run they start, and their schedules, then go to it. States: not set up, waiting
- * for the computer, connected, offline, needs an update. People the server lets see every runner (canSeeEveryone) also get Everyone's runners,
- * its own section below, where they may remove one.
+ * for the computer, connected, offline, needs an update. Each person sees and sets up only their own runner, admins included.
  */
 export function YourRunnerSection() {
     const me = useMyRunner(5000);
@@ -69,7 +66,6 @@ export function YourRunnerSection() {
     }, [me.data]);
     const state = !me.data ? null : !runner ? "not-set-up" : runner.status;
     return (
-        <>
         <section className="card card-pad stack-sm" id="runner" aria-labelledby="runner-title" data-testid="your-runner" data-tour="your-runner" data-state={state ?? "loading"}>
             <div className="row">
                 <Laptop size={18} aria-hidden />
@@ -103,9 +99,6 @@ export function YourRunnerSection() {
                 <RunnerDetails runner={runner} onChanged={me.reload} onSetUpAgain={() => setSettingUp(true)} />
             )}
         </section>
-        {/* Only for someone the server lets see every runner (platform admins and the like): a missing field means no, so nothing is polled. */}
-        {me.data?.canSeeEveryone === true && <EveryonesRunners mineId={runner?.id ?? null} />}
-        </>
     );
 }
 
@@ -389,82 +382,6 @@ function WaitForComputer({ made, onConnected, onAgain }: { made: { os: RunnerOs 
                 </Button>
             </div>
         </div>
-    );
-}
-
-/** People who manage runners: every person's runner, with Remove (GET /api/admin/runners, POST /api/admin/runners/:id/retire). */
-function EveryonesRunners({ mineId }: { mineId: string | null }) {
-    const list = useFetch<{ runners: AdminRunnerRow[] }>("/admin/runners", () => 30_000);
-    const [confirm, setConfirm] = useState<string | null>(null);
-    const [busy, setBusy] = useState(false);
-    const [note, setNote] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
-    // A server that does not have the list (or refuses it) shows nothing here.
-    if (!list.data) return null;
-    const rows = list.data.runners;
-    const retire = async (r: AdminRunnerRow) => {
-        setBusy(true);
-        setNote(null);
-        try {
-            await api(`/admin/runners/${encodeURIComponent(r.id)}/retire`, { method: "POST" });
-            setNote({ tone: "success", text: `${r.ownerName ?? "Someone"}’s runner ${r.name} was removed. It can no longer connect.` });
-            setConfirm(null);
-            await list.reload();
-        } catch (e) {
-            setNote({ tone: "danger", text: message(e, "The runner was not removed. Try again.") });
-        } finally {
-            setBusy(false);
-        }
-    };
-    return (
-        <section className="card card-pad stack-sm" data-testid="everyones-runners" aria-labelledby="everyones-runners-title">
-            <h2 className="t-section" id="everyones-runners-title">
-                Everyone’s runners ({rows.length})
-            </h2>
-            <div className="stack-sm">
-                {note && <Callout tone={note.tone}>{note.text}</Callout>}
-                {rows.length > 0 && <BadgeKey label="the runner states" entries={(["online", "busy", "offline"] as const).map((k) => ({ word: STATUS_WORDS[k].label, text: STATUS_WORDS[k].tip }))} />}
-                {rows.length === 0 ? (
-                    <p className="t-secondary">Nobody has set up a runner yet.</p>
-                ) : (
-                    <ul className="list divided" aria-label="Everyone’s runners">
-                        {rows.map((r) => {
-                            const w = STATUS_WORDS[r.status] ?? STATUS_WORDS.offline;
-                            return (
-                                <li key={r.id} className="list-row" data-runner={r.id}>
-                                    <span className="main">
-                                        <span className="title truncate">
-                                            {r.ownerName ?? "Someone"}: {r.name}
-                                        </span>
-                                        <span className="meta">
-                                            {r.lastSeenAt ? `Last seen ${relativeTime(r.lastSeenAt)}` : "Never connected"}
-                                            {r.version ? ` · version ${r.version}` : ""}
-                                        </span>
-                                    </span>
-                                    <Badge tone={w.tone} tip={w.tip}>
-                                        {w.label}
-                                    </Badge>
-                                    {r.id !== mineId &&
-                                        (confirm === r.id ? (
-                                            <>
-                                                <Button size="sm" onClick={() => setConfirm(null)}>
-                                                    Keep
-                                                </Button>
-                                                <Button size="sm" variant="danger" loading={busy} onClick={() => void retire(r)} aria-label={`Remove ${r.ownerName ?? "Someone"}’s runner ${r.name}`}>
-                                                    Remove
-                                                </Button>
-                                            </>
-                                        ) : (
-                                            <Button size="sm" variant="ghost" onClick={() => setConfirm(r.id)} aria-label={`Remove ${r.ownerName ?? "Someone"}’s runner ${r.name}…`}>
-                                                Remove
-                                            </Button>
-                                        ))}
-                                </li>
-                            );
-                        })}
-                    </ul>
-                )}
-            </div>
-        </section>
     );
 }
 

@@ -716,11 +716,6 @@ export class AgentStore {
         return { token, agent, online: Boolean(agent) && this.clock() - agent!.lastSeenMs <= ONLINE_MS };
     }
 
-    /** Every person's runner, for the admins' list, newest first. */
-    allTokens(): AgentTokenRecord[] {
-        return this.db.all(`SELECT * FROM agent_tokens ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`).map(toToken);
-    }
-
     /** The owner's switches. Only what is given changes. False when the runner is unknown (removed). */
     setTokenSwitches(id: string, s: { allowCodeScripts?: boolean; allowPrivateTargets?: boolean; allowRealPhone?: boolean }): boolean {
         const bit = (v: boolean | undefined) => (v === undefined ? null : v ? 1 : 0);

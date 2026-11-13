@@ -54,23 +54,11 @@ export interface RunnerMine {
 
 export interface MyRunnerAnswer {
     runner: RunnerMine | null;
-    /** The server lets this person see every person's runner (GET /api/admin/runners). Missing: no. */
-    canSeeEveryone?: boolean;
 }
 
 /** GET /api/me/runner/enrollments/:id: whether the computer has connected with the code inside the download. */
 export interface EnrollmentStatus {
     status: "waiting" | "connected" | "expired" | "used";
-}
-
-/** GET /api/admin/runners: every person's runner (platform admins and people who manage runners). */
-export interface AdminRunnerRow {
-    id: string;
-    name: string;
-    status: RunnerState | "retired" | "not-connected";
-    lastSeenAt: string | null;
-    version?: string | null;
-    ownerName?: string | null;
 }
 
 // ── the person's runner, one answer for the whole page ───────────────────────

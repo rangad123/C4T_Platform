@@ -133,12 +133,12 @@ describe("one runner per person", () => {
     let tom: Awaited<ReturnType<typeof setUp>>;
 
     it("not set up: GET /api/me/runner says so, and a run is refused with the typed code that links to Settings", async () => {
-        expect((await as("t-tess", "GET", "/api/me/runner")).body).toEqual({ runner: null, canSeeEveryone: false });
-        expect((await as("t-ada", "GET", "/api/me/runner")).body).toMatchObject({ canSeeEveryone: true });
+        expect((await as("t-tess", "GET", "/api/me/runner")).body).toEqual({ runner: null });
+        expect((await as("t-ada", "GET", "/api/me/runner")).body).toEqual({ runner: null });
         expect(refusal(() => gate(ids["t-tess"]!))).toMatchObject({ status: 409, message: RUNNER_NOT_SET_UP, code: "RUNNER_NOT_SET_UP" });
         // Someone with no runner has nothing to change; the shared key has none.
         expect((await as("t-vic", "PATCH", "/api/me/runner", { name: "x" })).status).toBe(404);
-        expect((await asKey("GET", "/api/me/runner")).body).toEqual({ runner: null, canSeeEveryone: false });
+        expect((await asKey("GET", "/api/me/runner")).body).toEqual({ runner: null });
         expect((await asKey("POST", "/api/me/runner/retire")).status).toBe(403);
     });
 
@@ -348,15 +348,14 @@ describe("one runner per person", () => {
         tess = again;
     });
 
-    it("admins see everyone's runners and may remove one; nobody else may", async () => {
-        expect((await as("t-tom", "GET", "/api/admin/runners")).status).toBe(403);
-        const list = (await as("t-ada", "GET", "/api/admin/runners")).body.runners as Array<{ id: string; ownerName: string; status: string }>;
-        expect(list.map((r) => r.id).sort()).toEqual([tess.runnerId, tom.runnerId].sort());
-        expect(list.find((r) => r.id === tom.runnerId)).toMatchObject({ status: "online" });
-        expect((await as("t-tom", "POST", `/api/admin/runners/${tess.runnerId}/retire`)).status).toBe(403);
-        expect((await as("t-ada", "POST", `/api/admin/runners/${tom.runnerId}/retire`)).status).toBe(200);
-        expect((await tom.agent!.hello({ machineId: tom.machineId })).status).toBe(404);
-        expect((await as("t-tom", "GET", "/api/me/runner")).body).toMatchObject({ runner: null });
+    it("an admin sees only their own runner: nobody's runner is listed for, or removable by, anyone else", async () => {
+        expect((await as("t-ada", "GET", "/api/me/runner")).body).toEqual({ runner: null });
+        expect((await as("t-tom", "GET", "/api/me/runner")).body.runner.id).toBe(tom.runnerId);
+        expect((await as("t-tess", "GET", "/api/me/runner")).body.runner.id).toBe(tess.runnerId);
+        expect((await as("t-ada", "GET", "/api/admin/runners")).status).toBe(404);
+        expect((await as("t-ada", "POST", `/api/admin/runners/${tom.runnerId}/retire`, {})).status).toBe(404);
+        expect((await tom.agent!.hello({ machineId: tom.machineId })).status).toBe(200);
+        expect((await as("t-tom", "POST", "/api/me/runner/retire")).body).toEqual({ runner: null });
     });
 
     it("Remove this computer: the credential stops working at once", async () => {

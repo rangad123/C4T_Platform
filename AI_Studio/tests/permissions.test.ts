@@ -227,7 +227,9 @@ describe("projects in reach: only the ones a person was added to", () => {
 
 describe("each permission is what stands between a route and its answer", () => {
     /** One route per code, on Alpha (where the account is a member). Allowed means: past the permission check (not 403). */
-    const ROUTE_FOR: Record<Permission, () => [string, string, unknown?]> = {
+    /** Kept so Crowd4Test's stored grants stay valid, but no route needs it: nobody sees or removes another person's runner. */
+    const GUARDS_NOTHING = new Set<Permission>(["ai_studio.runners.manage"]);
+    const ROUTE_FOR: Record<Exclude<Permission, "ai_studio.runners.manage">, () => [string, string, unknown?]> = {
         "ai_studio.access": () => ["GET", `/api/projects/${PA}/tests`],
         "ai_studio.project.create": () => ["POST", "/api/projects", { name: "By permission" }],
         "ai_studio.project.settings": () => ["PUT", `/api/projects/${PA}/framework-settings`, {}],
@@ -239,7 +241,6 @@ describe("each permission is what stands between a route and its answer", () => 
         "ai_studio.agent.run": () => ["POST", "/api/recordings/no-such-recording/act", {}],
         "ai_studio.reports.export": () => ["GET", `/api/projects/${PA}/junit`],
         "ai_studio.tests.delete": () => ["DELETE", `/api/projects/${PA}/test-data/no-such-set`],
-        "ai_studio.runners.manage": () => ["GET", "/api/admin/runners"],
         "ai_studio.ai_keys.manage": () => ["POST", `/api/projects/${PA}/integrations`, {}],
         "ai_studio.usage.view": () => ["GET", `/api/usage?projectId=${PA}`],
         "ai_studio.security.use": () => ["PUT", `/api/v1/security/projects/${PA}/testing-type`, {}],
@@ -247,7 +248,7 @@ describe("each permission is what stands between a route and its answer", () => 
     };
 
     it("names a route for every code, and each route's table rule is that code", () => {
-        expect(Object.keys(ROUTE_FOR).sort()).toEqual([...PERMISSIONS].sort());
+        expect(Object.keys(ROUTE_FOR).sort()).toEqual(PERMISSIONS.filter((c) => !GUARDS_NOTHING.has(c)).sort());
         for (const [code, route] of Object.entries(ROUTE_FOR)) {
             if (code === "ai_studio.access") continue;
             const [method, url] = route();
@@ -259,6 +260,7 @@ describe("each permission is what stands between a route and its answer", () => 
     it("refuses each route without its code and lets it through with it (a manager, SUB_ADMIN, a member of Alpha)", async () => {
         const wrong: string[] = [];
         for (const code of PERMISSIONS) {
+            if (code === "ai_studio.runners.manage") continue;
             const [method, url, body] = ROUTE_FOR[code]();
             const without = `t-without-${code}`;
             const withIt = `t-with-${code}`;

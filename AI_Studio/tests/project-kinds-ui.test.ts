@@ -1,7 +1,8 @@
 /**
  * The two kinds of project in a real browser (round 38): an AI agent project, a code project and a mixed one (made with both
- * testing modes before a project had one). Each one's tabs and their order, the projects list row (the kind's tile, the type chip,
- * the platform, the agent tiles with "+N", a code row's status), the legend under the list, the project header above the tabs,
+ * testing modes before a project had one). Each one's tabs and their order, the projects list row (the kind's labelled tile, shown
+ * once: no second type chip; the platform, the agent tiles with "+N", a code row's status; every column lined up from row to row),
+ * the legend under the list, the project header above the tabs with the same tags (the agents named),
  * the code dashboard's empty state with nothing about exploring, and an old Agent runs link that still opens.
  *
  * The platform underneath is real (seeded through the repo and the HTTP API). Port 7801.
@@ -110,11 +111,15 @@ const AGENT_TABS = ["Dashboard", "Runs", "Requirements", "Settings"];
 const CODE_TABS = ["Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Runs", "Settings"];
 
 describe("the projects list shows each project's kind", () => {
-    it("an agent row: the robot tile, the Agent chip, the platform, three agent tiles and +1 naming the rest", async () => {
+    it("an agent row: the robot tile named Agent project (the kind once, no chip), the platform, three agent tiles and +1 naming the rest", async () => {
         await visit(routes.home);
         const r = row("Kestrel agents");
         await pwExpect(r.locator(".pk-tile")).toHaveAttribute("data-kind", "agent");
-        await pwExpect(r.getByTestId("kind-chips")).toHaveText("Agent");
+        await pwExpect(r.getByRole("img", { name: "Agent project" })).toBeVisible();
+        await pwExpect(r.getByTestId("kind-chips")).toHaveCount(0);
+        await pwExpect(r.getByTestId("project-tags")).not.toContainText("Agent");
+        await r.locator(".pk-tile").hover();
+        await pwExpect(page.locator(".tt.is-open").filter({ hasText: "Tested by AI agents" })).toBeVisible();
         await pwExpect(r.locator(".pk-platform")).toHaveAttribute("data-platform", "web");
         await pwExpect(r.locator(".pk-platform")).toHaveText("Web");
         const tiles = r.getByTestId("row-agents");
@@ -132,7 +137,8 @@ describe("the projects list shows each project's kind", () => {
     it("a code row: the code tile and chip, the platform, no agents, and what its test scripts have instead of exploring", async () => {
         const empty = row("Lynx code");
         await pwExpect(empty.locator(".pk-tile")).toHaveAttribute("data-kind", "code");
-        await pwExpect(empty.getByTestId("kind-chips")).toHaveText("Code");
+        await pwExpect(empty.getByRole("img", { name: "Code project" })).toBeVisible();
+        await pwExpect(empty.getByTestId("kind-chips")).toHaveCount(0);
         await pwExpect(empty.locator(".pk-platform")).toHaveText("Android");
         await pwExpect(empty.getByTestId("row-agents")).toHaveCount(0);
         await pwExpect(empty).toContainText("No test scripts yet");
@@ -143,12 +149,13 @@ describe("the projects list shows each project's kind", () => {
         await pwExpect(withTests.getByTestId("row-agents")).toHaveCount(0);
     });
 
-    it("a mixed row shows both chips, with a tip saying how to choose one", async () => {
+    it("a mixed row's tile is named Agent and code project, with a tip saying how to choose one", async () => {
         const r = row("Newt mixed");
         await pwExpect(r.locator(".pk-tile")).toHaveAttribute("data-kind", "mixed");
-        await pwExpect(r.getByTestId("kind-chips").locator(".badge")).toHaveText(["Agent", "Code"]);
+        await pwExpect(r.getByRole("img", { name: "Agent and code project" })).toBeVisible();
+        await pwExpect(r.getByTestId("kind-chips")).toHaveCount(0);
         await pwExpect(r.locator(".pk-platform")).toHaveText("iOS");
-        await r.getByTestId("kind-chips").hover();
+        await r.locator(".pk-tile").hover();
         await pwExpect(page.locator(".tt.is-open").filter({ hasText: "Choose one in Settings → General" })).toBeVisible();
     });
 
@@ -165,6 +172,27 @@ describe("the projects list shows each project's kind", () => {
         const cut = await page.locator("a.list-row .title").evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent));
         expect(cut).toEqual([]);
         await shot("list-1280");
+    });
+
+    it("every column lines up from row to row: the tags start, the ribbon starts and the status ends at the same place, and every tag is one height", async () => {
+        for (const width of [1280, 1920]) {
+            await page.setViewportSize({ width, height: 900 });
+            await visit(routes.home);
+            await pwExpect(row("Osprey agents").getByTestId("row-agents-more")).toBeVisible();
+            const cols = await page.locator("a.list-row").evaluateAll((rows) =>
+                rows.map((r) => {
+                    const box = (sel: string) => r.querySelector(sel)?.getBoundingClientRect();
+                    return { tags: Math.round(box(".pk-facts")!.left), ribbon: Math.round(box(".pk-ribbon")!.left), status: Math.round(box(".tail")!.right) };
+                }),
+            );
+            for (const k of ["tags", "ribbon", "status"] as const) expect(new Set(cols.map((c) => c[k])).size, `${k} at ${width}`).toBe(1);
+            const heights = await page.locator('a.list-row [data-testid="project-tags"]').evaluateAll((tags) =>
+                tags.flatMap((t) => Array.from(t.querySelectorAll(".pk-platform, .pk-agent, .pk-more")).map((e) => Math.round(e.getBoundingClientRect().height))),
+            );
+            expect(new Set(heights), String(width)).toEqual(new Set([28]));
+            await shot(`list-${width}-aligned`);
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
         await axe();
     });
 
@@ -221,8 +249,8 @@ describe("the tabs follow the project's kind", () => {
 });
 
 describe("the project header sits above the tabs on every place", () => {
-    it("the kind's tile beside the name as the one h1, no second type chip (only a mixed project shows its two); the place's title is an h2 under the tab bar", async () => {
-        for (const [id, kind, label, chips] of [[agent, "agent", "Agent project", []], [code, "code", "Code project", []], [mixed, "mixed", "Agent and code project", ["Agent", "Code"]]] as const) {
+    it("the kind's tile beside the name as the one h1, the project's tags without a second type chip; the place's title is an h2 under the tab bar", async () => {
+        for (const [id, kind, label, platform] of [[agent, "agent", "Agent project", "Web"], [code, "code", "Code project", "Android"], [mixed, "mixed", "Agent and code project", "iOS"]] as const) {
             for (const [h, title] of [[routes.requirements(id), "Requirements"], [routes.runs(id), "Runs"], [routes.projectSettings(id), "Settings"]] as const) {
                 await visit(h);
                 const head = page.getByTestId("project-head");
@@ -230,7 +258,8 @@ describe("the project header sits above the tabs on every place", () => {
                 await pwExpect(page.locator("h1")).toHaveCount(1);
                 await pwExpect(head.locator("h1")).not.toHaveText("…");
                 await pwExpect(head.getByRole("img", { name: label })).toBeVisible();
-                await pwExpect(head.getByTestId("kind-chips").locator(".badge")).toHaveText([...chips]);
+                await pwExpect(head.getByTestId("kind-chips")).toHaveCount(0);
+                await pwExpect(head.getByTestId("project-tags").locator(".pk-platform")).toHaveText(platform);
                 await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText(title);
                 // Header, then the tab bar, then the place's title.
                 const order = await page.evaluate(() => {
@@ -241,6 +270,24 @@ describe("the project header sits above the tabs on every place", () => {
                 expect(order, h).toBe(true);
             }
         }
+        // The header names every one of the project's agents, with no "+N" (the list row shows three and "+1").
+        await visit(routes.project(agent));
+        const agents = page.getByTestId("project-head").getByRole("list", { name: "Testing agents" });
+        await pwExpect(agents.getByRole("listitem")).toHaveText(["API", "Accessibility", "Security", "UX"]);
+        await pwExpect(page.getByTestId("project-head").getByTestId("row-agents-more")).toHaveCount(0);
+        await shot("head-agent-1280");
+        // On a phone the tags wrap under the name: no sideways scrolling.
+        await page.setViewportSize({ width: 375, height: 800 });
+        try {
+            await visit(routes.project(agent));
+            await pwExpect(agents.getByRole("listitem")).toHaveCount(4);
+            expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+            await shot("head-agent-375");
+        } finally {
+            await page.setViewportSize({ width: 1280, height: 900 });
+        }
+        await visit(routes.project(code));
+        await pwExpect(page.getByTestId("project-head").getByTestId("row-agents")).toHaveCount(0);
         await visit(routes.requirements(agent));
         await pwExpect(page.locator("h1")).toHaveText("Kestrel agents");
         await pwExpect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Kestrel agents");

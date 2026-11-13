@@ -24,7 +24,6 @@ A run is refused up front with a plain 409 when the starter's runner cannot take
 | `GET /api/me/runner/download/info`, `POST /api/me/runner/download` `{ os, arch }` | the same (never the shared access key) | which systems can be downloaded; the download with the code in `runner.enroll` (`runner-enrollment.md`) |
 | `GET /api/me/runner/enrollments/:id` | its owner | `{ status: "waiting" \| "connected" \| "expired" \| "used" }` |
 | `PATCH /api/me/runner` `{ name?, switches? }`, `POST /api/me/runner/retire`, `POST /api/me/runner/update` | its owner | rename and the owner's switches; Remove this computer; Update now |
-| `GET /api/admin/runners`, `POST /api/admin/runners/:id/retire` | platform admins (`ai_studio.runners.manage`) | every person's runner; retire one |
 | `GET /api/config` | — | also `agentProtocol` and `executionMode` |
 
 Up-front refusals when a run starts (409, linked to Settings): `RUNNER_NOT_SET_UP` "Set up your runner in Settings to run tests.", `RUNNER_OFFLINE` "Your runner is offline. Start it on your computer, then try again.", and what the runner cannot do (phone tests, private addresses off, code scripts off). A `runnerId` sent by an older page is ignored. Job objects carry `ranOn: {kind: "platform"} | {kind: "agent", agentId, name, runnerId?, phase?, attempt?}`.

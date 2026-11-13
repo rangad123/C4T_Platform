@@ -204,7 +204,7 @@ describe("the keyboard reaches every badge's explanation (round 21)", () => {
     it("the lists and tables with status-like badges or words have their key", () => {
         const lists = [
             "pages/ProjectTests.tsx", "pages/ProjectOverview.tsx", "pages/ProjectRuns.tsx", "pages/Home.tsx", "features/dashboard/FleetDashboard.tsx",
-            "features/runs/RunDetail.tsx", "features/runners/YourRunner.tsx", "features/schedules/SchedulesPanel.tsx",
+            "features/runs/RunDetail.tsx", "features/schedules/SchedulesPanel.tsx",
             "features/schedules/AlertsPanel.tsx", "features/schedules/FlakyPanel.tsx", "features/manual/ReleasesPage.tsx", "features/manual/ReleaseDetail.tsx",
             "features/runbooks/RunbooksPanel.tsx", "features/environments/EnvironmentStrip.tsx", "features/environments/EnvironmentsPanel.tsx",
             "features/devicefarm/DeviceFarmPanel.tsx", "features/workbench/HistoryTab.tsx", "features/auth/PeopleSettings.tsx", "features/eval/QualityPanel.tsx",

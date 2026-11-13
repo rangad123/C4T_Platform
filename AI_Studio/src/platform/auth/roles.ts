@@ -287,8 +287,6 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/me/runner/download": "read",
     "GET /api/me/runner/download/info": "read",
     // Everyone's runners: "manage runners", and the handler also asks for a platform admin or someone with every project.
-    "GET /api/admin/runners": "ai_studio.runners.manage",
-    "POST /api/admin/runners/:runnerId/retire": "ai_studio.runners.manage",
 
     // ── issue trackers, Sentry (tokens of other systems) ──
     "GET /api/projects/:id/integrations": "read",
