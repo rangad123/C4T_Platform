@@ -78,7 +78,7 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
         }
         return out;
     };
-    const where = async () => ({ canRun: runsCanStartHere(p), ai: { configured: (await personAiView(p, aiOwnerOfActor(currentActor()))).configured } });
+    const where = async () => ({ canRun: runsCanStartHere(p), ai: { configured: (await personAiView(p, aiOwnerOfActor(currentActor()), p.llm.modelName)).configured } });
 
     app.get("/api/testing-agents", async (req) => {
         const projects = await projectsUsing(req);

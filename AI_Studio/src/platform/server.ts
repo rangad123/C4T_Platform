@@ -289,7 +289,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     app.get("/api/health", async () => ({ status: "ok" }));
     app.get("/api/config", async () => ({
         // The AI of the person asking: their chosen key (or the open server's own key), what the "AI connected" signs show (ai-config.ts).
-        llm: await personAiView(p, aiOwnerOfActor(currentActor())),
+        llm: await personAiView(p, aiOwnerOfActor(currentActor()), p.llm.modelName),
         authRequired: Boolean(p.config.API_KEY),
         // Whether a run or an exploration started now would start (suite-run.ts): false while tests are switched off on this server.
         runsHere: runsCanStartHere(p).ok,

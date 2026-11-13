@@ -171,7 +171,7 @@ export const keyCannotBeUsed = (problem: string): string => `Your chosen AI key 
  * The person's AI as the "AI connected" signs show it: their chosen key's provider, model and label, or the open server's own key. Names
  * no key. A key whose last test failed does not count as connected.
  */
-export async function personAiView(d: AiDeps, ownerId: string | null): Promise<{ configured: boolean; provider: string; model: string; via: "personal" | "organisational" | "server" | "none"; label?: string; problem?: string }> {
+export async function personAiView(d: AiDeps, ownerId: string | null, serverModel?: string): Promise<{ configured: boolean; provider: string; model: string; via: "personal" | "organisational" | "server" | "none"; label?: string; problem?: string }> {
     const ai = await resolveAiFor(d, ownerId);
     if (ai.source === "configuration") {
         const c = ai.configuration!;
@@ -179,8 +179,9 @@ export async function personAiView(d: AiDeps, ownerId: string | null): Promise<{
         return { configured: !failed, provider: c.provider, model: c.model, via: c.kind, label: c.label, ...(failed ? { problem: keyCannotBeUsed(c.statusNote ?? "its last test failed.") } : {}) };
     }
     if (ai.source === "server") {
-        const ok = serverHasKey(d.config);
-        return { configured: ok, provider: d.config.LLM_PROVIDER, model: ok ? (d.config.LLM_MODEL ?? "") : "unavailable", via: ok ? "server" : "none" };
+        // The server's own model as the platform built it (a model given to the platform in code counts too), else its .env settings.
+        const ok = serverModel !== undefined ? serverModel !== "unavailable" : serverHasKey(d.config);
+        return { configured: ok, provider: d.config.LLM_PROVIDER, model: ok ? (serverModel ?? d.config.LLM_MODEL ?? "") : "unavailable", via: ok ? "server" : "none" };
     }
     return { configured: false, provider: "", model: "unavailable", via: "none", ...(ai.blocked ? { problem: ai.blocked } : {}) };
 }

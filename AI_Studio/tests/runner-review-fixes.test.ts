@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TaskOffer, type LiveEvent } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
 import { getAgentServices, LIVE_EVENTS_MAX, LIVE_EVENTS_TRUNCATED } from "../src/platform/agent-services.js";
-import { AgentStore, MAX_ACCEPT_TIMEOUTS, NEVER_ACCEPTED } from "../src/platform/agent-store.js";
+import { ACCESS_KEY_OWNER, AgentStore, MAX_ACCEPT_TIMEOUTS, NEVER_ACCEPTED } from "../src/platform/agent-store.js";
 import { liveEventData } from "../src/platform/agent-routing.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { PERMISSIONS } from "../src/platform/auth/permissions.js";
@@ -177,9 +177,10 @@ describe("review fixes", () => {
         expect((await tom.agent.poll(1)).offer?.taskId).toBe(tomTask);
         await tom.agent.result(tomTask, { ok: true, runs: [] });
         finishJob(after);
-        // An edit with the access key (no person): the schedule has no owner from then on, and its next fire is refused with a sentence.
+        // An edit with the access key (no person): the access key is its maker from then on (its AI work uses the server's key), but it has
+        // no person whose runner it could use, so its next fire is refused with a sentence.
         expect((await asKey("PATCH", `/api/projects/${projectId}/schedules/${sid}`, { retryFailures: 0 })).status).toBe(200);
-        expect(getScheduleServices(platform).store.get(sid)!.createdBy).toBeNull();
+        expect(getScheduleServices(platform).store.get(sid)!.createdBy).toBe(ACCESS_KEY_OWNER);
         platform.db.run("UPDATE schedules SET next_run_at = ? WHERE id = ?", Date.now() - 1000, sid);
         writeHeartbeat(platform.db);
         const orphan = (await getScheduleServices(platform).scheduler.tick()).find((x) => x.scheduleId === sid)!;
