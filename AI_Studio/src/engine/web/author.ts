@@ -11,7 +11,7 @@
  *     (autospec's replay files contain no assertions);
  *   - the loop can resume from a replayed spec prefix with a failure description (repair).
  */
-import { generateText, hasToolCall, stepCountIs, tool } from "ai";
+import { generateText, stepCountIs, tool } from "ai";
 import type { Browser } from "playwright";
 import { z } from "zod";
 import type { EngineContext } from "../context.js";
@@ -28,6 +28,8 @@ import { makeLookAtScreen, VISION_AUTHORING_NOTE } from "../vision/look.js";
 import { COMPACT_SNAPSHOT_NOTE, RAW_SNAPSHOT_MAX, SnapshotView, snapshotSavingsEvent } from "../snapshots/compact.js";
 import { compactSnapshotsOn } from "../snapshots/setting.js";
 import { executeStep, runtimeData, type RuntimeData } from "./interpreter.js";
+import { notesFor, refusalText, refusedBy, type SiteNote } from "../memory/notes.js";
+import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -37,7 +39,7 @@ export interface AuthorInput {
     scenario: Scenario;
     credentials?: { username: string; password: string };
     /** Resume mode (repair): steps to replay first, and why the previous version failed. */
-    resume?: { prefix: Step[]; failure: string };
+    resume?: { prefix: Step[]; failure: string; /** The note is a review's list of changes, not a failed run. */ review?: boolean };
     /** Called for each tool action, for observability (agent_actions). */
     onAction?: (a: { tool: string; args: unknown; ok: boolean; observation: string }) => void;
     maxSteps?: number;
@@ -45,6 +47,14 @@ export interface AuthorInput {
     vision?: boolean;
     /** The Explorer view (the plain-English builder only): a picture is offered after each action, when someone watches. */
     frames?: FrameSink;
+    /** After a complete test: an AI review against its scenario; its fixes are applied once by resuming authoring (the exploration's test writers). */
+    review?: boolean;
+    /** A blocked scenario is tried once more in a fresh browser context before it is reported as not authored. */
+    retryBlocked?: boolean;
+    /** The project's notes for the AI (memory/notes.ts): those for the current page go into the prompt, and a "never" note refuses its control. */
+    notes?: SiteNote[];
+    /** Generated test data for the run (data-changing tests on): the agent gets a testValue tool, and the spec records the run tag. */
+    testData?: TestData;
 }
 
 /** `observations`: screens the vision model judged to look wrong while authoring (only when `vision` was on). */
@@ -63,6 +73,8 @@ Every action you perform successfully is recorded into a reusable Playwright tes
   for the provided test account. Never invent real people's data; example.com addresses only.
 - You MUST finish with assertions: use the assert tool to verify EVERY expected result of the scenario (visible text, URL, value, count...).
   A test without assertions is worthless. Assert on what the user would observe, after the final action, and wait via assertions (they auto-retry) rather than fixed sleeps.
+  Assert the OUTCOME, not only that what you clicked is still visible: the confirmation text, the new URL, the changed value or count.
+  When an outcome depends on an earlier step, assert that link (the value typed in a form shows in the list or summary afterwards).
 - Never perform irreversible/destructive real-world actions (payment, deleting accounts, sending messages). Stop before them and assert on the UI.
 - When every expected result is verified, call finish(result="complete").
 - If an assertion fails because the application genuinely behaves differently from the expected result, call finish(result="defect") and explain what was observed.
@@ -91,7 +103,69 @@ function pageHint(model: AppModel, scenario: Scenario): string {
  * the main one), and the rest of the scenario moves to the main model when the fast one struggles. Without a fast model nothing changes.
  */
 export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
-    return withRoute({ task: input.resume ? "repair" : "authoring", what: `Scenario ${input.scenario.scenarioId}` }, () => authorScenario(input));
+    return withRoute({ task: input.resume ? "repair" : "authoring", what: `Scenario ${input.scenario.scenarioId}` }, async () => {
+        let out = await authorScenario(input);
+        if (out.status === "blocked" && input.retryBlocked && !input.resume) {
+            input.ctx.emit({ stage: "generation", kind: "scenario_retry", level: "warn", message: `${input.scenario.scenarioId} was blocked (${out.explanation}); trying once more in a fresh browser` });
+            out = await authorScenario(input);
+        }
+        if (out.status === "complete" && input.review && !input.resume) out = await reviewAndFix(input, out);
+        return out;
+    });
+}
+
+const OUTCOME_PUSHBACKS = 2;
+const NO_OUTCOME = "Authoring finished without recording any assertion on the expected outcome";
+const NO_OUTCOME_HINT =
+    "Not finished: the test has no assertion on the scenario's expected outcome after the last action. Assert what the user should now observe (text, value, URL or count), not only that the element you used is visible, then call finish again.";
+const INTERACTIONS = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover"]);
+
+/** An assertion after the last action that is more than "the element I just used is visible": it proves the scenario's outcome. */
+export function hasOutcomeAssertion(steps: readonly Step[]): boolean {
+    const key = (l: unknown) => JSON.stringify(l);
+    const touched = new Set(steps.flatMap((s) => (INTERACTIONS.has(s.action) && "locator" in s && s.locator ? [key(s.locator)] : [])));
+    const lastAction = steps.findLastIndex((s) => INTERACTIONS.has(s.action));
+    return steps.slice(lastAction + 1).some((s) => s.action === "assert" && !(s.check === "visible" && s.locator && touched.has(key(s.locator))));
+}
+
+const REVIEW_SYSTEM = `You review ONE automatically written end-to-end web test against the scenario it must prove.
+Ask for a change only for: an expected result with no assertion that would fail if the outcome did not happen; an assertion that only checks that a clicked element is visible;
+an outcome that depends on an earlier step but is not checked (the value typed in a form should show afterwards); a weak locator (css or nth where a role, label or text exists);
+a step that does not match the scenario's intent. Never ask to remove or loosen an assertion.
+Answer exactly OK when nothing must change. Otherwise answer one concrete change per line, each starting with "- ", and, when an existing step must change
+(not only assertions added), a last line "First wrong step: <number>".`;
+
+/** The reviewer's answer: no changes ("OK", or nothing usable), or the changes and the first step that must change. */
+export function parseReview(answer: string): { fixes: string[]; firstWrongStep?: number } {
+    const fixes = answer.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean).slice(0, 5);
+    const step = Number(/first wrong step:\s*(\d+)/i.exec(answer)?.[1]);
+    return { fixes, ...(fixes.length && step >= 1 ? { firstWrongStep: step } : {}) };
+}
+
+/** The review pass: one short AI review of a finished test; its fixes are applied once through the resume path. A failed review or fix keeps the test as it was. */
+async function reviewAndFix(input: AuthorInput, out: AuthorOutcome): Promise<AuthorOutcome> {
+    const { ctx, scenario } = input;
+    let review: ReturnType<typeof parseReview>;
+    try {
+        review = parseReview(await ctx.llm.text({
+            system: REVIEW_SYSTEM,
+            prompt: `Scenario ${scenario.scenarioId}: ${scenario.title}\nDescription: ${scenario.description}\nExpected results:\n${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}\n\nTest steps:\n${out.steps.map((s, i) => `${i + 1}. ${describeStep(s)} ${JSON.stringify(s)}`).join("\n")}`,
+            maxOutputTokens: 600,
+            // The review always goes to the strongest model (llm/routing.ts STRONG_TASKS), never the fast one.
+            purpose: "review",
+        }));
+    } catch (err) {
+        ctx.emit({ stage: "generation", kind: "review_skipped", level: "warn", message: `${scenario.scenarioId}: the test was not reviewed: ${err instanceof Error ? err.message : String(err)}` });
+        return out;
+    }
+    const { fixes } = review;
+    if (!fixes.length) return out;
+    ctx.emit({ stage: "generation", kind: "review_fixes", message: `${scenario.scenarioId}: review asked for ${fixes.length} change(s): ${fixes.join("; ")}` });
+    const cut = review.firstWrongStep ? Math.min(out.steps.length, Math.max(1, review.firstWrongStep - 1)) : out.steps.length;
+    const fixed = await authorScenario({ ...input, resume: { prefix: out.steps.slice(0, cut), failure: fixes.map((f) => `- ${f}`).join("\n"), review: true } });
+    if (fixed.status === "complete" || fixed.status === "defect") return fixed;
+    ctx.emit({ stage: "generation", kind: "review_fix_failed", level: "warn", message: `${scenario.scenarioId}: the review's changes could not be applied (${fixed.explanation}); the test is kept as it was` });
+    return out;
 }
 
 async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
@@ -105,6 +179,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     const data: RuntimeData = runtimeData({}, credentials);
     const testData: Record<string, string> = {};
     let outcome: AuthorOutcome | undefined;
+    let pushbacks = 0;
     // Smaller page snapshots (setting LLM_COMPACT_SNAPSHOTS, on by default): off = exactly the snapshots, tools and instructions of before.
     const view = compactSnapshotsOn(ctx.config) ? new SnapshotView() : undefined;
     /** The page as the model gets it: the whole snapshot cut at `max`, or (smaller snapshots on) the compact one or what changed. */
@@ -153,7 +228,16 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             }
         }
 
+        const refuse = refusedBy(input.notes);
+        let notesShownFor = pathOf(page.url());
         const record = async (step: Step, toolName: string, args: unknown) => {
+            // A "never ..." note for this page is a hard rule: the control it names is not used.
+            const loc = "locator" in step ? (step.locator as Locator | undefined) : undefined;
+            const banned = step.action !== "assert" && loc ? refuse({ name: loc.value, url: page.url() }) : undefined;
+            if (banned) {
+                input.onAction?.({ tool: toolName, args, ok: false, observation: refusalText(banned) });
+                return { success: false, error: `${refusalText(banned)} Do not use this control; find another way or finish.`, url: page.url() };
+            }
             const r = await run(step);
             const snapshot = await snapshotFor(7_000);
             if (r.ok) {
@@ -161,7 +245,11 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 await show(step, credentials ? [credentials.password] : []);
             }
             input.onAction?.({ tool: toolName, args, ok: r.ok, observation: r.ok ? `url=${page.url()}` : (r.error ?? "failed") });
-            return { success: r.ok, ...(r.error ? { error: r.error } : {}), url: page.url(), snapshot };
+            // Arriving on another page: the notes for that page come with it, once.
+            const here = pathOf(page.url());
+            const pageNotes = here !== notesShownFor ? notesFor(input.notes, page.url()) : undefined;
+            notesShownFor = here;
+            return { success: r.ok, ...(r.error ? { error: r.error } : {}), url: page.url(), snapshot, ...(pageNotes ? { notes: pageNotes } : {}) };
         };
 
         const tools = {
@@ -233,6 +321,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 },
             }),
             ...(input.vision ? { lookAtScreen: makeLookAtScreen({ ctx, browser, page, scenarioId: scenario.scenarioId, observations, onAction: input.onAction }) } : {}),
+            ...(input.testData ? { testValue: testValueTool(input.testData, testData, input.onAction) } : {}),
             ...(view
                 ? {
                       seeWholePage: tool({
@@ -250,6 +339,12 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 description: "End the authoring session.",
                 inputSchema: z.object({ result: z.enum(["complete", "defect", "blocked"]), explanation: z.string() }),
                 execute: async ({ result, explanation }) => {
+                    // A complete test must prove the outcome: pushed back (a bounded number of times) and the agent continues.
+                    if (result === "complete" && !hasOutcomeAssertion(recorded) && pushbacks < OUTCOME_PUSHBACKS) {
+                        pushbacks++;
+                        input.onAction?.({ tool: "finish", args: { result }, ok: false, observation: NO_OUTCOME_HINT });
+                        return { done: false, error: NO_OUTCOME_HINT };
+                    }
                     outcome = { status: result, steps: [...recorded], testData, explanation };
                     return { done: true };
                 },
@@ -266,9 +361,11 @@ Expected results (assert ALL of them):
 ${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}
 Test account: ${credentials ? "available as {{credentials.username}} / {{credentials.password}}" : "NOT available"}
 ${pageHint(model, scenario)}
-
+${notesFor(input.notes, page.url()) ?? ""}
 ${
-    resume
+    resume?.review
+        ? `A review of this test against its scenario asked for these changes:\n${resume.failure}\nThe test's steps so far have been replayed (${resume.prefix.length - 1} steps). Continue from the current page state: apply the changes, then assert every expected result.\n`
+        : resume
         ? `A previous version of this test FAILED when executed as a standalone script:\n${resume.failure}\nThe steps that already work have been replayed (${resume.prefix.length - 1} steps). Continue from the current page state with corrected steps so the scenario fully completes, and re-assert all expected results.\n`
         : ""
 }Current page: ${page.url()}
@@ -277,12 +374,13 @@ ${snapshot}`;
 
         await generateText({
             model: ctx.llm.model,
-            system: (input.vision ? SYSTEM + VISION_AUTHORING_NOTE : SYSTEM) + (view ? COMPACT_SNAPSHOT_NOTE : ""),
+            system: (input.vision ? SYSTEM + VISION_AUTHORING_NOTE : SYSTEM) + (input.testData ? TEST_DATA_AUTHORING_NOTE : "") + (view ? COMPACT_SNAPSHOT_NOTE : ""),
             prompt,
             tools,
             providerOptions: PROVIDER_OPTIONS,
             maxRetries: LLM_MAX_RETRIES,
-            stopWhen: [stepCountIs(input.maxSteps ?? 28), hasToolCall("finish")],
+            // Ends when finish was accepted (a pushed-back finish lets the agent go on).
+            stopWhen: [stepCountIs(input.maxSteps ?? 28), () => outcome !== undefined],
             // Each step's tokens, prompt-cache reads and writes included (the instructions, tools and earlier steps are cached: llm/prompt-cache.ts).
             onStepFinish: (e) => {
                 addUsage(ctx.llm.usage, e.usage);
@@ -295,11 +393,11 @@ ${snapshot}`;
         if (view) ctx.emit(snapshotSavingsEvent(scenario.scenarioId, view.totals));
 
         const base: AuthorOutcome =
-            outcome ?? { status: "blocked", steps: recorded, testData, explanation: "Step budget exhausted before finishing" };
+            outcome ?? { status: "blocked", steps: recorded, testData, explanation: pushbacks ? NO_OUTCOME : "Step budget exhausted before finishing" };
         const result: AuthorOutcome = observations.length ? { ...base, observations: [...observations] } : base;
-        // A "complete" test must actually verify something.
-        if (result.status === "complete" && !result.steps.some((s) => s.action === "assert")) {
-            return { ...result, status: "blocked", explanation: "Authoring finished without recording any assertion" };
+        // A "complete" test must actually verify the scenario's outcome.
+        if (result.status === "complete" && !hasOutcomeAssertion(result.steps)) {
+            return { ...result, status: "blocked", explanation: NO_OUTCOME };
         }
         if (result.status === "complete" || result.status === "defect") {
             const pruned = await pruneByReplay(browser, baseUrl, result.steps, credentials, result.status === "complete");

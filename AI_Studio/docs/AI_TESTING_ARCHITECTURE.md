@@ -50,7 +50,7 @@ Source layout (`src/`):
 ## 2. AI workflow
 
 1. **Discovery** (no LLM). Chromium opens the URL; if credentials were supplied it logs in first.
-   A same-origin BFS crawl (default 25 pages, depth 3, ≤2 pages per URL pattern, sitemap-seeded)
+   A same-origin BFS crawl (limits from the exploration level, `src/engine/levels.ts`: thorough 60 pages, depth 4, 3 pages per URL pattern; sitemap-seeded)
    records for each page: accessibility snapshot, headings, forms (classified login/signup/search/…),
    controls, links, API calls, console errors, screenshot. It performs *safe* interactions only
    (menus/tabs/accordions) and never follows or clicks logout/delete/pay-style links. Network traffic

@@ -15,6 +15,11 @@ export interface Counters {
     /** Browser / screen-size checks that ran, and how many of them failed. */
     variantChecks?: number;
     variantFailures?: number;
+    /** Testing the tests: tests replayed with deliberate faults, faults that took effect, faults they caught, tests given a stronger check. */
+    strengthChecked?: number;
+    faultsInjected?: number;
+    faultsCaught?: number;
+    testsStrengthened?: number;
     /** Phone exploration (additive, present only for a phone job): screens the AI has seen and actions it has taken so far. */
     screensSeen?: number;
     actionsTaken?: number;

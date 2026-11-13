@@ -35,9 +35,9 @@ export function snapshotName(testId: string, index: number): string {
 
 const screenshotStep = (): Step => ({ action: "assert", check: "screenshot", expected: DEFAULT_MAX_DIFF_PIXELS, description: "Page matches its approved baseline screenshot" });
 
-export function generateVisualSpecs(model: AppModel, opts: { maxPages: number; /** Pages only a signed-in account can open (they get signed-in specs instead). */ excludePaths?: ReadonlySet<string> }): DraftSpec[] {
+export function generateVisualSpecs(model: AppModel, opts: { maxPages: number; /** Times the usual per-type limit of key pages (engine/levels); default 1. */ perTypeScale?: number; /** Pages only a signed-in account can open (they get signed-in specs instead). */ excludePaths?: ReadonlySet<string> }): DraftSpec[] {
     const skip = opts.excludePaths ?? new Set<string>();
-    return selectKeyPages(model, opts.maxPages + skip.size)
+    return selectKeyPages(model, opts.maxPages + skip.size, opts.perTypeScale)
         .filter(({ page }) => !skip.has(page.path || "/"))
         .slice(0, opts.maxPages)
         .map(({ page, label, priority }) => {

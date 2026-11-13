@@ -44,13 +44,15 @@ let clockNow = Date.now();
 
 // ── the scripted model ────────────────────────────────────────────────────────
 const prompts: string[] = [];
-const modelCalls = { object: 0 };
+const modelCalls = { object: 0, text: 0 };
 const toolQueue: Array<{ tool: string; input: Record<string, unknown> }> = [];
 /** What one agent step is reported as using. The numbers are far above the size of the prompts, so the up-front estimate of a call
  * (characters / 4) never decides these tests; only the reported usage does. */
 const STEP = { input: 2000, output: 500 };
 /** What one object() call is reported as using. */
 const OBJECT = { input: 5000, output: 1000 };
+/** What one text() call (the review of a finished web test) is reported as using. */
+const REVIEW = { input: 1000, output: 500 };
 
 const model = new MockLanguageModelV3({
     doGenerate: async () => {
@@ -70,7 +72,12 @@ const scripted: LlmClient = {
     modelName: "scripted-usage",
     model,
     usage: { inputTokens: 0, outputTokens: 0 },
-    text: async () => "",
+    text: async () => {
+        modelCalls.text++;
+        scripted.usage.inputTokens += REVIEW.input;
+        scripted.usage.outputTokens += REVIEW.output;
+        return "OK";
+    },
     object: (async ({ system, prompt }: { system: string; prompt: string }) => {
         modelCalls.object++;
         prompts.push(prompt);
@@ -90,6 +97,8 @@ const scripted: LlmClient = {
             };
         }
         if (/failing API test|analyse why an automatically generated/.test(system)) throw new Error("repair must not reach the model in these tests");
+        // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
+        if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
         for (const s of PLAN) {
             toolQueue.push({ tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: s.heading } } });
             toolQueue.push({ tool: "finish", input: { result: "complete", explanation: "checked" } });
@@ -320,34 +329,36 @@ describe("AI use by real jobs", () => {
         expect(tests.every((t) => t.validationStatus === "VALIDATED")).toBe(true);
 
         const u = await jobUsage(jobId);
-        // analysis x1, planning x1, and the authoring agent's 2 steps per scenario
+        // analysis x1, planning x2 (the plan, then the coverage-gap call), the authoring agent's 2 steps per scenario, and a review of each test
         expect(Object.fromEntries(u.byPurpose.map((g: any) => [g.key, [g.calls, g.inputTokens, g.outputTokens]]))).toEqual({
             analysis: [1, OBJECT.input, OBJECT.output],
-            planning: [1, OBJECT.input, OBJECT.output],
+            planning: [2, 2 * OBJECT.input, 2 * OBJECT.output],
             authoring: [4, 4 * STEP.input, 4 * STEP.output],
+            review: [2, 2 * REVIEW.input, 2 * REVIEW.output],
         });
-        expect(u.totals).toMatchObject({ calls: 6, inputTokens: 2 * OBJECT.input + 4 * STEP.input, outputTokens: 2 * OBJECT.output + 4 * STEP.output, estimated: false, cost: null });
+        expect(modelCalls.text).toBe(2);
+        expect(u.totals).toMatchObject({ calls: 9, inputTokens: 3 * OBJECT.input + 4 * STEP.input + 2 * REVIEW.input, outputTokens: 3 * OBJECT.output + 4 * STEP.output + 2 * REVIEW.output, estimated: false, cost: null });
         expect(u.byModel.map((g: any) => g.key)).toEqual(["scripted-usage"]);
-        expect(u.summary).toBe("18K in, 4K out, 6 calls");
+        expect(u.summary).toBe("25K in, 6K out, 9 calls");
         expect(u.stop).toBeNull();
         expect(u.projectId).toBe(p1);
         // the job's own counters (used by the older technical details line) agree
-        expect(job.counters.llmInputTokens).toBe(18_000);
+        expect(job.counters.llmInputTokens).toBe(25_000);
 
         // no limits set: no warning, no stop
         expect((await events(jobId)).filter((e) => e.kind.startsWith("ai_budget"))).toEqual([]);
 
-        // the same numbers by project, purpose and day (one row per job x purpose x model x day: three rows)
+        // the same numbers by project, purpose and day (one row per job x purpose x model x day: four rows)
         const rows = platform.db.all("SELECT * FROM ai_usage WHERE job_id = ?", jobId);
-        expect(rows).toHaveLength(3);
+        expect(rows).toHaveLength(4);
         const today = new Date().toISOString().slice(0, 10);
         expect(new Set(rows.map((r) => r.day))).toEqual(new Set([today]));
         const byProject = (await call("GET", "/api/usage?groupBy=project")).body;
-        expect(byProject.totals.totalTokens).toBe(22_000);
-        expect(byProject.month.usedTokens).toBe(22_000);
+        expect(byProject.totals.totalTokens).toBe(31_000);
+        expect(byProject.month.usedTokens).toBe(31_000);
         const byPurpose = (await call("GET", "/api/usage?groupBy=purpose")).body.groups;
-        expect(byPurpose.map((g: any) => [g.key, g.totalTokens])).toEqual([["authoring", 10_000], ["analysis", 6000], ["planning", 6000]]);
-        expect((await call("GET", `/api/usage?projectId=${p1}`)).body.totals.totalTokens).toBe(22_000);
+        expect(byPurpose.map((g: any) => [g.key, g.totalTokens])).toEqual([["planning", 12_000], ["authoring", 10_000], ["analysis", 6000], ["review", 3000]]);
+        expect((await call("GET", `/api/usage?projectId=${p1}`)).body.totals.totalTokens).toBe(31_000);
     }, 240_000);
 
     it("with a price set, the same job shows its cost; without one it shows tokens only", async () => {
@@ -355,14 +366,14 @@ describe("AI use by real jobs", () => {
         await call("PUT", "/api/usage/prices", { model: "scripted-usage", inputPerMTok: 10, outputPerMTok: 50, currency: "USD" });
         const u = await jobUsage(j1);
         expect(u.currency).toBe("USD");
-        expect(u.totals.cost).toBeCloseTo((18_000 / 1e6) * 10 + (4000 / 1e6) * 50, 10);
+        expect(u.totals.cost).toBeCloseTo((25_000 / 1e6) * 10 + (6000 / 1e6) * 50, 10);
         await call("DELETE", "/api/usage/prices?model=scripted-usage");
     });
 
     it("a per-job limit stops the job cleanly mid-way: the plain message, numbers in the log, the test already made is kept and validated", async () => {
         const p2 = await newProject("Shop two");
-        // analysis (6000) + planning (6000) = 12000; scenario one's two steps (2500 each) take it to 17000; scenario two is refused before its first step
-        expect((await setBudgets({ jobTokens: 15_000 })).status).toBe(200);
+        // analysis (6000) + planning (2 x 6000) = 18000; scenario one's two steps (2500 each) and its review (1500) take it to 24500; scenario two is refused before its first step
+        expect((await setBudgets({ jobTokens: 24_000 })).status).toBe(200);
         const { job, jobId } = await analyse(p2);
         await setBudgets({ jobTokens: null }); // whatever the checks below say, later tests start without this limit
 
@@ -374,20 +385,20 @@ describe("AI use by real jobs", () => {
 
         const log = await events(jobId);
         const warn = log.find((e) => e.kind === "ai_budget_warning");
-        expect(warn?.message).toBe("AI use has reached 80% of the limit for this job (12,000 of 15,000 tokens).");
+        expect(warn?.message).toBe("AI use has reached 85% of the limit for this job (20,500 of 24,000 tokens).");
         const stops = log.filter((e) => e.kind === "ai_budget_stop");
         expect(stops).toHaveLength(1);
-        expect(stops[0]!.message).toBe("The AI token limit for this job was reached. This job: 17,000 of 15,000 tokens used. AI work stops here; what was already created is kept.");
+        expect(stops[0]!.message).toBe("The AI token limit for this job was reached. This job: 24,500 of 24,000 tokens used. AI work stops here; what was already created is kept.");
         expect(log.some((e) => e.kind === "scenario_skipped" && /was not authored: The AI token limit for this job was reached/.test(e.message))).toBe(true);
 
         const u = await jobUsage(jobId);
-        expect(u.stop).toMatchObject({ cap: "job", message: "The AI token limit for this job was reached", usedTokens: 17_000, limitTokens: 15_000 });
-        expect(u.totals.totalTokens).toBe(17_000); // the refused call added nothing
+        expect(u.stop).toMatchObject({ cap: "job", message: "The AI token limit for this job was reached", usedTokens: 24_500, limitTokens: 24_000 });
+        expect(u.totals.totalTokens).toBe(24_500); // the refused call added nothing
     }, 240_000);
 
     it("the project's monthly limit stops a new analysis before it spends anything, exactly at the limit", async () => {
         const used = (await call("GET", `/api/usage?projectId=${p1}`)).body.month.project.usedTokens as number;
-        expect(used).toBe(22_000);
+        expect(used).toBe(31_000);
         expect((await call("PUT", `/api/projects/${p1}/usage-budget`, { monthlyTokens: used })).status).toBe(200);
         const calls0 = modelCalls.object;
         const { job, jobId } = await analyse(p1);
@@ -396,15 +407,15 @@ describe("AI use by real jobs", () => {
         expect(job.error).toBe("The AI token limit for this project was reached");
         expect(modelCalls.object).toBe(calls0); // the model was never asked
         const stop = (await jobUsage(jobId)).stop;
-        expect(stop).toMatchObject({ cap: "project", usedTokens: 22_000, limitTokens: 22_000, scope: "This project this month" });
-        expect((await events(jobId)).find((e) => e.kind === "ai_budget_stop")?.message).toBe("The AI token limit for this project was reached. This project this month: 22,000 of 22,000 tokens used. AI work stops here; what was already created is kept.");
+        expect(stop).toMatchObject({ cap: "project", usedTokens: 31_000, limitTokens: 31_000, scope: "This project this month" });
+        expect((await events(jobId)).find((e) => e.kind === "ai_budget_stop")?.message).toBe("The AI token limit for this project was reached. This project this month: 31,000 of 31,000 tokens used. AI work stops here; what was already created is kept.");
         // the tests from the first analysis are still there
         expect(await testsOf(p1)).toHaveLength(2);
     }, 240_000);
 
     it("the platform's monthly limit stops every project; validation-only runs and plain re-runs are unaffected, and repair is skipped with the same plain message", async () => {
         const total = (await month()).usedTokens;
-        expect(total).toBeGreaterThanOrEqual(22_000 + 17_000);
+        expect(total).toBeGreaterThanOrEqual(31_000 + 24_500);
         await setBudgets({ monthlyTokens: total });
         expect((await month()).level).toBe("reached");
 

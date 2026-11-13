@@ -36,6 +36,10 @@ let dir: string;
 type ToolStep = { tool: string; input: Record<string, unknown> };
 const STEP = { input: 2000, output: 500 };
 const OBJECT = { input: 5000, output: 1000 };
+/** The review of a finished web test (a text call). */
+const REVIEW = { input: 1000, output: 100 };
+/** Which client each review went to. */
+const reviews: string[] = [];
 
 /** One scripted agent model: plays its queue of tool calls, one per step, and logs each step. */
 function agent(name: string, queue: ToolStep[], log: string[]) {
@@ -72,11 +76,18 @@ function scriptedClient(name: string, own: string[], queue: ToolStep[]): LlmClie
         modelName: name,
         model: agent(name, queue, steps),
         usage: { inputTokens: 0, outputTokens: 0 },
-        text: async () => "",
-        object: (async ({ system }: { system: string }) => {
+        text: async () => {
+            reviews.push(name);
+            c.usage.inputTokens += REVIEW.input;
+            c.usage.outputTokens += REVIEW.output;
+            return "OK";
+        },
+        object: (async ({ system, prompt }: { system: string; prompt: string }) => {
             own.push(system.slice(0, 40));
             c.usage.inputTokens += OBJECT.input;
             c.usage.outputTokens += OBJECT.output;
+            // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
+            if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
             if (/analysing a web application/.test(system)) {
                 return {
                     siteType: "ecommerce",
@@ -146,6 +157,7 @@ const reset = () => {
     fastQueue.length = 0;
     objectCalls.main.length = 0;
     objectCalls.fast.length = 0;
+    reviews.length = 0;
 };
 
 describe("the fast model setting in Settings, AI model", () => {
@@ -179,9 +191,11 @@ describe("a job with a fast model", () => {
         const tests = await testsOf(projectId);
         expect(tests.map((t) => t.title).sort()).toEqual(PLAN.map((p) => p.title).sort());
         expect(tests.every((t) => t.validationStatus === "VALIDATED")).toBe(true);
-        // Understanding and planning: main model only.
-        expect(objectCalls.main).toHaveLength(2);
+        // Understanding and planning (the plan, then the coverage-gap call): main model only.
+        expect(objectCalls.main).toHaveLength(3);
         expect(objectCalls.fast).toEqual([]);
+        // The review of each finished test is a call of the job's client, not an agent step: the main model.
+        expect(reviews).toEqual(["main-model", "main-model"]);
         // Scenario 1: fast, fast. Scenario 2: fast fails the same click twice, then the main model asserts and finishes.
         expect(steps).toEqual(["fast-model", "fast-model", "fast-model", "fast-model", "main-model", "main-model"]);
         const esc = (await eventsOf(jobId)).filter((e) => e.kind === "ai_model_escalated");
@@ -194,7 +208,7 @@ describe("a job with a fast model", () => {
         expect(u.summary).toMatch(/, 1 escalated to the main model$/);
         const byModel = Object.fromEntries((u.byModel as Array<{ key: string; inputTokens: number; escalations: number }>).map((g) => [g.key, g]));
         expect(byModel["fast-model"]!.inputTokens).toBe(4 * STEP.input);
-        expect(byModel["main-model"]!.inputTokens).toBe(2 * OBJECT.input + 2 * STEP.input);
+        expect(byModel["main-model"]!.inputTokens).toBe(3 * OBJECT.input + 2 * STEP.input + 2 * REVIEW.input);
         expect(byModel["main-model"]!.escalations).toBe(1);
         // "Escalation" is not a purpose of its own in the breakdown.
         expect((u.byPurpose as Array<{ key: string }>).map((g) => g.key)).not.toContain("escalation");
@@ -217,6 +231,7 @@ describe("the setting emptied in Settings", () => {
         expect((await testsOf(projectId)).every((t) => t.validationStatus === "VALIDATED")).toBe(true);
         expect(steps).toEqual(["main-model", "main-model", "main-model", "main-model"]);
         expect(objectCalls.fast).toEqual([]);
+        expect(reviews).toEqual(["main-model", "main-model"]);
         const ev = await eventsOf(r.jobId);
         expect(ev.some((e) => e.kind === "ai_model_escalated" || e.kind === "ai_fast_model_unused")).toBe(false);
         const u = (await call("GET", `/api/jobs/${r.jobId}/usage`)).body;

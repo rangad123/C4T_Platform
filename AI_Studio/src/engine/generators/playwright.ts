@@ -8,6 +8,7 @@
  */
 import { A11Y_FAILURE_PREFIX, A11Y_MAX_RULES, A11Y_MAX_TARGETS, a11yThreshold, WCAG_TAGS } from "../a11y/audit.js";
 import { EVIDENCE_HELPER_SOURCE } from "../evidence/capture.js";
+import { CLEANUP_HELPER_SOURCE, runTagOf, webCleanupScriptSource } from "../cleanup/helper.js";
 import { HEALTH_HELPER_SOURCE, isHealthCheck } from "../health/checks.js";
 import { ACCESS_HELPER_SOURCE } from "../identity/access.js";
 import { TOTP_HELPER_SOURCE, usesTotp } from "../identity/totp.js";
@@ -241,9 +242,11 @@ export const playwrightGenerator: ScriptGenerator = {
             ? `import type { Locator, Page } from "@playwright/test";\nimport { AxeBuilder } from "@axe-core/playwright";\n`
             : "";
         const dataRows = dataRowsFor(spec, ctx);
+        // Generated test data (testData.runTag): the records the page creates with it are written down for cleanup.
+        const runTag = runTagOf(spec);
         const content = `${fileHeader(spec, "Playwright")}
 import { test, expect } from "@playwright/test";
-${RUN_ADDRESS_IMPORT}${a11yImports}${needsTotp(spec) ? 'import { createHmac } from "node:crypto";\n' : ""}${uploads ? UPLOAD_IMPORTS : ""}
+${RUN_ADDRESS_IMPORT}${a11yImports}${needsTotp(spec) ? 'import { createHmac } from "node:crypto";\n' : ""}${uploads ? UPLOAD_IMPORTS : ""}${runTag ? 'import * as cleanupFs from "node:fs";\nimport * as cleanupPath from "node:path";\n' : ""}
 const BASE_URL = process.env.BASE_URL ?? ${lit(ctx.baseUrl)};
 ${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec)}
 ${RUN_ADDRESS_HELPER_SOURCE}
@@ -255,7 +258,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }, testInfo) => {
     await evidenceAttach(page, testInfo);
 });
-${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}
+${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, { tag: ${JSON.stringify(spec.tags.map((t) => `@${t}`))} }, async ({ page }) => {
 ${dataRows ? `    ${ROW_SETUP}\n` : ""}${healthSetup}${popupSetup}${steps}${healthEnd}
 });

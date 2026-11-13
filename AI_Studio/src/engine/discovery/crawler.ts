@@ -18,9 +18,11 @@ import { throwIfAborted } from "../context.js";
 import { activityLine } from "../frames/activity.js";
 import type { ComponentModel, FormModel, PageModel, PageType, NavigationEdge } from "../understanding/app-model.js";
 import { ariaSnapshot, settle, type BrowserSession } from "./browser.js";
+import { hasPasswordField } from "./auth.js";
 import { captureSnapshot, type FormSnapshot } from "./snapshot.js";
 import { readFrameElements } from "../web/frame-elements.js";
 import { captchaMessage, detectCaptcha } from "../auth/captcha.js";
+import type { CrawlTransition } from "../screenmap/map.js";
 
 export interface CrawlOptions {
     startUrl: string;
@@ -36,11 +38,22 @@ export interface CrawlOptions {
      * even when signed in (and never link to the app from it) are otherwise unreachable.
      */
     seedUrls?: string[];
+    /**
+     * Sign in again (the crawl was signed in). Called at most once, when a page that needed the session lands on the
+     * sign-in form or answers 401; resolves true when signed in again.
+     */
+    relogin?: () => Promise<boolean>;
+    /** A "never ..." note for the project refuses this control or link (memory/notes.ts refusedBy). */
+    refuse?: Refuse;
 }
+
+type Refuse = (c: { name?: string; url: string }) => unknown;
 
 export interface CrawlResult {
     pages: PageModel[];
     navigation: NavigationEdge[];
+    /** Every same-origin link and navigation control seen on a visited page (the screen map, ../screenmap/map.ts). */
+    transitions: CrawlTransition[];
     skipped: number;
 }
 
@@ -200,19 +213,146 @@ async function extractPage(page: Page, url: string, depth: number, status: numbe
     };
 }
 
+/** Links and controls kept for the screen map per crawl. */
+const MAX_TRANSITIONS = 5_000;
+const CONDITIONAL_FORMS = 3;
+const CONDITIONAL_CONTROLS = 4;
+const CONDITIONAL_CHOICES = 4;
+
+/** The labels of the fields a person can see in the page's n-th form now. */
+async function visibleFields(page: Page, n: number): Promise<string[]> {
+    return page
+        .evaluate((i) => {
+            const form = document.forms[i];
+            if (!form) return [];
+            return Array.from(form.elements)
+                .filter((el) => (el instanceof HTMLInputElement && el.type !== "hidden" && el.type !== "submit" && el.type !== "button") || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement)
+                .filter((el) => (el as HTMLElement).getClientRects().length > 0)
+                .map((el) => {
+                    const e = el as HTMLInputElement;
+                    const label = Array.from(e.labels ?? []).map((l) => l.textContent ?? "").join(" ") || e.getAttribute("aria-label") || e.getAttribute("placeholder") || e.name || e.type;
+                    return label.replace(/\s+/g, " ").trim().slice(0, 60);
+                });
+        }, n)
+        .catch(() => []);
+}
+
+/**
+ * Forms whose later fields depend on an earlier answer: pick a few options of each drop-down, radio group and checkbox (nothing is
+ * submitted, and each is put back), and record the fields that appear. Written into each form's `conditional`. Search forms,
+ * sign-in forms and controls with destructive-sounding names are left alone; a choice that leaves the page stops the probe.
+ */
+async function probeConditionalFields(page: Page, forms: FormModel[], refuse?: Refuse): Promise<void> {
+    const start = page.url();
+    for (let i = 0, probed = 0; i < forms.length && probed < CONDITIONAL_FORMS; i++) {
+        const f = forms[i]!;
+        if (f.purpose === "search" || f.purpose === "login" || !f.fields.some((x) => ["select", "radio", "checkbox"].includes(x.type))) continue;
+        probed++;
+        const form = page.locator("form").nth(i);
+        const found: Array<{ when: string; shows: string[] }> = [];
+        const try1 = async (when: string, act: () => Promise<unknown>, undo: () => Promise<unknown>, before: string[]) => {
+            if (UNSAFE_NAME.test(when) || refuse?.({ name: when, url: page.url() })) return true;
+            await act();
+            await page.waitForTimeout(150);
+            if (page.url() !== start) return false;
+            const now = await visibleFields(page, i);
+            const shows = now.filter((x) => !before.includes(x));
+            if (shows.length && found.length < 8) found.push({ when, shows });
+            await undo();
+            await page.waitForTimeout(50);
+            return page.url() === start;
+        };
+        try {
+            const before = await visibleFields(page, i);
+            const label = async (el: import("playwright").Locator) =>
+                (await el.evaluate((e) => {
+                    const x = e as HTMLInputElement;
+                    return (Array.from(x.labels ?? []).map((l) => l.textContent ?? "").join(" ") || x.getAttribute("aria-label") || x.name || "").replace(/\s+/g, " ").trim().slice(0, 60);
+                })) || "choice";
+            const selects = form.locator("select:visible");
+            for (let s = 0; s < Math.min(await selects.count(), CONDITIONAL_CONTROLS); s++) {
+                const sel = selects.nth(s);
+                const original = await sel.inputValue();
+                const options = (await sel.locator("option").evaluateAll((os) => os.map((o) => ({ value: (o as HTMLOptionElement).value, text: (o.textContent ?? "").trim() })))).filter((o) => o.value !== original && o.value !== "").slice(0, CONDITIONAL_CHOICES);
+                const name = await label(sel);
+                for (const o of options) if (!(await try1(`${name} = ${o.text || o.value}`, () => sel.selectOption(o.value, { timeout: 1_000 }), () => sel.selectOption(original, { timeout: 1_000 }), before))) return;
+            }
+            // Handles taken once: ticking one radio unticks another, which would shift a live `:not(:checked)` list.
+            const boxes = (await form.locator("input[type=radio]:visible:not(:checked), input[type=checkbox]:visible:not(:checked)").elementHandles()).slice(0, CONDITIONAL_CONTROLS * 2);
+            for (const box of boxes) {
+                const info = await box.evaluate((e) => {
+                    const x = e as HTMLInputElement;
+                    const label = (Array.from(x.labels ?? []).map((l) => l.textContent ?? "").join(" ") || x.getAttribute("aria-label") || x.value || "").replace(/\s+/g, " ").trim().slice(0, 60);
+                    const prev = x.type === "radio" && x.name ? Array.from(document.getElementsByName(x.name)).findIndex((r) => (r as HTMLInputElement).checked) : -1;
+                    return { radio: x.type === "radio", group: x.name, label, prev };
+                });
+                const ok = await try1(
+                    info.radio ? `${info.group || "option"} = ${info.label}` : `${info.label || "box"} ticked`,
+                    () => box.check({ timeout: 1_000 }),
+                    () =>
+                        info.radio
+                            ? box.evaluate((e, prev) => {
+                                  const r = document.getElementsByName((e as HTMLInputElement).name)[prev] as HTMLInputElement | undefined;
+                                  if (r) r.click();
+                                  else (e as HTMLInputElement).checked = false;
+                              }, info.prev)
+                            : box.uncheck({ timeout: 1_000 }),
+                    before,
+                );
+                if (!ok) return;
+            }
+        } catch {
+            /* the form changed under us; keep what was found */
+        } finally {
+            if (found.length) f.conditional = found;
+        }
+    }
+}
+
 const SAFE_TOGGLE = '[aria-haspopup]:visible, [aria-expanded="false"]:visible, [role="tab"]:visible, summary:visible';
 const UNSAFE_NAME = /delete|remove|pay|buy|order|submit|confirm|log\s?out|sign\s?out|send|publish|save|reset|clear all|unsubscribe/i;
+/** Menu entries that open a submenu on hover (no click needed, nothing is changed). */
+const HOVER_TARGETS = "nav li:visible, header li:visible, [role=menubar] > *:visible";
+const LOAD_MORE = /^(load|show|see|view) more\b/i;
+const TOGGLES_PER_PAGE = 8;
+const HOVERS_PER_PAGE = 8;
+const LOAD_MORE_CLICKS = 2;
 
-/** Click a few non-destructive toggles (menus, tabs, accordions, disclosure) and record what appears. */
-async function exploreSafeInteractions(page: Page, pageUrl: string): Promise<string[]> {
+/** Every link in the document now (a link in a closed menu still has its text: innerText falls back to textContent). */
+async function readLinks(page: Page): Promise<Array<{ text: string; href: string }>> {
+    return page
+        .evaluate(() =>
+            Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+                .map((a) => ({ text: (a.innerText || a.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 80), href: a.href }))
+                .filter((l) => l.text && !/^javascript:/i.test(l.href)),
+        )
+        .catch(() => []);
+}
+
+/**
+ * Reveal hidden navigation: click a few non-destructive toggles (menus, tabs, accordions, disclosure), hover menu
+ * entries, press "Load more" a couple of times, and record what appears: the new lines of the page, and the links
+ * that were not in the document before (menus and tabs that render their links only when opened).
+ */
+async function exploreSafeInteractions(page: Page, pageUrl: string, known: Array<{ href: string }>, refuse?: Refuse): Promise<{ revealed: string[]; links: Array<{ text: string; href: string }> }> {
     const revealed = new Set<string>();
+    const seenHref = new Set(known.map((l) => l.href));
+    const links: Array<{ text: string; href: string }> = [];
+    const collect = async () => {
+        for (const l of await readLinks(page)) {
+            if (!seenHref.has(l.href) && links.length < 60) {
+                seenHref.add(l.href);
+                links.push(l);
+            }
+        }
+    };
     const toggles = page.locator(SAFE_TOGGLE);
-    const count = Math.min(await toggles.count().catch(() => 0), 4);
+    const count = Math.min(await toggles.count().catch(() => 0), TOGGLES_PER_PAGE);
     for (let i = 0; i < count; i++) {
         try {
             const el = toggles.nth(i);
             const name = ((await el.getAttribute("aria-label")) ?? (await el.innerText({ timeout: 1000 }))).trim();
-            if (UNSAFE_NAME.test(name)) continue;
+            if (UNSAFE_NAME.test(name) || refuse?.({ name, url: pageUrl }) || (await el.evaluate((e) => !!e.closest("form")))) continue;
             const before = await ariaSnapshot(page, 6_000);
             await el.click({ timeout: 2_000 });
             await page.waitForTimeout(250);
@@ -225,12 +365,43 @@ async function exploreSafeInteractions(page: Page, pageUrl: string): Promise<str
             for (const line of after.split("\n").map((l) => l.trim())) {
                 if (line && !beforeLines.has(line) && revealed.size < 15) revealed.add(`${name || "toggle"} → ${line}`.slice(0, 160));
             }
+            await collect();
             await page.keyboard.press("Escape").catch(() => undefined);
         } catch {
             /* interaction not possible; move on */
         }
     }
-    return [...revealed];
+    const hovers = page.locator(HOVER_TARGETS);
+    const hoverCount = Math.min(await hovers.count().catch(() => 0), HOVERS_PER_PAGE);
+    for (let i = 0; i < hoverCount; i++) {
+        try {
+            await hovers.nth(i).hover({ timeout: 1_000 });
+            await page.waitForTimeout(150);
+            await collect();
+            // Close it again, so the next entry is where it was (an open submenu shifts the ones after it).
+            await page.mouse.move(0, 0);
+            await page.waitForTimeout(50);
+        } catch {
+            /* not hoverable; move on */
+        }
+    }
+    await page.mouse.move(0, 0).catch(() => undefined);
+    for (let i = 0; i < LOAD_MORE_CLICKS; i++) {
+        try {
+            const more = page.getByRole("button", { name: LOAD_MORE }).first();
+            if (!(await more.isVisible().catch(() => false)) || (await more.evaluate((e) => !!e.closest("form")))) break;
+            await more.click({ timeout: 2_000 });
+            await page.waitForTimeout(300);
+            if (page.url() !== pageUrl) {
+                await page.goBack().catch(() => undefined);
+                break;
+            }
+            await collect();
+        } catch {
+            break;
+        }
+    }
+    return { revealed: [...revealed], links };
 }
 
 /**
@@ -285,7 +456,7 @@ async function load(page: Page, url: string): Promise<number> {
  * Click (safe, href-less) navigation controls and report the same-origin URLs they lead to.
  * `probed` is shared across the crawl so a nav bar repeated on every view is only probed once.
  */
-async function probeClientRoutes(page: Page, pageUrl: string, probed: Set<string>): Promise<Array<{ url: string; name: string }>> {
+async function probeClientRoutes(page: Page, pageUrl: string, probed: Set<string>, refuse?: Refuse): Promise<Array<{ url: string; name: string }>> {
     const out: Array<{ url: string; name: string }> = [];
     const cands = page.locator(ROUTE_CANDIDATES);
     const count = Math.min(await cands.count().catch(() => 0), 30);
@@ -299,7 +470,7 @@ async function probeClientRoutes(page: Page, pageUrl: string, probed: Set<string
                 { timeout: 1_000 },
             );
             // Form buttons submit data; unnamed or destructive-sounding controls are never clicked.
-            if (!info.name || info.inForm || UNSAFE_NAME.test(info.name) || probed.has(info.name)) continue;
+            if (!info.name || info.inForm || UNSAFE_NAME.test(info.name) || refuse?.({ name: info.name, url: pageUrl }) || probed.has(info.name)) continue;
             if (!(await el.isVisible())) continue;
             probed.add(info.name);
             tried++;
@@ -355,7 +526,8 @@ async function replayClickPath(page: Page, via: ClickPath, target: string): Prom
 export async function crawl(session: BrowserSession, ctx: EngineContext, opts: CrawlOptions): Promise<CrawlResult> {
     const { page } = session;
     const origin = new URL(opts.startUrl).origin;
-    const queue: Array<{ url: string; depth: number; from?: string; label?: string; via?: ClickPath }> = [];
+    type Source = "sitemap" | "revealed";
+    const queue: Array<{ url: string; depth: number; from?: string; label?: string; via?: ClickPath; source?: Source }> = [];
     const seen = new Set<string>();
     /** Normalised URLs actually rendered (after redirects), so a redirect target isn't recorded twice. */
     const visited = new Set<string>();
@@ -363,28 +535,36 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
     const patternCount = new Map<string, number>();
     const pages: PageModel[] = [];
     const navigation: NavigationEdge[] = [];
+    const transitions: CrawlTransition[] = [];
+    /** Address asked for -> where the app really landed (redirects), so a transition points at the page that was seen. */
+    const landed = new Map<string, string>();
     let skipped = 0;
+    /** Pages visited that only one source led to (one plain event each at the end). */
+    const foundBy: Record<Source, number> = { sitemap: 0, revealed: 0 };
+    let reloginUsed = false;
 
-    const enqueue = (raw: string, depth: number, from?: string, label?: string, via?: ClickPath) => {
+    const enqueue = (raw: string, depth: number, from?: string, label?: string, via?: ClickPath, source?: Source): boolean => {
         const url = normalizeUrl(raw, opts.startUrl);
-        if (!url || seen.has(url)) return;
+        if (!url || seen.has(url)) return false;
         const u = new URL(url);
-        if (u.origin !== origin) return;
-        if (ASSET_EXT.test(u.pathname) || DANGEROUS.test(u.pathname + u.search + u.hash)) {
+        if (u.origin !== origin) return false;
+        if (ASSET_EXT.test(u.pathname) || DANGEROUS.test(u.pathname + u.search + u.hash) || opts.refuse?.({ ...(label ? { name: label } : {}), url })) {
             skipped++;
-            return;
+            return false;
         }
         if (opts.includePaths?.length && !opts.includePaths.some((p) => u.pathname.startsWith(p)) && depth > 0) {
             skipped++;
-            return;
+            return false;
         }
         seen.add(url);
-        queue.push({ url, depth, from, label, via });
+        queue.push({ url, depth, from, label, via, source });
+        return true;
     };
 
     enqueue(opts.startUrl, 0);
     for (const seed of opts.seedUrls ?? []) enqueue(seed, 0);
-    await seedFromSitemap(session, origin, (u) => enqueue(u, 1));
+    // Half the budget at most, so a big sitemap (a blog, a catalogue) cannot crowd out what the app links to.
+    for (const u of await sitemapUrls(session, origin, Math.max(15, Math.floor(opts.maxPages / 2)))) enqueue(u, 1, undefined, undefined, undefined, "sitemap");
 
     while (queue.length && pages.length < opts.maxPages) {
         throwIfAborted(ctx.signal);
@@ -412,6 +592,16 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
         try {
             const t0 = Date.now();
             let status = await load(page, next.url);
+            // Signed in, and this page sent us to the sign-in form (or answered 401): the session ended. Sign in once more.
+            if (opts.relogin && !reloginUsed && (status === 401 || (normalizeUrl(page.url(), opts.startUrl) !== next.url && (await hasPasswordField(page))))) {
+                reloginUsed = true;
+                if (await opts.relogin().catch(() => false)) {
+                    ctx.emit({ stage: "discovery", kind: "session_renewed", message: "Signed in again after the session ended" });
+                    status = await load(page, next.url);
+                } else {
+                    ctx.emit({ stage: "discovery", kind: "session_lost", level: "warn", message: "The session ended and signing in again did not work; the rest is explored signed out" });
+                }
+            }
             if (status >= 400 && next.via) {
                 // Typical SPA on a static host: the route only exists client-side, so click to it instead.
                 const replayed = await replayClickPath(page, next.via, next.url);
@@ -425,6 +615,7 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
                 }
                 seen.add(finalUrl);
                 visited.add(finalUrl);
+                landed.set(next.url, finalUrl);
             }
             visited.add(next.url);
             // The Explorer view (only when someone watches): the page that just opened.
@@ -440,7 +631,9 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
             // A page with a captcha stops this path: nothing on it is tried and its links are not followed (hard sign-ins, ../auth/captcha.ts).
             const captcha = await detectCaptcha(page);
             if (captcha) ctx.emit({ stage: "discovery", kind: "captcha_found", level: "warn", message: captchaMessage(captcha, new URL(page.url()).pathname), data: { url: page.url(), captcha } });
-            if (model.type !== "error" && !captcha) model.revealed = await exploreSafeInteractions(page, page.url());
+            let hidden: Array<{ text: string; href: string }> = [];
+            if (model.type !== "error" && !captcha) ({ revealed: model.revealed, links: hidden } = await exploreSafeInteractions(page, page.url(), model.links, opts.refuse));
+            if (model.type !== "error" && !captcha) await probeConditionalFields(page, model.forms, opts.refuse);
             await ctx.frames?.capture(page, { note: activityLine({ kind: "read", links: model.links.length }), phase: "exploring", pagesSeen: pages.length + 1 });
 
             if (opts.screenshotsDir) {
@@ -453,6 +646,7 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
 
             patternCount.set(pat, (patternCount.get(pat) ?? 0) + 1);
             pages.push(model);
+            if (next.source) foundBy[next.source]++;
             if (next.from) navigation.push({ from: next.from, to: model.path, label: next.label ?? "" });
             ctx.emit({
                 stage: "discovery",
@@ -461,11 +655,24 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
                 data: { url: model.url, status, depth: next.depth, type: model.type },
             });
 
+            const here = normalizeUrl(model.url, opts.startUrl) ?? next.url;
+            const note = (href: string, label: string, via: CrawlTransition["via"]) => {
+                const to = normalizeUrl(href, opts.startUrl);
+                if (to && to !== here && new URL(to).origin === origin && transitions.length < MAX_TRANSITIONS) transitions.push({ from: here, to, label, via });
+            };
+            if (!captcha) {
+                for (const l of model.links) note(l.href, l.text, "link");
+                for (const l of hidden) note(l.href, l.text, "menu");
+            }
             if (next.depth < opts.maxDepth && !captcha) {
                 const d = next.depth + 1;
                 for (const l of model.links) enqueue(l.href, d, model.path, l.text, { parent: model.url, href: l.href });
-                const routes = model.type !== "error" ? await probeClientRoutes(page, page.url(), probed) : [];
-                for (const r of routes) enqueue(r.url, d, model.path, r.name, { parent: model.url, name: r.name });
+                for (const l of hidden) if (new URL(l.href).origin === origin) enqueue(l.href, d, model.path, l.text, undefined, "revealed");
+                const routes = model.type !== "error" ? await probeClientRoutes(page, page.url(), probed, opts.refuse) : [];
+                for (const r of routes) {
+                    note(r.url, r.name, "click");
+                    enqueue(r.url, d, model.path, r.name, { parent: model.url, name: r.name });
+                }
                 for (const u of moved) enqueue(u, d, model.path, "");
             }
         } catch (err) {
@@ -482,17 +689,46 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
         }
     }
     skipped += queue.length;
-    return { pages, navigation, skipped };
+    if (foundBy.sitemap) ctx.emit({ stage: "discovery", kind: "pages_from_sitemap", message: `Found ${foundBy.sitemap} ${foundBy.sitemap === 1 ? "page" : "pages"} from the sitemap` });
+    if (foundBy.revealed) ctx.emit({ stage: "discovery", kind: "pages_from_menus", message: `Found ${foundBy.revealed} ${foundBy.revealed === 1 ? "page" : "pages"} behind menus, tabs and "Load more"` });
+    for (const t of transitions) t.to = landed.get(t.to) ?? t.to;
+    return { pages, navigation, transitions, skipped };
 }
 
-/** Seed the queue from /sitemap.xml (same-origin, capped). */
-async function seedFromSitemap(session: BrowserSession, origin: string, add: (u: string) => void): Promise<void> {
-    try {
-        const res = await session.context.request.get(`${origin}/sitemap.xml`, { timeout: 5_000 });
-        if (!res.ok() || !(res.headers()["content-type"] ?? "").includes("xml")) return;
-        const xml = await res.text();
-        [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].slice(0, 15).forEach((m) => add(m[1]!));
-    } catch {
-        /* no sitemap */
+const SITEMAP_FILES = 6;
+
+/**
+ * Page addresses from the site's sitemaps: /sitemap.xml and any named in robots.txt, following a sitemap index one
+ * level down. Same origin only (checked by the caller), at most `cap` addresses.
+ */
+export async function sitemapUrls(session: BrowserSession, origin: string, cap: number): Promise<string[]> {
+    const get = async (url: string): Promise<string> => {
+        try {
+            const res = await session.context.request.get(url, { timeout: 5_000 });
+            return res.ok() ? (await res.text()).slice(0, 2_000_000) : "";
+        } catch {
+            return "";
+        }
+    };
+    const files = [`${origin}/sitemap.xml`];
+    for (const m of (await get(`${origin}/robots.txt`)).matchAll(/^\s*sitemap:\s*(\S+)/gim)) {
+        try {
+            const u = new URL(m[1]!, origin);
+            if (u.origin === origin && !files.includes(u.href)) files.push(u.href);
+        } catch {
+            /* not an address */
+        }
     }
+    const out: string[] = [];
+    for (let i = 0; i < files.length && i < SITEMAP_FILES && out.length < cap; i++) {
+        const xml = await get(files[i]!);
+        if (!/<(urlset|sitemapindex)\b/i.test(xml)) continue;
+        const locs = [...xml.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\s\]]+)/g)].map((m) => m[1]!.replace(/&amp;/g, "&"));
+        if (/<sitemapindex\b/i.test(xml)) {
+            for (const l of locs) if (!files.includes(l) && l.startsWith(origin)) files.push(l);
+        } else {
+            for (const l of locs) if (out.length < cap && !out.includes(l)) out.push(l);
+        }
+    }
+    return out;
 }

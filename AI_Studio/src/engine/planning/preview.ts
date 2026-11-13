@@ -8,6 +8,7 @@
  * some do not work out), and the signed-in speed and visual checks (they need a sign-in that is only tried during creation).
  * Both are said plainly in the answer rather than guessed.
  */
+import { levelSettings, type ExploreLevel } from "../levels.js";
 import { generateApiSpecs } from "../api/test-specs.js";
 import { generateApiWorkflowSpecs } from "../api/workflows.js";
 import { generateA11ySpecs } from "../a11y/specs.js";
@@ -65,6 +66,8 @@ export interface PlanOptions {
     excludeIdeas?: string[];
     /** The project has an API credential, so load checks may use endpoints that need one. */
     hasCredential?: boolean;
+    /** How much the exploration does (../levels): how many key pages and endpoints get each check. Absent: thorough. */
+    level?: ExploreLevel;
 }
 
 export type FamilyId = "phoneStart" | "phoneSignIn" | "phoneNavigation" | "phoneForms" | "phoneLists" | "phoneBack" | "phoneTabs" | "phoneSearch" | "phoneSettings" | "phoneJourneys" | "phoneCrashes" | "phoneStartup" | "phoneAccessibility" | "journeys" | "api" | "contract" | "accessibility" | "health" | "input" | "security" | "performance" | "load" | "visual" | "vision" | "access";
@@ -111,6 +114,7 @@ function switchOf(o: PlanOptions, option: PlanFamily["option"]): boolean {
     if (option === "api") return o.targets.includes("api");
     if (option === "mobile") return o.targets.includes("mobile");
     const v = o[option as keyof PlanOptions];
+    if (option === "visionChecks" && typeof v !== "boolean") return levelSettings(o).visionByDefault;
     return typeof v === "boolean" ? v : DEFAULT_ON[option];
 }
 
@@ -166,14 +170,15 @@ function webAndApiFamilies(plan: StoredPlan, o: PlanOptions): PlanFamily[] {
     const allowMutating = o.allowMutatingApiTests === true;
     const apis = model.apis;
     const hasPages = model.pages.length > 0;
+    const lv = levelSettings(o);
 
     const apiPlain = generateApiSpecs(apis, { allowMutating, maxPerEndpoint: 6, contractChecks: false }).specs.length;
     const apiWithContract = generateApiSpecs(apis, { allowMutating, maxPerEndpoint: 6, contractChecks: true }).specs.length;
-    const workflows = generateApiWorkflowSpecs(apis, { allowMutating, maxWorkflows: 8 }).specs.length;
+    const workflows = generateApiWorkflowSpecs(apis, { allowMutating, maxWorkflows: lv.apiEndpoints }).specs.length;
     const apiAccess = plan.apiAccess.length ? generateApiAccessSpecs(plan.apiAccess).length : 0;
     const webAccess = plan.accessReach.length > 1 ? generateAccessSpecs(plan.accessReach).length : 0;
-    const pageSpeed = hasPages ? generatePerformanceSpecs(model, { maxPages: 5, budgets: o.performanceBudgets }).length : 0;
-    const latency = generateLatencySpecs(apis, { maxEndpoints: 8, budgets: o.performanceBudgets }).length;
+    const pageSpeed = hasPages ? generatePerformanceSpecs(model, { maxPages: lv.speedPages, perTypeScale: lv.perTypeScale, budgets: o.performanceBudgets }).length : 0;
+    const latency = generateLatencySpecs(apis, { maxEndpoints: lv.apiEndpoints, budgets: o.performanceBudgets }).length;
     const load = generateLoadSpecs(apis, { maxEndpoints: LOAD_MAX_ENDPOINTS, budgets: o.loadBudgets, hasCredential: o.hasCredential === true }).length;
 
     const f = (x: Omit<PlanFamily, "on">): PlanFamily => ({ ...x, on: switchOf(o, x.option) });
@@ -181,15 +186,15 @@ function webAndApiFamilies(plan: StoredPlan, o: PlanOptions): PlanFamily[] {
         f({ id: "journeys", label: "Journeys through the app", about: "The AI tries each journey in a real browser, such as searching or signing in, and saves it as a test.", count: plan.scenarios.filter((s) => !isPhoneIdea(s.scenarioId) && !excluded.has(s.scenarioId)).length, option: "web", needs: "web", ...(plan.scenarios.every((s) => isPhoneIdea(s.scenarioId)) ? { note: "No journeys were planned." } : {}) }),
         f({ id: "api", label: "API checks", about: "For each endpoint: a normal request, a request that should be refused, and the shape of the answer. Also a few multi-step flows.", count: apiPlain + workflows, option: "api", needs: "api" }),
         f({ id: "contract", label: "Answers match the documentation", about: "Real API answers are compared with the OpenAPI description: missing fields, wrong types.", count: Math.max(0, apiWithContract - apiPlain), option: "contractChecks", needs: "api", ...(apis.some((a) => a.source === "openapi") ? {} : { note: "No OpenAPI description was found." }) }),
-        f({ id: "accessibility", label: "Accessibility", about: "Automatic checks of key pages against WCAG 2.1 AA.", count: hasPages ? generateA11ySpecs(model, { maxPages: 6 }).length : 0, option: "accessibility", needs: "web" }),
-        f({ id: "health", label: "Page health", about: "Looks for script errors, failed requests, broken links and insecure content on key pages.", count: hasPages ? generateHealthSpecs(model, { maxPages: 6 }).length : 0, option: "healthChecks", needs: "web" }),
-        f({ id: "input", label: "Form input", about: "Tries harmless unusual text in search forms. Forms that send data are only touched if data-changing tests are allowed.", count: hasPages ? generateInputSpecs(model, { maxPages: 4, allowMutating }).length : 0, option: "inputChecks", needs: "web" }),
+        f({ id: "accessibility", label: "Accessibility", about: "Automatic checks of key pages against WCAG 2.1 AA.", count: hasPages ? generateA11ySpecs(model, { maxPages: lv.checkPages, perTypeScale: lv.perTypeScale }).length : 0, option: "accessibility", needs: "web" }),
+        f({ id: "health", label: "Page health", about: "Looks for script errors, failed requests, broken links and insecure content on key pages.", count: hasPages ? generateHealthSpecs(model, { maxPages: lv.checkPages, perTypeScale: lv.perTypeScale }).length : 0, option: "healthChecks", needs: "web" }),
+        f({ id: "input", label: "Form input", about: "Tries harmless unusual text in search forms. Forms that send data are only touched if data-changing tests are allowed.", count: hasPages ? generateInputSpecs(model, { maxPages: lv.inputPages, allowMutating }).length : 0, option: "inputChecks", needs: "web" }),
         f({ id: "security", label: "Basic security", about: "A read-only look at security headers, cookies, exposed files and the HTTPS certificate. Nothing is attacked.", count: generateSecuritySpecs(model).length, option: "securityChecks", needs: "both" }),
         f({ id: "access", label: "Who can open what", about: "Pages and endpoints that one account can open must stay closed to a visitor or a lesser account.", count: webAccess + apiAccess, split: { web: webAccess, api: apiAccess }, option: "accessChecks", needs: "both", ...(plan.accessReach.length > 1 || plan.apiAccess.length ? {} : { note: "Needs test accounts (Library, Accounts)." }) }),
         f({ id: "performance", label: "Speed", about: "Loads key pages three times and times a few safe API endpoints. Takes longer.", count: pageSpeed + latency, split: { web: pageSpeed, api: latency }, option: "performanceChecks", needs: "both" }),
         f({ id: "load", label: "Load", about: "Up to 3 safe API endpoints with 10 people at once. Test environments only.", count: load, option: "loadChecks", needs: "api" }),
-        f({ id: "visual", label: "Visual changes", about: "Saves a screenshot of key pages and flags later differences.", count: hasPages ? generateVisualSpecs(model, { maxPages: 6 }).length : 0, option: "visual", needs: "web" }),
-        f({ id: "vision", label: "AI screen review", about: "The AI looks at screenshots of key pages. Needs a vision-capable model; screenshots go to your AI provider.", count: hasPages ? generateVisionSpecs(model, { maxPages: 3 }).length : 0, option: "visionChecks", needs: "web" }),
+        f({ id: "visual", label: "Visual changes", about: "Saves a screenshot of key pages and flags later differences.", count: hasPages ? generateVisualSpecs(model, { maxPages: lv.checkPages, perTypeScale: lv.perTypeScale }).length : 0, option: "visual", needs: "web" }),
+        f({ id: "vision", label: "AI screen review", about: "The AI looks at screenshots of key pages. Needs a vision-capable model; screenshots go to your AI provider.", count: hasPages ? generateVisionSpecs(model, { maxPages: lv.visionPages, perTypeScale: lv.perTypeScale }).length : 0, option: "visionChecks", needs: "web" }),
     ];
 }
 

@@ -330,6 +330,7 @@ export class PhoneFake {
                 proj.runner = { runOn: body?.runOn === "agent" ? "agent" : "platform", agentId: body?.runOn === "agent" ? (body.agentId ?? null) : null };
                 return { body: { runOn: proj.runner.runOn, agentId: proj.runner.agentId, status: "Saved.", canRunWeb: true, canRunMobile: true, unavailableReason: null } };
             }
+            if (method === "GET" && rest === "notes") return { body: { notes: [], max: 50 } };
             if (method === "PUT" && rest === "mobile-app") {
                 proj.mobile = { appPackage: body?.appPackage ?? null, apk: proj.mobile?.apk ?? null, avd: null, ...(body?.iosBundleId ? { iosBundleId: body.iosBundleId } : {}) };
                 return { body: proj.mobile };

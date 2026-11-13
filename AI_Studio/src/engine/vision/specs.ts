@@ -13,13 +13,15 @@ import { VISION_ADVICE, VISION_FAILURE_PREFIX, VISION_UNAVAILABLE_PREFIX } from 
 
 export interface VisionGenOptions {
     maxPages: number;
+    /** Times the usual per-type limit of key pages (engine/levels perTypeScale); default 1. */
+    perTypeScale?: number;
 }
 
 export const isVisionStep = (s: Step | undefined): boolean => s?.action === "assert" && s.check === "looksRight";
 
 /** Generated checks look at the most important pages only: every screenshot is a paid model call. */
 export function generateVisionSpecs(model: AppModel, opts: VisionGenOptions): DraftSpec[] {
-    return selectKeyPages(model, opts.maxPages).map(({ page, label, priority }) => {
+    return selectKeyPages(model, opts.maxPages, opts.perTypeScale).map(({ page, label, priority }) => {
         const path = page.path || "/";
         const name = page.title?.trim() || path;
         const steps: Step[] = [

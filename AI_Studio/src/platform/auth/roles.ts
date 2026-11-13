@@ -173,12 +173,18 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/api-changes": "read",
     "POST /api/projects/:id/api-diff": "ai_studio.tests.write",
     "PUT /api/projects/:id/mobile-app": "ai_studio.project.settings",
+    "PUT /api/projects/:id/explore-level": "ai_studio.project.settings",
     "POST /api/projects/:id/mobile-app/apk": "ai_studio.project.settings",
     // The app by platform (round 37, routes/project-app.ts): store links and an uploaded iPhone app.
     "GET /api/projects/:id/app-details": "read",
     "PUT /api/projects/:id/app-details": "ai_studio.project.settings",
     "POST /api/projects/:id/app-details/ipa": "ai_studio.project.settings",
     "GET /api/projects/:id/memory": "read",
+    // Notes for the AI (routes/notes.ts, round 53): anyone on the project reads them; changing them is a project setting.
+    "GET /api/projects/:id/notes": "read",
+    "POST /api/projects/:id/notes": "ai_studio.project.settings",
+    "PATCH /api/projects/:id/notes/:noteId": "ai_studio.project.settings",
+    "DELETE /api/projects/:id/notes/:noteId": "ai_studio.project.settings",
     "DELETE /api/projects/:id/memory": "ai_studio.tests.delete",
     "GET /api/projects/:id/cleanup": "read",
     "PUT /api/projects/:id/cleanup/settings": "ai_studio.project.settings",
@@ -478,6 +484,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     // Fast model for routine steps (ROUTE): a platform-wide AI setting, like the fallback models.
     "GET /api/llm/fast-model": "read",
     "PUT /api/llm/fast-model": "ai_studio.platform.settings",
+    "PUT /api/llm/planning-model": "ai_studio.platform.settings",
     // Repair without AI first and exploration reuse (DET): platform-wide AI settings, like the fallback models.
     "GET /api/llm/without-ai": "read",
     "PUT /api/llm/without-ai": "ai_studio.platform.settings",

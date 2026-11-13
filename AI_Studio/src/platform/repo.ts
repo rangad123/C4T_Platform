@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { LEVEL_SETTINGS, type ExploreLevel } from "../engine/levels.js";
 import type { EngineEvent } from "../engine/context.js";
 import type { Framework } from "../engine/generators/types.js";
 import { collapseBlocks } from "../engine/blocks/expand.js";
@@ -59,6 +60,8 @@ export interface JobOptions {
     startedBy?: { kind: string; id: string | null; ownerId?: string | null };
     /** Round 45: no longer read (every run goes to its owner's own runner). Older jobs may still carry the runner a person chose then. */
     runner?: { id: string };
+    /** How much to explore (engine/levels): thorough (absent, the default and minimum), deep or everything. */
+    level?: ExploreLevel;
     maxPages: number;
     maxDepth: number;
     maxScenarios: number;
@@ -93,7 +96,7 @@ export interface JobOptions {
     loadBudgets?: string;
     /** Probe search-type (GET) forms with harmless unusual input. Default true. Data-sending forms only when allowMutatingApiTests is on. */
     inputChecks?: boolean;
-    /** AI judgement: a vision-capable model looks at screenshots (authoring + "looks right" checks). Default false. */
+    /** AI judgement: a vision-capable model looks at screenshots (authoring + "looks right" checks). Absent: on at deep and everything when the model can read images (engine/levels visionOn); false always wins. */
     visionChecks?: boolean;
     /** Check API responses against the documented schema (OpenAPI). Default true. */
     contractChecks?: boolean;
@@ -158,9 +161,9 @@ export const WORKER_LOST_GIVE_UP = "This run was given up: the platform lost tra
 export type JobMode = "generate" | "validate" | "variants" | "environment" | "plain" | "agent";
 
 export const DEFAULT_JOB_OPTIONS: JobOptions = {
-    maxPages: 25,
-    maxDepth: 3,
-    maxScenarios: 25,
+    maxPages: LEVEL_SETTINGS.thorough.maxPages,
+    maxDepth: LEVEL_SETTINGS.thorough.maxDepth,
+    maxScenarios: LEVEL_SETTINGS.thorough.maxScenarios,
     targets: ["web", "api"],
     allowMutatingApiTests: false,
     healthChecks: true,
@@ -168,7 +171,6 @@ export const DEFAULT_JOB_OPTIONS: JobOptions = {
     performanceChecks: false,
     loadChecks: false,
     inputChecks: true,
-    visionChecks: false,
     contractChecks: true,
     accessChecks: true,
     useMemory: true,
@@ -197,6 +199,11 @@ export interface JobCounters {
     /** Browser / screen-size checks that really ran (passed + failed), and how many of them failed. */
     variantChecks: number;
     variantFailures: number;
+    /** Testing the tests (engine/mutation): tests replayed with deliberate faults, faults that took effect, faults they caught, tests given a stronger check. Absent on older jobs. */
+    strengthChecked?: number;
+    faultsInjected?: number;
+    faultsCaught?: number;
+    testsStrengthened?: number;
 }
 
 export const emptyCounters = (): JobCounters => ({
@@ -678,7 +685,7 @@ export class Repo {
         const job = this.getJob(jobId);
         if (!job) return;
         const next = { ...job.counters };
-        for (const [k, v] of Object.entries(patch) as Array<[keyof JobCounters, number]>) next[k] = add ? next[k] + v : v;
+        for (const [k, v] of Object.entries(patch) as Array<[keyof JobCounters, number]>) next[k] = add ? (next[k] ?? 0) + v : v;
         this.db.run("UPDATE generation_jobs SET counters_json = ?, updated_at = ? WHERE id = ?", JSON.stringify(next), now(), jobId);
         eventBus.publish(jobId);
     }

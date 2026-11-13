@@ -27,25 +27,39 @@ import type { EngineEvent } from "../context.js";
 import { CLASS_RULES, classifyLlmError } from "./errors.js";
 import { createLlmClient, describeFallbacks, LlmNotConfiguredError, parseFallbackModels, type CreateClientOptions, type LlmClient, type LlmProviderId, type Usage } from "./provider.js";
 import { answeredSlot, type ModelV3 } from "./resilience.js";
+import { modelCallPurpose } from "./metered.js";
 import { isBudgetExceeded, normalisePurpose, type LlmPurpose } from "./usage.js";
 
 // ── the table ────────────────────────────────────────────────────────────────
 
 /** What a call is doing: its purpose label, or the task of the agent loop it runs in. */
 export type RouteTask = LlmPurpose | "phone-explore";
-export type RouteTarget = "fast" | "main";
+/** "strong": the planning and review model when one is chosen, else the main model (STRONG_TASKS). */
+export type RouteTarget = "fast" | "main" | "strong";
 
 /** The routing rules. Calls with images go to the main model whatever their task, unless the fast model is marked as able to see them. */
-export const ROUTE_TABLE: Readonly<Record<RouteTask, { model: RouteTarget; what: string }>> = {
+export const ROUTE_TABLE: Readonly<Record<RouteTask, { model: "fast" | "main"; what: string }>> = {
     authoring: { model: "fast", what: "Steps of the agent that writes a web test (new scenarios and plain-English web tests)" },
     "phone-explore": { model: "fast", what: "Turns of the phone exploration (one action per screen)" },
     plain: { model: "fast", what: "Choosing the API operation and checks of a plain-English API test" },
     analysis: { model: "main", what: "Understanding the application, reading its documentation" },
-    planning: { model: "main", what: "Planning tests, phone test ideas, reading a requirements document" },
+    planning: { model: "main", what: "Planning tests (including the pass for what the plan does not cover yet), phone test ideas, reading a requirements document" },
+    review: { model: "main", what: "Reviewing each written web test against its scenario" },
     repair: { model: "main", what: "Why a test failed, repairing it (including the agent re-writing a failing web test), phone repair suggestions" },
     vision: { model: "main", what: "Anything with images (screenshot judgements), unless the fast model is marked as able to see images" },
     other: { model: "main", what: "Anything not labelled" },
 };
+
+/**
+ * Work that goes to the strongest model: the planning and review model when one is chosen (Settings, AI model), otherwise the main model.
+ * Never the fast model. A call is strong by the task of the route scope it runs in, else by its purpose; a review is strong in any scope
+ * (it runs inside a scenario's authoring scope). The phone explorer's turns, labelled analysis inside their own scope, stay as they were.
+ */
+export const STRONG_TASKS: ReadonlySet<RouteTask> = new Set<RouteTask>(["analysis", "planning", "review"]);
+export function isStrongCall(purpose: unknown, scope: RouteScope | undefined): boolean {
+    const p = normalisePurpose(purpose);
+    return p === "review" || STRONG_TASKS.has(scope?.task ?? p);
+}
 
 /** When the fast model is taken off an agent loop. */
 export const ESCALATION_LIMITS = { sameActionFails: 2, sameActionRepeats: 3, stepsWithoutProgress: 4 } as const;
@@ -216,7 +230,10 @@ export interface Escalation {
 }
 
 export interface RoutingSetup {
-    fast: LlmClient;
+    /** The fast model; absent = no fast model (only the planning and review model is routed). */
+    fast?: LlmClient;
+    /** The planning and review model (STRONG_TASKS); absent = the main model does that work. */
+    strong?: LlmClient;
     /** The fast model can look at images: calls with images may go to it. Default false. */
     fastImages?: boolean;
     /** Called once per escalation (the platform counts it in AI usage). */
@@ -288,6 +305,8 @@ export class RoutedModel implements ModelV3 {
         private readonly names: { main: string; fast: string },
         private readonly decide: (scope: RouteScope | undefined) => RouteTarget,
         private readonly escalate: (scope: RouteScope | undefined, reason: string, retried: boolean) => void,
+        /** The planning and review model, for direct calls whose purpose is one of STRONG_TASKS (a runner's proxied calls); absent: main. */
+        private readonly strong?: { model: ModelV3; name: string; fellBack: (reason: string) => void },
     ) {}
     get provider() {
         return this.main.provider;
@@ -308,7 +327,19 @@ export class RoutedModel implements ModelV3 {
 
     private async run<R>(options: Parameters<ModelV3["doGenerate"]>[0], call: (m: ModelV3, o: Parameters<ModelV3["doGenerate"]>[0]) => PromiseLike<R>): Promise<R> {
         const scope = currentRoute();
-        if (this.decide(scope) === "main") {
+        const target = this.decide(scope);
+        if (target === "strong" && this.strong) {
+            tellSlot(this.strong.name);
+            try {
+                return await call(this.strong.model, options);
+            } catch (e) {
+                if (final(e, options.abortSignal)) throw e;
+                this.strong.fellBack(reasonOf(e));
+                tellSlot(this.names.main);
+                return call(this.main, options);
+            }
+        }
+        if (target !== "fast") {
             tellSlot(this.names.main);
             return call(this.main, options);
         }
@@ -330,9 +361,9 @@ export class RoutedModel implements ModelV3 {
  * unchanged. Without a fast model the job is given `main` itself (see `withModelRouting`), never this wrapper.
  */
 export function routedClient(main: LlmClient, setup: RoutingSetup): LlmClient {
-    const { fast } = setup;
+    const { fast, strong } = setup;
     // Images go to the fast model only when it is marked as able to see them and its client can send them.
-    const fastImages = setup.fastImages === true && typeof fast.imageObject === "function";
+    const fastImages = setup.fastImages === true && typeof fast?.imageObject === "function";
     let sink: ((e: EngineEvent) => void) | undefined;
     let events = 0;
 
@@ -355,11 +386,22 @@ export function routedClient(main: LlmClient, setup: RoutingSetup): LlmClient {
     };
 
     /** Which model a call in this scope uses (escalation is only meaningful while the scope is on the fast model). */
-    const targetOf = (scope: RouteScope | undefined, task: RouteTask, images: boolean): RouteTarget => chooseModel({ task, images, escalated: scope?.escalated === true, fastImages });
+    const targetOf = (scope: RouteScope | undefined, task: RouteTask, images: boolean): RouteTarget => (fast ? chooseModel({ task, images, escalated: scope?.escalated === true, fastImages }) : "main");
+
+    /** The planning and review model failed a call (not for a final reason): the main model answered it. Told to the job, bounded. */
+    const strongFellBack = (reason: string) => {
+        if (!sink || !strong || events >= MAX_ESCALATION_EVENTS) return;
+        events++;
+        try {
+            sink({ stage: "orchestration", kind: "ai_planning_model_fallback", level: "warn", message: `The planning and review model ${strong.modelName} ${reason}, so the main model ${main.modelName} answered that call instead.`, data: { from: strong.modelName, to: main.modelName, reason } });
+        } catch {
+            // Telling the job is best effort.
+        }
+    };
 
     /** A scope's owner: called when its agent loop asks for the main model. */
     const owner: ScopeOwner = (scope, reason) => {
-        if (chooseModel({ task: scope.task, images: false, escalated: false, fastImages }) !== "fast") return;
+        if (!fast || chooseModel({ task: scope.task, images: false, escalated: false, fastImages }) !== "fast") return;
         tell({ from: fast.modelName, to: main.modelName, reason, what: scope.what, task: scope.task, retried: false });
     };
 
@@ -370,14 +412,30 @@ export function routedClient(main: LlmClient, setup: RoutingSetup): LlmClient {
             scope.escalated = true;
             scope.reason = reason;
         }
-        tell({ from: fast.modelName, to: main.modelName, reason, what: scope?.what, task, retried: true });
+        if (fast) tell({ from: fast.modelName, to: main.modelName, reason, what: scope?.what, task, retried: true });
     };
 
     async function route<R>(purpose: unknown, images: boolean, call: (c: LlmClient) => Promise<R>): Promise<R> {
+        // Analysis, planning and review: the strongest model, whatever scope the call runs in.
+        if (isStrongCall(purpose, currentRoute())) {
+            if (!strong || (images && typeof strong.imageObject !== "function")) {
+                tellSlot(main.modelName);
+                return call(main);
+            }
+            tellSlot(strong.modelName);
+            try {
+                return await call(strong);
+            } catch (e) {
+                if (final(e)) throw e;
+                strongFellBack(reasonOf(e));
+                tellSlot(main.modelName);
+                return call(main);
+            }
+        }
         const scope = currentRoute();
         scope?.bind(owner);
         const task: RouteTask = scope?.task ?? normalisePurpose(purpose);
-        if (targetOf(scope, task, images) === "main") {
+        if (!fast || targetOf(scope, task, images) !== "fast") {
             tellSlot(main.modelName);
             return call(main);
         }
@@ -398,29 +456,37 @@ export function routedClient(main: LlmClient, setup: RoutingSetup): LlmClient {
         get model(): LanguageModel {
             if (routedModel) return routedModel;
             const m = main.model;
-            const f = fast.model;
+            const f = fast?.model;
+            const s = strong?.model;
             // A model given as a plain id cannot be stepped through: the agent then uses the main model, as without routing.
-            if (!isV3(m) || !isV3(f)) return (routedModel = m);
+            const fastOk = isV3(f);
+            const strongOk = isV3(s);
+            if (!isV3(m) || (!fastOk && !strongOk)) return (routedModel = m);
             routedModel = new RoutedModel(
                 m,
-                f,
-                { main: main.modelName, fast: fast.modelName },
+                fastOk ? f : m,
+                { main: main.modelName, fast: fast?.modelName ?? main.modelName },
                 (scope) => {
+                    // A direct call that says it is analysis, planning or review (a runner's proxied call): the strongest model.
+                    if (isStrongCall(modelCallPurpose.getStore(), scope)) return "strong";
+                    if (!fastOk) return "main";
                     scope?.bind(owner);
                     // Agent steps outside a scope have no escalation to protect them: they stay on the main model.
                     return scope ? targetOf(scope, scope.task, false) : "main";
                 },
                 (scope, reason) => escalateCall(scope, scope?.task ?? "authoring", reason),
+                strongOk ? { model: s, name: strong!.modelName, fellBack: strongFellBack } : undefined,
             );
             return routedModel;
         },
-        usage: combinedUsage([main.usage, fast.usage]),
+        usage: combinedUsage([main.usage, ...(fast ? [fast.usage] : []), ...(strong ? [strong.usage] : [])]),
         object: ((args: Parameters<LlmClient["object"]>[0]) => route(args.purpose, false, (c) => c.object(args))) as LlmClient["object"],
         text: (args) => route(args.purpose, false, (c) => c.text(args)),
         setEventSink(fn) {
             sink = fn;
             main.setEventSink?.(fn);
-            fast.setEventSink?.(fn);
+            fast?.setEventSink?.(fn);
+            strong?.setEventSink?.(fn);
         },
     };
     // "Can this client look at images" stays exactly what the main client says; a fast model without images never gets them.
@@ -443,6 +509,35 @@ export interface FastModelSetting {
 let fastSource: (() => FastModelSetting | undefined) | undefined;
 export function setFastModelSource(fn: (() => FastModelSetting | undefined) | undefined): void {
     fastSource = fn;
+}
+
+/** Where the saved planning and review model comes from (platform/llm-routing.ts); undefined or "" = none (the main model does that work). */
+let planningSource: (() => string | undefined) | undefined;
+export function setPlanningModelSource(fn: (() => string | undefined) | undefined): void {
+    planningSource = fn;
+}
+
+export interface PlanningModelView {
+    /** The planning and review model in force; null = none (the main model plans and reviews). */
+    provider: LlmProviderId | null;
+    model: string | null;
+    /** Whether this server can use it (a key for its provider, not the main model itself), and why not. */
+    ready: boolean;
+    reason?: string;
+}
+
+/** The planning and review model saved in Settings (no environment variable: without one, the main model does that work). */
+export function configuredPlanningModel(cfg: Config): PlanningModelView {
+    let raw = "";
+    try {
+        raw = (planningSource?.() ?? "").trim();
+    } catch {
+        raw = "";
+    }
+    const entry = parseFallbackModels(raw, cfg.LLM_PROVIDER)[0];
+    if (!entry) return { provider: null, model: null, ready: false, ...(raw ? { reason: "The model name could not be read." } : {}) };
+    const [d] = describeFallbacks(cfg, [entry]);
+    return { provider: entry.provider, model: entry.model, ready: d!.ready, ...(d!.reason ? { reason: d!.reason } : {}) };
 }
 
 /** The reason provider.ts gives for an entry that names the main model itself. */
@@ -483,36 +578,54 @@ export function configuredFastModel(cfg: Config): FastModelView {
 }
 
 /** The fast model's own client: no fallback models (a fast model that is unavailable escalates to the main model and its fallbacks). */
-export function createFastClient(cfg: Config, view: FastModelView, opts: CreateClientOptions = {}): LlmClient {
+export function createFastClient(cfg: Config, view: Pick<FastModelView, "provider" | "model">, opts: CreateClientOptions = {}): LlmClient {
     const provider = view.provider!;
     const fastCfg: Config = { ...cfg, LLM_PROVIDER: provider, LLM_MODEL: view.model!, LLM_API_KEY: provider === cfg.LLM_PROVIDER ? cfg.LLM_API_KEY : undefined, LLM_FALLBACK_MODELS: undefined };
     return createLlmClient(fastCfg, { ...opts, fallbacks: [] });
 }
 
 /**
- * The job's client: `main` itself when no fast model is set (today's behaviour, byte for byte), the routed client otherwise.
- * `note` says in words why a fast model that is set is not used.
+ * The job's client: `main` itself when neither a fast model nor a planning and review model is set (today's behaviour, byte for byte),
+ * the routed client otherwise. `note` says in words why a model that is set is not used.
  */
 export function withModelRouting(
     cfg: Config,
     main: LlmClient,
-    o: { fast?: LlmClient; clientOptions?: CreateClientOptions; onEscalation?: (e: Escalation) => void } = {},
+    o: { fast?: LlmClient; strong?: LlmClient; clientOptions?: CreateClientOptions; onEscalation?: (e: Escalation) => void } = {},
 ): { client: LlmClient; note?: string } {
     if (main.modelName === "unavailable") return { client: main };
+    const notes: string[] = [];
+    const fast = pick(cfg, main, configuredFastModel(cfg), o.fast, o.clientOptions, "fast model", notes);
+    const strong = pick(cfg, main, configuredPlanningModel(cfg), o.strong, o.clientOptions, "planning and review model", notes);
+    const note = notes.length ? notes.join(" ") : undefined;
+    if (!fast && !strong) return { client: main, ...(note ? { note } : {}) };
     const view = configuredFastModel(cfg);
+    return { client: routedClient(main, { ...(fast ? { fast } : {}), ...(strong ? { strong } : {}), fastImages: view.images, onEscalation: o.onEscalation }), ...(note ? { note } : {}) };
+}
+
+/** One routed model's client, or undefined (not set, the main model itself, or not usable here: then a sentence is added to `notes`). */
+function pick(
+    cfg: Config,
+    main: LlmClient,
+    view: { provider: LlmProviderId | null; model: string | null; ready: boolean; reason?: string },
+    given: LlmClient | undefined,
+    clientOptions: CreateClientOptions | undefined,
+    what: string,
+    notes: string[],
+): LlmClient | undefined {
     // The setting decides; a client handed in (tests' scripted double) only replaces building one, so it needs no key.
-    if (!view.model) return { client: main };
-    // The main model named again as the fast one: nothing to route, nothing to warn about.
-    if (!o.fast && !view.ready && view.reason === MAIN_ALREADY) return { client: main };
-    if (!o.fast && !view.ready) return { client: main, note: `The fast model ${view.model} is not used: ${view.reason ?? "it cannot be used here."} Every AI call uses the main model.` };
-    let fast = o.fast;
-    if (!fast) {
+    if (!view.model) return undefined;
+    // The main model named again: nothing to route, nothing to warn about.
+    if (!given && !view.ready && view.reason === MAIN_ALREADY) return undefined;
+    const unused = (why: string) => notes.push(`The ${what} ${view.model} is not used: ${why} ${what === "fast model" ? "Every AI call uses the main model." : "The main model plans and reviews."}`);
+    if (!given && !view.ready) return void unused(view.reason ?? "it cannot be used here.");
+    let client = given;
+    if (!client) {
         try {
-            fast = createFastClient(cfg, view, o.clientOptions);
+            client = createFastClient(cfg, view, clientOptions);
         } catch (e) {
-            return { client: main, note: `The fast model ${view.model} is not used: ${e instanceof Error ? e.message : String(e)} Every AI call uses the main model.` };
+            return void unused(e instanceof Error ? e.message : String(e));
         }
     }
-    if (fast.modelName === main.modelName) return { client: main };
-    return { client: routedClient(main, { fast, fastImages: view.images, onEscalation: o.onEscalation }) };
+    return client.modelName === main.modelName ? undefined : client;
 }

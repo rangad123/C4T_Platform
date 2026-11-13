@@ -12,6 +12,8 @@ import { PERFORMANCE_ADVICE, PERFORMANCE_FAILURE_PREFIX, worstPerfTag, type Perf
 
 export interface PerformanceGenOptions {
     maxPages: number;
+    /** Times the usual per-type limit of key pages (engine/levels perTypeScale); default 1. */
+    perTypeScale?: number;
     /** Budget overrides, e.g. "lcp:3000 weight:5000000"; "slow-4g" throttles. Goes into each spec's `expected`. */
     budgets?: string;
     /** Pages only a signed-in account can open: they get signed-in specs instead (see generateSignedInPerformanceSpecs). */
@@ -24,7 +26,7 @@ const speedStep = (expected: string | undefined): Step => ({ action: "assert", c
 export function generatePerformanceSpecs(model: AppModel, opts: PerformanceGenOptions): DraftSpec[] {
     const skip = opts.excludePaths ?? new Set<string>();
     // Ask for enough pages that dropping the signed-in-only ones still leaves maxPages.
-    return selectKeyPages(model, opts.maxPages + skip.size)
+    return selectKeyPages(model, opts.maxPages + skip.size, opts.perTypeScale)
         .filter(({ page }) => !skip.has(page.path || "/"))
         .slice(0, opts.maxPages)
         .map(({ page, label, priority }) => {

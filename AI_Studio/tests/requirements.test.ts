@@ -129,7 +129,7 @@ describe("requirement-aware planning", () => {
         });
         const mock = new MockLanguageModelV3({
             doGenerate: async (options) => {
-                prompt = JSON.stringify(options.prompt);
+                prompt += JSON.stringify(options.prompt);
                 const out = { scenarios: [scenario("Login succeeds", ["REQ-1"]), scenario("Login fails with a wrong password", ["REQ-2", "REQ-99"]), scenario("Search by name", ["REQ-3"])] };
                 return {
                     content: [{ type: "text" as const, text: JSON.stringify(out) }],

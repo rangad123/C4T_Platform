@@ -15,6 +15,8 @@ import { HEALTH_ADVICE, HEALTH_CHECKS, HEALTH_FAILURE_PREFIX, healthCheckOf, isH
 
 export interface HealthGenOptions {
     maxPages: number;
+    /** Times the usual per-type limit of key pages (engine/levels perTypeScale); default 1. */
+    perTypeScale?: number;
 }
 
 const STEP_TEXT: Record<HealthCheck, string> = {
@@ -26,7 +28,7 @@ const STEP_TEXT: Record<HealthCheck, string> = {
 };
 
 export function generateHealthSpecs(model: AppModel, opts: HealthGenOptions): DraftSpec[] {
-    return selectKeyPages(model, opts.maxPages).map(({ page, label, priority }) => {
+    return selectKeyPages(model, opts.maxPages, opts.perTypeScale).map(({ page, label, priority }) => {
         const path = page.path || "/";
         const name = page.title?.trim() || path;
         const steps: Step[] = [

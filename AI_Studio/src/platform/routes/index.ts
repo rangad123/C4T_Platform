@@ -37,6 +37,7 @@ import { registerIdentityRoutes } from "./identity.js";
 import { registerImportRoutes } from "./imports.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerMemoryRoutes } from "./memory.js";
+import { registerNotesRoutes } from "./notes.js";
 import { registerOpsRoutes } from "./ops.js";
 import { registerLocatorRoutes } from "./locators.js";
 import { registerManualCaseRoutes } from "./manual-cases.js";
@@ -85,6 +86,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerHardSignInRoutes(ctx);
     registerReportRoutes(ctx);
     registerMemoryRoutes(ctx);
+    // Notes for the AI, written by people (routes/notes.ts, round 53).
+    registerNotesRoutes(ctx);
     registerEnvironmentRoutes(ctx);
     registerHealingRoutes(ctx);
     registerTriggerRoutes(ctx);

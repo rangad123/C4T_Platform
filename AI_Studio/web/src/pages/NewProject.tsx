@@ -17,6 +17,8 @@ import { MissingInputsDialog } from "../features/requirements/AgentInputsDialog"
 import { EXPLORING_OFF_HERE } from "../features/runs/runs-here";
 import { ExploreOnRunnerNote, ExploreStartError } from "../features/runs/ExploreOnRunner";
 import { useReadiness } from "../features/runners/my-runner";
+import { LevelChoice, projectLevel, ScreenReviewChoice } from "../features/explore/ExploreLevel";
+import type { ExploreLevel } from "../../../src/engine/levels";
 
 export function NewProject({ welcome = false, projectId, initialUrl }: { welcome?: boolean; projectId?: string; initialUrl?: string }) {
     useDocumentTitle(welcome ? "" : "New project");
@@ -47,6 +49,15 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
     const [name, setName] = useState("");
     const [nameError, setNameError] = useState("");
     const [scope, setScope] = useState("");
+    // How much to explore (the project's saved level, else Thorough) and whether every page goes to the AI again.
+    const [level, setLevel] = useState<ExploreLevel | null>(null);
+    const [fullExploration, setFullExploration] = useState(false);
+    // AI screen review: null = the level decides; set only when the person changes the box.
+    const [screenReview, setScreenReview] = useState<boolean | null>(null);
+    // Hidden when the project's testing agents leave it off (no UX agent).
+    const agentSwitches = useFetch<{ applies?: boolean; switches?: Record<string, string> }>(projectId ? `/projects/${projectId}/testing-agents` : null);
+    const screenReviewOff = agentSwitches.data?.applies === true && agentSwitches.data.switches?.visionChecks === "off";
+    const chosenLevel = level ?? projectLevel(existing.data);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<unknown>(null);
     // Runners mode (round 51): the exploration runs on the person's own runner, so it starts only once that runner can take it.
@@ -97,7 +108,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
             // sign-in, API access, OpenAPI document and requirements are the ones kept on the Requirements tab.
             await api(`/projects/${id}/test-generation`, {
                 method: "POST",
-                body: { url: n.url, plan: true, ...(aiMissing ? { targets: ["api"] } : {}), scope: scope.trim() || undefined },
+                body: { url: n.url, plan: true, ...(aiMissing ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration ? { fullExploration: true } : {}), ...(screenReview !== null && !screenReviewOff ? { visionChecks: screenReview } : {}) },
             });
             go(routes.project(id));
         } catch (err) {
@@ -150,6 +161,19 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                     <FieldHelp htmlFor="scope" label="Focus (optional)" help="Told to the AI when it plans which tests to write. The whole application is still explored." />
                     <input id="scope" className="input" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Everything — or e.g. “search and checkout only”" />
                 </div>
+                <LevelChoice value={chosenLevel} onChange={setLevel} />
+                {!screenReviewOff && <ScreenReviewChoice level={chosenLevel} canReadImages={Boolean(config?.llm.configured)} value={screenReview} onChange={setScreenReview} />}
+                {projectId && (
+                    <label className="row" style={{ alignItems: "flex-start" }}>
+                        <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />
+                        <span>
+                            Explore every page again
+                            <span className="t-meta" style={{ display: "block" }}>
+                                Pages unchanged since the last exploration are normally reused. This sends every page to the AI again.
+                            </span>
+                        </span>
+                    </label>
+                )}
 
                 {aiMissing && (
                     <Callout tone="warning" title="The AI model isn’t set up on this server" actions={<LinkButton size="sm" href={routes.settings}>How to set it up</LinkButton>}>

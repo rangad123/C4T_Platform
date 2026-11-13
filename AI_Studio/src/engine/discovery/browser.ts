@@ -17,6 +17,11 @@ export interface SessionOptions {
     headless?: boolean;
     storageState?: Awaited<ReturnType<BrowserContext["storageState"]>>;
     recordVideoDir?: string;
+    /**
+     * The project's API credential (bearer token / "Name: value" header), added to the browser's own requests to these
+     * origins only (the app and its configured API base), on the page's fetch/XHR calls. Never to any other host, and not to a redirect's next hop.
+     */
+    authHeaders?: { headers: Record<string, string>; origins: string[] };
 }
 
 export class BrowserSession {
@@ -51,9 +56,19 @@ export class BrowserSession {
         context.setDefaultTimeout(8_000);
         context.setDefaultNavigationTimeout(30_000);
 
+        const auth = opts.authHeaders && Object.keys(opts.authHeaders.headers).length ? { headers: opts.authHeaders.headers, origins: new Set(opts.authHeaders.origins.map((o) => new URL(o).origin)) } : undefined;
         await context.route("**/*", (route) => {
             try {
-                if (shouldBlockNavigation(route.request(), allowed)) return route.abort("blockedbyclient").catch(() => undefined);
+                const req = route.request();
+                if (shouldBlockNavigation(req, allowed)) return route.abort("blockedbyclient").catch(() => undefined);
+                // The page's own API calls to the app / API base. Sent without following redirects: Chromium would re-send the header to a
+                // redirect's next hop on any host, so the redirect goes back to the page and its next hop comes through here again.
+                if (auth && (req.resourceType() === "fetch" || req.resourceType() === "xhr") && auth.origins.has(new URL(req.url()).origin)) {
+                    return route
+                        .fetch({ headers: { ...req.headers(), ...auth.headers }, maxRedirects: 0 })
+                        .then((response) => route.fulfill({ response }))
+                        .catch(() => route.abort("failed").catch(() => undefined));
+                }
                 return route.continue().catch(() => undefined);
             } catch {
                 // A handler that throws would be an uncaught exception in the platform process: let the request through (the page stays inside the allowed hosts for the pages that matter) and carry on.

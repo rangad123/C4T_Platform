@@ -13,7 +13,7 @@
 import type { EngineContext } from "../context.js";
 import type { TestSpec } from "../spec/schema.js";
 import type { ScriptRun } from "../validation/runner.js";
-import { byCreation, countItems, planItems, summaryLine, type CreatedLine, type FinishedItem, type LedgerItem } from "./ledger.js";
+import { byCreation, countItems, leftBehindByTag, planItems, summaryLine, type CreatedLine, type FinishedItem, type LedgerItem } from "./ledger.js";
 
 export const DELETE_TIMEOUT_MS = 10_000;
 
@@ -152,12 +152,15 @@ export async function finishCleanup(ctx: EngineContext, collector: CleanupCollec
         if (r.reason) item.reason = r.reason;
     }
     const finished = items as FinishedItem[];
+    // A record left behind says which tag to search the application for (the reason is what the ledger keeps).
+    for (const item of finished) if (item.tag && item.status !== "removed" && item.status !== "already-gone") item.reason = `${item.reason ?? "It was not removed."} Its generated data carries the tag ${item.tag}.`;
     const counts = countItems(finished);
+    const byTag = leftBehindByTag(finished);
     ctx.emit({
         stage: "validation",
         kind: "cleanup_finished",
         level: counts.leftBehind > 0 ? "warn" : "info",
-        message: summaryLine(counts),
+        message: byTag ? `${summaryLine(counts)} ${byTag}` : summaryLine(counts),
         data: { created: counts.created, removed: counts.removed, leftBehind: counts.leftBehind },
     });
     return finished;

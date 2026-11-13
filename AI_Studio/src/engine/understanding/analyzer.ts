@@ -7,6 +7,12 @@
  */
 import type { EngineContext } from "../context.js";
 import type { ReusePlan } from "../memory/reuse.js";
+import { notesBlock, type SiteNote } from "../memory/notes.js";
+
+const withNotes = (notes: SiteNote[] | undefined, pages: Array<{ path: string }>) => {
+    const b = notesBlock(notes, pages);
+    return b ? `\n\n${b}` : "";
+};
 import {
     AnalysisSchema,
     type ApiEndpointModel,
@@ -26,7 +32,7 @@ Rules:
 /** Said once above the pages when some of them are given as one line (exploration reuse). */
 export const REUSE_NOTE = `Pages marked "unchanged" were understood in an earlier exploration and have not changed since; their snapshot is not repeated. You may leave them out of pagePurposes (their earlier purpose is kept).`;
 
-function summarisePages(pages: PageModel[], budget = 45_000, reuse?: ReusePlan): string {
+function summarisePages(pages: PageModel[], budget = 45_000, reuse?: ReusePlan, elements = 14): string {
     // A page that did not change since the last exploration gets one line (exploration reuse, ../memory/reuse.ts): the budget goes to the others.
     const sent = pages.filter((p) => !reuse?.pages.has(p.path)).length;
     const perPage = Math.max(900, Math.floor(budget / Math.max(sent, 1)));
@@ -37,10 +43,12 @@ function summarisePages(pages: PageModel[], budget = 45_000, reuse?: ReusePlan):
             const forms = p.forms
                 .map((f) => `    form[${f.purpose}] fields: ${f.fields.map((x) => `${x.label || x.placeholder || x.name || x.type}(${x.type}${x.required ? ",req" : ""})`).join(", ")}`)
                 .join("\n");
+            // As many controls as the exploration level shows, within the page's share of the prompt.
             const comps = p.components
-                .slice(0, 14)
+                .slice(0, elements)
                 .map((c) => `${c.role}:"${c.name}"`)
-                .join(", ");
+                .join(", ")
+                .slice(0, perPage);
             const aria = p.aria.slice(0, Math.max(300, perPage - 500));
             return [
                 `### ${p.path}  [${p.type}] title="${p.title}" status=${p.status}`,
@@ -61,7 +69,15 @@ export async function analyzeApplication(
     ctx: EngineContext,
     base: Omit<AppModel, "siteType" | "purpose" | "features" | "journeys">,
     /** `memory`: the bounded "previously known" section from site memory (context only; the crawl stays the source of truth). */
-    opts: { memory?: string; /** Pages that did not change since the last exploration: one line each, their earlier understanding kept. */ reuse?: ReusePlan } = {},
+    opts: {
+        memory?: string;
+        /** The project's notes for the AI (memory/notes.ts): all of them, a path note beside the pages it covers. */
+        notes?: SiteNote[];
+        /** Pages that did not change since the last exploration: one line each, their earlier understanding kept. */
+        reuse?: ReusePlan;
+        /** Controls per page shown to the AI (the exploration level's digestElementsPerPage). Default 14. */
+        digestElementsPerPage?: number;
+    } = {},
 ): Promise<AppModel> {
     const apiText = base.apis.length
         ? base.apis.slice(0, 40).map((a: ApiEndpointModel) => `${a.method} ${a.path} → ${a.statuses.join("/") || "?"} (${a.source})`).join("\n")
@@ -70,7 +86,8 @@ export async function analyzeApplication(
     const analysis = await ctx.llm.object({
         system: SYSTEM,
         schema: AnalysisSchema,
-        maxOutputTokens: 6_000,
+        // One purpose line per page: a larger exploration needs room for all of them.
+        maxOutputTokens: Math.min(16_000, 6_000 + 40 * base.pages.length),
         purpose: "analysis",
         prompt: `Application: ${base.url}
 Authentication: ${base.authentication.required ? "login required/available" : "no login form detected"}${base.authentication.loginPath ? ` (login page ${base.authentication.loginPath})` : ""}
@@ -80,7 +97,7 @@ API calls observed or documented:
 ${apiText}
 
 Pages (${base.pages.length}):
-${opts.reuse?.pages.size ? `${REUSE_NOTE}\n` : ""}${summarisePages(base.pages, undefined, opts.reuse)}${opts.memory ? `\n\n${opts.memory}` : ""}`,
+${opts.reuse?.pages.size ? `${REUSE_NOTE}\n` : ""}${summarisePages(base.pages, undefined, opts.reuse, opts.digestElementsPerPage)}${opts.memory ? `\n\n${opts.memory}` : ""}${withNotes(opts.notes, base.pages)}`,
     });
 
     const byPath = new Map(analysis.pagePurposes.map((p) => [p.path, p]));

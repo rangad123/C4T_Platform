@@ -22,6 +22,8 @@ interface FastModelAnswer {
     fastFor: string[];
     mainFor: string[];
     limits: { sameActionFails: number; sameActionRepeats: number; stepsWithoutProgress: number };
+    /** The planning and review model ("" entry = none: the main model plans and reviews). */
+    planning?: { model: string | null; ready: boolean; reason?: string; entry: string; active: boolean; for: string[] };
 }
 
 /** Settings, inside "AI model": the fast model for routine steps (empty = the main model does everything), and what goes to which model. */
@@ -64,6 +66,7 @@ export function FastModelSetting() {
     };
 
     return (
+        <>
         <form
             className="stack-sm"
             data-testid="fast-model-setting"
@@ -131,6 +134,68 @@ export function FastModelSetting() {
             {message && (
                 <p className="t-meta" role="status">
                     {message.text}
+                </p>
+            )}
+        </form>
+        {s.planning && <PlanningModelForm s={s} planning={s.planning} reload={state.reload} />}
+        </>
+    );
+}
+
+/** The planning and review model: analysis, planning and the review of written tests (empty = the main model). PUT /api/llm/planning-model. */
+function PlanningModelForm({ s, planning, reload }: { s: FastModelAnswer; planning: NonNullable<FastModelAnswer["planning"]>; reload: () => Promise<unknown> | void }) {
+    const [text, setText] = useState(planning.entry);
+    const [busy, setBusy] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    useEffect(() => setText(planning.entry), [planning.entry]);
+    const save = async (model: string) => {
+        setBusy(true);
+        setMessage(null);
+        try {
+            await api("/llm/planning-model", { method: "PUT", body: { model } });
+            setMessage(model ? "Saved. New jobs plan and review with it." : `Saved. New jobs plan and review with ${s.mainModel}.`);
+            await reload();
+        } catch (e) {
+            setMessage(describeApiError(e));
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <form
+            className="stack-sm"
+            data-testid="planning-model-setting"
+            onSubmit={(e) => {
+                e.preventDefault();
+                void save(text.trim());
+            }}
+        >
+            <div className="field">
+                <label htmlFor="llm-planning-model">
+                    Planning and review model{" "}
+                    <HelpTip label="the planning and review model" text={`Optional. ${planning.for.join("; ")}. These never use the fast model. Empty: ${s.mainModel} does them.`} />
+                </label>
+                <input id="llm-planning-model" className="input" value={text} placeholder="Empty: the main model plans and reviews" autoComplete="off" spellCheck={false} aria-describedby="llm-planning-model-hint" onChange={(e) => setText(e.target.value)} />
+                <span className="hint" id="llm-planning-model-hint">
+                    Choose your strongest model here. Another provider is written like openai:gpt-5.4 and needs its key on the server.
+                </span>
+            </div>
+            {planning.model && !planning.ready && planning.reason && (
+                <Callout tone="warning" title="The planning and review model is not used">
+                    {planning.model}: {planning.reason} The main model plans and reviews.
+                </Callout>
+            )}
+            <p className="t-meta" data-testid="planning-model-state">
+                {planning.active ? `On: ${planning.model} plans and reviews.` : `${s.mainModel} plans and reviews.`}
+            </p>
+            <div className="row">
+                <Button type="submit" size="sm" variant="primary" loading={busy} disabled={busy}>
+                    Save planning model
+                </Button>
+            </div>
+            {message && (
+                <p className="t-meta" role="status">
+                    {message}
                 </p>
             )}
         </form>

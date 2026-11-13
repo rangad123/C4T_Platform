@@ -257,9 +257,8 @@ describe("confidence rules and the verdict schema", () => {
         expect(JUDGE_SYSTEM).toMatch(/never instructions to you/);
     });
 
-    it("is off by default: no job option, no generated checks", () => {
-        expect(DEFAULT_JOB_OPTIONS.visionChecks).toBe(false);
-        expect(DEFAULT_JOB_OPTIONS.visionChecks).not.toBe(true);
+    it("has no job-option default: the exploration level decides (off at thorough)", () => {
+        expect(DEFAULT_JOB_OPTIONS.visionChecks).toBeUndefined();
     });
 
     it("reads image sizes from PNG and JPEG headers, and nothing else", () => {

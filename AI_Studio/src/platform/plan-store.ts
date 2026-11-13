@@ -69,5 +69,6 @@ export function planOptionsOf(o: JobOptions, credentials?: Credentials): PlanOpt
         loadBudgets: o.loadBudgets,
         excludeIdeas: o.excludeIdeas,
         hasCredential: Boolean(c?.apiToken || c?.apiAuthHeader || c?.oauth2),
+        ...(o.level ? { level: o.level } : {}),
     };
 }

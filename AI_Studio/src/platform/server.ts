@@ -1,4 +1,5 @@
 import dns from "node:dns/promises";
+import { effectiveLimits, isLevel, LEVEL_SETTINGS, LEVELS } from "../engine/levels.js";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -115,9 +116,12 @@ const GenerateSchema = z.object({
     scope: z.string().max(500).optional(),
     includePaths: z.array(z.string().startsWith("/")).max(20).optional(),
     targets: z.array(z.enum(["web", "api", "mobile"])).min(1).optional(),
-    maxPages: z.number().int().min(1).max(100).optional(),
-    maxDepth: z.number().int().min(0).max(6).optional(),
-    maxScenarios: z.number().int().min(1).max(100).optional(),
+    /** How much to explore (engine/levels): thorough (the default and minimum), deep or everything. */
+    level: z.enum(LEVELS).optional(),
+    /** Explicit limits win over the level's, but never go below thorough's (engine/levels effectiveLimits). */
+    maxPages: z.number().int().min(1).max(LEVEL_SETTINGS.everything.maxPages).optional(),
+    maxDepth: z.number().int().min(0).max(LEVEL_SETTINGS.everything.maxDepth).optional(),
+    maxScenarios: z.number().int().min(1).max(LEVEL_SETTINGS.everything.maxScenarios).optional(),
     allowMutatingApiTests: z.boolean().optional(),
     openApiUrl: z.string().url().optional(),
     apiBaseUrl: z.string().url().optional(),
@@ -443,7 +447,9 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const asked: JobOptions = {
             ...DEFAULT_JOB_OPTIONS,
             ...(body.plan ? { planOnly: true } : {}),
-            ...Object.fromEntries(Object.entries({ scope: body.scope, includePaths: body.includePaths, targets: body.targets, maxPages: body.maxPages, maxDepth: body.maxDepth, maxScenarios: body.maxScenarios, allowMutatingApiTests: body.allowMutatingApiTests, openApiUrl: body.openApiUrl, apiBaseUrl: body.apiBaseUrl, accessibility: body.accessibility, healthChecks: body.healthChecks, securityChecks: body.securityChecks, performanceChecks: body.performanceChecks, loadChecks: body.loadChecks, loadBudgets: body.loadBudgets, inputChecks: body.inputChecks, visionChecks: body.visionChecks,contractChecks: body.contractChecks, accessChecks: body.accessChecks, useMemory: body.useMemory, fullExploration: body.fullExploration, cleanupAfter: body.cleanupAfter, performanceBudgets: body.performanceBudgets, visual: body.visual, variants: body.variants?.length ? body.variants : undefined }).filter(([, v]) => v !== undefined)),
+            ...(body.level ? { level: body.level } : {}),
+            ...effectiveLimits(body),
+            ...Object.fromEntries(Object.entries({ scope: body.scope, includePaths: body.includePaths, targets: body.targets, allowMutatingApiTests: body.allowMutatingApiTests, openApiUrl: body.openApiUrl, apiBaseUrl: body.apiBaseUrl, accessibility: body.accessibility, healthChecks: body.healthChecks, securityChecks: body.securityChecks, performanceChecks: body.performanceChecks, loadChecks: body.loadChecks, loadBudgets: body.loadBudgets, inputChecks: body.inputChecks, visionChecks: body.visionChecks,contractChecks: body.contractChecks, accessChecks: body.accessChecks, useMemory: body.useMemory, fullExploration: body.fullExploration, cleanupAfter: body.cleanupAfter, performanceBudgets: body.performanceBudgets, visual: body.visual, variants: body.variants?.length ? body.variants : undefined }).filter(([, v]) => v !== undefined)),
         } as JobOptions;
         // The project's chosen testing agents decide which checks run (routes/testing-agents.ts); a project with none saved runs as asked.
         const options = await withAgentChoice(p, project(id), asked, body);
@@ -506,9 +512,25 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (credentials?.oauth2) await assertAllowedTarget(credentials.oauth2.tokenUrl);
         if (!baseUrl && !credentials && !mobile && latest) return { id: latest.id as string, url };
         // Keep the project's earlier settings (apiBaseUrl, mobile app) on the new application row.
-        const kept = { ...DEFAULT_JOB_OPTIONS, ...(latest?.config?.apiBaseUrl ? { apiBaseUrl: latest.config.apiBaseUrl } : {}), ...(target ? { mobile: target } : {}) };
+        const kept = { ...DEFAULT_JOB_OPTIONS, ...(latest?.config?.apiBaseUrl ? { apiBaseUrl: latest.config.apiBaseUrl } : {}), ...(target ? { mobile: target } : {}), ...keptLevel(latest?.config) };
         return { id: repo.createApplication(projectId, url, kept, credentials), url };
     };
+
+    /** The project's "How much to explore" and the limits saved with it (engine/levels), carried onto a new application row. */
+    const keptLevel = (config: Record<string, any> | undefined) =>
+        isLevel(config?.level) ? { level: config.level, ...effectiveLimits({ level: config.level, maxPages: config.maxPages, maxDepth: config.maxDepth, maxScenarios: config.maxScenarios }) } : {};
+
+    // Project Settings, "How much to explore": the level later explorations, schedules and "Explore again" start from.
+    app.put("/api/projects/:id/explore-level", async (req) => {
+        const { id } = req.params as { id: string };
+        project(id);
+        const { level } = z.object({ level: z.enum(LEVELS) }).strict().parse(req.body);
+        const latest = repo.getLatestApplicationPublic(id);
+        if (!latest) throw new HttpError(409, "Explore the application once first; then choose how much later explorations explore.");
+        const full = repo.getApplication(latest.id as string)!;
+        if (full.config.level !== level) repo.createApplication(id, full.url, { ...DEFAULT_JOB_OPTIONS, ...full.config, level, ...effectiveLimits({ level }) }, full.credentials);
+        return { level };
+    });
 
     let routeCtx: RouteCtx;
     const startValidationJob = async (projectId: string, applicationId: string, testIds: string[]) => {

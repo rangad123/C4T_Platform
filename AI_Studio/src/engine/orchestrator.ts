@@ -20,10 +20,10 @@ import type { Framework, RenderedScript } from "./generators/index.js";
 import { renderWithAdapter } from "./frameworks/index.js";
 import { deleteOperationsOf } from "./cleanup/helper.js";
 import type { FinishedItem } from "./cleanup/ledger.js";
-import type { CleanupRequest } from "./cleanup/run.js";
+import { cleanupHeaders, type CleanupRequest } from "./cleanup/run.js";
 import { generateA11ySpecs } from "./a11y/specs.js";
 import { generateHealthSpecs } from "./health/specs.js";
-import { generateAccessSpecs, generateApiAccessSpecs, surveyAccess, surveyApiAccess, type ApiAccessRow, type Reach, type RoleLogin } from "./identity/access.js";
+import { generateAccessSpecs, generateApiAccessSpecs, rolePageBudget, surveyAccess, surveyApiAccess, type ApiAccessRow, type Reach, type RoleLogin } from "./identity/access.js";
 import { generateInputSpecs } from "./inputs/specs.js";
 import { generateVisionSpecs } from "./vision/specs.js";
 import { generateLatencySpecs } from "./performance/latency.js";
@@ -38,6 +38,11 @@ import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
 import { reuseMessage } from "./memory/reuse.js";
 import { EVENT_PAGES_REUSED, explorationReuseOn } from "./llm/without-ai.js";
+import { levelSettings, visionOn, type ExploreLevel } from "./levels.js";
+import { buildScreenMap, coverWithTests, type CrawlTransition, type RoleCrawl } from "./screenmap/map.js";
+import { asRole, roleCredentials, roleDifferences } from "./identity/role-differences.js";
+import { refusedBy } from "./memory/notes.js";
+import { createTestData } from "./testdata/generate.js";
 import { parseRequirements } from "./requirements/parse.js";
 import { assertCredentialsStayHome } from "./spec/credential-origin.js";
 import { TestSpecSchema, type Scenario, type TestSpec } from "./spec/schema.js";
@@ -47,6 +52,7 @@ import { validateBatch, type TestUnderValidation, type ValidationOutcome } from 
 import { runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
 import { authorWebSpec, toSpec } from "./web/author.js";
+import { checkStrength } from "./mutation/strength.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 
@@ -55,6 +61,8 @@ export type PhaseName = "discovery" | "understanding" | "planning" | "generation
 
 export interface GenerationRequest {
     url: string;
+    /** How much to explore (./levels): sets how many key pages and endpoints get each check. Absent: thorough. */
+    level?: ExploreLevel;
     maxPages: number;
     maxDepth: number;
     maxScenarios: number;
@@ -90,7 +98,8 @@ export interface GenerationRequest {
     inputChecks?: boolean;
     /**
      * AI judgement (needs a vision-capable model): the authoring agent may ask whether a screen looks right, and key pages get a
-     * replayable "looks right" check. Default false: every screenshot is a paid model call and the verdict is a judgement.
+     * replayable "looks right" check. Absent: the level decides (on at deep and everything when the model can read images, see
+     * levels.ts visionOn); an explicit false always wins. Every screenshot is a paid model call and the verdict is a judgement.
      */
     visionChecks?: boolean;
     /** Check API responses against the documented schema (OpenAPI). Default true. */
@@ -105,6 +114,8 @@ export interface GenerationRequest {
     variants?: string[];
     /** Start the analysis from what earlier analyses of this application learned, and save what this one learns. Default true. */
     useMemory?: boolean;
+    /** The project's notes for the AI (memory/notes.ts): the analysis, the plan and the test writers read them; a "never" note is a hard rule. */
+    siteNotes?: import("./memory/notes.js").SiteNote[];
     /** Send every page to the AI again, even those unchanged since the last exploration (exploration reuse off for this job). Default false. */
     fullExploration?: boolean;
     /** Remove the records data-changing API tests create once the run ends (see ./cleanup). Absent: scripts remove their own records. */
@@ -236,6 +247,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
     const origin = new URL(req.url).origin;
     const summary: GenerationSummary = { model: null, testsGenerated: 0, testsValidated: 0, testsFailedValidation: 0, testsNeedingReview: 0, errors: [] };
     const wantWeb = req.targets.includes("web");
+    // AI screen review: the request's own choice, else the level's default when the model can read images.
+    const wantVision = visionOn(req, typeof ctx.llm.imageObject === "function" && ctx.llm.modelName !== "unavailable");
+    // Data-changing tests on: one generator for the run, so every value it gives carries the same run tag (testdata/generate.ts).
+    const testData = req.allowMutatingApiTests ? createTestData() : undefined;
     const wantApi = req.targets.includes("api");
     const creds: Credentials | undefined = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password, ...(req.credentials.totpSecret ? { totpSecret: req.credentials.totpSecret } : {}) } : undefined;
 
@@ -244,6 +259,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         let authState: AppModel["authentication"] = { required: false, mechanisms: [], loggedIn: false };
         let pages: AppModel["pages"] = [];
         let navigation: AppModel["navigation"] = [];
+        /** Links and controls the crawls saw, and each test account's crawl (the screen map). */
+        let crawlTransitions: CrawlTransition[] = [];
+        const roleCrawls: RoleCrawl[] = [];
         let skipped = 0;
         let landingUrl: string | undefined;
         let apis: ApiEndpointModel[] = [];
@@ -275,7 +293,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             await sink.phase("DISCOVERING", "discovery", "running");
             ctx.emit({ stage: "discovery", kind: "application_discovered", message: `Starting discovery of ${req.url}` });
 
-            const session = await BrowserSession.launch(browser, { startUrl: req.url, allowedHosts: req.apiBaseUrl ? [new URL(req.apiBaseUrl).host] : [], ...(req.savedSession ? { storageState: req.savedSession.storageState } : {}) });
+            // The project's API credential rides on the browser's own calls to the app and its API base only (never logged).
+            const exploreAuth = cleanupHeaders({ apiToken: req.credentials?.apiToken || req.credentials?.oauth2 ? await resolveApiToken(ctx, req.credentials) : undefined, apiAuthHeader: req.credentials?.apiAuthHeader });
+            const session = await BrowserSession.launch(browser, {
+                startUrl: req.url,
+                allowedHosts: req.apiBaseUrl ? [new URL(req.apiBaseUrl).host] : [],
+                ...(req.savedSession ? { storageState: req.savedSession.storageState } : {}),
+                authHeaders: { headers: exploreAuth, origins: [origin, ...(req.apiBaseUrl ? [req.apiBaseUrl] : [])] },
+            });
             try {
                 if (req.savedSession) {
                     // Signed in by hand earlier and checked just before this job: no form to fill.
@@ -294,12 +319,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         startUrl: req.url,
                         maxPages: req.maxPages,
                         maxDepth: req.maxDepth,
-                        maxPerPattern: 2,
+                        maxPerPattern: levelSettings(req).perPattern,
                         includePaths: req.includePaths,
                         seedUrls: landingUrl ? [landingUrl] : undefined,
+                        // Signed in with the project's credentials: a session that ends mid-crawl is renewed once.
+                        ...(creds && authState.loggedIn ? { relogin: async () => (await login(session, req.url, creds)).ok } : {}),
+                        ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
                     });
                     pages = result.pages;
                     navigation = result.navigation;
+                    crawlTransitions = result.transitions;
                     skipped = result.skipped;
                     if (!authState.required) {
                         const loginPage = pages.find((p) => p.type === "login");
@@ -312,7 +341,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 // Who can reach what: a small crawl as a visitor and as each named test account.
                 if (wantWeb && req.accessChecks !== false && req.roles?.length) {
                     try {
-                        accessReach = await surveyAccess(ctx, browser, req.url, req.roles);
+                        // Each viewer gets its share of the level's page budget (at least 20) and the level's depth.
+                        accessReach = await surveyAccess(ctx, browser, req.url, req.roles, {
+                            maxPages: rolePageBudget(req.maxPages, req.roles.length),
+                            maxDepth: req.maxDepth,
+                            perPattern: levelSettings(req).perPattern,
+                            ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
+                            onCrawl: (who, r) => {
+                                if (who !== "anonymous") roleCrawls.push({ who, pages: r.pages, transitions: r.transitions });
+                            },
+                        });
                         ctx.emit({ stage: "discovery", kind: "access_survey_done", message: `Access survey: ${accessReach.map((r) => `${r.who} reaches ${r.pages.length} pages`).join(", ")}` });
                     } catch (e) {
                         ctx.emit({ stage: "discovery", kind: "access_survey_failed", level: "warn", message: `Access survey failed: ${e instanceof Error ? e.message : String(e)}` });
@@ -405,6 +443,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     externalDependencies: external,
                     documentedTestCases,
                     stats: { pagesVisited: pages.length, pagesSkipped: skipped, apisFound: apis.length, durationMs: Date.now() - started },
+                    ...(wantWeb && pages.length ? { screenMap: buildScreenMap({ pages, transitions: crawlTransitions }, roleCrawls) } : {}),
                 };
                 await sink.counters({ pagesDiscovered: pages.length, apisDiscovered: apis.length });
                 await sink.saveModel({ ...base, siteType: "unknown", purpose: "", features: [], journeys: [] });
@@ -449,7 +488,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const reuse = explorationReuseOn(ctx.config) && !req.fullExploration ? memory.reusable(model) : undefined;
                 if (req.fullExploration && memory.hasPrevious) ctx.emit({ stage: "analysis", kind: "full_exploration", message: "Exploring every page again, as asked: nothing is reused from the last exploration." });
                 if (reuse?.pages.size) ctx.emit({ stage: "analysis", kind: EVENT_PAGES_REUSED, message: reuseMessage(reuse, model.pages.length), data: { pages: reuse.pages.size, of: model.pages.length } });
-                model = await analyzeApplication(ctx, base, { memory: memory.context("understanding"), ...(reuse?.pages.size ? { reuse } : {}) });
+                model = await analyzeApplication(ctx, base, { memory: memory.context("understanding"), notes: req.siteNotes, digestElementsPerPage: levelSettings(req).digestElementsPerPage, ...(reuse?.pages.size ? { reuse } : {}) });
                 memory.analysed(model);
                 analysed = true;
                 summary.model = model;
@@ -474,6 +513,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                               scope: req.scope,
                               requirements,
                               memory: memory.context("planning"),
+                              notes: req.siteNotes,
+                              digestElementsPerPage: levelSettings(req).digestElementsPerPage,
+                              roles: req.roles?.map((r) => r.name),
+                              roleDifferences: roleDifferences(accessReach),
+                              warnings: summary.errors,
+                              ...(testData ? { testData: { tag: testData.tag } } : {}),
                           });
                 await sink.counters({ scenariosPlanned: scenarios.length });
                 if (requirements?.length) {
@@ -521,11 +566,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         const scriptIds = new Map<string, string>();
         const renderCtx = { baseUrl: origin, apiBaseUrl: req.apiBaseUrl ?? (specBaseTrusted ? model.openApi?.baseUrl : undefined) ?? origin, deleteOps: deleteOperationsOf(model.apis) };
 
+        /** What each new test was created with, so later additions (its strength) keep the rest. */
+        const metas = new Map<string, Record<string, unknown>>();
         const persistNew = async (spec: TestSpec, framework: Framework, validation: "PENDING" | "NEEDS_REVIEW", reason?: string, meta?: Record<string, unknown>) => {
             // Stored sign-in details only go to the application's own site: refused before anything is created.
             assertCredentialsStayHome(spec, renderCtx);
             const h = await sink.createTest({ spec, framework, validation, reason, meta });
             handles.set(spec.testId, h);
+            metas.set(spec.testId, meta ?? {});
             const script = renderWithAdapter(spec, framework, renderCtx);
             scriptIds.set(spec.testId, await sink.saveScript(h, script, true));
             await sink.counters({ testsGenerated: 1 }, true);
@@ -539,15 +587,22 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 throwIfAborted(ctx.signal);
                 const runId = await sink.startAgentRun("web-authoring", `${scenario.scenarioId} ${scenario.title}`);
                 try {
+                    // A role scenario is written signed in as its own test account, and its script runs as that account.
+                    const asAccount = roleCredentials(scenario, req.roles);
                     const outcome = await authorWebSpec({
                         ctx,
                         browser,
                         baseUrl: origin,
                         model,
                         scenario,
-                        credentials: creds && authState.loggedIn ? creds : undefined,
+                        credentials: asAccount ? asAccount.credentials : creds && authState.loggedIn ? creds : undefined,
                         onAction: (a) => sink.agentAction(runId, a),
-                        vision: req.visionChecks === true,
+                        vision: wantVision,
+                        maxSteps: levelSettings(req).authoringMaxSteps,
+                        review: true,
+                        retryBlocked: true,
+                        ...(testData ? { testData } : {}),
+                        ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
                     });
                     await sink.finishAgentRun(runId, outcome.status, outcome.explanation);
                     if (outcome.status === "blocked") {
@@ -558,7 +613,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         return;
                     }
                     const key = await sink.nextTestKey("WEB");
-                    const spec = TestSpecSchema.parse(toSpec(scenario, outcome, key));
+                    const written = toSpec(scenario, outcome, key);
+                    const spec = TestSpecSchema.parse(asAccount ? asRole(written, asAccount.name) : written);
                     const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
                     if (outcome.status === "defect") {
                         await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation}`, meta);
@@ -621,7 +677,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
             // 4b2. API latency (opt-in): a few safe GET endpoints, called one at a time.
             if (req.performanceChecks === true) {
-                const lat = generateLatencySpecs(apis, { maxEndpoints: 8, budgets: req.performanceBudgets });
+                const lat = generateLatencySpecs(apis, { maxEndpoints: levelSettings(req).apiEndpoints, budgets: req.performanceBudgets });
                 for (const d of lat) {
                     const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                     await persistNew(spec, "playwright-api", "PENDING", undefined, { performance: true, endpoint: d.title.split(":")[0]! });
@@ -644,7 +700,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
 
             // 4c. Multi-request workflows (list → detail, create → read → delete, login → secured call).
-            const wf = generateApiWorkflowSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxWorkflows: 8 });
+            const wf = generateApiWorkflowSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxWorkflows: levelSettings(req).apiEndpoints });
             for (const d of wf.specs) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { workflow: true });
@@ -661,7 +717,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4d. Accessibility audits (deterministic, axe-core) for key discovered pages.
         if (wantWeb && req.accessibility !== false && model.pages.length) {
-            const a11y = generateA11ySpecs(model, { maxPages: 6 });
+            const a11y = generateA11ySpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale });
             for (const d of a11y) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { accessibility: true });
@@ -672,7 +728,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4d2. Page health checks (deterministic): script errors, failed requests, broken links, mixed content, basics.
         if (wantWeb && req.healthChecks !== false && model.pages.length) {
-            const health = generateHealthSpecs(model, { maxPages: 6 });
+            const health = generateHealthSpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale });
             for (const d of health) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { health: true });
@@ -695,7 +751,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4d2b. Input handling (deterministic): harmless unusual input in search-type forms (data-sending forms only if allowed).
         if (wantWeb && req.inputChecks !== false && model.pages.length) {
-            const inputs = generateInputSpecs(model, { maxPages: 4, allowMutating: req.allowMutatingApiTests });
+            const inputs = generateInputSpecs(model, { maxPages: levelSettings(req).inputPages, allowMutating: req.allowMutatingApiTests });
             for (const d of inputs) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { input: true });
@@ -706,8 +762,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4d2c. AI judgement (opt-in): "does this screen look right?" for the most important pages. The checks are generated even
         // without a usable model — they then fail validation with a plain reason instead of silently doing nothing.
-        if (wantWeb && req.visionChecks === true && model.pages.length) {
-            const vision = generateVisionSpecs(model, { maxPages: 3 });
+        if (wantWeb && wantVision && model.pages.length) {
+            const vision = generateVisionSpecs(model, { maxPages: levelSettings(req).visionPages, perTypeScale: levelSettings(req).perTypeScale });
             for (const d of vision) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { vision: true });
@@ -735,7 +791,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4d3. Page speed (opt-in): median of 3 cold loads per key page against budgets.
         if (wantWeb && req.performanceChecks === true && model.pages.length) {
-            const perf = [...generatePerformanceSpecs(model, { maxPages: 5, budgets: req.performanceBudgets, excludePaths: signedIn?.gated }), ...(signedIn ? generateSignedInPerformanceSpecs(signedIn, { budgets: req.performanceBudgets }) : [])];
+            const perf = [...generatePerformanceSpecs(model, { maxPages: levelSettings(req).speedPages, perTypeScale: levelSettings(req).perTypeScale, budgets: req.performanceBudgets, excludePaths: signedIn?.gated }), ...(signedIn ? generateSignedInPerformanceSpecs(signedIn, { budgets: req.performanceBudgets }) : [])];
             for (const d of perf) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { performance: true, ...(d.tags.includes("signed-in") ? { signedIn: true } : {}) });
@@ -756,7 +812,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4e. Visual regression baselines (opt-in): captured on this run, compared on later validations.
         if (wantWeb && req.visual && model.pages.length) {
-            const visual = [...generateVisualSpecs(model, { maxPages: 6, excludePaths: signedIn?.gated }), ...(signedIn ? generateSignedInVisualSpecs(signedIn) : [])];
+            const visual = [...generateVisualSpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale, excludePaths: signedIn?.gated }), ...(signedIn ? generateSignedInVisualSpecs(signedIn) : [])];
             for (const d of visual) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { visual: true, ...(d.tags.includes("signed-in") ? { signedIn: true } : {}) });
@@ -781,7 +837,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken: await resolveApiToken(ctx, req.credentials), apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS },
                     render: renderCtx,
                     model,
-                    maxRepairAttempts: ctx.config.MAX_REPAIR_ATTEMPTS,
+                    // The level decides; a setting below the default (tests, the local CLI) lowers it.
+                    maxRepairAttempts: ctx.config.MAX_REPAIR_ATTEMPTS < 2 ? ctx.config.MAX_REPAIR_ATTEMPTS : levelSettings(req).repairAttempts,
+                    // A new test that still fails runs once more, so its reason says flaky or broken.
+                    confirmFailures: true,
                     workers: ctx.config.CONCURRENCY,
                     cleanup: req.cleanup,
                 },
@@ -834,11 +893,40 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     req.variants,
                 );
             }
+            // Testing the tests: validated web tests replayed with deliberate faults in their browser; one that misses some is given a stronger check once.
+            throwIfAborted(ctx.signal);
+            const strength = await checkStrength(
+                ctx,
+                { scratchDir: ctx.config.scratchDir, env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, headless: ctx.config.HEADLESS }, render: renderCtx, workers: ctx.config.CONCURRENCY, browser, baseUrl: origin, model, credentials: creds && authState.loggedIn ? creds : undefined, maxSteps: levelSettings(req).authoringMaxSteps, limit: levelSettings(req).strengthTests },
+                outcomes.flatMap((o) => (o.status === "NOT_RUN" ? [] : [{ spec: o.spec, validationStatus: o.status, scenario: pending.find((t) => t.spec.testId === o.spec.testId)?.scenario }])),
+                {
+                    async onStrengthened(testId, spec, run) {
+                        const h = handles.get(testId)!;
+                        await sink.updateTest(h, { spec });
+                        scriptIds.set(testId, await sink.saveScript(h, renderWithAdapter(spec, "playwright", renderCtx), true));
+                        await sink.recordExecution(h, scriptIds.get(testId) ?? null, 1, run, new Date(Date.now() - run.durationMs).toISOString());
+                    },
+                    async onScored(testId, s) {
+                        const meta = { ...(metas.get(testId) ?? {}), strength: s };
+                        metas.set(testId, meta);
+                        await sink.updateTest(handles.get(testId)!, { meta });
+                    },
+                },
+            );
+            if (strength.checked) await sink.counters({ strengthChecked: strength.checked, faultsCaught: strength.caught, faultsInjected: strength.total, testsStrengthened: strength.strengthened });
             await sink.phase("VALIDATING", "validation", "done");
         } else {
             await sink.phase("VALIDATING", "validation", "skipped");
         }
 
+        // The screen map: which transitions the authored web tests follow (and the ones they took that the crawl did not see).
+        if (model.screenMap) {
+            const web = pending.filter((t) => t.scenario).map((t) => t.spec);
+            if (web.length) {
+                coverWithTests(model.screenMap, web, origin);
+                await sink.saveModel(model);
+            }
+        }
         await sink.counters({ llmInputTokens: ctx.llm.usage.inputTokens, llmOutputTokens: ctx.llm.usage.outputTokens });
         // Cancellation during validation: results so far are recorded truthfully, but the job ends as cancelled.
         throwIfAborted(ctx.signal);

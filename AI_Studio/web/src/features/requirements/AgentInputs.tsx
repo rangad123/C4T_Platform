@@ -255,7 +255,7 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                                 <input type="checkbox" checked={allowMutating} disabled={!canEdit} onChange={(e) => setAllowMutating(e.target.checked)} />
                                 <span>
                                     <span className="title">Include API tests that change data</span>
-                                    <span className="hint">Creates, updates and deletes records in the real application. Off by default; only enable on a test environment.</span>
+                                    <span className="hint">API tests and browser tests then create, edit and delete records in the real application, filled with made-up data (names, emails on example.com, phone numbers) tagged with the run, so you can find them. Off by default; only enable on a test environment.</span>
                                 </span>
                             </label>
                             {allowMutating && (
@@ -264,7 +264,7 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                                     <span>
                                         <span className="title">Remove the records these tests create afterwards</span>
                                         <span className="hint">
-                                            Only records a test created in that run are removed, and only where the application describes how to remove them.
+                                            Only records a test created in that run are removed, and only where the application describes how to remove them. Anything left behind is listed with its tag.
                                             {!cleanupAfter && " Cleanup is off: the records the tests create will stay in the application."}
                                         </span>
                                     </span>

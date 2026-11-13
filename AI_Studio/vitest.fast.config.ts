@@ -8,6 +8,12 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         include: [
+            "tests/levels-unit.test.ts",
+            "tests/test-strength-unit.test.ts",
+            "tests/screenmap-roles-unit.test.ts",
+            "tests/site-notes.test.ts",
+            "tests/testdata-unit.test.ts",
+            "tests/levels-api.test.ts",
             "tests/c4t-owner-cutoff-unit.test.ts",
             "tests/rebinding-guard-unit.test.ts",
             "tests/project-permissions-unit.test.ts",
@@ -114,6 +120,7 @@ export default defineConfig({
             "tests/record-agent-unit.test.ts",
             "tests/recorder-unit.test.ts",
             "tests/requirements.test.ts",
+            "tests/planner-batched-unit.test.ts",
             "tests/retention-unit.test.ts",
             "tests/runner-kit-unit.test.ts",
             "tests/runner-refused-unit.test.ts",

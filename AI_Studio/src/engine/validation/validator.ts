@@ -109,6 +109,11 @@ export interface ValidationDeps {
      */
     repairsAreDrafts?: boolean;
     workers: number;
+    /**
+     * A new authored web test that is about to be reported as not validated runs once more first, so the reason says whether it is
+     * flaky ("passed 1 of 2 runs") or broken ("fails every time at ..."), with a healing candidate when one exists. Default off.
+     */
+    confirmFailures?: boolean;
     /** Re-run a failing script this many times before analysing/repairing it (scheduled runs). Default 0. */
     retryFailures?: number;
     /** Where Taqwright (mobile) scripts run. Absent: such scripts report an error instead of running. */
@@ -363,13 +368,27 @@ export async function validateBatch(
             logRun(ctx, t.spec, run, attempt);
         }
 
+        // Flaky or broken: one more run of the final script before a new test is called unreliable (test weakness, never a defect).
+        let heal: HealResult | undefined;
+        if (outcome?.status === "FAILED_VALIDATION" && deps.confirmFailures && t.scenario && !t.custom && t.spec.kind === "web" && run.status !== "passed" && !ctx.signal?.aborted) {
+            const again = await runAgain(t, script);
+            if (again) {
+                attempt++;
+                await hooks.onAttempt(t, attempt, script, again);
+                logRun(ctx, t.spec, again, attempt);
+                if (again.status !== "passed" && deps.browser) {
+                    heal = await proposeHeal({ browser: deps.browser, baseUrl: deps.render.baseUrl, spec: t.spec, run: again, credentials: deps.env.credentials }).catch(() => undefined);
+                }
+                outcome = { ...outcome, reason: reliabilityReason(run, again, outcome.reason, heal), attempts: attempt, lastRun: again.status === "passed" ? run : again };
+            }
+        }
         // A passing run may carry plain notes (a low-confidence AI judgement): kept as the reason so a reviewer can see them.
         outcome ??= { status: "VALIDATED", ...(run.notes?.length ? { reason: run.notes.join("\n") } : {}), spec: t.spec, script, attempts: attempt, lastRun: run };
         await hooks.onFinal(t, outcome);
         // A test that could not find its element may get a repair SUGGESTION (never applied here). Deterministic, no model.
         if (outcome.status !== "VALIDATED" && !t.custom && hooks.onHealing && deps.browser && outcome.spec.kind === "web" && !ctx.signal?.aborted) {
             try {
-                const heal = await proposeHeal({ browser: deps.browser, baseUrl: deps.render.baseUrl, spec: outcome.spec, run: outcome.lastRun, credentials: deps.env.credentials });
+                heal ??= await proposeHeal({ browser: deps.browser, baseUrl: deps.render.baseUrl, spec: outcome.spec, run: outcome.lastRun, credentials: deps.env.credentials });
                 await hooks.onHealing(t, heal);
                 if (heal.status === "proposed") ctx.emit({ stage: "validation", kind: "healing_proposed", message: `${t.spec.testId}: a likely replacement for a missing element was found (${heal.proposal.confidenceLabel} confidence); it waits for approval` });
             } catch (err) {
@@ -488,6 +507,20 @@ export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
         return `Possible security issue: ${last.method} ${last.path} is documented as requiring authentication but returned ${last.status} without credentials.`;
     }
     return undefined;
+}
+
+/**
+ * Why a new test could not be made reliable, from its last failing run and one more run of the same script: flaky (passed once) or
+ * broken (failed both times, at the same step or not), with the healing candidate when an equivalent element exists. Any analysis
+ * that differs from the plain failure is kept after it.
+ */
+export function reliabilityReason(failed: ScriptRun, again: ScriptRun, analysis: string | undefined, heal?: HealResult): string {
+    const extra = analysis && analysis !== summarise(failed) ? ` Analysis: ${analysis}` : "";
+    if (again.status === "passed") return `Flaky: passed 1 of 2 runs. The failing run stopped at ${summarise(failed)}${extra}`.slice(0, 600);
+    const step = (r: ScriptRun) => r.steps.find((s) => s.status === "failed")?.title;
+    const where = step(failed) === step(again) ? `Fails every time at ${summarise(again)}` : `Failed on both runs, at different steps: ${summarise(failed)}; then ${summarise(again)}`;
+    const replacement = heal?.status === "proposed" ? ` ${heal.proposal.oldDescription} is gone; a likely replacement is ${heal.proposal.newDescription} (it waits for approval).` : "";
+    return `${where.replace(/\.$/, "")}.${replacement}${extra}`.slice(0, 800);
 }
 
 export function summarise(run: ScriptRun): string {

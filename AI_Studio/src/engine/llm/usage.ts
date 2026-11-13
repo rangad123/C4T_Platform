@@ -7,8 +7,8 @@
  */
 
 /** What a model call was for. A call site passes one of these when it is cheap to do so; otherwise "other". */
-export type LlmPurpose = "analysis" | "planning" | "authoring" | "repair" | "vision" | "plain" | "other";
-export const PURPOSES: readonly LlmPurpose[] = ["analysis", "planning", "authoring", "repair", "vision", "plain", "other"];
+export type LlmPurpose = "analysis" | "planning" | "review" | "authoring" | "repair" | "vision" | "plain" | "other";
+export const PURPOSES: readonly LlmPurpose[] = ["analysis", "planning", "review", "authoring", "repair", "vision", "plain", "other"];
 
 export function normalisePurpose(p: unknown): LlmPurpose {
     return typeof p === "string" && (PURPOSES as readonly string[]).includes(p) ? (p as LlmPurpose) : "other";

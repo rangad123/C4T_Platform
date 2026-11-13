@@ -84,6 +84,7 @@ export interface JobUsage {
 export const PURPOSE_LABEL: Record<string, string> = {
     analysis: "Understanding the application",
     planning: "Planning tests",
+    review: "Reviewing written tests",
     authoring: "Writing web tests",
     repair: "Repairing tests",
     vision: "Looking at screenshots",

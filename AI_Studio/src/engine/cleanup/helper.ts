@@ -26,6 +26,17 @@ import type { ApiEndpointModel } from "../understanding/app-model.js";
 /** POSTs to paths like these answer with tokens or results, not with a record that was created. */
 export const CLEANUP_IGNORED_PATHS = String.raw`/(login|log-in|signin|sign-in|signout|logout|token|oauth|authenticate|auth|search|query|graphql|verify|refresh)(/|$)`;
 
+/** Shape of a run tag (testdata/generate.ts): "qa" and four letters or digits. */
+export const RUN_TAG = /^qa[0-9a-z]{4}$/;
+/** The testData key holding the run tag of a spec's generated data. */
+export const RUN_TAG_KEY = "runTag";
+
+/** The run tag a spec's generated data carries, if any. */
+export const runTagOf = (spec: Pick<TestSpec, "testData">): string | undefined => {
+    const t = (spec.testData as Record<string, string> | undefined)?.[RUN_TAG_KEY];
+    return typeof t === "string" && RUN_TAG.test(t) ? t : undefined;
+};
+
 /** Cap on the records kept per test (a runaway loop must not fill the ledger). */
 export const MAX_RECORDS_PER_TEST = 200;
 
@@ -253,6 +264,54 @@ test.afterEach(async ({ request }) => {
         }
     }
     console.log(\`Cleanup: removed \${removed} of \${removed + left.length} records this test created\${left.length ? "; left behind: " + left.join("; ") : ""}\`);
+});
+`;
+}
+
+/**
+ * The web-script part: a test whose spec carries generated data (testData.runTag) writes down each record the page's own
+ * requests created with that data (a successful POST on the API's address whose request carries the tag and whose answer names
+ * the record), so the platform can remove it after the run. Only when the platform asked (AITP_CLEANUP platform or off): a web
+ * script run on its own removes nothing. Needs CLEANUP_HELPER_SOURCE, `BASE_URL`, and `cleanupFs`/`cleanupPath` (node:fs / node:path).
+ */
+export function webCleanupScriptSource(opts: { testId: string; tag: string }): string {
+    return `
+// ── Test-data cleanup ─────────────────────────────────────────────────────────────────────────────────
+// This test fills forms with generated data tagged ${opts.tag}. When the AI Testing Platform runs it, each record the page creates
+// with that data (its id and address only) is written down so the platform can remove it after the run.
+const CLEANUP_TAG = ${JSON.stringify(opts.tag)};
+const CLEANUP_BASE = process.env.API_BASE_URL || BASE_URL;
+let cleanupCount = 0;
+function cleanupLog(line: Record<string, unknown>): void {
+    const dir = process.env.AITP_CREATED_DIR;
+    if (!dir || !process.env.AITP_CLEANUP || process.env.AITP_CLEANUP === "self") return;
+    try {
+        cleanupFs.mkdirSync(dir, { recursive: true });
+        cleanupFs.appendFileSync(cleanupPath.join(dir, ${JSON.stringify(createdFileName(opts.testId))}), JSON.stringify(line) + "\\n");
+    } catch {
+        /* the ledger is best effort: a test never fails because it could not be written */
+    }
+}
+test.beforeEach(async ({ page }) => {
+    page.on("response", async (res) => {
+        try {
+            const method = res.request().method();
+            const p = cleanupPathOf(res.url(), CLEANUP_BASE);
+            if (p === undefined) return;
+            if (method === "DELETE" && ((res.status() >= 200 && res.status() < 300) || res.status() === 404 || res.status() === 410)) return cleanupLog({ k: "deleted", path: p, status: res.status() });
+            if (method !== "POST" || res.status() < 200 || res.status() >= 300 || res.status() === 204 || !cleanupCandidate(p) || cleanupCount >= ${MAX_RECORDS_PER_TEST}) return;
+            if (!(res.request().postData() ?? "").includes(CLEANUP_TAG)) return;
+            const headers = res.headers();
+            const location = headers["location"] ? cleanupPathOf(headers["location"], CLEANUP_BASE) : undefined;
+            const json = /json/i.test(headers["content-type"] ?? "") ? await res.json().catch(() => undefined) : undefined;
+            const id = cleanupIdOf(json, p) ?? (location ? cleanupIdFromLocation(p, location) : undefined);
+            if (id === undefined) return;
+            cleanupCount++;
+            cleanupLog({ k: "created", path: p, id, ...(location ? { location } : {}), at: new Date().toISOString(), tag: CLEANUP_TAG });
+        } catch {
+            /* a page that closed mid-answer: nothing to write down */
+        }
+    });
 });
 `;
 }

@@ -139,7 +139,7 @@ describe("saving what the agents need", () => {
         expect(latest.url).toBe(SITE);
         const full = platform.repo.getApplication(String(latest.id))!;
         expect(full.credentials).toMatchObject({ username: "qa@shop.example", password: S.password, totpSecret: S.totp, apiToken: S.token, oauth2: { clientSecret: S.clientSecret } });
-        expect(full.config).toMatchObject({ maxPages: 25, openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: true });
+        expect(full.config).toMatchObject({ maxPages: 60, openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: true });
         const raw = platform.db.get<{ c: string; j: string }>("SELECT credentials_enc AS c, config_json AS j FROM applications WHERE id = ?", latest.id);
         for (const v of Object.values(S)) expect(`${raw!.c}${raw!.j}`).not.toContain(v);
         expect((await as("t-cora", "GET", `/api/projects/${id}/cleanup`)).body.enabled).toBe(false);

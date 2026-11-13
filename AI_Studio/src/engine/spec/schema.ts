@@ -420,6 +420,8 @@ export const ScenarioSchema = z.object({
     requiredData: z.array(z.string()).default([]),
     /** Requirement ids (from an uploaded requirements document) this scenario covers. */
     requirements: z.array(z.string()).default([]),
+    /** The named test account this scenario signs in as (role scenarios, see ../identity/role-differences.ts). Absent: the project's own account. */
+    role: z.string().optional(),
 });
 export type Scenario = z.infer<typeof ScenarioSchema>;
 

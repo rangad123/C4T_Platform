@@ -11,6 +11,8 @@ import { A11Y_FAILURE_PREFIX, type A11yImpact } from "./audit.js";
 
 export interface A11yGenOptions {
     maxPages: number;
+    /** Times the usual per-type limit (engine/levels perTypeScale); default 1, Infinity: no per-type limit. */
+    perTypeScale?: number;
     /** Minimum failing impact; defaults to "serious". */
     threshold?: A11yImpact;
 }
@@ -116,16 +118,16 @@ export interface KeyPage {
  * The important, distinct, anonymously reachable pages of an application, most important first.
  * Shared by the deterministic per-page generators (accessibility audits, visual baselines).
  */
-export function selectKeyPages(model: AppModel, maxPages: number): KeyPage[] {
-    return pickPages(model, maxPages).map(({ page, type }) => ({ page, type, label: LABEL[type], priority: PRIORITY[type] ?? "low" }));
+export function selectKeyPages(model: AppModel, maxPages: number, perTypeScale = 1): KeyPage[] {
+    return pickPages(model, maxPages, perTypeScale).map(({ page, type }) => ({ page, type, label: LABEL[type], priority: PRIORITY[type] ?? "low" }));
 }
 
 export function generateA11ySpecs(model: AppModel, opts: A11yGenOptions): DraftSpec[] {
     const threshold = opts.threshold ?? "serious";
-    return pickPages(model, opts.maxPages).map(({ page, type }) => a11ySpec(page, type, threshold));
+    return pickPages(model, opts.maxPages, opts.perTypeScale ?? 1).map(({ page, type }) => a11ySpec(page, type, threshold));
 }
 
-function pickPages(model: AppModel, maxPages: number): Array<{ page: PageModel; type: PageType }> {
+function pickPages(model: AppModel, maxPages: number, perTypeScale: number): Array<{ page: PageModel; type: PageType }> {
     // Pages the crawl reached while logged in would redirect a fresh (anonymous) browser to the login
     // page, so their audit would silently test the wrong page; skip them rather than mislabel results.
     const gated = new Set<PageType>(model.authentication.loggedIn ? ["account", "dashboard"] : []);
@@ -144,7 +146,7 @@ function pickPages(model: AppModel, maxPages: number): Array<{ page: PageModel; 
         if (picked.length >= maxPages) break;
         const key = pattern(c.page.path);
         const used = perType.get(c.type) ?? 0;
-        if (seenPattern.has(key) || used >= (PER_TYPE[c.type] ?? 1)) continue;
+        if (seenPattern.has(key) || used >= (PER_TYPE[c.type] ?? 1) * perTypeScale) continue;
         seenPattern.add(key);
         perType.set(c.type, used + 1);
         picked.push(c);

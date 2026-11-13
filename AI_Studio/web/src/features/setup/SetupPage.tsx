@@ -18,6 +18,8 @@ import { AlertsPanel } from "../schedules/AlertsPanel";
 import { ProjectStorage } from "../storage/ProjectStorage";
 import { type ProjectStorage as ProjectStorageData } from "../storage/storage";
 import { TestingTypeSetting } from "../security/TestingType";
+import { ExploreLevelSetting } from "../explore/ExploreLevel";
+import { NotesCard } from "../notes/NotesCard";
 import { ProjectAiSettings } from "../aiconfig/ProjectAiSettings";
 import { MembersPanel } from "../workspace/MembersPanel";
 import { ReviewPolicyCard } from "../review/ReviewCards";
@@ -80,6 +82,10 @@ function GeneralSetting({ id }: { id: string }) {
             <ProjectGeneral id={id} />
             {/* The project's testing type (functional, security assessment or both); it shows only when the security module is on. */}
             <TestingTypeSetting id={id} />
+            {/* How much later explorations, "Explore again" and schedules explore (engine/levels.ts). */}
+            <ExploreLevelSetting id={id} />
+            {/* Hints people write for the AI, by page; "never ..." notes are rules (features/notes/NotesCard.tsx). */}
+            <NotesCard projectId={id} />
         </div>
     );
 }

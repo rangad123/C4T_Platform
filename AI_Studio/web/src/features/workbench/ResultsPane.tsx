@@ -211,6 +211,13 @@ export function ResultsPane({
                 </section>
             )}
 
+            {t.generationMeta?.strength ? (
+                <p className="t-secondary" data-testid="test-strength">
+                    Strength: catches {t.generationMeta.strength.caught} of {t.generationMeta.strength.total} deliberate faults
+                    {t.generationMeta.strength.strengthened ? " (after a stronger check was added)" : ""}.
+                    {t.generationMeta.strength.missed.length ? ` It still passes when ${t.generationMeta.strength.missed.join(", or when ")}.` : ""}
+                </p>
+            ) : null}
             {t.generationMeta?.visionObservations?.length ? (
                 <Callout tone="warning" title="The AI reviewer noticed something while this test was being created">
                     <ul className="bullets" data-testid="vision-observations">

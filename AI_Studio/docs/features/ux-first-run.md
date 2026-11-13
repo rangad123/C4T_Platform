@@ -25,3 +25,35 @@ What changed for the tester (UX-E, round 15).
 - A plan is kept until used, discarded, or removed by the storage policy (then the page says it is gone and offers Explore again). There is no automatic expiry.
 - Changing sign-in details, test accounts or data-changing tests means exploring again; the plan editor only chooses among what was found.
 - Not verified: a very large site's plan page (page list is capped at 50, shown with a note).
+
+## How much to explore (exploration levels, round 53)
+
+How much one AI exploration does. The table lives in `src/engine/levels.ts`; every count that grows with an exploration reads it.
+
+| Level | Pages | Depth | AI tests | Pages per URL pattern | Accessibility, health, visual | Form input | AI screen review | Page speed | API speed / workflows |
+|---|---|---|---|---|---|---|---|---|---|
+| Thorough (default and minimum) | 60 | 4 | 50 | 3 | 12 key pages | 8 | 5 | 8 | 12 endpoints |
+| Deep | 120 | 5 | 100 | 5 | 24 | 16 | 10 | 16 | 24 |
+| Everything | 250 | 6 | 150 | 8 | every key page | every | every | every | every |
+
+Key pages are picked by importance (home, sign-in, checkout first) and one per URL pattern, since templated pages share their
+markup. Thorough takes a few pages of each kind (up to 3 forms, 1 detail page...), Deep twice as many, Everything any number.
+
+### Where it is chosen
+
+- **Explore page** (first exploration and **Explore again**): "How much to explore", starting from the project's saved level.
+- **Project Settings, General**: the project's level, `PUT /api/projects/:id/explore-level { level }` (permission
+  `ai_studio.project.settings`; 409 until the application has been explored once). It is saved with the application's settings, so
+  schedules, run sequences and deploy triggers that explore again use it.
+- **API**: `POST /api/projects/:id/test-generation { level?: "thorough" | "deep" | "everything" }`. A request without a level, and every
+  job stored before levels existed, runs as Thorough.
+
+Explicit `maxPages`, `maxDepth` and `maxScenarios` still win over the level, but never go below Thorough's (60, 4, 50); the most
+they can ask for is Everything's (250, 6, 150).
+
+An exploration on a runner (round 51) carries the level in its request, so the runner explores at the same level.
+
+### Explore every page again
+
+A checkbox on **Explore again** (off by default; `fullExploration: true` in the API). Without it, pages unchanged since the last
+exploration are reused instead of being sent to the AI again ([repair-and-reuse-without-ai.md](repair-and-reuse-without-ai.md)).

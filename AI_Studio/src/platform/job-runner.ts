@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { effectiveLimits, levelOf } from "../engine/levels.js";
 import path from "node:path";
 import type { Config } from "../config.js";
 import type { EngineContext, EngineEvent } from "../engine/context.js";
@@ -46,6 +47,8 @@ import { SecretBox } from "./secrets.js";
 import { prepareJobSignIn, type JobSignIn } from "./hard-signin-service.js";
 import { meterFor } from "./usage-store.js";
 import { routedLlmForJob } from "./llm-routing.js";
+import { NotesStore } from "./notes-store.js";
+import type { SiteNote } from "../engine/memory/notes.js";
 import { configuredLlmForJob, resolveProjectAi, type ProjectAi } from "./ai-config.js";
 import { jobPersonGate } from "./phone-person-gate.js";
 import { agentServiceOf, RunnerAgentError } from "./agent-services.js";
@@ -102,6 +105,12 @@ export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boole
 export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Promise<void> {
     // What the AI writes in this job is the change of the person who started it, for review (review-store.ts).
     return withJobStarter(job.options.startedBy, () => runJobAs(deps, job, owner));
+}
+
+/** The project's notes for the AI as an exploration request field (none: no field). */
+async function siteNotesOf(repo: Repo, projectId: string): Promise<{ siteNotes?: SiteNote[] }> {
+    const notes = await new NotesStore(repo.db.sql).forEngine(projectId);
+    return notes.length ? { siteNotes: notes } : {};
 }
 
 export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeFastLlm">;
@@ -426,9 +435,9 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 ...(o.planOnly ? { planOnly: true } : {}),
                 ...(fromPlan ? { plan: fromPlan, excludeIdeas: o.excludeIdeas } : {}),
                 url: app.url,
-                maxPages: o.maxPages,
-                maxDepth: o.maxDepth,
-                maxScenarios: o.maxScenarios,
+                // The level's numbers (engine/levels), never below thorough's: a job stored before levels existed runs as thorough.
+                level: levelOf(o),
+                ...effectiveLimits(o),
                 scope: o.scope,
                 includePaths: o.includePaths,
                 targets: o.targets,
@@ -454,6 +463,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 roles,
                 accessChecks: o.accessChecks,
                 useMemory: o.useMemory,
+                // Notes for the AI, read as they are now (notes-store.ts): never part of the job's stored options.
+                ...(await siteNotesOf(repo, job.projectId)),
                 ...(o.fullExploration ? { fullExploration: true } : {}),
                 cleanup,
                 ...(signIn.savedSession ? { savedSession: signIn.savedSession } : {}),

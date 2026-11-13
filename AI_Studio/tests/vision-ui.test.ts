@@ -167,14 +167,14 @@ describe("AI judgement results in the UI", () => {
 });
 
 describe("New project form", () => {
-    it("has no AI screen review switch: an exploration leaves it off unless the UX agent's run asks for it", async () => {
+    it("an untouched AI screen review box sends nothing: the level decides, and thorough leaves it off", async () => {
         // A port nothing listens on: the job is accepted (and its options stored) but ends at once.
         const dead = "http://127.0.0.1:5479/";
         await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
         await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
         // Round 37: a new project's name is always typed.
         await page.getByLabel("Project name").fill("Vision project 1");
-        await pwExpect(page.getByRole("checkbox", { name: /AI screen review/ })).toHaveCount(0);
+        await pwExpect(page.getByRole("checkbox", { name: /AI screen review/ })).not.toBeChecked();
         const sent: Array<Record<string, unknown>> = [];
         await page.route("**/api/projects/*/test-generation", (route) => {
             sent.push(route.request().postDataJSON());

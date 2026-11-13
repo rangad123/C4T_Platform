@@ -473,6 +473,16 @@ CREATE TABLE explore_task_state (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE project_notes (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    path TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_project_notes_project ON project_notes (project_id, created_at);
+
 CREATE TABLE trigger_tokens (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

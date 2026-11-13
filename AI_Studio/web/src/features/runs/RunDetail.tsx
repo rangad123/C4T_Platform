@@ -121,6 +121,12 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                             Also checked on other browsers and screen sizes: {plural(job.counters.variantChecks, "check")}, {job.counters.variantFailures ?? 0} failed.
                         </p>
                     ) : null}
+                    {job.counters.strengthChecked ? (
+                        <p className="t-secondary" data-testid="run-strength">
+                            Test strength: {plural(job.counters.strengthChecked, "test")} replayed with deliberate faults caught {job.counters.faultsCaught ?? 0} of {job.counters.faultsInjected ?? 0}
+                            {job.counters.testsStrengthened ? `; ${plural(job.counters.testsStrengthened, "test")} given a stronger check` : ""}.
+                        </p>
+                    ) : null}
                     {!active && !exploration && (
                         <div className="row">
                             <RunMenu projectId={id} scope="fixed" label={`Run failing tests again${failing.length ? ` (${failing.length})` : ""}`} fixed={{ ids: failing.map((t) => t.id), description: `The ${plural(failing.length, "failing test")} of this run.`, ...sameEnvironment }} variant="primary" />

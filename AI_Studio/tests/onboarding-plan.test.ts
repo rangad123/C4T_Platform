@@ -36,7 +36,7 @@ let dir: string;
 let svc: ReturnType<typeof getScheduleServices>;
 
 // ── the scripted model ────────────────────────────────────────────────────────
-const prompts = { analysis: 0, plan: 0 };
+const prompts = { analysis: 0, plan: 0, gap: 0 };
 let modelCalls = 0;
 /** When false the platform has no AI model configured (the real "unavailable" client). */
 let aiOn = true;
@@ -62,7 +62,12 @@ const scripted: LlmClient = {
     model,
     usage: { inputTokens: 0, outputTokens: 0 },
     text: async () => "",
-    object: (async ({ system }: { system: string; prompt: string }) => {
+    object: (async ({ system, prompt }: { system: string; prompt: string }) => {
+        // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
+        if (prompt.includes("Already covered by the plan")) {
+            prompts.gap++;
+            return { scenarios: [] };
+        }
         if (/analysing a web application/.test(system)) {
             prompts.analysis++;
             return {
@@ -148,8 +153,8 @@ describe("explore first, create after the person has looked", () => {
         expect(job.progress).toMatchObject({ discovery: "done", understanding: "done", planning: "done", generation: "skipped", validation: "skipped" });
         expect(job.counters.pagesDiscovered).toBeGreaterThan(3);
         expect(job.counters.scenariosPlanned).toBe(2);
-        // The AI was asked to understand and to plan, once each, and never to author a test.
-        expect(prompts).toEqual({ analysis: 1, plan: 1 });
+        // The AI was asked to understand and to plan (the plan, then one coverage-gap call), and never to author a test.
+        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1 });
         expect(modelCalls).toBe(0);
         // Nothing exists yet: no test, no run summary, no script.
         expect(await testsOf(projectId)).toEqual([]);
@@ -220,7 +225,7 @@ describe("explore first, create after the person has looked", () => {
         expect(job.counters.scenariosPlanned).toBe(1);
 
         // Nothing was explored, understood or planned again.
-        expect(prompts).toEqual({ analysis: 1, plan: 1 });
+        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1 });
         const kinds = (await events(created.body.jobId)).map((e) => e.kind);
         expect(kinds).toContain("plan_reused");
         expect(kinds).not.toContain("application_discovered");

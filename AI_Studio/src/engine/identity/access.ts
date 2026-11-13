@@ -20,7 +20,7 @@ import type { DraftSpec } from "../api/test-specs.js";
 import type { EngineContext } from "../context.js";
 import { login } from "../discovery/auth.js";
 import { BrowserSession } from "../discovery/browser.js";
-import { crawl } from "../discovery/crawler.js";
+import { crawl, type CrawlOptions, type CrawlResult } from "../discovery/crawler.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ScriptRun } from "../validation/runner.js";
 
@@ -152,11 +152,34 @@ export interface Reach {
     pages: ReachedPage[];
     /** The account's sign-in asked for an authenticator code (lets signed-in speed / visual checks repeat it). */
     needsCode?: boolean;
+    /** Buttons, tabs and menu entries shown on each page reached (role scenarios: "the admin sees Delete"). */
+    controls?: Array<{ path: string; names: string[] }>;
 }
+
+/** How big each viewer's crawl is. */
+export interface SurveyOptions {
+    maxPages: number;
+    maxDepth?: number;
+    perPattern?: number;
+    /** Each viewer's whole crawl, for the screen map (../screenmap/map.ts). */
+    onCrawl?: (who: string, result: CrawlResult) => void;
+    /** The project's "never ..." notes refuse these controls and links (memory/notes.ts refusedBy). */
+    refuse?: CrawlOptions["refuse"];
+}
+
+/** Fewest pages each viewer's crawl gets, however many accounts share the level's budget. */
+export const MIN_ROLE_PAGES = 20;
+
+/** Pages each viewer's crawl may visit: the exploration's page budget split across the accounts, at least MIN_ROLE_PAGES. */
+export function rolePageBudget(maxPages: number, roles: number): number {
+    return Math.max(MIN_ROLE_PAGES, Math.floor(maxPages / Math.max(1, roles)));
+}
+
+const CONTROL_ROLES = new Set(["button", "menuitem", "tab", "checkbox", "switch"]);
 
 const pathOf = (p: { path: string }) => (p.path || "/").split(/[?#]/)[0] || "/";
 
-async function surveyOne(ctx: EngineContext, browser: Browser, startUrl: string, role: RoleLogin | undefined, maxPages: number): Promise<Reach | undefined> {
+async function surveyOne(ctx: EngineContext, browser: Browser, startUrl: string, role: RoleLogin | undefined, opts: SurveyOptions): Promise<Reach | undefined> {
     const session = await BrowserSession.launch(browser, { startUrl });
     try {
         let seed: string | undefined;
@@ -170,24 +193,32 @@ async function surveyOne(ctx: EngineContext, browser: Browser, startUrl: string,
             seed = r.landingUrl;
             needsCode = r.mechanisms.includes("totp");
         }
-        const result = await crawl(session, ctx, { startUrl, maxPages, maxDepth: 2, maxPerPattern: 2, seedUrls: seed ? [seed] : undefined });
-        const pages = result.pages
-            .filter((p) => p.type !== "error" && p.type !== "login" && (p.status === 0 || (p.status >= 200 && p.status < 400)))
-            .map((p) => ({ path: pathOf(p), heading: (p.headings.find((h) => h.trim()) ?? p.title ?? "").trim() }));
+        const result = await crawl(session, ctx, { startUrl, maxPages: opts.maxPages, maxDepth: opts.maxDepth ?? 2, maxPerPattern: opts.perPattern ?? 2, seedUrls: seed ? [seed] : undefined, ...(opts.refuse ? { refuse: opts.refuse } : {}) });
+        const who = role?.name ?? "anonymous";
+        opts.onCrawl?.(who, result);
+        const ok = result.pages.filter((p) => p.type !== "error" && p.type !== "login" && (p.status === 0 || (p.status >= 200 && p.status < 400)));
+        const pages = ok.map((p) => ({ path: pathOf(p), heading: (p.headings.find((h) => h.trim()) ?? p.title ?? "").trim() }));
         const seen = new Set<string>();
-        return { who: role?.name ?? "anonymous", pages: pages.filter((p) => (seen.has(p.path) ? false : (seen.add(p.path), true))), ...(needsCode ? { needsCode } : {}) };
+        const controls = ok
+            .map((p) => ({ path: pathOf(p), names: [...new Set(p.components.filter((c) => CONTROL_ROLES.has(c.role)).map((c) => c.name))].slice(0, 30) }))
+            .filter((c) => c.names.length);
+        return { who, pages: pages.filter((p) => (seen.has(p.path) ? false : (seen.add(p.path), true))), ...(needsCode ? { needsCode } : {}), ...(controls.length ? { controls } : {}) };
     } finally {
         await session.close();
     }
 }
 
-/** Crawl the app as "not signed in" and as each test account. A small crawl each: this is a survey, not a full discovery. */
-export async function surveyAccess(ctx: EngineContext, browser: Browser, startUrl: string, roles: RoleLogin[], maxPages = 12): Promise<Reach[]> {
+/**
+ * Crawl the app as "not signed in" and as each test account. A number alone is the old small survey (that many pages, 2 deep);
+ * an exploration passes its share of the level's page budget (rolePageBudget) and depth.
+ */
+export async function surveyAccess(ctx: EngineContext, browser: Browser, startUrl: string, roles: RoleLogin[], size: number | SurveyOptions = 12): Promise<Reach[]> {
+    const opts: SurveyOptions = typeof size === "number" ? { maxPages: size } : size;
     const out: Reach[] = [];
-    const anon = await surveyOne(ctx, browser, startUrl, undefined, maxPages);
+    const anon = await surveyOne(ctx, browser, startUrl, undefined, opts);
     if (anon) out.push(anon);
     for (const role of roles) {
-        const r = await surveyOne(ctx, browser, startUrl, role, maxPages);
+        const r = await surveyOne(ctx, browser, startUrl, role, opts);
         if (r) out.push(r);
     }
     return out;

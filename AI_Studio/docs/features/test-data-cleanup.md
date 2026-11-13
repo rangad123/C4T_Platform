@@ -29,6 +29,12 @@ A successful `POST` (2xx, not 204) in a generated API test whose answer names th
 
 POSTs to login, token, search, GraphQL and similar paths are never treated as creating a record.
 
+## Generated test data and browser tests
+
+With data-changing tests on, planning may plan create, edit and delete scenarios "with generated data", and the authoring agent asks for each field's value (`src/engine/testdata/generate.ts`): realistic names, emails on `example.com`, phones in the fictional 555-01xx range, dates and numbers within the field's limits, addresses, plus boundary and invalid values for validation tests. Every value that names a record carries the run's tag (e.g. `qa7k2q`), so runs do not collide and records can be found again. Values are deterministic for a seed.
+
+A browser test with generated data (`testData.runTag`) writes down each record the page's own requests created with it: a successful POST on the API's address whose request carries the tag and whose answer names the record (same rules as above). Those records are removed after the run like API-created ones, through a DELETE the API description knows, with the API credentials. What could not be removed is said with its tag: "3 records with tag qa7k2q were left in the app." A browser test run on its own removes nothing.
+
 A record is removed only when a **known DELETE operation** matches it: `DELETE /things/{id}` for `POST /things`, known from the OpenAPI document or the analysis (`ApiEndpointModel`), from a DELETE step of the test itself (`DELETE /things/{{id}}`), or from another test of the same project. Never a collection-wide DELETE, never a listing, never a guess. No known operation: the record is listed as "No way to remove it".
 
 ## How it works

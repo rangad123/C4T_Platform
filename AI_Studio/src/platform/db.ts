@@ -19,6 +19,7 @@ import { LIVE_SESSION_MIGRATION } from "./live-session-store.js";
 import { LOCATORS_MIGRATION } from "./locator-store.js";
 import { caseTypesMigration, MANUAL_MIGRATION } from "./manual-case-store.js";
 import { MEMORY_MIGRATION } from "./memory-store.js";
+import { NOTES_MIGRATION } from "./notes-store.js";
 import { PERFORMANCE_MIGRATION } from "./perf-store.js";
 import { QUARANTINE_MIGRATION } from "./quarantine-store.js";
 import { RETENTION_MIGRATION } from "./retention-store.js";
@@ -304,6 +305,7 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     llm_json TEXT,
     updated_at TEXT NOT NULL
 );`,
+    /* 59: notes for the AI: plain hints people write for their project, optionally for a path or page pattern (schema lives in notes-store.ts; existing projects have none) */ NOTES_MIGRATION,
 ];
 
 /**

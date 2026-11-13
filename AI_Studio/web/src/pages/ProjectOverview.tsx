@@ -11,6 +11,7 @@ import { exploreAgainHref, phoneJobOf } from "../features/phone/phone";
 import { HelpPlace } from "../features/guide/HelpContext";
 import { ApiChangesCard } from "../features/contracts/ApiChangesCard";
 import { SiteMemoryCard } from "../features/memory/SiteMemoryCard";
+import { ScreenMapCard } from "../features/explore/ScreenMapCard";
 import { CleanupCard } from "../features/cleanup/CleanupCard";
 import { SlowestPages } from "../features/performance/SlowestPages";
 import { VariantsResult } from "../features/variants/VariantsResult";
@@ -261,6 +262,8 @@ export function ProjectOverview({ id }: { id: string }) {
                 )}
 
                 {job && settled && <ApiChangesCard projectId={id} />}
+
+                {job && settled && !code && <ScreenMapCard key={`screens-${job.jobId}`} projectId={id} />}
 
                 {job && settled && <SiteMemoryCard key={`memory-${job.jobId}`} projectId={id} />}
 

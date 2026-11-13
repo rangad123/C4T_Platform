@@ -42,6 +42,8 @@ export interface FormModel {
     submitLabel?: string;
     /** Heuristic classification: login, signup, search, contact, other. */
     purpose: "login" | "signup" | "search" | "contact" | "checkout" | "other";
+    /** Fields that appear only after a choice in this form (found by the crawl; see discovery/crawler.ts probeConditionalFields). */
+    conditional?: Array<{ when: string; shows: string[] }>;
 }
 
 export interface ComponentModel {
@@ -155,6 +157,8 @@ export interface AppModel {
     stats: { pagesVisited: number; pagesSkipped: number; apisFound: number; durationMs: number };
     /** Only for an Android app explored by the AI on a phone: its screens, how they connect, forms and sign-in (see mobile/explore/types.ts). */
     mobile?: import("../mobile/explore/types.js").MobileAppModel;
+    /** Screens and the actions that lead between them (see ../screenmap/map.ts). Absent on models stored before it existed. */
+    screenMap?: import("../screenmap/map.js").ScreenMap;
 }
 
 /** Schema the analyzer asks the LLM to fill in. */

@@ -141,8 +141,8 @@ export const TESTING_AGENTS: readonly TestingAgent[] = [
         id: "ux",
         name: "UX Testing Agent",
         summary: "Finds what spoils a visit: script errors, failed requests, broken links, and screens that do not look right.",
-        description: "Checks the key pages for problems a visitor would notice: errors in the page's scripts, requests that fail, broken links. For a run you can also turn on AI screen review, where a model that can read images looks at each key page and says whether it looks right; its verdict is a judgement, shown as such.",
-        checks: ["Script errors and failed requests on key pages", "Broken links", "AI screen review, when you turn it on for a run"],
+        description: "Checks the key pages for problems a visitor would notice: errors in the page's scripts, requests that fail, broken links. With AI screen review, a model that can read images looks at each key page and says whether it looks right; its verdict is a judgement, shown as such. It is on at Deep and Everything when your model can read images (screenshots go to your AI provider), and you can turn it on or off for any run.",
+        checks: ["Script errors and failed requests on key pages", "Broken links", "AI screen review: on at Deep and Everything when your model can read images, or when you turn it on"],
         platforms: ["web"],
         needs: [EXPLORE_NEEDS, "AI screen review needs a model that can read images, and each picture is a paid AI call."],
         available: true,
@@ -309,7 +309,13 @@ export function applyAgentChoice(options: JobOptions, asked: AskedSwitches, agen
             out.targets = targets.length ? targets : ["web"];
         } else if (k === "variants") {
             if (!value) delete out.variants;
-        } else if (k === "loadChecks" || k === "visionChecks" || k === "visual" || k === "performanceChecks") {
+        } else if (k === "visionChecks") {
+            // On, or off by the person's word (or no chosen agent owns it): stored. Nothing said: left out, so the level decides
+            // (on at deep and everything when the model can read images, engine/levels visionOn).
+            if (value) bag[k] = true;
+            else if (state[k] === "off" || want === false) bag[k] = false;
+            else delete bag[k];
+        } else if (k === "loadChecks" || k === "visual" || k === "performanceChecks") {
             // Off-by-default switches are stored only when on, as before.
             if (value) bag[k] = true;
             else delete bag[k];

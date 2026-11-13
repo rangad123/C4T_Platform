@@ -290,6 +290,7 @@ export class SecurityFake {
             if (method === "GET" && rest === "") return { body: this.publicProject(proj) };
             if (method === "GET" && (rest === "tests" || rest === "jobs")) return { body: [] };
             if (method === "GET" && rest === "testing-agents") return { body: { applies: false, agents: [], source: "matched", chosenBy: null, chosenAt: null, switches: {}, platforms: ["web"] } };
+            if (method === "GET" && rest === "notes") return { body: { notes: [], max: 50 } };
             if (method === "GET" && rest === "app-details") return { body: { webUrl: null, android: { apk: null, appPackage: null, playStoreUrl: null }, ios: { ipa: null, bundleId: null, appStoreUrl: null } } };
             if (method === "GET" && rest === "schedules") return { body: { serverTime: new Date().toISOString(), timezone: { name: "UTC", utcOffsetMinutes: 0 }, schedulerEnabled: false, schedules: [] } };
             if (method === "GET" && rest === "storage") return { body: { project: { id: proj.id, name: proj.name }, generatedAt: new Date().toISOString(), truncated: false, usage: { bytes: 0, text: "0 B" }, removed: { files: 0, bytes: 0, text: "" }, retention: { enabled: false, source: "default" }, needsSecrets: [] } };

@@ -34,7 +34,7 @@ export interface Detail extends TestSummary, Partial<CompatDetail>, EnvironmentD
     /** Only for a test that uses reusable steps: the steps that really run, each with the step of the test it belongs to. */
     runSteps?: Array<{ index: number; from: number; block?: string; step: any }>;
     quality?: { level: "good" | "weak"; reasons: string[] } | null;
-    generationMeta: OriginInput["generationMeta"] & { visionObservations?: string[] };
+    generationMeta: OriginInput["generationMeta"] & { visionObservations?: string[]; /** Testing the test: how many deliberate faults it noticed (engine/mutation). */ strength?: { caught: number; total: number; missed: string[]; strengthened?: boolean } };
     scripts: Array<{ id: string; framework: string; filename: string; version: number; executable: boolean; content: string; createdAt?: string }>;
     executions: Execution[];
     /** What the latest failure comes down to, when the platform can say (a failing test or a finding). */

@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { Config } from "../config.js";
 import type { EngineEvent } from "../engine/context.js";
 import type { CreateClientOptions, LlmClient } from "../engine/llm/provider.js";
-import { configuredFastModel, ESCALATION_LIMITS, ROUTE_TABLE, setFastModelSource, withModelRouting, type FastModelSetting, type FastModelView } from "../engine/llm/routing.js";
+import { configuredFastModel, configuredPlanningModel, ESCALATION_LIMITS, ROUTE_TABLE, setFastModelSource, setPlanningModelSource, STRONG_TASKS, withModelRouting, type FastModelSetting, type FastModelView, type PlanningModelView, type RouteTask } from "../engine/llm/routing.js";
 import { ESCALATION_PURPOSE } from "../engine/llm/usage.js";
 import type { Db } from "./db.js";
 import { SettingsCache } from "./settings-cache.js";
@@ -19,6 +19,27 @@ import type { RouteCtx } from "./routes/types.js";
 import { usageStoreFor } from "./usage-store.js";
 
 const FAST_KEY = "llm_fast_model";
+/** The planning and review model (round 53): a model name, "" or no row = the main model plans and reviews. */
+const PLANNING_KEY = "llm_planning_model";
+
+export function savedPlanningModel(db: Db): string | undefined {
+    try {
+        const raw = db.get<{ value: string | null }>("SELECT value FROM ai_settings WHERE key = ?", PLANNING_KEY)?.value;
+        return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Save the planning and review model; "" or null = none (the main model plans and reviews). */
+export function savePlanningModel(db: Db, config: Config, model: string | null): PlanningModelView {
+    const v = (model ?? "").trim();
+    if (!v) db.run("DELETE FROM ai_settings WHERE key = ?", PLANNING_KEY);
+    else db.run("INSERT INTO ai_settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", PLANNING_KEY, v);
+    void planningCache?.refresh();
+    return configuredPlanningModel(config);
+}
+let planningCache: SettingsCache<string | undefined> | undefined;
 
 /** The value saved in the app, or undefined when nobody saved one (then LLM_MODEL_FAST is used). An empty model = "no fast model". */
 export function savedFastModel(db: Db): FastModelSetting | undefined {
@@ -52,6 +73,8 @@ let fastCache: SettingsCache<FastModelSetting | undefined> | undefined;
 export function installLlmRouting(db: Db): void {
     const c = (fastCache = new SettingsCache(() => savedFastModel(db)));
     setFastModelSource(() => c.get());
+    const pc = (planningCache = new SettingsCache(() => savedPlanningModel(db)));
+    setPlanningModelSource(() => pc.get());
 }
 
 /**
@@ -63,7 +86,7 @@ export function routedLlmForJob(
     deps: { db: Db; config: Config; emit: (e: EngineEvent) => void },
     job: { id: string; projectId: string },
     main: LlmClient,
-    o: { fast?: LlmClient; clientOptions?: CreateClientOptions } = {},
+    o: { fast?: LlmClient; strong?: LlmClient; clientOptions?: CreateClientOptions } = {},
 ): LlmClient {
     const usage = (() => {
         try {
@@ -101,6 +124,8 @@ export interface FastModelAnswer extends FastModelView {
     fastFor: string[];
     mainFor: string[];
     limits: typeof ESCALATION_LIMITS;
+    /** The planning and review model: `entry` as Settings writes it ("" = none, the main model), whether it is in force, and what it does. */
+    planning: PlanningModelView & { entry: string; active: boolean; for: string[] };
 }
 
 export function fastModelAnswer(config: Config, mainModel: string): FastModelAnswer {
@@ -115,6 +140,17 @@ export function fastModelAnswer(config: Config, mainModel: string): FastModelAns
         fastFor: rows.filter((r) => r.model === "fast").map((r) => r.what),
         mainFor: rows.filter((r) => r.model === "main").map((r) => r.what),
         limits: ESCALATION_LIMITS,
+        planning: planningAnswer(config, mainModel),
+    };
+}
+
+function planningAnswer(config: Config, mainModel: string): FastModelAnswer["planning"] {
+    const v = configuredPlanningModel(config);
+    return {
+        ...v,
+        entry: v.model ? (v.provider === config.LLM_PROVIDER ? v.model : `${v.provider}:${v.model}`) : "",
+        active: mainModel !== "unavailable" && v.ready && Boolean(v.model),
+        for: [...STRONG_TASKS].map((t) => ROUTE_TABLE[t as RouteTask].what),
     };
 }
 
@@ -130,6 +166,8 @@ const FastBody = z
     })
     .strict();
 
+const PlanningBody = z.object({ model: FastBody.shape.model }).strict();
+
 export function registerLlmRoutingRoutes(ctx: RouteCtx): void {
     const { app, p } = ctx;
     app.get("/api/llm/fast-model", async () => fastModelAnswer(p.config, p.llm.modelName));
@@ -138,6 +176,13 @@ export function registerLlmRoutingRoutes(ctx: RouteCtx): void {
         if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "Send { model: \"name\" }, { model: \"\" } or { model: null }");
         const { model, images } = parsed.data;
         saveFastModel(p.db, p.config, model === null ? null : { model, images: images ?? false });
+        return fastModelAnswer(p.config, p.llm.modelName);
+    });
+    //   PUT /api/llm/planning-model  { model: string | null }   "" or null = none: the main model plans and reviews
+    app.put("/api/llm/planning-model", async (req) => {
+        const parsed = PlanningBody.safeParse(req.body ?? {});
+        if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "Send { model: \"name\" } or { model: \"\" }");
+        savePlanningModel(p.db, p.config, parsed.data.model);
         return fastModelAnswer(p.config, p.llm.modelName);
     });
 }
