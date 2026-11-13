@@ -247,7 +247,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
                     }}
                 >
                     <option value="validate">Re-run all tests</option>
-                    {explores && <option value="generate">Explore again (looks for new things to test; needs the AI model)</option>}
+                    {explores && <option value="generate">Explore again (looks for new things to test; uses your AI key)</option>}
                     {(suites.data?.suites ?? []).map((x) => (
                         <option key={x.id} value={`suite:${x.id}`} disabled={x.testCount === 0}>
                             Run the suite “{x.name}”{x.testCount === 0 ? " (no tests yet)" : ""}

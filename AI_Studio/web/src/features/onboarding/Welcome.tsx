@@ -164,12 +164,12 @@ export function Welcome({ aiConfigured, explore, name }: { aiConfigured: boolean
                 {what === "android" ? (
                     <>
                         {aiConfigured === false ? (
-                            <Callout tone="warning" title="The AI model isn’t set up on this server" actions={<LinkButton href={routes.settings}>Open Settings</LinkButton>}>
-                                Exploring a phone app needs it. The other two ways to start work without it.
+                            <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton href={routes.aiKeys}>Open AI keys</LinkButton>}>
+                                Exploring a phone app uses your AI key. Add your own key in Settings, or ask an admin to assign one. The other two ways to start work without it.
                             </Callout>
                         ) : (
                             <p className="t-meta" data-testid="ai-note">
-                                Uses the AI model: it opens the app on a phone or emulator, taps through it like a careful user and plans tests. Android only.
+                                Uses your AI key: it opens the app on a phone or emulator, taps through it like a careful user and plans tests. Android only.
                             </p>
                         )}
                         <div className="field">
@@ -207,12 +207,12 @@ export function Welcome({ aiConfigured, explore, name }: { aiConfigured: boolean
                 ) : (
                     <>
                     {aiConfigured === false ? (
-                        <Callout tone="warning" title="The AI model isn’t set up on this server" actions={<LinkButton href={routes.settings}>Open Settings</LinkButton>}>
-                            Exploring a web application needs it. Tests for an API alone don’t, and the other two ways to start work without it.
+                        <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton href={routes.aiKeys}>Open AI keys</LinkButton>}>
+                            Exploring a web application uses your AI key. Add your own key in Settings, or ask an admin to assign one. Tests for an API alone don’t, and the other two ways to start work without it.
                         </Callout>
                     ) : (
                         <p className="t-meta" data-testid="ai-note">
-                            Uses the AI model: it decides what to test, writes the browser tests and corrects one that fails along the way. Tests for an API alone are created without it.
+                            Uses your AI key: it decides what to test, writes the browser tests and corrects one that fails along the way. Tests for an API alone are created without it.
                         </p>
                     )}
                     <div className="field">

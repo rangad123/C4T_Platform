@@ -107,7 +107,7 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     site = await startMemorySite(SITE_PORT);
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-onboarding-ui-"));
-    // A key is set (never used: the worker's model is the double) so the page sees an AI model that is set up.
+    // A key is set (never used: the worker's model is the double): an open server uses its own key, so the page sees AI that is ready.
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", LLM_API_KEY: "test-key-not-real", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "1", SECRET_KEY: "test-secret-key-0123456789", HOST: "127.0.0.1", PORT: String(PORT) }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
@@ -212,7 +212,7 @@ describe("the first screen", () => {
         expect(names).toEqual(["Explore my app", "Record a test", "Start from tests I have"]);
         // Said before anything is done: what it uses, what it needs, and that nothing is created without a yes.
         await pwExpect(group).toContainText("Nothing is created or run until you say so.");
-        await pwExpect(page.getByTestId("ai-note")).toContainText("Uses the AI model");
+        await pwExpect(page.getByTestId("ai-note")).toContainText("Uses your AI key");
         await pwExpect(group).not.toContainText("isn’t set up");
         await pwExpect(group.getByText("No AI needed.", { exact: false })).toHaveCount(2);
         await pwExpect(page.getByText("2. We explore and show a plan")).toBeVisible();
@@ -225,23 +225,23 @@ describe("the first screen", () => {
         await shot("welcome-light-1280");
     });
 
-    it("without the AI model the first card says so plainly and links to Settings; the other two still work", async () => {
-        await page.route("**/api/config", async (route) => {
+    it("without a usable AI key the first card says so plainly and links to AI keys; the other two still work", async () => {
+        await page.route("**/api/me/ai", async (route) => {
             const real = await (await route.fetch()).json();
-            await route.fulfill({ json: { ...real, llm: { ...real.llm, configured: false, model: "unavailable" } } });
+            await route.fulfill({ json: { ...real, openServer: { ...(real.openServer ?? { provider: "anthropic", model: "unavailable" }), configured: false } } });
         });
         try {
             await visit("");
             const explore = page.getByRole("group", { name: "Ways to start" }).locator(".welcome-card").nth(0);
-            await pwExpect(explore.getByText("The AI model isn’t set up on this server")).toBeVisible();
-            await pwExpect(explore.getByRole("link", { name: "Open Settings", exact: true })).toHaveAttribute("href", "#/settings");
+            await pwExpect(explore.getByText("You have no usable AI key")).toBeVisible();
+            await pwExpect(explore.getByRole("link", { name: "Open AI keys", exact: true })).toHaveAttribute("href", "#/settings#ai-keys");
             await pwExpect(page.getByTestId("ai-note")).toHaveCount(0);
             await pwExpect(page.getByLabel("Address to start from")).toBeEnabled();
             await pwExpect(page.getByRole("button", { name: "Record a test", exact: true })).toBeEnabled();
             await pwExpect(page.getByRole("button", { name: "Import tests", exact: true })).toBeEnabled();
             await shot("welcome-no-ai-light-1280");
         } finally {
-            await page.unroute("**/api/config");
+            await page.unroute("**/api/me/ai");
         }
     });
 
@@ -699,7 +699,7 @@ describe("stopping at each stage says what is kept (the platform's answers for o
             await pwExpect(page.getByText("Nothing was created.")).toBeVisible();
             await page.unroute(`**/api/projects/${pid}/plans/job-fake`);
 
-            // The AI model missing: the API side is still planned, and the warning is in plain words with the way to fix it.
+            // No usable AI key: the API side is still planned, and the warning is in plain words with the way to fix it.
             const ready = {
                 ready: true, jobId: "job-fake", status: "PARTIALLY_COMPLETED", createdAt: NOW(), url: SITE, targets: ["web", "api"],
                 found: { pages: 5, apiEndpoints: 2, forms: 1, journeys: 0 }, about: null, pages: [{ path: "/", title: "Shop", type: "home" }, { path: "/login", title: "Sign in", type: "login" }], ideas: [],
@@ -712,8 +712,8 @@ describe("stopping at each stage says what is kept (the platform's answers for o
             };
             await page.route(`**/api/projects/${pid}/plans/job-fake`, (route) => route.fulfill({ json: ready }));
             await visit(`#/projects/${pid}`);
-            await pwExpect(page.getByText("The AI model isn’t set up yet")).toBeVisible();
-            await pwExpect(page.getByRole("link", { name: "Open settings" })).toBeVisible();
+            await pwExpect(page.getByText("You have no usable AI key")).toBeVisible();
+            await pwExpect(page.getByRole("link", { name: "Open AI keys" })).toBeVisible();
             await pwExpect(page.getByTestId("plan-sentence")).toHaveText("We will create about 11 tests: API checks 6 and basic security 5.");
             await pwExpect(page.getByTestId("plan-login-hint")).toBeVisible();
             await page.unroute(`**/api/projects/${pid}/plans/job-fake`);

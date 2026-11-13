@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getAgentServices } from "../agent-services.js";
-import { ownerIdOfActor } from "../agent-store.js";
+import { ownerIdOfActor, makerIdOfActor } from "../agent-store.js";
 import { SEVERITIES } from "../../engine/validation/severity.js";
 import { ALERT_EVENTS, API_DRIFT_EVENT, type AlertChannel } from "../alerts.js";
 import { assertSmtpHostAllowed, fromInput, mergeSmtp, NO_MAIL_SERVER_MESSAGE, publicSmtp, Recipients, serverSmtp, SmtpInput, SmtpPatch } from "../alert-email.js";
@@ -180,7 +180,7 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         if (body.runbookId) checkRunbook(id, body.runbookId);
         // Who made it: a person's own runner may take the runs of that person's schedules (COMMON contract, scheduler.ts startedBy).
         const actor = currentActor();
-        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures, createdBy: ownerIdOfActor(actor) });
+        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures, createdBy: makerIdOfActor(actor) });
         if (body.environment) setScheduleEnvironment(repo.db, created.id, { environment: body.environment, confirmProduction: Boolean(body.confirmProduction) });
         if (body.runbookId) runbooks.setScheduleLink(created.id, body.runbookId);
         if (body.suiteId) await suites.setScheduleLink(created.id, body.suiteId);
@@ -209,7 +209,7 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         if (nextEnv) checkScheduleEnvironment(id, patch.kind ?? cur.kind, nextEnv, nextConfirm);
         // The editor now owns its runs: from here on they go to the editor's own runner, never to the previous maker's.
         const editor = currentActor();
-        const updated = svc.store.update(sid, { ...own, name: renamed, createdBy: ownerIdOfActor(editor) })!;
+        const updated = svc.store.update(sid, { ...own, name: renamed, createdBy: makerIdOfActor(editor) })!;
         if (environment !== undefined || confirmProduction !== undefined) setScheduleEnvironment(repo.db, sid, { environment: nextEnv, confirmProduction: nextConfirm });
         if (runbookId !== undefined) runbooks.setScheduleLink(sid, runbookId);
         if (suiteId !== undefined) await suites.setScheduleLink(sid, suiteId);

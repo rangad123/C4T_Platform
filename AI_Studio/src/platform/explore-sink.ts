@@ -24,6 +24,8 @@ import { SafeName } from "../agent-protocol/schema.js";
 import type { Platform } from "./bootstrap.js";
 import type { ExploreTaskRef } from "./explore-task.js";
 import { HttpError } from "./http-error.js";
+import { aiOwnerOfJob, resolveAiFor } from "./ai-config.js";
+import { PERSONAL_KEY_MODEL } from "./usage-store.js";
 import { RepoSink } from "./repo-sink.js";
 import { applyAgentCall } from "./agent-on-runner.js";
 
@@ -144,12 +146,15 @@ async function sinkFor(p: Platform, task: ExploreTaskRef): Promise<TaskSink> {
     const dir = folderOf(task);
     if (!saved) await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
     await fs.mkdir(path.join(dir, "uploads"), { recursive: true });
+    // A person's own key: the tests' provenance does not name its model (as on the server, job-runner.ts).
+    const repoSink = new RepoSink(p.repo, p.store, { id: job.id, projectId: job.projectId, applicationId: job.applicationId, mode: job.options.mode });
+    if ((await resolveAiFor({ sql: p.sql, config: p.config }, aiOwnerOfJob(job.options))).billing.owner === "personal") repoSink.modelShownAs = PERSONAL_KEY_MODEL;
     const fresh: TaskSink = {
         attempt: task.attempt,
         jobId: job.id,
         seq: saved?.seq ?? 0,
         last: saved?.last ?? [],
-        sink: new RepoSink(p.repo, p.store, { id: job.id, projectId: job.projectId, applicationId: job.applicationId, mode: job.options.mode }),
+        sink: repoSink,
         handles: new Map([...(presets.get(task.taskId) ?? []), ...(saved?.handles ?? [])]),
         scripts: new Set(saved?.scripts ?? []),
         agentRuns: new Set(saved?.agentRuns ?? []),

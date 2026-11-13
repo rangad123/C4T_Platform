@@ -3,7 +3,8 @@ import { z } from "zod";
 import { clean, MAX_CASES } from "../../engine/manual/cases.js";
 import { batchesOf, generateCasesForBatch, MAX_GENERATE_REQUIREMENTS, NO_MODEL_FOR_CASES, type GeneratedCase, type RequirementForCases } from "../../engine/manual/generate.js";
 import { classifyLlmError, describeLlmError } from "../../engine/llm/errors.js";
-import { projectLlm } from "../ai-config.js";
+import { aiOwnerOfActor, personLlm } from "../ai-config.js";
+import { currentActor } from "../auth/actor.js";
 import { JobMeter } from "../../engine/llm/metered.js";
 import { ManualCaseStore } from "../manual-case-store.js";
 import { projectSetupOf } from "../project-setup.js";
@@ -156,8 +157,8 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/requirements/import/refine", async (req) => {
         const pid = projectId(req);
         const text = await sourceText(req.body);
-        // The project's AI and who pays for it (ai-config.ts): a project on its own key never reaches the server's key from here.
-        const { llm, billing, blocked } = await projectLlm(p, pid);
+        // The asking person's chosen AI key and who pays for it (ai-config.ts): a signed-in person never reaches the server's key.
+        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         const skip = aiSkipReason(usage, pid);
@@ -193,8 +194,8 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
         }
         const room = MAX_CASES - cases.countCases(pid);
         if (room <= 0) throw new HttpError(409, `This project already has ${MAX_CASES} test cases, the most it can have. Delete some before writing more.`);
-        // The project's AI and who pays for it (ai-config.ts), as the import refinement does.
-        const { llm, billing, blocked } = await projectLlm(p, pid);
+        // The asking person's chosen AI key and who pays for it (ai-config.ts), as the import refinement does.
+        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_CASES, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         if (aiSkipReason(usage, pid)) throw new HttpError(409, "The AI token limit was reached, so the AI cannot write test cases now. You can still add test cases by hand.");

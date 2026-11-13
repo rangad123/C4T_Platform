@@ -116,6 +116,8 @@ beforeAll(async () => {
         // The AI model is set up (its answer only: nothing here calls a provider).
         await route.fulfill({ response: res, json: { ...json, executionMode: "runners", runsHere: true, llm: { ...json.llm, configured: true } } });
     });
+    // The person's AI is ready (its answer only: nothing here calls a provider).
+    await page.route("**/api/me/ai", (route) => route.fulfill({ json: { chosen: null, problem: null, personal: [], organisational: [], canManageOrganisational: false, openServer: { configured: true, provider: "anthropic", model: "stand-in" } } }));
     await page.route("**/api/me/runner", (route) => route.fulfill({ json: { runner: fake.mine } }));
     await page.route("**/api/projects/*/test-generation", async (route) => {
         if (route.request().method() !== "POST") return route.continue();

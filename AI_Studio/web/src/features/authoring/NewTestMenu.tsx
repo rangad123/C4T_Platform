@@ -3,7 +3,7 @@ import { useState } from "react";
 import { projectShape, type ProjectDetail } from "../../api";
 import { Menu, MenuItem, MenuLabel } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
-import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { useAiBlock } from "../aiconfig/aiconfig";
 import { useHere } from "../auth/project-access";
 import { BUILDS_ON_RUNNER, useRunsHere } from "../runs/runs-here";
 import { useReadiness } from "../runners/my-runner";
@@ -32,10 +32,10 @@ export function NewTestMenu({ projectId, onDescribe, onImport, onMade, variant =
     // Runners mode (round 52): the described test is built on the person's runner, so it needs one that is set up, online and new enough.
     const ready = useReadiness({ can: ["web", "plain"] });
     const runnersOnly = ready.mode === "runners";
-    // Scripts from test cases: the AI writes and saves them (both permissions in this project, as the server asks), with the project's AI model.
+    // Scripts from test cases: the AI writes and saves them (both permissions in this project, as the server asks), with the person's AI key.
     const here = useHere(projectId, project);
-    const aiReady = useProjectAiReady(projectId);
-    const fromCasesWhy = project.data && !mayGenerateScripts(project.data, here.may) ? NO_PERMISSION_FOR_SCRIPTS : generateScriptsBlock(project.data, aiReady);
+    const noAi = useAiBlock();
+    const fromCasesWhy = project.data && !mayGenerateScripts(project.data, here.may) ? NO_PERMISSION_FOR_SCRIPTS : generateScriptsBlock(project.data, noAi);
     // Every way in makes a test script (ai_studio.tests.write in this project): without it the menu is switched off with the reason.
     const writeWhy = here.why("ai_studio.tests.write");
     return (
@@ -44,10 +44,10 @@ export function NewTestMenu({ projectId, onDescribe, onImport, onMade, variant =
                 {(done) => (
                     <>
                         <MenuLabel>With help</MenuLabel>
-                        <MenuItem icon={PencilLine} description={webOnly ? PHONE : runnersOnly ? (ready.reason ?? BUILDS_ON_RUNNER) : !runsHere ? "Tests are switched off on this server, and the AI writes a described test inside a run." : "The AI writes the steps from your words. Uses the AI model."} disabled={webOnly || (runnersOnly ? !ready.ready : !runsHere)} onClick={() => { done(); onDescribe(); }}>
+                        <MenuItem icon={PencilLine} description={webOnly ? PHONE : runnersOnly ? (ready.reason ?? BUILDS_ON_RUNNER) : !runsHere ? "Tests are switched off on this server, and the AI writes a described test inside a run." : "The AI writes the steps from your words. Uses your AI key."} disabled={webOnly || (runnersOnly ? !ready.ready : !runsHere)} onClick={() => { done(); onDescribe(); }}>
                             Describe it
                         </MenuItem>
-                        <MenuItem icon={Sparkles} description={fromCasesWhy ?? "The AI writes a script for each Automated test case you choose. Uses the AI model."} disabled={!!fromCasesWhy} onClick={() => { done(); setDialog("cases"); }}>
+                        <MenuItem icon={Sparkles} description={fromCasesWhy ?? "The AI writes a script for each Automated test case you choose. Uses your AI key."} disabled={!!fromCasesWhy} onClick={() => { done(); setDialog("cases"); }}>
                             Generate from test cases
                         </MenuItem>
                         <MenuLabel>By hand</MenuLabel>

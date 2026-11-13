@@ -729,6 +729,7 @@ CREATE TABLE ai_usage (
     billing_organization_id TEXT,
     cache_read_tokens BIGINT NOT NULL DEFAULT 0,
     cache_write_tokens BIGINT NOT NULL DEFAULT 0,
+    billing_person_id TEXT,
     PRIMARY KEY (job_id, purpose, model, day)
 );
 CREATE INDEX idx_ai_usage_billing ON ai_usage (billing_owner, day);
@@ -1509,19 +1510,28 @@ CREATE TABLE ai_configurations (
     last_validated_at TEXT,
     created_by TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    owner_person_id TEXT
 );
 CREATE INDEX idx_ai_configurations_owner ON ai_configurations (owner_kind, organization_id);
 CREATE INDEX idx_ai_configurations_project ON ai_configurations (project_id);
+CREATE INDEX idx_ai_configurations_person ON ai_configurations (owner_person_id);
 
-CREATE TABLE project_ai_settings (
-    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-    mode TEXT NOT NULL,
-    configuration_id TEXT REFERENCES ai_configurations(id) ON DELETE SET NULL,
-    updated_by TEXT,
+CREATE TABLE ai_key_assignees (
+    key_id TEXT NOT NULL REFERENCES ai_configurations(id) ON DELETE CASCADE,
+    person_id TEXT NOT NULL,
+    assigned_by TEXT,
+    assigned_at TEXT NOT NULL,
+    PRIMARY KEY (key_id, person_id)
+);
+CREATE INDEX idx_ai_key_assignees_person ON ai_key_assignees (person_id);
+
+CREATE TABLE ai_key_choices (
+    person_id TEXT PRIMARY KEY,
+    key_id TEXT NOT NULL REFERENCES ai_configurations(id) ON DELETE CASCADE,
     updated_at TEXT NOT NULL
 );
-CREATE INDEX idx_project_ai_configuration ON project_ai_settings (configuration_id);
+CREATE INDEX idx_ai_key_choices_key ON ai_key_choices (key_id);
 
 CREATE TABLE objective_runs (
     id TEXT PRIMARY KEY,

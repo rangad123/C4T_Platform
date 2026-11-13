@@ -47,7 +47,7 @@ describe("status language", () => {
 
 describe("errors", () => {
     it("translate raw engine errors into what / why / what to do", () => {
-        expect(friendlyError('No credentials for LLM provider "anthropic". Set ANTHROPIC_API_KEY').fix?.href).toBe("#/settings");
+        expect(friendlyError('No credentials for LLM provider "anthropic". Set ANTHROPIC_API_KEY').fix?.href).toBe("#/settings#ai-keys");
         expect(friendlyError("Authoring failed: Cannot connect to API: getaddrinfo ENOTFOUND openrouter.ai").title).toBe("We couldn’t reach the AI service");
         expect(friendlyError("Discovery found no loadable pages at https://x.test").title).toBe("We couldn’t access this application");
         expect(friendlyError("Cancelled").title).toBe("This run was stopped");
@@ -104,7 +104,7 @@ describe("cleanReason", () => {
         expect(cleanReason("2. Request succeeds — Error: expect(received).toBe(expected) // Object.is equality (automatic repair failed: Provider returned error)")).toBe(
             "2. Request succeeds — the result didn’t match what the test expected. An automatic fix was tried but didn’t work.",
         );
-        expect(cleanReason("Server error: GET /x returned 500 (automatic repair skipped: no LLM configured)")).toBe("Server error: GET /x returned 500. Automatic fixing isn’t available because the AI model isn’t set up.");
+        expect(cleanReason("Server error: GET /x returned 500 (automatic repair skipped: no LLM configured)")).toBe("Server error: GET /x returned 500. Automatic fixing isn’t available because there is no usable AI key.");
         expect(cleanReason("3. Click button — locator.click: Timeout 10000ms exceeded.")).toBe("3. Click button — the element couldn’t be found in time");
     });
 });

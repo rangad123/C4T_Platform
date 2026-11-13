@@ -40,7 +40,7 @@ export const workingOn = (mode: string | undefined, name: string | undefined): s
 /** Round 52: a scheduled exploration in runners mode runs on the runner of the person who made the schedule. */
 export const SCHEDULED_EXPLORE_ON = "Explores on the runner of the person who made this schedule. If that runner is offline when the schedule fires, the exploration waits for it.";
 /** Round 52: a described test and an agent run in runners mode work in a browser on the person's runner. */
-export const BUILDS_ON_RUNNER = "The AI writes the steps from your words and checks them in a browser on your runner. Uses the AI model.";
+export const BUILDS_ON_RUNNER = "The AI writes the steps from your words and checks them in a browser on your runner. Uses your AI key.";
 
 /** Before a run sends code scripts to the person's own computer. */
 export function codeScriptsNotice(authors: string[]): string {

@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { givePersonalKeys } from "./fixtures/ai-key.js";
 import { loadConfig } from "../src/config.js";
 import { CHECK_ON_DEVICE, phoneScriptPrompt, phoneScriptSystemPrompt, phoneSpecFrom, writePhoneCaseScript } from "../src/engine/authoring/case-phone-script.js";
 import { scriptTitleOf, type CaseForScript } from "../src/engine/authoring/case-script.js";
@@ -227,6 +228,8 @@ beforeAll(async () => {
     const control = accessControlOf(app);
     const e = control.users.create({ email: "erin@example.com", name: "Erin", role: "editor" });
     editor = control.users.createToken(e.id, { name: "t", role: "editor" }).token;
+    // A signed-in person uses their own key on the stand-in provider (round 57: never the server's key).
+    await givePersonalKeys(platform, [e.id], { baseUrl: `${fake.url}/openai/v1`, model: MODEL });
     const v = control.users.create({ email: "vic@example.com", name: "Vic", role: "viewer" });
     viewer = control.users.createToken(v.id, { name: "t", role: "viewer" }).token;
 }, 60_000);

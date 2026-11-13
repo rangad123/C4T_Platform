@@ -235,8 +235,13 @@ export function jobOwnerId(options: { startedBy?: unknown }): string | null {
     if (!s || typeof s !== "object") return null;
     if (s.kind === "user") return typeof s.id === "string" ? s.id : null;
     if (s.kind === "open") return OPEN_OWNER_ID;
-    if (s.kind === "schedule" || s.kind === "trigger") return typeof s.ownerId === "string" ? s.ownerId : null;
+    if (s.kind === "schedule" || s.kind === "trigger") return typeof s.ownerId === "string" && s.ownerId !== ACCESS_KEY_OWNER ? s.ownerId : null;
     return null;
+}
+
+/** Who made a schedule or a deploy trigger: the person (ownerIdOfActor), or ACCESS_KEY_OWNER for the shared access key. */
+export function makerIdOfActor(actor: { kind: string; id?: string | undefined }): string | null {
+    return actor.kind === "key" ? ACCESS_KEY_OWNER : ownerIdOfActor(actor);
 }
 
 /** The owner a person acting now stands for: a person (session or own API token) by their id, the open server as OPEN_OWNER_ID; else null. */
@@ -248,6 +253,13 @@ export function ownerIdOfActor(actor: { kind: string; id?: string | undefined })
 
 /** The owner of everything done on a server in open mode (no accounts): the open server acts as one person. */
 export const OPEN_OWNER_ID = "open";
+/**
+ * The maker of a schedule or a deploy trigger made with the shared access key (API_KEY): no person, so no runner (jobOwnerId says null), but
+ * their AI work uses the server's own key, as the access key's does (ai-config.ts).
+ */
+export const ACCESS_KEY_OWNER = "access-key";
+/** A schedule's or trigger's maker as a person whose runner runs its work: the shared access key is none. */
+export const runnerOwnerOf = (makerId: string | null | undefined): string | null => (makerId && makerId !== ACCESS_KEY_OWNER ? makerId : null);
 
 /** Enrollment codes: what the website makes, the agent trades once for its credential (POST /api/agent/enroll). */
 export { ENROLLMENT_CODE_PREFIX };

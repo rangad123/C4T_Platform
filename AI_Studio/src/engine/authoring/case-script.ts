@@ -16,7 +16,7 @@ const MAX_CASE_CHARS = 6000;
 const MAX_ANSWER_CHARS = 20_000;
 
 export const NO_MODEL_FOR_SCRIPTS =
-    "The AI model isn’t set up yet. Writing test scripts from test cases needs access to an AI model. A project admin can set one up in Settings, AI configuration, then try again. You can still write test scripts by hand.";
+    "The AI model isn’t set up yet. Writing test scripts from test cases needs access to an AI model. Add your own AI key in Settings, AI keys, or ask an admin to assign one, then try again. You can still write test scripts by hand.";
 
 export interface CaseForScript {
     ref: string;

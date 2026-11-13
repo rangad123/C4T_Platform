@@ -8,7 +8,7 @@ import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
-import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { useAiBlock } from "../aiconfig/aiconfig";
 import { AiSuites, RequirementSuites } from "../suites/GenerateSuites";
 import { SuiteDetail } from "../suites/SuiteDetail";
 import { runResult, type Suite, type SuiteList } from "../suites/suites";
@@ -33,7 +33,8 @@ function SuiteIndex({ id }: { id: string }) {
     const canWrite = !project.data?.access || project.data.access.permissions.includes("ai_studio.tests.write");
     // The AI's proposal uses the AI and is there to be saved: both permissions, as the server asks.
     const canGenerate = canWrite && (!project.data?.access || project.data.access.permissions.includes("ai_studio.tests.generate"));
-    const aiReady = useProjectAiReady(id);
+    const noAi = useAiBlock();
+    const aiReady = !noAi;
     const runnersOnly = useExecutionMode() === "runners";
     const [adding, setAdding] = useState(false);
     /** "Generate suites": by requirement (no AI) or using AI, shown in the card until closed. */
@@ -62,10 +63,10 @@ function SuiteIndex({ id }: { id: string }) {
                             !canGenerate
                                 ? "Needs permission to use the AI to write tests."
                                 : !aiReady
-                                  ? "Needs an AI model. A project admin can set one up in Settings, AI configuration."
+                                  ? noAi
                                   : full
                                     ? `A project can have up to ${data.limits.suitesPerProject} suites.`
-                                    : "The AI proposes suites; you check and edit them before anything is saved. Uses the AI model."
+                                    : "The AI proposes suites; you check and edit them before anything is saved. Uses your AI key."
                         }
                         onClick={() => {
                             close();

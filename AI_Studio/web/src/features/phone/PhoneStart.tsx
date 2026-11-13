@@ -1,4 +1,4 @@
-import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { useAiBlock } from "../aiconfig/aiconfig";
 import { Smartphone, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type ProjectDetail } from "../../api";
@@ -26,7 +26,8 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     const runnersOnly = executionModeOf(config) === "runners";
     const onRunner = runnersOnly || runner.data?.runOn === "agent";
     const me = useMyRunner(15_000, onRunner);
-    const aiReady = useProjectAiReady(projectId);
+    const noAi = useAiBlock();
+    const aiReady = !noAi;
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [busy, setBusy] = useState(false);
@@ -123,8 +124,8 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
                 )}
             </div>
             {aiMissing && (
-                <Callout tone="warning" title="The AI model isn’t set up" actions={<LinkButton href={routes.settings}>Open Settings</LinkButton>}>
-                    {AI_MISSING}
+                <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton href={routes.aiKeys}>Open AI keys</LinkButton>}>
+                    {AI_MISSING} {noAi}
                 </Callout>
             )}
 

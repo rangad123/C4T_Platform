@@ -1,3 +1,4 @@
+import { runnerOwnerOf } from "./agent-store.js";
 /**
  * Running a suite a person built. Nothing here is a new way of running tests: a suite run is the same validation job "run these
  * tests" queues (or the same environment job), for exactly the suite's tests in the suite's order, with the suite's settings.
@@ -154,7 +155,7 @@ export async function startSuiteForSchedule(p: Platform, s: Schedule): Promise<J
     if (!isAppUri(url)) await assertRunTarget(s.projectId, url);
     const settings = suite.settings;
     const shape = settings.environment ? "environment" : "validate";
-    const allowed = new Set(await runnableTestIds(repo, s.projectId, shape, s.createdBy ?? null));
+    const allowed = new Set(await runnableTestIds(repo, s.projectId, shape, runnerOwnerOf(s.createdBy)));
     const chosen = await chooseVersionsToRun(repo, s.projectId, await suiteTests(repo, store, suite));
     const testIds = chosen.run.filter((t) => allowed.has(t.id)).map((t) => t.id);
     if (testIds.length === 0) throw new Error(`The suite “${suite.name}” has no tests that can run automatically here.`);

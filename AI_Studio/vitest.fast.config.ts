@@ -50,6 +50,7 @@ export default defineConfig({
             "tests/agent-safety-unit.test.ts",
             "tests/requirements-api.test.ts",
             "tests/ai-config-api.test.ts",
+            "tests/ai-keys-migration.test.ts",
             "tests/testing-agents.test.ts",
             "tests/project-basics.test.ts",
             "tests/shared-integrations.test.ts",

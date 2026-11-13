@@ -1,4 +1,4 @@
-import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { useAiBlock } from "../aiconfig/aiconfig";
 import { PencilLine } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
@@ -32,7 +32,8 @@ interface Props {
 export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, onDone }: Props) {
     const area = useRef<HTMLTextAreaElement>(null);
     const config = useConfig();
-    const aiReady = useProjectAiReady(projectId);
+    const noAi = useAiBlock();
+    const aiReady = !noAi;
     const environments = useFetch<{ environments: Environment[] }>(`/projects/${projectId}/environments`);
     const [text, setText] = useState(rewrite?.description ?? "");
     const [environment, setEnvironment] = useState("");
@@ -119,11 +120,11 @@ export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, 
                             : "Describe what the test should do, in your own words. We open the application in a real browser, do it step by step, keep the steps that work, and run the finished test."}
                     </p>
                     <p className="t-meta" data-testid="ai-note">
-                        Uses the AI model. It decides each step from what it sees on the page, then saves the test and runs it. You can edit or delete the test afterwards.
+                        Uses your AI key. It decides each step from what it sees on the page, then saves the test and runs it. You can edit or delete the test afterwards.
                     </p>
                     {modelMissing && (
-                        <Callout tone="warning" title="The AI model isn’t set up yet" actions={<LinkButton size="sm" href={routes.settings}>Open settings</LinkButton>}>
-                            Writing a test from a sentence needs access to an AI model. Add your API key in the server settings, then come back.
+                        <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.settings}>Open settings</LinkButton>}>
+                            Writing a test from a sentence uses your AI key. {noAi}
                         </Callout>
                     )}
                     {busy && !modelMissing && <Callout tone="info" title="Another job is running for this project">You can write a test when it has finished.</Callout>}

@@ -145,7 +145,7 @@ export function setupItems(f: SetupFacts): SetupItem[] {
         items.push({ key: "ios-runner", ok: f.canRunIos, text: f.canRunIos ? "A runner can run iOS tests." : "iOS tests need a runner on a Mac with Xcode." });
     }
     if (testingModes.includes("agent"))
-        items.push({ key: "ai-model", ok: f.aiConfigured, text: f.aiConfigured ? "An AI model is set up." : "Agent mode needs an AI model. Set one up in Settings." });
+        items.push({ key: "ai-model", ok: f.aiConfigured, text: f.aiConfigured ? "Your AI key is set up." : "Agent mode needs your AI key. Add your own in Settings, AI keys, or ask an admin to assign one." });
     const r = f.runner;
     items.push(
         !f.runsHere

@@ -5,14 +5,14 @@ import { Button, Callout, ListSkeleton } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { describeApiError } from "../../lib/labels";
 import { draftNameProblem, moveScript, requirementPlanLine, type RequirementSuitesAnswer, type SuiteProposal } from "./suites";
+import { NO_AI_KEY } from "../aiconfig/aiconfig";
 
 /**
  * "Generate suites" on the Test suites page (src/platform/routes/suites.ts): by requirement (no AI; it says what it will make before it
  * makes anything) and using AI (the AI proposes suites, the person edits and approves them, and only then are they saved).
  */
 
-const MODEL_MISSING = "The AI model isn’t set up yet. A project admin can set one up in Settings, AI configuration, then try again. You can still generate suites by requirement or make them by hand.";
-const errorWords = (e: unknown) => (e instanceof ApiError && (e.details as { modelMissing?: boolean } | undefined)?.modelMissing ? MODEL_MISSING : describeApiError(e));
+const errorWords = (e: unknown) => (e instanceof ApiError && (e.details as { modelMissing?: boolean } | undefined)?.modelMissing ? `${describeApiError(e) || NO_AI_KEY} You can still generate suites by requirement or make them by hand.` : describeApiError(e));
 
 type ReqState = { step: "checking" } | { step: "confirm"; plan: RequirementSuitesAnswer } | { step: "saving"; plan: RequirementSuitesAnswer } | { step: "done"; answer: RequirementSuitesAnswer } | { step: "failed"; error: string };
 

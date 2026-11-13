@@ -16,7 +16,8 @@ import { classifyLlmError, describeLlmError } from "../../engine/llm/errors.js";
 import { JobMeter } from "../../engine/llm/metered.js";
 import { EXTRA_VARIANT_IDS } from "../../engine/validation/variants.js";
 import { getAgentServices } from "../agent-services.js";
-import { projectLlm } from "../ai-config.js";
+import { aiOwnerOfActor, personLlm } from "../ai-config.js";
+import { currentActor } from "../auth/actor.js";
 import { assertHoldsHere } from "../auth/access.js";
 import { actorLabel } from "../auth/actor.js";
 import { PRODUCTION_CONFIRM_MESSAGE } from "../environment-run.js";
@@ -446,7 +447,7 @@ export function registerSuiteRoutes(ctx: RouteCtx): void {
         const room = SUITE_LIMITS.suitesPerProject - existing.length;
         if (room <= 0) throw new HttpError(409, `A project can have up to ${SUITE_LIMITS.suitesPerProject} suites. Delete some before making more.`);
         // The project's AI and who pays for it (ai-config.ts), as the other AI routes do.
-        const { llm, billing, blocked } = await projectLlm(p, pid);
+        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_SUITES, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         if (aiSkipReason(usage, pid)) throw new HttpError(409, "The AI token limit was reached, so the AI cannot propose suites now. You can still make suites by requirement or by hand.");

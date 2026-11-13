@@ -2,7 +2,6 @@ import { Bot, ChevronRight, FolderKanban, LayoutDashboard, Library, Menu, Plug, 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import crowd4testMark from "../assets/crowd4test-mark.png";
 import { useEmbedded } from "../lib/embedded";
-import { useConfig } from "../lib/hooks";
 import { HelpButton, HelpNavItem } from "../features/guide/HelpButton";
 import { useHelp } from "../features/guide/HelpContext";
 import { DOCK_QUERY, HelpPanel } from "../features/guide/HelpPanel";
@@ -12,6 +11,7 @@ import { Button } from "./ui";
 import { AccountChip } from "../features/auth/AccountChip";
 import { SIDE_WORDS, sideOf, useCan } from "../features/auth/permissions";
 import { useAuth } from "../features/auth/auth";
+import { aiReadyOf, useMyAi } from "../features/aiconfig/aiconfig";
 
 export interface PageMeta {
     crumbs: Array<{ label: string; href?: string }>;
@@ -35,7 +35,11 @@ export function usePage(meta: PageMeta): void {
 export function Shell({ children, routeKey }: { children: ReactNode; routeKey: string }) {
     const [meta, setMeta] = useState<PageMeta>({ crumbs: [], nav: "projects" });
     const [open, setOpen] = useState(false);
-    const config = useConfig();
+    const ai = useMyAi();
+    const myAi = ai.data;
+    // A refusal or an error is "not set up", never a sign that keeps checking.
+    const aiReady = ai.error && !myAi ? false : aiReadyOf(myAi);
+    const aiTitle = myAi?.openServer ? `${myAi.openServer.provider} · ${myAi.openServer.model}` : myAi?.chosen ? `${myAi.chosen.label} · ${myAi.chosen.model}` : undefined;
     const help = useHelp();
     // Wide screens keep the Help panel beside the page; the page makes room for it.
     const docked = useMedia(DOCK_QUERY) && help.open;
@@ -80,30 +84,16 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
                     {/* Round 37: Security assessment is no longer in the left panel. Its pages stay: a project that includes it has
                         a Security assessment tab, and #/security still lists those projects. */}
                     <div className="nav-label">System</div>
-                    {/* Settings: also for anyone who may run tests, who sets up their runner there. */}
-                    {(can("ai_studio.platform.settings") || can("ai_studio.usage.view") || can("ai_studio.tests.run") || can("ai_studio.runners.manage")) && item(routes.settings, "Settings", Settings, "settings", "nav-settings")}
+                    {/* Settings: also for anyone who may run tests or use the AI: their runner and their AI keys are there. */}
+                    {(can("ai_studio.platform.settings") || can("ai_studio.usage.view") || can("ai_studio.tests.run") || can("ai_studio.runners.manage") || can("ai_studio.tests.generate") || can("ai_studio.agent.run")) && item(routes.settings, "Settings", Settings, "settings", "nav-settings")}
                     <HelpNavItem />
                     <div className="sidebar-foot">
                         <AccountChip />
-                        {/* The AI's state; it opens Settings only for people who may change it. */}
-                        {(() => {
-                            const body = (
-                                <>
-                                    <span className={`dot ${config?.llm.configured ? "ok" : "off"}`} />
-                                    {config ? (config.llm.configured ? "AI connected" : "AI not set up") : "Checking AI…"}
-                                </>
-                            );
-                            const title = config ? `${config.llm.provider} · ${config.llm.model}` : undefined;
-                            return can("ai_studio.platform.settings") ? (
-                                <a className="ai-chip" href={routes.settings} title={title}>
-                                    {body}
-                                </a>
-                            ) : (
-                                <span className="ai-chip" title={title}>
-                                    {body}
-                                </span>
-                            );
-                        })()}
+                        {/* The person's AI: their chosen key (Settings, AI keys), which every AI job they start uses. */}
+                        <a className="ai-chip" href={routes.aiKeys} title={aiTitle} data-testid="ai-chip">
+                            <span className={`dot ${aiReady ? "ok" : "off"}`} />
+                            {aiReady === undefined ? "Checking AI…" : aiReady ? "AI connected" : "AI not set up"}
+                        </a>
                     </div>
                 </aside>
                 <div className="scrim" onClick={() => setOpen(false)} />

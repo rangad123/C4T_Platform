@@ -165,7 +165,7 @@ export interface ResilientOptions {
      */
     probe?: boolean;
     /**
-     * A key that is not the server's own (a project's AI configuration, platform/ai-config.ts). Its failures stay out of the server's model
+     * A key that is not the server's own (a person's or an organisational AI key, platform/ai-config.ts). Its failures stay out of the server's model
      * health, `explain` puts them in the project's words, and once the key is refused or out of credit the calls after it fail at once.
      */
     ownKey?: OwnKeyHandling;

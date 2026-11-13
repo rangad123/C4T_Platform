@@ -18,7 +18,7 @@ one runner they set up in **Settings, Your runner** ([runner-settings.md](runner
   `src/engine/discovery/browser.ts`), means hidden with one sentence in the job. Older runners ignore the field. See [runner-settings.md](runner-settings.md).
 - **The AI stays on the platform.** Each time the engine asks the model something, the runner sends the call to the platform
   (`POST /api/agent/tasks/:id/explore/llm`). The platform runs it on the job's own model, built as it would be for an exploration
-  run on the server: the project's AI setting, the routing to the fast model, the usage meter and the AI budgets. Only the answer
+  run on the server: the starter's chosen AI key, the routing to the fast model, the usage meter and the AI budgets. Only the answer
   goes back. Tools the AI calls, such as clicking a page, run on the runner. Since round 52 each call carries what it is for (planning,
   analysis, vision...), and the usage row says so, as on the server (anything else counts as authoring). When the runner's own agent
   loop moves a piece of work to the main model (it repeated itself, made no progress), the job's log says so once and the escalation is
@@ -84,9 +84,9 @@ refused with "Your runner “…” is too old to explore a phone app" (or "to r
 
 ## Who pays for the AI
 
-The same person or organisation as before. The exploration uses the project's AI. With the organisation's own key, that key is
-charged. With the AI Crowd4Test provides, Crowd4Test meters it and bills it, with the same budgets and limits. Your runner uses
-no AI account of its own, and nothing about AI is set up on your computer.
+The person who starts it: the exploration uses their chosen AI key ([ai-keys.md](ai-keys.md)), a schedule's or a trigger's that of the
+person who made it. On a personal key that person pays; on an organisational key Crowd4Test does, with the same budgets and limits. Your
+runner uses no AI account of its own, and nothing about AI is set up on your computer.
 
 ## What the page says
 

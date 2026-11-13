@@ -33,7 +33,7 @@ const TEXT: Record<Key, { title: string; help: string; hint: string; off: string
     },
 };
 
-/** Settings, inside "AI model": the two "no AI where it is not needed" switches (on by default), and where each choice comes from. */
+/** Settings, inside "How the AI works here": the two "no AI where it is not needed" switches (on by default), and where each choice comes from. */
 export function WithoutAiSetting() {
     const state = useFetch<WithoutAiAnswer>("/llm/without-ai");
     const [busy, setBusy] = useState(false);

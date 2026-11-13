@@ -15,8 +15,10 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { givePersonalKeys } from "./fixtures/ai-key.js";
+import { NO_AI_KEY } from "../src/platform/ai-config.js";
 import { loadConfig } from "../src/config.js";
-import { MAX_PROPOSED_SUITES, NO_MODEL_FOR_SUITES, proposalFromAnswer, proposalPrompt, requirementSuiteName, scriptsByRequirement, type ScriptForSuites } from "../src/engine/authoring/suite-plan.js";
+import { MAX_PROPOSED_SUITES, proposalFromAnswer, proposalPrompt, requirementSuiteName, scriptsByRequirement, type ScriptForSuites } from "../src/engine/authoring/suite-plan.js";
 import { defaultFramework } from "../src/engine/generators/index.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
@@ -109,6 +111,14 @@ beforeAll(async () => {
     platform = bootstrap(loadConfig({ DATA_DIR: dir, ...common, LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: `${fake.url}/openai/v1`, LLM_MODEL: "m", LLM_API_KEY: "fake-key" }));
     app = await buildServer(platform);
     await app.ready();
+    // Every person here uses their own key on the stand-in provider (round 57: never the server's key).
+    const people: string[] = [];
+    for (const t of Object.keys(ACCOUNTS)) {
+        const r = await app.inject({ method: "GET", url: "/api/auth/state", headers: { cookie: `c4t_access=${t}` } });
+        const id = (JSON.parse(r.body) as { me?: { id?: string } }).me?.id;
+        if (id) people.push(id);
+    }
+    await givePersonalKeys(platform, people, { baseUrl: `${fake.url}/openai/v1`, model: "m" });
     const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-suites-gen-bare-"));
     dirs.push(bareDir);
     const bp = bootstrap(loadConfig({ DATA_DIR: bareDir, ...common }));
@@ -325,7 +335,8 @@ describe("generate suites using AI", () => {
         bare.platform.repo.insertTest({ projectId: pid, suiteId: bare.platform.repo.getOrCreateSuite(pid, "X", "x"), jobId: null, spec, framework: defaultFramework("api"), validationStatus: "PENDING" });
         const noModel = await propose("t-all", pid, bare.app);
         expect(noModel.status).toBe(422);
-        expect(noModel.body.error).toBe(NO_MODEL_FOR_SUITES);
+        // A signed-in person without an AI key of their own is told that (round 57), not that the server has no model.
+        expect(noModel.body.error).toBe(NO_AI_KEY);
         expect(noModel.body.details).toEqual({ modelMissing: true });
     });
 

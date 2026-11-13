@@ -7,6 +7,8 @@
 import { getAgentServices } from "../../src/platform/agent-services.js";
 import { OPEN_OWNER_ID } from "../../src/platform/agent-store.js";
 import type { Platform } from "../../src/platform/bootstrap.js";
+import { randomUUID } from "node:crypto";
+import { secretBoxOf } from "../../src/platform/ai-config.js";
 import { UserStore } from "../../src/platform/user-store.js";
 
 let defaultOwner: string | undefined;
@@ -16,12 +18,20 @@ export const runOwner = (): string => defaultOwner ?? OPEN_OWNER_ID;
 
 /**
  * A person (an owner of this server) with a personal API token, for a test whose platform keeps its API_KEY: runs started with the server's
- * shared key have no owner (round 45), so the test acts as this person instead, and their runner takes the runs.
+ * shared key have no owner (round 45), so the test acts as this person instead, and their runner takes the runs. Since round 57 their AI work
+ * uses their own chosen key, never the server's: they get a personal key with the server's own AI settings (the tests' scripted model).
  */
 export function testPerson(p: Platform, role: "owner" | "editor" | "viewer" = "owner"): { id: string; token: string } {
     const users = new UserStore(p.db);
     const id = users.create({ email: `runner-owner-${Math.random().toString(36).slice(2, 8)}@people.example`, name: "Runner owner", role }).id;
     defaultOwner = id;
+    const keyId = randomUUID();
+    const now = new Date().toISOString();
+    p.db.run(
+        "INSERT INTO ai_configurations (id, owner_kind, owner_person_id, label, provider, model, base_url, key_enc, key_hint, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        keyId, "personal", id, "Test key", p.config.LLM_PROVIDER, p.config.LLM_MODEL ?? "test-model", p.config.LLM_BASE_URL ?? null, secretBoxOf(p.config).encrypt("test-person-key"), "-key", "working", "test", now, now,
+    );
+    p.db.run("INSERT INTO ai_key_choices (person_id, key_id, updated_at) VALUES (?,?,?)", id, keyId, now);
     return { id, token: users.createToken(id, { name: "test", role }).token };
 }
 

@@ -50,7 +50,7 @@ export function DashboardPage() {
             {can("ai_studio.usage.view") && (
                 <section className="card card-pad stack-sm" data-testid="dashboard-ai">
                     <h2 className="t-section">AI usage</h2>
-                    <p className="t-secondary">Usage and the estimated cost of every project, by model, by month and by who pays (Crowd4Test or the customer), with the limits that stop a run.</p>
+                    <p className="t-secondary">Usage and the estimated cost of every project, by model, by month and by which kind of key paid (organisational or personal), with the limits that stop a run.</p>
                     <div>
                         <LinkButton href={routes.settings}>Open AI usage</LinkButton>
                     </div>

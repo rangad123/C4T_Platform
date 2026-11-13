@@ -513,7 +513,8 @@ describe("who may do what", () => {
         expect(byTester.status).toBe(403);
         expect(JSON.stringify(byTester.body)).toContain(NOT_AN_APPROVER);
         expect((await as("t-ann", "POST", `${url(rid, mine)}/approvals/${asked.id}`, { approve: false })).status).toBe(200);
-        // A budget above the default is spending: refused for someone who may not see AI usage, whatever else they hold.
+        // A budget above the default is spending: refused for someone who may not see AI usage, whatever else they hold (with an AI key of their own).
+        expect((await as("t-tom", "POST", "/api/me/ai/keys", { label: "Tom's key", provider: "anthropic", model: "claude-x", apiKey: "sk-tom-own-key-12345678" })).status).toBe(201);
         const big = await as("t-tom", "POST", url("", mine), { objective: "Someone can open the shop", limits: { budgetTokens: 400_000 } });
         expect(big.status).toBe(403);
         expect(JSON.stringify(big.body)).toContain(BUDGET_NEEDS_USAGE);
@@ -557,13 +558,8 @@ describe("a server where runs cannot start", () => {
         expect(JSON.stringify(noModel.body)).toContain(AGENT_NO_MODEL);
         expect(hosted.db.all("SELECT id FROM objective_runs")).toHaveLength(0);
 
-        // The server has no key, but a project with its own can start.
+        // The shared access key uses the server's own key, and there is none: no project can start.
         expect((await ask("GET", `/api/projects/${id}/agent-runs`)).body.canStart).toEqual({ ok: false, reason: AGENT_NO_MODEL });
-        const own = await ask("POST", `/api/projects/${id}/ai/configurations`, { label: "Own key", provider: "openai-compatible", model: "stand-in", baseUrl: "https://provider.example/v1", apiKey: "own-project-key-1234" });
-        expect(own.status).toBe(201);
-        expect((await ask("PUT", `/api/projects/${id}/ai`, { mode: "own", configurationId: own.body.id })).status).toBe(200);
-        expect((await ask("GET", `/api/projects/${id}/agent-runs`)).body.canStart).toEqual({ ok: true });
-        // Another project on the same server still cannot.
         const other = (await ask("POST", "/api/projects", { name: "Hosted, no key" })).body.id as string;
         expect((await ask("GET", `/api/projects/${other}/agent-runs`)).body.canStart).toEqual({ ok: false, reason: AGENT_NO_MODEL });
         expect(hosted.db.all("SELECT id FROM generation_jobs")).toHaveLength(0);

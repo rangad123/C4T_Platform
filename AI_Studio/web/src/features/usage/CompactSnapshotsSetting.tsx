@@ -11,7 +11,7 @@ interface CompactSnapshotsAnswer {
     environment: boolean | null;
 }
 
-/** Settings, inside "AI model": the switch for smaller page snapshots (docs/features/smaller-snapshots.md). */
+/** Settings, inside "How the AI works here": the switch for smaller page snapshots (docs/features/smaller-snapshots.md). */
 export function CompactSnapshotsSetting() {
     const answer = useFetch<CompactSnapshotsAnswer>("/llm/compact-snapshots");
     const [busy, setBusy] = useState(false);

@@ -1,4 +1,4 @@
-import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { useAiBlock } from "../aiconfig/aiconfig";
 import { useState } from "react";
 import { Sparkles, X } from "lucide-react";
 import { api } from "../../api";
@@ -12,13 +12,14 @@ import { describeApiError } from "../../lib/labels";
 
 /**
  * Import requirements from pasted text or a document (.txt, .md, .docx, .pdf). The platform reads them first and shows what it
- * found; nothing is saved until the person chooses which to keep. Reading uses rules, no AI. With an AI model set up, the person
+ * found; nothing is saved until the person chooses which to keep. Reading uses rules, no AI. With a usable AI key, the person
  * may ask the AI to split and tidy them instead.
  */
 export function ImportPanel({ projectId, onCancel, onImported }: { projectId: string; onCancel: () => void; onImported: (summary: string) => void | Promise<void> }) {
     const config = useConfig();
     const can = useHere(projectId).may;
-    const aiReady = useProjectAiReady(projectId);
+    const noAi = useAiBlock();
+    const aiReady = !noAi;
     const [mode, setMode] = useState<"paste" | "file">("paste");
     const [text, setText] = useState("");
     const [file, setFile] = useState<File | null>(null);
@@ -108,7 +109,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
                         )}
                         <Button onClick={onCancel}>Cancel</Button>
                     </div>
-                    {!aiReady && config && <p className="hint">Reading with AI needs an AI model, and none is set up here. Reading without AI finds requirements by their ids, lists and “must” sentences.</p>}
+                    {noAi && config && <p className="hint">Reading with AI needs your AI key: {noAi} Reading without AI finds requirements by their ids, lists and “must” sentences.</p>}
                 </>
             ) : (
                 <>

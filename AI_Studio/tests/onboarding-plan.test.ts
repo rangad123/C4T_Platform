@@ -209,6 +209,9 @@ describe("explore first, create after the person has looked", () => {
 
     it("creates exactly the chosen tests from the stored exploration, without exploring again", async () => {
         const left = plan.ideas[1].id as string;
+        // The plan was someone else's: creating its tests records who creates them (their AI key and runner), never the plan's starter.
+        const planRow = platform.repo.getJob(planJob)!;
+        platform.db.run("UPDATE generation_jobs SET options_json = ? WHERE id = ?", JSON.stringify({ ...planRow.options, startedBy: { kind: "user", id: "someone-else" } }), planJob);
         const created = await call("POST", `/api/projects/${projectId}/plans/${planJob}/create`, {
             accessibility: false,
             healthChecks: false,
@@ -223,6 +226,9 @@ describe("explore first, create after the person has looked", () => {
         expect(job.fromPlan).toBe(planJob);
         expect(job.planOnly).toBeUndefined();
         expect(job.counters.scenariosPlanned).toBe(1);
+        const createdRow = platform.repo.getJob(created.body.jobId)!;
+        expect(createdRow.options.startedBy).toEqual({ kind: "open", id: null });
+        expect(JSON.stringify(platform.repo.getApplication(createdRow.applicationId)?.config ?? {})).not.toContain("someone-else");
 
         // Nothing was explored, understood or planned again.
         expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1 });

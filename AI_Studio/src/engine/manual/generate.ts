@@ -19,7 +19,7 @@ export const MAX_CASES_PER_REQUIREMENT = 8;
 const MAX_REQUIREMENT_CHARS = 6000;
 
 export const NO_MODEL_FOR_CASES =
-    "The AI model isn’t set up yet. Writing test cases from requirements needs access to an AI model. A project admin can set one up in Settings, AI configuration, then try again. You can still add test cases by hand.";
+    "The AI model isn’t set up yet. Writing test cases from requirements needs access to an AI model. Add your own AI key in Settings, AI keys, or ask an admin to assign one, then try again. You can still add test cases by hand.";
 
 export interface RequirementForCases {
     id: string;

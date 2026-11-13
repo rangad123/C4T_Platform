@@ -141,7 +141,7 @@ export class UsageStore {
     /** Add counts to the job's row for the day of `at` (created on first use). One statement, so processes never lose an update. */
     addUsage(d: UsageDelta): void {
         this.db.run(
-            `INSERT INTO ai_usage (job_id, project_id, purpose, model, day, calls, failed_calls, input_tokens, output_tokens, images, estimated_calls, cache_read_tokens, cache_write_tokens, billing_owner, billing_organization_id)
+            `INSERT INTO ai_usage (job_id, project_id, purpose, model, day, calls, failed_calls, input_tokens, output_tokens, images, estimated_calls, cache_read_tokens, cache_write_tokens, billing_owner, billing_person_id)
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(job_id, purpose, model, day) DO UPDATE SET
                 calls = calls + excluded.calls, failed_calls = failed_calls + excluded.failed_calls,
@@ -163,7 +163,7 @@ export class UsageStore {
             Math.round(d.cacheReadTokens ?? 0),
             Math.round(d.cacheWriteTokens ?? 0),
             d.billing?.owner ?? "crowd4test",
-            d.billing?.organizationId ?? null,
+            d.billing?.owner === "personal" ? (d.billing.personId ?? null) : null,
         );
     }
 
@@ -179,7 +179,7 @@ export class UsageStore {
 
     /**
      * Tokens used in a calendar month (UTC), for one project, or across projects (counted like `jobTokens`). Across projects means what
-     * Crowd4Test pays for: that total is what the platform's monthly limit protects, and a customer's own key is not part of it.
+     * Crowd4Test pays for: that total is what the platform's monthly limit protects, and a person's own key is not part of it.
      */
     monthTokens(month: string, projectId?: string): number {
         const { from, to } = monthBounds(month);
@@ -309,18 +309,14 @@ export class UsageStore {
 
     /**
      * The limits that apply to a project's jobs: the platform's monthly cap, the project's monthly cap, and the lower of the two per-job caps.
-     * A project on its own key spends its organisation's money, so only its own limits apply (ai-config-store.ts).
+     * Work on a person's own key spends their money, not Crowd4Test's, so the platform's monthly cap does not apply to it (ai-config.ts).
      */
-    capsFor(projectId: string): { caps: Caps; warnPercent: number } {
+    capsFor(projectId: string, billing?: UsageBilling): { caps: Caps; warnPercent: number } {
         const platform = this.platformBudget();
         const project = this.projectBudget(projectId);
-        if (this.onOwnKey(projectId)) return { caps: { month: null, project: project.monthlyTokens, job: project.jobTokens }, warnPercent: platform.warnPercent };
+        if (billing?.owner === "personal") return { caps: { month: null, project: project.monthlyTokens, job: project.jobTokens }, warnPercent: platform.warnPercent };
         const jobs = [platform.jobTokens, project.jobTokens].filter((v): v is number => v !== null);
         return { caps: { month: platform.monthlyTokens, project: project.monthlyTokens, job: jobs.length ? Math.min(...jobs) : null }, warnPercent: platform.warnPercent };
-    }
-
-    private onOwnKey(projectId: string): boolean {
-        return this.db.get("SELECT 1 AS x FROM project_ai_settings WHERE project_id = ? AND mode = 'own'", projectId) !== undefined;
     }
 
     /**
@@ -354,12 +350,15 @@ export class UsageStore {
     }
 }
 
+/** What usage pages show for the model of work a personal key paid for: nobody else may learn which model a person's own key uses. */
+export const PERSONAL_KEY_MODEL = "A personal key";
+
 /** One summed row; the cache counts are left out when zero, so rows without caching look as they did. */
 function usageRowOf(r: Record<string, any>): UsageRow {
-    const row: UsageRow = { day: r.day, projectId: r.project_id, purpose: r.purpose, model: r.model, calls: r.calls, failedCalls: r.failed, inputTokens: r.i, outputTokens: r.o, images: r.img, estimatedCalls: r.est };
+    const row: UsageRow = { day: r.day, projectId: r.project_id, purpose: r.purpose, model: r.billing_owner === "personal" ? PERSONAL_KEY_MODEL : r.model, calls: r.calls, failedCalls: r.failed, inputTokens: r.i, outputTokens: r.o, images: r.img, estimatedCalls: r.est };
     if (r.cr) row.cacheReadTokens = r.cr;
     if (r.cw) row.cacheWriteTokens = r.cw;
-    if (r.billing_owner === "organization") row.billingOwner = "organization";
+    if (r.billing_owner === "personal") row.billingOwner = "personal";
     return row;
 }
 

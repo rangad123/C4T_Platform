@@ -122,27 +122,25 @@ describe("1. a custom AI endpoint", () => {
         resetKeyTests();
         seen.length = 0;
         llmMode = "redirect";
-        const pid = await newProject("t-ann", "Shop");
-        const c = await as("t-ann", "POST", `/api/projects/${pid}/ai/configurations`, { label: "x", provider: "openai-compatible", model: "m", baseUrl: `http://127.0.0.1:${LLM_PORT}/v1`, apiKey: "sk-customer-secret-key-1234" });
+        const c = await as("t-ann", "POST", "/api/me/ai/keys", { label: "x", provider: "openai-compatible", model: "m", baseUrl: `http://127.0.0.1:${LLM_PORT}/v1`, apiKey: "sk-customer-secret-key-1234" });
         expect(c.status).toBe(201);
-        const t = await as("t-ann", "POST", `/api/ai-configurations/${c.body.id}/test`, {});
+        const t = await as("t-ann", "POST", `/api/me/ai/keys/${c.body.key.id}/test`, {});
         expect(t.status).toBe(200);
         expect(t.body.ok).toBe(false);
         expect(seen.some((s) => s.startsWith("internal"))).toBe(false);
         expect(t.text).not.toContain("ASIA-INTERNAL");
-        expect(t.body.configuration.statusNote).toMatch(/^(Key refused|Address not reachable|Provider busy|Unexpected answer)\./);
+        expect(t.body.key.statusNote).toMatch(/^(Key refused|Address not reachable|Provider busy|Unexpected answer)\./);
     });
 
     it("shows only the class of a failure, never the text the address answered", async () => {
         resetKeyTests();
         llmMode = "text";
-        const pid = await newProject("t-ann", "Shop two");
-        const c = await as("t-ann", "POST", `/api/projects/${pid}/ai/configurations`, { label: "y", provider: "openai-compatible", model: "m", baseUrl: `http://127.0.0.1:${LLM_PORT}/v1`, apiKey: "sk-customer-secret-key-5678" });
-        const t = await as("t-ann", "POST", `/api/ai-configurations/${c.body.id}/test`, {});
+        const c = await as("t-ann", "POST", "/api/me/ai/keys", { label: "y", provider: "openai-compatible", model: "m", baseUrl: `http://127.0.0.1:${LLM_PORT}/v1`, apiKey: "sk-customer-secret-key-5678" });
+        const t = await as("t-ann", "POST", `/api/me/ai/keys/${c.body.key.id}/test`, {});
         expect(t.body.ok).toBe(false);
         expect(t.text).not.toContain(ANSWER_TEXT);
         expect(t.body.message).toMatch(/^It did not work\. Unexpected answer\./);
-        expect(t.body.configuration.statusNote).toMatch(/^Unexpected answer\./);
+        expect(t.body.key.statusNote).toMatch(/^Unexpected answer\./);
     });
 
     it("with BLOCK_PRIVATE_TARGETS, refuses a private address at connection time, whatever the name resolved to before (DNS rebinding)", async () => {
@@ -273,15 +271,12 @@ describe("4 and 5. runner tokens", () => {
     });
 });
 
-describe("6. AI configurations across organisations", () => {
-    it("staff limited to some projects manage only those projects' organisations, and none of the platform's", async () => {
-        const pid = await newProject("t-ann", "Org A shop");
-        await as("t-sue", "GET", "/api/auth/state");
-        control().set(await personOf("t-sue"), { mode: "only", projects: [{ projectId: pid, role: "owner" }] });
+describe("6. organisational AI keys", () => {
+    it("a sub-admin holding the key and settings permissions still cannot manage them: only Crowd4Test admins do", async () => {
         const body = { label: "k", provider: "openai", model: "gpt-x", apiKey: "sk-staff-key-12345678" };
-        expect((await as("t-sue", "POST", "/api/ai-configurations", { ...body, owner: "organization", organizationId: "org-b" })).status).toBe(403);
-        expect((await as("t-sue", "POST", "/api/ai-configurations", { ...body, owner: "platform" })).status).toBe(403);
-        expect((await as("t-sue", "POST", "/api/ai-configurations", { ...body, owner: "organization", organizationId: "org-a" })).status).toBe(201);
+        expect((await as("t-sue", "POST", "/api/admin/ai-keys", body)).status).toBe(403);
+        expect((await as("t-sue", "GET", "/api/admin/ai-keys")).status).toBe(403);
+        expect((await as("t-ann", "POST", "/api/admin/ai-keys", body)).status).toBe(403);
     });
 });
 
@@ -298,7 +293,7 @@ describe("7. deleting a project", () => {
 });
 
 describe("8. caps", () => {
-    it("folders, AI configurations and comments stop at their limit with a plain 409", async () => {
+    it("folders, AI keys and comments stop at their limit with a plain 409", async () => {
         const pid = await newProject("t-zed", "Capped shop");
 
         const folders = new FolderStore(platform.db);
@@ -308,10 +303,11 @@ describe("8. caps", () => {
         expect(f.text).toMatch(/200 folders/);
 
         const configs = aiConfigStore({ sql: platform.sql, config: platform.config });
-        for (let i = 0; i < 20; i++) await configs.create({ label: `c${i}`, provider: "openai", model: "m", apiKey: "sk-cap-key-12345678", ownerKind: "organization", organizationId: "org-z", baseUrl: null, fastModel: null, createdBy: "test" } as never);
-        const c = await as("t-zed", "POST", `/api/projects/${pid}/ai/configurations`, { label: "one more", provider: "openai", model: "m", apiKey: "sk-cap-key-12345678" });
+        const zed = await personOf("t-zed");
+        for (let i = 0; i < 20; i++) await configs.create({ label: `c${i}`, provider: "openai", model: "m", apiKey: "sk-cap-key-12345678", kind: "personal", ownerPersonId: zed, baseUrl: null, fastModel: null, createdBy: "test" });
+        const c = await as("t-zed", "POST", "/api/me/ai/keys", { label: "one more", provider: "openai", model: "m", apiKey: "sk-cap-key-12345678" });
         expect(c.status).toBe(409);
-        expect(c.text).toMatch(/20 AI configurations/);
+        expect(c.text).toMatch(/at most 20 AI keys/);
 
         platform.repo.createApplication(pid, "http://127.0.0.1:9/", {});
         const spec = TestSpecSchema.parse({ testId: "WEB-001", title: "Capped test", kind: "web", category: "Smoke", priority: "high", steps: [{ action: "navigate", url: "/" }] });

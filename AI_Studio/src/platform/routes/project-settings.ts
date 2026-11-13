@@ -10,7 +10,7 @@
  * platform or mode turned off stays where it is and keeps showing. The linked Crowd4Test project is a reference only (D-27): it is
  * checked to belong to the project's organisation through Crowd4Test's service, and it grants nobody anything.
  */
-import { projectAiGate } from "../ai-config.js";
+import { aiGate, aiOwnerOfActor } from "../ai-config.js";
 import { z } from "zod";
 import { MobileTargetSchema } from "../../engine/mobile/target.js";
 import { isAppUri } from "../../engine/desktop/target.js";
@@ -133,7 +133,7 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
                 hasAndroidApp: Boolean(m?.appPackage || m?.apkPath),
                 hasIosApp: Boolean(m?.iosBundleId),
                 canRunIos: runner.canRunIos,
-                aiConfigured: (await projectAiGate(p, id)).ok,
+                aiConfigured: (await aiGate(p, aiOwnerOfActor(currentActor()))).ok,
                 runner: runner.runOn === "platform" ? { runOn: "platform" } : { runOn: "agent", online: agents.ownRunner(ownerIdOfActor(currentActor()), id)?.online ? 1 : 0 },
                 runsHere: runsCanStartHere(p).ok,
             }),

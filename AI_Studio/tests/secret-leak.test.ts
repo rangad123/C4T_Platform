@@ -237,11 +237,13 @@ describe("secrets never leave the encrypted store", () => {
         expect(notion.status).toBe(201);
         expect(notion.body.config).toMatchObject({ kind: "notion", titleProperty: "Name" });
         await call("PATCH", `/api/integrations/${notion.body.id}`, { token: SECRETS.notionToken });
-        const aiConfig = await call("POST", `/api/projects/${projectId}/ai/configurations`, { label: "Own key", provider: "anthropic", model: "stand-in", apiKey: SECRETS.aiKey });
+        const aiConfig = await call("POST", "/api/me/ai/keys", { label: "Own key", provider: "anthropic", model: "stand-in", apiKey: SECRETS.aiKey });
         expect(aiConfig.status).toBe(201);
-        expect(aiConfig.body.keyEnding).toBe("20e4");
-        await call("GET", `/api/projects/${projectId}/ai`);
-        await call("GET", "/api/ai-configurations");
+        expect(aiConfig.body.key.keyHint).toBe("20e4");
+        await call("GET", "/api/me/ai");
+        const orgKey = await call("POST", "/api/admin/ai-keys", { label: "Crowd4Test key", provider: "anthropic", model: "stand-in", apiKey: SECRETS.aiKey });
+        expect(orgKey.status).toBe(201);
+        await call("GET", "/api/admin/ai-keys");
         const sentry = await call("PUT", `/api/projects/${projectId}/sentry`, { organization: "acme", project: "shop", token: SECRETS.sentryToken, verify: false });
         expect(sentry.status).toBe(201);
         expect(sentry.body.connection).toMatchObject({ organization: "acme", project: "shop" });

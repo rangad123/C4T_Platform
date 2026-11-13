@@ -320,7 +320,7 @@ function StepCard({
 
             {s.type === "analyze" && (
                 <div className="rb-fields">
-                    <p className="t-secondary span">Looks at the application again with the settings of the last exploration. It uses the AI model. These two stay off unless you turn them on here.</p>
+                    <p className="t-secondary span">Looks at the application again with the settings of the last exploration. It uses the AI key of the person who starts it (for a schedule or a deploy trigger, its maker). These two stay off unless you turn them on here.</p>
                     <label className="check span">
                         <input type="checkbox" checked={s.allowMutating} onChange={(e) => onChange({ allowMutating: e.target.checked })} />
                         <span>

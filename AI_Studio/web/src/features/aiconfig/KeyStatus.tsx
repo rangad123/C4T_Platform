@@ -2,12 +2,12 @@ import { CircleCheck, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { ApiError, api } from "../../api";
 import { Badge, Button, Callout } from "../../components/ui";
-import { STATUS_WORDS, type AiConfiguration, type KeyTestAnswer } from "./aiconfig";
+import { STATUS_WORDS, type KeyTestAnswer, type KeyView } from "./aiconfig";
 
 const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-/** What is known about a key, and "Test this key": one minimal call, and the plain answer. Nothing here says it worked unless the call did. */
-export function KeyStatus({ configuration: c, onTested }: { configuration: AiConfiguration; onTested: () => Promise<unknown> }) {
+/** What is known about a key (never the key), and "Test this key": one minimal call, and the plain answer. Nothing here says it worked unless the call did. */
+export function KeyStatus({ keyView: c, testPath, onTested }: { keyView: KeyView; testPath: string; onTested: () => Promise<unknown> }) {
     const [busy, setBusy] = useState(false);
     const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
     const status = STATUS_WORDS[c.status];
@@ -15,7 +15,7 @@ export function KeyStatus({ configuration: c, onTested }: { configuration: AiCon
         setBusy(true);
         setResult(null);
         try {
-            const r = await api<KeyTestAnswer>(`/ai-configurations/${c.id}/test`, { method: "POST" });
+            const r = await api<KeyTestAnswer>(testPath, { method: "POST" });
             setResult({ ok: r.ok, message: r.message });
             await onTested();
         } catch (e) {
@@ -31,14 +31,14 @@ export function KeyStatus({ configuration: c, onTested }: { configuration: AiCon
                     {status.label}
                 </Badge>
                 <span className="t-secondary">
-                    {c.providerName}, <span className="mono">{c.model}</span>
+                    {c.providerWords}, <span className="mono">{c.model}</span>
                     {c.fastModel ? (
                         <>
                             {" "}
                             and <span className="mono">{c.fastModel}</span>
                         </>
                     ) : null}
-                    , key ending in <span className="mono">{c.keyEnding}</span>
+                    , key ending in <span className="mono">{c.keyHint}</span>
                 </span>
             </div>
             <p className="t-meta">{c.lastValidatedAt ? `Last tested ${when(c.lastValidatedAt)}.` : "Not tested since it was saved."}</p>

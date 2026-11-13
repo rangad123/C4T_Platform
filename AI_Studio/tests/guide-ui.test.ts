@@ -199,7 +199,6 @@ function everyPlace(): Array<[string, PlaceId]> {
         [routes.projectSettings(P(), "storage"), "setup-storage"],
         [routes.projectSettings(P(), "general"), "settings-general"],
         [routes.projectSettings(P(), "members"), "settings-members"],
-        [routes.projectSettings(P(), "ai"), "settings-ai"],
         [routes.requirements(P()), "requirements"],
         [routes.suites(P()), "suites"],
         [routes.scripts(P()), "scripts"],

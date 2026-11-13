@@ -74,8 +74,18 @@ export class RepoSink implements GenerationSink {
 
     nextTestKey: GenerationSink["nextTestKey"] = (prefix) => this.writes.run(() => this.repo.db.tx(() => this.repo.nextTestKey(this.job.projectId, prefix)));
 
-    createTest: GenerationSink["createTest"] = ({ spec, framework, validation, reason, meta }) =>
+    /**
+     * What a test's provenance says the model was: set when the job runs on a person's own key, whose model nobody else may learn (the same
+     * placeholder as the usage pages, usage-store.ts). Unset: the model's own name.
+     */
+    modelShownAs: string | undefined;
+    private shown<M extends Record<string, unknown> | undefined>(meta: M): M {
+        return this.modelShownAs && meta && "model" in meta ? ({ ...meta, model: this.modelShownAs } as M) : meta;
+    }
+
+    createTest: GenerationSink["createTest"] = ({ spec, framework, validation, reason, meta: given }) =>
         this.writes.run(() => {
+            const meta = this.shown(given);
             const slug = slugify(spec.category);
             const suiteId = this.repo.getOrCreateSuite(this.job.projectId, spec.category, slug);
             const id = this.repo.insertTest({ projectId: this.job.projectId, suiteId, jobId: this.job.id, spec, framework, validationStatus: validation, meta, versionSource: this.versionSource });
@@ -98,7 +108,7 @@ export class RepoSink implements GenerationSink {
             }
             // A test that ran its approved version while a newer draft waits: the run's steps are never written over the draft.
             const spec = this.keepSteps.has(h.id) ? undefined : patch.spec;
-            this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: patch.reason, attempts: patch.attempts, meta: patch.meta, versionSource: this.versionSource });
+            this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: patch.reason, attempts: patch.attempts, meta: this.shown(patch.meta), versionSource: this.versionSource });
         });
 
     /** Tests whose steps this run must not write back (set by the job runner from the versions it pinned, review-store.ts). */

@@ -317,6 +317,8 @@ More: [storage-and-backup.md](features/storage-and-backup.md).
 
 ## 12. AI usage limits
 
+**Settings → AI keys** ([ai-keys.md](features/ai-keys.md)): every person uses one chosen key for all their AI work, in any project. Crowd4Test admins add organisational keys there and assign each to particular admins and sub-admins; anyone who uses AI can add a personal key of their own. A signed-in person with no key gets no AI: the server's own key in `.env` is used only on a server without accounts and for the shared access key.
+
 **Settings → AI usage** shows tokens (the units the AI service bills in) used this month by day, project, purpose and model. Set a monthly limit for the whole platform, a monthly limit per project and a limit per job in the page, or use `AI_MONTHLY_TOKEN_LIMIT` and `AI_JOB_TOKEN_LIMIT` as defaults (limits set in the page take precedence). When a limit is reached the job stops cleanly with a plain message, keeps the tests it already made and still runs them. A scheduled exploration is skipped. Enter a price per model to see a cost (no prices are built in). Only counts are stored, never prompts or answers. More: [ai-usage-budgets.md](features/ai-usage-budgets.md).
 
 ## 13. Plug-in frameworks

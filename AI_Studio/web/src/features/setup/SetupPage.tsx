@@ -20,7 +20,6 @@ import { type ProjectStorage as ProjectStorageData } from "../storage/storage";
 import { TestingTypeSetting } from "../security/TestingType";
 import { ExploreLevelSetting } from "../explore/ExploreLevel";
 import { NotesCard } from "../notes/NotesCard";
-import { ProjectAiSettings } from "../aiconfig/ProjectAiSettings";
 import { MembersPanel } from "../workspace/MembersPanel";
 import { ReviewPolicyCard } from "../review/ReviewCards";
 import { ProjectGeneral } from "../workspace/ProjectGeneral";
@@ -137,7 +136,6 @@ export function SetupPage({ id }: { id: string }) {
                 </div>
             ),
         },
-        { key: "ai", label: "AI configuration", hint: "Who pays, which key this project uses, and its budget", render: () => <ProjectAiSettings id={id} /> },
         { key: "frameworks", label: "Frameworks", hint: "Which test technologies run and their limits", render: () => <FrameworksSetting id={id} /> },
         { key: "mobile", label: "Mobile app", hint: "The app your phone tests run against", render: () => <MobileSetting id={id} /> },
         { key: "alerts", label: "Alerts", hint: "Who is told when a run finds something", render: () => <AlertsPanel projectId={id} reloadKey={0} /> },

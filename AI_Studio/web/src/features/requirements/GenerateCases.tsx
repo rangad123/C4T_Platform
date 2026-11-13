@@ -4,7 +4,7 @@ import { api, ApiError } from "../../api";
 import { Button, Callout, LinkButton } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { routes } from "../../lib/router";
-import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { useAiBlock } from "../aiconfig/aiconfig";
 import "../manual/manual.css";
 import type { GenerateCasesResult } from "./requirements";
 import { describeApiError } from "../../lib/labels";
@@ -63,7 +63,7 @@ export function GenerateOutcome({ projectId, state, onClose }: { projectId: stri
         if (state.step === "done" || state.step === "error") ref.current?.focus({ preventScroll: true });
         if (state.step !== "idle") ref.current?.scrollIntoView({ block: "nearest" });
     }, [state.step]);
-    // A danger callout is an alert by itself; the warning one (no AI model) is made one here.
+    // A danger callout is an alert by itself; the warning one (no AI key) is made one here.
     const role = state.step === "error" ? (state.modelMissing ? "alert" : undefined) : "status";
     return (
         <div ref={ref} tabIndex={-1} role={role} aria-live={role === "status" ? "polite" : undefined} className="gen-outcome" data-testid="generate-cases-outcome">
@@ -116,11 +116,11 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 
 /**
  * The card under the requirements of a code-based project: Generate test cases using AI. It says before the click when the project
- * has no AI model, and shows the outcome (`outcome`) in itself, where the person clicked.
+ * has no usable AI key, and shows the outcome (`outcome`) in itself, where the person clicked.
  */
 export function GenerateCasesCard({ projectId, state, choosing, chosenCount, hasRequirements, onStart, onGenerate, onCancel, outcome }: { projectId: string; state: GenerateState; choosing: boolean; chosenCount: number; hasRequirements: boolean; onStart: () => void; onGenerate: () => void; onCancel: () => void; outcome?: ReactNode }) {
-    const aiReady = useProjectAiReady(projectId);
-    const noAi = aiReady ? undefined : "Needs an AI model. A project admin can set one up in Settings, AI configuration.";
+    const noAi = useAiBlock();
+    const aiReady = !noAi;
     return (
         <section className="card card-pad ai-card" aria-labelledby="gen-cases-title" data-testid="generate-cases">
             <span className="ai-tile" aria-hidden>
@@ -133,7 +133,7 @@ export function GenerateCasesCard({ projectId, state, choosing, chosenCount, has
                 <p className="t-secondary">Automatically create test cases from your added requirements using AI.</p>
                 {!aiReady && (
                     <p className="t-meta" data-testid="generate-cases-no-ai">
-                        The AI model isn’t set up for this project, so test cases cannot be generated here. You can still add them by hand in <a href={routes.cases(projectId)}>Test cases</a>.
+                        {noAi} You can still add test cases by hand in <a href={routes.cases(projectId)}>Test cases</a>.
                     </p>
                 )}
                 {!hasRequirements ? (

@@ -43,7 +43,7 @@ const seconds = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed
 const timeOf = (iso: string) => new Date(iso).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
 const entryText = (f: FallbackModel, primary: string) => (f.provider === primary ? f.model : `${f.provider}:${f.model}`);
 
-/** Settings, inside "AI model": recent health of each model, the connection check, and the fallback models. */
+/** Settings, inside "How the AI works here": recent health of each model, the connection check, and the fallback models. */
 export function ModelHealth() {
     const health = useFetch<HealthAnswer>("/llm/health");
     const [checking, setChecking] = useState(false);

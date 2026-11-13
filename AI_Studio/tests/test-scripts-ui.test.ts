@@ -24,6 +24,9 @@ import { ManualCaseStore } from "../src/platform/manual-case-store.js";
 import { RequirementStore } from "../src/platform/requirement-store.js";
 import { ReviewStore } from "../src/platform/review-store.js";
 import { NO_APP_FOR_SCRIPTS } from "../src/platform/routes/generate-scripts.js";
+
+/** The server's sentence for a person without a usable AI key (round 57). */
+const NO_AI_KEY = "You have no AI key. Add your own key in Settings, AI keys, or ask an admin to assign an organisational key.";
 import { buildServer } from "../src/platform/server.js";
 
 const PORT = 8798;
@@ -214,11 +217,11 @@ describe("tests switched off on this server", () => {
     });
 });
 
-describe("Generate test cases without an AI model", () => {
+describe("Generate test cases without an AI key", () => {
     it("says so on the card before the click", async () => {
         await page.goto(`${BASE}/#/projects/${code}/requirements`);
         const card = page.getByTestId("generate-cases");
-        await pwExpect(card.getByTestId("generate-cases-no-ai")).toContainText("The AI model isn’t set up for this project, so test cases cannot be generated here.");
+        await pwExpect(card.getByTestId("generate-cases-no-ai")).toContainText(`${NO_AI_KEY} You can still add test cases by hand`);
         await pwExpect(card.getByRole("button", { name: "Generate test cases" })).toBeDisabled();
         if (process.env.UI_REVIEW_SHOTS) await card.screenshot({ path: path.join(process.env.UI_REVIEW_SHOTS, "generate-cases-no-ai.png") });
     });
@@ -248,7 +251,7 @@ describe("a phone project", () => {
 });
 
 describe("Generate test scripts using AI", () => {
-    it("is under the Test cases list when that page renders it, and says plainly that it needs an AI model here", async () => {
+    it("is under the Test cases list when that page renders it, and says plainly that it needs an AI key here", async () => {
         await page.goto(`${BASE}/#/projects/${code}/tests`);
         await pwExpect(page.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible();
         const card = page.getByTestId("generate-scripts");
@@ -260,16 +263,16 @@ describe("Generate test scripts using AI", () => {
         await pwExpect(card.getByRole("heading", { name: "Generate test scripts using AI" })).toBeVisible();
         await pwExpect(card).toContainText("Automatically create test scripts for the selected or all test cases using AI.");
         await pwExpect(card.getByRole("button", { name: "Generate test scripts" })).toBeDisabled();
-        await pwExpect(card).toContainText("The AI model isn’t set up for this project");
+        await pwExpect(card).toContainText(`Test scripts cannot be generated with AI: ${NO_AI_KEY}`);
         if (shots) await card.screenshot({ path: path.join(shots, "generate-scripts-card.png") });
     });
 
-    it("is in the New test script menu on Test scripts too, saying it needs an AI model here", async () => {
+    it("is in the New test script menu on Test scripts too, saying it needs an AI key here", async () => {
         await page.goto(`${BASE}/#/projects/${code}/scripts`);
         await page.getByRole("button", { name: "New test script", exact: true }).click();
         const fromCases = page.getByRole("menuitem", { name: /Generate from test cases/ });
         await pwExpect(fromCases).toBeDisabled();
-        await pwExpect(fromCases).toContainText("Needs an AI model. A project admin can set one up in Settings, AI configuration.");
+        await pwExpect(fromCases).toContainText(NO_AI_KEY);
         await page.keyboard.press("Escape");
     });
 });

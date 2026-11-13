@@ -6,7 +6,7 @@ import { plural } from "../../lib/format";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
-import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { NO_AI_KEY, useAiBlock } from "../aiconfig/aiconfig";
 import { type Permission } from "../auth/permissions";
 import { useHere } from "../auth/project-access";
 import { Modal } from "../../components/Modal";
@@ -29,8 +29,6 @@ export const IOS_PROJECT = "The AI writes phone test scripts for Android apps on
 export const NO_APP_FOR_SCRIPTS = "This project has no Android app yet, and a phone test script is saved for the app it tests. Add the app under Settings, Mobile app, then generate the test scripts.";
 export const NO_ADDRESS_FOR_SCRIPTS = "This project has no application address yet, and a test script is saved for the address it tests. Add the address in Settings → General, then generate the test scripts.";
 export const NO_PERMISSION_FOR_SCRIPTS = "Needs permission to use the AI to write tests.";
-const NO_AI = "The AI model isn’t set up for this project, so test scripts cannot be generated here.";
-const NO_AI_TIP = "Needs an AI model. A project admin can set one up in Settings, AI configuration.";
 const ON_DEVICE = "The AI has not seen the app: it finds each button and field by its visible text or accessibility label, so check each script on the device before approving it.";
 
 /** Cases sent per request, so the page can say how far it got (the server takes at most 20). */
@@ -55,14 +53,14 @@ export function mayGenerateScripts(p: ProjectDetail | null | undefined, can: (pe
 }
 
 /** Why the AI cannot write test scripts from test cases here, said before the click (in the server's order); null when it can, as far as the page knows. */
-export function generateScriptsBlock(p: ProjectDetail | null | undefined, aiReady: boolean): string | null {
+export function generateScriptsBlock(p: ProjectDetail | null | undefined, noAi: string | undefined): string | null {
     const form = scriptFormOf(p);
     if (!p || !form) return null;
     if (!projectShape(p).testingModes.includes("code")) return "Test scripts are made from test cases in code-based projects. In an AI agent project the agents decide what to check.";
     if (form === "text" && !/^https?:/i.test(p.application?.url ?? "")) return NO_ADDRESS_FOR_SCRIPTS;
     if (form === "ios") return IOS_PROJECT;
     if (form === "phone" && !(p.mobile?.appPackage || p.mobile?.apk)) return NO_APP_FOR_SCRIPTS;
-    if (!aiReady) return NO_AI_TIP;
+    if (noAi) return noAi;
     return null;
 }
 
@@ -79,7 +77,7 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
     const [error, setError] = useState<string | null>(null);
     const send = (body: { caseIds?: string[]; dryRun?: boolean }) => api<GenerateAnswer>(`/projects/${projectId}/manual-cases/generate-scripts`, { method: "POST", body });
     const fail = (e: unknown) => {
-        setError(e instanceof ApiError && (e.details as { modelMissing?: boolean } | undefined)?.modelMissing ? "The AI model isn’t set up yet. A project admin can set one up in Settings, AI configuration, then try again." : describeApiError(e));
+        setError(e instanceof ApiError && (e.details as { modelMissing?: boolean } | undefined)?.modelMissing ? `${describeApiError(e) || NO_AI_KEY} Then try again.` : describeApiError(e));
         setState({ step: "idle" });
     };
 
@@ -184,11 +182,11 @@ function Outcome({ state, form, projectId, onClose, inList }: { state: Extract<S
  * they run once approved.
  */
 export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId: string; /** The cases chosen in the list; none = all. */ caseIds?: string[]; /** After scripts were made (the list shows its new links). */ onDone?: () => void }) {
-    const aiReady = useProjectAiReady(projectId);
+    const noAi = useAiBlock();
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
     const can = useHere(projectId, project).may;
     const form = scriptFormOf(project.data);
-    const block = generateScriptsBlock(project.data, aiReady);
+    const block = generateScriptsBlock(project.data, noAi);
     const { state, setState, error, check, write } = useGenerateScripts(projectId, onDone);
     // The AI writes and saves the scripts: both permissions in this project, as the server asks.
     if (!project.data || !mayGenerateScripts(project.data, can)) return null;
@@ -210,12 +208,12 @@ export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId:
                     </Button>
                 )}
             </div>
-            {block && block !== NO_AI_TIP && state.step === "idle" && (
+            {block && block !== noAi && state.step === "idle" && (
                 <p className="t-meta" data-testid="generate-scripts-why">
                     {block}
                 </p>
             )}
-            {block === NO_AI_TIP && state.step === "idle" && <p className="t-meta">{NO_AI} You can still write them by hand in Test scripts.</p>}
+            {noAi && block === noAi && state.step === "idle" && <p className="t-meta">Test scripts cannot be generated with AI: {noAi} You can still write them by hand in Test scripts.</p>}
             {!block && form === "phone" && state.step === "idle" && <p className="t-meta">This project tests an Android app, so the AI writes phone test scripts. {ON_DEVICE}</p>}
             {error && <Callout tone="danger" title="No test scripts were made">{error}</Callout>}
 
@@ -255,13 +253,13 @@ export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId:
  * chosen, and say why. The scripts are the AI's drafts; the list behind the dialog shows them once they are made.
  */
 export function GenerateFromCasesDialog({ projectId, onClose, onMade }: { projectId: string; onClose: () => void; /** After scripts were made. */ onMade?: () => void }) {
-    const aiReady = useProjectAiReady(projectId);
+    const noAi = useAiBlock();
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
     const list = useFetch<CaseList>(`/projects/${projectId}/manual-cases`);
     const reqs = useFetch<RequirementList>(`/projects/${projectId}/requirements`);
     const tests = useFetch<TestSummary[]>(`/projects/${projectId}/tests`);
     const form = scriptFormOf(project.data);
-    const block = generateScriptsBlock(project.data, aiReady);
+    const block = generateScriptsBlock(project.data, noAi);
     const [picked, setPicked] = useState<Set<string>>(new Set());
     const { state, error, check, write } = useGenerateScripts(projectId, () => {
         setPicked(new Set());
@@ -305,12 +303,12 @@ export function GenerateFromCasesDialog({ projectId, onClose, onMade }: { projec
         >
             <div className="stack-sm" data-testid="generate-from-cases">
                 <p className="t-secondary">
-                    Choose the test cases. The AI writes one test script for each Automated test case that has none yet, linked to the test case and its requirement. The scripts are drafts: they run once they are approved. Uses the AI model.
+                    Choose the test cases. The AI writes one test script for each Automated test case that has none yet, linked to the test case and its requirement. The scripts are drafts: they run once they are approved. Uses your AI key.
                 </p>
                 {form === "phone" && !block && <p className="t-meta">This project tests an Android app, so the AI writes phone test scripts. {ON_DEVICE}</p>}
                 {block && (
                     <Callout tone="info" title="Test scripts cannot be generated here">
-                        <span data-testid="generate-from-cases-why">{block === NO_AI_TIP ? `${NO_AI} A project admin can set one up in Settings, AI configuration. You can still write test scripts by hand.` : block}</span>
+                        <span data-testid="generate-from-cases-why">{noAi && block === noAi ? `${noAi} You can still write test scripts by hand.` : block}</span>
                     </Callout>
                 )}
                 {error && <Callout tone="danger" title="No test scripts were made">{error}</Callout>}

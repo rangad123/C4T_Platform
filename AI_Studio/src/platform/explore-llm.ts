@@ -31,7 +31,7 @@ import { LlmNotConfiguredError, type LlmClient } from "../engine/llm/provider.js
 import type { ModelV3 } from "../engine/llm/resilience.js";
 import { currentRoute, ROUTE_TABLE, withRoute, type RouteScope, type RouteTask } from "../engine/llm/routing.js";
 import { isBudgetExceeded, PURPOSES, type LlmPurpose } from "../engine/llm/usage.js";
-import { AI_NO_ANSWER, AI_NOT_AVAILABLE, AI_REFUSED, type ProjectAi } from "./ai-config.js";
+import { AI_NO_ANSWER, AI_NOT_AVAILABLE, AI_REFUSED, type WorkAi } from "./ai-config.js";
 import type { ExploreTaskRef } from "./explore-task.js";
 import { HttpError } from "./http-error.js";
 import { jobLlm, type JobLlmDeps } from "./job-runner.js";
@@ -43,7 +43,7 @@ type CallOptions = Parameters<ModelV3["doGenerate"]>[0];
 type Result = Awaited<ReturnType<ModelV3["doGenerate"]>>;
 
 interface Built {
-    ai: ProjectAi;
+    ai: WorkAi;
     meter: JobMeter | null;
     llm: LlmClient;
 }
@@ -215,7 +215,7 @@ export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body
 }
 
 /** The failure in the few words the runner may see (ai-config.ts: no key, label, provider or provider text). */
-export function errorOf(e: unknown, ai?: Pick<ProjectAi, "blocked">): ExploreLlmError {
+export function errorOf(e: unknown, ai?: Pick<WorkAi, "blocked">): ExploreLlmError {
     if (isBudgetExceeded(e)) return { kind: "budget", hit: e.hit };
     if (e instanceof LlmNotConfiguredError)
         return {

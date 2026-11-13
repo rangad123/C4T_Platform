@@ -437,11 +437,13 @@ describe("only your own runner, admins included", () => {
 });
 
 describe("the rest of Settings for someone who may run tests but not change the platform", () => {
-    it("shows Your runner and the read-only AI model and Test formats cards, but not the platform-wide panels", async () => {
+    it("shows Your runner and the Test formats card, and Settings in the side bar, but neither AI keys (no AI permission) nor the platform-wide panels", async () => {
         fake.mine = runnerOf();
         fake.permissions = ["ai_studio.access", "ai_studio.tests.run"];
         await visit();
-        await pwExpect(page.getByRole("heading", { name: "AI model", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Your runner", exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("ai-keys")).toHaveCount(0);
+        await pwExpect(page.getByTestId("ai-behaviour")).toHaveCount(0);
         await pwExpect(page.getByRole("heading", { name: "Test formats", exact: true })).toBeVisible();
         await pwExpect(page.getByTestId("mobile-tooling")).toHaveCount(0);
         await pwExpect(page.locator("aside.sidebar a.nav-item", { hasText: /^Settings$/ })).toBeVisible();

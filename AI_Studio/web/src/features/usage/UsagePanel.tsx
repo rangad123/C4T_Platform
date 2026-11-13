@@ -138,8 +138,8 @@ function DayBars({ series }: { series: UsageGroup[] }) {
     );
 }
 
-const BY_LABEL: Record<GroupBy, string> = { project: "By project", purpose: "By purpose", model: "By model", billing: "By who pays" };
-const OWNER_LABEL: Record<string, string> = { crowd4test: "Crowd4Test", organization: "The customer’s organisation" };
+const BY_LABEL: Record<GroupBy, string> = { project: "By project", purpose: "By purpose", model: "By model", billing: "By kind of key" };
+const OWNER_LABEL: Record<string, string> = { organisational: "Organisational keys (Crowd4Test pays)", personal: "Personal keys (the person pays)", crowd4test: "Crowd4Test (before AI keys)", organization: "A customer’s organisation (before AI keys)" };
 
 function Breakdown({ by, onBy, state, currency }: { by: GroupBy; onBy: (b: GroupBy) => void; state: ReturnType<typeof useFetch<UsageAnswer>>; currency: string }) {
     const rows = state.data?.groups ?? [];
@@ -172,7 +172,7 @@ function Breakdown({ by, onBy, state, currency }: { by: GroupBy; onBy: (b: Group
                     <table className="usage-table" data-testid="usage-table">
                         <thead>
                             <tr>
-                                <th scope="col">{by === "project" ? "Project" : by === "purpose" ? "Purpose" : by === "billing" ? "Who pays" : "Model"}</th>
+                                <th scope="col">{by === "project" ? "Project" : by === "purpose" ? "Purpose" : by === "billing" ? "Kind of key" : "Model"}</th>
                                 <th scope="col" className="num">Calls</th>
                                 <th scope="col" className="num">In</th>
                                 {cached && <th scope="col" className="num">From cache</th>}

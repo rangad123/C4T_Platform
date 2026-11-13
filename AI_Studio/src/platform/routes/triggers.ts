@@ -11,7 +11,7 @@ import { getRunbookServices } from "../runbook-runner.js";
 import { runbookRunStatus, startRunbookForToken } from "../runbook-triggers.js";
 import { getTriggerServices, MIN_RUN_GAP_MS, RateLimited } from "../trigger-services.js";
 import type { TriggerToken } from "../trigger-store.js";
-import { ownerIdOfActor } from "../agent-store.js";
+import { makerIdOfActor } from "../agent-store.js";
 import { actorOf } from "../auth/access.js";
 import { currentActor } from "../auth/actor.js";
 import type { RouteCtx } from "./types.js";
@@ -59,7 +59,7 @@ export function registerTriggerRoutes(ctx: RouteCtx): void {
         if (runbookId && runbooks.get(runbookId)?.projectId !== id) throw new HttpError(404, "This project has no runbook with that id.");
         if (svc.store.list(id).filter((t) => !t.revokedAt).length >= MAX_ACTIVE_TOKENS) throw new HttpError(409, `A project can have ${MAX_ACTIVE_TOKENS} active tokens. Revoke one you no longer use first.`);
         // Who made it: its runs go to that person's runner (round 45).
-        const { token, record } = svc.store.create(id, { ...body, createdBy: ownerIdOfActor(actorOf(req) ?? currentActor()) });
+        const { token, record } = svc.store.create(id, { ...body, createdBy: makerIdOfActor(actorOf(req) ?? currentActor()) });
         // The only time the token is ever shown: only its hash is kept.
         if (runbookId) runbooks.setTokenLink(record.id, runbookId);
         return reply.code(201).send({ ...withRunbook(record), token });

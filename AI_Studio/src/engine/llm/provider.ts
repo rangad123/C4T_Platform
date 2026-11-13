@@ -300,7 +300,7 @@ export interface CreateClientOptions {
     /** Address for every provider (tests point it at a local fake provider). Default: LLM_BASE_URL for custom endpoints only. */
     baseURLFor?: (provider: LlmProviderId) => string | undefined;
     /**
-     * A key that is not the server's (a project's AI configuration, platform/ai-config.ts): `id` keeps its failures from pausing the
+     * A key that is not the server's (a person's or an organisational AI key, platform/ai-config.ts): `id` keeps its failures from pausing the
      * provider for everyone else, and resilience.ts says the rest. Such a client is built with `fallbacks: []`.
      */
     ownKey?: OwnKeyHandling & { id: string };

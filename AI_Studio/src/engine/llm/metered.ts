@@ -28,7 +28,7 @@ export interface MeterBackend {
     /** `cacheReadTokens`/`cacheWriteTokens`: of the input tokens, prompt-cache reads and writes (prompt-cache.ts); missing = none. */
     addUsage(d: { jobId: string; projectId: string; purpose: string; model: string; at: Date; calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number; billing?: UsageBilling }): void;
     totalsFor(jobId: string, projectId: string, month: string): Used;
-    capsFor(projectId: string): { caps: Caps; warnPercent: number };
+    capsFor(projectId: string, billing?: UsageBilling): { caps: Caps; warnPercent: number };
     recordStop(s: { jobId: string; projectId: string; cap: string; used: number; limit: number; at: string }): void;
 }
 
@@ -242,7 +242,7 @@ export class JobMeter {
         const month = monthOf(this.now());
         if (this.callsSinceRefresh < this.refreshEvery && month === this.seededMonth) return;
         this.used = this.backend.totalsFor(this.opts.jobId, this.opts.projectId, month);
-        const c = this.backend.capsFor(this.opts.projectId);
+        const c = this.backend.capsFor(this.opts.projectId, this.opts.billing);
         this.caps = c.caps;
         this.warnPercent = c.warnPercent;
         this.seededMonth = month;

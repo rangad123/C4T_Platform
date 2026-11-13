@@ -1,3 +1,4 @@
+import { runnerOwnerOf } from "./agent-store.js";
 import { noteCustomSkipped, splitCustom } from "./custom-policy.js";
 import { notePluginSkipped, pluginSkips, type RunShape } from "./plugin-policy.js";
 import { droppedChecksNote, narrowedByChoice, TestingAgentStore, type AgentSwitch, type AskedSwitches } from "./testing-agents.js";
@@ -81,7 +82,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     let options: JobOptions;
     let dropped: AgentSwitch[] = [];
     if (s.kind === "validate") {
-        let testIds = await runnableTestIds(repo, s.projectId, "validate", s.createdBy ?? null);
+        let testIds = await runnableTestIds(repo, s.projectId, "validate", runnerOwnerOf(s.createdBy));
         if (testIds.length === 0) throw new Error("This project has no tests that can be run yet.");
         options = { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds, retryFailures: s.retryFailures };
         // A schedule can run against a named environment instead (results are kept for that environment).
@@ -92,13 +93,13 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
             if (env.production && !target.confirmProduction) throw new Error(`“${env.name}” is a production environment and this schedule was not confirmed for it. Edit the schedule and confirm.`);
             await assertEnvironmentTargets(env);
             // A run against an environment leaves plug-in tests out altogether (the gate refuses them there).
-            testIds = await runnableTestIds(repo, s.projectId, "environment", s.createdBy ?? null);
+            testIds = await runnableTestIds(repo, s.projectId, "environment", runnerOwnerOf(s.createdBy));
             if (testIds.length === 0) throw new Error("This project has no tests that can be run against an environment yet.");
             options = { ...DEFAULT_JOB_OPTIONS, mode: "environment", testIds, environment: env.name, ...(env.production ? { confirmProduction: true } : {}) };
         }
     } else {
         // Saved generation settings, minus anything that only makes sense for another kind of job.
-        const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, retryFailures: _r, requirementsText: _rt, ...saved } = config;
+        const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, retryFailures: _r, requirementsText: _rt, startedBy: _sb, ...saved } = config;
         // A schedule never turns the load check on again, whatever the saved settings say (a person starts that on purpose).
         options = { ...DEFAULT_JOB_OPTIONS, ...saved, mode: "generate", loadChecks: false } as JobOptions;
         // The project's current testing agents decide the checks, not only what the last exploration ran with: a removed agent's checks

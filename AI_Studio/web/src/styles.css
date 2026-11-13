@@ -379,3 +379,10 @@ p.section { max-width: none; }
 .choice-group { border: 0; margin: 0; padding: 0; min-width: 0; }
 .choice-group legend { padding: 0; margin-bottom: 4px; }
 .choice-text { display: grid; gap: 2px; }
+
+/* AI keys (features/aiconfig): a hairline between keys, and the assignment list scrolls inside itself */
+.ai-key-list { list-style: none; margin: 0; padding: 0; }
+.ai-key-row { padding: var(--space-3) 0; border-top: 1px solid var(--border-default); min-width: 0; }
+.ai-key-row strong { overflow-wrap: anywhere; }
+.ai-assign-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; border: 0; max-height: 320px; overflow-y: auto; }
+.ai-assign-list legend { padding: 0; margin-bottom: var(--space-2); }

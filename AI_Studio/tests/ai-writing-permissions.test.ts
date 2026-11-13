@@ -9,6 +9,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { givePersonalKeys } from "./fixtures/ai-key.js";
 import { loadConfig } from "../src/config.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { PERMISSION_WORDS, PERMISSIONS } from "../src/platform/auth/permissions.js";
@@ -76,6 +77,10 @@ beforeAll(async () => {
     );
     app = await buildServer(platform);
     await app.ready();
+    // Every person here uses their own key on the stand-in provider (round 57: never the server's key).
+    const people: string[] = [];
+    for (const t of Object.keys(ACCOUNTS)) people.push((await as(t, "GET", "/api/auth/state")).body.me.id as string);
+    await givePersonalKeys(platform, people, { baseUrl: `${fake.url}/openai/v1`, model: "m" });
     const made = await as("t-cora", "POST", "/api/projects", { name: "Boot shop", platforms: ["web"], testingModes: ["code"] });
     expect(made.status, JSON.stringify(made.body)).toBe(201);
     projectId = made.body.id;

@@ -5,7 +5,7 @@ follows and what should happen at each one, typed **Automated** (a tool can do i
 is the runnable test. Each Automated test case gets at most one script, linked to the case and to the case's requirement.
 
 The AI writes the scripts from the cases. It needs an AI model: without one, both entry points say so before the click ("The AI model
-isn’t set up for this project…"), and a project admin can add one under Settings, AI configuration. Writing scripts needs the
+isn’t set up for this project…"), and the person can add their own key under Settings, AI keys, or ask an admin to assign one. Writing scripts needs the
 permissions to add tests and to use the AI to write tests in that project (a project viewer does not have them, whatever their
 role elsewhere): without them the card is not shown and the menu entry says so.
 

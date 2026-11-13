@@ -27,7 +27,7 @@ import { RUNBOOKS_MIGRATION } from "./runbook-store.js";
 import { SESSIONS_MIGRATION } from "./session-store.js";
 import { SCHEDULES_MIGRATION } from "./schedule-schema.js";
 import { addCacheColumns, USAGE_MIGRATION } from "./usage-store.js";
-import { AI_CONFIG_MIGRATION } from "./ai-config-store.js";
+import { AI_CONFIG_MIGRATION, AI_KEYS_MIGRATION, backfillChosenKeys } from "./ai-config-store.js";
 import { WEB_PAGES_MIGRATION } from "./test-data-reset-store.js";
 import { addActorColumns, USERS_MIGRATION } from "./user-store.js";
 import { SECURITY_MIGRATION } from "../security/store.js";
@@ -307,7 +307,11 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
 );`,
     /* 59: notes for the AI: plain hints people write for their project, optionally for a path or page pattern (schema lives in notes-store.ts; existing projects have none) */ NOTES_MIGRATION,
     /* 60: the owner's "Show the browser while exploring" switch on their runner (schema lives in agent-store.ts; every existing runner keeps it off) */ RUNNER_SHOW_BROWSER_MIGRATION,
+    /* 61: two kinds of AI keys, organisational (assigned to admins and sub-admins) and personal, one chosen key per person, no AI choice on projects (schema lives in ai-config-store.ts; then backfillChosenKeys) */ AI_KEYS_MIGRATION,
 ];
+
+/** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */
+const SLOT_STEPS: ReadonlyMap<number, (raw: DatabaseSync) => void> = new Map([[61, backfillChosenKeys]]);
 
 /**
  * Slots that were reserved before their SQL existed: the slot number and a table only that slot creates (and no later slot drops: slot 42's
@@ -360,6 +364,7 @@ export class Db {
             this.raw.exec("BEGIN");
             try {
                 this.raw.exec(MIGRATIONS[current]!);
+                SLOT_STEPS.get(current + 1)?.(this.raw);
                 this.raw.prepare("INSERT INTO schema_version (version) VALUES (?)").run(current + 1);
                 this.raw.exec("COMMIT");
             } catch (e) {
@@ -433,6 +438,7 @@ export function createDatabaseAtVersion(file: string, version: number): void {
         raw.exec("PRAGMA foreign_keys = ON; CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)");
         for (let i = 0; i < version; i++) {
             raw.exec(MIGRATIONS[i]!);
+            SLOT_STEPS.get(i + 1)?.(raw);
             raw.prepare("INSERT INTO schema_version (version) VALUES (?)").run(i + 1);
         }
     } finally {

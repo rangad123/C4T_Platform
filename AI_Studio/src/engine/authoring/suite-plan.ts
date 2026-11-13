@@ -25,7 +25,7 @@ const MAX_REQUIREMENTS_FOR_AI = 200;
 const MAX_PROPOSED_DESCRIPTION = 300;
 
 export const NO_MODEL_FOR_SUITES =
-    "The AI model isn’t set up yet. Proposing test suites needs access to an AI model. A project admin can set one up in Settings, AI configuration, then try again. You can still make suites by requirement or by hand.";
+    "The AI model isn’t set up yet. Proposing test suites needs access to an AI model. Add your own AI key in Settings, AI keys, or ask an admin to assign one, then try again. You can still make suites by requirement or by hand.";
 
 export interface ScriptForSuites {
     id: string;

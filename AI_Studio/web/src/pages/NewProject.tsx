@@ -17,6 +17,7 @@ import { MissingInputsDialog } from "../features/requirements/AgentInputsDialog"
 import { EXPLORING_OFF_HERE } from "../features/runs/runs-here";
 import { ExploreOnRunnerNote, ExploreStartError } from "../features/runs/ExploreOnRunner";
 import { useReadiness } from "../features/runners/my-runner";
+import { aiProblemOf, aiReadyOf, useMyAi } from "../features/aiconfig/aiconfig";
 import { LevelChoice, projectLevel, ScreenReviewChoice } from "../features/explore/ExploreLevel";
 import type { ExploreLevel } from "../../../src/engine/levels";
 
@@ -74,8 +75,10 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
         if (existing.data?.application?.url && !url) setUrl(existing.data.application.url);
     }, [existing.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Without an AI model the web application cannot be explored; the API can, so only the API is explored here (said in the callout).
-    const aiMissing = Boolean(config && !config.llm.configured);
+    // Without a usable AI key of the person's the web application cannot be explored; the API can, so only the API is explored here (said in the callout).
+    const myAi = useMyAi().data;
+    const aiReady = aiReadyOf(myAi);
+    const aiMissing = aiReady === false;
     const agents = inputs.data?.applies && inputs.data.agents ? inputs.data.agents : null;
 
     function submit(e: React.FormEvent) {
@@ -162,7 +165,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                     <input id="scope" className="input" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Everything — or e.g. “search and checkout only”" />
                 </div>
                 <LevelChoice value={chosenLevel} onChange={setLevel} />
-                {!screenReviewOff && <ScreenReviewChoice level={chosenLevel} canReadImages={Boolean(config?.llm.configured)} value={screenReview} onChange={setScreenReview} />}
+                {!screenReviewOff && <ScreenReviewChoice level={chosenLevel} canReadImages={aiReady === true} value={screenReview} onChange={setScreenReview} />}
                 {projectId && (
                     <label className="row" style={{ alignItems: "flex-start" }}>
                         <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />
@@ -176,8 +179,8 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                 )}
 
                 {aiMissing && (
-                    <Callout tone="warning" title="The AI model isn’t set up on this server" actions={<LinkButton size="sm" href={routes.settings}>How to set it up</LinkButton>}>
-                        Exploring the web application needs it, so only the application’s API is explored here. API tests are created without the AI.
+                    <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.aiKeys}>Open AI keys</LinkButton>}>
+                        {aiProblemOf(myAi)} Exploring the web application needs it, so only the application’s API is explored here. API tests are created without the AI.
                     </Callout>
                 )}
                 {runnersOnly ? (
@@ -200,7 +203,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                     )}
                 </div>
                 <p className="t-meta" data-testid="ai-note">
-                    Exploring a web application uses the AI model: it decides what to test, writes the tests and corrects a test that fails along the way. Tests for an API alone are created without it.
+                    Exploring a web application uses your AI key: it decides what to test, writes the tests and corrects a test that fails along the way. Tests for an API alone are created without it.
                 </p>
             </div>
             <p className="t-meta" data-testid="inputs-note">
@@ -227,7 +230,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
     if (choosing && step === "choose") {
         const chooser = (
             <Welcome
-                aiConfigured={config ? config.llm.configured : undefined}
+                aiConfigured={aiReady}
                 explore={{ url, setUrl, urlError, clearUrlError: () => setUrlError(""), busy, error, blocked: runnersOnly && blocked, runnerNote: runnersOnly ? <ExploreOnRunnerNote ready={ready} /> : null, onExplore: () => void begin(), onOptions: () => setStep("form"), autoFocus: welcome }}
                 name={{ value: name, set: (v: string) => (setName(v), setNameError("")), error: nameError, setError: setNameError }}
             />
@@ -263,7 +266,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                 <SecurityStartGate>
                 {step === "choose" ? (
                     <Welcome
-                        aiConfigured={config ? config.llm.configured : undefined}
+                        aiConfigured={aiReady}
                         explore={{ url, setUrl, urlError, clearUrlError: () => setUrlError(""), busy, error, blocked: runnersOnly && blocked, runnerNote: runnersOnly ? <ExploreOnRunnerNote ready={ready} /> : null, onExplore: () => void begin(), onOptions: () => setStep("form"), autoFocus: true }}
                         name={{ value: name, set: (v: string) => (setName(v), setNameError("")), error: nameError, setError: setNameError }}
                     />

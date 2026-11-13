@@ -313,13 +313,13 @@ describe("start: the panel", () => {
         expect(post(new RegExp(`/projects/${p.id}/test-generation$`))).toHaveLength(1);
     });
 
-    it("when the AI model is not set up it says so, links to Settings and does not start", async () => {
+    it("without a usable AI key it says so, links to AI keys and does not start", async () => {
         fake.config.llm = { provider: "anthropic", model: "unavailable", configured: false };
         const p = fake.addProject("Shop");
         await visit(startHash(p.id));
         await pwExpect(dialog()).toBeVisible();
-        await pwExpect(dialog()).toContainText("The AI model isn’t set up on this server. Exploring a phone app needs it.");
-        await pwExpect(dialog().getByRole("link", { name: "Open Settings", exact: true })).toHaveAttribute("href", "#/settings");
+        await pwExpect(dialog()).toContainText("Exploring a phone app uses your AI key. This server has no AI key of its own.");
+        await pwExpect(dialog().getByRole("link", { name: "Open AI keys", exact: true })).toHaveAttribute("href", "#/settings#ai-keys");
         await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeDisabled();
     });
 
@@ -457,14 +457,14 @@ describe("start: the welcome page", () => {
         expect(seq.lastIndexOf("POST /projects/:id/mobile-app/apk")).toBeLessThan(seq.lastIndexOf("PUT /projects/:id/mobile-app"));
     });
 
-    it("without the AI model the Android choice says so and links to Settings", async () => {
+    it("without a usable AI key the Android choice says so and links to AI keys", async () => {
         fake.projects.clear();
         fake.config.llm = { provider: "anthropic", model: "unavailable", configured: false };
         await visit("#/");
         const card = page.getByRole("group", { name: "Ways to start", exact: true }).locator(".welcome-card").nth(0);
         await card.getByRole("radio", { name: "An Android app" }).check();
-        await pwExpect(card).toContainText("Exploring a phone app needs it. The other two ways to start work without it.");
-        await pwExpect(card.getByRole("link", { name: "Open Settings", exact: true })).toHaveAttribute("href", "#/settings");
+        await pwExpect(card).toContainText("Exploring a phone app uses your AI key.");
+        await pwExpect(card.getByRole("link", { name: "Open AI keys", exact: true })).toHaveAttribute("href", "#/settings#ai-keys");
     });
 });
 

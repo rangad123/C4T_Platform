@@ -1,3 +1,4 @@
+import { runnerOwnerOf } from "./agent-store.js";
 /**
  * Deploy triggers wired to one platform: start a re-run of the project's tests for a token, report its progress and result,
  * and deliver the optional callback when the run ends. The job is the same one a schedule starts (a "validate" job over every
@@ -180,7 +181,7 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
 
             refuseUnlessRunsStart(p); // tests switched off on this server: the pipeline is told, nothing is queued
             // From here to the insert nothing is awaited: no other job can slip in between the checks and the create.
-            const testIds = await runnableTestIds(repo, token.projectId, "validate", token.createdBy);
+            const testIds = await runnableTestIds(repo, token.projectId, "validate", runnerOwnerOf(token.createdBy));
             if (testIds.length === 0) throw new HttpError(409, "This project has no tests that can be run yet.");
             const busy = await activeJobOf(repo, token.projectId);
             if (busy) throw new HttpError(409, `Tests are already running for this project (${busy.status.toLowerCase().replace(/_/g, " ")}). Try again when that run has finished.`);

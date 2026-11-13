@@ -74,7 +74,7 @@ export const willDo = (app: string): string =>
 export const WONT_DO = ["Pay for anything or subscribe", "Delete accounts or data", "Send messages or money, or make calls", "Use a fingerprint or face check", "Get past captchas", "Explore games"];
 export const ACCOUNT_REMINDER = "If the app needs a login, add a test account under Advanced options.";
 export const NO_WHERE_TITLE = "No phone or emulator is ready";
-export const AI_MISSING = "The AI model isn’t set up on this server. Exploring a phone app needs it.";
+export const AI_MISSING = "Exploring a phone app uses your AI key.";
 /** Runners mode (round 52): the exploration runs on the person's runner, on the phone or emulator attached to it. */
 export const EXPLORES_ON_YOUR_RUNNER = "It opens the phone or emulator attached to your runner’s computer. The AI works from the platform.";
 

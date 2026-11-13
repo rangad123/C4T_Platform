@@ -95,6 +95,7 @@ describe("how much to explore", () => {
             const body = await res.json();
             await route.fulfill({ response: res, json: { ...body, llm: { ...body.llm, configured: true } } });
         });
+        await p2.route("**/api/me/ai", (route) => route.fulfill({ json: { chosen: null, problem: null, personal: [], organisational: [], canManageOrganisational: false, openServer: { configured: true, provider: "anthropic", model: "stand-in" } } }));
         await p2.goto(`${BASE}/#/new?project=${shop}`);
         const levels = p2.getByTestId("explore-level");
         await levels.getByRole("radio", { name: /Thorough/ }).check();

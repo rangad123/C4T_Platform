@@ -1,9 +1,10 @@
 /**
- * AI configuration per project (AD-10, AD-11, AI-02 to AI-05, FL-E), against a stand-in Crowd4Test sign-in (port 7825), a stand-in
- * OpenAI-compatible provider that records which key each call carried (port 7826) and a real platform through inject. No real provider is
- * ever called. Covers: the key is encrypted and write-only; a project on its own key uses that key and never the server's, with no
- * fallback; managed AI uses the server's key (with none, a working Crowd4Test configuration); "Test this key"; usage rows carry who pays; permissions (a tester sees only availability, a
- * customer stays inside their organisation); budgets; and what the hosted preview says.
+ * AI keys (round 57, docs/features/ai-keys.md): two kinds, organisational (Crowd4Test admins add them and assign them to admins and
+ * sub-admins) and personal (a person's own), and one chosen key per person that all their AI work uses. Against a stand-in Crowd4Test sign-in
+ * (port 7825), a stand-in OpenAI-compatible provider that records which key each call carried (port 7826) and a real platform through inject.
+ * No real provider is ever called. Covers: a key is encrypted and write-only; who sees which key, through every route; assignment only to
+ * admins and sub-admins; resolution (chosen personal, chosen organisational, assignment taken away, key removed, no key, the open server,
+ * a schedule's maker) and that the server's key is never used for a signed-in person; usage rows say who pays; "Test this key".
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -11,10 +12,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig, type Config } from "../src/config.js";
-import { AI_NOT_AVAILABLE, AI_REFUSED, clientOfConfiguration, resolveProjectAi } from "../src/platform/ai-config.js";
-import { AiConfigStore } from "../src/platform/ai-config-store.js";
-import { PERMISSIONS } from "../src/platform/auth/permissions.js";
+import { jobOwnerId, makerIdOfActor, OPEN_OWNER_ID } from "../src/platform/agent-store.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
+import { RepoSink } from "../src/platform/repo-sink.js";
+import { TestSpecSchema } from "../src/engine/spec/schema.js";
+import { PERSONAL_KEY_MODEL } from "../src/platform/usage-store.js";
+import { ACCESS_KEY_OWNER, aiGate, aiOwnerOfJob, KEY_NOT_AVAILABLE, mayHoldOrganisational, PERSON_INACTIVE, NO_AI_KEY, NO_PERSON, personLlm, resolveAiFor } from "../src/platform/ai-config.js";
+import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { runJob } from "../src/platform/job-runner.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
@@ -30,7 +34,8 @@ const PROVIDER = `http://127.0.0.1:${PROVIDER_PORT}/v1`;
 const KEY = "ai-config-owner-key-5e21";
 const SECRET = "ai-config-test-secret-key-0123456789";
 const SERVER_KEY = "SERVER-managed-key-0000";
-const GOOD = "ORG-own-key-sentinel-1234";
+const CORA_KEY = "CORA-own-key-sentinel-1234";
+const ORG_KEY = "ORG-shared-key-sentinel-5678";
 const BAD = "BAD-own-key-sentinel-9999";
 const PAGE = { "x-requested-with": "ai-studio" };
 
@@ -38,12 +43,13 @@ const me = (id: string, role: string, permissions: readonly string[], organisati
     data: { user: { id, email: `${id}@people.example`, role, status: "ACTIVE", firstName: id, lastName: "Person", emailVerified: true, permissions, organisationId } },
 });
 const ACCOUNTS: Record<string, unknown> = {
-    "t-admin": me("ada", "ADMIN", []),
+    "t-admin": me("ada", "ADMIN", PERMISSIONS),
+    "t-sam": me("sam", "SUB_ADMIN", PERMISSIONS),
     "t-cora": me("cora", "CUSTOMER", PERMISSIONS, "org-a"),
-    "t-rita": me("rita", "CUSTOMER", ["ai_studio.access", "ai_studio.usage.view"], "org-a"),
     "t-bob": me("bob", "CUSTOMER", PERMISSIONS, "org-b"),
-    // Asking for a tester to hold these: AI Studio ignores them.
-    "t-tim": me("tim", "TESTER", ["ai_studio.access", "ai_studio.ai_keys.manage", "ai_studio.usage.view"]),
+    // A tester who may use the AI, and one who may not.
+    "t-tia": me("tia", "TESTER", ["ai_studio.access", "ai_studio.tests.generate"]),
+    "t-tim": me("tim", "TESTER", ["ai_studio.access"]),
 };
 
 let c4t: http.Server;
@@ -53,6 +59,7 @@ let app: Awaited<ReturnType<typeof buildServer>>;
 let dir = "";
 /** Every Authorization key the stand-in provider received, in order. */
 let seen: string[] = [];
+const ids: Record<string, string> = {};
 
 const call = async (headers: Record<string, string>, method: string, url: string, payload?: unknown) => {
     const r = await app.inject({ method: method as "GET", url, headers, ...(payload !== undefined ? { payload: payload as object } : {}) });
@@ -60,14 +67,24 @@ const call = async (headers: Record<string, string>, method: string, url: string
 };
 const asKey = (method: string, url: string, payload?: unknown) => call({ "x-api-key": KEY }, method, url, payload);
 const as = (token: string, method: string, url: string, payload?: unknown) => call({ cookie: `c4t_access=${token}`, ...(method === "GET" ? {} : PAGE) }, method, url, payload);
-const personOf = async (token: string): Promise<string> => (await as(token, "GET", "/api/auth/state")).body.me.id;
-const addMember = async (projectId: string, token: string) => accessControlOf(app).projects.store.addMember(projectId, await personOf(token), { role: "owner", projectAdmin: true, source: "added", addedBy: "test" } as never);
-const newProject = async (token: string, name: string) => (await as(token, "POST", "/api/projects", { name })).body.id as string;
 const FIELDS = { provider: "openai-compatible", model: "stand-in-main", baseUrl: PROVIDER };
-const orgConfig = async (token: string, label: string, apiKey: string) => (await as(token, "POST", "/api/ai-configurations", { ...FIELDS, label, apiKey, owner: "organization" })).body as { id: string; keyEnding: string };
-const useOwn = (token: string, id: string, configurationId: string) => as(token, "PUT", `/api/projects/${id}/ai`, { mode: "own", configurationId });
+const personalKey = async (token: string, label: string, apiKey: string) => {
+    const r = await as(token, "POST", "/api/me/ai/keys", { ...FIELDS, label, apiKey });
+    expect(r.status, r.text).toBe(201);
+    return r.body.key as { id: string; keyHint: string; chosen: boolean; kind: string };
+};
+const orgKey = async (label: string, apiKey: string) => {
+    const r = await as("t-admin", "POST", "/api/admin/ai-keys", { ...FIELDS, label, apiKey });
+    expect(r.status, r.text).toBe(201);
+    return r.body.key as { id: string };
+};
+const assign = (keyId: string, people: string[]) => as("t-admin", "PUT", `/api/admin/ai-keys/${keyId}/assignees`, { personIds: people.map((t) => ids[t]!) });
 const deps = () => ({ sql: platform.sql, config: platform.config });
-const usageRows = (projectId: string) => platform.db.all<{ job_id: string; billing_owner: string; billing_organization_id: string | null; model: string; calls: number }>("SELECT job_id, billing_owner, billing_organization_id, model, calls FROM ai_usage WHERE project_id = ?", projectId);
+const reset = () => {
+    platform.db.run("DELETE FROM ai_key_choices");
+    platform.db.run("DELETE FROM ai_key_assignees");
+    platform.db.run("DELETE FROM ai_configurations");
+};
 
 beforeAll(async () => {
     c4t = http.createServer((req, res) => {
@@ -77,8 +94,7 @@ beforeAll(async () => {
     });
     await new Promise<void>((r) => c4t.listen(C4T_PORT, "127.0.0.1", r));
     fakeProvider = http.createServer((req, res) => {
-        const chunks: Buffer[] = [];
-        req.on("data", (c: Buffer) => chunks.push(c));
+        req.resume();
         req.on("end", () => {
             const key = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
             seen.push(key);
@@ -93,7 +109,7 @@ beforeAll(async () => {
     });
     await new Promise<void>((r) => fakeProvider.listen(PROVIDER_PORT, "127.0.0.1", r));
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"]) process.env[k] = "";
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-aiconfig-"));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-aikeys-"));
     platform = bootstrap(
         loadConfig({
             DATA_DIR: dir,
@@ -113,6 +129,7 @@ beforeAll(async () => {
     );
     app = await buildServer(platform);
     await app.ready();
+    for (const t of Object.keys(ACCOUNTS)) ids[t] = (await as(t, "GET", "/api/auth/state")).body.me.id;
 }, 60_000);
 
 afterAll(async () => {
@@ -126,373 +143,356 @@ afterAll(async () => {
 beforeEach(() => {
     seen = [];
     resetKeyTests();
+    reset();
 });
 
 describe("a key is stored once and never comes back", () => {
     it("is encrypted at rest, shown only by its ending, and never returned by any route", async () => {
-        const pid = await newProject("t-cora", "Write-only");
-        const created = await as("t-cora", "POST", `/api/projects/${pid}/ai/configurations`, { ...FIELDS, label: "Write-only key", apiKey: GOOD });
-        expect(created.status).toBe(201);
-        expect(created.body.keyEnding).toBe("1234");
-        await useOwn("t-cora", pid, created.body.id);
-        const answers = [created, await as("t-cora", "GET", `/api/projects/${pid}/ai`), await as("t-cora", "GET", "/api/ai-configurations"), await as("t-admin", "GET", "/api/ai-configurations"), await asKey("GET", "/api/ai-configurations")];
+        const k = await personalKey("t-cora", "Cora's key", CORA_KEY);
+        expect(k).toMatchObject({ keyHint: "1234", kind: "personal", chosen: true });
+        const o = await orgKey("Crowd4Test key", ORG_KEY);
+        await assign(o.id, ["t-sam"]);
+        const raw = platform.db.all<{ key_enc: string }>("SELECT key_enc FROM ai_configurations");
+        for (const r of raw) {
+            expect(r.key_enc).not.toContain(CORA_KEY);
+            expect(r.key_enc).not.toContain(ORG_KEY);
+        }
+        expect(new SecretBox(dir, SECRET).decrypt(raw.find(() => true)!.key_enc)).toMatch(/sentinel/);
+        const answers = [
+            await as("t-cora", "GET", "/api/me/ai"),
+            await as("t-sam", "GET", "/api/me/ai"),
+            await as("t-admin", "GET", "/api/admin/ai-keys"),
+            await as("t-cora", "PATCH", `/api/me/ai/keys/${k.id}`, { label: "Renamed" }),
+            await as("t-admin", "PATCH", `/api/admin/ai-keys/${o.id}`, { label: "Renamed too" }),
+            await as("t-admin", "GET", "/api/config"),
+            await as("t-cora", "GET", "/api/config"),
+        ];
         for (const a of answers) {
-            expect(a.status).toBeLessThan(300);
-            expect(a.text).not.toContain(GOOD);
-            expect(a.text).not.toMatch(/key_?enc/i);
+            expect(a.status, a.text).toBeLessThan(300);
+            expect(a.text).not.toContain(CORA_KEY);
+            expect(a.text).not.toContain(ORG_KEY);
         }
-        const row = platform.db.get<{ key_enc: string; key_hint: string }>("SELECT key_enc, key_hint FROM ai_configurations WHERE id = ?", created.body.id)!;
-        expect(row.key_enc).not.toContain(GOOD);
-        expect(row.key_hint).toBe("1234");
-        expect(await new AiConfigStore(platform.sql, new SecretBox(dir, SECRET)).keyOf(created.body.id)).toBe(GOOD);
-        // Nowhere in the database files in readable form.
-        for (const f of fs.readdirSync(dir).filter((n) => /\.(db|sqlite)/.test(n))) expect(fs.readFileSync(path.join(dir, f)).includes(Buffer.from(GOOD))).toBe(false);
-        // Nor in the Activity list.
-        expect(JSON.stringify(platform.db.all("SELECT * FROM activity"))).not.toContain(GOOD);
     });
 
-    it("needs the key entered again when the provider or the address changes, so a stored key only goes where it was meant to", async () => {
-        const c = await orgConfig("t-cora", "Moves", GOOD);
-        const moved = await as("t-cora", "PATCH", `/api/ai-configurations/${c.id}`, { baseUrl: "https://elsewhere.example/v1" });
-        expect(moved.status).toBe(400);
-        expect(moved.body.error).toMatch(/Enter the key again/);
-        const renamed = await as("t-cora", "PATCH", `/api/ai-configurations/${c.id}`, { label: "Renamed" });
-        expect(renamed.status).toBe(200);
-        expect(renamed.body).toMatchObject({ label: "Renamed", keyEnding: "1234" });
-        const rekeyed = await as("t-cora", "PATCH", `/api/ai-configurations/${c.id}`, { baseUrl: "https://elsewhere.example/v1", apiKey: "new-key-for-there-5678" });
-        expect(rekeyed.body).toMatchObject({ keyEnding: "5678", status: "untested", baseUrl: "https://elsewhere.example/v1" });
-    });
-
-    it("refuses an address with a password in it, one for a provider that has none, and a private one where private addresses are blocked", async () => {
-        const pid = await newProject("t-cora", "Addresses");
-        const post = (body: object) => as("t-cora", "POST", `/api/projects/${pid}/ai/configurations`, { label: "x", model: "m", apiKey: GOOD, ...body });
-        expect((await post({ provider: "openai-compatible", baseUrl: "https://me:pw@llm.example/v1" })).status).toBe(400);
-        expect((await post({ provider: "openai-compatible" })).status).toBe(400);
-        expect((await post({ provider: "anthropic", baseUrl: "https://llm.example/v1" })).status).toBe(400);
-        expect((await post({ provider: "anthropic", apiKey: "short" })).status).toBe(400);
-        const saved = process.env.BLOCK_PRIVATE_TARGETS;
-        process.env.BLOCK_PRIVATE_TARGETS = "true";
-        try {
-            const r = await post({ provider: "openai-compatible", baseUrl: "http://169.254.169.254/v1" });
-            expect(r.status).toBe(400);
-            expect(r.body.error).toMatch(/private/i);
-        } finally {
-            if (saved === undefined) delete process.env.BLOCK_PRIVATE_TARGETS;
-            else process.env.BLOCK_PRIVATE_TARGETS = saved;
-        }
+    it("needs the key entered again when the provider or the address changes, and refuses an address with a password in it", async () => {
+        const k = await personalKey("t-cora", "Moving", CORA_KEY);
+        expect((await as("t-cora", "PATCH", `/api/me/ai/keys/${k.id}`, { baseUrl: "http://127.0.0.1:1/v1" })).status).toBe(400);
+        expect((await as("t-cora", "PATCH", `/api/me/ai/keys/${k.id}`, { baseUrl: `${PROVIDER}/`, apiKey: CORA_KEY })).status).toBe(200);
+        const r = await as("t-cora", "POST", "/api/me/ai/keys", { ...FIELDS, baseUrl: "http://user:pw@127.0.0.1:1/v1", label: "x", apiKey: CORA_KEY });
+        expect(r.status).toBe(400);
+        expect(r.body.error).toBe("Put the key in the key field, not in the address.");
     });
 });
 
-describe("which key a project's work uses", () => {
-    const refine = (token: string, pid: string) => as(token, "POST", `/api/projects/${pid}/requirements/import/refine`, { text: "The system shall let a user sign in with an email address and a password." });
-
-    it("a project on its own key uses that key, and its usage names the organisation", async () => {
-        const pid = await newProject("t-cora", "Own key");
-        const c = await orgConfig("t-cora", "Org key", GOOD);
-        expect((await useOwn("t-cora", pid, c.id)).body).toMatchObject({ mode: "own", billingOwner: "organization" });
-        const r = await refine("t-cora", pid);
-        expect(r.status).toBe(200);
-        expect(seen.length).toBeGreaterThan(0);
-        expect(new Set(seen)).toEqual(new Set([GOOD]));
-        const rows = usageRows(pid);
-        expect(rows.length).toBeGreaterThan(0);
-        expect(rows.every((x) => x.billing_owner === "organization" && x.billing_organization_id === "org-a" && x.model === "stand-in-main")).toBe(true);
+describe("who sees which key", () => {
+    it("a personal key exists only for its person: not for another person, not for an admin, through every route", async () => {
+        const k = await personalKey("t-cora", "Cora only", CORA_KEY);
+        for (const t of ["t-bob", "t-admin", "t-sam"]) {
+            const mine = (await as(t, "GET", "/api/me/ai")).body;
+            expect(JSON.stringify(mine)).not.toContain(k.id);
+            expect((await as(t, "PATCH", `/api/me/ai/keys/${k.id}`, { label: "x" })).status).toBe(404);
+            expect((await as(t, "DELETE", `/api/me/ai/keys/${k.id}`)).status).toBe(404);
+            expect((await as(t, "POST", `/api/me/ai/keys/${k.id}/test`, {})).status).toBe(404);
+            expect((await as(t, "PUT", "/api/me/ai/chosen", { keyId: k.id })).status).toBe(404);
+        }
+        // Admins manage organisational keys only: a personal key is not one of them.
+        expect(JSON.stringify((await as("t-admin", "GET", "/api/admin/ai-keys")).body)).not.toContain(k.id);
+        expect((await as("t-admin", "PATCH", `/api/admin/ai-keys/${k.id}`, { label: "x" })).status).toBe(404);
+        expect((await as("t-admin", "DELETE", `/api/admin/ai-keys/${k.id}`)).status).toBe(404);
+        expect((await as("t-cora", "GET", "/api/me/ai")).body).toMatchObject({ chosen: { id: k.id, kind: "personal" }, personal: [{ id: k.id }], organisational: [], problem: null, canManageOrganisational: false, openServer: null });
     });
 
-    it("a managed project uses the server's key, and its usage names Crowd4Test", async () => {
-        const pid = await newProject("t-cora", "Managed");
-        expect((await as("t-cora", "GET", `/api/projects/${pid}/ai`)).body).toMatchObject({ mode: "managed", billingOwner: "crowd4test", available: false, ready: true });
-        expect((await refine("t-cora", pid)).status).toBe(200);
-        expect(new Set(seen)).toEqual(new Set([SERVER_KEY]));
-        const rows = usageRows(pid);
-        expect(rows.length).toBeGreaterThan(0);
-        expect(rows.every((x) => x.billing_owner === "crowd4test" && x.billing_organization_id === null)).toBe(true);
+    it("an organisational key exists only for the people it is assigned to; admins see all of them", async () => {
+        const o = await orgKey("Team key", ORG_KEY);
+        // Not assigned yet: the sub-admin does not see it and cannot choose it.
+        expect((await as("t-sam", "GET", "/api/me/ai")).body.organisational).toEqual([]);
+        expect((await as("t-sam", "PUT", "/api/me/ai/chosen", { keyId: o.id })).status).toBe(404);
+        expect((await as("t-admin", "GET", "/api/admin/ai-keys")).body.keys).toEqual([expect.objectContaining({ id: o.id, kind: "organisational", assignees: [] })]);
+        expect((await assign(o.id, ["t-sam"])).body.key.assignees).toEqual([expect.objectContaining({ id: ids["t-sam"], role: "Sub-admin" })]);
+        const sam = (await as("t-sam", "GET", "/api/me/ai")).body;
+        expect(sam.organisational).toEqual([expect.objectContaining({ id: o.id, kind: "organisational", chosen: false })]);
+        expect(sam.problem).toBe(NO_AI_KEY);
+        // Assigned people may use and test it, not change or remove it.
+        expect((await as("t-sam", "PUT", "/api/me/ai/chosen", { keyId: o.id })).body).toMatchObject({ chosen: { id: o.id }, problem: null });
+        expect((await as("t-sam", "PATCH", `/api/me/ai/keys/${o.id}`, { label: "x" })).status).toBe(404);
+        expect((await as("t-sam", "POST", `/api/me/ai/keys/${o.id}/test`, {})).body).toMatchObject({ ok: true });
+        // Another admin not assigned does not see it among their own.
+        expect((await as("t-admin", "GET", "/api/me/ai")).body.organisational).toEqual([]);
+        expect((await as("t-cora", "GET", "/api/me/ai")).body.organisational).toEqual([]);
     });
 
-    it("an own key that fails stops with a clear message, never reaches the server's key, and shows on the configuration", async () => {
-        const pid = await newProject("t-cora", "Own key fails");
-        const c = await orgConfig("t-cora", "Bad org key", BAD);
-        await useOwn("t-cora", pid, c.id);
-        const ai = await resolveProjectAi(deps(), pid);
-        const client = clientOfConfiguration(deps(), ai);
-        const ask = () => client.text({ system: "s", prompt: "p" });
-        await expect(ask()).rejects.toThrow(AI_REFUSED);
-        const after = seen.length;
-        expect(after).toBe(1);
-        expect(seen).not.toContain(SERVER_KEY);
-        // The key is known to be bad: the next call stops here, in the same words, without another request.
-        await expect(ask()).rejects.toThrow(AI_REFUSED);
-        expect(seen.length).toBe(after);
-        await expect.poll(async () => (await as("t-cora", "GET", `/api/projects/${pid}/ai`)).body.configuration.status).toBe("failed");
-        expect((await as("t-cora", "GET", `/api/projects/${pid}/ai`)).body).toMatchObject({ available: false, ready: false });
-        // Words for testers too: no key, no provider detail.
-        expect(AI_REFUSED).not.toMatch(/key|Bad org/i);
-        // The configuration's failure does not pause the provider for a project on the server's key.
-        const other = await newProject("t-cora", "Still managed");
-        expect((await refine("t-cora", other)).status).toBe(200);
-        expect(seen).toContain(SERVER_KEY);
+    it("only admins and sub-admins can be assigned, and only Crowd4Test admins manage organisational keys", async () => {
+        const o = await orgKey("Staff only", ORG_KEY);
+        const refused = await assign(o.id, ["t-sam", "t-cora"]);
+        expect(refused.status).toBe(400);
+        expect(refused.body.error).toBe("Organisational keys can be assigned only to Crowd4Test admins and sub-admins.");
+        expect((await assign(o.id, ["t-tia"])).status).toBe(400);
+        const list = (await as("t-admin", "GET", "/api/admin/ai-keys")).body.people.map((p: { id: string }) => p.id);
+        expect(list).toEqual(expect.arrayContaining([ids["t-admin"], ids["t-sam"]]));
+        expect(list).not.toContain(ids["t-cora"]);
+        expect(list).not.toContain(ids["t-tia"]);
+        // A sub-admin (and anyone else who is not a Crowd4Test admin) is refused the management routes.
+        for (const t of ["t-sam", "t-cora", "t-tia"]) {
+            expect((await as(t, "GET", "/api/admin/ai-keys")).status).toBe(403);
+            expect((await as(t, "POST", "/api/admin/ai-keys", { ...FIELDS, label: "x", apiKey: ORG_KEY })).status).toBe(403);
+            expect((await as(t, "PUT", `/api/admin/ai-keys/${o.id}/assignees`, { personIds: [] })).status).toBe(403);
+        }
+        expect((await as("t-admin", "GET", "/api/me/ai")).body.canManageOrganisational).toBe(true);
+        expect((await as("t-sam", "GET", "/api/me/ai")).body.canManageOrganisational).toBe(false);
     });
 
-    it("a project on its own key has no way to the server: none chosen, removed, another organisation's, or unreadable all stop it", async () => {
-        const pid = await newProject("t-cora", "Blocked");
-        const none = await useOwn("t-cora", pid, "");
-        expect(none.status).toBe(400);
-        const c = await orgConfig("t-cora", "Will go", GOOD);
-        await useOwn("t-cora", pid, c.id);
-        // Unreadable: the stored key does not decrypt.
-        platform.db.run("UPDATE ai_configurations SET key_enc = 'broken' WHERE id = ?", c.id);
-        let ai = await resolveProjectAi(deps(), pid);
-        expect(ai).toMatchObject({ mode: "own", source: "blocked", blocked: AI_NOT_AVAILABLE });
-        expect(ai.problem).toMatch(/could not be read/);
-        await expect(clientOfConfiguration(deps(), ai).text({ system: "s", prompt: "p" })).rejects.toThrow(AI_NOT_AVAILABLE);
-        expect((await refine("t-cora", pid)).status).toBe(422);
-        expect((await as("t-cora", "GET", `/api/projects/${pid}/ai`)).body).toMatchObject({ ready: false, problem: expect.stringMatching(/could not be read/) });
+    it("every account that may use AI has keys of its own; the shared access key and a tester without AI permission do not", async () => {
+        const t = await personalKey("t-tia", "Tester's own", CORA_KEY);
+        expect((await as("t-tia", "GET", "/api/me/ai")).body.chosen).toMatchObject({ id: t.id });
+        expect((await as("t-tim", "GET", "/api/me/ai")).status).toBe(403);
+        expect((await as("t-tim", "POST", "/api/me/ai/keys", { ...FIELDS, label: "x", apiKey: CORA_KEY })).status).toBe(403);
+        const key = await asKey("GET", "/api/me/ai");
+        expect(key.status).toBe(403);
+        expect(key.body.error).toBe("Sign in with your own account to add and use AI keys.");
+    });
+});
+
+describe("which key the work uses", () => {
+    it("the chosen personal key, never the server's, and its usage names the person", async () => {
+        const k = await personalKey("t-cora", "Cora", CORA_KEY);
+        const r = await personLlm(deps(), ids["t-cora"]!);
+        expect(r.billing).toEqual({ owner: "personal", personId: ids["t-cora"] });
+        await r.llm.text({ system: "s", prompt: "p", maxOutputTokens: 8, purpose: "other" });
+        expect(seen).toEqual([CORA_KEY]);
+        expect(await resolveAiFor(deps(), ids["t-cora"]!)).toMatchObject({ source: "configuration", configuration: { id: k.id } });
+    });
+
+    it("the chosen organisational key: Crowd4Test pays; taking the assignment away or removing the key stops it, with a sentence", async () => {
+        const o = await orgKey("Shared", ORG_KEY);
+        await assign(o.id, ["t-sam"]);
+        await as("t-sam", "PUT", "/api/me/ai/chosen", { keyId: o.id });
+        const r = await personLlm(deps(), ids["t-sam"]!);
+        expect(r.billing).toEqual({ owner: "crowd4test" });
+        await r.llm.text({ system: "s", prompt: "p", maxOutputTokens: 8, purpose: "other" });
+        expect(seen).toEqual([ORG_KEY]);
+        // Taken away: the choice goes with it, and the person is told.
+        await assign(o.id, []);
+        expect((await resolveAiFor(deps(), ids["t-sam"]!)).blocked).toBe(NO_AI_KEY);
+        // Assigned again and chosen, then the person stops being staff: no longer usable.
+        await assign(o.id, ["t-sam"]);
+        await as("t-sam", "PUT", "/api/me/ai/chosen", { keyId: o.id });
+        platform.db.run("UPDATE users SET c4t_role = 'CUSTOMER' WHERE id = ?", ids["t-sam"]!);
+        expect((await resolveAiFor(deps(), ids["t-sam"]!)).blocked).toBe(KEY_NOT_AVAILABLE);
+        platform.db.run("UPDATE users SET c4t_role = 'SUB_ADMIN' WHERE id = ?", ids["t-sam"]!);
+        // Removed by an admin while chosen: the choice clears.
+        expect((await as("t-admin", "DELETE", `/api/admin/ai-keys/${o.id}`)).status).toBe(204);
+        expect((await as("t-sam", "GET", "/api/me/ai")).body).toMatchObject({ chosen: null, problem: NO_AI_KEY, organisational: [] });
+    });
+
+    it("no key: AI work is refused with the sentence, and nothing reaches the provider; no person behind it: refused too", async () => {
+        expect(await aiGate({ ...deps(), llm: platform.llm }, ids["t-bob"]!)).toEqual({ ok: false, reason: NO_AI_KEY });
+        const r = await personLlm(deps(), ids["t-bob"]!);
+        expect(r.blocked).toBe(NO_AI_KEY);
+        await expect(r.llm.text({ system: "s", prompt: "p", maxOutputTokens: 8, purpose: "other" })).rejects.toThrow();
+        expect((await resolveAiFor(deps(), null)).blocked).toBe(NO_PERSON);
+        // The connection check is of the person's own key (an admin with none: there is nothing to check).
+        const check = await as("t-admin", "POST", "/api/llm/check", {});
+        expect(check.status).toBe(409);
+        expect(check.body.error).toBe(NO_AI_KEY);
         expect(seen).toEqual([]);
-
-        // A project moved to another organisation stops using the old one's key at once.
-        const c2 = await orgConfig("t-cora", "Org A", GOOD);
-        await useOwn("t-cora", pid, c2.id);
-        expect((await resolveProjectAi(deps(), pid)).source).toBe("configuration");
-        accessControlOf(app).projects.store.ensureOrganization("org-b");
-        platform.db.run("UPDATE projects SET organization_id = 'org-b' WHERE id = ?", pid);
-        ai = await resolveProjectAi(deps(), pid);
-        expect(ai.source).toBe("blocked");
-        expect(ai.problem).toMatch(/another organisation/);
     });
 
-    it("a managed project with a platform configuration uses it, and falls back to the server's key when it fails", async () => {
-        const c = (await asKey("POST", "/api/ai-configurations", { ...FIELDS, label: "Platform bad", apiKey: BAD, owner: "platform" })).body;
-        const pid = await newProject("t-cora", "Managed with config");
-        expect((await as("t-cora", "PUT", `/api/projects/${pid}/ai`, { mode: "managed", configurationId: c.id })).status).toBe(200);
-        const ai = await resolveProjectAi(deps(), pid);
-        expect(ai).toMatchObject({ mode: "managed", source: "configuration", billing: { owner: "crowd4test" } });
-        // The customer knows its name, and nothing about Crowd4Test's key.
-        const view = await as("t-cora", "GET", `/api/projects/${pid}/ai`);
-        expect(view.body).toMatchObject({ configurationId: c.id, configuration: null, managedOptions: expect.arrayContaining([{ id: c.id, label: "Platform bad", model: "stand-in-main", providerName: "Custom endpoint" }]) });
-        expect(view.body.managedOptions.find((o: { id: string }) => o.id === c.id)).not.toHaveProperty("keyEnding");
-        expect((await as("t-cora", "POST", `/api/ai-configurations/${c.id}/test`)).status).toBe(404);
-        await expect(clientOfConfiguration(deps(), ai).text({ system: "s", prompt: "p" })).resolves.toBe("OK");
-        expect(seen).toEqual([BAD, SERVER_KEY]);
-        // Marked as failed, or unreadable: the server's key from the start.
-        platform.db.run("UPDATE ai_configurations SET status = 'failed' WHERE id = ?", c.id);
-        expect((await resolveProjectAi(deps(), pid)).source).toBe("server");
+    it("the open server uses its chosen key if it has one, else the server's own key; so does the shared access key, never a person", async () => {
+        expect(await resolveAiFor(deps(), OPEN_OWNER_ID)).toMatchObject({ source: "server", billing: { owner: "crowd4test" } });
+        expect(await resolveAiFor(deps(), ACCESS_KEY_OWNER)).toMatchObject({ source: "server", billing: { owner: "crowd4test" } });
+        expect((await resolveAiFor(deps(), ids["t-admin"]!)).source).toBe("blocked");
     });
 
-    it("a job uses its project's configuration, with its usage rows, and the server's fallback and fast models never apply", async () => {
-        const pid = await newProject("t-cora", "Job");
-        const c = await orgConfig("t-cora", "Job key", GOOD);
-        await useOwn("t-cora", pid, c.id);
-        const cfgs: Config[] = [];
-        const makeLlm = (cfg: Config) => {
-            cfgs.push(cfg);
-            return unavailableLlmClient("double");
+    it("a job uses its starter's key; a schedule's job its maker's; a job without a usable key fails in neutral words", async () => {
+        await personalKey("t-cora", "Cora", CORA_KEY);
+        const pid = (await as("t-cora", "POST", "/api/projects", { name: "Jobs" })).body.id as string;
+        const app1 = platform.repo.createApplication(pid, "http://127.0.0.1:9/", {});
+        const runWith = async (startedBy: object, worker: string) => {
+            const queued = await platform.repo.createJob(pid, app1, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy } as never);
+            const job = platform.repo.claimNextJob(60_000, worker)!;
+            expect(job.id).toBe(queued.id);
+            const cfgs: Config[] = [];
+            await runJob({ repo: platform.repo, store: platform.store, config: { ...platform.config, LLM_FALLBACK_MODELS: "server-backup", LLM_MODEL_FAST: "server-fast" }, llm: platform.llm, makeLlm: (cfg) => (cfgs.push(cfg), unavailableLlmClient("double")) }, job, worker);
+            return { cfgs, job: platform.repo.getJob(job.id)! };
         };
-        const app1 = platform.repo.createApplication(pid, "http://127.0.0.1:9/", {});
-        const queued = await platform.repo.createJob(pid, app1, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
-        const job = platform.repo.claimNextJob(60_000, "w1")!;
-        expect(job.id).toBe(queued.id);
-        await runJob({ repo: platform.repo, store: platform.store, config: { ...platform.config, LLM_FALLBACK_MODELS: "server-backup", LLM_MODEL_FAST: "server-fast" }, llm: platform.llm, makeLlm }, job, "w1");
-        expect(cfgs).toHaveLength(1);
-        expect(cfgs[0]).toMatchObject({ LLM_API_KEY: GOOD, LLM_MODEL: "stand-in-main", LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: PROVIDER });
-        expect(cfgs[0]!.LLM_FALLBACK_MODELS).toBeUndefined();
-        expect(cfgs[0]!.LLM_MODEL_FAST).toBeUndefined();
-    });
-
-    it("a job of a project whose own key cannot be used fails in plain words, without touching the server's key", async () => {
-        const pid = await newProject("t-cora", "Job blocked");
-        const c = await orgConfig("t-cora", "Gone", GOOD);
-        await useOwn("t-cora", pid, c.id);
-        platform.db.run("UPDATE ai_configurations SET key_enc = 'broken' WHERE id = ?", c.id);
-        const app1 = platform.repo.createApplication(pid, "http://127.0.0.1:9/", {});
-        const queued = await platform.repo.createJob(pid, app1, { ...DEFAULT_JOB_OPTIONS, mode: "generate" });
-        const job = platform.repo.claimNextJob(60_000, "w2")!;
+        const byCora = await runWith({ kind: "user", id: ids["t-cora"] }, "w1");
+        expect(byCora.cfgs).toHaveLength(1);
+        expect(byCora.cfgs[0]).toMatchObject({ LLM_API_KEY: CORA_KEY, LLM_MODEL: "stand-in-main", LLM_BASE_URL: PROVIDER });
+        expect(byCora.cfgs[0]!.LLM_FALLBACK_MODELS).toBeUndefined();
+        expect(byCora.cfgs[0]!.LLM_MODEL_FAST).toBeUndefined();
+        const bySchedule = await runWith({ kind: "schedule", id: "s1", ownerId: ids["t-cora"] }, "w2");
+        expect(bySchedule.cfgs[0]).toMatchObject({ LLM_API_KEY: CORA_KEY });
+        // Bob has no key: his schedule's job never builds a client, and says so without naming anyone.
+        const queued = await platform.repo.createJob(pid, app1, { ...DEFAULT_JOB_OPTIONS, mode: "generate", startedBy: { kind: "schedule", id: "s2", ownerId: ids["t-bob"] } } as never);
+        const job = platform.repo.claimNextJob(60_000, "w3")!;
         expect(job.id).toBe(queued.id);
         const cfgs: Config[] = [];
-        await runJob({ repo: platform.repo, store: platform.store, config: platform.config, llm: platform.llm, makeLlm: (cfg) => (cfgs.push(cfg), unavailableLlmClient("double")) }, job, "w2");
+        await runJob({ repo: platform.repo, store: platform.store, config: platform.config, llm: platform.llm, makeLlm: (cfg) => (cfgs.push(cfg), unavailableLlmClient("double")) }, job, "w3");
         expect(cfgs).toEqual([]);
-        expect(platform.repo.getJob(job.id)).toMatchObject({ status: "FAILED", error: AI_NOT_AVAILABLE });
-        expect(seen).toEqual([]);
+        expect(platform.repo.getJob(job.id)).toMatchObject({ status: "FAILED", error: expect.stringContaining("the person who started it has no AI key") });
+        expect(seen).not.toContain(SERVER_KEY);
     });
 });
 
-describe("Test this key", () => {
-    it("says plainly that a good key worked and records it, as a call its owner pays for", async () => {
-        const c = await orgConfig("t-cora", "Good", GOOD);
-        const r = await as("t-cora", "POST", `/api/ai-configurations/${c.id}/test`);
-        expect(r.status).toBe(200);
-        expect(r.body).toMatchObject({ ok: true, configuration: { status: "working", statusNote: null } });
-        expect(r.body.message).toMatch(/It worked/);
-        expect(r.body.configuration.lastValidatedAt).toBeTruthy();
-        expect(seen).toEqual([GOOD]);
-        expect(platform.db.get("SELECT billing_owner, billing_organization_id FROM ai_usage WHERE job_id = ?", `key-test-${c.id}`)).toMatchObject({ billing_owner: "organization", billing_organization_id: "org-a" });
+describe("Test this key, and usage", () => {
+    it("says plainly that a good key worked, and records the call for whoever pays", async () => {
+        const k = await personalKey("t-cora", "Good", CORA_KEY);
+        const t = await as("t-cora", "POST", `/api/me/ai/keys/${k.id}/test`, {});
+        expect(t.body).toMatchObject({ ok: true, key: { id: k.id, status: "working" } });
+        const rows = platform.db.all<{ billing_owner: string; billing_person_id: string | null }>("SELECT billing_owner, billing_person_id FROM ai_usage WHERE job_id = ?", `key-test-${k.id}`);
+        expect(rows).toEqual([{ billing_owner: "personal", billing_person_id: ids["t-cora"] }]);
     });
 
-    it("says plainly that a bad key did not work, never repeats the key, and asks to wait before hammering the provider", async () => {
-        const c = await orgConfig("t-cora", "Bad", BAD);
-        const r = await as("t-cora", "POST", `/api/ai-configurations/${c.id}/test`);
-        expect(r.status).toBe(200);
-        expect(r.body).toMatchObject({ ok: false, configuration: { status: "failed" } });
-        expect(r.body.message).toMatch(/did not work.*refused this key/);
-        expect(r.text).not.toContain(BAD);
-        expect(r.body.configuration.statusNote).not.toContain(BAD);
-        expect((await as("t-cora", "POST", `/api/ai-configurations/${c.id}/test`)).status).toBe(429);
-        expect(seen).toEqual([BAD]);
-    });
-});
-
-describe("permissions", () => {
-    it("a tester sees only whether AI is available, and is refused everything about keys", async () => {
-        const pid = await newProject("t-cora", "Tester view");
-        await addMember(pid, "t-tim");
-        const c = await orgConfig("t-cora", "Org key", GOOD);
-        await useOwn("t-cora", pid, c.id);
-        const view = await as("t-tim", "GET", `/api/projects/${pid}/ai`);
-        expect(view.status).toBe(200);
-        expect(Object.keys(view.body).sort()).toEqual(["available", "ready", "runsHere"]);
-        expect((await as("t-tim", "GET", "/api/ai-configurations")).status).toBe(403);
-        expect((await as("t-tim", "PUT", `/api/projects/${pid}/ai`, { mode: "managed" })).status).toBe(403);
-        expect((await as("t-tim", "POST", `/api/projects/${pid}/ai/configurations`, { ...FIELDS, label: "x", apiKey: GOOD })).status).toBe(403);
-        expect((await as("t-tim", "POST", "/api/ai-configurations", { ...FIELDS, label: "x", apiKey: GOOD, owner: "organization" })).status).toBe(403);
-        expect((await as("t-tim", "POST", `/api/ai-configurations/${c.id}/test`)).status).toBe(403);
-        expect((await as("t-tim", "DELETE", `/api/ai-configurations/${c.id}`)).status).toBe(403);
+    it("says plainly that a bad key did not work, never repeats the key, and asks to wait before testing again", async () => {
+        const k = await personalKey("t-cora", "Bad", BAD);
+        const t = await as("t-cora", "POST", `/api/me/ai/keys/${k.id}/test`, {});
+        expect(t.body.ok).toBe(false);
+        expect(t.text).not.toContain(BAD);
+        expect((await as("t-cora", "POST", `/api/me/ai/keys/${k.id}/test`, {})).status).toBe(429);
+        // A failing chosen key is told on the person's answer.
+        expect((await as("t-cora", "GET", "/api/me/ai")).body.problem).toMatch(/^Your chosen AI key cannot be used: /);
     });
 
-    it("someone with usage but not keys sees who pays and the budget, and no configuration", async () => {
-        const pid = await newProject("t-cora", "Usage only");
-        await addMember(pid, "t-rita");
-        const view = (await as("t-rita", "GET", `/api/projects/${pid}/ai`)).body;
-        expect(view).toMatchObject({ mode: "managed", billingOwner: "crowd4test", canManage: false, budget: { monthlyTokens: null } });
-        for (const k of ["configuration", "ownOptions", "managedOptions", "providers"]) expect(view).not.toHaveProperty(k);
-    });
-
-    it("a customer stays inside their organisation", async () => {
-        const a = await orgConfig("t-cora", "Org A key", GOOD);
-        const pidB = await newProject("t-bob", "Org B project");
-        // The configuration of another organisation answers as if it did not exist.
-        expect((await as("t-bob", "GET", "/api/ai-configurations")).body.configurations.some((c: { id: string }) => c.id === a.id)).toBe(false);
-        for (const [m, u, b] of [["PATCH", `/api/ai-configurations/${a.id}`, { label: "Mine now" }], ["POST", `/api/ai-configurations/${a.id}/test`, undefined], ["DELETE", `/api/ai-configurations/${a.id}`, undefined]] as const) {
-            const r = await as("t-bob", m, u, b);
-            expect(r.status).toBe(404);
-            expect(r.body.error).toBe("AI configuration not found");
-        }
-        expect((await useOwn("t-bob", pidB, a.id)).status).toBe(404);
-        // A project of another organisation is not reachable at all.
-        const pidA = await newProject("t-cora", "Org A project");
-        expect((await as("t-bob", "GET", `/api/projects/${pidA}/ai`)).status).toBe(404);
-        expect((await as("t-bob", "PUT", `/api/projects/${pidA}/ai`, { mode: "managed" })).status).toBe(404);
-        // Nor can a customer put a configuration on another organisation or the platform.
-        expect((await as("t-bob", "POST", "/api/ai-configurations", { ...FIELDS, label: "x", apiKey: GOOD, owner: "organization", organizationId: "org-a" })).status).toBe(403);
-        expect((await as("t-bob", "POST", "/api/ai-configurations", { ...FIELDS, label: "x", apiKey: GOOD, owner: "platform" })).status).toBe(403);
-        // A project's own configuration is that project's alone: another project of the same organisation cannot pick it.
-        const pidA2 = await newProject("t-cora", "Org A second");
-        const own = (await as("t-cora", "POST", `/api/projects/${pidA}/ai/configurations`, { ...FIELDS, label: "Project key", apiKey: GOOD })).body;
-        expect((await useOwn("t-cora", pidA2, own.id)).status).toBe(404);
-    });
-
-    it("every change of who pays is in Activity, and a configuration in use cannot be removed", async () => {
-        const pid = await newProject("t-cora", "Audited");
-        const c = await orgConfig("t-cora", "In use", GOOD);
-        await useOwn("t-cora", pid, c.id);
-        await as("t-cora", "PUT", `/api/projects/${pid}/ai`, { mode: "managed" });
-        const rows = platform.db.all<{ action: string; detail: string }>("SELECT action, detail FROM activity WHERE project_id = ? AND action = 'ai-configuration-changed'", pid);
-        expect(rows.map((r) => r.detail)).toEqual([expect.stringMatching(/organisation pays/), expect.stringMatching(/Crowd4Test pays/)]);
-
-        await useOwn("t-cora", pid, c.id);
-        const refused = await as("t-cora", "DELETE", `/api/ai-configurations/${c.id}`);
-        expect(refused.status).toBe(409);
-        expect(refused.body.error).toMatch(/A project uses this configuration/);
-        await as("t-cora", "PUT", `/api/projects/${pid}/ai`, { mode: "managed" });
-        expect((await as("t-cora", "DELETE", `/api/ai-configurations/${c.id}`)).status).toBe(204);
-    });
-});
-
-describe("budgets and usage", () => {
-    it("a project on its own key is held to its own limits, and the platform's monthly total counts only what Crowd4Test pays for", async () => {
-        const own = await newProject("t-cora", "Budget own");
-        const managed = await newProject("t-cora", "Budget managed");
-        const c = await orgConfig("t-cora", "Budget key", GOOD);
-        await useOwn("t-cora", own, c.id);
+    it("work on a personal key is not held to the platform's monthly cap, which counts only what Crowd4Test pays for", async () => {
         const usage = usageStoreFor(platform.db, platform.config);
         const month = new Date().toISOString().slice(0, 7);
         const base = usage.monthTokens(month);
-        const row = { purpose: "other", model: "m", at: new Date(), calls: 1, failedCalls: 0, inputTokens: 1000, outputTokens: 0, images: 0, estimatedCalls: 0 };
-        usage.addUsage({ ...row, jobId: "own-job", projectId: own, billing: { owner: "organization", organizationId: "org-a" } });
-        usage.addUsage({ ...row, jobId: "managed-job", projectId: managed });
+        const row = { projectId: "p-any", purpose: "other", model: "m", at: new Date(), calls: 1, failedCalls: 0, inputTokens: 1000, outputTokens: 0, images: 0, estimatedCalls: 0 };
+        usage.addUsage({ ...row, jobId: "personal-job", billing: { owner: "personal", personId: "someone" } });
+        usage.addUsage({ ...row, jobId: "crowd4test-job" });
         expect(usage.monthTokens(month)).toBe(base + 1000);
-        expect(usage.monthTokens(month, own)).toBe(1000);
-
         usage.setPlatformBudget({ monthlyTokens: 1, jobTokens: 1 });
-        usage.setProjectBudget(own, { monthlyTokens: 5000, jobTokens: 900 });
         try {
-            expect(usage.capsFor(own).caps).toEqual({ month: null, project: 5000, job: 900 });
-            expect(usage.monthlyBlock(own)).toBeNull();
-            expect(usage.monthlyBlock(managed)?.cap).toBe("month");
+            expect(usage.capsFor("p-any", { owner: "personal", personId: "someone" }).caps.month).toBeNull();
+            expect(usage.capsFor("p-any").caps.month).toBe(1);
         } finally {
             usage.setPlatformBudget({ monthlyTokens: null, jobTokens: null });
         }
-        const view = (await as("t-cora", "GET", `/api/projects/${own}/ai`)).body;
-        expect(view.budget).toMatchObject({ monthlyTokens: 5000, jobTokens: 900, usedTokens: 1000 });
-        expect(view.usageByOwner).toEqual([expect.objectContaining({ owner: "organization", totalTokens: 1000 })]);
-        const grouped = (await asKey("GET", `/api/usage?groupBy=billing&projectId=${own}`)).body;
-        expect(grouped.groups.map((g: { key: string }) => g.key)).toEqual(["organization"]);
-        expect((await asKey("GET", `/api/jobs/own-job/usage`)).status).toBe(404);
+        expect(platform.db.get("SELECT billing_owner, billing_person_id FROM ai_usage WHERE job_id = 'personal-job'")).toEqual({ billing_owner: "personal", billing_person_id: "someone" });
+    });
+
+    it("every change is in Activity", async () => {
+        const o = await orgKey("Noted", ORG_KEY);
+        await assign(o.id, ["t-sam"]);
+        await as("t-sam", "PUT", "/api/me/ai/chosen", { keyId: o.id });
+        const actions = platform.db.all<{ action: string }>("SELECT action FROM activity ORDER BY rowid DESC LIMIT 30").map((r) => r.action);
+        expect(actions).toEqual(expect.arrayContaining(["ai-key-added", "ai-key-assigned", "ai-key-chosen"]));
     });
 });
 
-describe("the hosted preview", () => {
-    it("says that nothing runs here and that the server has no key, and a project's own key still counts as ready", async () => {
-        const hostedDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-aiconfig-hosted-"));
-        const hosted = bootstrap(loadConfig({ DATA_DIR: hostedDir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: SECRET, LLM_PROVIDER: "anthropic", LLM_API_KEY: "" } as never));
-        const server = await buildServer(hosted);
+describe("nobody else learns about a personal key", () => {
+    it("no Activity row, admin list, usage page or job log names a personal key, its provider, model or address", async () => {
+        const LABEL = "Cora-private-label-7f3a";
+        const MODEL = "cora-private-model-x9";
+        const ADDRESS = `${PROVIDER}/cora-private-path`;
+        const r = await as("t-cora", "POST", "/api/me/ai/keys", { provider: "openai-compatible", model: MODEL, baseUrl: ADDRESS, label: LABEL, apiKey: CORA_KEY });
+        expect(r.status, r.text).toBe(201);
+        const id = r.body.key.id as string;
+        await as("t-cora", "PATCH", `/api/me/ai/keys/${id}`, { label: `${LABEL}-2` });
+        await as("t-cora", "POST", `/api/me/ai/keys/${id}/test`, {});
+        await as("t-cora", "PUT", "/api/me/ai/chosen", { keyId: id });
+        const pid = (await as("t-cora", "POST", "/api/projects", { name: "Private shop" })).body.id as string;
+        const app1 = platform.repo.createApplication(pid, "http://127.0.0.1:9/", {});
+        await platform.repo.createJob(pid, app1, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy: { kind: "user", id: ids["t-cora"] } } as never);
+        const job = platform.repo.claimNextJob(60_000, "w-private")!;
+        await runJob({ repo: platform.repo, store: platform.store, config: platform.config, llm: platform.llm, makeLlm: () => unavailableLlmClient("double") }, job, "w-private");
+        await as("t-cora", "DELETE", `/api/me/ai/keys/${id}`);
+        const secret = [LABEL, MODEL, "cora-private-path"];
+        const rows = JSON.stringify(platform.db.all("SELECT * FROM activity"));
+        const seenByAdmin = [
+            rows,
+            (await as("t-admin", "GET", "/api/admin/ai-keys")).text,
+            (await as("t-admin", "GET", "/api/activity?limit=200")).text,
+            (await as("t-admin", "GET", "/api/usage?groupBy=model")).text,
+            (await as("t-admin", "GET", "/api/usage?groupBy=billing")).text,
+            (await as("t-admin", "GET", `/api/test-generation/${job.id}/events`)).text,
+            (await as("t-admin", "GET", `/api/test-generation/${job.id}`)).text,
+        ];
+        for (const text of seenByAdmin) for (const s of secret) expect(text).not.toContain(s);
+        expect(platform.db.all<{ detail: string }>("SELECT detail FROM activity WHERE action LIKE 'ai-key-%'").map((x) => x.detail)).toEqual(
+            expect.arrayContaining(["Their own AI key was added.", "Their own AI key was changed.", "Their AI work now uses their own key.", "Their own AI key was removed."]),
+        );
+    });
+});
+
+describe("review fixes", () => {
+    it("with Crowd4Test sign-in, a local owner account neither manages organisational keys nor can be assigned one", async () => {
+        const users = accessControlOf(app).users;
+        const local = users.create({ email: "local-owner@people.example", name: "Local owner", role: "owner" });
+        const token = users.createToken(local.id, { name: "t", role: "owner" }).token;
+        const r = await call({ authorization: `Bearer ${token}` }, "GET", "/api/admin/ai-keys");
+        expect(r.status).toBe(403);
+        expect(await mayHoldOrganisational(deps(), local.id)).toBe(false);
+        expect((await as("t-admin", "GET", "/api/admin/ai-keys")).body.people.map((x: { id: string }) => x.id)).not.toContain(local.id);
+        const o = await orgKey("Staff only", ORG_KEY);
+        expect((await as("t-admin", "PUT", `/api/admin/ai-keys/${o.id}/assignees`, { personIds: [local.id] })).status).toBe(400);
+    });
+
+    it("without Crowd4Test sign-in, the server's owners manage organisational keys and can be assigned them", async () => {
+        const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-aikeys-local-"));
+        const lp = bootstrap(loadConfig({ DATA_DIR: localDir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: SECRET, LLM_PROVIDER: "anthropic", LLM_API_KEY: "" } as never));
+        const la = await buildServer(lp);
         try {
-            const h = { "x-api-key": KEY };
-            const req = async (method: string, url: string, payload?: object) => JSON.parse((await server.inject({ method: method as "GET", url, headers: h, ...(payload ? { payload } : {}) })).body);
-            const pid = (await req("POST", "/api/projects", { name: "Hosted" })).id;
-            expect(await req("GET", "/api/ai-configurations")).toMatchObject({ server: { hasKey: false, runsHere: false } });
-            expect(await req("GET", `/api/projects/${pid}/ai`)).toMatchObject({ available: false, ready: false, runsHere: false, serverHasKey: false, mode: "managed" });
-            const c = await req("POST", `/api/projects/${pid}/ai/configurations`, { ...FIELDS, label: "Own", apiKey: GOOD });
-            await req("PUT", `/api/projects/${pid}/ai`, { mode: "own", configurationId: c.id });
-            expect(await req("GET", `/api/projects/${pid}/ai`)).toMatchObject({ available: false, ready: true, runsHere: false, mode: "own" });
+            const users = accessControlOf(la).users;
+            const owner = users.create({ email: "owner@people.example", name: "Owner", role: "owner" });
+            const token = users.createToken(owner.id, { name: "t", role: "owner" }).token;
+            const go = async (method: string, url: string, payload?: object) => {
+                const r = await la.inject({ method: method as "GET", url, headers: { authorization: `Bearer ${token}` }, ...(payload ? { payload } : {}) });
+                return { status: r.statusCode, body: JSON.parse(r.body || "{}") };
+            };
+            const made = await go("POST", "/api/admin/ai-keys", { ...FIELDS, label: "Local org key", apiKey: ORG_KEY });
+            expect(made.status).toBe(201);
+            expect((await go("PUT", `/api/admin/ai-keys/${made.body.key.id}/assignees`, { personIds: [owner.id] })).status).toBe(200);
+            expect(await mayHoldOrganisational({ sql: lp.sql, config: lp.config }, owner.id)).toBe(true);
         } finally {
-            await server.close();
-            hosted.db.close();
-            fs.rmSync(hostedDir, { recursive: true, force: true });
+            await la.close();
+            lp.db.close();
+            fs.rmSync(localDir, { recursive: true, force: true });
         }
     });
 
-    it("with no key on the server, a working Crowd4Test configuration answers for managed projects and the AI shows as connected", async () => {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-aiconfig-stand-in-"));
-        const keyless = bootstrap(loadConfig({ DATA_DIR: dir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: SECRET, LLM_PROVIDER: "anthropic", LLM_API_KEY: "" } as never));
-        const server = await buildServer(keyless);
+    it("a schedule or trigger made with the shared access key uses the server's key and has no runner owner; an old one without a maker is refused", async () => {
+        expect(makerIdOfActor({ kind: "key" })).toBe(ACCESS_KEY_OWNER);
+        const fromKey = { startedBy: { kind: "schedule", id: "s1", ownerId: ACCESS_KEY_OWNER } };
+        expect(jobOwnerId(fromKey)).toBeNull();
+        expect(aiOwnerOfJob(fromKey)).toBe(ACCESS_KEY_OWNER);
+        expect(await resolveAiFor(deps(), aiOwnerOfJob(fromKey))).toMatchObject({ source: "server" });
+        expect(aiOwnerOfJob({ startedBy: { kind: "trigger", id: "t1", ownerId: ACCESS_KEY_OWNER } })).toBe(ACCESS_KEY_OWNER);
+        expect((await resolveAiFor(deps(), aiOwnerOfJob({ startedBy: { kind: "schedule", id: "s0", ownerId: null } }))).blocked).toBe(NO_PERSON);
+    });
+
+    it("a person turned off here: their keys and assignments no longer serve their work", async () => {
+        await personalKey("t-cora", "Cora", CORA_KEY);
+        platform.db.run("UPDATE users SET status = 'disabled' WHERE id = ?", ids["t-cora"]!);
         try {
-            const req = async (method: string, url: string, payload?: object) => JSON.parse((await server.inject({ method: method as "GET", url, headers: { "x-api-key": KEY }, ...(payload ? { payload } : {}) })).body);
-            const d = { sql: keyless.sql, config: keyless.config };
-            const pid = (await req("POST", "/api/projects", { name: "Managed, no server key" })).id;
-            expect((await req("GET", "/api/config")).llm).toMatchObject({ configured: false, via: "none" });
-            const c = await req("POST", "/api/ai-configurations", { ...FIELDS, label: "Crowd4Test key", apiKey: GOOD, owner: "platform" });
-            // Not tested yet: not used, so nothing is shown as connected before the key is known to work.
-            expect((await req("GET", "/api/config")).llm.configured).toBe(false);
-            expect((await resolveProjectAi(d, pid)).source).toBe("server");
-            keyless.db.run("UPDATE ai_configurations SET status = 'working' WHERE id = ?", c.id);
-            const llm = (await req("GET", "/api/config")).llm;
-            expect(llm).toEqual({ configured: true, via: "configuration", label: "Crowd4Test key", provider: "openai-compatible", model: "stand-in-main" });
-            expect(JSON.stringify(llm)).not.toContain(GOOD);
-            expect(await resolveProjectAi(d, pid)).toMatchObject({ mode: "managed", source: "configuration", billing: { owner: "crowd4test" }, configuration: { id: c.id } });
-            expect(await req("GET", "/api/ai-configurations")).toMatchObject({ server: { hasKey: true } });
-            expect(await req("GET", `/api/projects/${pid}/ai`)).toMatchObject({ ready: true, serverHasKey: true, mode: "managed" });
-            // A project on its own key keeps to it: the stand-in is managed AI only.
-            const own = (await req("POST", "/api/projects", { name: "Own key" })).id;
-            const o = await req("POST", `/api/projects/${own}/ai/configurations`, { ...FIELDS, label: "Own", apiKey: BAD });
-            await req("PUT", `/api/projects/${own}/ai`, { mode: "own", configurationId: o.id });
-            expect(await resolveProjectAi(d, own)).toMatchObject({ mode: "own", configuration: { id: o.id } });
-            // Failed: no longer used, and the AI is not set up again.
-            keyless.db.run("UPDATE ai_configurations SET status = 'failed' WHERE id = ?", c.id);
-            expect((await req("GET", "/api/config")).llm.configured).toBe(false);
-            expect((await resolveProjectAi(d, pid)).source).toBe("server");
+            expect((await resolveAiFor(deps(), ids["t-cora"]!)).blocked).toBe(PERSON_INACTIVE);
+            expect(await mayHoldOrganisational(deps(), ids["t-cora"]!)).toBe(false);
         } finally {
-            await server.close();
-            keyless.db.close();
-            fs.rmSync(dir, { recursive: true, force: true });
+            platform.db.run("UPDATE users SET status = 'active' WHERE id = ?", ids["t-cora"]!);
         }
+    });
+
+    it("a test made on a personal key does not name its model in its provenance", async () => {
+        const pid = (await as("t-cora", "POST", "/api/projects", { name: "Provenance" })).body.id as string;
+        const app1 = platform.repo.createApplication(pid, "http://127.0.0.1:9/", {});
+        const job = await platform.repo.createJob(pid, app1, { ...DEFAULT_JOB_OPTIONS, mode: "generate" });
+        const sink = new RepoSink(platform.repo, platform.store, { id: job.id, projectId: pid, applicationId: app1, mode: "generate" });
+        sink.modelShownAs = PERSONAL_KEY_MODEL;
+        const spec = TestSpecSchema.parse({ testId: "WEB-901", title: "Provenance", kind: "web", category: "Smoke", priority: "high", steps: [{ action: "navigate", url: "/" }] });
+        const h = await sink.createTest({ spec, framework: "playwright", validation: "PENDING", meta: { model: "cora-private-model-x9", authoring: "authored" } });
+        await sink.updateTest(h, { meta: { model: "cora-private-model-x9", authoring: "repaired" } } as never);
+        const t = platform.repo.getTest(h.id)!;
+        expect(t.generationMeta).toMatchObject({ model: PERSONAL_KEY_MODEL });
+        expect(JSON.stringify(t)).not.toContain("cora-private-model-x9");
+    });
+});
+
+describe("no AI on projects", () => {
+    it("the project AI routes are gone", async () => {
+        const pid = (await as("t-cora", "POST", "/api/projects", { name: "No AI choice" })).body.id as string;
+        expect((await as("t-cora", "GET", `/api/projects/${pid}/ai`)).status).toBe(404);
+        expect((await as("t-cora", "PUT", `/api/projects/${pid}/ai`, { mode: "own" })).status).toBe(404);
+        expect((await as("t-cora", "GET", "/api/ai-configurations")).status).toBe(404);
+        expect(platform.db.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_ai_settings'")).toBeUndefined();
     });
 });

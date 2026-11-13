@@ -29,7 +29,7 @@ The suite limits apply (50 suites per project, 500 scripts per suite); what does
 
 **Generate suites → Using AI** asks the project's AI model to propose suites (for example Smoke, Regression, one per feature or area) from the scripts' titles, kinds, types, priorities, areas and requirements. The proposal is shown for you to check: rename suites, remove suites, move scripts between suites or remove them. **Nothing is saved until you choose Save.** Saving is all or none: every name must be free in the project and in the list.
 
-- It needs an AI model. Without one the menu entry says so, and the request answers 422 with a plain sentence; a project admin can add one in Settings, AI configuration. The AI token limit, when reached, is a 409.
+- It needs an AI model. Without one the menu entry says so, and the request answers 422 with a plain sentence; you can add your own key in Settings, AI keys, or ask an admin to assign one. The AI token limit, when reached, is a 409.
 - It needs both permissions: using the AI to write tests (`ai_studio.tests.generate`) and changing tests (`ai_studio.tests.write`).
 - The model's answer is untrusted: only scripts the model was given count (others are left out and counted), names and descriptions are one line of plain text cut to length, empty suites are dropped, a name given twice gets a number, at most 12 suites (fewer when the project is near its limit). Only the first 300 scripts in key order are sent; the answer says so when there are more. Nothing the model says is run.
 - AI usage is metered like the other AI features.

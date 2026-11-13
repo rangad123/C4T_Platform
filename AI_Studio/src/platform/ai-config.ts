@@ -1,14 +1,16 @@
 /**
- * Which AI a project's work uses, and who pays (AD-11, AI-02, AI-03). Read when a job starts, or when a route is about to call the model: the
- * answer is fixed for that piece of work, so the engine keeps reading only its own client and the settings caches, and never waits on this.
+ * Which AI a person's work uses, and who pays (round 57). Every person has one chosen key (ai-config-store.ts): one of their own personal keys,
+ * or an organisational key an admin assigned to them. All the AI work they start uses it, in any project; a schedule's or a deploy trigger's
+ * work uses its maker's. Read when a job starts, or when a route is about to call the model: the answer is fixed for that piece of work.
  *
- * - Managed AI: Crowd4Test pays. The platform's configuration the project picked, or the server's key when none is picked or it cannot be used;
- *   with no key on the server, the first working platform configuration.
- * - Own key: the organisation pays. Only that configuration is used, with its own models: no fallback models, no fast model from Settings, no
- *   server key. Anything wrong with it stops the AI work with a clear message; it never turns into spending Crowd4Test's key.
+ * - A personal key: that person pays. An organisational key: Crowd4Test pays.
+ * - Only that key is used, with its own models: no fallback models, no fast model from Settings, and never the server's key. Anything wrong
+ *   with it stops the AI work with a plain sentence.
+ * - The open server (no accounts) uses its chosen key if it has one, else the server's own key, as before; the shared access key (API_KEY)
+ *   uses the server's own key. A signed-in person never does.
  *
  * The messages of a job are read by everyone on the project, testers too, so they name no key, label or provider. The detail stays on the
- * configuration (`status_note`), which only people who manage keys see.
+ * key (`status_note`), which only the people who manage it see.
  */
 import type { Config } from "../config.js";
 import { CLASS_RULES, isLlmCallError, LlmCallError, toLlmCallError, type LlmErrorClass } from "../engine/llm/errors.js";
@@ -16,7 +18,8 @@ import { assertLlmConfigured, createLlmClient, createLlmClientOrUnavailable, Llm
 import { routedClient } from "../engine/llm/routing.js";
 import { ESCALATION_PURPOSE, type UsageBilling } from "../engine/llm/usage.js";
 import type { EngineEvent } from "../engine/context.js";
-import { AiConfigStore, type AiConfiguration, type AiMode } from "./ai-config-store.js";
+import { ACCESS_KEY_OWNER, jobOwnerId, OPEN_OWNER_ID, ownerIdOfActor } from "./agent-store.js";
+import { AiConfigStore, assignableSql, type AiConfiguration } from "./ai-config-store.js";
 import type { Db } from "./db.js";
 import { guardedFetch } from "./guarded-fetch.js";
 import { assertAllowedTarget } from "./net-guard.js";
@@ -24,49 +27,85 @@ import { SecretBox } from "./secrets.js";
 import type { Sql } from "./sql.js";
 import { usageStoreFor } from "./usage-store.js";
 
-export const AI_NOT_AVAILABLE = "AI is not available for this project: its AI configuration cannot be used. A project admin can fix it in Settings, AI configuration. Crowd4Test’s AI was not used instead.";
-export const AI_REFUSED = "The AI work stopped: the provider did not accept this project’s AI configuration. A project admin can fix it in Settings, AI configuration. Crowd4Test’s AI was not used instead.";
-export const AI_NO_ANSWER = "The AI work stopped: the provider did not answer with this project’s AI configuration. Try again later. Crowd4Test’s AI was not used instead.";
+/**
+ * Whose AI the work uses: a person's id, OPEN_OWNER_ID (the open server), ACCESS_KEY_OWNER (the shared access key, API_KEY: an operator's
+ * credential, not a person; it uses the server's own key, as the open server does), or null (nobody: refused).
+ */
+export { ACCESS_KEY_OWNER };
+export const aiOwnerOfActor = (actor: { kind: string; id?: string | undefined }): string | null => (actor.kind === "key" ? ACCESS_KEY_OWNER : ownerIdOfActor(actor));
+/** A job's: its starter's; a schedule's or trigger's made with the shared access key uses the server's key like the access key itself. */
+export function aiOwnerOfJob(options: { startedBy?: unknown }): string | null {
+    const s = options.startedBy as { kind?: string; ownerId?: string | null } | undefined;
+    if (s?.kind === "key") return ACCESS_KEY_OWNER;
+    if ((s?.kind === "schedule" || s?.kind === "trigger") && s.ownerId === ACCESS_KEY_OWNER) return ACCESS_KEY_OWNER;
+    return jobOwnerId(options);
+}
 
-const CROWD4TEST: UsageBilling = { owner: "crowd4test", organizationId: null };
+/** The person acting has no usable key at all. */
+export const NO_AI_KEY = "You have no AI key. Add your own key in Settings, AI keys, or ask an admin to assign an organisational key.";
+/** Their chosen key was removed, or its assignment was taken away. */
+export const KEY_NOT_AVAILABLE = "Your chosen AI key is no longer available to you. Choose another one in Settings, AI keys, or ask an admin to assign an organisational key.";
+/** The person behind the work is turned off here, or no longer here. */
+export const PERSON_INACTIVE = "AI is not available: the person whose AI key this work uses can no longer use AI Studio.";
+/** No person behind the work (the shared access key, the system). */
+export const NO_PERSON = "AI work needs a person's AI key: sign in with your own account to use AI.";
+/** Said in a job (read by everyone on the project) when its starter's key cannot be used: names no key and no person. */
+export const AI_NOT_AVAILABLE = "AI is not available for this work: the AI key of the person who started it cannot be used. They can fix it in Settings, AI keys. No other key was used instead.";
+export const AI_REFUSED = "The AI work stopped: the provider did not accept the AI key of the person who started it. They can fix it in Settings, AI keys. No other key was used instead.";
+export const AI_NO_ANSWER = "The AI work stopped: the provider did not answer with the AI key of the person who started it. Try again later. No other key was used instead.";
+
+const CROWD4TEST: UsageBilling = { owner: "crowd4test" };
 
 export interface AiDeps {
     sql: Sql;
     config: Config;
 }
 
-export interface ProjectAi {
-    mode: AiMode;
+/** The AI one piece of work uses. */
+export interface WorkAi {
+    /** Whose key: Crowd4Test's (organisational, or the open server's own key) or the person's own. */
     billing: UsageBilling;
-    /** What this work uses: the server's key, a configuration, or nothing (own key that cannot be used). */
+    /** What this work uses: the server's key (open server only), a key, or nothing. */
     source: "server" | "configuration" | "blocked";
     configuration?: AiConfiguration;
     /** Only for building this work's client; never logged or returned. */
     key?: string;
-    /** The message for everyone when `source` is "blocked". */
+    /** The sentence when `source` is "blocked", for the person themselves (NO_AI_KEY, KEY_NOT_AVAILABLE, NO_PERSON, or the key's problem). */
     blocked?: string;
-    /** What is wrong, for the people who manage keys. */
+    /** What is wrong with the key, for its owner (and the admins, for an organisational key). */
     problem?: string;
 }
 
 export const secretBoxOf = (config: Pick<Config, "dataDir" | "SECRET_KEY">): SecretBox => new SecretBox(config.dataDir, config.SECRET_KEY);
 export const aiConfigStore = (d: AiDeps): AiConfigStore => new AiConfigStore(d.sql, secretBoxOf(d.config));
 
-/** Who pays for a configuration's calls outside a project (its "Test this key"). */
-export async function billingOfConfiguration(sql: Sql, c: AiConfiguration): Promise<UsageBilling> {
-    if (c.ownerKind === "platform") return CROWD4TEST;
-    return { owner: "organization", organizationId: c.ownerKind === "organization" ? c.organizationId : await organizationOf(sql, c.projectId ?? "") };
+/** Who pays for a key's calls. */
+export function billingOfKey(c: AiConfiguration): UsageBilling {
+    return c.kind === "personal" ? { owner: "personal", personId: c.ownerPersonId } : CROWD4TEST;
 }
 
-const organizationOf = async (sql: Sql, projectId: string): Promise<string | null> => (await sql.get<{ organization_id: string | null }>("SELECT organization_id FROM projects WHERE id = ?", projectId))?.organization_id ?? null;
+/** Whether this server signs people in with Crowd4Test (then only Crowd4Test admins and sub-admins hold organisational keys). */
+export const crowd4testOn = (config: Pick<Config, "C4T_API_ORIGIN">): boolean => Boolean(config.C4T_API_ORIGIN?.trim());
 
-/** May this project use this configuration? Checked at every use, so a project moved to another organisation stops using the old one's key at once. */
-export function belongsTo(c: AiConfiguration, projectId: string, organizationId: string | null): boolean {
-    if (c.ownerKind === "project") return c.projectId === projectId;
-    return c.ownerKind === "organization" && Boolean(organizationId) && c.organizationId === organizationId;
+/** May this person be assigned an organisational key (and keep using one)? Crowd4Test admins and sub-admins; without Crowd4Test sign-in, owners. */
+export async function mayHoldOrganisational(d: AiDeps, personId: string): Promise<boolean> {
+    if (personId === OPEN_OWNER_ID) return true;
+    return Boolean(await d.sql.get(`SELECT 1 AS x FROM users u WHERE u.id = ? AND ${assignableSql("u", crowd4testOn(d.config))}`, personId));
 }
 
-/** The configuration, its key and its address check, or what is wrong. */
+/** Is this person still someone here (active)? The open server always is. */
+export async function personActive(sql: Sql, personId: string): Promise<boolean> {
+    if (personId === OPEN_OWNER_ID) return true;
+    return Boolean(await sql.get("SELECT 1 AS x FROM users WHERE id = ? AND role IS NOT NULL AND status = 'active'", personId));
+}
+
+/** May this person use this key? Their own personal key, or an organisational key assigned to them that they may still hold. */
+export async function mayUseKey(store: AiConfigStore, d: AiDeps, c: AiConfiguration, personId: string): Promise<boolean> {
+    if (c.kind === "personal") return c.ownerPersonId === personId;
+    return (await store.isAssigned(c.id, personId)) && (await mayHoldOrganisational(d, personId));
+}
+
+/** The key, and its address check, or what is wrong. */
 async function usable(store: AiConfigStore, c: AiConfiguration): Promise<{ key: string } | { problem: string }> {
     let key: string;
     try {
@@ -85,11 +124,7 @@ async function usable(store: AiConfigStore, c: AiConfiguration): Promise<{ key: 
     return { key };
 }
 
-/**
- * The AI this project's work uses right now. Never throws: when the choice itself cannot be read the work is stopped, because a project on
- * its own key must not reach the server's key by accident.
- */
-/** Whether the server's own settings name a usable key (LLM_PROVIDER and its key in .env). */
+/** Whether the server's own settings name a usable key (LLM_PROVIDER and its key in .env): used only for the open server. */
 export function serverHasKey(config: Config): boolean {
     try {
         assertLlmConfigured(config);
@@ -99,56 +134,55 @@ export function serverHasKey(config: Config): boolean {
     }
 }
 
-/** The first Crowd4Test configuration whose last test worked and whose key can be read: managed AI's stand-in when the server has no key. */
-async function workingPlatformConfiguration(store: AiConfigStore): Promise<{ row: AiConfiguration; key: string } | undefined> {
-    for (const row of await store.list()) {
-        if (row.ownerKind !== "platform" || row.status !== "working") continue;
+/**
+ * The AI this person's work uses right now. `ownerId` is from aiOwnerOfActor / aiOwnerOfJob. Never throws.
+ */
+export async function resolveAiFor(d: AiDeps, ownerId: string | null): Promise<WorkAi> {
+    if (!ownerId) return { billing: CROWD4TEST, source: "blocked", blocked: NO_PERSON };
+    if (ownerId === ACCESS_KEY_OWNER) return { billing: CROWD4TEST, source: "server" };
+    const blocked = (sentence: string, problem?: string): WorkAi => ({ billing: CROWD4TEST, source: "blocked", blocked: sentence, ...(problem ? { problem } : {}) });
+    try {
+        if (!(await personActive(d.sql, ownerId))) return blocked(PERSON_INACTIVE);
+        const store = aiConfigStore(d);
+        const chosen = await store.chosenOf(ownerId);
+        if (!chosen) return ownerId === OPEN_OWNER_ID ? { billing: CROWD4TEST, source: "server" } : blocked(NO_AI_KEY);
+        const row = await store.get(chosen);
+        if (!row || !(await mayUseKey(store, d, row, ownerId))) return blocked(KEY_NOT_AVAILABLE);
         const u = await usable(store, row);
-        if ("key" in u) return { row, key: u.key };
+        if (!("key" in u)) return blocked(keyCannotBeUsed(u.problem), u.problem);
+        return { billing: billingOfKey(row), source: "configuration", configuration: row, key: u.key };
+    } catch {
+        return blocked("Your AI key could not be read. Try again, or choose it again in Settings, AI keys.");
     }
-    return undefined;
 }
+
+/** The same refusal as a job says it (read by everyone on the project): no "you", no key, no person named. */
+export function jobSentenceOf(blocked: string): string {
+    if (blocked === NO_AI_KEY) return "AI is not available for this work: the person who started it has no AI key. They can add their own key in Settings, AI keys, or ask an admin to assign an organisational key.";
+    if (blocked === NO_PERSON) return "AI is not available for this work: no person's AI key is behind it. Start it while signed in with your own account.";
+    if (blocked === PERSON_INACTIVE) return PERSON_INACTIVE;
+    return AI_NOT_AVAILABLE;
+}
+
+/** The sentence a person gets when their chosen key itself is the problem. */
+export const keyCannotBeUsed = (problem: string): string => `Your chosen AI key cannot be used: ${problem} Fix it in Settings, AI keys.`;
 
 /**
- * The AI the platform as a whole has, for the "AI connected" signs: the server's key, else a working Crowd4Test configuration (what managed
- * projects then use). Names no key, only the provider, model and the configuration's label.
+ * The person's AI as the "AI connected" signs show it: their chosen key's provider, model and label, or the open server's own key. Names
+ * no key. A key whose last test failed does not count as connected.
  */
-export async function platformAi(d: AiDeps, serverModel: string): Promise<{ configured: boolean; provider: string; model: string; via: "server" | "configuration" | "none"; label?: string }> {
-    if (serverModel !== "unavailable") return { configured: true, provider: d.config.LLM_PROVIDER, model: serverModel, via: "server" };
-    try {
-        const stand = await workingPlatformConfiguration(aiConfigStore(d));
-        if (stand) return { configured: true, provider: stand.row.provider, model: stand.row.model, via: "configuration", label: stand.row.label };
-    } catch {
-        // An unreadable store says nothing more than "not set up".
+export async function personAiView(d: AiDeps, ownerId: string | null): Promise<{ configured: boolean; provider: string; model: string; via: "personal" | "organisational" | "server" | "none"; label?: string; problem?: string }> {
+    const ai = await resolveAiFor(d, ownerId);
+    if (ai.source === "configuration") {
+        const c = ai.configuration!;
+        const failed = c.status === "failed";
+        return { configured: !failed, provider: c.provider, model: c.model, via: c.kind, label: c.label, ...(failed ? { problem: keyCannotBeUsed(c.statusNote ?? "its last test failed.") } : {}) };
     }
-    return { configured: false, provider: d.config.LLM_PROVIDER, model: serverModel, via: "none" };
-}
-
-export async function resolveProjectAi(d: AiDeps, projectId: string): Promise<ProjectAi> {
-    let organizationId: string | null = null;
-    const stop = (problem: string): ProjectAi => ({ mode: "own", billing: { owner: "organization", organizationId }, source: "blocked", blocked: AI_NOT_AVAILABLE, problem });
-    try {
-        const store = aiConfigStore(d);
-        const choice = await store.choice(projectId);
-        organizationId = await organizationOf(d.sql, projectId);
-        const row = choice.configurationId ? await store.get(choice.configurationId) : undefined;
-        if (choice.mode === "managed") {
-            if (row?.ownerKind === "platform" && row.status !== "failed") {
-                const u = await usable(store, row);
-                if ("key" in u) return { mode: "managed", billing: CROWD4TEST, source: "configuration", configuration: row, key: u.key };
-            }
-            // No key on the server: a working Crowd4Test configuration stands in for it, so managed AI works without one being picked.
-            const stand = serverHasKey(d.config) ? undefined : await workingPlatformConfiguration(store);
-            return stand ? { mode: "managed", billing: CROWD4TEST, source: "configuration", configuration: stand.row, key: stand.key } : { mode: "managed", billing: CROWD4TEST, source: "server" };
-        }
-        if (!row) return stop("No configuration is chosen for this project.");
-        if (!belongsTo(row, projectId, organizationId)) return stop("This configuration belongs to another organisation. Choose another one.");
-        const u = await usable(store, row);
-        if (!("key" in u)) return stop(u.problem);
-        return { mode: "own", billing: { owner: "organization", organizationId }, source: "configuration", configuration: row, key: u.key };
-    } catch {
-        return stop("The project’s AI configuration could not be read.");
+    if (ai.source === "server") {
+        const ok = serverHasKey(d.config);
+        return { configured: ok, provider: d.config.LLM_PROVIDER, model: ok ? (d.config.LLM_MODEL ?? "") : "unavailable", via: ok ? "server" : "none" };
     }
+    return { configured: false, provider: "", model: "unavailable", via: "none", ...(ai.blocked ? { problem: ai.blocked } : {}) };
 }
 
 /**
@@ -213,17 +247,7 @@ function ownKeyOptions(c: AiConfiguration, key: string, words: boolean, onKeyFai
     };
 }
 
-/** A managed project's configuration is Crowd4Test's money either way: when it fails, the server's key answers, as for any other project. */
-function managedOptions(config: Config): CreateClientOptions {
-    try {
-        assertLlmConfigured(config);
-        return { fallbacks: [], thenServer: config, fetch: guardedFetch };
-    } catch {
-        return { fallbacks: [], fetch: guardedFetch };
-    }
-}
-
-/** What a job or route does when a project's own key fails for good: the configuration shows it, for the people who manage keys. */
+/** What a job or route does when a key fails for good: the key shows it, for the people who manage it. */
 const markFailed = (d: AiDeps, c: AiConfiguration) => (e: LlmCallError) => {
     void aiConfigStore(d)
         .setStatus(c.id, "failed", keyFailureWords(e.cls), false)
@@ -233,13 +257,13 @@ const markFailed = (d: AiDeps, c: AiConfiguration) => (e: LlmCallError) => {
 /** Builds a model client from settings; tests hand in a scripted double. */
 export type MakeLlm = (config: Config) => LlmClient;
 
-/** One piece of work's client for a project whose AI is a configuration or blocked (a project on the server's key goes through llm-routing.ts). */
-export function clientOfConfiguration(d: AiDeps, ai: ProjectAi, o: { makeLlm?: MakeLlm; onEscalation?: (e: { to: string }) => void } = {}): LlmClient {
-    if (ai.source !== "configuration") return unavailableLlmClient(ai.blocked ?? AI_NOT_AVAILABLE);
+/** One piece of work's client on a key, or the sentence when it is blocked (the open server's own key goes through llm-routing.ts). */
+export function clientOfConfiguration(d: AiDeps, ai: WorkAi, o: { makeLlm?: MakeLlm; onEscalation?: (e: { to: string }) => void; blockedSentence?: string } = {}): LlmClient {
+    if (ai.source !== "configuration") return unavailableLlmClient(o.blockedSentence ?? ai.blocked ?? AI_NOT_AVAILABLE);
     const c = ai.configuration!;
     const key = ai.key!;
     const cfg = configWith(d.config, c, key);
-    const options = ai.mode === "own" ? ownKeyOptions(c, key, true, markFailed(d, c)) : managedOptions(d.config);
+    const options = ownKeyOptions(c, key, true, markFailed(d, c));
     const build = (settings: Config) => (o.makeLlm ? o.makeLlm(settings) : createLlmClient(settings, options));
     try {
         const main = build(cfg);
@@ -251,10 +275,12 @@ export function clientOfConfiguration(d: AiDeps, ai: ProjectAi, o: { makeLlm?: M
     }
 }
 
-/** A job's client on a configuration: as `clientOfConfiguration`, with escalations counted on the usage rows of whoever pays. */
-export function configuredLlmForJob(deps: AiDeps & { db: Db; emit?: (e: EngineEvent) => void }, job: { id: string; projectId: string }, ai: ProjectAi, makeLlm?: MakeLlm): LlmClient {
+/** A job's client on a key: as `clientOfConfiguration`, with escalations counted on the usage rows of whoever pays. */
+export function configuredLlmForJob(deps: AiDeps & { db: Db; emit?: (e: EngineEvent) => void }, job: { id: string; projectId: string }, ai: WorkAi, makeLlm?: MakeLlm): LlmClient {
     return clientOfConfiguration(deps, ai, {
         makeLlm,
+        // A job is read by everyone on the project: the neutral sentence, never the starter's own.
+        blockedSentence: AI_NOT_AVAILABLE,
         onEscalation: (e) => {
             try {
                 usageStoreFor(deps.db, deps.config).addUsage({ jobId: job.id, projectId: job.projectId, purpose: ESCALATION_PURPOSE, model: e.to, at: new Date(), calls: 1, failedCalls: 0, inputTokens: 0, outputTokens: 0, images: 0, estimatedCalls: 0, billing: ai.billing });
@@ -265,22 +291,24 @@ export function configuredLlmForJob(deps: AiDeps & { db: Db; emit?: (e: EngineEv
     });
 }
 
-/** The client for a model call outside a job (a route): with who pays, and the message when it cannot run. */
-export async function projectLlm(p: AiDeps, projectId: string): Promise<{ llm: LlmClient; billing: UsageBilling; blocked?: string }> {
-    const ai = await resolveProjectAi(p, projectId);
+/** The client for a model call outside a job (a route), for the person acting: with who pays, and the sentence when it cannot run. */
+export async function personLlm(p: AiDeps, ownerId: string | null): Promise<{ llm: LlmClient; billing: UsageBilling; blocked?: string }> {
+    const ai = await resolveAiFor(p, ownerId);
     if (ai.source === "server") return { llm: createLlmClientOrUnavailable(p.config), billing: ai.billing };
-    return { llm: clientOfConfiguration(p, ai), billing: ai.billing, blocked: ai.blocked };
+    return { llm: clientOfConfiguration(p, ai), billing: ai.billing, ...(ai.blocked ? { blocked: ai.blocked } : {}) };
 }
 
 /**
- * Whether this project can use AI at all (a key that is there, not whether a worker runs): `ok` false with the plain reason. It is what
- * checks in front of AI work ask, instead of whether the server has a key of its own.
+ * Whether this person can use AI at all (a key that is there, not whether a worker runs): `ok` false with the plain reason. What checks in
+ * front of AI work ask.
  */
-export async function projectAiGate(p: AiDeps & { llm: { modelName: string } }, projectId: string): Promise<{ ok: true } | { ok: false; own: boolean; reason?: string }> {
-    const ai = await resolveProjectAi(p, projectId);
+export async function aiGate(p: AiDeps & { llm: { modelName: string } }, ownerId: string | null): Promise<{ ok: true } | { ok: false; reason?: string }> {
+    const ai = await resolveAiFor(p, ownerId);
+    // A key whose last call failed may work again (credit added): the work starts, and fails with the provider's answer if it still does not.
     if (ai.source === "configuration") return { ok: true };
-    if (ai.source === "blocked") return { ok: false, own: true, reason: ai.blocked };
-    return p.llm.modelName === "unavailable" ? { ok: false, own: false } : { ok: true };
+    if (ai.source === "blocked") return { ok: false, reason: ai.blocked ?? NO_AI_KEY };
+    // The open server or the shared access key on the server's own key: with none, the caller says "no AI model" in its own words.
+    return p.llm.modelName === "unavailable" ? { ok: false } : { ok: true };
 }
 
 export interface KeyTestResult {

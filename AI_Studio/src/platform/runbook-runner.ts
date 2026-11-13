@@ -308,7 +308,8 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
             const config = (app.config ?? {}) as Record<string, any>;
             // Saved settings of the latest analysis, minus anything that belongs to another kind of job. Data-changing tests
             // and the load check are off unless this step switches them on.
-            const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, runbookRunId: _r, retryFailures: _rf, requirementsText: _rt, ...saved } = config;
+            // Never who started an earlier job (an older application kept it): this run's own starter is recorded (labelOptions).
+            const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, runbookRunId: _r, retryFailures: _rf, requirementsText: _rt, startedBy: _sb, ...saved } = config;
             const options = { ...DEFAULT_JOB_OPTIONS, ...saved, mode: "generate", allowMutatingApiTests: step.allowMutatingApiTests === true, loadChecks: step.loadChecks === true } as JobOptions;
             if (options.loadChecks) {
                 const refused = await loadTargetProblem(p.db, run.projectId, [options.apiBaseUrl, app.url as string]);

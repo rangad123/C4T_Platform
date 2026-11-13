@@ -4,7 +4,7 @@ import { z } from "zod";
 import { CHECK_ON_DEVICE, writePhoneCaseScript } from "../../engine/authoring/case-phone-script.js";
 import { MAX_SCRIPTS_PER_CALL, NO_MODEL_FOR_SCRIPTS, scriptTitleOf, writeCaseScript, type CaseForScript } from "../../engine/authoring/case-script.js";
 import { JobMeter } from "../../engine/llm/metered.js";
-import { projectLlm } from "../ai-config.js";
+import { aiOwnerOfActor, personLlm } from "../ai-config.js";
 import { isAppUri } from "../../engine/desktop/target.js";
 import { MobileTargetSchema } from "../../engine/mobile/target.js";
 import type { TestSpec } from "../../engine/spec/schema.js";
@@ -149,7 +149,7 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
 
     async function writeScripts(req: FastifyRequest, pid: string, now: string[], byId: Map<string, ManualCase>, skipped: Array<{ caseId: string; reason: SkipReason; detail: string }>, target: Target) {
         // The project's AI and who pays for it (ai-config.ts), as the other AI routes do.
-        const { llm, billing, blocked } = await projectLlm(p, pid);
+        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_SCRIPTS, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         if (aiSkipReason(usage, pid)) throw new HttpError(409, "The AI token limit was reached, so the AI cannot write test scripts now. You can still write them by hand.");

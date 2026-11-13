@@ -13,7 +13,7 @@ function ServerNotes({ where }: { where: AgentWhere }) {
         <>
             {!where.ai.configured && (
                 <Callout tone="warning" title="AI is not set up on this server">
-                    The agents explore with an AI model, so none of them can work here until one is set up in Settings. You can still choose agents for your projects.
+                    The agents explore with an AI model, so none of them can work for you until you have an AI key in Settings, AI keys. You can still choose agents for your projects.
                 </Callout>
             )}
             {!where.canRun.ok && (

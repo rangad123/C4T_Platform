@@ -279,6 +279,8 @@ export class PhoneFake {
         if (method === "GET" && p === "/config") return { body: this.config };
         // The person's own runner (round 45): none unless a test sets one.
         if (method === "GET" && p === "/me/runner") return { body: { runner: this.me } };
+        // The person's AI (routes for AI keys): an open server, whose own key follows the server's word here.
+        if (method === "GET" && p === "/me/ai") return { body: { chosen: null, problem: null, personal: [], organisational: [], canManageOrganisational: false, openServer: { configured: this.config.llm.configured, provider: this.config.llm.provider, model: this.config.llm.model } } };
         // The Security Assessment module (round 18): the shell asks whether it is on; these phone screens run with it off.
         if (method === "GET" && p === "/v1/security/status") return { body: { enabled: false } };
         if (method === "GET" && p === "/projects") return { body: [...this.projects.values()].map((x) => this.publicProject(x)) };
@@ -319,8 +321,8 @@ export class PhoneFake {
                 const depths = [["quick", "Quick", 40, 150, 10, 15], ["standard", "Standard", 150, 600, 30, 40], ["thorough", "Thorough", 300, 1200, 60, 80]].map(([id, label, screens, actions, minutes, ideas]) => ({ id, label, screens, actions, minutes, ideas, line: `About ${screens} screens.` }));
                 return { body: { hasApp: Boolean(proj.mobile?.appPackage || proj.mobile?.apk), appPackage: proj.mobile?.appPackage ?? null, runsOn: null, effective: { kind: "auto" }, sentence: "Phone tests run on a connected phone that has the app, else on an emulator.", exploredOn: null, depth: "standard", depths, keepSignedIn: false, cleanStart: proj.mobile?.cleanStart === true, farm: { connections: [], chosen: null } } };
             }
-            // What every project page may ask: can this project use AI (routes/ai-config.ts). Here it follows the server's word.
-            if (method === "GET" && rest === "ai") return { body: { available: this.config.llm.configured, ready: this.config.llm.configured, runsHere: true } };
+            // The project header names the project's testing agents (round 56): none chosen in this fake.
+            if (method === "GET" && rest === "testing-agents") return { body: { applies: false, agents: [], source: "matched", chosenBy: null, chosenAt: null, switches: {}, platforms: ["android"] } };
             if (method === "GET" && rest === "runner") {
                 const a = proj.runner.agentId ? this.agents.find((x) => x.id === proj.runner.agentId) : undefined;
                 const canMobile = proj.runner.runOn === "agent" ? Boolean(a?.online && a?.capabilities?.android) : this.config.mobile?.available === true;

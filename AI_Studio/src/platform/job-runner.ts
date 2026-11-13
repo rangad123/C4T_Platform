@@ -46,11 +46,11 @@ import { MobileTargetSchema } from "../engine/mobile/target.js";
 import type { DeviceOpener } from "../engine/mobile/explore/types.js";
 import { SecretBox } from "./secrets.js";
 import { prepareJobSignIn, type JobSignIn } from "./hard-signin-service.js";
-import { meterFor } from "./usage-store.js";
+import { meterFor, PERSONAL_KEY_MODEL } from "./usage-store.js";
 import { routedLlmForJob } from "./llm-routing.js";
 import { NotesStore } from "./notes-store.js";
 import type { SiteNote } from "../engine/memory/notes.js";
-import { configuredLlmForJob, resolveProjectAi, type ProjectAi } from "./ai-config.js";
+import { aiOwnerOfJob, configuredLlmForJob, jobSentenceOf, resolveAiFor, type WorkAi } from "./ai-config.js";
 import { jobPersonGate } from "./phone-person-gate.js";
 import { agentServiceOf, RunnerAgentError } from "./agent-services.js";
 import { exploreOnRunner } from "./explore-dispatch.js";
@@ -134,10 +134,12 @@ export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeF
  * the usage meter (engine/llm/metered.ts). `emit` is where routing tells the job about escalations. Also used for an exploration on a runner,
  * whose model calls come back here (explore-llm.ts).
  */
-export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEvent) => void): Promise<{ ai: ProjectAi; meter: JobMeter | null; rawLlm: LlmClient; llm: LlmClient }> {
+export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEvent) => void): Promise<{ ai: WorkAi; meter: JobMeter | null; rawLlm: LlmClient; llm: LlmClient }> {
     const { repo, config } = deps;
-    // Which AI this job uses and who pays: read once, here, so the engine never waits for it (ai-config.ts).
-    const ai = await resolveProjectAi({ sql: repo.db.sql, config }, job.projectId);
+    // Which AI this job uses and who pays: its starter's chosen key (a schedule's or trigger's maker's), read once, here (ai-config.ts).
+    const resolved = await resolveAiFor({ sql: repo.db.sql, config }, aiOwnerOfJob(job.options));
+    // A job is read by everyone on its project: a blocked job says so in words that name no key and no person.
+    const ai: WorkAi = resolved.blocked ? { ...resolved, blocked: jobSentenceOf(resolved.blocked) } : resolved;
     // A client per job so its token usage is this job's alone (the shared client's counters span jobs).
     // Every model call of the job is counted and checked against the AI budgets before it is made (engine/llm/metered.ts).
     const meter = meterFor(repo, config, job, undefined, ai.billing);
@@ -161,6 +163,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     // What the engine writes through: the same sink, closed by a hand-over (fenceSink).
     const engineSink = fenceSink(sink, () => handingOver, going);
     const { ai, meter, rawLlm, llm } = await jobLlm(deps, job, (e) => (job.options.mode === "validate" || handingOver ? undefined : sink.event(e)));
+    // A person's own key: the tests' provenance does not name its model.
+    if (ai.billing.owner === "personal") sink.modelShownAs = PERSONAL_KEY_MODEL;
     const app = repo.getApplication(job.applicationId);
     if (!app) {
         repo.setJobStatus(job.id, "FAILED", "Application record not found");
@@ -242,7 +246,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     });
 
     try {
-        // A project on its own key that cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
+        // The starter's key cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
         if (ai.blocked && !validateOnly) throw new Error(ai.blocked);
         const ctx: EngineContext = {
             config,

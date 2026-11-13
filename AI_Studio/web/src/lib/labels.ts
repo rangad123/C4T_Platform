@@ -195,7 +195,7 @@ export function cleanReason(r: string | null | undefined): string {
         .replace(/Error:\s*expect\(locator\)\.\w+\(\)\s*failed/g, "the element wasn’t in the expected state")
         .replace(/locator\.\w+: Timeout \d+ms exceeded\.?/g, "the element couldn’t be found in time")
         // The automatic-repair afterthought.
-        .replace(/\s*\(automatic repair skipped: no LLM configured\)/g, ". Automatic fixing isn’t available because the AI model isn’t set up.")
+        .replace(/\s*\(automatic repair skipped: no LLM configured\)/g, ". Automatic fixing isn’t available because there is no usable AI key.")
         .replace(/\s*\(automatic repair (?:failed|skipped)[^)]*\)/g, ". An automatic fix was tried but didn’t work.")
         .replace(/\s*\(proposed fix rejected:[^)]*\)/g, ". An automatic fix was proposed but rejected as unsafe.")
         .replace(/\s+/g, " ")
@@ -218,9 +218,9 @@ export function friendlyError(message: string | null | undefined): FriendlyError
     if (!m) return { title: "Something went wrong", body: "No further details are available. Try again." };
     if (/No credentials for LLM provider|LLM_BASE_URL/i.test(m)) {
         return {
-            title: "The AI model isn’t set up yet",
-            body: "Exploring web applications needs access to an AI model. Add your API key in the server settings, then try again. API-only testing works without one.",
-            fix: { label: "Open settings", href: "#/settings" },
+            title: "You have no usable AI key",
+            body: "Exploring web applications uses your AI key. Add your own key in Settings, AI keys, or ask an admin to assign an organisational key, then try again. API-only testing works without one.",
+            fix: { label: "Open AI keys", href: "#/settings#ai-keys" },
         };
     }
     if (/AI token limit for this (job|project|month) was reached/i.test(m)) {

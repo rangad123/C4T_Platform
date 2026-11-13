@@ -155,7 +155,7 @@ const CASES = ["all", "automated", "manual"] as const;
 const SCRIPTS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 const RUNS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
 // Round 37: runners are machine-level, on the Runners page, not a project setting.
-const SETTINGS = ["general", "members", "environments", "data", "accounts", "ai", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+const SETTINGS = ["general", "members", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 const PLACES: Array<{ tab: string; h: () => string; title: string; sections: string[]; at: (i: number) => string }> = [
     { tab: "Test scripts", h: () => routes.scripts(P()), title: "Test scripts", sections: ["Scripts", "Review", "Reusable steps", "Shared elements", "Helpers (code)", "Reusable libraries"], at: (i) => routes.scripts(P(), SCRIPTS[i]) },
     { tab: "Runs", h: () => routes.runs(P()), title: "Runs", sections: ["All runs", "Schedules", "After a deploy", "Trends", "Releases", "Compliance"], at: (i) => routes.runs(P(), RUNS[i]) },
@@ -163,7 +163,7 @@ const PLACES: Array<{ tab: string; h: () => string; title: string; sections: str
         tab: "Settings",
         h: () => routes.projectSettings(P()),
         title: "Settings",
-        sections: ["General", "Members", "Environments", "Test data", "Test accounts", "AI configuration", "Frameworks", "Mobile app", "Alerts", "Issue tracker", "Storage and backup"],
+        sections: ["General", "Members", "Environments", "Test data", "Test accounts", "Frameworks", "Mobile app", "Alerts", "Issue tracker", "Storage and backup"],
         at: (i) => routes.projectSettings(P(), SETTINGS[i]),
     },
 ];
@@ -291,7 +291,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         await pwExpect(page.getByTestId("planned-script-approval")).toHaveCount(0);
     });
 
-    it("Settings > General edits the project's details, AI configuration says whether AI is available and who pays, Members lists who is on the project; the testing type is under General", async () => {
+    it("Settings > General edits the project's details, there is no AI section (each person has their own AI key), Members lists who is on the project; the testing type is under General", async () => {
         // General is real since round 26: name, platforms and testing modes (US-010), the Crowd4Test link, and archive or delete (round 34).
         await visit(routes.projectSettings(P(), "general"));
         const general = page.getByTestId("project-general");
@@ -303,9 +303,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         await pwExpect(general.getByText("Choose one testing mode")).toBeVisible();
         await pwExpect(general.getByTestId("project-c4t-link")).toBeVisible();
         await pwExpect(general.getByTestId("project-archive").getByRole("button", { name: "Archive project" })).toBeVisible();
-        await visit(routes.projectSettings(P(), "ai"));
-        await pwExpect(page.getByTestId("project-ai-available")).toBeVisible();
-        await pwExpect(page.getByTestId("project-ai-choice").getByRole("heading", { name: "Who pays for this project’s AI" })).toBeVisible();
+        await pwExpect(page.getByRole("link", { name: /AI configuration/ })).toHaveCount(0);
         await visit(routes.projectSettings(P(), "members"));
         await pwExpect(page.getByTestId("project-members").getByRole("heading", { name: "Members", exact: true })).toBeVisible();
         // The security module is on by default (round 18), so the project's testing type shows; it moved here from Setup.
@@ -459,7 +457,7 @@ describe("Test scripts > Scripts (the old Tests page)", () => {
             // Round 38: recording and exploring a phone app are no longer entries of this menu.
             ["Describe it", /AI writes the steps/],
             // Round 41: scripts from the project's written test cases (it says what it needs where it cannot write).
-            ["Generate from test cases", /Automated test case you choose|AI model|permission|code-based|Android|application address/],
+            ["Generate from test cases", /Automated test case you choose|AI key|permission|code-based|Android|application address/],
             ["Build steps by hand", /one by one/],
             ["Write it as text", /^The DSL: one line per step.*No AI needed/],
             ["Write code", /Runs only where code tests are allowed/],
@@ -696,6 +694,7 @@ describe("every route builder opens a page without an error", () => {
             develop: [routes.develop],
             createProject: [routes.createProject],
             yourRunner: [routes.yourRunner],
+            aiKeys: [routes.aiKeys],
             folders: [routes.folders],
             integrations: [routes.integrations],
             libraries: [routes.libraries],

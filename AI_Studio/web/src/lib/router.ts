@@ -25,6 +25,7 @@ export function useRoute(): Route {
 
 /** "Your runner" in Settings: one runner per person, set up once (features/runners/YourRunner.tsx). */
 const RUNNER_SETTINGS = "#/settings#runner";
+const AI_KEY_SETTINGS = "#/settings#ai-keys";
 
 export const go = (href: string) => {
     location.hash = href.replace(/^#/, "");
@@ -40,7 +41,7 @@ export const CASES_SECTIONS = ["all", "automated", "manual"] as const;
 export const SCRIPTS_SECTIONS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 export const RUNS_SECTIONS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
 // Runners are not a project setting: each person sets up their own runner once in Settings (round 45).
-export const SETTINGS_SECTIONS = ["general", "members", "environments", "data", "accounts", "ai", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+export const SETTINGS_SECTIONS = ["general", "members", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 export type CasesSection = (typeof CASES_SECTIONS)[number];
 export type ScriptsSection = (typeof SCRIPTS_SECTIONS)[number];
 export type RunsSection = (typeof RUNS_SECTIONS)[number];
@@ -154,6 +155,7 @@ export const routes = {
     develop: "#/develop",
     /** The person's runner: the "Your runner" section of Settings (round 45 removed the Runners pages; old links land here). */
     yourRunner: RUNNER_SETTINGS,
+    aiKeys: AI_KEY_SETTINGS,
     /** Integrations: every system the projects connect to, set up once for an organisation, and which projects use each. */
     integrations: "#/integrations",
     /** An old link (the Folders place of round 34): it lands on Reusable libraries (lib/aliases.ts). */

@@ -40,7 +40,7 @@ Before every model call the platform checks the job, the project's month and the
 
 | Limit | Set with | Default |
 |---|---|---|
-| Tokens per month, all projects | Settings, or `PUT /api/usage/budgets` `{ monthlyTokens }`; env default `AI_MONTHLY_TOKEN_LIMIT` | none |
+| Tokens per month, all projects (what Crowd4Test pays for: organisational keys and the server's own key; work on a personal key is not counted against it, [ai-keys.md](ai-keys.md)) | Settings, or `PUT /api/usage/budgets` `{ monthlyTokens }`; env default `AI_MONTHLY_TOKEN_LIMIT` | none |
 | Tokens per job | Settings, or `PUT /api/usage/budgets` `{ jobTokens }`; env default `AI_JOB_TOKEN_LIMIT` | none |
 | Warning percentage | `PUT /api/usage/budgets` `{ warnPercent }` (1 to 99) | 80 |
 | One project's month and job limits | Settings, or `PUT /api/projects/:id/usage-budget` `{ monthlyTokens, jobTokens }` | none |

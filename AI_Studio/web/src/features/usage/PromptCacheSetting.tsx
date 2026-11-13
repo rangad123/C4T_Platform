@@ -16,7 +16,7 @@ interface PromptCacheAnswer {
     explanation: string;
 }
 
-/** Settings, inside "AI model": the prompt-caching switch (on by default), what it does for the model in use, and where the choice comes from. */
+/** Settings, inside "How the AI works here": the prompt-caching switch (on by default), what it does for the model in use, and where the choice comes from. */
 export function PromptCacheSetting() {
     const state = useFetch<PromptCacheAnswer>("/llm/prompt-cache");
     const [busy, setBusy] = useState(false);

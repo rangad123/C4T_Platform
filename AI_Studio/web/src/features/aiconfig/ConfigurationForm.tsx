@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { ApiError, api } from "../../api";
 import { Button, Callout } from "../../components/ui";
-import type { AiConfiguration, AiProviderChoice } from "./aiconfig";
+import type { AiProviderChoice, KeyView } from "./aiconfig";
 
 /**
- * Add a configuration, or change one. The key field is write-only: it starts empty, a saved key is never shown, and leaving it empty when
+ * Add a key, or change one. The key field is write-only: it starts empty, a saved key is never shown, and leaving it empty when
  * changing keeps the saved key. A new provider or address needs the key again, because a stored key only goes where it was entered for.
  */
-export function ConfigurationForm({ idPrefix, providers, current, path, extra, onSaved, onCancel }: { idPrefix: string; providers: AiProviderChoice[]; current?: AiConfiguration; path: string; extra?: Record<string, unknown>; onSaved: (c: AiConfiguration) => void | Promise<void>; onCancel: () => void }) {
+export function ConfigurationForm({ idPrefix, providers, current, path, onSaved, onCancel }: { idPrefix: string; providers: AiProviderChoice[]; current?: KeyView; path: string; onSaved: (saved: KeyView | undefined) => void | Promise<void>; onCancel: () => void }) {
     const [label, setLabel] = useState(current?.label ?? "");
     const [provider, setProvider] = useState(current?.provider ?? providers[0]?.id ?? "anthropic");
     const chosen = providers.find((p) => p.id === provider);
@@ -29,9 +29,9 @@ export function ConfigurationForm({ idPrefix, providers, current, path, extra, o
         setError("");
         try {
             const fields = { label: label.trim(), provider, model: model.trim(), fastModel: fastModel.trim() || null, baseUrl: chosen?.needsAddress ? baseUrl.trim() : null, ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) };
-            const saved = await api<AiConfiguration>(path, { method: current ? "PATCH" : "POST", body: { ...fields, ...extra } });
+            const answer = await api<{ key?: KeyView } | undefined>(path, { method: current ? "PATCH" : "POST", body: fields });
             setApiKey("");
-            await onSaved(saved);
+            await onSaved(answer?.key);
         } catch (e) {
             setError(e instanceof ApiError ? e.message : "That did not save. Try again.");
         } finally {
@@ -84,12 +84,12 @@ export function ConfigurationForm({ idPrefix, providers, current, path, extra, o
                 <label htmlFor={`${idPrefix}-key`}>{current ? "New key" : "Key"}</label>
                 <input id={`${idPrefix}-key`} className="input mono" type="password" autoComplete="new-password" aria-describedby={`${idPrefix}-key-hint`} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
                 <span className="hint" id={`${idPrefix}-key-hint`}>
-                    {current ? `Leave empty to keep the key ending in ${current.keyEnding}.` : "Stored encrypted and never shown again. Only its last four characters appear here."}
+                    {current ? `Leave empty to keep the key ending in ${current.keyHint}.` : "Stored encrypted and never shown again. Only its last four characters appear here."}
                 </span>
             </div>
             <div className="row" style={{ gap: 8 }}>
                 <Button type="submit" variant="primary" loading={busy}>
-                    {current ? "Save changes" : "Save configuration"}
+                    {current ? "Save changes" : "Save key"}
                 </Button>
                 <Button variant="ghost" disabled={busy} onClick={onCancel}>
                     Cancel

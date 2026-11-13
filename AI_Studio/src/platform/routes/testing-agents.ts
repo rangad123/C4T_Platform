@@ -18,7 +18,7 @@ import type { Row } from "../db.js";
 import { DEFAULT_PLATFORMS, projectSetupOf, type ProjectPlatform, type TestingMode } from "../project-setup.js";
 import type { JobOptions, Repo } from "../repo.js";
 import { runsCanStartHere } from "../suite-run.js";
-import { platformAi } from "../ai-config.js";
+import { aiOwnerOfActor, personAiView } from "../ai-config.js";
 import { AGENTS_NEED_AGENT_MODE, agentById, applyAgentChoice, switchesFor, TESTING_AGENTS, TestingAgentStore, validateChoice, type AgentId, type AskedSwitches, type TestingAgent } from "../testing-agents.js";
 import type { RouteCtx } from "./types.js";
 
@@ -78,7 +78,7 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
         }
         return out;
     };
-    const where = async () => ({ canRun: runsCanStartHere(p), ai: { configured: (await platformAi(p, p.llm.modelName)).configured } });
+    const where = async () => ({ canRun: runsCanStartHere(p), ai: { configured: (await personAiView(p, aiOwnerOfActor(currentActor()))).configured } });
 
     app.get("/api/testing-agents", async (req) => {
         const projects = await projectsUsing(req);

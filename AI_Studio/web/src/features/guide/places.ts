@@ -93,8 +93,7 @@ export type PlaceId =
     | "script-version"
     | "agent-runs"
     | "settings-general"
-    | "settings-members"
-    | "settings-ai";
+    | "settings-members";
 
 const here = (place: WhereTo["place"], section?: string): Target => ({ where: section ? { place, section } : { place } });
 
@@ -523,10 +522,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     settings: {
         title: "Settings",
-        what: "Your runner, and how this whole platform is set up: the AI model, the people who use it and what kinds of tests are allowed.",
+        what: "Your runner, your AI keys, and how this whole platform is set up: the people who use it and what kinds of tests are allowed.",
         canDo: [
             { text: "Use Your runner to set up the program on your computer that runs your tests.", button: "Read about your runner", to: { topic: "runners" }, ui: ["Your runner"] },
-            { text: "Check that the AI model is connected.", button: "Read about the AI model", to: { topic: "settings-page", search: "AI model settings" } },
+            { text: "Use AI keys to add your own key or choose the one your AI work uses.", button: "Read about AI keys", to: { topic: "ai-keys" }, ui: ["AI keys"] },
             { text: "Let colleagues in with their own accounts and roles.", button: "Read about people and access", to: { topic: "people-and-access", search: "people" } },
             { text: "Read which kinds of tests can run here.", button: "Read about settings", to: { topic: "settings-page", search: "settings" } },
         ],
@@ -818,18 +817,6 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "Ask your Crowd4Test administrator for features you need.", button: "Read about people and access", to: { topic: "people-and-access" } }],
         topic: "people-and-access",
     },
-    "settings-ai": {
-        title: "AI configuration",
-        what: "Who pays for this project's AI: Crowd4Test's managed AI, or your organisation's own key. If your own key fails, the AI work stops; it never moves to Crowd4Test's key.",
-        canDo: [
-            { text: "See how much AI the projects used.", button: "Read about AI usage", to: { topic: "ai-usage" } },
-            { text: "Add the keys your organisation shares in Settings, under AI configurations.", button: "Open settings", to: here("settings") },
-            { text: "Read how the AI is kept reliable.", button: "Read about settings", to: { topic: "settings-page" } },
-        ],
-        words: ["exploration"],
-        next: [{ text: "Run an exploration to see the AI at work.", button: "Read how exploring works", to: { topic: "explore-my-app" } }],
-        topic: "ai-usage",
-    },
 };
 
 /** Every id of the table, so a test can walk it. */
@@ -878,7 +865,7 @@ export function placeOf(route: RouteLike): PlaceId {
         }
         if (c === "settings") {
             const s = pick(SETTINGS_SECTIONS, q.get("section"));
-            if (s === "general" || s === "members" || s === "ai") return `settings-${s}` as PlaceId;
+            if (s === "general" || s === "members") return `settings-${s}` as PlaceId;
             if (s === "data" || s === "accounts") return `library-${s}` as PlaceId;
             return `setup-${s}` as PlaceId;
         }

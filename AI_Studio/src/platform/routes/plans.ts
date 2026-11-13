@@ -154,7 +154,8 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         const unknown = (body.excludeIdeas ?? []).find((x) => !known.has(x));
         if (unknown) throw new HttpError(400, `Unknown test idea: ${unknown}`);
 
-        const { planOnly: _p, fromPlan: _f, excludeIdeas: _e, requirementsText: _r, ...kept } = job.options;
+        // Who started the plan is not who creates its tests: the person acting now is recorded (createJob), so their AI key and runner are used.
+        const { planOnly: _p, fromPlan: _f, excludeIdeas: _e, requirementsText: _r, startedBy: _s, ...kept } = job.options;
         const { targets: _t, excludeIdeas: _x, ...switches } = body;
         const asked: JobOptions = {
             ...kept,
@@ -184,7 +185,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         refuseUnlessRunsStart(ctx.p, EXPLORING_OFF_MESSAGE); // tests switched off on this server: nothing is queued
         await ctx.assertNoActiveJob(id);
         // The application keeps the generation settings and the sign-in details of the plan, minus the one-off plan fields.
-        const { fromPlan: _a, excludeIdeas: _b, ...config } = options;
+        const { fromPlan: _a, excludeIdeas: _b, startedBy: _c, ...config } = options;
         const keptMobile = planned.config.mobile;
         const appId = repo.createApplication(id, planned.url, keptMobile ? { ...config, mobile: keptMobile } : config, planned.credentials);
         const created = await repo.createJob(id, appId, options);

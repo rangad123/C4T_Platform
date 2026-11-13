@@ -26,7 +26,7 @@ interface FastModelAnswer {
     planning?: { model: string | null; ready: boolean; reason?: string; entry: string; active: boolean; for: string[] };
 }
 
-/** Settings, inside "AI model": the fast model for routine steps (empty = the main model does everything), and what goes to which model. */
+/** Settings, inside "How the AI works here": the fast model for routine steps (empty = the main model does everything), and what goes to which model. */
 export function FastModelSetting() {
     const state = useFetch<FastModelAnswer>("/llm/fast-model");
     const [text, setText] = useState("");

@@ -17,7 +17,8 @@ import type { SessionOptions } from "../engine/discovery/browser.js";
 import { TestSpecSchema, type Step, type TestSpec } from "../engine/spec/schema.js";
 import { toSpec } from "../engine/web/author.js";
 import { defaultFramework } from "../engine/generators/index.js";
-import { projectAiGate } from "./ai-config.js";
+import { aiGate, aiOwnerOfActor } from "./ai-config.js";
+import { currentActor } from "./auth/actor.js";
 import { AgentRunStore, isActiveRun, type AgentRun, type RunResult } from "./agent-run-store.js";
 import type { Platform } from "./bootstrap.js";
 import { HttpError } from "./http-error.js";
@@ -61,9 +62,9 @@ export async function agentRunsCanStart(p: Pick<Platform, "config" | "db" | "llm
         if (!p.config.AGENT_RUNS_ON_SERVER) return { ok: false, reason: AGENT_RUNS_OFF };
         if (!runsCanStartHere(p).ok) return { ok: false, reason: AGENT_NO_WORKER };
     }
-    // The project's AI: its own key counts, and a key that cannot be used says why.
-    const ai = await projectAiGate(p, projectId);
-    if (!ai.ok) return { ok: false, reason: ai.reason ?? AGENT_NO_MODEL };
+    // The AI of the person starting it (their chosen key), and why not when it cannot be used.
+    const ai = await aiGate(p, aiOwnerOfActor(currentActor()));
+    if (!ai.ok) return { ok: false, reason: ai.reason || AGENT_NO_MODEL };
     return { ok: true };
 }
 

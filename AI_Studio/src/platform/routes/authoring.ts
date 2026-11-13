@@ -1,4 +1,5 @@
-import { projectAiGate } from "../ai-config.js";
+import { aiGate, aiOwnerOfActor } from "../ai-config.js";
+import { currentActor } from "../auth/actor.js";
 import { CustomScriptStore } from "../custom-script-store.js";
 import { z } from "zod";
 import { detectKind, NO_MODEL_MESSAGE, PLAIN_MAX_LENGTH, PLAIN_MIN_LENGTH, PLAIN_ORIGIN, refusalFor } from "../../engine/authoring/describe.js";
@@ -36,8 +37,8 @@ export function registerAuthoringRoutes(ctx: RouteCtx): void {
         const allowChanges = latest?.config?.allowMutatingApiTests === true;
         const refused = refusalFor(body.description, { allowChanges });
         if (refused) throw new HttpError(422, refused, { refused: true });
-        const gate = await projectAiGate(p, projectId);
-        if (!gate.ok) throw new HttpError(422, gate.reason ?? NO_MODEL_MESSAGE, { modelMissing: true });
+        const gate = await aiGate(p, aiOwnerOfActor(currentActor()));
+        if (!gate.ok) throw new HttpError(422, gate.reason || NO_MODEL_MESSAGE, { modelMissing: true });
 
         let baseUrl = body.baseUrl;
         if (body.environment) {

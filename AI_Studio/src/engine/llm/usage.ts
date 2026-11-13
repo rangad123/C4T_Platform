@@ -217,16 +217,16 @@ export interface UsageRow {
     /** Of the input tokens: read from / written to the provider's prompt cache (0 or missing when nothing was cached). */
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
-    /** Who pays for these tokens; missing = Crowd4Test (the server's key). */
+    /** Who pays for these tokens; missing = Crowd4Test. */
     billingOwner?: BillingOwner;
 }
 
-/** Who pays for a model call: Crowd4Test (managed AI, the server's key) or the customer's organisation (its own key). Nothing is charged here. */
-export type BillingOwner = "crowd4test" | "organization";
+/** Who pays for a model call: Crowd4Test (an organisational key, or the open server's own key) or a person (their personal key). Nothing is charged here. */
+export type BillingOwner = "crowd4test" | "personal";
 export interface UsageBilling {
     owner: BillingOwner;
-    /** The organisation that pays; null for Crowd4Test, and for a project on its own key that has no organisation. */
-    organizationId?: string | null;
+    /** The person who pays, for a personal key. */
+    personId?: string | null;
 }
 
 export type GroupBy = "day" | "project" | "purpose" | "model" | "billing";
