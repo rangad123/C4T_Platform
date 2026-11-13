@@ -16,6 +16,9 @@ import { EnrollRequest } from "../../agent-protocol/schema.js";
 import { MAX_DEVICE_PUSH_BYTES } from "../agent-device.js";
 import { EXPLORE_LLM_MAX_BYTES } from "../../agent-protocol/explore-llm.js";
 import { EXPLORE_SINK_BODY_MAX } from "../../agent-protocol/explore-sink.js";
+import { EXPLORE_FRAME_MAX_BYTES, ExploreFrameRequest, type ExploreFrameAnswer } from "../../agent-protocol/explore-frame.js";
+import { FRAME_LIMITS } from "../../engine/frames/shoot.js";
+import { frameHub } from "../frame-hub.js";
 import { handleExploreLlm } from "../explore-llm.js";
 import { handleExploreSink } from "../explore-sink.js";
 import { exploreLlmDeps } from "../explore-dispatch.js";
@@ -116,6 +119,22 @@ function parse<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
     if (r.success) return r.data;
     const i = r.error.issues[0];
     throw new HttpError(400, `The ${what} is not in the expected format${i ? ` (${i.path.join(".") || "body"}: ${i.message})` : ""}.`);
+}
+
+/**
+ * Watch live, a runner's side (explore-frame.ts): the answer says whether anyone watches the job; a picture is kept (in memory only) only while
+ * someone does, and only a JPEG within the Explorer view's size limit.
+ */
+function runnerFrame(jobId: string, req: ExploreFrameRequest): ExploreFrameAnswer {
+    const watched = frameHub.isWatched(jobId);
+    const f = req.frame;
+    if (f && watched) {
+        const jpeg = Buffer.from(f.imageBase64, "base64");
+        if (jpeg.byteLength > FRAME_LIMITS.maxBytes) throw new HttpError(413, "The picture is larger than the Explorer view allows.");
+        if (jpeg.byteLength < 4 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new HttpError(400, "The picture is not a JPEG.");
+        frameHub.put(jobId, { jpeg: new Uint8Array(jpeg), url: f.url, title: f.title, note: f.note, phase: f.phase, pagesSeen: f.pagesSeen, at: f.at }, { fromRunner: true });
+    }
+    return { watched };
 }
 
 /** Counts what passes through, and stops at the cap (the store hashes it). */
@@ -402,14 +421,15 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
 
         // Round 51: an exploration on a runner asks the job's AI and saves what it finds. Fenced to this runner's own running explore task and
         // its current attempt (AgentService.exploreTask), then the body is read with its cap and handed over (explore-llm.ts, explore-sink.ts).
-        const exploreCall = async (req: FastifyRequest, reply: FastifyReply, route: "llm" | "sink") => {
+        const exploreCall = async (req: FastifyRequest, reply: FastifyReply, route: "llm" | "sink" | "frame") => {
             other(req);
             const { id } = req.params as { id: string };
             const attempt = req.headers[ATTEMPT_HEADER];
             const task = svc.exploreTask(token(req), id, typeof attempt === "string" ? attempt : undefined);
             // Round 52: a restarting platform takes no new call; the runner sends it again to the next process (explore-transport.ts).
             if (svc.draining) throw new HttpError(503, "The platform is restarting. The runner sends this again in a moment.");
-            const body = await readJson(req, route === "llm" ? EXPLORE_LLM_MAX_BYTES : EXPLORE_SINK_BODY_MAX);
+            const body = await readJson(req, route === "llm" ? EXPLORE_LLM_MAX_BYTES : route === "frame" ? EXPLORE_FRAME_MAX_BYTES : EXPLORE_SINK_BODY_MAX);
+            if (route === "frame") return runnerFrame(task.jobId, parse(ExploreFrameRequest, body, "picture"));
             if (route === "sink") return handleExploreSink(p, task, body);
             // The request closing before its answer (the runner gone, the task stopped or handed out again) stops the provider call.
             const gone = new AbortController();
@@ -421,6 +441,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         };
         scope.post("/api/agent/tasks/:id/explore/llm", async (req, reply) => exploreCall(req, reply, "llm"));
         scope.post("/api/agent/tasks/:id/explore/sink", async (req, reply) => exploreCall(req, reply, "sink"));
+        scope.post("/api/agent/tasks/:id/explore/frame", async (req, reply) => exploreCall(req, reply, "frame"));
 
         // Runner updates: the offer and its files (routes/runner-updates.ts), behind the same token check.
         registerUpdateAgentRoutes(scope, { svc, updates, token, other });

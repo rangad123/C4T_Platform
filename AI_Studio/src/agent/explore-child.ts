@@ -12,7 +12,8 @@
 import path from "node:path";
 import { parseEnvSettings, type Config } from "../config.js";
 import type { EngineContext } from "../engine/context.js";
-import { useChromium } from "../engine/discovery/browser.js";
+import { fallBackToHidden, useChromium } from "../engine/discovery/browser.js";
+import { createFrameSink } from "../engine/frames/sink.js";
 import { localExecutor } from "../engine/frameworks/index.js";
 import { withFrameworkSettings } from "../engine/frameworks/settings-executor.js";
 import { describeDeviations, effectiveSettings, firstTurnedOff, normalizeSettings } from "../engine/frameworks/settings.js";
@@ -21,12 +22,15 @@ import { runGeneration, type GenerationRequest, type GenerationSummary } from ".
 import { runPlainAuthoring, type PlainRequest } from "../engine/authoring/plain.js";
 import { openLocalDeviceSession } from "../engine/mobile/device/session.js";
 import { runAssessmentOnRunner, type AssessmentOnRunnerRequest } from "../security/assessment/probe.js";
+import { requestSecrets } from "../platform/explore-task.js";
 import { runAgentObjective, type AgentOnRunnerRequest } from "./agent-mode.js";
 import { addressProblem } from "./address-guard.js";
 import type { ChildExplore, ExploreAnswer, FromChild } from "./child-protocol.js";
 import type { ExplorePost } from "./explore-transport.js";
 import { remoteLlmClient } from "./remote-llm.js";
 import { remoteGenerationSink } from "./remote-sink.js";
+import { remoteFrameTarget } from "./remote-frames.js";
+import { BROWSER_HIDDEN_NOTE, browserWindowFor, once } from "./show-browser.js";
 
 /** An answer from the platform that was a refusal: the agent's sentence, with the HTTP status when there was one. */
 export class ExplorePostError extends Error {
@@ -80,10 +84,17 @@ export function childPost(send: (m: FromChild) => void): { post: ExplorePost; on
     };
 }
 
-/** The local executor this runner uses for runs, with its browser choice and the project's framework settings applied. */
-function executorOf(m: ChildExplore, platformWorkers: number): { executor: ScriptExecutor; frameworkOff?: EngineContext["frameworkOff"] } {
+/**
+ * The local executor this runner uses for runs, with its browser choice and the project's framework settings applied. `hideRuns`: the
+ * exploring browser is shown, so the test runs inside the exploration stay hidden (one window, never several), whatever the settings say.
+ */
+function executorOf(m: ChildExplore, platformWorkers: number, hideRuns = false): { executor: ScriptExecutor; frameworkOff?: EngineContext["frameworkOff"] } {
     const browser = m.browser && (m.browser.channel || m.browser.executablePath) ? m.browser : undefined;
     let executor: ScriptExecutor = browser ? { name: localExecutor.name, execute: (a, b, e, o) => localExecutor.execute(a, b, e, { ...o, browser }) } : localExecutor;
+    if (hideRuns) {
+        const shown = executor;
+        executor = { name: shown.name, execute: (a, b, e, o) => shown.execute(a, b, { ...e, run: { ...e.run, headless: true } }, o) };
+    }
     if (m.explore.frameworkSettings === undefined) return { executor };
     const settings = normalizeSettings(m.explore.frameworkSettings);
     const eff = effectiveSettings(settings, { onAgent: true, platformWorkers });
@@ -94,11 +105,18 @@ function executorOf(m: ChildExplore, platformWorkers: number): { executor: Scrip
 /** Run the exploration and say how it went (`explored` with the summary, or `error`). Never throws. */
 export async function runExplore(m: ChildExplore, io: { send(m: FromChild): Promise<void>; post: ExplorePost; signal: AbortSignal; env?: NodeJS.ProcessEnv }): Promise<void> {
     try {
-        // The runner's environment, the browser hidden, and every file of the job in the task's own folder.
+        if (m.browser && (m.browser.channel || m.browser.executablePath)) useChromium(m.browser);
+        // The browser is hidden unless the runner's owner switched on "Show the browser while exploring" (web explorations and Describe it only).
+        const wantsWindow = m.explore.showBrowser === true && (!m.explore.mode || m.explore.mode === "generate" || m.explore.mode === "plain");
+        const shown = browserWindowFor(wantsWindow, { env: io.env ?? process.env });
+        const sayHidden = once(() => void io.send({ type: "engine", event: { stage: "orchestration", kind: "browser_hidden", level: "warn", message: BROWSER_HIDDEN_NOTE } }));
+        if (shown.note) sayHidden();
+        fallBackToHidden(shown.headless ? undefined : sayHidden);
+        // The runner's environment and every file of the job in the task's own folder.
         // Built here rather than with loadConfig: the runner has no database or platform data folder, and none of their names goes in its bundle.
         const dataDir = path.join(m.scratchDir, "data");
         const config: Config = {
-            ...parseEnvSettings({ ...(io.env ?? process.env), HEADLESS: "true" }),
+            ...parseEnvSettings({ ...(io.env ?? process.env), HEADLESS: shown.headless ? "true" : "false" }),
             // What a runner never does, whatever its environment says: hand-written scripts and plug-ins come only with a run's own rules.
             ALLOW_CUSTOM_SCRIPTS: false,
             ALLOW_ADAPTER_PLUGINS: false,
@@ -109,9 +127,8 @@ export async function runExplore(m: ChildExplore, io: { send(m: FromChild): Prom
             artifactsDir: path.join(dataDir, "generated-tests"),
             scratchDir: m.scratchDir,
         };
-        if (m.browser && (m.browser.channel || m.browser.executablePath)) useChromium(m.browser);
         const sink = remoteGenerationSink({ post: io.post, signal: io.signal, dir: path.join(m.scratchDir, "from-platform") });
-        const { executor, frameworkOff } = executorOf(m, config.CONCURRENCY);
+        const { executor, frameworkOff } = executorOf(m, config.CONCURRENCY, !shown.headless);
         const ctx: EngineContext = {
             config,
             llm: remoteLlmClient({ post: io.post, modelName: m.explore.modelName, signal: io.signal }),
@@ -155,13 +172,21 @@ export async function runExplore(m: ChildExplore, io: { send(m: FromChild): Prom
             await io.send({ type: "explored", summary: none });
             return;
         }
-        const summary =
-            mode === "plain"
-                ? await runPlainAuthoring(ctx, { ...(m.explore.request as unknown as PlainRequest), ...(cleanup ? { cleanup } : {}) }, sink)
-                : await runGeneration(ctx, { ...(m.explore.request as unknown as GenerationRequest), ...(cleanup ? { cleanup } : {}) }, sink);
-        // Everything it saved is accepted by the platform before the result says it is done.
-        await sink.flush();
-        await io.send({ type: "explored", summary });
+        // Watch live: pictures only while someone on the platform watches (remote-frames.ts), every stored sign-in value covered, as on the server.
+        const frames = remoteFrameTarget({ post: io.post, signal: io.signal });
+        const secrets = requestSecrets(m.explore.request as Parameters<typeof requestSecrets>[0]);
+        ctx.frames = createFrameSink(frames, { secrets: () => secrets });
+        try {
+            const summary =
+                mode === "plain"
+                    ? await runPlainAuthoring(ctx, { ...(m.explore.request as unknown as PlainRequest), ...(cleanup ? { cleanup } : {}) }, sink)
+                    : await runGeneration(ctx, { ...(m.explore.request as unknown as GenerationRequest), ...(cleanup ? { cleanup } : {}) }, sink);
+            // Everything it saved is accepted by the platform before the result says it is done.
+            await sink.flush();
+            await io.send({ type: "explored", summary });
+        } finally {
+            frames.stop();
+        }
     } catch (e) {
         await io.send({ type: "error", message: e instanceof Error ? e.message : String(e) });
     }

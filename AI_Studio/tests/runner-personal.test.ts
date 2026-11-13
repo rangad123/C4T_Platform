@@ -146,7 +146,7 @@ describe("one runner per person", () => {
         tess = await setUp("t-tess");
         tom = await setUp("t-tom");
         const r = (await as("t-tess", "GET", "/api/me/runner")).body.runner;
-        expect(r).toMatchObject({ id: tess.runnerId, status: "online", os: "linux", arch: "x64", switches: { codeScripts: true, privateTargets: false, realPhone: false } });
+        expect(r).toMatchObject({ id: tess.runnerId, status: "online", os: "linux", arch: "x64", switches: { codeScripts: true, privateTargets: false, realPhone: false, showBrowser: false } });
         expect(typeof r.lastSeenAt).toBe("string");
         // `can`: what it can start now, in the words the server's up-front refusals use.
         const name = r.hostname as string;
@@ -208,6 +208,23 @@ describe("one runner per person", () => {
         await tess.agent!.result(local, { ok: true, runs: [] });
         expect((await as("t-tess", "PATCH", "/api/me/runner", { switches: { privateTargets: false } })).status).toBe(200);
         expect((await as("t-tess", "PATCH", "/api/me/runner", { switches: { nonsense: true } })).status).toBe(400);
+    });
+
+    it("Show the browser while exploring: off by default, only the owner changes it, it is kept and noted, and a run's offer is unchanged", async () => {
+        const turned = await as("t-tess", "PATCH", "/api/me/runner", { switches: { showBrowser: true } });
+        expect(turned.status, JSON.stringify(turned.body)).toBe(200);
+        expect(turned.body.runner.switches).toMatchObject({ showBrowser: true, codeScripts: true });
+        expect(svc().store.getToken(tess.runnerId)!.showBrowser).toBe(true);
+        expect((await as("t-tess", "GET", "/api/me/runner")).body.runner.switches.showBrowser).toBe(true);
+        expect((await as("t-tom", "GET", "/api/me/runner")).body.runner.switches.showBrowser).toBe(false);
+        expect(accessControlOf(app).users.activity({ action: "runner-switches-changed", limit: 5 }).map((r) => r.detail)).toContain("Their runner: the browser is shown while exploring.");
+        const t = queue(ids["t-tess"]!);
+        const offer = (await tess.agent!.poll(1)).offer;
+        expect(offer?.taskId).toBe(t);
+        expect(offer?.explore).toBeUndefined();
+        await tess.agent!.result(t, { ok: true, runs: [] });
+        expect((await as("t-tess", "PATCH", "/api/me/runner", { switches: { showBrowser: false } })).body.runner.switches.showBrowser).toBe(false);
+        expect((await as("t-tess", "PATCH", "/api/me/runner", { switches: { showBrowser: "yes" } })).status).toBe(400);
     });
 
     it("a run done by the person's runner names it exactly as Settings does", async () => {

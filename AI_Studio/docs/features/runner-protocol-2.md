@@ -78,6 +78,14 @@ a failure screenshot the moment Playwright writes it and then sends the `screens
 Android, iOS and Windows desktop runs report no live steps: when their run ends the agent sends one `test_finished` event per test before
 it uploads the files; their progress lines still arrive live.
 
+### Watch live pictures
+
+An exploration or a described test on a runner may be watched (`explorerFrames: true` in the capabilities). The runner's child asks
+`POST /api/agent/tasks/:id/explore/frame` with `{}` every 2 seconds and the answer is `{ watched }`; while it is true, at most one picture a
+second goes to the same route as `{ frame: { imageBase64, url, title, note, phase, pagesSeen, at } }` (a JPEG of at most 120 KB, the body
+at most about 170 KB). The route is fenced like `explore/llm` and `explore/sink` (`x-attempt-id`, the runner's own running task). Pictures
+are never put into live events.
+
 ## Heartbeat answers (protocol 2)
 
 Besides `cancel`: `timeout: true` (the platform's time limit for the run passed; the agent stops at once), `shutdown: true` (the runner was

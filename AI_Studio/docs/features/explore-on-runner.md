@@ -11,6 +11,11 @@ one runner they set up in **Settings, Your runner** ([runner-settings.md](runner
   authoring agents and each validation run all happen there. Your application is reached from your computer, so an application
   only your network can reach can be explored. Private and local addresses follow your runner's **Test private and local addresses**
   switch, the same rule as runs.
+- **Hidden unless you ask.** The browser runs hidden, unless the runner's owner switched on **Show the browser while exploring** in
+  Settings, Your runner: then the offer carries `explore.showBrowser` (web explorations and web Describe it only) and the runner opens a
+  real window for the browser the AI explores with, while the exploration's own test runs stay hidden (one window). `src/agent/show-browser.ts`
+  decides once per task; Linux without a screen, or a visible launch that fails for want of a window (`fallBackToHidden` in
+  `src/engine/discovery/browser.ts`), means hidden with one sentence in the job. Older runners ignore the field. See [runner-settings.md](runner-settings.md).
 - **The AI stays on the platform.** Each time the engine asks the model something, the runner sends the call to the platform
   (`POST /api/agent/tasks/:id/explore/llm`). The platform runs it on the job's own model, built as it would be for an exploration
   run on the server: the project's AI setting, the routing to the fast model, the usage meter and the AI budgets. Only the answer
@@ -26,6 +31,10 @@ one runner they set up in **Settings, Your runner** ([runner-settings.md](runner
   exploration on the server would save them. Files travel as uploads. A screenshot, video or trace too large for one save (8 MB) is
   uploaded first in 4 MB pieces, so evidence of any size reaches the server, up to 256 MB for one exploration. The live steps on the project page come through the runner's
   live-event channel ([runner-protocol-2.md](runner-protocol-2.md)).
+- **Watch live** shows the browser on your runner, a picture about once a second while the panel is open
+  ([ux-explorer-view.md](ux-explorer-view.md)). The runner asks every 2 seconds whether anyone is watching
+  (`POST /api/agent/tasks/:id/explore/frame`, fenced like the AI and saving routes) and takes no picture while nobody is. Pictures stay in the
+  platform's memory, never in a file, a log or the database. A runner downloaded before this shows nothing and the page asks for a new download.
 - **Sign-in details** saved on the project's Requirements tab go to the runner with the task. The runner keeps them in memory,
   hides them in its logs and never writes them to disk.
 
@@ -122,6 +131,9 @@ Recordings "on the server" stay refused in runners mode, with a sentence (record
 
 ## Where it is proven
 
+- `tests/explore-frames-on-runner.test.ts` (Watch live: no picture kept while nobody watches, a watched picture reaches the page with
+  `onRunner`, fencing, the size and JPEG checks, an older runner's sentence, and the real runner sending pictures of its browser while the test
+  watches) and `tests/remote-frames-unit.test.ts` (the runner takes no picture until it is told someone watches).
 - `tests/explore-restart.test.ts`: a graceful restart while a runner explores. The job is handed over with its task left running. The next
   platform process answers a repeated save as before, takes the next one, and finishes the job from the same task, every test made once.
 - `tests/explore-sink.test.ts` (chunked uploads, numbered saves, the state read back after a hand-over, sending again while the platform is

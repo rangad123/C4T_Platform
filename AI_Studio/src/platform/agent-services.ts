@@ -1804,6 +1804,25 @@ export function jobRanOn(job: JobRow): ReturnType<AgentService["ranOn"]> {
 }
 
 /**
+ * Watch live: is this job's browser work running on a runner right now (an explore task of it is running), and does that runner send pictures
+ * (it reported `explorerFrames`)? Undefined when no explore task of the job is running, so the job is watched as on the server.
+ */
+export function exploreRunnerOfJob(job: JobRow): { frames: boolean } | undefined {
+    for (const s of installed.values()) {
+        try {
+            if (!s.p.repo.getJob(job.id)) continue;
+            const t = s.store.tasksOfJob(job.id).filter((x) => isExploreAdapter(x.adapterId) && x.status === "running").at(-1);
+            if (!t) return undefined;
+            const agent = t.agentId ? s.store.getAgent(t.agentId) : undefined;
+            return { frames: agent?.capabilities.explorerFrames === true };
+        } catch {
+            /* closed database */
+        }
+    }
+    return undefined;
+}
+
+/**
  * Is this project's work run on an agent? Then the address of the application is reached from the agent's network, so private and
  * loopback addresses are allowed for it (still http/https only, no credentials in the address). Every outbound call the platform makes
  * itself keeps the usual guard.

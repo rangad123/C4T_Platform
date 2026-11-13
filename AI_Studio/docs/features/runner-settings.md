@@ -37,7 +37,14 @@ every few seconds and has these states:
   server's access key). `GET /api/me/runner/download/info` says which systems can be downloaded; when it says `mayDownload: false`,
   its `refusal` sentence is shown instead of the button.
 - **The switches** (`PATCH /api/me/runner` `{ switches }`): Run code scripts (on), Test private and local addresses (off), Use my
-  connected phone (off). The server enforces each when it hands out work, and the runner checks again. A person who still has more than
+  connected phone (off), Show the browser while exploring (off). The server enforces each when it hands out work, and the runner checks again.
+- **Show the browser while exploring** (`showBrowser`, migration 60): a real browser window opens on that computer while it explores a web
+  app or builds a web test from a sentence ("Describe it"), so the person sitting there can watch. One window only: the browser the AI
+  explores and builds with. The test runs inside the exploration stay hidden, as do runs, agent runs, phone work and security assessments.
+  Clicking or typing in the window can disturb the exploration, and passwords the AI types are visible in it. Without a screen (Linux with
+  no `DISPLAY` or `WAYLAND_DISPLAY`) the browser runs hidden at once; a visible launch that fails because no window can be shown is opened
+  hidden instead. Either way the job says once: "The browser window could not be shown on this computer, so it runs hidden." The switch
+  never fails an exploration, and nothing opens and closes before it starts. A person who still has more than
   one computer from before round 45 changes the switches of all of them at once.
 - **Rename** is `PATCH /api/me/runner` `{ name }`; **Remove this computer** is `POST /api/me/runner/retire`.
 - **Only your own runner.** Every account, admins included, sees and sets up only its own runner; nobody lists or removes another person's.

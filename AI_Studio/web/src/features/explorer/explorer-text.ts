@@ -16,6 +16,8 @@ export interface FrameAnswer {
     pagesSeen?: number;
     at?: string;
     ageMs?: number;
+    /** The browser is on the person's runner, not on the platform's computer. */
+    onRunner?: boolean;
     /** A picture of a phone or emulator screen (portrait): `url` is then the screen’s own name or activity, `title` the screen’s title, and `app` the app’s name. Absent for a browser. */
     kind?: "phone";
     app?: string;
@@ -33,6 +35,8 @@ export interface Shown {
     at: string;
     kind?: "phone";
     app?: string;
+    /** It shows the browser on the person's runner. */
+    onRunner?: boolean;
     /** When it was taken, on this computer's clock (the server says how old it was when it arrived). */
     takenAt: number;
 }
@@ -74,6 +78,8 @@ export const EXPLAIN_FINISHED = "This is the last picture of the browser the AI 
 export const EXPLAIN_PHONE = "This is a picture of the phone screen the AI is using, on a runner or on the platform’s computer. It refreshes about once a second while this panel is open. Passwords are hidden.";
 export const EXPLAIN_PHONE_FINISHED = "This is the last picture of the phone screen the AI used. Passwords were hidden. It is kept on this page only and is gone when you leave.";
 export const EXPLAIN = "This is a picture of the browser the AI is using on the platform’s computer. It refreshes about once a second while this panel is open. Passwords are hidden.";
+export const EXPLAIN_RUNNER = "This is a picture of the browser the AI is using on your runner’s computer. It refreshes about once a second while this panel is open. Passwords are hidden.";
+export const EXPLAIN_RUNNER_FINISHED = "This is the last picture of the browser the AI used on your runner’s computer. Passwords were hidden. It is kept on this page only and is gone when you leave.";
 
 // ── the last picture of a job, kept in this tab only ───────────────────────────
 // The platform forgets a picture when its job ends, so the finished panel shows the one this tab already had. Never stored anywhere else.

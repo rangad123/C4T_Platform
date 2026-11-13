@@ -342,6 +342,9 @@ const knownOwner = (expr: string): string => `(SELECT x.id FROM (SELECT 'open' A
  *
  * SQLite only (julianday, json_object): a PostgreSQL database starts from pg/baseline.sql, which already has this schema.
  */
+/** Migration slot 60: agent_tokens.show_browser 1: explorations on that runner open a visible browser window (its owner's switch, off by default). */
+export const RUNNER_SHOW_BROWSER_MIGRATION = `ALTER TABLE agent_tokens ADD COLUMN show_browser INTEGER NOT NULL DEFAULT 0;`;
+
 export const RUNNER_RESET_MIGRATION = `
 UPDATE agent_tasks SET status = 'failed', error = '${RUNNER_REMOVED_IN_UPDATE}', finished_ms = ${NOW_MS_SQL}, lease_until = NULL, phase = 'failed', phase_ms = ${NOW_MS_SQL}
     WHERE status = 'running' OR (status = 'queued' AND (adapter_id LIKE 'record:%' OR adapter_id LIKE 'device:%'));
@@ -467,6 +470,8 @@ export interface AgentTokenRecord {
     allowPrivateTargets: boolean;
     /** Phone work may use a real phone plugged into it: its owner's switch, off by default. */
     allowRealPhone: boolean;
+    /** Explorations open a visible browser window on that computer: its owner's switch, off by default. */
+    showBrowser: boolean;
     /** The install id of the computer the credential is bound to (null until a runner that sends one connects). */
     machineId: string | null;
     createdBy: string | null;
@@ -485,6 +490,7 @@ const toToken = (r: Record<string, any>): AgentTokenRecord => ({
     allowCodeScripts: Number(r.allow_code_scripts ?? 0) === 1,
     allowPrivateTargets: Number(r.allow_private_targets ?? 0) === 1,
     allowRealPhone: Number(r.allow_real_phone ?? 0) === 1,
+    showBrowser: Number(r.show_browser ?? 0) === 1,
     machineId: r.machine_id ?? null,
     createdBy: r.created_by ?? null,
     rotatedAt: r.rotated_at ?? null,
@@ -717,13 +723,14 @@ export class AgentStore {
     }
 
     /** The owner's switches. Only what is given changes. False when the runner is unknown (removed). */
-    setTokenSwitches(id: string, s: { allowCodeScripts?: boolean; allowPrivateTargets?: boolean; allowRealPhone?: boolean }): boolean {
+    setTokenSwitches(id: string, s: { allowCodeScripts?: boolean; allowPrivateTargets?: boolean; allowRealPhone?: boolean; showBrowser?: boolean }): boolean {
         const bit = (v: boolean | undefined) => (v === undefined ? null : v ? 1 : 0);
         const r = this.db.run(
-            "UPDATE agent_tokens SET allow_code_scripts = COALESCE(?, allow_code_scripts), allow_private_targets = COALESCE(?, allow_private_targets), allow_real_phone = COALESCE(?, allow_real_phone) WHERE id = ?",
+            "UPDATE agent_tokens SET allow_code_scripts = COALESCE(?, allow_code_scripts), allow_private_targets = COALESCE(?, allow_private_targets), allow_real_phone = COALESCE(?, allow_real_phone), show_browser = COALESCE(?, show_browser) WHERE id = ?",
             bit(s.allowCodeScripts),
             bit(s.allowPrivateTargets),
             bit(s.allowRealPhone),
+            bit(s.showBrowser),
             id,
         );
         return Number(r.changes) > 0;

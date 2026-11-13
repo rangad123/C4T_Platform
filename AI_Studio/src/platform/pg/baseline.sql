@@ -1455,6 +1455,7 @@ CREATE TABLE agent_tokens (
     rotated_at TEXT,
     previous_hash TEXT,
     previous_until_ms BIGINT,
+    show_browser BIGINT NOT NULL DEFAULT 0,
     seq BIGINT GENERATED ALWAYS AS IDENTITY,
     UNIQUE (owner_id),
     UNIQUE (token_hash)

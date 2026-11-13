@@ -12,11 +12,13 @@ import { DISPATCH_OFF, executionModeOf, RUNS_OFF_TIP, type ExecutionMode } from 
 
 export type RunnerState = "online" | "busy" | "offline";
 
-/** What the runner may run beyond tests made of steps: the owner's three switches. */
+/** What the runner may run beyond tests made of steps, and whether it shows its browser while exploring: the owner's switches. */
 export interface RunnerSwitchValues {
     codeScripts: boolean;
     privateTargets: boolean;
     realPhone: boolean;
+    /** A visible browser window while it explores or builds a test from a sentence (off by default; missing from an older server). */
+    showBrowser?: boolean;
 }
 
 /** One thing the runner can or cannot do now, with the server's own sentence when it cannot (the same one it refuses a start with). */

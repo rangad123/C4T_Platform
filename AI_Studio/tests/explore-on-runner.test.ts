@@ -202,6 +202,30 @@ describe("an exploration goes to its starter's runner", () => {
         await jobDone(started.body.jobId);
     }, 60_000);
 
+    it("carries the owner's Show the browser while exploring only when it is on, and leaves the run part's browser setting alone", async () => {
+        const lina = await person("Lina's shop");
+        const ravi = await person("Ravi's shop");
+        const shown = await rawAgent(lina.id, "Lina laptop");
+        const hidden = await rawAgent(ravi.id, "Ravi laptop");
+        const linaToken = svc().store.runnerOf(lina.id)!.token;
+        expect(linaToken.showBrowser).toBe(false);
+        expect(svc().store.setTokenSwitches(linaToken.id, { showBrowser: true })).toBe(true);
+        const a = await explore(lina);
+        const b = await explore(ravi);
+        expect(a.status, a.text).toBe(202);
+        expect(b.status, b.text).toBe(202);
+        const offerA = await poll(shown);
+        const offerB = await poll(hidden);
+        expect(offerA.explore.showBrowser).toBe(true);
+        expect(offerA.env.headless).toBe(true);
+        expect(offerB.explore).not.toHaveProperty("showBrowser");
+        for (const [o, id, token] of [[offerA, a.body.jobId, lina.token], [offerB, b.body.jobId, ravi.token]] as const) {
+            expect(o.jobId).toBe(id);
+            expect((await call("DELETE", `/api/test-generation/${id}`, undefined, token)).status).toBe(202);
+            await jobDone(id);
+        }
+    }, 60_000);
+
     it("is refused with the run's codes when the person has no runner or it is offline, and an older runner is told to update", async () => {
         const noRunner = await person("No runner");
         const none = await explore(noRunner);

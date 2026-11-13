@@ -363,9 +363,9 @@ export class PlatformClient {
      * Round 51: one call of an exploration on this runner (POST .../explore/llm or .../explore/sink), for the current attempt. The answer is the
      * platform's JSON as it is (the caller's schema checks it). A refusal (409: the task or attempt is no longer ours) is a "rejected" error.
      */
-    async explore(taskId: string, attemptId: string, route: "llm" | "sink", body: unknown, signal?: AbortSignal): Promise<unknown> {
-        const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/explore/${route}`, { body: JSON.stringify(body), headers: { "content-type": "application/json", [ATTEMPT_HEADER]: attemptId }, timeoutMs: 10 * 60_000, ...(signal ? { signal } : {}) });
-        if (!res.ok) throw await this.failure(res, route === "llm" ? "ask the AI" : "save what the exploration found");
+    async explore(taskId: string, attemptId: string, route: "llm" | "sink" | "frame", body: unknown, signal?: AbortSignal): Promise<unknown> {
+        const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/explore/${route}`, { body: JSON.stringify(body), headers: { "content-type": "application/json", [ATTEMPT_HEADER]: attemptId }, timeoutMs: route === "frame" ? 15_000 : 10 * 60_000, ...(signal ? { signal } : {}) });
+        if (!res.ok) throw await this.failure(res, route === "llm" ? "ask the AI" : route === "frame" ? "send a picture for Watch live" : "save what the exploration found");
         try {
             return (await res.json()) as unknown;
         } catch {

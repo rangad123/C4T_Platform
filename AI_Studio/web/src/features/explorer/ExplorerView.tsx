@@ -6,7 +6,7 @@ import { Tooltip } from "../../components/Tooltip";
 import { StopRun } from "../runs/StopDialog";
 import { useExplorerFrames, useNow, useTabVisible, useThrottled } from "./explorer";
 import { phoneFinishedWords, isPhoneJob, isPhoneOnly } from "../phone/phone";
-import { ELSEWHERE, EXPLAIN, EXPLAIN_FINISHED, EXPLAIN_PHONE, EXPLAIN_PHONE_FINISHED, NOTHING, WAITING, canOfferWatch, finishedWords, forget, keptFor, pagesWords, phaseWords, readWatch, updatedWords, writeWatch } from "./explorer-text";
+import { ELSEWHERE, EXPLAIN, EXPLAIN_FINISHED, EXPLAIN_RUNNER, EXPLAIN_RUNNER_FINISHED, EXPLAIN_PHONE, EXPLAIN_PHONE_FINISHED, NOTHING, WAITING, canOfferWatch, finishedWords, forget, keptFor, pagesWords, phaseWords, readWatch, updatedWords, writeWatch } from "./explorer-text";
 import "./explorer.css";
 
 type Stoppable = Pick<Job, "jobId" | "projectId" | "mode"> & { planOnly?: boolean };
@@ -159,7 +159,7 @@ function Panel({ job, running, onStopped }: { job: Job; running: boolean; onStop
                 </p>
             )}
 
-            <p className="hint ex-explain">{phone ? (running ? EXPLAIN_PHONE : EXPLAIN_PHONE_FINISHED) : running ? EXPLAIN : EXPLAIN_FINISHED}</p>
+            <p className="hint ex-explain" data-testid="explorer-explain">{phone ? (running ? EXPLAIN_PHONE : EXPLAIN_PHONE_FINISHED) : shown?.onRunner ? (running ? EXPLAIN_RUNNER : EXPLAIN_RUNNER_FINISHED) : running ? EXPLAIN : EXPLAIN_FINISHED}</p>
         </section>
     );
 }

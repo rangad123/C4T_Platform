@@ -82,7 +82,7 @@ export type FromChild =
     | { type: "error"; message: string }
     | { type: "live"; event: LiveRunEvent }
     /** Explore tasks: a call for the platform (the agent answers with the same id), one the child gave up on, an engine event, and the summary. */
-    | { type: "post"; id: number; route: "llm" | "sink"; body: unknown }
+    | { type: "post"; id: number; route: "llm" | "sink" | "frame"; body: unknown }
     | { type: "post-abort"; id: number }
     | { type: "engine"; event: EngineEvent }
     | { type: "explored"; summary: GenerationSummary };

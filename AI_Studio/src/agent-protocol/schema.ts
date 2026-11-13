@@ -101,6 +101,8 @@ export const Capabilities = z.object({
      * told to update.
      */
     exploreModes: z.array(z.enum(["plain", "agent", "mobile", "assessment"])).max(8).optional(),
+    /** Additive, optional: while someone watches, an exploration on this agent sends pictures of its browser (explore-frame.ts). An older agent sends none. */
+    explorerFrames: z.boolean().optional(),
     /**
      * The runner's own Android phone tools (additive, optional; see docs/features/phone-setup-simple.md): "can-fetch" means this computer has no adb
      * yet and the runner gets Google's platform-tools itself when a phone session arrives; "ready" means it uses the ones it fetched. Reported only
@@ -728,6 +730,8 @@ export const ExploreTask = z.object({
     cleanup: z.boolean().optional(),
     /** The project's framework settings (engine/frameworks/settings.ts), applied on the runner as for a run. */
     frameworkSettings: z.unknown().optional(),
+    /** The runner owner's "Show the browser while exploring": a visible browser window (web explorations and Describe it only). Older runners ignore it. */
+    showBrowser: z.boolean().optional(),
     /** Exact strings the agent masks in everything it logs or sends (passwords, tokens, saved sign-in values). */
     secrets: z.array(z.string().max(20_000)).max(500),
 });

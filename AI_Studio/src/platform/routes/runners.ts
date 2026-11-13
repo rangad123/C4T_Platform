@@ -5,7 +5,7 @@
  *   GET    /api/me/runner                       → { runner: null | RunnerMine }; RunnerMine.can says what it can start now
  *                                                 ({ ok, why? } per kind: the sentence the server's up-front refusal would give)
  *   GET    /api/me/runner/enrollments/:id       → { status: "waiting" | "connected" | "expired" | "used" }   (the code's owner only)
- *   PATCH  /api/me/runner                       { name?, switches?: { codeScripts?, privateTargets?, realPhone? } } → { runner }
+ *   PATCH  /api/me/runner                       { name?, switches?: { codeScripts?, privateTargets?, realPhone?, showBrowser? } } → { runner }
  *   POST   /api/me/runner/retire                "Remove this computer": its credential stops working at once → { runner: null }
  *   POST   /api/me/runner/update                "Update now" → { runner }
  *
@@ -106,7 +106,7 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
             ...(latest && (latest.capabilities.kitVersion || latest.capabilities.update) ? { update: updates.publicView(latest) } : {}),
             ...(check ? { check } : {}),
             ...(network ? { network } : {}),
-            switches: { codeScripts: t.allowCodeScripts, privateTargets: t.allowPrivateTargets, realPhone: t.allowRealPhone },
+            switches: { codeScripts: t.allowCodeScripts, privateTargets: t.allowPrivateTargets, realPhone: t.allowRealPhone, showBrowser: t.showBrowser },
             can: canOf(t, latest, status !== "offline"),
             ...(running ? { currentRun: { jobId: running.jobId, projectId: running.projectId, title: projectName(running.projectId) } } : {}),
         };
@@ -143,14 +143,14 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
         const { token } = liveMine(req);
         const actor = who(req);
         const body = parsePlain(
-            z.object({ name: RunnerName.optional(), switches: z.object({ codeScripts: z.boolean().optional(), privateTargets: z.boolean().optional(), realPhone: z.boolean().optional() }).strict().optional() }).strict(),
+            z.object({ name: RunnerName.optional(), switches: z.object({ codeScripts: z.boolean().optional(), privateTargets: z.boolean().optional(), realPhone: z.boolean().optional(), showBrowser: z.boolean().optional() }).strict().optional() }).strict(),
             req.body ?? {},
         );
         const sw = body.switches ?? {};
         if (body.name !== undefined && !svc.store.renameToken(token.id, body.name)) throw new HttpError(409, RUNNER_RETIRED);
-        if (!svc.store.setTokenSwitches(token.id, { ...(sw.codeScripts !== undefined ? { allowCodeScripts: sw.codeScripts } : {}), ...(sw.privateTargets !== undefined ? { allowPrivateTargets: sw.privateTargets } : {}), ...(sw.realPhone !== undefined ? { allowRealPhone: sw.realPhone } : {}) })) throw new HttpError(409, RUNNER_RETIRED);
+        if (!svc.store.setTokenSwitches(token.id, { ...(sw.codeScripts !== undefined ? { allowCodeScripts: sw.codeScripts } : {}), ...(sw.privateTargets !== undefined ? { allowPrivateTargets: sw.privateTargets } : {}), ...(sw.realPhone !== undefined ? { allowRealPhone: sw.realPhone } : {}), ...(sw.showBrowser !== undefined ? { showBrowser: sw.showBrowser } : {}) })) throw new HttpError(409, RUNNER_RETIRED);
         if (body.name !== undefined) note(actor, "runner-renamed", `Their runner was renamed to “${body.name}”.`);
-        const said = [sw.codeScripts !== undefined ? `code scripts ${sw.codeScripts ? "allowed" : "not allowed"}` : "", sw.privateTargets !== undefined ? `private addresses ${sw.privateTargets ? "allowed" : "not allowed"}` : "", sw.realPhone !== undefined ? `a connected phone ${sw.realPhone ? "may be used" : "is not used"}` : ""].filter(Boolean);
+        const said = [sw.codeScripts !== undefined ? `code scripts ${sw.codeScripts ? "allowed" : "not allowed"}` : "", sw.privateTargets !== undefined ? `private addresses ${sw.privateTargets ? "allowed" : "not allowed"}` : "", sw.realPhone !== undefined ? `a connected phone ${sw.realPhone ? "may be used" : "is not used"}` : "", sw.showBrowser !== undefined ? `the browser ${sw.showBrowser ? "is shown" : "is hidden"} while exploring` : ""].filter(Boolean);
         if (said.length) note(actor, "runner-switches-changed", `Their runner: ${said.join(", ")}.`);
         return { runner: mine(svc.store.getToken(token.id)!) };
     });

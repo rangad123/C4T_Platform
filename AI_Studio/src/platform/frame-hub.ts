@@ -67,9 +67,9 @@ export class FrameHub {
         return true;
     }
 
-    /** Keeps the latest picture of a job. */
-    put(jobId: string, frame: ExplorerFrame): void {
-        this.local = true;
+    /** Keeps the latest picture of a job. `fromRunner`: it came from a runner (POST .../explore/frame), so it says nothing about a local worker. */
+    put(jobId: string, frame: ExplorerFrame, o: { fromRunner?: boolean } = {}): void {
+        if (!o.fromRunner) this.local = true;
         this.puts++;
         const t = this.now();
         this.prune(t);
@@ -154,6 +154,8 @@ export const frameHub = new FrameHub();
 export type WatchWhy = "waiting" | "nothing" | "elsewhere" | "finished" | "stopping" | "unavailable";
 export interface WatchState {
     canWatch: boolean;
+    /** The picture is of the browser on a person's runner, not on the platform's computer. */
+    onRunner?: boolean;
     why?: WatchWhy;
     reason?: string;
 }
@@ -165,20 +167,23 @@ export const REASONS = {
     finished: "This has finished, so there is nothing more to show.",
     stopping: "Stopping, so there is nothing more to show.",
     unavailable: "The jobs of this platform run in a separate worker program, so its browser cannot be shown here.",
+    oldRunner: "Your runner is too old to show this live. Download the runner again from Settings to watch it.",
 } as const;
 
 /**
  * Can a person watch this job's browser right now? True only while a browser-driven part that is wired to the Explorer view runs on this platform's
  * computer: the exploration itself (not creating tests from a plan) and the browser work of a test built from a sentence.
- * `ranOnAgent` is whether the job's scripts run on a runner agent (only the run part ever does).
+ * `ranOnAgent` is whether the job's scripts run on a runner agent. `runner`: the browser part itself runs on a person's runner now (an explore
+ * task), whose pictures arrive through POST .../explore/frame when it can send them (`frames`).
  */
-export function watchState(job: Pick<JobRow, "status" | "options" | "cancelRequested">, o: { ranOnAgent?: boolean; hub?: FrameHub } = {}): WatchState {
+export function watchState(job: Pick<JobRow, "status" | "options" | "cancelRequested">, o: { ranOnAgent?: boolean; hub?: FrameHub; runner?: { frames: boolean } } = {}): WatchState {
     const hub = o.hub ?? frameHub;
     if (!ACTIVE_STATES.includes(job.status) && job.status !== "QUEUED") return { canWatch: false, why: "finished", reason: REASONS.finished };
     if (job.cancelRequested) return { canWatch: false, why: "stopping", reason: REASONS.stopping };
     const mode = job.options.mode ?? "generate";
     const browserPart = (mode === "generate" && !job.options.fromPlan && job.status === "DISCOVERING") || (mode === "plain" && (job.options.plainKind ?? "web") === "web" && job.status === "GENERATING");
     if (browserPart) {
+        if (o.runner) return o.runner.frames ? { canWatch: true, onRunner: true } : { canWatch: false, why: "elsewhere", reason: REASONS.oldRunner };
         if (!hub.canServe) return { canWatch: false, why: "unavailable", reason: REASONS.unavailable };
         return { canWatch: true };
     }

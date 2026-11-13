@@ -176,6 +176,7 @@ export const running: Topic[] = [
         goodToKnow: [
             "One runner per person: a new computer replaces the old one.",
             "The runner connects out, so nothing opens into your network.",
+            "Show the browser while exploring lets you watch it.",
         ],
         open: { label: "Open Settings", to: { place: "settings" } },
         words: ["runner", "environment"],

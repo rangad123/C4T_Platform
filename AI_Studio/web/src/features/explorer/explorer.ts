@@ -59,7 +59,7 @@ export function useExplorerFrames(projectId: string, jobId: string, on: boolean,
                         const takenAt = Date.now() - (a.ageMs ?? 0);
                         let shown = cur.shown;
                         if (a.unchanged && shown) shown = { ...shown, takenAt };
-                        else if (a.imageBase64) shown = { src: `data:image/jpeg;base64,${a.imageBase64}`, url: a.url ?? "", title: a.title ?? "", note: a.note ?? "", phase: a.phase ?? "", pagesSeen: a.screensSeen ?? a.pagesSeen ?? 0, at: a.at ?? "", takenAt, ...(a.kind === "phone" || isPhoneUrl(a.url) ? { kind: "phone" as const, app: a.app ?? packageOfUrl(a.url) } : {}) };
+                        else if (a.imageBase64) shown = { src: `data:image/jpeg;base64,${a.imageBase64}`, url: a.url ?? "", title: a.title ?? "", note: a.note ?? "", phase: a.phase ?? "", pagesSeen: a.screensSeen ?? a.pagesSeen ?? 0, at: a.at ?? "", takenAt, ...(a.onRunner ? { onRunner: true } : {}), ...(a.kind === "phone" || isPhoneUrl(a.url) ? { kind: "phone" as const, app: a.app ?? packageOfUrl(a.url) } : {}) };
                         if (shown) keep(jobId, shown, Math.max(pagesRef.current(), shown.pagesSeen));
                         return { shown, state: "showing", reason: "", problem: "" };
                     });

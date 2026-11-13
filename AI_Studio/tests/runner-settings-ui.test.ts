@@ -97,7 +97,7 @@ const runnerOf = (over: Partial<RunnerMine> = {}): RunnerMine => ({
     arch: "x64",
     hostname: "PRIYA-LT",
     version: "2.1.0",
-    switches: { codeScripts: true, privateTargets: false, realPhone: false },
+    switches: { codeScripts: true, privateTargets: false, realPhone: false, showBrowser: false },
     network: "Connects directly, no proxy.",
     ...over,
 });
@@ -327,6 +327,25 @@ describe("connected", () => {
         await axeBoth();
     }, 60_000);
 
+    it("Show the browser while exploring: off by default, says what it does, and turns on with one PATCH", async () => {
+        fake.mine = runnerOf();
+        calls.length = 0;
+        await visit();
+        await section().getByText("Details", { exact: true }).click();
+        const show = section().getByRole("checkbox", { name: /Show the browser while exploring/ });
+        await pwExpect(show).not.toBeChecked();
+        await pwExpect(section()).toContainText("A real browser window opens on this computer while it explores or builds a test from a sentence.");
+        await pwExpect(section()).toContainText("Clicking or typing in it can disturb the exploration, and passwords the AI types are visible in that window.");
+        await show.check();
+        await pwExpect(section()).toContainText("The next exploration on your computer opens a browser window you can watch.");
+        expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ switches: { showBrowser: true } });
+        await pwExpect(show).toBeChecked();
+        await axeBoth();
+        await show.uncheck();
+        await pwExpect(section()).toContainText("Explorations on your computer run with the browser hidden again.");
+        await pwExpect(show).not.toBeChecked();
+    }, 60_000);
+
     it("links the run it is on, and renames", async () => {
         fake.mine = runnerOf({ status: "busy", currentRun: { jobId: "job-9", projectId: "p-1", title: "Nightly checks" } });
         calls.length = 0;
@@ -494,7 +513,7 @@ describe("against the real routes", () => {
         await section().getByRole("checkbox", { name: /Test private and local addresses/ }).check();
         await pwExpect(section()).toContainText("Tests on your computer may now reach private and local addresses.");
         const after = (await (await fetch(`${BASE}/api/me/runner`)).json()) as { runner: RunnerMine };
-        expect(after.runner.switches).toEqual({ codeScripts: true, privateTargets: true, realPhone: false });
+        expect(after.runner.switches).toEqual({ codeScripts: true, privateTargets: true, realPhone: false, showBrowser: false });
 
         await section().getByRole("button", { name: "Remove this computer" }).click();
         await section().getByRole("button", { name: "Remove this computer" }).last().click();

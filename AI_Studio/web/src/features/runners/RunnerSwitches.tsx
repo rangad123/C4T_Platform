@@ -10,12 +10,13 @@ const SAID: Record<Field, [on: string, off: string]> = {
     codeScripts: ["Code scripts now run on your runner.", "Code scripts no longer run on your runner."],
     privateTargets: ["Tests on your computer may now reach private and local addresses.", "Tests on your computer no longer reach private and local addresses."],
     realPhone: ["Your phone tests and sessions may now use the phone connected to your computer.", "Only emulators are used on your computer now."],
+    showBrowser: ["The next exploration on your computer opens a browser window you can watch.", "Explorations on your computer run with the browser hidden again."],
 };
 
 /**
  * What the person's runner may run beyond tests made of steps (PATCH /api/me/runner { switches }): code scripts (on by default), private
  * and local addresses (off by default) and the connected phone (off by default). The server enforces each when it hands out work, and
- * the runner checks again. Only the owner changes them.
+ * the runner checks again. Also whether explorations show their browser window on that computer (off by default). Only the owner changes them.
  */
 export function RunnerSwitches({ runner: r, onChanged }: { runner: RunnerMine; onChanged: () => Promise<void> | void }) {
     const [busy, setBusy] = useState<Field | null>(null);
@@ -64,6 +65,7 @@ export function RunnerSwitches({ runner: r, onChanged }: { runner: RunnerMine; o
             {box("codeScripts", "Run code scripts", "Hand-written, imported and Git scripts, which run on your computer as you and can read what you can.")}
             {box("privateTargets", "Test private and local addresses", "localhost and addresses on your own network, such as 192.168.x.x; off by default, so a test can’t reach them by mistake.")}
             {box("realPhone", "Use my connected phone", "Phone tests may install the app on the phone plugged into your computer and remove it afterwards; when this is off, only emulators are used.")}
+            {box("showBrowser", "Show the browser while exploring", "A real browser window opens on this computer while it explores or builds a test from a sentence. Clicking or typing in it can disturb the exploration, and passwords the AI types are visible in that window.")}
         </div>
     );
 }

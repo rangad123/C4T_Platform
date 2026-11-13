@@ -9,6 +9,7 @@ export default defineConfig({
     test: {
         include: [
             "tests/levels-unit.test.ts",
+            "tests/remote-frames-unit.test.ts",
             "tests/finish-flows-unit.test.ts",
             "tests/conditions-unit.test.ts",
             "tests/web-checks-unit.test.ts",

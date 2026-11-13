@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
-import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, RUNNER_LIFECYCLE_MIGRATION, RUNNER_RESET_MIGRATION, RUNNER_SHARING_MIGRATION } from "./agent-store.js";
+import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, RUNNER_LIFECYCLE_MIGRATION, RUNNER_RESET_MIGRATION, RUNNER_SHARING_MIGRATION, RUNNER_SHOW_BROWSER_MIGRATION } from "./agent-store.js";
 import { BLOCKS_MIGRATION } from "./block-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
@@ -306,6 +306,7 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     updated_at TEXT NOT NULL
 );`,
     /* 59: notes for the AI: plain hints people write for their project, optionally for a path or page pattern (schema lives in notes-store.ts; existing projects have none) */ NOTES_MIGRATION,
+    /* 60: the owner's "Show the browser while exploring" switch on their runner (schema lives in agent-store.ts; every existing runner keeps it off) */ RUNNER_SHOW_BROWSER_MIGRATION,
 ];
 
 /**

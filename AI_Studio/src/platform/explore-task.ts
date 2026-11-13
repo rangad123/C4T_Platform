@@ -79,7 +79,12 @@ export function requestSecrets(req: Partial<Pick<GenerationRequest, "credentials
 export type ExploreRequest = { url: string; apiBaseUrl?: string; cleanup?: { enabled: boolean } };
 
 /** The offer of an explore task: the request as data (the runner adds its own cleanup guard), with everything to mask. */
-export function exploreOffer(o: { taskId: string; job: Pick<JobRow, "id">; mode?: ExploreMode; request: ExploreRequest; modelName: string; frameworkSettings?: unknown; secrets: string[]; leaseSeconds: number }): TaskOffer {
+/** Whether the work drives a web browser that "Show the browser while exploring" can make visible: an exploration of a web app, a web test described in words. */
+export function showsBrowserWindow(mode: ExploreMode, request: { kind?: unknown }): boolean {
+    return mode === "generate" || (mode === "plain" && request.kind !== "api");
+}
+
+export function exploreOffer(o: { taskId: string; job: Pick<JobRow, "id">; mode?: ExploreMode; request: ExploreRequest; modelName: string; frameworkSettings?: unknown; secrets: string[]; leaseSeconds: number; showBrowser?: boolean }): TaskOffer {
     const { cleanup, ...rest } = o.request;
     const mode = o.mode ?? "generate";
     const explore: ExploreTask = {
@@ -88,6 +93,7 @@ export function exploreOffer(o: { taskId: string; job: Pick<JobRow, "id">; mode?
         modelName: o.modelName.slice(0, 200),
         ...(cleanup?.enabled ? { cleanup: true } : {}),
         ...(o.frameworkSettings !== undefined ? { frameworkSettings: o.frameworkSettings } : {}),
+        ...(o.showBrowser === true && showsBrowserWindow(mode, o.request as { kind?: unknown }) ? { showBrowser: true } : {}),
         secrets: o.secrets,
     };
     return TaskOffer.parse({

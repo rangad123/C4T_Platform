@@ -1,9 +1,10 @@
 // How the exploration child on a runner talks to the platform (round 51).
 // `route` picks the endpoint: "llm" -> POST /api/agent/tasks/:id/explore/llm,
-// "sink" -> POST /api/agent/tasks/:id/explore/sink. The body is JSON; the
+// "sink" -> POST /api/agent/tasks/:id/explore/sink, "frame" -> .../explore/frame (Watch live). The body is JSON; the
 // answer is the parsed JSON reply. A non-2xx reply rejects (409 = this task
 // or attempt is no longer ours: stop).
-export type ExplorePost = (route: "llm" | "sink", body: unknown, o?: { signal?: AbortSignal }) => Promise<unknown>;
+export type ExploreRoute = "llm" | "sink" | "frame";
+export type ExplorePost = (route: ExploreRoute, body: unknown, o?: { signal?: AbortSignal }) => Promise<unknown>;
 
 /** How long a call is tried again while the platform is away (a restart, a deploy): a couple of minutes. */
 export const EXPLORE_RETRY_MS = 150_000;

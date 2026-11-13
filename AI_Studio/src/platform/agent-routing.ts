@@ -51,6 +51,8 @@ const ROUTES: Array<{ method: string; kind: AgentRoute["kind"]; re: RegExp }> = 
     // Round 51: an exploration on a runner asks the job's AI and saves what it finds (docs/features/explore-on-runner.md).
     { method: "POST", kind: "explore-llm", re: new RegExp(`^/api/agent/tasks/(${ID})/explore/llm$`) },
     { method: "POST", kind: "explore-sink", re: new RegExp(`^/api/agent/tasks/(${ID})/explore/sink$`) },
+    // Watch live: is anyone watching this exploration, and its pictures while someone is (docs/features/ux-explorer-view.md).
+    { method: "POST", kind: "explore-frame", re: new RegExp(`^/api/agent/tasks/(${ID})/explore/frame$`) },
     // Runner updates: what to update to, and the files of that update (docs/features/runner-updates.md). The empty group keeps the name in m[2].
     { method: "POST", kind: "update", re: /^\/api\/agent\/update$/ },
     { method: "GET", kind: "update-file", re: new RegExp(`^/api/agent/update/files/()(${NAME})$`) },
@@ -62,7 +64,7 @@ const ROUTES: Array<{ method: string; kind: AgentRoute["kind"]; re: RegExp }> = 
 ];
 
 export interface AgentRoute {
-    kind: "hello" | "poll" | "heartbeat" | "download" | "upload" | "result" | "recording" | "device" | "update" | "update-file" | "check" | "accept" | "reject" | "events" | "enroll" | "rotate" | "explore-llm" | "explore-sink";
+    kind: "hello" | "poll" | "heartbeat" | "download" | "upload" | "result" | "recording" | "device" | "update" | "update-file" | "check" | "accept" | "reject" | "events" | "enroll" | "rotate" | "explore-llm" | "explore-sink" | "explore-frame";
     taskId?: string;
     name?: string;
 }

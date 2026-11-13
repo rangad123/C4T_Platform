@@ -70,9 +70,11 @@ export async function exploreOnRunner(
         // A plugged-in phone only when the runner's owner allowed it (Settings, Your runner), as for a phone session; else an emulator.
         if (mode === "mobile") request = { ...request, runnerPhone: { realPhone: svc.ownRunner(svc.jobStarter(job.id).ownerId, job.projectId)?.token.allowRealPhone === true } } as unknown as ExploreRequest;
         const secrets = requestSecrets(request as Parameters<typeof requestSecrets>[0], [...(o.secrets ?? []), ...svc.projectSecrets(job.projectId)]);
+        // A visible browser window only when the starter's own runner has "Show the browser while exploring" on (Settings, Your runner).
+        const showBrowser = svc.ownRunner(svc.jobStarter(job.id).ownerId, job.projectId)?.token.showBrowser === true;
         let offer: TaskOffer;
         try {
-            offer = exploreOffer({ taskId, job, mode, request, modelName: o.modelName, frameworkSettings: o.frameworkSettings, secrets, leaseSeconds: svc.limits.leaseSeconds });
+            offer = exploreOffer({ taskId, job, mode, request, modelName: o.modelName, frameworkSettings: o.frameworkSettings, secrets, leaseSeconds: svc.limits.leaseSeconds, showBrowser });
         } catch (e) {
             throw new RunnerAgentError(`This ${WORDS[mode].noun} cannot be sent to your runner: ${e instanceof Error ? e.message.split("\n")[0] : "invalid request"}`);
         }

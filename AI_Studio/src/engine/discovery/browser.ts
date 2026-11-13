@@ -239,8 +239,31 @@ export function useChromium(choice: { channel?: string; executablePath?: string 
     chromiumChoice = { ...(choice.channel ? { channel: choice.channel } : {}), ...(choice.executablePath ? { executablePath: choice.executablePath } : {}) };
 }
 
+/** What a visible launch says when this computer cannot show a window (no X server or Wayland, no desktop session). */
+const NO_WINDOW = /x ?server|display|wayland|ozone|headed|desktop|session/i;
+let onNoWindow: (() => void) | undefined;
+let windowFailed = false;
+/**
+ * A runner's "Show the browser while exploring": a visible launch that fails because no window can be shown opens the browser hidden
+ * instead, tells `fn`, and later launches of this process go hidden at once. Unset: a failed visible launch fails as before.
+ */
+export function fallBackToHidden(fn: (() => void) | undefined): void {
+    onNoWindow = fn;
+    windowFailed = false;
+}
+
 export async function launchChromium(headless = true): Promise<Browser> {
-    return chromium.launch({ headless, args: ["--no-sandbox", "--disable-setuid-sandbox"], ...chromiumChoice });
+    const launch = (h: boolean) => chromium.launch({ headless: h, args: ["--no-sandbox", "--disable-setuid-sandbox"], ...chromiumChoice });
+    if (headless || !onNoWindow) return launch(headless);
+    if (windowFailed) return launch(true);
+    try {
+        return await launch(false);
+    } catch (e) {
+        if (!NO_WINDOW.test(e instanceof Error ? e.message : String(e))) throw e;
+        windowFailed = true;
+        onNoWindow();
+        return launch(true);
+    }
 }
 
 /** Accessibility-tree snapshot used as the LLM-facing page representation (autospec's approach). */
