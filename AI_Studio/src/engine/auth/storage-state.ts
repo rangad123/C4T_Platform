@@ -13,6 +13,36 @@ import { detectCaptcha } from "./captcha.js";
 export const MAX_STATE_BYTES = 1_000_000;
 export const MAX_COOKIES = 300;
 export const MAX_ORIGINS = 40;
+/** sessionStorage a run hands to the browser (an environment variable: Windows allows about 32,000 characters). */
+export const MAX_SESSION_STORAGE_CHARS = 24_000;
+
+/** The sessionStorage of every site in a state, as the init script reads it (empty text: none). */
+export function sessionStorageText(state: { origins: Array<{ origin: string; sessionStorage?: Array<{ name: string; value: string }> }> }): string {
+    const list = state.origins.filter((o) => o.sessionStorage?.length).map((o) => ({ origin: o.origin, items: o.sessionStorage! }));
+    return list.length ? JSON.stringify(list) : "";
+}
+
+/** The state as Playwright reads it: what Playwright does not know (sessionStorage, the check page) left out. */
+export function playwrightState(state: StorageState): { cookies: StorageState["cookies"]; origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }>; indexedDB?: unknown[] }> } {
+    return { cookies: state.cookies, origins: state.origins.map((o) => ({ origin: o.origin, localStorage: o.localStorage, ...(o.indexedDB ? { indexedDB: o.indexedDB } : {}) })) };
+}
+
+/**
+ * Restores sessionStorage in every page, before the page's own code runs, once per tab (a page that changes or clears it later keeps its
+ * change across reloads). Plain JavaScript in a string (bundlers must not rewrite it); called with the parsed `sessionStorageText`.
+ */
+export const RESTORE_SESSION_STORAGE_SOURCE = `(list) => {
+    try {
+        const mine = list.find((o) => o.origin === location.origin);
+        if (!mine || sessionStorage.getItem("__aitp_restored") === "1") return;
+        for (const i of mine.items) sessionStorage.setItem(i.name, i.value);
+        sessionStorage.setItem("__aitp_restored", "1");
+    } catch {
+        /* a page without storage (about:blank, a sandboxed frame) */
+    }
+}`;
+/** The init script for one state's sessionStorage text. */
+export const restoreSessionStorageScript = (text: string): string => `(${RESTORE_SESSION_STORAGE_SOURCE})(${text});`;
 
 const Cookie = z.object({
     name: z.string().max(512),
@@ -25,14 +55,26 @@ const Cookie = z.object({
     secure: z.boolean(),
     sameSite: z.enum(["Strict", "Lax", "None"]),
 });
+const Item = z.object({ name: z.string().max(512), value: z.string().max(100_000) });
 const OriginStorage = z.object({
     origin: z.string().max(300),
-    localStorage: z.array(z.object({ name: z.string().max(512), value: z.string().max(100_000) })).max(500),
+    localStorage: z.array(Item).max(500),
+    /** The site's IndexedDB databases, as Playwright writes them with `storageState({ indexedDB: true })` (Firebase-style sign-ins keep their token there). */
+    indexedDB: z.array(z.unknown()).max(50).optional(),
+    /**
+     * The site's sessionStorage (not part of Playwright's storage state): restored by an init script before the site's own code runs (see
+     * ./run-session.ts). Kept small, because a run hands it to the browser in an environment variable.
+     */
+    sessionStorage: z.array(Item).max(200).optional(),
 });
-export const StorageStateSchema = z.object({
-    cookies: z.array(Cookie).max(MAX_COOKIES),
-    origins: z.array(OriginStorage).max(MAX_ORIGINS),
-});
+export const StorageStateSchema = z
+    .object({
+        cookies: z.array(Cookie).max(MAX_COOKIES),
+        origins: z.array(OriginStorage).max(MAX_ORIGINS),
+        /** The page the "Still signed in?" check opens; a run carries it so a session that runs out can be renewed once (./run-session.ts). */
+        checkUrl: z.string().max(2000).optional(),
+    })
+    .refine((st) => sessionStorageText(st).length <= MAX_SESSION_STORAGE_CHARS, { message: "The saved sign-in's session storage is too large." });
 export type StorageState = z.infer<typeof StorageStateSchema>;
 
 export class StorageStateError extends Error {}
@@ -82,7 +124,16 @@ export function sessionExpiry(state: StorageState, appUrl: string): Date | undef
 export function secretValuesOf(state: StorageState): string[] {
     const out = new Set<string>();
     for (const c of state.cookies) if (c.value.length >= 6) out.add(c.value);
-    for (const o of state.origins) for (const i of o.localStorage) if (i.value.length >= 6) out.add(i.value);
+    for (const o of state.origins) for (const i of [...o.localStorage, ...(o.sessionStorage ?? [])]) if (i.value.length >= 6) out.add(i.value);
+    // IndexedDB records: every text in them that is long enough to be a token (the database and store names are left alone).
+    const walk = (v: unknown, depth: number) => {
+        if (out.size > 5_000 || depth > 12) return;
+        if (typeof v === "string") {
+            if (v.length >= 8) out.add(v);
+        } else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
+        else if (v && typeof v === "object") for (const x of Object.values(v)) walk(x, depth + 1);
+    };
+    for (const o of state.origins) for (const db of o.indexedDB ?? []) for (const store of (db as { stores?: Array<{ records?: unknown[] }> }).stores ?? []) walk(store.records ?? [], 0);
     return [...out];
 }
 
@@ -101,7 +152,7 @@ function safeHost(origin: string): string {
     }
 }
 
-const SIGN_IN_PATH = /(^|\/)(log-?in|sign-?in|signin|auth|sso|oauth2?|session\/new|account\/login|users\/sign_in)(\/|$|\?)/i;
+export const SIGN_IN_PATH = /(^|\/)(log-?in|sign-?in|signin|auth|sso|oauth2?|session\/new|account\/login|users\/sign_in)(\/|$|\?)/i;
 
 export interface SignedInVerdict {
     signedIn: boolean;
@@ -132,7 +183,9 @@ export async function judgeSignedIn(page: Page, checkUrl: string, status?: numbe
  * is clicked or typed. `browser` is the caller's (it closes it); the context is closed here.
  */
 export async function checkStillSignedIn(browser: Browser, state: StorageState, checkUrl: string): Promise<SignedInVerdict> {
-    const context = await browser.newContext({ storageState: state, viewport: { width: 1280, height: 800 }, serviceWorkers: "block", acceptDownloads: false });
+    const context = await browser.newContext({ storageState: playwrightState(state), viewport: { width: 1280, height: 800 }, serviceWorkers: "block", acceptDownloads: false });
+    const session = sessionStorageText(state);
+    if (session) await context.addInitScript({ content: restoreSessionStorageScript(session) });
     try {
         const page = await context.newPage();
         const res = await page.goto(checkUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });

@@ -9,6 +9,9 @@ export default defineConfig({
     test: {
         include: [
             "tests/levels-unit.test.ts",
+            "tests/finish-flows-unit.test.ts",
+            "tests/conditions-unit.test.ts",
+            "tests/web-checks-unit.test.ts",
             "tests/test-strength-unit.test.ts",
             "tests/screenmap-roles-unit.test.ts",
             "tests/site-notes.test.ts",

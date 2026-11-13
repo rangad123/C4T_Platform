@@ -28,6 +28,7 @@ import * as security from "../src/engine/security/checks.js";
 import * as origin from "../src/engine/spec/credential-origin.js";
 import * as vision from "../src/engine/vision/capture.js";
 import * as pages from "../src/engine/web/pages.js";
+import { NEEDS_EXPECTED, NEEDS_LOCATOR, NEWER_PLAYWRIGHT_CHECKS } from "../src/engine/web/checks.js";
 
 const BASE = "https://shop.example.test";
 const spec = (raw: Record<string, unknown>): TestSpec => TestSpecSchema.parse(raw);
@@ -53,10 +54,21 @@ const webSteps = [
     { action: "wait", ms: 10 },
     { action: "email", to: "test-{{unique}}@mail.example.test", use: "code", locator: { by: "label", value: "Code" } },
     { action: "email", to: "test@mail.example.test", use: "link", after: "Confirm" },
-    ...ASSERT_CHECKS.filter((c) => c !== "accessDenied").map((check) => ({
+    { action: "click", locator: { by: "role", role: "button", value: "Add", within: { by: "role", role: "listitem", nth: 1 }, filter: { hasText: "Mug", hasNotText: "Sold", has: { by: "altText", value: "Mug" }, hasNot: { by: "title", value: "Gone" } } } },
+    { action: "wait", until: "response", value: "/api/cart" },
+    { action: "wait", until: "url", value: "/cart" },
+    { action: "wait", until: "hidden", locator: { by: "text", value: "Loading" } },
+    { action: "remember", locator: { by: "testId", value: "price" }, name: "price" },
+    { action: "remember", locator: { by: "label", value: "Qty" }, name: "qty", from: "value" },
+    { action: "request", method: "GET", path: "/api/cart", extract: { cartId: "id" } },
+    ...["status", "statusClass", "statusBelow", "jsonPath", "jsonType", "header", "bodyContains", "bodyNotContains"].map((check) => ({ action: "assertResponse", check, path: "id", expected: check === "statusClass" ? "2xx" : check.startsWith("status") ? 200 : "x" })),
+    { action: "assert", check: "remembered", locator: { by: "testId", value: "total" }, name: "price", compare: "greater" },
+    ...ASSERT_CHECKS.filter((c) => c !== "accessDenied" && !NEWER_PLAYWRIGHT_CHECKS[c]).map((check) => ({
         action: "assert",
         check,
-        ...(["visible", "hidden", "enabled", "disabled", "text", "value", "count", "screenshot", "looksRight"].includes(check) ? { locator: { by: "css", value: "main", nth: 0 } } : {}),
+        ...(["visible", "hidden", "enabled", "disabled", "text", "value", "count", "screenshot", "looksRight", ...NEEDS_LOCATOR, "ariaSnapshot"].includes(check) ? { locator: { by: "css", value: "main", nth: 0 } } : {}),
+        ...(check === "attribute" || check === "css" ? { name: "color" } : check === "remembered" ? { name: "price", compare: "equals" } : {}),
+        ...(NEEDS_EXPECTED.has(check) ? { expected: "x" } : {}),
         ...(check === "a11y" ? { locator: { by: "role", role: "main" } } : {}),
         ...(["text", "value", "url", "title"].includes(check) ? { expected: "Shop" } : check === "count" ? { expected: 2 } : {}),
     })),
@@ -157,9 +169,17 @@ test("x", async ({ page }) => {
     await page.clock.install();
     await expect(page.locator("main")).toMatchAriaSnapshot("- main");
 });`);
-        expect(newerThan(s).map((u) => u.api).sort()).toEqual(["filter({ visible })", "step({ timeout })"]);
-        expect(s.unknown.map((u) => u.name).sort()).toEqual(["install", "toMatchAriaSnapshot"]);
+        expect(newerThan(s).map((u) => u.api).sort()).toEqual(["filter({ visible })", "step({ timeout })", "toMatchAriaSnapshot"]);
+        expect(s.unknown.map((u) => u.name).sort()).toEqual(["install"]);
         expect(newerThan(s, "1.51.0")).toEqual([]);
+    });
+
+    it("the three checks newer than the floor say so in the script, and nothing else in it is newer", () => {
+        const steps = [{ action: "navigate", url: "/" }, ...Object.keys(NEWER_PLAYWRIGHT_CHECKS).map((check) => ({ action: "assert", check, locator: { by: "label", value: "Email" }, expected: "x" }))];
+        const content = renderScript(spec({ testId: "WEB-009", title: "Newer checks", kind: "web", steps }), "playwright", { baseUrl: BASE }).content;
+        expect(content).toContain('// Needs Playwright 1.50 or newer: it uses the checks "accessibleName", "ariaSnapshot", "accessibleErrorMessage".');
+        const late = newerThan(scanPlaywrightApis(content)).map((u) => `${u.api} ${u.since}`);
+        expect(late.filter((u) => u.startsWith("to")).sort()).toEqual(["toHaveAccessibleErrorMessage 1.50", "toHaveAccessibleName 1.44", "toMatchAriaSnapshot 1.49"]);
     });
 
     it("ignores what is inside strings and comments", () => {

@@ -48,6 +48,8 @@ export interface PlainRequest {
     dataSets?: RenderContext["dataSets"];
     deleteOps?: string[];
     cleanup?: CleanupRequest;
+    /** The project's notes for the AI: the agent reads them, and the overlays they name are closed while building and in the script. */
+    siteNotes?: import("../memory/notes.js").SiteNote[];
     /** Rebuild this test from the new description instead of adding one (same id, new script version, history kept). */
     replace?: { handle: TestHandle; spec: TestSpec };
 }
@@ -91,7 +93,7 @@ export async function runPlainAuthoring(ctx: EngineContext, req: PlainRequest, s
     const origin = new URL(req.url).origin;
     const model = req.model && req.model.origin === origin ? req.model : stubModel(req.url, origin);
     const apiBaseUrl = req.apiBaseUrl ?? origin;
-    const renderCtx: RenderContext = { baseUrl: origin, apiBaseUrl, ...(req.dataSets ? { dataSets: req.dataSets } : {}), ...(req.deleteOps ? { deleteOps: req.deleteOps } : {}) };
+    const renderCtx: RenderContext = { baseUrl: origin, apiBaseUrl, ...(req.dataSets ? { dataSets: req.dataSets } : {}), ...(req.deleteOps ? { deleteOps: req.deleteOps } : {}), ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}) };
     const creds = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password, ...(req.credentials.totpSecret ? { totpSecret: req.credentials.totpSecret } : {}) } : undefined;
     // A project with only named accounts: the first one signs in for the test.
     const role = !creds ? req.roles?.[0] : undefined;
@@ -162,6 +164,7 @@ export async function runPlainAuthoring(ctx: EngineContext, req: PlainRequest, s
                     credentials: login,
                     onAction: (a) => sink.agentAction(runId, a),
                     maxSteps: PLAIN_MAX_STEPS,
+                    ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
                     // The Explorer view: only this builder shows its browser (the exploration's test writers do not).
                     frames: ctx.frames,
                 });

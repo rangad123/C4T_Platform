@@ -22,6 +22,7 @@ import { prepareRunExtras } from "../auth/run-session.js";
 import type { MailSource } from "../auth/mail.js";
 import type { BrowserLaunch } from "../browsers/choice.js";
 import { withTestProxy } from "../net/test-proxy.js";
+import { maskSecrets } from "../frameworks/plugin.js";
 
 export interface RunEnv {
     baseUrl: string;
@@ -90,6 +91,8 @@ export interface ScriptRun {
     metrics?: Array<{ metric: string; value: number; unit: string; budget?: number }>;
     /** Cross-browser / responsive runs only: the Playwright project (variant id) this result belongs to. */
     variant?: string;
+    /** A failed run: what the page showed at the failing check (Playwright's accessibility snapshot, masked with the run's secrets). Read by repair. */
+    errorContext?: string;
     /** API tests with RunEnv.cleanup set: what the script wrote down about records it created (and DELETEs it made), in order. Paths and ids only. */
     created?: CreatedLine[];
     /**
@@ -107,6 +110,8 @@ export interface RunnerProject {
     name: string;
     device: string;
     viewport?: { width: number; height: number };
+    /** Conditions on top of the device (dark mode, locale and time zone, forced colours, reduced motion, JavaScript off): Playwright `use` options. */
+    use?: Record<string, string | boolean>;
 }
 
 const require = createRequire(import.meta.url);
@@ -146,9 +151,12 @@ export default defineConfig({
     use: {
         headless: process.env.PW_HEADLESS !== "false",
         screenshot: "only-on-failure",
-        trace: "retain-on-failure",
-        // Recorded for every run but kept only when a test fails, so reviewers can watch what happened.
-        video: "retain-on-failure",
+        // Kept for a failing run (and any retry), with the accessibility tree at each action next to the page itself.
+        trace: { mode: "retain-on-failure-and-retries", snapshots: { dom: true, aria: true, screen: true } },
+        // Recorded for every run but kept only when a test fails, so reviewers can watch what happened: each action and step is shown on the video.
+        video: { mode: "retain-on-failure", show: { actions: {}, test: { level: "step" } } },
+        // Routes (the bearer token, deliberate faults) must see every request: a service worker would answer some itself.
+        serviceWorkers: "block",
         actionTimeout: 10_000,
         navigationTimeout: 30_000,
         viewport: { width: 1280, height: 800 },
@@ -166,11 +174,11 @@ export function configFor(projects: RunnerProject[], testTimeoutMs?: number, bro
     // A runner that uses the computer's Chrome or Edge (../browsers/choice.ts): Chromium tests run in it. Firefox and WebKit variants keep their own engine.
     const launch = browser?.channel || browser?.executablePath ? `${browser.channel ? `channel: ${JSON.stringify(browser.channel)}, ` : ""}${browser.executablePath ? `launchOptions: { executablePath: ${JSON.stringify(browser.executablePath)} }, ` : ""}`.replace(/, $/, "") : "";
     // No video tool on this computer (a runner using an installed browser that has not fetched it yet): no failure video, rather than no test.
-    const filmed = browser?.video === false ? timed.replace('video: "retain-on-failure",', () => 'video: "off",') : timed;
+    const filmed = browser?.video === false ? timed.replace(/video: \{ mode: "retain-on-failure"[^\n]*\},\n/, () => 'video: "off",\n') : timed;
     const base = launch && projects.length === 0 ? filmed.replace("    use: {\n", () => `    use: {\n        ${launch},\n`) : filmed;
     if (projects.length === 0) return base;
     const list = projects
-        .map((p) => `        { name: ${JSON.stringify(p.name)}, use: { ...devices[${JSON.stringify(p.device)}]${p.viewport ? `, viewport: ${JSON.stringify(p.viewport)}` : ""}${launch ? `, ...(devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "firefox" || devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "webkit" ? {} : { ${launch} })` : ""} } },`)
+        .map((p) => `        { name: ${JSON.stringify(p.name)}, use: { ...devices[${JSON.stringify(p.device)}]${p.viewport ? `, viewport: ${JSON.stringify(p.viewport)}` : ""}${p.use ? `, ...${JSON.stringify(p.use)}` : ""}${launch ? `, ...(devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "firefox" || devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "webkit" ? {} : { ${launch} })` : ""} } },`)
         .join("\n");
     return base.replace("import { defineConfig }", () => "import { defineConfig, devices }").replace("    use: {", () => `    projects: [\n${list}\n    ],\n    use: {`);
 }
@@ -185,6 +193,12 @@ export interface RunProgress {
 }
 
 const BASE_REPORTER = 'reporter: [["json", { outputFile: "report.json" }]],';
+
+/** The config with Playwright's own time limit for the whole run, a little under `killAfterMs` (the runner's kill timer). Exported for the unit tests. */
+export function withGlobalTimeout(config: string, killAfterMs: number): string {
+    const ms = Math.max(1_000, Math.round(killAfterMs - Math.min(30_000, killAfterMs / 10)));
+    return config.replace("    retries: 0,\n", () => `    retries: 0,\n    globalTimeout: ${ms},\n`);
+}
 
 /** The same config plus extra reporters (each a Playwright reporter entry written as source text). With none it is the base config itself. */
 function withReporters(config: string, extra: string[]): string {
@@ -458,7 +472,9 @@ export async function runScripts(
     await fs.mkdir(runDir, { recursive: true });
     // A run that can be cancelled also keeps each finished test's result as it ends (a cancelled run is killed before Playwright writes its report).
     // --proxy-tests on a runner (AITP_PROXY_TESTS=1): the browser gets the proxy; otherwise the config is unchanged (engine/net/test-proxy.ts).
-    const config = withTestProxy(configFor(projects, opts.testTimeoutMs, opts.browser), process.env);
+    const limit = opts.timeoutMs ?? Math.max(120_000, scripts.length * Math.max(1, projects.length) * (opts.testTimeoutMs ?? 60_000));
+    // Just under the kill timer below: Playwright stops the run itself first and still writes report.json for every test.
+    const config = withGlobalTimeout(withTestProxy(configFor(projects, opts.testTimeoutMs, opts.browser), process.env), limit);
     await fs.writeFile(path.join(runDir, "playwright.config.ts"), withReporters(config, [...(opts.onProgress ? ['["list"]'] : []), ...(opts.signal ? ['["./partial-reporter.mjs"]'] : []), ...(opts.onLive ? [`["./${LIVE_REPORTER_FILE}"]`] : [])]));
     if (opts.signal) await fs.writeFile(path.join(runDir, "partial-reporter.mjs"), PARTIAL_REPORTER);
     if (opts.onLive) await fs.writeFile(path.join(runDir, LIVE_REPORTER_FILE), LIVE_REPORTER);
@@ -535,7 +551,6 @@ export async function runScripts(
             progress?.push(String(d));
             live?.push(String(d));
         });
-        const limit = opts.timeoutMs ?? Math.max(120_000, scripts.length * Math.max(1, projects.length) * (opts.testTimeoutMs ?? 60_000));
         let killed = false;
         const timer = setTimeout(() => {
             killed = true;
@@ -560,6 +575,7 @@ export async function runScripts(
     const evidenceTexts = new Map<string, string>();
     const runs = await parseReport(runDir, scripts, stderr, timedOut, "Playwright", projects.map((p) => p.name), evidenceTexts);
     await storeEvidence(runDir, runs, evidenceTexts, [...secretsOfRun(env), ...extras.secrets]);
+    for (const run of runs) if (run.errorContext) run.errorContext = maskSecrets(run.errorContext, [...traceSecretsOfRun(env), ...extras.secrets]);
     // Failure traces keep what the test typed and what the browser sent: masked with the run's secrets, or not kept (../evidence/trace-scrub.ts).
     await scrubRunTraces(runs, [...traceSecretsOfRun(env), ...extras.secrets]);
     // Records data-changing API tests created: written as they happened, so a run that was killed still reports them.
@@ -620,13 +636,20 @@ interface Hit {
     status: string;
     /** The test's title, which carries the row of a data-driven script ("... [row 2/5]"). */
     title: string;
+    /** "failed" for a test marked `test.fail()` (it tracks a known bug). */
+    expectedStatus?: string;
+    annotations?: Array<{ type: string; description?: string }>;
 }
+
+/** The start of the error of a run that tracks a known bug and passed: the bug seems fixed. */
+export const KNOWN_BUG_FIXED = "The bug this test tracks seems fixed";
 
 function* walk(suite: any): Generator<Hit> {
     for (const spec of suite.specs ?? []) {
         for (const test of spec.tests ?? []) {
             const results: PwResult[] = test.results ?? [];
-            yield { file: spec.file ?? suite.file, project: test.projectName ?? "", result: results[results.length - 1], status: test.status, title: String(spec.title ?? "") };
+            const last = results[results.length - 1] as (PwResult & { annotations?: Hit["annotations"] }) | undefined;
+            yield { file: spec.file ?? suite.file, project: test.projectName ?? "", result: last, status: test.status, title: String(spec.title ?? ""), expectedStatus: test.expectedStatus, annotations: [...(test.annotations ?? []), ...(last?.annotations ?? [])] };
         }
     }
     for (const child of suite.suites ?? []) yield* walk(child);
@@ -688,6 +711,7 @@ export async function parseReport(runDir: string, scripts: ScriptInput[], stderr
         }
     }
     const topLevelErrors: string = (report.errors ?? []).map((e: any) => e.message).join("\n");
+    const globalTimedOut = /Timed out waiting [\d.]+s for the .+ to run/.test(topLevelErrors.replace(ANSI, ""));
 
     return Promise.all(targets.map(async ({ s, v }): Promise<ScriptRun> => {
         const merged = mergeRowResults(byFile.get(v ? `${s.filename}|${v}` : s.filename));
@@ -719,17 +743,28 @@ export async function parseReport(runDir: string, scripts: ScriptInput[], stderr
             });
         }
         const failed = steps.find((x) => x.status === "failed");
-        const status = r.status === "passed" ? "passed" : r.status === "timedOut" ? "timedOut" : r.status === "skipped" ? "skipped" : "failed";
+        // Playwright's own time limit for the run (globalTimeout) stops the tests still running: they did not finish, so they ran out of time.
+        const cutOff = r.status === "interrupted" || (r.status === "skipped" && globalTimedOut);
+        let status: ScriptRun["status"] = r.status === "passed" ? "passed" : r.status === "timedOut" || cutOff ? "timedOut" : r.status === "skipped" ? "skipped" : "failed";
+        let error = r.error?.message?.replace(ANSI, "").slice(0, 2000) ?? (cutOff ? "The run reached its time limit before this test finished." : undefined);
         const artifacts: ScriptRun["artifacts"] = [];
         let responses: ScriptRun["responses"] = [];
         let metrics: ScriptRun["metrics"];
         const notes: string[] = [];
+        let errorContext: string | undefined;
         const visionShots: Array<{ step: number; path: string }> = [];
         const visionAsks = new Map<number, string>();
         for (const a of r.attachments ?? []) {
             // Handed to the caller as text, not kept in the result: it is stored only after redaction (storeEvidence).
             if (a.name === EVIDENCE_ATTACHMENT) {
                 if (evidence && a.body) evidence.set(`${s.testId}|${v ?? ""}`, Buffer.from(a.body, "base64").toString("utf8"));
+                continue;
+            }
+            // Playwright's failure context: the accessibility snapshot at the failing check (or of the page when the test ended).
+            if (a.name === "error-context" && a.path) {
+                const text = await fs.readFile(a.path, "utf8").catch(() => "");
+                const at = text.search(/^# (Error details|Page snapshot)/m);
+                if (text) errorContext = (at >= 0 ? text.slice(at) : text).slice(0, 6000);
                 continue;
             }
             if (a.name === "metrics" && a.body) {
@@ -793,12 +828,25 @@ export async function parseReport(runDir: string, scripts: ScriptInput[], stderr
             else if (a.name.endsWith("-actual.png")) artifacts.push({ kind: "visual-actual", path: a.path });
             else if (a.name.endsWith("-diff.png")) artifacts.push({ kind: "visual-diff", path: a.path });
         }
+        // A test marked test.fail() tracks a known bug: failing is its expected result, and passing says the bug seems fixed.
+        if (hit.expectedStatus === "failed") {
+            const bug = hit.annotations?.find((x) => x.type === "fail" && x.description)?.description ?? "a known bug";
+            if (status === "passed") {
+                status = "failed";
+                error = `${KNOWN_BUG_FIXED} (${bug}): the test passed, but it is marked to fail until that bug is fixed. Check the bug, then remove its link from this test.`;
+            } else if (status === "failed") {
+                status = "passed";
+                notes.push(`Failed as expected: the bug this test tracks (${bug}) is still there.`);
+                error = undefined;
+            }
+        }
         return {
             testId: s.testId,
             status,
             durationMs: r.duration,
-            error: r.error?.message?.replace(ANSI, "").slice(0, 2000),
-            failedStepIndex: failed ? failed.index : -1,
+            error,
+            ...(errorContext && status !== "passed" ? { errorContext } : {}),
+            failedStepIndex: failed && status !== "passed" ? failed.index : -1,
             steps,
             artifacts,
             responses,

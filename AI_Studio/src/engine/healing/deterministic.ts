@@ -60,7 +60,7 @@ export interface DetRepairInput {
 
 /** At most this many fixes are handed back (each one costs a run of the test). */
 export const MAX_FIXES = 3;
-const REPLAYED = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "wait"]);
+const REPLAYED = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "wait", "upload", "drag", "dialog", "remember", "clock", "condition"]);
 const STEP_TIMEOUT = 6_000;
 const OVERALL_TIMEOUT = 60_000;
 const FIELD_ROLES = new Set(["textbox", "searchbox", "combobox", "spinbutton", "slider", "listbox"]);

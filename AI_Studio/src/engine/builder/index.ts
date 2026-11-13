@@ -11,6 +11,7 @@ import type { BlockIndex } from "../blocks/model.js";
 import { locatorOf, refProblems, type ObjectIndex } from "../locators/refs.js";
 import { unknownPlaceholders } from "../testdata/dataset.js";
 import { popupProblems } from "../web/pages.js";
+import { planCondition, renderClock } from "../web/conditions.js";
 import { isMissingValue, isUnknownChoice, isUnknownKind } from "../zod-issue.js";
 
 /** What the editor refuses to store, in numbers. */
@@ -28,7 +29,7 @@ export const BUILDER_LIMITS = {
 export const EDITABLE_KINDS = ["web", "api"] as const;
 export type EditableKind = (typeof EDITABLE_KINDS)[number];
 export const ACTIONS_BY_KIND: Record<EditableKind, readonly Step["action"][]> = {
-    web: ["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "email", "wait", "assert"],
+    web: ["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "dialog", "download", "email", "wait", "assert", "clock", "condition"],
     api: ["request", "assertResponse"],
 };
 export const isEditableKind = (k: string): k is EditableKind => (EDITABLE_KINDS as readonly string[]).includes(k);
@@ -247,6 +248,7 @@ function stepProblems(step: Step, kind: EditableKind): string[] {
             break;
         case "click":
         case "hover":
+        case "download":
         case "fill":
         case "select":
         case "check": {
@@ -270,6 +272,15 @@ function stepProblems(step: Step, kind: EditableKind): string[] {
             }
             break;
         }
+        case "clock":
+        case "condition":
+            try {
+                if (step.action === "clock") renderClock(step);
+                else planCondition(step);
+            } catch (e) {
+                out.push((e as Error).message);
+            }
+            break;
         case "drag": {
             const p = locatorProblem(step.locator);
             if (p) out.push(p);

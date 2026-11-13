@@ -5,6 +5,8 @@
  * has them validated again; deleting one that is used is refused; renaming rewrites the specs in the same transaction. The
  * helpers exported at the bottom are shared with the healing route (a repair of a shared step edits the element once).
  */
+import { withProjectNotes } from "../render-context.js";
+import { dataSetsFor } from "./environments.js";
 import path from "node:path";
 import { z } from "zod";
 import { isAppUri } from "../../engine/desktop/target.js";
@@ -27,7 +29,6 @@ import {
 import { indexOf, locatorOf, refOf } from "../../engine/locators/refs.js";
 import { blocksHoldingElements, elementUsageThroughBlocks } from "../../engine/blocks/element-usage.js";
 import type { Locator } from "../../engine/spec/schema.js";
-import { dataSetsFor } from "./environments.js";
 import { HttpError } from "../http-error.js";
 import { CustomScriptStore } from "../custom-script-store.js";
 import { BlockStore, blocksFor, blockView } from "../block-store.js";
@@ -522,6 +523,7 @@ export function locatorServices(ctx: RouteCtx) {
         const objects = store.index(projectId);
         const blocks = blocksFor(p.db, projectId);
         const dataSets = dataSetsFor(repo, projectId);
+        const renderCtx = await withProjectNotes(p.db, projectId, { baseUrl: origin, dataSets, ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) });
         const hand = new CustomScriptStore(repo.db);
         for (const id of testIds) {
             const t = repo.getTest(id);
@@ -533,7 +535,7 @@ export function locatorServices(ctx: RouteCtx) {
                 if (!hasAdapter(fw)) continue;
                 try {
                     const adapter = getAdapter(fw);
-                    const script = renderWithAdapter(t.spec, fw, { baseUrl: origin, dataSets, ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) });
+                    const script = renderWithAdapter(t.spec, fw, renderCtx);
                     if (fw === t.framework) await storeScript(repo, p.store, projectId, t.id, slug, script, adapter.executable);
                     else {
                         // A script made for another framework (for example the mobile version of a web test) lives next to the main one.

@@ -59,6 +59,7 @@ type PlainJobArgs = {
     cleanup: CleanupRequest;
     dataSets: Record<string, DataSet>;
     deleteOps: string[];
+    siteNotes?: import("../engine/memory/notes.js").SiteNote[];
 };
 
 /** Run one plain-English job: resolve its inputs at the time it runs (an environment may have changed since it was queued), then build and run the test. */
@@ -109,6 +110,7 @@ export async function plainRequestOf(args: Omit<PlainJobArgs, "ctx" | "sink">): 
         ...(o.environment ? { environment: o.environment } : {}),
         dataSets: args.dataSets,
         deleteOps: args.deleteOps,
+        ...(args.siteNotes?.length ? { siteNotes: args.siteNotes } : {}),
         cleanup: args.cleanup,
         replace,
     };

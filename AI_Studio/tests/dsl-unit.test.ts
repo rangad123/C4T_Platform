@@ -41,7 +41,7 @@ describe("the grammar follows the schema", () => {
 
     it("has a phrase for every action of the schema (a new action fails here until the text format covers it)", () => {
         // 14, plus upload and drag (frames-uploads-popups) and email (hard sign-ins)
-        expect(ACTIONS.length).toBe(17);
+        expect(ACTIONS.length).toBe(22);
         for (const a of ACTIONS) expect(PHRASES.some((p) => p.fixed.action === a), `action ${a}`).toBe(true);
     });
 

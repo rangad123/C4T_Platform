@@ -8,6 +8,10 @@
  *  - saving never runs the script by itself: a validation job is queued the normal way, which the run policy gates
  *    (platform/custom-policy.ts). When it cannot run, the test stays "Not validated" and the answer says why.
  */
+import { withProjectNotes } from "./render-context.js";
+import { DataSetStore } from "./environments-store.js";
+import { blocksFor } from "./block-store.js";
+import { LocatorStore } from "./locator-store.js";
 import { checkScript, describeErrors, guardAvailable, type Diagnostic } from "../engine/custom/guard.js";
 import { isHelperName, MAX_HELPER_BYTES } from "../engine/custom/helpers.js";
 import { defaultAdapterFor, hasAdapter, renderWithAdapter } from "../engine/frameworks/index.js";
@@ -16,10 +20,7 @@ import { refNames } from "../engine/locators/refs.js";
 import { TestSpecSchema, type TestSpec } from "../engine/spec/schema.js";
 import type { Platform } from "./bootstrap.js";
 import { CustomScriptStore, HelperLimitError, customInfo, type CustomInfo, type GitProvenance, type VersionKind } from "./custom-script-store.js";
-import { DataSetStore } from "./environments-store.js";
 import { HttpError } from "./http-error.js";
-import { blocksFor } from "./block-store.js";
-import { LocatorStore } from "./locator-store.js";
 import { storeScript } from "./repo-sink.js";
 import { draftRunNote, ReviewStore, trackTestVersion } from "./review-store.js";
 import { TERMINAL_STATES, type JobRow, type Repo, type TestRow } from "./repo.js";
@@ -159,9 +160,10 @@ export class CustomScripts {
         const origin = isAppUri(url) ? url : new URL(url).origin;
         const objects = new LocatorStore(this.s.p.db).index(t.projectId);
         const blocks = blocksFor(this.s.p.db, t.projectId);
+        const renderCtx = await withProjectNotes(this.s.p.db, t.projectId, { baseUrl: origin, dataSets: new DataSetStore(this.s.p.db).asMap(t.projectId), ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) });
         let script;
         try {
-            script = renderWithAdapter(spec, t.framework, { baseUrl: origin, dataSets: new DataSetStore(this.s.p.db).asMap(t.projectId), ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) });
+            script = renderWithAdapter(spec, t.framework, renderCtx);
         } catch (e) {
             throw new HttpError(409, `The generated script could not be created again: ${e instanceof Error ? e.message : String(e)}`);
         }

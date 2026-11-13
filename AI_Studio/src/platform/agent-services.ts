@@ -1702,6 +1702,7 @@ class RemoteExecutor implements ScriptExecutor {
                 ...(w.newBaselines ? { newBaselines: w.newBaselines.flatMap((b) => (local(b.ref) ? [{ name: b.name, path: local(b.ref)! }] : [])) } : {}),
                 ...(w.metrics ? { metrics: w.metrics } : {}),
                 ...(w.variant !== undefined ? { variant: w.variant } : {}),
+                ...(w.errorContext !== undefined ? { errorContext: w.errorContext } : {}),
             };
             if (run.vision && run.vision.length === 0) delete run.vision;
             if (run.newBaselines && run.newBaselines.length === 0) delete run.newBaselines;

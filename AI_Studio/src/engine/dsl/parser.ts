@@ -67,7 +67,7 @@ export function parseDsl(input: string): ParseResult {
     }
 
     const present: ParseResult["present"] = {};
-    const head: { title?: string; kind: "web" | "api"; category?: string; type?: string; priority?: string; description?: string } = { kind: "web" };
+    const head: { title?: string; kind: "web" | "api"; category?: string; type?: string; priority?: string; description?: string; date?: string } = { kind: "web" };
     const tags: string[] = [];
     const preconditions: string[] = [];
     const results: string[] = [];
@@ -155,6 +155,12 @@ export function parseDsl(input: string): ParseResult {
                         const v = value.toLowerCase();
                         if ((PRIORITIES as readonly string[]).includes(v)) head.priority = v;
                         else add(lineNo, ...range, `The priority is one of ${PRIORITIES.join(", ")}.`);
+                    });
+                    break;
+                case "date":
+                    once("Date:", () => {
+                        if (/^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2})?)?$/.test(value) && !Number.isNaN(Date.parse(value))) head.date = value;
+                        else add(lineNo, ...range, "The date is written like 2025-01-15 or 2025-01-15T12:00:00Z.");
                     });
                     break;
                 case "description":
@@ -258,6 +264,7 @@ export function parseDsl(input: string): ParseResult {
         ...(head.category !== undefined ? { category: head.category } : {}),
         ...(head.type !== undefined ? { type: head.type } : {}),
         ...(head.priority !== undefined ? { priority: head.priority } : {}),
+        ...(head.date !== undefined ? { pinnedTime: head.date } : {}),
         preconditions,
         steps,
         expectedResults: results,
@@ -285,7 +292,7 @@ export function parseDsl(input: string): ParseResult {
 }
 
 /** The step actions that can work in a popup window (the schema's web steps with `inPopup`). */
-const POPUP_ACTIONS = new Set(["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "assert"]);
+const POPUP_ACTIONS = new Set(["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "dialog", "download", "assert"]);
 const popupStep = (p: PhraseDef): boolean => p.for === "web" && POPUP_ACTIONS.has(String(p.fixed.action));
 
 /** A step line may end with  note "why" : the text becomes the step's description. */

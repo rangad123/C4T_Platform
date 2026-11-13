@@ -40,6 +40,10 @@ export interface LevelSettings {
     visionByDefault: boolean;
     /** Validated web tests replayed with deliberate faults to check they notice breakage (mutation/strength.ts; Infinity: all). */
     strengthTests: number;
+    /** Extra runs a newly written web test must pass before it is validated (any failure makes it flaky). */
+    repeatPasses: number;
+    /** Conditions (validation/variants.ts) the key validated web tests also run under, without being asked. */
+    conditionVariants: readonly string[];
 }
 
 export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSettings>>> = {
@@ -59,6 +63,8 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         digestElementsPerPage: 60,
         visionByDefault: false,
         strengthTests: 15,
+        repeatPasses: 3,
+        conditionVariants: [],
     },
     deep: {
         maxPages: 120,
@@ -76,6 +82,8 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         digestElementsPerPage: 90,
         visionByDefault: true,
         strengthTests: 40,
+        repeatPasses: 3,
+        conditionVariants: ["dark", "locale"],
     },
     everything: {
         maxPages: 250,
@@ -93,6 +101,8 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         digestElementsPerPage: 120,
         visionByDefault: true,
         strengthTests: Infinity,
+        repeatPasses: 5,
+        conditionVariants: ["dark", "locale"],
     },
 };
 

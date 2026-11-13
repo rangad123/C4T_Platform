@@ -256,6 +256,7 @@ export function comparableSpec(spec: TestSpec): string {
         category: spec.category,
         type: spec.type,
         priority: spec.priority,
+        ...(spec.pinnedTime !== undefined ? { pinnedTime: spec.pinnedTime } : {}),
         preconditions: spec.preconditions,
         expectedResults: spec.expectedResults,
         testData: spec.testData,
@@ -277,6 +278,7 @@ export function printSpec(spec: TestSpec): PrintResult {
     if (spec.type !== "functional") out.push(`Type: ${spec.type}`);
     if (spec.priority !== "medium") out.push(`Priority: ${spec.priority}`);
     if (spec.description !== "") out.push(`Description: ${headerValue(spec.description)}`);
+    if (spec.pinnedTime !== undefined) out.push(`Date: ${headerValue(spec.pinnedTime)}`);
     for (const t of spec.tags) out.push(`Tag: ${headerValue(t)}`);
     for (const p of spec.preconditions) out.push(`Precondition: ${headerValue(p)}`);
     for (const r of spec.expectedResults) out.push(`Result: ${headerValue(r)}`);

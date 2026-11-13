@@ -101,6 +101,8 @@ export class NetworkInterceptor {
     private readonly endpoints = new Map<string, ApiEndpointModel>();
     private readonly otherHosts = new Set<string>();
     private readonly authSchemes = new Set<string>();
+    /** WebSocket addresses (no query string: it can carry a token) and the pages that opened them. */
+    private readonly sockets = new Map<string, Set<string>>();
     private origin = "";
     private pagePath = "/";
 
@@ -117,6 +119,26 @@ export class NetworkInterceptor {
     attach(page: Page): void {
         page.on("request", (req) => this.noteHost(req));
         page.on("response", (res) => void this.record(res));
+        page.on("websocket", (ws) => this.noteSocket(ws.url()));
+    }
+
+    private noteSocket(url: string): void {
+        try {
+            const u = new URL(url);
+            if (u.protocol !== "ws:" && u.protocol !== "wss:") return;
+            const key = `${u.origin.replace(/^http/, "ws")}${u.pathname}`;
+            if (!this.sockets.has(key) && this.sockets.size >= 20) return;
+            const pages = this.sockets.get(key) ?? new Set<string>();
+            if (pages.size < 10) pages.add(this.pagePath);
+            this.sockets.set(key, pages);
+        } catch {
+            /* not an address */
+        }
+    }
+
+    /** The WebSocket endpoints the app's pages opened (live updates, chat, notifications). */
+    getWebSockets(): Array<{ url: string; usedIn: string[] }> {
+        return [...this.sockets].map(([url, pages]) => ({ url, usedIn: [...pages] }));
     }
 
     /** Hosts other than the application's that its pages talked to (fonts, analytics, payment providers...). */

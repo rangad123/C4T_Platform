@@ -44,7 +44,7 @@ export interface HealInput {
 }
 
 /** Steps that change the page and are therefore replayed to reach the failing step. Checks are not repeated. */
-const REPLAYED = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "wait"]);
+const REPLAYED = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "wait", "upload", "drag", "dialog", "remember", "clock", "condition"]);
 const STEP_TIMEOUT = 6_000;
 const OVERALL_TIMEOUT = 90_000;
 
@@ -68,6 +68,10 @@ export function locatorOptions(old: Locator, c: Candidate): Locator[] {
             return [...byTestId, ...byRole];
         case "css":
             return [...byTestId, ...(c.id && /^[\w-]+$/.test(c.id) ? [{ by: "css", value: `#${c.id}` } as Locator] : []), ...byRole];
+        // An image by its alt text, an element by its title: the page names them for people, so the accessible name is the replacement.
+        case "altText":
+        case "title":
+            return [...byRole, ...byTestId];
     }
 }
 

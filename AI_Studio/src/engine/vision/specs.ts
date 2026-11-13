@@ -4,6 +4,7 @@
  *  - visionFinding / visionUnavailable: how the validator reads a run after the platform judged its screenshots
  *    (see judge.ts, which folds verdicts into the run) — a finding is a NEEDS_REVIEW result, "could not run" is a plain failure.
  */
+import { pinToday } from "../web/conditions.js";
 import { selectKeyPages } from "../a11y/specs.js";
 import type { DraftSpec } from "../api/test-specs.js";
 import type { Step, TestSpec } from "../spec/schema.js";
@@ -41,6 +42,8 @@ export function generateVisionSpecs(model: AppModel, opts: VisionGenOptions): Dr
             testData: {},
             tags: ["vision", "ai"],
             source: { origin: "vision-check" },
+            // The same screen every day: a date on the page is not something to judge.
+            pinnedTime: pinToday(),
         };
     });
 }

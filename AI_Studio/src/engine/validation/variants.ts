@@ -26,10 +26,16 @@ import type { RunEnv, RunnerProject, ScriptRun } from "./runner.js";
 
 // ── The fixed set of variants ───────────────────────────────────────────────
 
-export const VARIANT_IDS = ["chromium-desktop", "firefox", "webkit", "mobile-chrome", "tablet"] as const;
+/**
+ * Conditions (desktop Chrome under another setting): dark mode, another language and a far time zone, high contrast (forced colours),
+ * reduced motion, and JavaScript off (content pages only). Same results as a browser variant: a test that fails only under a condition is a finding.
+ */
+export const CONDITION_VARIANT_IDS = ["dark", "locale", "high-contrast", "reduced-motion", "no-js"] as const;
+export type ConditionVariantId = (typeof CONDITION_VARIANT_IDS)[number];
+export const VARIANT_IDS = ["chromium-desktop", "firefox", "webkit", "mobile-chrome", "tablet", ...CONDITION_VARIANT_IDS] as const;
 export type VariantId = (typeof VARIANT_IDS)[number];
 /** The variants a user can ask for. chromium-desktop is the base run that already happens on every validation. */
-export const EXTRA_VARIANT_IDS = ["firefox", "webkit", "mobile-chrome", "tablet"] as const;
+export const EXTRA_VARIANT_IDS = ["firefox", "webkit", "mobile-chrome", "tablet", ...CONDITION_VARIANT_IDS] as const;
 export type ExtraVariantId = (typeof EXTRA_VARIANT_IDS)[number];
 
 export type BrowserName = "chromium" | "firefox" | "webkit";
@@ -43,6 +49,8 @@ export interface VariantDef {
     /** Playwright device profile the project starts from (user agent, touch, pixel density). */
     device: string;
     viewport: { width: number; height: number };
+    /** Conditions on top of the device (Playwright `use` options). */
+    use?: Record<string, string | boolean>;
 }
 
 export const VARIANTS: Record<VariantId, VariantDef> = {
@@ -51,7 +59,22 @@ export const VARIANTS: Record<VariantId, VariantDef> = {
     webkit: { id: "webkit", label: "Safari (WebKit)", description: "The engine behind Safari on Mac and iPhone, on a desktop screen.", browser: "webkit", device: "Desktop Safari", viewport: { width: 1280, height: 800 } },
     "mobile-chrome": { id: "mobile-chrome", label: "Phone", description: "A phone-sized screen (390 × 844) with touch and a mobile browser.", browser: "chromium", device: "Pixel 7", viewport: { width: 390, height: 844 } },
     tablet: { id: "tablet", label: "Tablet", description: "A tablet-sized screen (820 × 1180) with touch.", browser: "chromium", device: "Galaxy Tab S4", viewport: { width: 820, height: 1180 } },
+    dark: { id: "dark", label: "Dark mode", description: "Chrome on a desktop screen, with the computer set to dark mode.", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { colorScheme: "dark" } },
+    locale: { id: "locale", label: "Another language and time zone", description: "Chrome on a desktop screen in German (de-DE), in the New Zealand time zone (about 12 hours ahead of London).", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { locale: "de-DE", timezoneId: "Pacific/Auckland" } },
+    "high-contrast": { id: "high-contrast", label: "High contrast", description: "Chrome on a desktop screen with forced colours and more contrast, as people with low vision set it.", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { forcedColors: "active", contrast: "more" } },
+    "reduced-motion": { id: "reduced-motion", label: "Reduced motion", description: "Chrome on a desktop screen, with the computer asking for less animation.", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { reducedMotion: "reduce" } },
+    "no-js": { id: "no-js", label: "JavaScript off", description: "Chrome on a desktop screen with JavaScript turned off. Only tests that open pages and read them are repeated here.", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { javaScriptEnabled: false } },
 };
+
+/** Checks a page with JavaScript off can still answer: reading what it shows. */
+const READING_CHECKS = new Set(["visible", "hidden", "text", "count", "url", "title"]);
+
+/** Whether a test that is repeated at all fits this variant too (JavaScript off: content pages only). */
+export function variantFits(v: ExtraVariantId, spec: TestSpec): { fits: true } | { fits: false; reason: string } {
+    if (v !== "no-js") return { fits: true };
+    const reading = spec.steps.every((s) => s.action === "navigate" || (s.action === "assert" && READING_CHECKS.has(s.check)));
+    return reading ? { fits: true } : { fits: false, reason: "With JavaScript off only tests that open pages and read them are repeated; this one acts on the page." };
+}
 
 export const variantLabel = (v: string): string => (v in VARIANTS ? VARIANTS[v as VariantId].label : v);
 
@@ -131,6 +154,9 @@ function failureReason(run: ScriptRun): string {
     const step = run.steps.find((s) => s.status === "failed");
     return `${step ? `${step.title} - ` : ""}${firstLine(step?.error ?? run.error) || run.status}`.slice(0, 400);
 }
+
+/** The tests a level's own condition runs take (levels.ts conditionVariants): the key ones, critical and high priority. */
+export const isKeyTest = (spec: TestSpec): boolean => spec.priority === "critical" || spec.priority === "high";
 
 // ── Running the variants ────────────────────────────────────────────────────
 
@@ -226,17 +252,35 @@ export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, te
     if (runnable.length) {
         throwIfAborted(ctx.signal);
         ctx.emit({ stage: "validation", kind: "variants_started", message: `Checking ${eligible.length} test(s) on ${runnable.map(variantLabel).join(", ")}` });
-        const scripts = eligible.map((t) => {
+        const script = (t: VariantTest) => {
             if (t.custom) return { testId: t.spec.testId, filename: t.custom.filename, content: t.custom.content, custom: true };
             const s = renderWithAdapter(t.spec, "playwright", deps.render);
             return { testId: t.spec.testId, filename: s.filename, content: s.content };
-        });
-        const projects: RunnerProject[] = runnable.map((v) => ({ name: v, device: VARIANTS[v].device, viewport: VARIANTS[v].viewport }));
-        // Firefox and WebKit are heavy: never more than two at once on a small machine.
-        const runs = await (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts, ...(deps.helpers?.length && eligible.some((t) => t.custom) ? { helpers: deps.helpers } : {}) }, { run: deps.env }, { workers: Math.max(1, Math.min(deps.workers, 2)), signal: ctx.signal, projects });
-        const byKey = new Map(runs.map((r) => [`${r.testId}|${r.variant}`, r]));
+        };
+        // Variants that take the same tests run together, one Playwright project each (JavaScript off takes only content-page tests).
+        const groups = new Map<string, { tests: VariantTest[]; variants: ExtraVariantId[] }>();
+        for (const v of runnable) {
+            const tests = eligible.filter((t) => variantFits(v, t.spec).fits);
+            const key = tests.map((t) => t.spec.testId).join("|");
+            if (!tests.length) continue;
+            const g = groups.get(key) ?? { tests, variants: [] };
+            g.variants.push(v);
+            groups.set(key, g);
+        }
+        const byKey = new Map<string, ScriptRun>();
+        for (const g of groups.values()) {
+            const projects: RunnerProject[] = g.variants.map((v) => ({ name: v, device: VARIANTS[v].device, viewport: VARIANTS[v].viewport, ...(VARIANTS[v].use ? { use: VARIANTS[v].use } : {}) }));
+            // Firefox and WebKit are heavy: never more than two at once on a small machine.
+            const runs = await (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts: g.tests.map(script), ...(deps.helpers?.length && g.tests.some((t) => t.custom) ? { helpers: deps.helpers } : {}) }, { run: deps.env }, { workers: Math.max(1, Math.min(deps.workers, 2)), signal: ctx.signal, projects });
+            for (const r of runs) byKey.set(`${r.testId}|${r.variant}`, r);
+        }
         for (const t of eligible) {
             for (const v of runnable) {
+                const fit = variantFits(v, t.spec);
+                if (!fit.fits) {
+                    await record(t, { variant: v, status: "skipped", reason: fit.reason });
+                    continue;
+                }
                 const run = byKey.get(`${t.spec.testId}|${v}`);
                 const c: { status: CompatStatus; reason?: string } = run ? classifyVariantRun(run, v) : { status: "unavailable", reason: `${variantLabel(v)} returned no result for this test.` };
                 perTest.get(t.spec.testId)!.push(c.status);

@@ -14,6 +14,7 @@
  * and the page-oriented assertions (url, title, a11y, screenshot, health, ...).
  */
 import type { Locator, Step, TestSpec } from "../spec/schema.js";
+import { webOnlyProblem } from "../web/checks.js";
 import { controlTypeOf, DESKTOP_CONTROL_TYPES, DesktopTargetSchema } from "./target.js";
 
 /** The `assert` checks a desktop test understands. */
@@ -60,6 +61,8 @@ export function desktopSpecIssues(spec: Pick<TestSpec, "kind" | "steps"> & { des
         const n = i + 1;
         const bad = (m: string) => out.push(`Step ${n}: ${m}`);
         if (WHY[s.action]) return bad(`${WHY[s.action]}.`);
+        const webOnly = webOnlyProblem(s);
+        if (webOnly) return bad(`${webOnly}.`);
         if (s.action === "click" || s.action === "fill" || s.action === "select" || s.action === "check") {
             const p = locatorProblem(s.locator);
             if (p) bad(p);

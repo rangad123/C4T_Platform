@@ -3,6 +3,7 @@
  * they agree on how a frame is found, where a test file is placed and how a popup is followed. See docs/features/frames-uploads-popups.md.
  */
 import { TEST_FILE_NAME, type FrameRef, type Step, type TestSpec } from "../spec/schema.js";
+import { isGeneratedSample, SAMPLES_SOURCE } from "./interruptions.js";
 
 /** CSS string contents for an attribute selector (the schema already refuses line breaks in a frame's name). */
 const cssString = (v: string): string => v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -57,7 +58,8 @@ export const isTestFileName = (name: string): boolean => TEST_FILE_NAME.test(nam
 /** The test files a test's steps upload (after reusable steps are put in place), each once. */
 export function uploadFilesOf(spec: Pick<TestSpec, "steps">): string[] {
     const out = new Set<string>();
-    for (const s of spec.steps as Step[]) if (s.action === "upload") out.add(s.file);
+    // A generated sample file (./interruptions.ts) is made by the script itself: it is never one of the library's files.
+    for (const s of spec.steps as Step[]) if (s.action === "upload" && !isGeneratedSample(s.file)) out.add(s.file);
     return [...out];
 }
 
@@ -74,8 +76,10 @@ export function testFileNameFrom(raw: string): string | undefined {
 }
 
 /** Script helpers for upload steps: the file is looked up next to the script; a field that is not a file input is clicked and the file chooser answered. */
-export const UPLOAD_HELPER_SOURCE = String.raw`/** Test files come from the project's library: the platform places each one next to this script before it runs. */
-function testFile(name: string): string {
+export const UPLOAD_HELPER_SOURCE = SAMPLES_SOURCE + String.raw`/** Test files come from the project's library: the platform places each one next to this script before it runs. A generated-sample file is made here. */
+function testFile(name: string): string | { name: string; mimeType: string; buffer: Buffer } {
+    const sample = GENERATED_SAMPLES[/^generated-sample\.([a-z]+)$/.exec(name)?.[1] ?? ""];
+    if (sample) return { name, mimeType: sample.mimeType, buffer: Buffer.from(sample.base64, "base64") };
     const placed = testFileJoin(test.info().project.testDir, "__baselines__", "${TEST_FILE_PREFIX}" + name);
     if (!testFileExists(placed)) throw new Error("The test file \"" + name + "\" is not available to this run. Add it under Settings, Test data, Test files, or check its name.");
     // The page sees the file under its own name (not the name it travels under).
@@ -87,8 +91,19 @@ function testFile(name: string): string {
 }
 
 /** Uploads a test file into a file field, or through the file chooser a button opens. */
-async function uploadTestFile(page: import("@playwright/test").Page, target: import("@playwright/test").Locator, name: string): Promise<void> {
+async function uploadTestFile(page: import("@playwright/test").Page, target: import("@playwright/test").Locator, name: string, drop = false): Promise<void> {
     const file = testFile(name);
+    // A drop zone: the file is dropped on it the way a person drags it in from their computer (drag events carrying the file).
+    if (drop) {
+        const f = typeof file === "string" ? { name, mimeType: "application/octet-stream", buffer: testFileRead(file) } : file;
+        const dataTransfer = await page.evaluateHandle(({ name, mimeType, b64 }) => {
+            const dt = new DataTransfer();
+            dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], name, { type: mimeType }));
+            return dt;
+        }, { name: f.name, mimeType: f.mimeType, b64: f.buffer.toString("base64") });
+        for (const type of ["dragenter", "dragover", "drop"]) await target.dispatchEvent(type, { dataTransfer });
+        return;
+    }
     const isFileInput = await target.evaluate((el) => el instanceof HTMLInputElement && el.type === "file").catch(() => false);
     if (isFileInput) return target.setInputFiles(file);
     const chooser = page.waitForEvent("filechooser");
@@ -97,7 +112,7 @@ async function uploadTestFile(page: import("@playwright/test").Page, target: imp
 }
 `;
 
-export const UPLOAD_IMPORTS = 'import { copyFileSync as testFileCopy, existsSync as testFileExists, mkdirSync as testFileMkdir } from "node:fs";\nimport { join as testFileJoin } from "node:path";\n';
+export const UPLOAD_IMPORTS = 'import { copyFileSync as testFileCopy, existsSync as testFileExists, mkdirSync as testFileMkdir, readFileSync as testFileRead } from "node:fs";\nimport { join as testFileJoin } from "node:path";\n';
 
 /** Declared at the top of a test that follows popups: the popup an earlier step opened, and the way a step reaches it. */
 export const POPUP_SETUP = `    let popup: typeof page | undefined;

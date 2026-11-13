@@ -9,6 +9,7 @@
  *  - nothing is stored when anything is wrong (all-or-nothing), and a preview never stores anything;
  *  - saving never runs the test by itself: the normal validation job is queued, or the answer says in plain words why not.
  */
+import { withProjectNotes } from "./render-context.js";
 import { blockOfStep, expandBlocks, sourceIndexes } from "../engine/blocks/expand.js";
 import type { BlockIndex } from "../engine/blocks/model.js";
 import type { ObjectIndex } from "../engine/locators/refs.js";
@@ -222,7 +223,7 @@ export class SpecEditService {
         if (errorsOf(diagnostics).length) return { diagnostics };
 
         try {
-            const script = renderWithAdapter(spec, t.framework, { baseUrl: origin, dataSets, ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) });
+            const script = renderWithAdapter(spec, t.framework, await withProjectNotes(this.ctx.p.db, projectId, { baseUrl: origin, dataSets, ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) }));
             return { spec, diagnostics, script: { content: script.content, filename: script.filename } };
         } catch (e) {
             diagnostics.push({ severity: "error", message: `The script could not be created from these steps: ${e instanceof Error ? e.message : String(e)}` });
@@ -308,7 +309,7 @@ export class SpecEditService {
         const spec = blankSpec({ testId: key, title: o.title, kind: o.kind, category, startPath });
         const adapter = defaultAdapterFor(o.kind);
         const dataSets = new DataSetStore(this.ctx.p.db).asMap(projectId);
-        const script = renderWithAdapter(spec, adapter.id, { baseUrl: origin, dataSets });
+        const script = renderWithAdapter(spec, adapter.id, await withProjectNotes(this.ctx.p.db, projectId, { baseUrl: origin, dataSets }));
         const slug = slugify(category);
         const suiteId = this.repo.getOrCreateSuite(projectId, category, slug);
         const id = this.repo.insertTest({ projectId, suiteId, jobId: null, spec, framework: adapter.id as TestRow["framework"], validationStatus: "PENDING", meta: { authoring: "built-in-editor" } });

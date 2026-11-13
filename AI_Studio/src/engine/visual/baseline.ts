@@ -13,6 +13,7 @@
  * Playwright's toHaveScreenshot already retakes screenshots until two consecutive ones match before
  * comparing, so no fixed waits are needed.
  */
+import { pinToday } from "../web/conditions.js";
 import { selectKeyPages } from "../a11y/specs.js";
 import type { DraftSpec } from "../api/test-specs.js";
 import { signedInPageSteps, signedInPreconditions, signedInTitle, type SignedInPlan } from "../identity/signed-in.js";
@@ -59,6 +60,8 @@ export function generateVisualSpecs(model: AppModel, opts: { maxPages: number; /
             testData: {},
             tags: ["visual"],
             source: { origin: "visual-baseline" },
+            // Dates and "x minutes ago" on the page would change the screenshot every day.
+            pinnedTime: pinToday(),
         };
     });
 }
@@ -82,6 +85,7 @@ export function generateSignedInVisualSpecs(plan: SignedInPlan): DraftSpec[] {
             testData: {},
             tags: ["visual", "signed-in"],
             source: { origin: "visual-baseline" },
+            // Not pinned: a signed-in page's session can depend on the real time.
         })),
     );
 }

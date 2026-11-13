@@ -9,6 +9,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cutLockfile, LockCutError, nodeFloor, compareVersions, type Lockfile } from "../engine/portable/lockfile.js";
 import { OLDEST_PLAYWRIGHT } from "../engine/portable/playwright-apis.js";
+import { NEEDS_PLAYWRIGHT_LINE } from "../engine/web/checks.js";
 
 /** One script as it goes into the download. */
 export interface ExportScript {
@@ -283,6 +284,11 @@ function readme(r: PortableOptions & { pins: Record<string, string>; node: strin
     lines.push("## Versions", "");
     lines.push(`These tests were written for and run with ${Object.entries(r.pins).map(([n, v]) => `${n} ${v}`).join(", ") || "Playwright"}. ${r.lockfile ? `package.json pins ${Object.keys(r.pins).length === 1 ? "that exact version" : "those exact versions"} and package-lock.json pins everything they need, so every computer gets the same ones.` : "package.json pins those exact versions."}`, "");
     lines.push(`Tests the platform made from steps work with Playwright ${OLDEST_PLAYWRIGHT} or newer: to use another version, \`npm install -D @playwright/test@<version>\`, then \`npx playwright install\` again. Code tests (written by hand) may use anything of the version they were written with${pw ? ` (${pw})` : ""}.`, "");
+    // A few checks need a newer Playwright than that floor; each such script says so in its first lines (engine/web/checks.ts).
+    for (const sc of r.scripts) {
+        const m = NEEDS_PLAYWRIGHT_LINE.exec(sc.content);
+        if (m) lines.push(`${sc.path} needs Playwright ${m[1]} or newer: ${m[2]}`, "");
+    }
     if (r.phoneCount) {
         lines.push("## Phone tests", "");
         lines.push(`Phone tests are in phone-tests/ and run with Taqwright (Appium), not with \`npx playwright test\`. They need Node.js ${r.node} or newer, an Android emulator or phone (Android SDK) or, for iOS, a Mac with Xcode and a simulator, and the app installed or its file. Then: \`npm run test:phone\`, with \`MOBILE_AVD\` (or \`MOBILE_SIMULATOR\`), \`MOBILE_APP_PACKAGE\` and optionally \`MOBILE_APK_PATH\` and \`MOBILE_UDID\` set.`, "");

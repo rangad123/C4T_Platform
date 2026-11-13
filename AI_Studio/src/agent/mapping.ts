@@ -131,6 +131,7 @@ export function toWireRun(run: ScriptRun, outcome: UploadOutcome): WireRun {
         responses: run.responses.slice(0, 500).map((r) => ({ method: r.method, path: r.path, status: r.status, ...(r.obs !== undefined ? { obs: r.obs } : {}) })),
         ...(run.metrics?.length ? { metrics: run.metrics.slice(0, 100) } : {}),
         ...(run.variant !== undefined ? { variant: run.variant } : {}),
+        ...(run.errorContext ? { errorContext: cut(run.errorContext, 6000) } : {}),
         ...(run.created?.length ? { created: run.created.slice(0, 500) as unknown as Array<Record<string, unknown>> } : {}),
     };
 }
@@ -145,5 +146,6 @@ export function maskRun(run: WireRun, redact: (text: string) => string): WireRun
         ...(run.error !== undefined ? { error: redact(run.error) } : {}),
         steps: run.steps.map((s) => ({ ...s, title: redact(s.title), ...(s.error !== undefined ? { error: redact(s.error) } : {}) })),
         ...(run.notes ? { notes: run.notes.map(redact) } : {}),
+        ...(run.errorContext !== undefined ? { errorContext: redact(run.errorContext) } : {}),
     };
 }

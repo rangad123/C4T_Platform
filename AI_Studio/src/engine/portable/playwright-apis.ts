@@ -44,6 +44,8 @@ export const PLAYWRIGHT_METHODS: Readonly<Record<string, string>> = {
     test: "1.10", step: "1.10", info: "1.10", setTimeout: "1.10", beforeEach: "1.10", afterEach: "1.10", beforeAll: "1.10", afterAll: "1.10", skip: "1.10", fail: "1.10", slow: "1.10", describe: "1.10", attach: "1.10", defineConfig: "1.28",
     expect: "1.10", toBe: "1.10", toEqual: "1.10", toBeTruthy: "1.10", toBeFalsy: "1.10", toContain: "1.10", toMatch: "1.10", toBeGreaterThan: "1.10", toBeLessThan: "1.10", toBeLessThanOrEqual: "1.10", toBeGreaterThanOrEqual: "1.10",
     toBeVisible: "1.20", toBeHidden: "1.20", toBeEnabled: "1.20", toBeDisabled: "1.20", toContainText: "1.20", toHaveValue: "1.20", toHaveCount: "1.20", toHaveURL: "1.20", toHaveTitle: "1.20", toHaveScreenshot: "1.23",
+    toBeChecked: "1.20", toBeFocused: "1.20", toBeEditable: "1.20", toHaveAttribute: "1.20", toHaveClass: "1.20", toHaveCSS: "1.20", toHaveText: "1.20", soft: "1.20", poll: "1.21", toBeInViewport: "1.31",
+    toHaveAccessibleName: "1.44", toMatchAriaSnapshot: "1.49", toHaveAccessibleErrorMessage: "1.50", ariaSnapshot: "1.49", waitForResponse: "1.0",
     // Page, Frame, Keyboard
     goto: "1.0", waitForTimeout: "1.0", waitForLoadState: "1.0", waitForEvent: "1.0", waitForURL: "1.11", url: "1.0", title: "1.0", context: "1.0", on: "1.0", off: "1.0", once: "1.0", evaluate: "1.0", $$eval: "1.0", $eval: "1.0",
     screenshot: "1.0", viewportSize: "1.0", setViewportSize: "1.0", close: "1.0", isClosed: "1.0", content: "1.0", reload: "1.0", goBack: "1.0", bringToFront: "1.0", mainFrame: "1.0", frames: "1.0", opener: "1.0",
@@ -52,6 +54,8 @@ export const PLAYWRIGHT_METHODS: Readonly<Record<string, string>> = {
     click: "1.14", dblclick: "1.14", fill: "1.14", clear: "1.28", selectOption: "1.14", setChecked: "1.15", check: "1.14", uncheck: "1.14", hover: "1.14", dragTo: "1.18", press: "1.14", pressSequentially: "1.38", type: "1.14",
     nth: "1.14", first: "1.14", last: "1.14", or: "1.33", and: "1.34", filter: "1.22", all: "1.29", count: "1.14", waitFor: "1.16", evaluateAll: "1.14", getAttribute: "1.14", innerText: "1.14", innerHTML: "1.14", textContent: "1.14",
     inputValue: "1.13", isVisible: "1.14", isHidden: "1.14", isEnabled: "1.14", isDisabled: "1.14", isEditable: "1.14", isChecked: "1.14", setInputFiles: "1.14", focus: "1.14", blur: "1.28", scrollIntoViewIfNeeded: "1.14", boundingBox: "1.14",
+    // Dialogs, downloads, drop zones, overlays (../web/interruptions.ts)
+    addLocatorHandler: "1.42", message: "1.0", accept: "1.0", dismiss: "1.0", suggestedFilename: "1.0", createReadStream: "1.0", dispatchEvent: "1.0", evaluateHandle: "1.0",
     // BrowserContext, Browser, CDP, files
     newPage: "1.0", newContext: "1.0", browser: "1.0", pages: "1.0", storageState: "1.8", newCDPSession: "1.0", send: "1.0", detach: "1.0", setFiles: "1.0", addInitScript: "1.0", cookies: "1.0", addCookies: "1.0", route: "1.0", unroute: "1.0",
     // APIRequestContext, APIResponse, Request, Response, ConsoleMessage
@@ -74,6 +78,7 @@ export const PLAYWRIGHT_OPTIONS: Readonly<Record<string, Readonly<Record<string,
     getByPlaceholder: { exact: "1.27" },
     filter: { hasText: "1.22", has: "1.22", hasNot: "1.33", hasNotText: "1.33", visible: "1.51" },
     waitFor: { state: "1.16" },
+    toBeChecked: { checked: "1.18" },
     pressSequentially: { delay: "1.38" },
     newContext: { storageState: "1.8", ignoreHTTPSErrors: "1.0", viewport: "1.0" },
     defineConfig: { snapshotPathTemplate: "1.28", fullyParallel: "1.20", testIgnore: "1.10", testMatch: "1.10", outputDir: "1.10" },

@@ -2,6 +2,7 @@
  * Routes for locator healing. A proposal is a suggestion made after a failed run; the only way it changes a test is the
  * apply route below, which a person calls. Nothing here (or anywhere else) applies a proposal on its own.
  */
+import { withProjectNotes } from "../render-context.js";
 import { applyLocator, sameLocator } from "../../engine/healing/apply.js";
 import { unhealableTest } from "../../engine/healing/failure.js";
 import { defaultAdapterFor, renderWithAdapter } from "../../engine/frameworks/index.js";
@@ -140,7 +141,8 @@ export function registerHealingRoutes(ctx: RouteCtx): void {
         const framework = adapter.id;
         const origin = new URL(application.url).origin;
         const suiteSlug = (repo.getSuite(t.suiteId)?.slug as string | undefined) ?? "general";
-        const script = renderWithAdapter(changed.spec, framework, { baseUrl: origin });
+        const renderCtx = await withProjectNotes(p.db, t.projectId, { baseUrl: origin });
+        const script = renderWithAdapter(changed.spec, framework, renderCtx);
         const scriptId = await storeScript(repo, p.store, t.projectId, t.id, suiteSlug, script, adapter.executable);
 
         // Everything from here is synchronous: the busy check, the spec change and the new job cannot be interleaved by another request.
@@ -152,7 +154,7 @@ export function registerHealingRoutes(ctx: RouteCtx): void {
             job = await ctx.startValidationJob(t.projectId, application.id, [t.id]);
         } catch (e) {
             // A run started while the new script was being saved: put the stored script back in line with the unchanged test.
-            await storeScript(repo, p.store, t.projectId, t.id, suiteSlug, renderWithAdapter(t.spec, framework, { baseUrl: origin }), adapter.executable);
+            await storeScript(repo, p.store, t.projectId, t.id, suiteSlug, renderWithAdapter(t.spec, framework, renderCtx), adapter.executable);
             throw e;
         }
         const note = draftRunNote(repo.db, [t.id]);

@@ -88,10 +88,30 @@ The list below is generated from the grammar table (`tests/dsl-unit.test.ts` fai
 - `Click the "Terms" link and wait for the popup`: Click an element that opens a popup window or a new tab. Later steps that end with in the popup work in it.
 - `Upload "photo.png" to the "Avatar" field`: Put a file of the project's test files into a file field (or the file chooser a button opens).
 - `Drag the "Card 1" listitem to the "Done" list`: Drag an element and drop it on another one.
+- `Drop "report.pdf" onto the "Drop files here" text`: Drop a file of the project's test files onto a drop zone (an area files are dragged onto).
+- `Accept the next dialog saying "Delete course?"`: Accept the next alert, confirm or prompt dialog; the next step must open it, and it must contain this text.
+- `Answer the next dialog with "Blue"`: Answer the next prompt dialog with a text (the next step must open it).
+- `Accept the next dialog`: Accept the next alert, confirm or prompt dialog (the next step must open it). Without this, dialogs are dismissed.
+- `Dismiss the next dialog`: Dismiss (cancel) the next dialog (the next step must open it).
+- `Download from the "Export" button a file named like "report"`: Click a link or button that downloads a file, and check the file is not empty and its name contains a text.
+- `Download from the "Export" button`: Click a link or button that downloads a file, and check the file is not empty.
 - `Wait for an email to "qa+{{unique}}@example.test" and type its code after "Your code is" into the "Code" field`: Wait for an email to an address of the test mailbox, then type the code that follows this text into a field (see `hard-sign-ins.md`).
 - `Wait for an email to "qa+{{unique}}@example.test" and type its code into the "Code" field`: Wait for an email to an address of the test mailbox, then type the code it contains (4 to 8 digits after a word such as code) into a field.
 - `Wait for an email to "qa+{{unique}}@example.test" and open its link containing "sign-in"`: Wait for an email to an address of the test mailbox, then open its link (only a link to the application's own site). Optionally the link whose address or words contain a text.
 - Frames and popups (see `frames-uploads-popups.md`): an element inside a frame is written with the frame after it, `the "Pay" button inside the frame "checkout"` (or `inside the frame titled "Payment"`, `inside the frame at "pay.example.com/form"`; inner frame first), and any page step can end with `in the popup`.
+- `Take over the clock from "2025-01-15T09:00:00Z"`: Take over the page's clock from a date and time: time then moves only when a step moves it.
+- `Take over the clock`: Take over the page's clock from now.
+- `Move the clock 30 minutes ahead`: Move the page's clock ahead by some minutes (timers due on the way fire), for timeouts, expiry and countdowns.
+- `Stop the clock at "2025-01-15T10:00:00Z"`: Stop the page's clock at a date and time.
+- `Let the clock run again`: Let a stopped clock run again.
+- `Set the condition "colorScheme" to "dark"`: Change a condition from here on: offline, online, colorScheme (light or dark), reducedMotion, forcedColors (high contrast), media (print), viewport (390x844), grantPermissions (geolocation,notifications), denyPermissions, geolocation (52.52,13.40).
+- `Set the condition "offline"`: Change a condition that takes no value: offline, online or denyPermissions.
+- `Remember the value of the "Quantity" field as "qty"`: Remember what a field holds under a name, to compare later or use as {{name}}.
+- `Remember the text of the test id "price" as "price"`: Remember an element's text under a name (such as a price), to compare later or use as {{name}}.
+- `Wait until the address contains "/cart"`: Wait until the address contains this text.
+- `Wait for a response from "/api/cart"`: Wait for a response from an address that contains this text (the step before causes it).
+- `Wait until the text "Loading" is gone`: Wait until an element is gone.
+- `Wait until the text "Saved" shows`: Wait until an element shows.
 - `Wait 500 ms`: Wait a fixed time, in milliseconds (at most 10000). Prefer an expectation: it waits only as long as needed.
 
 ### Check what the page shows
@@ -108,6 +128,26 @@ The list below is generated from the grammar table (`tests/dsl-unit.test.ts` fai
 - `Expect the "Item" listitem to appear 3 times`: This many elements match.
 - `Expect the address to contain "/dashboard"`: The address of the page contains this text.
 - `Expect the page title to contain "Dashboard"`: The title of the page contains this text.
+- `Expect the "Gift wrap" field to be ticked`: A box or switch is ticked.
+- `Expect the "Express" field not to be ticked`: A box or switch is not ticked.
+- `Expect the "Email" field to have the focus`: An element has the keyboard focus.
+- `Expect the "Email" field to be editable`: A field can be typed in.
+- `Expect the "Pay" button to be in view`: An element is in the visible part of the page.
+- `Expect the "Email" field to have the attribute "aria-invalid" set to "true"`: An element's attribute has this value.
+- `Expect the "Email" field to have the attribute "required"`: An element has this attribute.
+- `Expect the "Save" button to have the class "primary"`: An element has this class among its classes.
+- `Expect the "Save" button to have the style "color" set to "rgb(200, 0, 0)"`: An element's computed style property has this value.
+- `Expect the test id "close" to have the accessible name "Close"`: An element's accessible name is this.
+- `Expect the "Email" field to have the error message "Enter a valid email"`: A field's error message (aria-errormessage) contains this text.
+- `Expect the test id "total" to show exactly "Total: $15.50"`: An element's whole text is exactly this.
+- `Expect the page not to contain the text "undefined"`: The page does not contain this text anywhere.
+- `Expect the "Cart" list not to contain the text "Red cup"`: An element does not contain this text.
+- `Expect the address to match "/orders/*"`: The address matches a pattern: * is any characters within one part, ** anything.
+- `Expect the "Cart" list to have the structure "- listitem: Blue mug"`: A region (a list, a table, a summary) has this structure, written as an ARIA snapshot; parts that change are /patterns/.
+- `Expect the test id "line" to contain the remembered "price"`: An element contains the value remembered earlier under this name.
+- `Expect the test id "total" to be more than the remembered "price"`: An element's number is bigger than the remembered one.
+- `Expect the test id "discount" to be less than the remembered "price"`: An element's number is smaller than the remembered one.
+- `Expect the test id "cart-price" to equal the remembered "price"`: An element shows exactly the value remembered earlier under this name.
 - `Expect no accessibility problems of impact "moderate" or worse`: No accessibility problems (axe-core). The impact is minor, moderate, serious (default) or critical.
 - `Expect the test id "header" to match its approved screenshot within 50 pixels`: An element looks like its approved screenshot. The number is how many pixels may differ.
 - `Expect the page to match its approved screenshot`: The page looks like its approved screenshot. The first run saves it.
@@ -171,3 +211,4 @@ The list below is generated from the grammar table (`tests/dsl-unit.test.ts` fai
 - `Precondition: The account exists`: Something that must be true before the test. Repeat the line for more.
 - `Result: The dashboard is shown`: What a person should see when it works. Repeat the line for more.
 - `Data: name = "Ada"`: A value steps can use as {{name}}. Repeat the line for more.
+- `Date: 2025-01-15T12:00:00Z`: Web tests: the page's date and time stay at this moment for the whole test, so dates on the page read the same every day.

@@ -18,6 +18,10 @@
  * are the project's only Project Admin and its policy allows it. Approvals, rejections, requests for changes and policy changes go
  * into the activity log.
  */
+import { withProjectNotes } from "../render-context.js";
+import { blocksFor } from "../block-store.js";
+import { dataSetsFor } from "./environments.js";
+import { objectsFor } from "./locators.js";
 import { z } from "zod";
 import { renderWithAdapter } from "../../engine/frameworks/index.js";
 import { isAppUri } from "../../engine/desktop/target.js";
@@ -26,11 +30,8 @@ import type { TestSpec } from "../../engine/spec/schema.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
 import { currentActor, type Actor } from "../auth/actor.js";
 import { visibleProjectsOf } from "../auth/project-scope.js";
-import { blocksFor } from "../block-store.js";
 import { HttpError } from "../http-error.js";
 import { ReviewStore, starterKey, type ReviewPolicy, type TestVersion } from "../review-store.js";
-import { dataSetsFor } from "./environments.js";
-import { objectsFor } from "./locators.js";
 import { parsePlain } from "./project-settings.js";
 import type { RouteCtx } from "./types.js";
 
@@ -121,7 +122,7 @@ export function registerReviewRoutes(ctx: RouteCtx): void {
     };
 
     /** A version's code: a person's code as stored, the script a run made from it, or the steps rendered now (not stored). */
-    const codeOf = (v: TestVersion): { code: string | null; note: string | null } => {
+    const codeOf = async (v: TestVersion): Promise<{ code: string | null; note: string | null }> => {
         if (v.code !== null) return { code: v.code, note: null };
         if (v.scriptId) {
             const s = p.db.get<{ content: string }>("SELECT content FROM generated_scripts WHERE id = ?", v.scriptId);
@@ -133,7 +134,7 @@ export function registerReviewRoutes(ctx: RouteCtx): void {
         try {
             const objects = objectsFor(repo, v.projectId);
             const blocks = blocksFor(p.db, v.projectId);
-            const script = renderWithAdapter(v.spec as TestSpec, v.framework as never, { baseUrl: isAppUri(url) ? url : new URL(url).origin, dataSets: dataSetsFor(repo, v.projectId), ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) });
+            const script = renderWithAdapter(v.spec as TestSpec, v.framework as never, await withProjectNotes(p.db, v.projectId, { baseUrl: isAppUri(url) ? url : new URL(url).origin, dataSets: dataSetsFor(repo, v.projectId), ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) }));
             return { code: script.content, note: "Made from these steps now, to read. The run makes it again when this version runs." };
         } catch (e) {
             return { code: null, note: `The code cannot be made from these steps: ${e instanceof Error ? e.message : String(e)}` };
@@ -220,11 +221,11 @@ export function registerReviewRoutes(ctx: RouteCtx): void {
             ...summaryOf(v),
             submittedAt: v.submittedAt,
             ...textOf(v),
-            ...(() => {
-                const c = codeOf(v);
+            ...(await (async () => {
+                const c = await codeOf(v);
                 return { code: c.code, codeNote: c.note };
-            })(),
-            approved: approved && approved.id !== v.id ? { version: approved.version, text: textOf(approved).text, code: codeOf(approved).code } : null,
+            })()),
+            approved: approved && approved.id !== v.id ? { version: approved.version, text: textOf(approved).text, code: (await codeOf(approved)).code } : null,
             comments: store.comments(v.id),
             actions: {
                 submit: isOpen && v.state === "draft" && canWrite,

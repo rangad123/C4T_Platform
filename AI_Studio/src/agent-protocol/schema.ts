@@ -863,6 +863,8 @@ export const WireRun = z.object({
     responses: z.array(z.object({ method: z.string(), path: z.string(), status: z.number(), obs: z.unknown().optional() })).max(500),
     metrics: z.array(z.object({ metric: z.string(), value: z.number(), unit: z.string(), budget: z.number().optional() })).max(100).optional(),
     variant: z.string().optional(),
+    /** A failed run: the accessibility snapshot at the failing check (masked by the runner). Runners before round 54 do not send it. */
+    errorContext: z.string().max(6000).optional(),
     /** Cleanup ledger lines (ids and paths only), already executed by the agent when env.cleanup is "agent". */
     created: z.array(z.record(z.string(), z.unknown())).max(500).optional(),
 });

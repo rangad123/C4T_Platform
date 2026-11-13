@@ -34,7 +34,7 @@ const ACTIONS = options.map((o) => o.shape.action!.value!);
 describe("the field table follows the schema", () => {
     it("has an entry for every action the schema has, and every one but the desktop pair can be edited", () => {
         // 14, plus upload and drag (frames-uploads-popups) and email (hard sign-ins)
-        expect(ACTIONS.length).toBe(17);
+        expect(ACTIONS.length).toBe(22);
         for (const a of ACTIONS) expect(FIELDS[a], a).toBeDefined();
         expect(EDITABLE_ACTIONS.sort()).toEqual(ACTIONS.filter((a) => a !== "launchApp" && a !== "closeApp").sort());
     });

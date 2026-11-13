@@ -74,9 +74,14 @@ export const ACTION_LABEL: Record<string, string> = {
     check: "Tick or untick",
     press: "Press a key",
     hover: "Hover",
+    remember: "Remember a value",
     upload: "Upload a test file",
     drag: "Drag and drop",
+    dialog: "Answer the next dialog",
+    download: "Download a file",
     email: "Use an emailed code or link",
+    clock: "Control the clock",
+    condition: "Change a condition",
     wait: "Wait",
     assert: "Check the page",
     request: "Send a request",
@@ -95,6 +100,10 @@ export interface CheckInfo {
     expectedHelp?: string;
     /** Shown under "More checks". */
     more?: boolean;
+    /** The check also needs a name (an attribute, a CSS property, a remembered value): its label. */
+    nameLabel?: string;
+    /** remembered: how the element compares with the remembered value. */
+    compare?: boolean;
 }
 
 /** Web checks (assert), in the words of the add-a-step palette. */
@@ -118,6 +127,21 @@ export const ASSERT_INFO: Record<string, CheckInfo> = {
     pageSpeed: { label: "The page loads fast enough", locator: "none", expected: "optional", expectedLabel: "Your own limits (optional)", expectedHelp: "For example: lcp:2500 fcp:1800 ttfb:800", more: true },
     inputHandling: { label: "Forms handle unusual input", locator: "none", expected: "optional", expectedLabel: "Which forms (optional)", expectedHelp: "safe (the default) or all.", more: true },
     accessDenied: { label: "A restricted page stays closed", locator: "none", expected: "required", expectedLabel: "Settings (JSON)", expectedHelp: 'For example: {"as":"anonymous","path":"/admin"}', more: true },
+    checked: { label: "A box is ticked", locator: "required", expected: "none", more: true },
+    unchecked: { label: "A box is not ticked", locator: "required", expected: "none", more: true },
+    focused: { label: "An element has the focus", locator: "required", expected: "none", more: true },
+    editable: { label: "A field can be typed in", locator: "required", expected: "none", more: true },
+    inViewport: { label: "An element is in view", locator: "required", expected: "none", more: true },
+    attribute: { label: "An element has an attribute", locator: "required", expected: "optional", expectedLabel: "Value it should have (optional)", nameLabel: "Attribute", more: true },
+    class: { label: "An element has a class", locator: "required", expected: "required", expectedLabel: "Class name", more: true },
+    css: { label: "An element has a style", locator: "required", expected: "required", expectedLabel: "Value it should have", expectedHelp: "As the browser computes it, for example rgb(200, 0, 0).", nameLabel: "CSS property", more: true },
+    accessibleName: { label: "An element has an accessible name", locator: "required", expected: "required", expectedLabel: "Name", more: true },
+    accessibleErrorMessage: { label: "A field shows its error message", locator: "required", expected: "required", expectedLabel: "Text the message should contain", more: true },
+    exactText: { label: "An element shows exactly", locator: "required", expected: "required", expectedLabel: "Its whole text" },
+    notText: { label: "Text is not shown", locator: "optional", expected: "required", expectedLabel: "Text that should not be there", more: true },
+    urlPattern: { label: "The address matches a pattern", locator: "none", expected: "required", expectedLabel: "Pattern", expectedHelp: "* stands for any characters within one part, ** for anything: /orders/*", more: true },
+    ariaSnapshot: { label: "A region has this structure", locator: "required", expected: "required", expectedLabel: "Structure (ARIA snapshot)", expectedHelp: "As the AI captured it. Parts that change, like numbers, are written /between slashes/.", more: true },
+    remembered: { label: "An element matches a remembered value", locator: "required", expected: "none", nameLabel: "Remembered as", compare: true, more: true },
     looksRight: { label: "An AI reviewer says it looks right", locator: "optional", expected: "optional", expectedLabel: "What to look for (optional)", more: true },
 };
 
@@ -155,7 +179,7 @@ export const RESPONSE_INFO: Record<string, RespInfo> = {
 
 // ── the field table ─────────────────────────────────────────────────────────
 
-export type FieldKind = "emailUse" | "locator" | "optLocator" | "text" | "area" | "key" | "ms" | "tick" | "method" | "auth" | "map" | "json" | "assertCheck" | "responseCheck" | "flag" | "testFile";
+export type FieldKind = "emailUse" | "locator" | "optLocator" | "text" | "area" | "key" | "ms" | "tick" | "method" | "auth" | "map" | "json" | "assertCheck" | "responseCheck" | "flag" | "testFile" | "choice" | "number";
 
 /** Web steps can work in the popup window an earlier click opened: a tick box at the end of their form. */
 const IN_POPUP: FieldDef = { name: "inPopup", kind: "flag", label: "Do this in the popup window", help: "The window or tab an earlier click opened (that click has “Opens a popup” ticked)." };
@@ -168,6 +192,8 @@ export interface FieldDef {
     required?: boolean;
     /** A text that may use {{placeholders}}. */
     placeholders?: boolean;
+    /** kind "choice": the values offered, with their plain names. */
+    options?: Array<[string, string]>;
 }
 
 /** The fields each action shows, in order. `assert` and `assertResponse` add or drop fields by their check (see `fieldsFor`). */
@@ -202,11 +228,23 @@ export const FIELDS: Record<string, FieldDef[]> = {
     upload: [
         { name: "locator", kind: "locator", label: "File field", help: "The file input, or the button that opens the file chooser.", required: true },
         { name: "file", kind: "testFile", label: "Test file", help: "One of the project's test files (Settings, Test files).", required: true },
+        { name: "drop", kind: "flag", label: "Drop it on a drop zone", help: "Tick when the element is an area files are dragged onto, not a file field." },
         IN_POPUP,
     ],
     drag: [
         { name: "locator", kind: "locator", label: "Element to drag", required: true },
         { name: "target", kind: "locator", label: "Where to drop it", required: true },
+        IN_POPUP,
+    ],
+    dialog: [
+        { name: "response", kind: "choice", label: "Answer", required: true, options: [["accept", "Accept (OK)"], ["dismiss", "Dismiss (Cancel)"]] },
+        { name: "message", kind: "text", label: "The dialog says (optional)", help: "The step after this one must open a dialog containing this text.", placeholders: true },
+        { name: "promptText", kind: "text", label: "Text to type into a prompt (optional)", placeholders: true },
+        IN_POPUP,
+    ],
+    download: [
+        { name: "locator", kind: "locator", label: "Link or button that downloads", required: true },
+        { name: "filename", kind: "text", label: "File name contains (optional)", help: "The check also makes sure the file is not empty.", placeholders: true },
         IN_POPUP,
     ],
     email: [
@@ -215,7 +253,28 @@ export const FIELDS: Record<string, FieldDef[]> = {
         { name: "locator", kind: "optLocator", label: "Field to type the code into (for a code)" },
         { name: "after", kind: "text", label: "Only after this text (optional)", help: "For a code: the code that follows this text. For a link: the link whose address or words contain it." },
     ],
-    wait: [{ name: "ms", kind: "ms", label: "Wait for (milliseconds)", help: "Between 0 and 10000. A check that waits for something is usually better than a fixed wait.", required: true }],
+    clock: [
+        { name: "op", kind: "choice", label: "What to do with the clock", required: true, options: [["install", "Take it over (time moves only when a step moves it)"], ["fastForward", "Move it ahead"], ["pauseAt", "Stop it at a moment"], ["resume", "Let it run again"]] },
+        { name: "time", kind: "text", label: "Date and time (to take over from, or stop at)", help: "For example 2025-01-15 or 2025-01-15T09:30:00Z. Empty when taking over: from now.", placeholder: "2025-01-15T09:30:00Z" },
+        { name: "minutes", kind: "number", label: "Minutes ahead (to move it ahead)", help: "Timers due on the way fire, so a session timeout or a countdown shows its end." },
+    ],
+    condition: [
+        { name: "set", kind: "choice", label: "What changes", required: true, options: [["offline", "Go offline"], ["online", "Go back online"], ["colorScheme", "Light or dark mode"], ["reducedMotion", "Reduced motion"], ["forcedColors", "High contrast (forced colours)"], ["media", "Print or screen"], ["viewport", "Window size"], ["grantPermissions", "Allow permissions"], ["denyPermissions", "Refuse every permission"], ["geolocation", "Place the browser somewhere"]] },
+        { name: "value", kind: "text", label: "How", help: "dark or light; reduce; active or none; print; a size like 390x844; geolocation,notifications; a location like 52.52,13.40. Empty for offline, online and refusing permissions." },
+    ],
+    remember: [
+        { name: "locator", kind: "locator", label: "Element", required: true },
+        { name: "name", kind: "text", label: "Remember as", help: "A name of letters, numbers and _ (such as price). Later steps use it as {{price}} or compare with it.", required: true },
+        { name: "from", kind: "choice", label: "What to remember", options: [["text", "Its text"], ["value", "A field's value"]] },
+        IN_POPUP,
+    ],
+    wait: [
+        { name: "until", kind: "choice", label: "Wait until", options: [["url", "The address contains"], ["response", "A response arrives from"], ["hidden", "An element is gone"], ["visible", "An element shows"]] },
+        { name: "value", kind: "text", label: "Address text (for the address or a response)", placeholders: true },
+        { name: "locator", kind: "optLocator", label: "Element (for gone or shows)" },
+        { name: "ms", kind: "ms", label: "Or wait a fixed time (milliseconds)", help: "Between 0 and 10000. Waiting until something happens is better than a fixed wait." },
+        IN_POPUP,
+    ],
     assert: [{ name: "check", kind: "assertCheck", label: "What to check", required: true }],
     request: [
         { name: "method", kind: "method", label: "Method", required: true },
@@ -251,7 +310,9 @@ export function fieldsFor(step: Step): FieldDef[] {
         const info = ASSERT_INFO[String(step.check)];
         const out = [...base];
         if (info && info.locator !== "none") out.push({ name: "locator", kind: info.locator === "required" ? "locator" : "optLocator", label: info.locator === "required" ? "Element" : "Element (optional)", required: info.locator === "required" });
-        if (info && info.expected !== "none") out.push({ name: "expected", kind: "text", label: info.expectedLabel ?? "Expected", help: info.expectedHelp, required: info.expected === "required", placeholders: true });
+        if (info && info.expected !== "none") out.push({ name: "expected", kind: step.check === "ariaSnapshot" ? "area" : "text", label: info.expectedLabel ?? "Expected", help: info.expectedHelp, required: info.expected === "required", placeholders: true });
+        if (info?.nameLabel) out.push({ name: "name", kind: "text", label: info.nameLabel, required: true });
+        if (info?.compare) out.push({ name: "compare", kind: "choice", label: "How it compares", options: [["equals", "Is the same"], ["contains", "Contains it"], ["greater", "Is a bigger number"], ["less", "Is a smaller number"]] });
         // Checks of what a page shows also work in a popup; the ones that watch the whole page load only on the page the test started on.
         if (!POPUP_BLOCKED_CHECKS.has(String(step.check))) out.push(IN_POPUP);
         return out;
@@ -287,7 +348,7 @@ export function setField(step: Step, name: string, value: unknown): Step {
 export function setCheck(step: Step, check: string): Step {
     const next: Step = { ...step, check };
     const allowed = new Set(fieldsFor(next).map((f) => f.name));
-    for (const k of ["locator", "expected", "path", "schema", "inPopup"]) if (!allowed.has(k)) delete next[k];
+    for (const k of ["locator", "expected", "path", "schema", "inPopup", "name", "compare"]) if (!allowed.has(k)) delete next[k];
     return next;
 }
 
@@ -334,7 +395,26 @@ export const PALETTE: Record<Kind, PaletteGroup[]> = {
             items: ["visible", "hidden", "text", "value", "enabled", "disabled", "count", "url", "title"].map(assertItem),
             more: Object.entries(ASSERT_INFO).filter(([, i]) => i.more).map(([c]) => assertItem(c)),
         },
-        { id: "wait", title: "Wait", items: [{ id: "wait", label: "Wait a moment", make: () => ({ action: "wait", ms: 500 }) }] },
+        { id: "remember", title: "Remember", items: [{ id: "remember", label: "Remember a value", make: () => ({ action: "remember", locator: loc("testId", { value: "" }), name: "value" }) }] },
+        {
+            id: "wait",
+            title: "Wait",
+            items: [
+                { id: "wait-visible", label: "Wait until something shows", make: () => ({ action: "wait", ms: 0, until: "visible", locator: loc("text", { value: "" }) }) },
+                { id: "wait-url", label: "Wait for an address", make: () => ({ action: "wait", ms: 0, until: "url", value: "" }) },
+                { id: "wait", label: "Wait a moment", make: () => ({ action: "wait", ms: 500 }) },
+            ],
+        },
+        {
+            id: "conditions",
+            title: "Time and conditions",
+            items: [
+                { id: "clock-install", label: "Take over the clock", make: () => ({ action: "clock", op: "install" }) },
+                { id: "clock-forward", label: "Move the clock ahead", make: () => ({ action: "clock", op: "fastForward", minutes: 30 }) },
+                { id: "condition-offline", label: "Go offline", make: () => ({ action: "condition", set: "offline" }) },
+                { id: "condition", label: "Change a condition", make: () => ({ action: "condition", set: "colorScheme", value: "dark" }) },
+            ],
+        },
     ],
     api: [
         { id: "request", title: "Request", items: [{ id: "request", label: "Send a request", make: () => ({ action: "request", method: "GET", path: "/", auth: "default" }) }] },

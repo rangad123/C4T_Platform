@@ -41,6 +41,8 @@ function failureText(spec: TestSpec, run: ScriptRun): string {
         `Status: ${run.status}`,
         failed ? `Failed step: ${failed.title}` : "No individual step failed (timeout, setup or syntax problem).",
         `Error: ${(failed?.error ?? run.error ?? "unknown").slice(0, 1200)}`,
+        // What the page showed at the failing check (Playwright's error context): the elements really there, with their names.
+        ...(run.errorContext ? [`What the page showed when it failed (accessibility snapshot):\n${run.errorContext.slice(0, 4000)}`] : []),
     ].join("\n");
 }
 

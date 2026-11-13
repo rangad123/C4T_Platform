@@ -22,6 +22,8 @@ import { runScripts } from "../src/engine/validation/runner.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { personalRunner, testPerson } from "./helpers/personal-runner.js";
 import { CustomScriptStore } from "../src/platform/custom-script-store.js";
+import { SYSTEM_ACTOR } from "../src/platform/auth/actor.js";
+import { ReviewStore } from "../src/platform/review-store.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -631,6 +633,12 @@ describe("the run policy is the boundary: hand-written tests do not run where th
         const store = new CustomScriptStore(e.platform.db);
         store.mark(id, pid, { origin: "written" });
         e.platform.repo.addScript(id, { framework: "playwright", filename: "SMUGGLED.spec.ts", content: sneaky, hash: "x", storagePath: `${pid}/x/SMUGGLED.spec.ts`, executable: true });
+        // The smuggled code must be the approved version: otherwise review pinning runs the approved steps instead and the
+        // executor's own refusal is never reached.
+        const reviews = new ReviewStore(e.platform.db);
+        const v = reviews.track(id, "takeover", SYSTEM_ACTOR)!;
+        if (v.state !== "approved") reviews.approve(v, SYSTEM_ACTOR, null);
+        expect(reviews.approved(id)?.code).toBe(sneaky);
         fs.rmSync(marker, { force: true });
 
         // 1. the gate refuses the job

@@ -108,15 +108,15 @@ describe("testing the tests", () => {
             onScored: async (id, s) => void scored.set(id, s),
             onStrengthened: async (id, s, run) => (expect(run.status).toBe("passed"), void strengthened.set(id, s)),
         });
-        expect(scored.get("WEB-101")).toMatchObject({ caught: 4, total: 4, missed: [] });
+        expect(scored.get("WEB-101")).toMatchObject({ caught: 5, total: 5, missed: [] });
         expect(scored.get("WEB-101")!.strengthened).toBeUndefined();
-        // The weak test was sent once with the note naming the faults it missed, and the stronger version catches all four.
+        // The weak test was sent once with the note naming the faults it missed, and the stronger version catches all five (the offline fault too).
         expect(prompts.some((p) => p.includes("add an assertion that would fail when the page's data comes back empty"))).toBe(true);
         expect(strengthened.get("WEB-102")!.steps.at(-1)).toMatchObject({ action: "assert", check: "visible", locator: { by: "text", value: "Apple" } });
-        expect(scored.get("WEB-102")).toMatchObject({ caught: 4, total: 4, strengthened: true });
-        expect(summary).toMatchObject({ checked: 2, caught: 8, total: 8, strengthened: 1 });
+        expect(scored.get("WEB-102")).toMatchObject({ caught: 5, total: 5, strengthened: true });
+        expect(summary).toMatchObject({ checked: 2, caught: 10, total: 10, strengthened: 1 });
         const weakBefore = events.find((e) => e.kind === "strength_scored" && String(e.message).startsWith("WEB-102"));
-        expect(weakBefore?.message).toMatch(/catches 4 of 4.*stronger check/);
+        expect(weakBefore?.message).toMatch(/catches 5 of 5.*stronger check/);
     }, 240_000);
 
     it("scores the weak test as it is without a browser to strengthen it, and keeps the level's bound", async () => {
@@ -124,8 +124,8 @@ describe("testing the tests", () => {
         const scored = new Map<string, Strength>();
         await checkStrength(ctx, deps(ctx, Infinity, false), [{ spec: weak, validationStatus: "VALIDATED" }], { onScored: async (id, s) => void scored.set(id, s) });
         // Only hiding the list breaks a visibility check: an error, an empty list and changed content all pass.
-        expect(scored.get("WEB-102")).toMatchObject({ caught: 1, total: 4 });
-        expect(scored.get("WEB-102")!.missed).toEqual(["the page's data comes back as a server error", "the page's data comes back empty", "the checked element shows different content"]);
+        expect(scored.get("WEB-102")).toMatchObject({ caught: 1, total: 5 });
+        expect(scored.get("WEB-102")!.missed).toEqual(["the page's data comes back as a server error", "the page's data comes back empty", "the checked element shows different content", "the browser goes offline"]);
 
         const bounded = new Map<string, Strength>();
         const s = await checkStrength(ctx, deps(ctx, 1, false), [strong, weak].map((x) => ({ spec: x, validationStatus: "VALIDATED" })), { onScored: async (id, v) => void bounded.set(id, v) });

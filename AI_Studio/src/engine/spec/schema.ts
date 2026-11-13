@@ -15,6 +15,9 @@ export const LOCATOR_STRATEGIES = [
     "placeholder",
     "testId",
     "css",
+    /** Web only: an image (or area/input) by its alt text, and any element by its title attribute. */
+    "altText",
+    "title",
 ] as const;
 
 /**
@@ -47,6 +50,23 @@ export type LocatorFallback = z.infer<typeof LocatorFallbackSchema>;
 export const MAX_LOCATOR_FALLBACKS = 3;
 const FallbacksSchema = z.array(LocatorFallbackSchema).min(1).max(MAX_LOCATOR_FALLBACKS);
 
+/** The plain part of a locator: one strategy, no filter and no container (what `filter` and `within` hold, so a locator nests one level only). */
+const PlainLocatorSchema = z.object({
+    by: z.enum(LOCATOR_STRATEGIES),
+    role: z.string().optional(),
+    value: z.string().optional(),
+    exact: z.boolean().optional(),
+    nth: z.number().int().min(0).optional(),
+});
+export type PlainLocator = z.infer<typeof PlainLocatorSchema>;
+/**
+ * Web only: keep the matches that contain (`hasText`) or do not contain (`hasNotText`) a text, or that hold (`has`) or do not hold
+ * (`hasNot`) an element: the row of the product "Blue mug", not "row number 3". Playwright `locator.filter()`.
+ */
+export const LocatorFilterSchema = z
+    .object({ hasText: z.string().min(1).max(300).optional(), hasNotText: z.string().min(1).max(300).optional(), has: PlainLocatorSchema.optional(), hasNot: PlainLocatorSchema.optional() })
+    .refine((f) => f.hasText !== undefined || f.hasNotText !== undefined || f.has !== undefined || f.hasNot !== undefined, "A filter keeps matches by hasText, hasNotText, has or hasNot");
+
 /** Semantic element locator. Mirrors the Playwright / Taqwright `getBy*` vocabulary. */
 export const LocatorSchema = z.object({
     by: z.enum(LOCATOR_STRATEGIES),
@@ -59,6 +79,10 @@ export const LocatorSchema = z.object({
     nth: z.number().int().min(0).optional(),
     /** Web only: the frames the element is inside, outermost first. */
     frame: FrameChainSchema.optional(),
+    /** Web only: keep only the matches that contain a text or an element (applied before `nth`). */
+    filter: LocatorFilterSchema.optional(),
+    /** Web only: the element is looked for inside this container (a list, a table row, a dialog), not on the whole page. */
+    within: PlainLocatorSchema.optional(),
     /** Phone tests only: other ways to find the same element, tried in order (see LocatorFallbackSchema). */
     fallbacks: FallbacksSchema.optional(),
 });
@@ -88,6 +112,8 @@ const StepLocatorSchema = z
         exact: z.boolean().optional(),
         nth: z.number().int().min(0).optional(),
         frame: FrameChainSchema.optional(),
+        filter: LocatorFilterSchema.optional(),
+        within: PlainLocatorSchema.optional(),
         fallbacks: FallbacksSchema.optional(),
     })
     .superRefine((l, ctx) => {
@@ -95,7 +121,7 @@ const StepLocatorSchema = z
             if (l.by === undefined) ctx.addIssue({ code: "invalid_type", expected: "string", input: undefined, path: ["by"], message: "Required" });
             return;
         }
-        if (l.by !== undefined || l.role !== undefined || l.value !== undefined || l.exact !== undefined || l.nth !== undefined || l.frame !== undefined || l.fallbacks !== undefined) {
+        if (l.by !== undefined || l.role !== undefined || l.value !== undefined || l.exact !== undefined || l.nth !== undefined || l.frame !== undefined || l.filter !== undefined || l.within !== undefined || l.fallbacks !== undefined) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A locator is either a shared element ({ \"ref\": \"name\" }) or a concrete locator, not both" });
         }
     }) as unknown as z.ZodType<Locator, unknown>;
@@ -116,6 +142,34 @@ export const ASSERT_CHECKS = [
     "count",
     "url",
     "title",
+    // ── web element checks (see ../web/checks.ts); `expected` is the value where one is needed ──
+    "checked",
+    "unchecked",
+    "focused",
+    "editable",
+    "inViewport",
+    /** The attribute `name` has the value `expected` (absent `expected`: the attribute is present). */
+    "attribute",
+    /** The element's classes include `expected` (one class name). */
+    "class",
+    /** The computed CSS property `name` is `expected` (e.g. name "color", expected "rgb(200, 0, 0)"). */
+    "css",
+    "accessibleName",
+    /** The field's accessible error message (aria-errormessage) contains `expected`: the message a validation test expects. */
+    "accessibleErrorMessage",
+    /** The element's whole text is `expected` (case and spacing as shown), not just a part of it. */
+    "exactText",
+    /** The element (or the page) does NOT contain the text `expected`. */
+    "notText",
+    /** The current address matches the pattern `expected`: `*` stands for any characters inside one part, `**` for anything. */
+    "urlPattern",
+    /**
+     * The structure of `locator` (a list, a table, a summary) matches the ARIA snapshot template in `expected` (YAML, as
+     * `locator.ariaSnapshot()` writes it). Numbers, dates and ids in it are written as /regex/ so a fresh run still matches (see ../web/checks.ts).
+     */
+    "ariaSnapshot",
+    /** The text (or field value) of `locator` compared with the value an earlier `remember` step stored under `name`, by `compare`. */
+    "remembered",
     /**
      * Accessibility audit (axe-core) of the page, or of `locator` if given. `expected` is the minimum
      * impact that fails the check: "minor" | "moderate" | "serious" (default) | "critical".
@@ -161,6 +215,12 @@ export const ASSERT_CHECKS = [
      */
     "looksRight",
 ] as const;
+
+/** What a wait step can wait for (web). */
+export const WAIT_UNTIL = ["url", "response", "hidden", "visible"] as const;
+/** A remembered value's name: usable as {{name}} and never one of the built-in names (those contain a dot or are "unique"). */
+export const REMEMBER_NAME = /^(?!unique$)[A-Za-z][A-Za-z0-9_]{0,39}$/;
+export const REMEMBER_COMPARE = ["equals", "contains", "greater", "less"] as const;
 
 export const RESPONSE_CHECKS = [
     "status",
@@ -212,6 +272,17 @@ export const RESPONSE_CHECKS = [
     "statusDenied",
 ] as const;
 
+/** What a `clock` step does to the page's time (Playwright's page.clock). */
+export const CLOCK_OPS = ["install", "fastForward", "pauseAt", "resume"] as const;
+/** At most a year and a bit ahead in one step. */
+export const MAX_CLOCK_MINUTES = 60 * 24 * 400;
+/**
+ * What a `condition` step changes, and its `value`: offline / online (no value); colorScheme light|dark; reducedMotion reduce|no-preference;
+ * forcedColors active|none (high contrast); media print|screen; viewport "390x844"; grantPermissions "geolocation,notifications";
+ * denyPermissions (every granted permission is taken back, so the next request is refused); geolocation "52.52,13.40" (also grants it).
+ */
+export const CONDITION_SETS = ["offline", "online", "colorScheme", "reducedMotion", "forcedColors", "media", "viewport", "grantPermissions", "denyPermissions", "geolocation"] as const;
+
 type AnyLocatorSchema = z.ZodType<Locator, unknown>;
 /** The step list is built once for the concrete locator (what models are asked for) and once for the stored form that also allows `{ ref }`. */
 function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
@@ -254,6 +325,15 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         ...base,
     }),
     z.object({ action: z.literal("hover"), locator: LocatorSchema, ...popupBase, ...base }),
+    /** Web only: keep the text (or a field's value) of `locator` under `name`; later steps use it as {{name}} or compare with it (check "remembered"). */
+    z.object({
+        action: z.literal("remember"),
+        locator: LocatorSchema,
+        name: z.string().regex(REMEMBER_NAME, "A remembered value is named with letters, numbers and underscores (at most 40), starting with a letter"),
+        from: z.enum(["text", "value"]).default("text"),
+        ...popupBase,
+        ...base,
+    }),
     // ── web: files and drag and drop (see docs/features/frames-uploads-popups.md) ──
     z.object({
         action: z.literal("upload"),
@@ -261,6 +341,28 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         locator: LocatorSchema,
         /** A file of the project's test files library, by name. */
         file: z.string().regex(TEST_FILE_NAME, "A test file name uses letters, numbers, dots, dashes and underscores (at most 100)"),
+        /** The file is dropped onto the element (a drop zone) instead of chosen in a file field. */
+        drop: z.boolean().optional(),
+        ...popupBase,
+        ...base,
+    }),
+    /**
+     * The next alert, confirm or prompt is answered this way (accept or dismiss, with `promptText` typed into a prompt). Armed before
+     * the step that opens it; that step then fails when no dialog appears or its message does not contain `message`.
+     */
+    z.object({
+        action: z.literal("dialog"),
+        response: z.enum(["accept", "dismiss"]),
+        promptText: z.string().max(500).optional(),
+        message: z.string().max(300).optional(),
+        ...popupBase,
+        ...base,
+    }),
+    /** Click `locator`, wait for the download it starts, and check the file is not empty and its name contains `filename`. */
+    z.object({
+        action: z.literal("download"),
+        locator: LocatorSchema,
+        filename: z.string().max(200).optional(),
         ...popupBase,
         ...base,
     }),
@@ -278,7 +380,16 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
     z.object({ action: z.literal("closeApp"), ...base }),
     z.object({
         action: z.literal("wait"),
-        ms: z.number().int().min(0).max(10_000),
+        /** A fixed pause. Only for what nothing can be waited for; `until` is the better wait. */
+        ms: z.number().int().min(0).max(10_000).default(0),
+        /**
+         * Web only: wait for something instead of a fixed time: the address to match `value` (url), a response whose address contains
+         * `value` (response; it is listened for from the step before), or `locator` to be hidden or visible.
+         */
+        until: z.enum(WAIT_UNTIL).optional(),
+        value: z.string().max(500).optional(),
+        locator: LocatorSchema.optional(),
+        ...popupBase,
         ...base,
     }),
     z.object({
@@ -287,6 +398,10 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         locator: LocatorSchema.optional(),
         /** Expected text / value / url fragment / count. */
         expected: z.union([z.string(), z.number()]).optional(),
+        /** attribute / css: the attribute or CSS property name; remembered: the name of the remembered value. */
+        name: z.string().min(1).max(100).optional(),
+        /** remembered only: how the element's text compares with the remembered value (greater/less compare the first number in each). */
+        compare: z.enum(REMEMBER_COMPARE).optional(),
         ...popupBase,
         ...base,
     }),
@@ -341,6 +456,24 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         after: z.string().max(200).optional(),
         ...base,
     }),
+    // ── web: time and conditions (see ../web/conditions.ts) ──
+    z.object({
+        action: z.literal("clock"),
+        /** install: a fake clock from `time` (or now); fastForward: jump `minutes` ahead (timers due on the way fire once); pauseAt: stop time at `time`; resume: let it run again. */
+        op: z.enum(CLOCK_OPS),
+        /** A date or date and time, e.g. "2025-01-15" or "2025-01-15T09:30:00Z" (install, pauseAt). */
+        time: z.string().max(40).optional(),
+        /** fastForward only. */
+        minutes: z.number().min(0).max(MAX_CLOCK_MINUTES).optional(),
+        ...base,
+    }),
+    z.object({
+        action: z.literal("condition"),
+        /** What changes from this step on (see CONDITION_SETS); `value` says how. */
+        set: z.enum(CONDITION_SETS),
+        value: z.string().max(200).optional(),
+        ...base,
+    }),
 ]);
 }
 export const StepSchema = buildStepSchema(LocatorSchema);
@@ -380,6 +513,11 @@ export const TestSpecSchema = z.object({
     desktop: DesktopTargetSchema.optional(),
     /** Mobile tests only: "ios" sends the test to a simulator on a Mac (framework taqwright-ios). Absent or "android": the Android emulator, exactly as before. */
     platform: z.enum(["android", "ios"]).optional(),
+    /**
+     * Web tests only: the page's date and time stay at this moment for the whole test (Date.now and new Date(); timers keep running), so
+     * dates and "x minutes ago" on the page read the same every day. Visual and AI-judgement checks get one by default. A date or date and time.
+     */
+    pinnedTime: z.string().max(40).optional(),
     /** Suite / feature area, e.g. "Authentication". */
     category: z.string().default("General"),
     type: z.enum(TEST_TYPES).default("functional"),
@@ -466,20 +604,58 @@ export function describeStep(step: Step): string {
     return inPopup ? `${plain} (in the popup)` : plain;
 }
 
+/** One line for a condition step (the schema's own words; the UI has its own in web/src/lib/labels.ts). */
+export function describeCondition(set: (typeof CONDITION_SETS)[number], value?: string): string {
+    switch (set) {
+        case "offline":
+            return "Go offline (the browser loses its network)";
+        case "online":
+            return "Go back online";
+        case "colorScheme":
+            return `Switch the page to ${value ?? "dark"} mode`;
+        case "reducedMotion":
+            return value === "no-preference" ? "Allow motion again" : "Ask for reduced motion";
+        case "forcedColors":
+            return value === "none" ? "Turn high contrast off" : "Turn high contrast (forced colours) on";
+        case "media":
+            return `Show the page as for ${value === "print" ? "printing" : "the screen"}`;
+        case "viewport":
+            return `Resize the window to ${value ?? "?"}`;
+        case "grantPermissions":
+            return `Allow ${value ?? "?"}`;
+        case "denyPermissions":
+            return "Refuse every permission (location, notifications...)";
+        case "geolocation":
+            return `Allow location and place the browser at ${value ?? "?"}`;
+    }
+}
+
 const FRAME_WORDS: Record<FrameRef["by"], string> = { name: "frame", title: "frame titled", url: "frame at" };
 /** `inside frame "checkout"` for an element in a frame (innermost first, the way it reads). */
 export const frameWords = (frame?: FrameRef[]): string => (frame?.length ? ` ${[...frame].reverse().map((f) => `inside ${FRAME_WORDS[f.by]} "${f.value}"`).join(" ")}` : "");
 
+const plainWords = (l: PlainLocator) => (l.by === "role" ? `${l.role} "${l.value ?? ""}"` : `${l.by} "${l.value ?? ""}"`);
+const filterWords = (l: Locator): string => {
+    const f = l.filter;
+    if (!f) return "";
+    const parts = [f.hasText !== undefined && `with "${f.hasText}"`, f.hasNotText !== undefined && `without "${f.hasNotText}"`, f.has && `holding ${plainWords(f.has)}`, f.hasNot && `not holding ${plainWords(f.hasNot)}`];
+    return ` ${parts.filter(Boolean).join(" ")}`;
+};
+
 function describePlainStep(step: Step): string {
     const loc = (l?: Locator) =>
-        l ? (isLocatorRef(l) ? `shared element "${l.ref}"` : `${l.by === "role" ? `${l.role} "${l.value ?? ""}"` : `${l.by} "${l.value ?? ""}"`}${frameWords(l.frame)}`) : "";
+        l ? (isLocatorRef(l) ? `shared element "${l.ref}"` : `${plainWords(l)}${filterWords(l)}${l.within ? ` inside ${plainWords(l.within)}` : ""}${frameWords(l.frame)}`) : "";
     switch (step.action) {
         case "navigate":
             return `Open ${step.url}`;
         case "click":
             return `Click ${loc(step.locator)}${step.opensPopup ? " and wait for the popup" : ""}`;
         case "upload":
-            return `Upload the test file "${step.file}" to ${loc(step.locator)}`;
+            return `${step.drop ? "Drop" : "Upload"} the test file "${step.file}" ${step.drop ? "onto" : "to"} ${loc(step.locator)}`;
+        case "dialog":
+            return `${step.response === "accept" ? "Accept" : "Dismiss"} the next dialog${step.message ? ` (it says "${step.message}")` : ""}${step.promptText !== undefined ? ` and answer "${step.promptText}"` : ""}`;
+        case "download":
+            return `Click ${loc(step.locator)} and check the download${step.filename ? ` named like "${step.filename}"` : ""}`;
         case "drag":
             return `Drag ${loc(step.locator)} to ${loc(step.target)}`;
         case "fill":
@@ -497,7 +673,12 @@ function describePlainStep(step: Step): string {
         case "closeApp":
             return "Close the application";
         case "wait":
+            if (step.until === "url") return `Wait until the address matches "${step.value ?? ""}"`;
+            if (step.until === "response") return `Wait for the response from "${step.value ?? ""}"`;
+            if (step.until) return `Wait until ${loc(step.locator)} is ${step.until}`;
             return `Wait ${step.ms}ms`;
+        case "remember":
+            return `Remember the ${step.from === "value" ? "value" : "text"} of ${loc(step.locator)} as {{${step.name}}}`;
         case "assert":
             // These two use `expected` as a setting, not an expected value.
             if (step.check === "screenshot") {
@@ -510,6 +691,9 @@ function describePlainStep(step: Step): string {
                 return `AI judgement: ${step.locator ? loc(step.locator) : "the page"} looks right${typeof step.expected === "string" && step.expected.trim() ? ` (${step.expected.trim()})` : ""}`;
             }
             if (HEALTH_STEP_WORDING[step.check]) return HEALTH_STEP_WORDING[step.check]!;
+            if (step.check === "remembered") return `Verify ${loc(step.locator)} ${step.compare === "greater" ? "is greater than" : step.compare === "less" ? "is less than" : step.compare === "contains" ? "contains" : "equals"} the remembered {{${step.name ?? ""}}}`;
+            if (step.check === "ariaSnapshot") return `Verify the structure of ${step.locator ? loc(step.locator) : "the page"} matches its snapshot`;
+            if (step.check === "attribute" || step.check === "css") return `Verify ${step.check} ${step.name ?? ""} of ${loc(step.locator)}${step.expected !== undefined ? ` = ${step.expected}` : ""}`;
             return `Verify ${step.check}${step.locator ? ` of ${loc(step.locator)}` : ""}${
                 step.expected !== undefined ? ` = ${step.expected}` : ""
             }`;
@@ -527,5 +711,15 @@ function describePlainStep(step: Step): string {
             return step.use === "code"
                 ? `Wait for an email to ${step.to} and type its code into ${loc(step.locator)}`
                 : `Wait for an email to ${step.to} and open its link${step.after ? ` containing "${step.after}"` : ""}`;
+        case "clock":
+            return step.op === "install"
+                ? `Take over the page's clock${step.time ? ` from ${step.time}` : ""}`
+                : step.op === "fastForward"
+                  ? `Move the clock ${step.minutes ?? 0} minute(s) ahead`
+                  : step.op === "pauseAt"
+                    ? `Stop the clock at ${step.time ?? "?"}`
+                    : "Let the clock run again";
+        case "condition":
+            return describeCondition(step.set, step.value);
     }
 }

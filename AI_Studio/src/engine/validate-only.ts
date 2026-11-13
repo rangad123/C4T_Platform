@@ -54,6 +54,10 @@ export interface ValidationOnlyRequest {
     helpers?: Array<{ name: string; content: string }>;
     /** Run the tests one at a time, in the order given, and stop at the first that does not pass; the tests after it are not run. */
     stopOnFirstFailure?: boolean;
+    /** Open bugs linked to tests (test id -> the bug's reference): those tests render as `test.fail()` (see generators/types.ts). */
+    knownBugs?: Record<string, string>;
+    /** The project's notes for the AI: the overlays they name are closed in the rendered web scripts (see generators/types.ts). */
+    siteNotes?: import("./memory/notes.js").SiteNote[];
 }
 
 export interface TestToValidate {
@@ -82,7 +86,7 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
 
     const origin = new URL(req.url).origin;
     const model = req.model && req.model.origin === origin ? req.model : stubModel(req.url, origin);
-    const renderCtx: RenderContext = { baseUrl: origin, apiBaseUrl: apiBase(req, model, origin), ...(req.dataSets ? { dataSets: req.dataSets } : {}), deleteOps: mergeOperations(deleteOperationsOf(model.apis), req.deleteOps, ...tests.map((t) => deleteOperationsOfSpec(t.spec))) };
+    const renderCtx: RenderContext = { baseUrl: origin, apiBaseUrl: apiBase(req, model, origin), ...(req.dataSets ? { dataSets: req.dataSets } : {}), ...(req.knownBugs ? { knownBugs: req.knownBugs } : {}), ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}), deleteOps: mergeOperations(deleteOperationsOf(model.apis), req.deleteOps, ...tests.map((t) => deleteOperationsOfSpec(t.spec))) };
     const creds = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password, ...(req.credentials.totpSecret ? { totpSecret: req.credentials.totpSecret } : {}) } : undefined;
 
     const mobile = resolveMobile(ctx, req.mobile, undefined, phoneMemoryOf(sink, req.mobile));

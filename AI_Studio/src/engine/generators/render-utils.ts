@@ -1,4 +1,4 @@
-import { isLocatorRef, type Locator, type TestSpec } from "../spec/schema.js";
+import { isLocatorRef, type Locator, type PlainLocator, type TestSpec } from "../spec/schema.js";
 import { DATA_SET_KEY, dataSetNameOf, resolveRows, type DataSet } from "../testdata/dataset.js";
 import { frameSelector } from "../web/pages.js";
 
@@ -131,6 +131,27 @@ export function locatorCall(root: string, l: Locator): string {
         if (root !== "page") throw new Error("Frames exist only on web pages; this step names a frame.");
         root = l.frame.reduce((r, f) => `${r}.frameLocator(${lit(frameSelector(f))})`, root);
     }
+    if ((l.within || l.filter) && !root.startsWith("page")) throw new Error("Filters and containers in a locator exist only on web pages; this step uses one.");
+    // The frame (or the page) the element is in: a filter's inner locators are found from it, as Playwright requires.
+    const scope = root;
+    if (l.within) root = plainCall(root, l.within, true);
+    const out = plainCall(root, l);
+    const f = l.filter;
+    const filter = f
+        ? `.filter({ ${[
+              f.hasText !== undefined && `hasText: ${expr(f.hasText)}`,
+              f.hasNotText !== undefined && `hasNotText: ${expr(f.hasNotText)}`,
+              f.has && `has: ${plainCall(scope, f.has, true)}`,
+              f.hasNot && `hasNot: ${plainCall(scope, f.hasNot, true)}`,
+          ]
+              .filter(Boolean)
+              .join(", ")} })`
+        : "";
+    return l.nth !== undefined ? `${out}${filter}.nth(${l.nth})` : `${out}${filter}`;
+}
+
+/** One strategy's call on `root`, with its own `nth` (a container or a filter's inner locator, or the element itself without its filter). */
+function plainCall(root: string, l: PlainLocator, withNth = false): string {
     const exact = l.exact ? ", exact: true" : "";
     let out: string;
     switch (l.by) {
@@ -154,8 +175,16 @@ export function locatorCall(root: string, l: Locator): string {
         case "css":
             out = `${root}.locator(${expr(l.value ?? "")})`;
             break;
+        case "altText":
+            if (!root.startsWith("page")) throw new Error("Finding an element by its alt text works on web pages only.");
+            out = `${root}.getByAltText(${expr(l.value ?? "")}${l.exact ? ", { exact: true }" : ""})`;
+            break;
+        case "title":
+            if (!root.startsWith("page")) throw new Error("Finding an element by its title works on web pages only.");
+            out = `${root}.getByTitle(${expr(l.value ?? "")}${l.exact ? ", { exact: true }" : ""})`;
+            break;
     }
-    return l.nth !== undefined ? `${out}.nth(${l.nth})` : out;
+    return withNth && l.nth !== undefined ? `${out}.nth(${l.nth})` : out;
 }
 
 export function fileHeader(spec: TestSpec, note: string): string {

@@ -77,6 +77,31 @@ export function StepForm({ id, step, onChange, catalog, placeholders, shared, bl
                 );
             case "testFile":
                 return <TestFileField key={f.name} id={fid} label={f.label} help={f.help} projectId={projectId} value={String(step[f.name] ?? "")} onChange={(v) => onChange({ ...step, [f.name]: v })} />;
+            case "choice":
+                return (
+                    <div className="field" key={f.name}>
+                        <label htmlFor={fid}>{f.label}</label>
+                        <select id={fid} className="input" value={String(step[f.name] ?? f.options?.[0]?.[0] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
+                            {(f.options ?? []).map(([v, l]) => (
+                                <option key={v} value={v}>
+                                    {l}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                );
+            case "number":
+                return (
+                    <div className="field" key={f.name}>
+                        <label htmlFor={fid}>{f.label}</label>
+                        <input id={fid} className="input bld-narrow" type="number" min={0} value={typeof step[f.name] === "number" ? (step[f.name] as number) : ""} aria-describedby={f.help ? `${fid}-hint` : undefined} onChange={(e) => set(f.name, e.target.value === "" ? undefined : Math.max(0, Number(e.target.value) || 0))} />
+                        {f.help && (
+                            <p className="hint" id={`${fid}-hint`}>
+                                {f.help}
+                            </p>
+                        )}
+                    </div>
+                );
             case "ms":
                 return (
                     <div className="field" key={f.name}>

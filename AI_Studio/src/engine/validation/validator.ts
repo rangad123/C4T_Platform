@@ -41,7 +41,7 @@ import { deterministicRepairOn } from "../llm/without-ai.js";
 import type { MobileRunEnv } from "./mobile-runner.js";
 import type { IosRunEnv } from "../mobile/ios-runner.js";
 import { missingApiTokenReason } from "../evidence/failure-facts.js";
-import { markUnfinishedAsNotRun, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
+import { KNOWN_BUG_FIXED, markUnfinishedAsNotRun, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
 // A phone run the phone itself could not carry out (device/infra.ts): said plainly, never a failing test of the app, never repaired.
 import { isPhoneInfrastructure } from "../mobile/device/infra.js";
 
@@ -114,6 +114,11 @@ export interface ValidationDeps {
      * flaky ("passed 1 of 2 runs") or broken ("fails every time at ..."), with a healing candidate when one exists. Default off.
      */
     confirmFailures?: boolean;
+    /**
+     * A new authored web test that passed runs this many times more before it is VALIDATED (the level's repeatPasses); any failure
+     * among them makes it flaky. Default 0.
+     */
+    repeatPasses?: number;
     /** Re-run a failing script this many times before analysing/repairing it (scheduled runs). Default 0. */
     retryFailures?: number;
     /** Where Taqwright (mobile) scripts run. Absent: such scripts report an error instead of running. */
@@ -382,6 +387,21 @@ export async function validateBatch(
                 outcome = { ...outcome, reason: reliabilityReason(run, again, outcome.reason, heal), attempts: attempt, lastRun: again.status === "passed" ? run : again };
             }
         }
+        // A new test that passed must keep passing: it runs again (one runner process, one run after the other); any failure makes it flaky.
+        const repeats = deps.repeatPasses ?? 0;
+        if (!outcome && run.status === "passed" && repeats > 0 && t.scenario && !t.custom && t.spec.kind === "web" && !ctx.signal?.aborted) {
+            const copies = Array.from({ length: repeats }, (_, k) => ({ ...input(t, script), filename: script.filename.replace(/(\.spec\.ts)?$/, (ext) => `.repeat${k + 1}${ext}`) }));
+            const again = (await execute(ctx, deps, copies, 1)).filter((r) => !r.notRun);
+            const failing = again.find((r) => r.status !== "passed");
+            if (failing) {
+                attempt++;
+                await hooks.onAttempt(t, attempt, script, failing);
+                logRun(ctx, t.spec, failing, attempt);
+                const passed = 1 + again.filter((r) => r.status === "passed").length;
+                outcome = { status: "FAILED_VALIDATION", reason: `Flaky: passed ${passed} of ${again.length + 1} runs. The failing run stopped at ${summarise(failing)}`.slice(0, 600), spec: t.spec, script, attempts: attempt, lastRun: failing };
+                ctx.emit({ stage: "validation", kind: "flaky_pass", level: "warn", message: `${t.spec.testId} passed ${passed} of ${again.length + 1} runs: flagged as flaky` });
+            }
+        }
         // A passing run may carry plain notes (a low-confidence AI judgement): kept as the reason so a reviewer can see them.
         outcome ??= { status: "VALIDATED", ...(run.notes?.length ? { reason: run.notes.join("\n") } : {}), spec: t.spec, script, attempts: attempt, lastRun: run };
         await hooks.onFinal(t, outcome);
@@ -459,6 +479,8 @@ export async function validateBatch(
  * runbooks) and runs against a named environment all call it, so a finding is a finding wherever the test runs.
  */
 export function classifyFailedRun(spec: TestSpec, run: ScriptRun): { status: "NEEDS_REVIEW" | "FAILED_VALIDATION"; reason: string } | undefined {
+    // A test that tracks a known bug passed: the bug seems fixed. Said as it is, never repaired (a repair would only make it fail again).
+    if (run.error?.startsWith(KNOWN_BUG_FIXED)) return { status: "FAILED_VALIDATION", reason: run.error };
     // The phone could not run the test (its test helper crashed twice, it went offline, pre-flight stopped the run): the reason as it is, no repair.
     if (spec.kind === "mobile" && run.status === "error" && isPhoneInfrastructure(run)) return { status: "FAILED_VALIDATION", reason: run.error! };
     // A signed-in check whose sign-in did not work never reached the page under test: a plain failure, not a finding and not repairable.

@@ -20,8 +20,9 @@ import { runTagOf } from "../cleanup/helper.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { RunEnv, ScriptInput, ScriptRun } from "../validation/runner.js";
 import { variantEligibility } from "../validation/variants.js";
+import { isSocketFault, socketFaults, socketFaultScript, type SocketFaultKind } from "../web/socket-faults.js";
 
-export type FaultKind = "error" | "empty" | "changed" | "hidden";
+export type FaultKind = "error" | "empty" | "changed" | "hidden" | SocketFaultKind;
 
 export interface Fault {
     kind: FaultKind;
@@ -83,7 +84,7 @@ function targetOf(step: AssertStep): string | undefined {
 }
 
 /** The faults that apply to a test, in a fixed order. */
-export function faultsFor(spec: TestSpec): Fault[] {
+export function faultsFor(spec: TestSpec, opts: { webSockets?: boolean } = {}): Fault[] {
     const k = keyStep(spec);
     if (!k) return [];
     const step = spec.steps[k.key] as AssertStep;
@@ -96,6 +97,10 @@ export function faultsFor(spec: TestSpec): Fault[] {
     if (text) out.push({ kind: "changed", label: `the text "${text.slice(0, 60)}" comes back changed` });
     else if (target) out.push({ kind: "changed", label: "the checked element shows different content" });
     if (target) out.push({ kind: "hidden", label: "the checked element is hidden" });
+    // Socket and offline faults (../web/socket-faults.ts): only for an application exploring saw use a WebSocket.
+    // Offline only after an action on the page: a navigate that triggers the check would just fail to load, which proves nothing about the test.
+    const navigates = spec.steps[k.trigger]?.action === "navigate";
+    out.push(...socketFaults(opts.webSockets === true).filter((f) => !(navigates && f.kind === "offline")));
     return out;
 }
 
@@ -158,6 +163,7 @@ function before(content: string, n: number, line: string): string | undefined {
 export function faultScript(spec: TestSpec, render: RenderContext, fault: Fault): ScriptInput | undefined {
     const k = keyStep(spec);
     if (!k) return undefined;
+    if (isSocketFault(fault.kind)) return socketFaultScript(spec, render, fault.kind);
     const step = spec.steps[k.key] as AssertStep;
     const script = renderWithAdapter(spec, "playwright", render);
     const text = fault.kind === "changed" ? changeableText(step) : undefined;
@@ -190,12 +196,14 @@ export interface FaultDeps {
     render: RenderContext;
     workers: number;
     executor?: ScriptExecutor;
+    /** Exploring saw the application use a WebSocket: socket and offline faults are tried too. */
+    webSockets?: boolean;
 }
 
 /** Replay every test once per fault; one score per test (undefined: no fault took effect, so there is no score). */
 export async function scoreTests(ctx: EngineContext, deps: FaultDeps, specs: TestSpec[]): Promise<Map<string, Strength | undefined>> {
     throwIfAborted(ctx.signal);
-    const jobs = specs.flatMap((spec) => faultsFor(spec).flatMap((fault) => {
+    const jobs = specs.flatMap((spec) => faultsFor(spec, { webSockets: deps.webSockets }).flatMap((fault) => {
         const input = faultScript(spec, deps.render, fault);
         return input ? [{ spec, fault, input }] : [];
     }));

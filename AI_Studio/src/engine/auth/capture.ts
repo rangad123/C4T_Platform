@@ -12,7 +12,32 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { pidAlive } from "../recorder/session.js";
 import { detectCaptcha } from "./captcha.js";
 import type { StorageState } from "./storage-state.js";
-import { parseStorageState } from "./storage-state.js";
+import { MAX_SESSION_STORAGE_CHARS, parseStorageState } from "./storage-state.js";
+
+/**
+ * Adds each open page's sessionStorage to a storage state (Playwright does not save it): some sites keep their sign-in there. A site whose
+ * sessionStorage would make the state too large keeps none (its sign-in then lasts only if cookies or local storage carry it).
+ */
+export async function withSessionStorage<T extends { origins: Array<{ origin: string }> }>(raw: T, pages: Page[]): Promise<T> {
+    const byOrigin = new Map<string, Array<{ name: string; value: string }>>();
+    for (const p of pages) {
+        if (p.isClosed()) continue;
+        let origin: string;
+        try {
+            origin = new URL(p.url()).origin;
+        } catch {
+            continue;
+        }
+        if (origin === "null" || byOrigin.has(origin)) continue;
+        const items = await p.sessionStorage.items().catch(() => []);
+        const kept = items.filter((i) => i.name !== "__aitp_restored");
+        if (kept.length && JSON.stringify(kept).length <= MAX_SESSION_STORAGE_CHARS / 2) byOrigin.set(origin, kept.slice(0, 200));
+    }
+    if (!byOrigin.size) return raw;
+    const origins = raw.origins.map((o) => (byOrigin.has(o.origin) ? { ...o, sessionStorage: byOrigin.get(o.origin) } : o));
+    for (const [origin, items] of byOrigin) if (!raw.origins.some((o) => o.origin === origin)) origins.push({ origin, localStorage: [], sessionStorage: items } as unknown as T["origins"][number]);
+    return { ...raw, origins };
+}
 
 export type CaptureStatus = "starting" | "open" | "saved" | "cancelled" | "failed";
 
@@ -142,9 +167,10 @@ export class SignInCapture {
     /** "I'm signed in": takes the storage state and the main window's address (the page the "Still signed in?" check opens), then closes. */
     async save(): Promise<{ state: StorageState; checkUrl: string }> {
         if (this.s.status !== "open" || !this.context || !this.page) throw new Error(this.s.status === "starting" ? "The browser is still opening." : "This sign-in session has ended.");
-        const raw = await this.context.storageState();
+        // IndexedDB too: Firebase-style sign-ins keep their token there, not in a cookie.
+        const raw = await this.context.storageState({ indexedDB: true });
         const checkUrl = this.page.url();
-        const state = parseStorageState(raw);
+        const state = parseStorageState(await withSessionStorage(raw, this.context.pages()));
         await this.finish("saved");
         return { state, checkUrl };
     }

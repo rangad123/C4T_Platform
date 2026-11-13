@@ -92,6 +92,13 @@ Rules:
 - Where the app allows, the plan must include: multi-step end-to-end journeys across pages; form validation (required fields,
   formats, boundary lengths and values); negative paths with the error message shown; state that must persist (after reload, back,
   sign out and in again); search, filter, sort and pagination results.
+- The mix must also include content checks (wrong or placeholder text such as "lorem ipsum" or "undefined", broken images, wrong
+  totals or counts) and constraint checks (the app's business rules: dates in order, limits and quantities, a total equal to the sum
+  of its lines). These are the checks most often missed.
+- When the app shows time (a session timeout, an expiry, a countdown, "x minutes ago"), plan time scenarios: the test takes over the
+  clock and moves it ahead, then checks what the page shows. When it has forms, location or notifications, plan conditions too: going
+  offline in the middle of a form (the app's offline message, nothing lost), and location or another permission refused.
+- A pass needs observable evidence: every expectedResult names something a person can see change, never only "no error appears".
 - Derive expected behaviour from the intended functionality, but only reference UI that exists in the model.
 - Each scenario must be independently runnable from a clean browser session, starting at "startPath".
 - Each scenario needs 1-3 concrete, observable expectedResults that depend on its steps: name the element and its state before and

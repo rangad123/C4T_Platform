@@ -11,6 +11,7 @@ import type { Scenario } from "../engine/spec/schema.js";
 import { runValidationOnly, type TestToValidate } from "../engine/validate-only.js";
 import { runVariantsJob, type VariantTest } from "../engine/validation/variants.js";
 import { runEnvironmentJob } from "../engine/environments/run.js";
+import { pruneAuthoringTraces } from "../engine/web/author.js";
 import { deleteOperationsOf, deleteOperationsOfSpec, mergeOperations } from "../engine/cleanup/helper.js";
 import type { CleanupRequest } from "../engine/cleanup/run.js";
 import { CleanupStore } from "./cleanup-store.js";
@@ -108,6 +109,19 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
 }
 
 /** The project's notes for the AI as an exploration request field (none: no field). */
+/**
+ * Bugs filed for the tests of a run (issue links): such a test renders as `test.fail()` with the bug's reference, so it stays green while
+ * the bug is there and says "seems fixed" when it passes. A link is open until a person removes it (the tracker's own state is not read).
+ */
+function knownBugsOf(db: Repo["db"], tests: TestToValidate[]): { knownBugs?: Record<string, string> } {
+    const out: Record<string, string> = {};
+    for (const t of tests) {
+        const link = db.all<{ external_id: string; url: string }>("SELECT external_id, url FROM issue_links WHERE test_case_id = ? ORDER BY created_at DESC LIMIT 1", t.handle.id)[0];
+        if (link) out[t.handle.testId] = `${link.external_id} ${link.url}`.trim();
+    }
+    return Object.keys(out).length ? { knownBugs: out } : {};
+}
+
 async function siteNotesOf(repo: Repo, projectId: string): Promise<{ siteNotes?: SiteNote[] }> {
     const notes = await new NotesStore(repo.db.sql).forEngine(projectId);
     return notes.length ? { siteNotes: notes } : {};
@@ -367,11 +381,11 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             }
             for (const id of prepared.missing) ctx.emit({ stage: "validation", kind: "test_missing", level: "warn", message: `Test ${id} no longer exists; skipped` });
             for (const note of prepared.notes) ctx.emit({ stage: "validation", kind: "project_accounts_withheld", level: "warn", message: note });
-            summary = await runEnvironmentJob(ctx, { ...prepared.request, render: { ...prepared.request.render, deleteOps: projectDeleteOps((app.model ?? repo.getLatestAppModel(job.projectId))?.apis) }, cleanup, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, prepared.tests, engineSink);
+            summary = await runEnvironmentJob(ctx, { ...prepared.request, render: { ...prepared.request.render, deleteOps: projectDeleteOps((app.model ?? repo.getLatestAppModel(job.projectId))?.apis), notes: (await siteNotesOf(repo, job.projectId)).siteNotes }, cleanup, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, prepared.tests, engineSink);
         } else if (o.mode === "plain") {
             // One test described in plain words: built, run for real, stored (see engine/authoring/plain.ts).
             const model = app.model ?? repo.getLatestAppModel(job.projectId);
-            const plain = { repo, config, job, app: { ...app, model }, roles, cleanup, dataSets, deleteOps: projectDeleteOps(model?.apis) };
+            const plain = { repo, config, job, app: { ...app, model }, roles, cleanup, dataSets, deleteOps: projectDeleteOps(model?.apis), ...(await siteNotesOf(repo, job.projectId)) };
             summary = onRunner
                 ? await exploreOnRunner(onRunner, { deps, job, mode: "plain", request: await plainRequestOf(plain), modelName: llm.modelName, frameworkSettings: frameworkSettingsOf(repo, job.projectId), signal: abort.signal, emit })
                 : await runPlainJob({ ...plain, ctx, sink: engineSink });
@@ -427,7 +441,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                     ...(custom.byTest.has(t.id) ? { custom: custom.byTest.get(t.id)! } : {}),
                 });
             }
-            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}) }, tests, engineSink);
+            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}), ...knownBugsOf(repo.db, tests), ...(await siteNotesOf(repo, job.projectId)) }, tests, engineSink);
         } else {
             // Creating from a plan the person approved: the plan is read back here, so a missing one fails before anything is touched.
             const fromPlan = o.fromPlan ? await requireStoredPlan(repo, store, o.fromPlan) : undefined;
@@ -607,4 +621,6 @@ async function cleanScratch(dir: string): Promise<void> {
         const st = await fs.stat(full).catch(() => null);
         if (st && Date.now() - st.mtimeMs > 60 * 60_000) await fs.rm(full, { recursive: true, force: true });
     }
+    // Blocked authoring traces: the same hour, and a cap on their total size.
+    await pruneAuthoringTraces(dir);
 }

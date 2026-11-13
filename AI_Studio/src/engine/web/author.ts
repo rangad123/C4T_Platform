@@ -11,8 +11,10 @@
  *     (autospec's replay files contain no assertions);
  *   - the loop can resume from a replayed spec prefix with a failure description (repair).
  */
+import fs from "node:fs/promises";
+import path from "node:path";
 import { generateText, stepCountIs, tool } from "ai";
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 import { z } from "zod";
 import type { EngineContext } from "../context.js";
 import { activityOfStep, activityLine, pathOf } from "../frames/activity.js";
@@ -20,14 +22,21 @@ import type { FrameSink } from "../frames/sink.js";
 import { LLM_MAX_RETRIES, PROVIDER_OPTIONS } from "../llm/provider.js";
 import { addUsage } from "../llm/prompt-cache.js";
 import { noteAgentStep, withRoute } from "../llm/routing.js";
-import { ariaSnapshot, BrowserSession, settle } from "../discovery/browser.js";
+import { ariaSnapshot, BrowserSession, settle, type SessionEvents } from "../discovery/browser.js";
 import { placeholderCanMoveAddress, RUN_ADDRESS_RULE } from "../spec/run-address.js";
+import { CLOCK_OPS, CONDITION_SETS, MAX_CLOCK_MINUTES } from "../spec/schema.js";
+import { CONDITION_HELP } from "./conditions.js";
+import { REMEMBER_COMPARE, REMEMBER_NAME, WAIT_UNTIL, type ASSERT_CHECKS } from "../spec/schema.js";
+import { NEEDS_EXPECTED, NEEDS_LOCATOR } from "./checks.js";
+import { captureAriaTemplate } from "./interpreter.js";
 import { describeStep, LocatorSchema, type Locator, type Scenario, type Step, type TestSpec } from "../spec/schema.js";
 import type { AppModel, PageModel } from "../understanding/app-model.js";
 import { makeLookAtScreen, VISION_AUTHORING_NOTE } from "../vision/look.js";
 import { COMPACT_SNAPSHOT_NOTE, RAW_SNAPSHOT_MAX, SnapshotView, snapshotSavingsEvent } from "../snapshots/compact.js";
 import { compactSnapshotsOn } from "../snapshots/setting.js";
-import { executeStep, runtimeData, type RuntimeData } from "./interpreter.js";
+import { scrubTraceFile } from "../evidence/trace-scrub.js";
+import { executeStep, locate, rememberPopup, runtimeData, type RuntimeData } from "./interpreter.js";
+import { sampleName, sampleTypeFor, SAMPLE_TYPES } from "./interruptions.js";
 import { notesFor, refusalText, refusedBy, type SiteNote } from "../memory/notes.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 
@@ -60,15 +69,21 @@ export interface AuthorInput {
 /** `observations`: screens the vision model judged to look wrong while authoring (only when `vision` was on). */
 export type AuthorOutcome =
     | { status: "complete"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[] }
-    | { status: "defect"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[] }
-    | { status: "blocked"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[] };
+    | { status: "defect"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[]; /** Errors the app reported while the agent worked (console, failed requests). */ evidence?: string[] }
+    | { status: "blocked"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[]; /** The session's Playwright trace (passwords masked), kept as evidence of what blocked it. */ trace?: string };
 
 const SYSTEM = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
 Every action you perform successfully is recorded into a reusable Playwright test, so be deliberate:
 - Perform the scenario step by step; after each action you receive the page's accessibility snapshot. Look before you act.
 - Locate elements the way a user would: by="role" (role + accessible name) first, then "label", "placeholder", "text". Use "css" only as a last resort.
   Role names are ARIA roles (button, link, textbox, checkbox, combobox, heading, tab, menuitem...). Copy accessible names from the snapshot.
-- If a locator matches several elements the action fails; make it more specific (exact=true, a different role/name) or use nth.
+- If a locator matches several elements the action fails; make it more specific (exact=true, a different role/name), narrow it with
+  within (a container: the dialog, the list, the table row) or filter (hasText / has: the row that holds "Blue mug"); nth only as a last resort.
+  Images: by="altText"; an element named only by its title attribute: by="title".
+- Use the strongest check that fits: exactText for a total or a status, notText for what must be gone, checked/unchecked, focused, attribute,
+  accessibleErrorMessage for a field's validation message, ariaSnapshot for a result list or summary. To prove a value carries over
+  (the product page price is the cart price), remember it first and assert check "remembered" later.
+- Wait for things (wait until url / response / hidden / visible), never a fixed time.
 - Use {{unique}} inside values that must be unique (emails/usernames you create), and {{credentials.username}} / {{credentials.password}}
   for the provided test account. Never invent real people's data; example.com addresses only.
 - You MUST finish with assertions: use the assert tool to verify EVERY expected result of the scenario (visible text, URL, value, count...).
@@ -80,9 +95,51 @@ Every action you perform successfully is recorded into a reusable Playwright tes
 - If an assertion fails because the application genuinely behaves differently from the expected result, call finish(result="defect") and explain what was observed.
 - If you cannot make progress (element missing, blocked), call finish(result="blocked") and explain.
 - Be efficient: do not explore unrelated pages. Do not repeat failed actions unchanged.
-- Stay in the UI: do not navigate to API/JSON endpoints; verify what a user sees in the pages.`;
+- Stay in the UI: do not navigate to API/JSON endpoints; verify what a user sees in the pages.
+- Dialogs (confirm "Delete?") are dismissed unless you call dialog(response="accept") right before the action that opens one. A new tab a click opens is where your next actions go.
+- Tool results tell you what happened (dialogs, new tabs, downloads, console errors, failed requests). A server error (HTTP 5xx) after an action is a defect to report, not a reason to test something else.`;
 
 const target = LocatorSchema.describe("How to find the element");
+/** The longest fixed pause the agent may record (a wait for something is the better step; the review flags fixed ones). */
+const MAX_FIXED_WAIT_MS = 3_000;
+/** The checks the agent may use; the deterministic families (health, speed, audits) come from their own generators. */
+const AUTHOR_CHECKS = ["visible", "hidden", "text", "exactText", "notText", "value", "enabled", "disabled", "editable", "checked", "unchecked", "focused", "inViewport", "count", "url", "urlPattern", "title", "attribute", "class", "css", "accessibleName", "accessibleErrorMessage", "ariaSnapshot", "remembered"] as const satisfies readonly (typeof ASSERT_CHECKS)[number][];
+
+/** Steps that can work in a new tab (the schema's `inPopup`). */
+const POPUP_STEPS = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "dialog", "download", "assert"]);
+
+/** What the session saw during one action, told to the agent in plain words (and the new tab to continue in, if one opened). */
+async function interruptionNotes(e: SessionEvents, step: Step, ok: boolean): Promise<{ lines: string[]; popup?: Page }> {
+    const lines: string[] = [];
+    for (const d of e.dialogs) {
+        lines.push(
+            d.armed
+                ? `A ${d.type} dialog appeared: "${d.message}" - it was ${d.answer}, as prepared.`
+                : `A ${d.type} dialog appeared: "${d.message}" - it was dismissed. To accept it, call dialog(response="accept") right before the action that opens it, then do that action again.`,
+        );
+    }
+    const popup = e.opened.find((p) => !p.isClosed());
+    if (popup) {
+        await popup.waitForLoadState("domcontentloaded").catch(() => undefined);
+        lines.push(`A new tab opened: ${popup.url()}. Your next actions work in it; switchTab(to="main") goes back to the first page.`);
+    }
+    if (step.action !== "download") for (const name of e.downloads) lines.push(`A download started: "${name}". To check a download, use the download tool on the control that starts it.`);
+    if (e.problems.length) lines.push(`The application reported errors during this action:\n${e.problems.map((p) => `- ${p}`).join("\n")}`);
+    if (e.serverError && ok)
+        lines.push('The server answered with an error (HTTP 5xx). That is an application defect, not something to write a test around: assert what the user sees now if it shows the failure, then finish(result="defect") and name the failing request.');
+    return { lines, ...(popup ? { popup } : {}) };
+}
+
+/** The `accept` attribute of the file field a target is, holds, or labels (empty when there is none or it cannot be read). */
+async function acceptOf(page: Page, l: Locator): Promise<string> {
+    return locate(page, l, {})
+        .first()
+        .evaluate((el) => {
+            const field = el instanceof HTMLInputElement ? el : (el.querySelector("input[type=file]") ?? (el instanceof HTMLLabelElement ? el.control : null));
+            return field instanceof HTMLInputElement ? field.accept : "";
+        }, undefined, { timeout: 2_000 })
+        .catch(() => "");
+}
 
 function pageHint(model: AppModel, scenario: Scenario): string {
     const start = scenario.startPath.split("?")[0];
@@ -110,28 +167,60 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
             out = await authorScenario(input);
         }
         if (out.status === "complete" && input.review && !input.resume) out = await reviewAndFix(input, out);
+        if (out.status === "defect") out = await confirmDefect(input, out);
         return out;
     });
+}
+
+const VERDICT_SYSTEM = `You judge ONE suspected bug found by an automated test writer in a web application. Answer only "yes" when the evidence shows the application itself misbehaves (wrong result, error, crash, server error), or "no" when it is more likely the test writer's mistake (wrong element, wrong expectation, a step not done, timing).`;
+const VERDICT_TRIES = 3;
+/** One verdict answer: yes, no, or undefined when it says neither. */
+export const parseVerdict = (answer: string): boolean | undefined => (/^\W*yes\b/i.test(answer) ? true : /^\W*no\b/i.test(answer) ? false : undefined);
+
+/**
+ * Before a "defect" is stored: the review model is asked 3 times whether this is a real application bug (answers vary between tries),
+ * and the majority is kept. A majority of "no" makes the outcome "blocked" (not reported as a bug); answers that say neither, or failed
+ * calls, do not count, so without clear answers the defect stands.
+ */
+async function confirmDefect(input: AuthorInput, out: Extract<AuthorOutcome, { status: "defect" }>): Promise<AuthorOutcome> {
+    const { ctx, scenario } = input;
+    const prompt = `Scenario ${scenario.scenarioId}: ${scenario.title}\nDescription: ${scenario.description}\nExpected results:\n${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}\n\nWhat the test writer reports: ${out.explanation}\n\nSteps performed:\n${out.steps.map((s, i) => `${i + 1}. ${describeStep(s)}`).join("\n")}\n\nErrors the application reported:\n${out.evidence?.map((e) => `- ${e}`).join("\n") || "none"}\n\nIs this a real application bug? Answer yes or no.`;
+    let yes = 0;
+    let no = 0;
+    for (let i = 0; i < VERDICT_TRIES; i++) {
+        const v = await ctx.llm.text({ system: VERDICT_SYSTEM, prompt, maxOutputTokens: 20, purpose: "review" }).then(parseVerdict, () => undefined);
+        if (v === true) yes++;
+        else if (v === false) no++;
+    }
+    if (no > yes) {
+        ctx.emit({ stage: "generation", kind: "defect_unconfirmed", level: "warn", message: `${scenario.scenarioId}: not reported as a bug: ${no} of ${VERDICT_TRIES} reviews said it is not a real application bug` });
+        return { status: "blocked", steps: out.steps, testData: out.testData, explanation: `Not reported as a bug (${no} of ${VERDICT_TRIES} reviews said it is not a real application bug): ${out.explanation}`, ...(out.observations ? { observations: out.observations } : {}) };
+    }
+    ctx.emit({ stage: "generation", kind: "defect_confirmed", message: `${scenario.scenarioId}: ${yes} of ${VERDICT_TRIES} reviews said this is a real application bug` });
+    return out;
 }
 
 const OUTCOME_PUSHBACKS = 2;
 const NO_OUTCOME = "Authoring finished without recording any assertion on the expected outcome";
 const NO_OUTCOME_HINT =
     "Not finished: the test has no assertion on the scenario's expected outcome after the last action. Assert what the user should now observe (text, value, URL or count), not only that the element you used is visible, then call finish again.";
-const INTERACTIONS = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover"]);
+const INTERACTIONS = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "download"]);
 
 /** An assertion after the last action that is more than "the element I just used is visible": it proves the scenario's outcome. */
 export function hasOutcomeAssertion(steps: readonly Step[]): boolean {
     const key = (l: unknown) => JSON.stringify(l);
     const touched = new Set(steps.flatMap((s) => (INTERACTIONS.has(s.action) && "locator" in s && s.locator ? [key(s.locator)] : [])));
     const lastAction = steps.findLastIndex((s) => INTERACTIONS.has(s.action));
+    // A download step checks its own outcome (the file arrived, named as expected, not empty).
+    if (steps[lastAction]?.action === "download") return true;
     return steps.slice(lastAction + 1).some((s) => s.action === "assert" && !(s.check === "visible" && s.locator && touched.has(key(s.locator))));
 }
 
 const REVIEW_SYSTEM = `You review ONE automatically written end-to-end web test against the scenario it must prove.
 Ask for a change only for: an expected result with no assertion that would fail if the outcome did not happen; an assertion that only checks that a clicked element is visible;
 an outcome that depends on an earlier step but is not checked (the value typed in a form should show afterwards); a weak locator (css or nth where a role, label or text exists);
-a step that does not match the scenario's intent. Never ask to remove or loosen an assertion.
+a step that does not match the scenario's intent; a fixed wait ("Wait Nms") where waiting for the address, a response or an element would do;
+a pass with no observable evidence (nothing a person would see changes is checked). Never ask to remove or loosen an assertion.
 Answer exactly OK when nothing must change. Otherwise answer one concrete change per line, each starting with "- ", and, when an existing step must change
 (not only assertions added), a last line "First wrong step: <number>".`;
 
@@ -170,9 +259,14 @@ async function reviewAndFix(input: AuthorInput, out: AuthorOutcome): Promise<Aut
 
 async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     const { ctx, browser, baseUrl, model, scenario, credentials, resume } = input;
-    const session = await BrowserSession.launch(browser, { startUrl: baseUrl });
+    const session = await BrowserSession.launch(browser, { startUrl: baseUrl, ...(input.notes?.length ? { notes: input.notes } : {}) });
     const { page } = session;
     page.setDefaultTimeout(6_000);
+    /** The new tab the agent works in (a click opened it), else the page the test started on. */
+    let tab: Page | undefined;
+    const here = (): Page => (tab && !tab.isClosed() ? tab : page);
+    /** What the app reported while the agent worked (console and page errors, failed requests): the evidence a bug verdict reads. */
+    const evidence: string[] = [];
 
     const recorded: Step[] = [];
     const observations: string[] = [];
@@ -183,13 +277,17 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     // Smaller page snapshots (setting LLM_COMPACT_SNAPSHOTS, on by default): off = exactly the snapshots, tools and instructions of before.
     const view = compactSnapshotsOn(ctx.config) ? new SnapshotView() : undefined;
     /** The page as the model gets it: the whole snapshot cut at `max`, or (smaller snapshots on) the compact one or what changed. */
-    const snapshotFor = async (max: number) => (view ? view.show(page.url(), await ariaSnapshot(page, RAW_SNAPSHOT_MAX), max) : await ariaSnapshot(page, max));
+    const snapshotFor = async (max: number) => (view ? view.show(here().url(), await ariaSnapshot(here(), RAW_SNAPSHOT_MAX), max) : await ariaSnapshot(here(), max));
+    // The session is traced; the trace is kept only when the scenario ends blocked (keepBlockedTrace).
+    const traced = await session.context.tracing.start({ snapshots: true, screenshots: true }).then(() => true, () => false);
+    let finished: AuthorOutcome | undefined;
 
     try {
+        return (finished = await (async (): Promise<AuthorOutcome> => {
         const run = async (step: Step): Promise<{ ok: boolean; error?: string }> => {
             try {
                 await executeStep(page, step, data, baseUrl);
-                await settle(page, 1_500);
+                await settle(here(), 1_500);
                 return { ok: true };
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
@@ -233,23 +331,40 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         const record = async (step: Step, toolName: string, args: unknown) => {
             // A "never ..." note for this page is a hard rule: the control it names is not used.
             const loc = "locator" in step ? (step.locator as Locator | undefined) : undefined;
-            const banned = step.action !== "assert" && loc ? refuse({ name: loc.value, url: page.url() }) : undefined;
+            const banned = step.action !== "assert" && loc ? refuse({ name: loc.value, url: here().url() }) : undefined;
             if (banned) {
                 input.onAction?.({ tool: toolName, args, ok: false, observation: refusalText(banned) });
-                return { success: false, error: `${refusalText(banned)} Do not use this control; find another way or finish.`, url: page.url() };
+                return { success: false, error: `${refusalText(banned)} Do not use this control; find another way or finish.`, url: here().url() };
             }
+            // Working in a new tab: the step is recorded "in the popup" (the schema's popup support), as the script will run it.
+            if (tab && !tab.isClosed() && POPUP_STEPS.has(step.action)) step = { ...step, inPopup: true } as Step;
+            session.takeEvents();
             const r = await run(step);
+            await session.quiet();
+            const events = session.takeEvents();
+            const told = await interruptionNotes(events, step, r.ok);
+            evidence.push(...events.problems.slice(0, 5));
+            if (told.popup) {
+                tab = told.popup;
+                rememberPopup(page, told.popup);
+                await settle(tab, 1_500);
+            }
             const snapshot = await snapshotFor(7_000);
             if (r.ok) {
-                recorded.push({ ...step, description: step.description || describeStep(step) });
+                // A click that opened a new tab is recorded as one that waits for it, so a replay and the script follow it too.
+                recorded.push({ ...step, ...(told.popup && step.action === "click" ? { opensPopup: true } : {}), description: step.description || describeStep(step) } as Step);
                 await show(step, credentials ? [credentials.password] : []);
+            } else if (recorded.at(-1)?.action === "dialog") {
+                // The answer armed for a dialog belongs right before the action that opens it: an action that failed drops it.
+                recorded.pop();
+                told.lines.push("The prepared dialog answer was dropped because this action failed. Prepare it again right before the action that opens the dialog.");
             }
-            input.onAction?.({ tool: toolName, args, ok: r.ok, observation: r.ok ? `url=${page.url()}` : (r.error ?? "failed") });
+            input.onAction?.({ tool: toolName, args, ok: r.ok, observation: [r.ok ? `url=${here().url()}` : (r.error ?? "failed"), ...told.lines].join(" ") });
             // Arriving on another page: the notes for that page come with it, once.
-            const here = pathOf(page.url());
-            const pageNotes = here !== notesShownFor ? notesFor(input.notes, page.url()) : undefined;
-            notesShownFor = here;
-            return { success: r.ok, ...(r.error ? { error: r.error } : {}), url: page.url(), snapshot, ...(pageNotes ? { notes: pageNotes } : {}) };
+            const at = pathOf(here().url());
+            const pageNotes = at !== notesShownFor ? notesFor(input.notes, here().url()) : undefined;
+            notesShownFor = at;
+            return { success: r.ok, ...(r.error ? { error: r.error } : {}), ...(told.lines.length ? { happened: told.lines.join("\n") } : {}), url: here().url(), snapshot, ...(pageNotes ? { notes: pageNotes } : {}) };
         };
 
         const tools = {
@@ -284,6 +399,51 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 inputSchema: z.object({ target, why: z.string().optional() }),
                 execute: ({ target: t, why }) => record({ action: "hover", locator: t as Locator, description: why ?? "" }, "hover", t),
             }),
+            upload: tool({
+                description: "Put a small generated file into a file field (or the button that opens the file chooser). The file's type follows the field's accepted types unless fileType is given. Never a person's own files.",
+                inputSchema: z.object({ target, fileType: z.enum(SAMPLE_TYPES as [string, ...string[]]).optional(), why: z.string().optional() }),
+                execute: async ({ target: t, fileType, why }) => {
+                    const type = fileType ?? sampleTypeFor(await acceptOf(here(), t as Locator));
+                    return record({ action: "upload", locator: t as Locator, file: sampleName(type), description: why ?? "" }, "upload", { target: t, fileType: type });
+                },
+            }),
+            drop: tool({
+                description: "Drop a small generated file onto a drop zone (drag-and-drop file upload area).",
+                inputSchema: z.object({ target, fileType: z.enum(SAMPLE_TYPES as [string, ...string[]]).optional(), why: z.string().optional() }),
+                execute: async ({ target: t, fileType, why }) => {
+                    const type = fileType ?? sampleTypeFor(await acceptOf(here(), t as Locator));
+                    return record({ action: "upload", locator: t as Locator, file: sampleName(type), drop: true, description: why ?? "" }, "drop", { target: t, fileType: type });
+                },
+            }),
+            drag: tool({
+                description: "Drag an element and drop it on another one (reorder a list, move a card).",
+                inputSchema: z.object({ target, to: LocatorSchema.describe("Where it is dropped"), why: z.string().optional() }),
+                execute: ({ target: t, to, why }) => record({ action: "drag", locator: t as Locator, target: to as Locator, description: why ?? "" }, "drag", { target: t, to }),
+            }),
+            dialog: tool({
+                description:
+                    "Prepare the answer to the NEXT alert/confirm/prompt dialog, then perform the action that opens it. Without this, dialogs are dismissed (a confirmed delete does nothing). message: text the dialog should contain; promptText: what to type into a prompt.",
+                inputSchema: z.object({ response: z.enum(["accept", "dismiss"]), message: z.string().max(300).optional(), promptText: z.string().max(500).optional(), why: z.string().optional() }),
+                execute: ({ response, message, promptText, why }) =>
+                    record({ action: "dialog", response, ...(message ? { message } : {}), ...(promptText !== undefined ? { promptText } : {}), description: why ?? "" }, "dialog", { response, message, promptText }),
+            }),
+            download: tool({
+                description: "Click a control that downloads a file, wait for the download, and check the file is not empty (and its name contains filename, if given).",
+                inputSchema: z.object({ target, filename: z.string().max(200).optional(), why: z.string().optional() }),
+                execute: ({ target: t, filename, why }) => record({ action: "download", locator: t as Locator, ...(filename ? { filename } : {}), description: why ?? "" }, "download", { target: t, filename }),
+            }),
+            switchTab: tool({
+                description: "Work in the first page again (main) or in the latest new tab (newTab). Records no step.",
+                inputSchema: z.object({ to: z.enum(["main", "newTab"]) }),
+                execute: async ({ to }) => {
+                    const opened = session.context.pages().filter((p) => p !== page && !p.isClosed()).at(-1);
+                    if (to === "newTab" && !opened) return { success: false, error: "No new tab is open.", url: here().url() };
+                    tab = to === "main" ? undefined : opened;
+                    if (tab) rememberPopup(page, tab);
+                    input.onAction?.({ tool: "switchTab", args: { to }, ok: true, observation: `url=${here().url()}` });
+                    return { success: true, url: here().url(), snapshot: await snapshotFor(7_000) };
+                },
+            }),
             navigate: tool({
                 description: "Navigate to a path or URL on the application.",
                 inputSchema: z.object({ url: z.string() }),
@@ -293,21 +453,65 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                     return record({ action: "navigate", url, description: `Open ${url}` }, "navigate", { url });
                 },
             }),
+            clock: tool({
+                description:
+                    "Control the page's time, for session timeouts, expiry, countdowns and \"x minutes ago\". op install: take over the clock (from `time`, or now) - do it BEFORE opening the page that reads the time; fastForward: jump `minutes` ahead (timers due fire); pauseAt: stop at `time`; resume. time like 2025-01-15T09:30:00Z.",
+                inputSchema: z.object({ op: z.enum(CLOCK_OPS), time: z.string().max(40).optional(), minutes: z.number().min(0).max(MAX_CLOCK_MINUTES).optional(), why: z.string().optional() }),
+                execute: ({ op, time, minutes, why }) => record({ action: "clock", op, ...(time ? { time } : {}), ...(minutes !== undefined ? { minutes } : {}), description: why ?? "" }, "clock", { op, time, minutes }),
+            }),
+            condition: tool({
+                description: `Change a browser condition from now on (then assert how the app copes, e.g. its offline message or "location refused" text). ${CONDITION_HELP}`,
+                inputSchema: z.object({ set: z.enum(CONDITION_SETS), value: z.string().max(200).optional(), why: z.string().optional() }),
+                execute: ({ set, value, why }) => record({ action: "condition", set, ...(value ? { value } : {}), description: why ?? "" }, "condition", { set, value }),
+            }),
             wait: tool({
-                description: "Pause (ms). Prefer assert, which auto-waits.",
-                inputSchema: z.object({ ms: z.number().int().min(0).max(5000) }),
-                execute: ({ ms }) => record({ action: "wait", ms, description: `Wait ${ms}ms` }, "wait", { ms }),
+                description: `Wait for something: until "url" (the address contains value), "response" (a response whose address contains value, caused by your previous action), "hidden" or "visible" (target). A fixed pause (ms, at most ${MAX_FIXED_WAIT_MS}) only when nothing can be waited for; asserts auto-wait anyway.`,
+                inputSchema: z.object({ until: z.enum(WAIT_UNTIL).optional(), value: z.string().max(500).optional(), target: LocatorSchema.optional(), ms: z.number().int().min(0).max(MAX_FIXED_WAIT_MS).optional() }),
+                execute: async ({ until, value, target: t, ms }) => {
+                    const missing = until === "url" || until === "response" ? (!value ? `waiting for a ${until} needs value` : undefined) : until ? (!t ? `waiting until ${until} needs a target` : undefined) : ms === undefined ? "give until, or ms for a fixed pause" : undefined;
+                    if (missing) {
+                        input.onAction?.({ tool: "wait", args: { until, value, ms }, ok: false, observation: missing });
+                        return { success: false, error: missing, url: page.url() };
+                    }
+                    const step: Step = until ? { action: "wait", ms: 0, until, ...(value ? { value } : {}), ...(t ? { locator: t as Locator } : {}), description: "" } : { action: "wait", ms: ms!, description: `Wait ${ms}ms` };
+                    return record(step, "wait", { until, value, target: t, ms });
+                },
+            }),
+            remember: tool({
+                description: "Remember the text (or a field's value) of an element under a name, to compare later (assert check remembered) or reuse as {{name}}: e.g. the price on the product page, checked in the cart.",
+                inputSchema: z.object({ target, name: z.string().regex(REMEMBER_NAME), from: z.enum(["text", "value"]).default("text"), why: z.string().optional() }),
+                execute: ({ target: t, name, from, why }) => record({ action: "remember", locator: t as Locator, name, from, description: why ?? "" }, "remember", { target: t, name, from }),
             }),
             assert: tool({
                 description:
-                    "Verify something about the page (auto-retries ~6s). check: visible|hidden (locator or expected text), text (locator contains expected), value, enabled, disabled, count (expected number), url (current URL contains expected), title. Only passing assertions are recorded.",
+                    "Verify something about the page (auto-retries ~6s). check: visible|hidden (locator or expected text), text (locator contains expected), exactText (whole text is expected), notText (does NOT contain expected), value, enabled, disabled, editable, checked, unchecked, focused, inViewport, count (expected number), url (current URL contains expected), urlPattern (expected like /orders/*), title, attribute (name + optional expected), class (expected class), css (name = property, expected = computed value), accessibleName, accessibleErrorMessage (a field's validation message), ariaSnapshot (target = the result list/table/summary; leave expected empty: its structure is captured, numbers and dates become patterns), remembered (target compared with a remembered value: name + compare equals|contains|greater|less). Only passing assertions are recorded.",
                 inputSchema: z.object({
-                    check: z.enum(["visible", "hidden", "text", "value", "enabled", "disabled", "count", "url", "title"]),
+                    check: z.enum(AUTHOR_CHECKS),
                     target: LocatorSchema.optional(),
                     expected: z.union([z.string(), z.number()]).optional(),
+                    name: z.string().max(100).optional().describe("attribute / css: the attribute or property; remembered: the remembered value's name"),
+                    compare: z.enum(REMEMBER_COMPARE).optional(),
                     why: z.string().optional(),
                 }),
-                execute: async ({ check, target: t, expected, why }) => {
+                execute: async ({ check, target: t, expected: given, name, compare, why }) => {
+                    let expected = given;
+                    const refuse = (error: string) => {
+                        input.onAction?.({ tool: "assert", args: { check, target: t, expected }, ok: false, observation: error });
+                        return { success: false, error, url: page.url() };
+                    };
+                    if (NEEDS_LOCATOR.has(check) && !t) return refuse(`"${check}" needs a target`);
+                    if ((check === "attribute" || check === "css" || check === "remembered") && !name) return refuse(`"${check}" needs a name`);
+                    // The region's structure, captured now as a template a later run with other numbers still matches.
+                    if (check === "ariaSnapshot") {
+                        if (!t) return refuse('"ariaSnapshot" needs a target: the list, table or summary that shows the result');
+                        try {
+                            expected = await captureAriaTemplate(page, t as Locator, data);
+                        } catch (err) {
+                            return refuse(err instanceof Error ? err.message.split("\n")[0]! : String(err));
+                        }
+                    }
+                    if (NEEDS_EXPECTED.has(check) && (expected === undefined || expected === "")) return refuse(`"${check}" needs a non-empty expected value`);
+                    const extra = { ...(name ? { name } : {}), ...(check === "remembered" ? { compare: compare ?? "equals" } : {}) };
                     // An empty expectation makes url/title/text/value checks vacuous (e.g. toHaveURL(/(?:)/i)
                     // always passes) yet would still satisfy the "has an assertion" rule — refuse it.
                     const needsExpected = ["url", "title", "text", "value", "count"].includes(check);
@@ -317,7 +521,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         input.onAction?.({ tool: "assert", args: { check, target: t, expected }, ok: false, observation: error });
                         return { success: false, error, url: page.url() };
                     }
-                    return record({ action: "assert", check, locator: t as Locator | undefined, expected, description: why ?? "" }, "assert", { check, target: t, expected });
+                    return record({ action: "assert", check, locator: t as Locator | undefined, expected, ...extra, description: why ?? "" }, "assert", { check, target: t, expected, ...extra });
                 },
             }),
             ...(input.vision ? { lookAtScreen: makeLookAtScreen({ ctx, browser, page, scenarioId: scenario.scenarioId, observations, onAction: input.onAction }) } : {}),
@@ -345,7 +549,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         input.onAction?.({ tool: "finish", args: { result }, ok: false, observation: NO_OUTCOME_HINT });
                         return { done: false, error: NO_OUTCOME_HINT };
                     }
-                    outcome = { status: result, steps: [...recorded], testData, explanation };
+                    outcome = result === "defect" ? { status: result, steps: [...recorded], testData, explanation, ...(evidence.length ? { evidence: [...new Set(evidence)].slice(0, 15) } : {}) } : { status: result, steps: [...recorded], testData, explanation };
                     return { done: true };
                 },
             }),
@@ -411,8 +615,55 @@ ${snapshot}`;
             }
         }
         return result;
+        })());
     } finally {
+        if (traced) await keepBlockedTrace(input, session, finished);
         await session.close();
+    }
+}
+
+/** Where blocked authoring traces are kept, inside the scratch folder. On a runner that folder is the task's own and goes with the task. */
+export const AUTHORING_TRACES = "authoring-traces";
+const TRACE_MAX_AGE_MS = 60 * 60_000;
+const TRACE_MAX_TOTAL = 256 * 1024 * 1024;
+
+/**
+ * Removes kept authoring traces older than an hour (as validation's run folders are), then the oldest ones until the rest fit in
+ * 256 MB (the newest is removed last). Never throws.
+ */
+export async function pruneAuthoringTraces(scratchDir: string, now = Date.now()): Promise<void> {
+    const dir = path.join(scratchDir, AUTHORING_TRACES);
+    const names = await fs.readdir(dir).catch(() => [] as string[]);
+    const files = (await Promise.all(names.map(async (n) => ({ file: path.join(dir, n), st: await fs.stat(path.join(dir, n)).catch(() => null) })))).filter((f) => f.st?.isFile());
+    files.sort((a, b) => a.st!.mtimeMs - b.st!.mtimeMs);
+    let total = files.reduce((sum, f) => sum + f.st!.size, 0);
+    for (const f of files) {
+        if (now - f.st!.mtimeMs <= TRACE_MAX_AGE_MS && total <= TRACE_MAX_TOTAL) continue;
+        await fs.rm(f.file, { force: true }).catch(() => undefined);
+        total -= f.st!.size;
+    }
+}
+
+/** A blocked scenario keeps its authoring trace (masked with the sign-in password) in the scratch folder; any other ending drops it. Never throws. */
+async function keepBlockedTrace(input: AuthorInput, session: BrowserSession, finished: AuthorOutcome | undefined): Promise<void> {
+    try {
+        if (finished?.status !== "blocked") {
+            await session.context.tracing.stop();
+            return;
+        }
+        const file = path.join(input.ctx.config.scratchDir, AUTHORING_TRACES, `${input.scenario.scenarioId.replace(/[^\w-]/g, "_").slice(0, 60)}-${Date.now()}.zip`);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await session.context.tracing.stop({ path: file });
+        await pruneAuthoringTraces(input.ctx.config.scratchDir);
+        const clean = await scrubTraceFile(file, input.credentials?.password ? [input.credentials.password] : []);
+        if (!clean.ok) {
+            await fs.rm(file, { force: true });
+            return;
+        }
+        finished.trace = file;
+        input.ctx.emit({ stage: "generation", kind: "authoring_trace_kept", message: `${input.scenario.scenarioId}: the browser trace of the blocked attempt was kept`, data: { scenarioId: input.scenario.scenarioId } });
+    } catch {
+        /* a trace is evidence only: it never changes the outcome */
     }
 }
 

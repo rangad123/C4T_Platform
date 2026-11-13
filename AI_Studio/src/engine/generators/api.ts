@@ -11,6 +11,7 @@
  */
 import { describeStep, placeholdersIn, type Step, type TestSpec } from "../spec/schema.js";
 import type { RenderContext, RenderedScript, ScriptGenerator } from "./types.js";
+import { knownBugLine, testDetails } from "./playwright.js";
 import { dataDeclaration, dataRowsFor, dataSetDeclaration, expr, fileHeader, lit, ROW_SETUP, rowTitle, scriptFilename } from "./render-utils.js";
 import { CLEANUP_HELPER_SOURCE, canCreateRecords, cleanupScriptSource, deleteOperationsOfSpec, mergeOperations } from "../cleanup/helper.js";
 import { CONTRACT_HELPER_SOURCE } from "../contracts/check.js";
@@ -116,7 +117,7 @@ function withCleanupHook(helpers: string): string {
 }
 
 /** Interpolate {{vars}} inside an arbitrary JSON body into a JS expression. */
-function jsonExpr(value: unknown): string {
+export function jsonExpr(value: unknown): string {
     if (typeof value === "string") return expr(value);
     if (Array.isArray(value)) return `[${value.map(jsonExpr).join(", ")}]`;
     if (value && typeof value === "object") {
@@ -127,7 +128,7 @@ function jsonExpr(value: unknown): string {
     return JSON.stringify(value) ?? "undefined";
 }
 
-function recordExpr(rec: Record<string, string> | undefined): string {
+export function recordExpr(rec: Record<string, string> | undefined): string {
     if (!rec) return "undefined";
     return `{ ${Object.entries(rec)
         .map(([k, v]) => `${lit(k)}: ${expr(v)}`)
@@ -261,8 +262,8 @@ ${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec)}
 ${helpers}
 ${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupScriptSource({ testId: spec.testId, ops: mergeOperations(ctx.deleteOps, deleteOperationsOfSpec(spec)) })}` : ""}
 
-${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, { tag: ${JSON.stringify(spec.tags.map((t) => `@${t}`))} }, async ({ request }) => {
-${dataRows ? `    ${ROW_SETUP}\n    // Each row is judged on its own responses.\n    responses.length = 0;\n    calls.length = 0;\n` : ""}    ${hasLoad ? "// A load check runs for about 10 seconds (twice at most), may wait its turn behind another load check, and waits for slow answers: far more than the default time limit.\n    test.setTimeout(180_000);\n    " : ""}let last!: Call;
+${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ request }) => {
+${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n    // Each row is judged on its own responses.\n    responses.length = 0;\n    calls.length = 0;\n` : ""}    ${hasLoad ? "// A load check runs for about 10 seconds (twice at most), may wait its turn behind another load check, and waits for slow answers: far more than the default time limit.\n    test.setTimeout(180_000);\n    " : ""}let last!: Call;
 ${steps}
 });
 ${dataRows ? "}\n" : ""}`;

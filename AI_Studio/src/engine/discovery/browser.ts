@@ -6,7 +6,9 @@
  * here: cross-host *document* navigations are aborted at the network layer (context.route)
  * instead of being stopped after they start. Each session watches its page's API traffic (./network.ts).
  */
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Dialog, type Page } from "playwright";
+import type { SiteNote } from "../memory/notes.js";
+import { installOverlayHandlers, overlayRules } from "../web/interruptions.js";
 import { GuardProxy, privateTargetsBlocked } from "./guard-proxy.js";
 import { NetworkInterceptor } from "./network.js";
 
@@ -22,6 +24,46 @@ export interface SessionOptions {
      * origins only (the app and its configured API base), on the page's fetch/XHR calls. Never to any other host, and not to a redirect's next hop.
      */
     authHeaders?: { headers: Record<string, string>; origins: string[] };
+    /** The project's notes: the overlays they name ("close the newsletter popup") are closed before each action, as consent banners are. */
+    notes?: readonly SiteNote[];
+}
+
+/** What happened on the session's pages since it was last asked (see BrowserSession.takeEvents). */
+export interface SessionEvents {
+    /** Dialogs, each answered: dismissed unless a dialog step armed an answer for it. */
+    dialogs: Array<{ type: string; message: string; answer: "accepted" | "dismissed"; /** A dialog step prepared the answer. */ armed: boolean }>;
+    /** Pages (tabs, popups) opened after the first one. */
+    opened: Page[];
+    /** Console errors, page errors, and failed requests (HTTP 4xx / 5xx, network failures) to the application's own origin. */
+    problems: string[];
+    /** True when one of the problems is a server error (HTTP 5xx) from the application. */
+    serverError: boolean;
+    /** Downloads started (their suggested file names). */
+    downloads: string[];
+}
+
+type Armed = { response: "accept" | "dismiss"; promptText?: string; seen: (message: string) => void };
+const armedDialogs = new WeakMap<Page, Armed>();
+const watchedPages = new WeakSet<Page>();
+const answer = (d: Dialog, a: Armed | undefined) => {
+    a?.seen(d.message());
+    void (a?.response === "accept" ? d.accept(a.promptText) : d.dismiss()).catch(() => undefined);
+};
+/**
+ * A dialog step: the next dialog on this page is answered this way instead of being dismissed; the promise gives its message. On a page
+ * no session watches, a one-off listener does the same (Playwright dismisses dialogs nobody listens for).
+ */
+export function armDialog(page: Page, response: "accept" | "dismiss", promptText?: string): Promise<string> {
+    return new Promise((seen) => {
+        armedDialogs.set(page, { response, ...(promptText !== undefined ? { promptText } : {}), seen });
+        if (!watchedPages.has(page)) {
+            page.once("dialog", (d) => {
+                const a = armedDialogs.get(page);
+                armedDialogs.delete(page);
+                answer(d, a);
+            });
+        }
+    });
 }
 
 export class BrowserSession {
@@ -49,6 +91,8 @@ export class BrowserSession {
             storageState: opts.storageState,
             recordVideo: opts.recordVideoDir ? { dir: opts.recordVideoDir, size: { width: 1280, height: 800 } } : undefined,
             ignoreHTTPSErrors: false,
+            // Routes (the bearer token, the address guard) must see every request: a service worker would answer some itself.
+            serviceWorkers: "block",
         }).catch(async (e: unknown) => {
             await guard?.close().catch(() => undefined);
             throw e;
@@ -76,10 +120,79 @@ export class BrowserSession {
             }
         });
 
+        const rules = overlayRules(opts.notes);
+        let session: BrowserSession | undefined;
+        const early: Page[] = [];
+        context.on("page", (p) => (session ? session.watch(p, rules) : early.push(p)));
         const page = await context.newPage();
-        const session = new BrowserSession(browser, context, page, host, guard);
+        session = new BrowserSession(browser, context, page, host, guard);
+        for (const p of early) await session.watch(p, rules);
         session.network.attach(page);
         return session;
+    }
+
+    private events: SessionEvents = { dialogs: [], opened: [], problems: [], serverError: false, downloads: [] };
+
+    private inFlight = 0;
+    /**
+     * After an action: a short pause for what it starts (a new tab, a fetch), then until the session's requests are answered (at most
+     * `ms`). Playwright's "networkidle" cannot tell: once a page reached it, waiting for it returns at once.
+     */
+    async quiet(ms = 1_500): Promise<void> {
+        const end = Date.now() + ms;
+        await new Promise((r) => setTimeout(r, 250));
+        while (this.inFlight > 0 && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+    }
+
+    /** What happened since the last call (dialogs answered, tabs opened, errors), then forgotten. */
+    takeEvents(): SessionEvents {
+        const e = this.events;
+        this.events = { dialogs: [], opened: [], problems: [], serverError: false, downloads: [] };
+        return e;
+    }
+
+    /** Every page of the session: dialogs are dismissed (never accepted unless a step armed it), overlays closed, problems noted. */
+    private async watch(p: Page, rules: ReturnType<typeof overlayRules>): Promise<void> {
+        if (watchedPages.has(p)) return;
+        watchedPages.add(p);
+        if (p !== this.page) this.events.opened.push(p);
+        const problem = (text: string) => {
+            if (this.events.problems.length < 20) this.events.problems.push(text.replace(/\s+/g, " ").slice(0, 300));
+        };
+        const own = (url: string) => {
+            try {
+                return new URL(url).host === this.host;
+            } catch {
+                return false;
+            }
+        };
+        const where = (url: string) => {
+            const u = new URL(url);
+            return u.pathname + (u.search ? "?…" : "");
+        };
+        p.on("dialog", (d) => {
+            const armed = armedDialogs.get(p);
+            armedDialogs.delete(p);
+            this.events.dialogs.push({ type: d.type(), message: d.message().slice(0, 300), answer: armed?.response === "accept" ? "accepted" : "dismissed", armed: !!armed });
+            answer(d, armed);
+        });
+        p.on("request", () => void this.inFlight++);
+        p.on("requestfinished", () => void (this.inFlight = Math.max(0, this.inFlight - 1)));
+        p.on("console", (m) => void (m.type() === "error" && problem(`Console error: ${m.text()}`)));
+        p.on("pageerror", (e) => problem(`Page error: ${e.message}`));
+        p.on("response", (r) => {
+            if (r.status() < 400 || !own(r.url())) return;
+            if (r.status() >= 500) this.events.serverError = true;
+            problem(`${r.request().method()} ${where(r.url())} answered HTTP ${r.status()}`);
+        });
+        p.on("requestfailed", (r) => {
+            this.inFlight = Math.max(0, this.inFlight - 1);
+            const why = r.failure()?.errorText ?? "";
+            // Requests the guard stopped on purpose and requests a navigation cancelled are not the application's errors.
+            if (own(r.url()) && !/BLOCKED_BY_CLIENT|ERR_ABORTED/i.test(why)) problem(`${r.method()} ${where(r.url())} failed: ${why}`);
+        });
+        p.on("download", (d) => void this.events.downloads.push(d.suggestedFilename()));
+        await installOverlayHandlers(p, rules);
     }
 
     async close(): Promise<void> {

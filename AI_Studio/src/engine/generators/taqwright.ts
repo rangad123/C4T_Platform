@@ -17,6 +17,7 @@ import type { RenderContext, RenderedScript, ScriptGenerator } from "./types.js"
 import { commentSafe, concreteLocator, dataDeclaration, expr, fileHeader, lit, scriptFilename } from "./render-utils.js";
 import { renderPermissionStep } from "../mobile/state/permission-step.js";
 // Phone check tests (start-up, accessibility) carry a marker line the mobile runner reads; every other test renders exactly as before ("").
+import { webOnlyProblem } from "../web/checks.js";
 import { phoneCheckMarker } from "../mobile/quality/findings.js";
 // How every phone test starts (the launcher activity the runner resolved on the phone) and its system dialog watch (RUN, round 24).
 import { PHONE_START_IMPORT, phoneStartHooks } from "../mobile/device/start-script.js";
@@ -41,6 +42,9 @@ function baseLocator(l: Pick<StepLocator, "by" | "value" | "role">, value: (v: s
             return `mobile.getByTestId(${value(l.value ?? "")})`;
         case "css":
             return `mobile.getByCss(${value(l.value ?? "")})`;
+        case "altText":
+        case "title":
+            throw new Error(`Finding an element by ${l.by} works on web pages only and cannot be rendered as a mobile UI test`);
     }
 }
 
@@ -187,7 +191,12 @@ function renderStep(step: Step, platform: TestSpec["platform"] = "android"): str
             throw new Error(`The reusable steps “${step.block}” were not expanded before the script was rendered`);
         case "upload":
         case "drag":
+        case "dialog":
+        case "download":
         case "email":
+        case "remember":
+        case "clock":
+        case "condition":
             // Web page steps (test files, drag and drop): a phone test has no file field or HTML drag events to drive.
             throw new Error(`The step "${step.action}" works on web pages only and cannot be rendered as a mobile UI test`);
     }
@@ -201,6 +210,9 @@ export const taqwrightGenerator: ScriptGenerator = {
         const steps = spec.steps
             .map((step, i) => {
                 const title = `${i + 1}. ${describeStep(step)}`;
+                // Checks, waits and locator narrowing only a web page has are refused in plain words, never rendered as nothing.
+                const webOnly = webOnlyProblem(step);
+                if (webOnly) throw new Error(`Step ${i + 1}: ${webOnly} and cannot be rendered as a mobile UI test`);
                 return `    await test.step(${lit(title)}, async () => {\n        ${renderStep(step, spec.platform)}\n    });`;
             })
             .join("\n");

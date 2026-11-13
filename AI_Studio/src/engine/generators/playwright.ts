@@ -38,8 +38,21 @@ import {
 import { maxDiffPixels, snapshotName } from "../visual/baseline.js";
 import { MAIN_PAGE_ONLY_CHECKS, POPUP_SETUP, UPLOAD_HELPER_SOURCE, UPLOAD_IMPORTS, usesPopups } from "../web/pages.js";
 import { EMAIL_HELPER_SOURCE, renderEmailStep, usesEmail } from "../auth/email-step.js";
+import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, overlayHelperSource, overlayRules } from "../web/interruptions.js";
+import { renderClock, renderCondition, renderPinnedTime } from "../web/conditions.js";
+import { classPattern, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
+import { jsonExpr, recordExpr } from "./api.js";
 
-function renderStep(step: Step, snapshotName: string): string {
+const isResponseWait = (s: Step | undefined) => s?.action === "wait" && s.until === "response";
+/** The final outcome checks of a test (the asserts after its last other step) that run as soft assertions: every one is tried, the first failure is reported. */
+function softOutcomeChecks(steps: readonly Step[]): Set<number> {
+    const last = steps.findLastIndex((s) => s.action !== "assert");
+    const soft = steps.flatMap((s, i) => (i > last && s.action === "assert" && SOFT_CHECKS.has(s.check) && !(s.check === "remembered") ? [i] : []));
+    // One check gains nothing from being soft: such scripts read exactly as before.
+    return new Set(soft.length >= 2 ? soft : []);
+}
+
+function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: string): string {
     const L = (l: Parameters<typeof locatorCall>[1]) => locatorCall("page", l);
     switch (step.action) {
         case "navigate":
@@ -50,7 +63,12 @@ function renderStep(step: Step, snapshotName: string): string {
                 ? `const popupOpened = page.waitForEvent("popup");\n        await ${L(step.locator)}.click();\n        popup = await popupOpened;\n        await popup.waitForLoadState("domcontentloaded");`
                 : `await ${L(step.locator)}.click();`;
         case "upload":
-            return `await uploadTestFile(page, ${L(step.locator)}, ${lit(step.file)});`;
+            return `await uploadTestFile(page, ${L(step.locator)}, ${lit(step.file)}${step.drop ? ", true" : ""});`;
+        case "dialog":
+            // Armed before the step that opens the dialog; that step checks it appeared (see dialogCheck in render()).
+            return `dialogPending = armDialog(page, ${lit(step.response)}${step.promptText !== undefined ? `, ${expr(step.promptText)}` : ""});\n        dialogExpected = ${step.message !== undefined ? expr(step.message) : '""'};`;
+        case "download":
+            return `await downloadChecked(page, ${L(step.locator)}, ${step.filename !== undefined ? expr(step.filename) : '""'});`;
         case "drag":
             // dragTo moves the pointer the way a person does, which fires the HTML5 drag events (dragstart, dragover, drop).
             return `await ${L(step.locator)}.dragTo(${L(step.target)});`;
@@ -67,12 +85,47 @@ function renderStep(step: Step, snapshotName: string): string {
         case "hover":
             return `await ${L(step.locator)}.hover();`;
         case "wait":
+            if (step.until === "url") return `await page.waitForURL(${regexFromText(step.value ?? "")});`;
+            // Listened for from the step before (see render()), so a response that came while that step ran is not missed.
+            if (step.until === "response") return `const seen = await responseWaits[${index}];
+        if (seen instanceof Error) throw seen;`;
+            if (step.until) {
+                if (!step.locator) throw new Error(`Waiting until an element is ${step.until} needs the element (a locator)`);
+                return `await ${L(step.locator)}.waitFor({ state: ${lit(step.until)} });`;
+            }
             return `await page.waitForTimeout(${step.ms});`;
+        case "remember":
+            return `data[${lit(step.name)}] = ${step.from === "value" ? `await ${L(step.locator)}.inputValue()` : `(await ${L(step.locator)}.innerText()).replace(/\\s+/g, " ").trim()`};`;
         case "assert":
-            return renderAssert(step, snapshotName);
-        case "request":
-        case "assertResponse":
-            throw new Error(`Step "${step.action}" is API-only and cannot be rendered by the Playwright web generator`);
+            return renderAssert(step, snapshotName, softMessage);
+        case "request": {
+            // Through the page's request context: the browser's cookies for that site go with it (see ../web/checks.ts).
+            const extract = Object.entries(step.extract ?? {}).map(([name, path]) => `\n        data[${lit(name)}] = capture(last, ${lit(name)}, ${lit(path)});`).join("");
+            return `last = await webRequest(page, ${lit(step.method)}, ${expr(step.path)}, { query: ${recordExpr(step.query)}, headers: ${recordExpr(step.headers)}, body: ${step.body === undefined ? "undefined" : jsonExpr(step.body)} });${extract}`;
+        }
+        case "assertResponse": {
+            const text = expr(String(step.expected ?? ""));
+            switch (step.check) {
+                case "status":
+                    return `expect(last.status).toBe(${Number(step.expected)});`;
+                case "statusClass":
+                    return `expect(Math.floor(last.status / 100)).toBe(${Number(String(step.expected).charAt(0))});`;
+                case "statusBelow":
+                    return `expect(last.status).toBeLessThan(${Number(step.expected)});`;
+                case "jsonPath":
+                    return step.expected === undefined ? `expect(at(last.json, ${lit(step.path ?? "")})).toBeDefined();` : `expect(String(at(last.json, ${lit(step.path ?? "")}))).toBe(${text});`;
+                case "jsonType":
+                    return `expect(typeOf(${step.path ? `at(last.json, ${lit(step.path)})` : "last.json"})).toBe(${lit(String(step.expected))});`;
+                case "header":
+                    return `expect(last.headers[${lit((step.path ?? "").toLowerCase())}] ?? "").toContain(${text});`;
+                case "bodyContains":
+                    return `expect(last.text).toContain(${text});`;
+                case "bodyNotContains":
+                    return `expect(last.text).not.toContain(${text});`;
+                default:
+                    throw new Error(`The response check "${step.check}" runs in API tests only`);
+            }
+        }
         case "launchApp":
         case "closeApp":
             throw new Error(`Step "${step.action}" is for Windows desktop tests and cannot be rendered by the Playwright web generator`);
@@ -82,10 +135,16 @@ function renderStep(step: Step, snapshotName: string): string {
         case "email":
             // Emailed codes and magic links: the platform reads the test mailbox and answers the script (see ../auth/email-step.ts).
             return renderEmailStep(step, L, expr, lit);
+        case "clock":
+            return renderClock(step);
+        case "condition":
+            return renderCondition(step);
     }
 }
 
-function renderAssert(step: Extract<Step, { action: "assert" }>, snapshotName: string): string {
+function renderAssert(step: Extract<Step, { action: "assert" }>, snapshotName: string, softMessage?: string): string {
+    // A final outcome check runs soft (the test goes on to the next check; the step still reports its failure) and names its step.
+    const E = (t: string) => (softMessage !== undefined ? `expect.soft(${t}, ${lit(softMessage)})` : `expect(${t})`);
     const target = step.locator
         ? locatorCall("page", step.locator)
         : step.expected !== undefined && (step.check === "visible" || step.check === "hidden")
@@ -94,23 +153,63 @@ function renderAssert(step: Extract<Step, { action: "assert" }>, snapshotName: s
     const exp = step.expected !== undefined ? expr(String(step.expected)) : '""';
     switch (step.check) {
         case "visible":
-            return `await expect(${target}).toBeVisible();`;
+            return `await ${E(target)}.toBeVisible();`;
         case "hidden":
-            return `await expect(${target}).toBeHidden();`;
+            return `await ${E(target)}.toBeHidden();`;
         case "enabled":
-            return `await expect(${target}).toBeEnabled();`;
+            return `await ${E(target)}.toBeEnabled();`;
         case "disabled":
-            return `await expect(${target}).toBeDisabled();`;
+            return `await ${E(target)}.toBeDisabled();`;
         case "text":
-            return `await expect(${target}).toContainText(${exp});`;
+            return `await ${E(target)}.toContainText(${exp});`;
         case "value":
-            return `await expect(${target}).toHaveValue(${exp});`;
+            return `await ${E(target)}.toHaveValue(${exp});`;
         case "count":
-            return `await expect(${target}).toHaveCount(${Number(step.expected ?? 0)});`;
+            return `await ${E(target)}.toHaveCount(${Number(step.expected ?? 0)});`;
         case "url":
-            return `await expect(page).toHaveURL(${regexFromText(step.expected ?? "")});`;
+            return `await ${E("page")}.toHaveURL(${regexFromText(step.expected ?? "")});`;
         case "title":
-            return `await expect(page).toHaveTitle(${regexFromText(step.expected ?? "")});`;
+            return `await ${E("page")}.toHaveTitle(${regexFromText(step.expected ?? "")});`;
+        case "checked":
+            return `await ${E(target)}.toBeChecked();`;
+        case "unchecked":
+            return `await ${E(target)}.toBeChecked({ checked: false });`;
+        case "focused":
+            return `await ${E(target)}.toBeFocused();`;
+        case "editable":
+            return `await ${E(target)}.toBeEditable();`;
+        case "inViewport":
+            return `await ${E(target)}.toBeInViewport();`;
+        case "attribute":
+            if (!step.name) throw new Error('The check "attribute" needs the attribute name');
+            return `await ${E(target)}.toHaveAttribute(${lit(step.name)}${step.expected !== undefined ? `, ${exp}` : ""});`;
+        case "class":
+            // toHaveClass with a whole-word pattern (Playwright 1.20) instead of toContainClass (1.52): downloaded projects run older versions too.
+            return `await ${E(target)}.toHaveClass(${classPattern(String(step.expected ?? "")).toString()});`;
+        case "css":
+            if (!step.name) throw new Error('The check "css" needs the CSS property name');
+            return `await ${E(target)}.toHaveCSS(${lit(step.name)}, ${exp});`;
+        case "accessibleName":
+            return `await ${E(target)}.toHaveAccessibleName(${exp});`;
+        case "accessibleErrorMessage":
+            return `await ${E(target)}.toHaveAccessibleErrorMessage(${regexFromText(step.expected ?? "")});`;
+        case "exactText":
+            return `await ${E(target)}.toHaveText(${exp});`;
+        case "notText":
+            return `await ${E(target)}.not.toContainText(${exp});`;
+        case "urlPattern":
+            // Placeholders are not read in a pattern: it is matched as written.
+            return `await ${E("page")}.toHaveURL(${urlPatternRegex(String(step.expected ?? "")).toString()});`;
+        case "ariaSnapshot":
+            // The template is matched as written ({{...}} is not read inside it).
+            return `await ${E(target)}.toMatchAriaSnapshot(${lit(String(step.expected ?? ""))});`;
+        case "remembered": {
+            const kept = `recalled(${lit(step.name ?? "")})`;
+            if (step.compare === "greater" || step.compare === "less") {
+                return `await expect.poll(async () => numberIn(await ${target}.innerText()), { message: ${lit(describeStep(step))} }).${step.compare === "greater" ? "toBeGreaterThan" : "toBeLessThan"}(numberIn(${kept}));`;
+            }
+            return `await ${E(target)}.${step.compare === "contains" ? "toContainText" : "toHaveText"}(${kept});`;
+        }
         case "a11y": {
             // axe only takes CSS selectors: a plain css locator is passed through; any other
             // strategy (or css + nth) is resolved by Playwright and tagged inside a11yAudit().
@@ -194,6 +293,21 @@ async function a11yAudit(page: Page, minImpact: string, scope?: string | Locator
 }
 `;
 
+/** The test's details (tags, and annotations naming its scenario and requirements) as source text. Shared with the API generator. */
+export function testDetails(spec: TestSpec): string {
+    const annotation = [
+        ...(spec.source.scenarioId ? [{ type: "scenario", description: spec.source.scenarioId }] : []),
+        ...(spec.source.requirements ?? []).slice(0, 20).map((r) => ({ type: "requirement", description: r.slice(0, 200) })),
+    ];
+    return `{ tag: ${JSON.stringify(spec.tags.map((t) => `@${t}`))}${annotation.length ? `, annotation: ${JSON.stringify(annotation)}` : ""} }`;
+}
+
+/** First line of the test body for a test linked to an open bug: Playwright expects it to fail, and a pass says the bug seems fixed. */
+export function knownBugLine(spec: TestSpec, ctx: RenderContext): string {
+    const bug = ctx.knownBugs?.[spec.testId];
+    return bug ? `    test.fail(true, ${lit(`Tracks the open bug ${bug.slice(0, 300)}`)});\n` : "";
+}
+
 export const playwrightGenerator: ScriptGenerator = {
     framework: "playwright",
     kind: "web",
@@ -206,6 +320,17 @@ export const playwrightGenerator: ScriptGenerator = {
         // Stored sign-in details are only ever typed on the application's own site: refused here when a step goes elsewhere first, and checked
         // again in the script against the page's real address right before the value is used (a redirect cannot get around it).
         assertCredentialsStayHome(spec, ctx);
+        // Requests inside a web test go only to the application or its API address, and are judged by the answer checks a web test runs.
+        const requestProblems = webRequestProblems(spec, ctx);
+        if (requestProblems.length) throw new Error(requestProblems.join(" "));
+        const soft = softOutcomeChecks(spec.steps);
+        // A wait for a response listens from the step before it (or from its own start when it is the first step), so the response is not missed.
+        const listen = (i: number): string => {
+            const at = isResponseWait(spec.steps[i + 1]) ? i + 1 : i === 0 && isResponseWait(spec.steps[0]) ? 0 : -1;
+            if (at < 0) return "";
+            const wait = spec.steps[at] as Extract<Step, { action: "wait" }>;
+            return `responseWaits[${at}] = page.waitForResponse((r) => r.url().includes(${expr(wait.value ?? "")})).catch((e: Error) => e);\n        `;
+        };
         const usesCredentials = specUsesCredentials(spec);
         const originCheck = (step: Step): string =>
             !usesCredentials || !stepUsesCredentials(step, spec.testData)
@@ -219,10 +344,16 @@ export const playwrightGenerator: ScriptGenerator = {
             if (step.action === "assert" && MAIN_PAGE_ONLY_CHECKS.has(step.check)) throw new Error(`The check "${step.check}" works on the page the test started on, not in a popup`);
             return "const page = popupPage();\n        ";
         };
+        // Dialogs: the step after a dialog step checks the dialog appeared and said what it should.
+        const dialogs = spec.steps.some((s) => s.action === "dialog");
+        const dialogCheck = (i: number) => (i > 0 && spec.steps[i - 1]!.action === "dialog" ? "\n        await dialogShown(dialogPending, dialogExpected);\n        dialogPending = undefined;" : "");
+        // Consent banners and the overlays the project's notes name are closed before each action (../web/interruptions.ts).
+        const interruptions = `\n${overlayHelperSource(overlayRules(ctx.notes))}${dialogs ? `\n${DIALOG_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "download") ? `\n${DOWNLOAD_HELPER_SOURCE}` : ""}`;
+        const interruptionSetup = `    await installOverlayHandlers(page);\n${dialogs ? '    let dialogPending: Promise<string> | undefined;\n    let dialogExpected = "";\n' : ""}`;
         const steps = spec.steps
             .map((step, i) => {
                 const title = `${i + 1}. ${describeStep(step)}`;
-                const body = `async () => {\n        ${inPopup(step)}${originCheck(step)}${renderStep(step, snapshotName(spec.testId, i))}\n    }`;
+                const body = `async () => {\n        ${inPopup(step)}${originCheck(step)}${listen(i)}${renderStep(step, snapshotName(spec.testId, i), i, soft.has(i) ? title : undefined)}${dialogCheck(i)}\n    }`;
                 // The evidence recorder labels what happens from here on with this step's number.
                 return isHealth(step)
                     ? `    evidenceStep(page, ${i + 1});\n    await test.step(${lit(title)}, ${body}).catch((e) => healthFailures.push(e));`
@@ -231,9 +362,12 @@ export const playwrightGenerator: ScriptGenerator = {
             .join("\n");
         // The collector listens from the very first moment, i.e. before the first navigation.
         const healthSetup = health ? `    const health = installHealthCollector(page, new URL(BASE_URL).origin);\n    const healthFailures: unknown[] = [];\n` : "";
-        const healthEnd = health ? `\n    if (healthFailures.length) throw healthFailures[0];` : "";
+        const healthEnd = `${health ? `\n    if (healthFailures.length) throw healthFailures[0];` : ""}${soft.size ? `\n    // The outcome checks above ran soft so each one reports; this hard check makes sure the test still fails when one did.\n    expect(test.info().errors.length, "Outcome checks failed (see the steps above)").toBe(0);` : ""}`;
+        const responseSetup = spec.steps.some(isResponseWait) ? "    const responseWaits: Record<number, Promise<unknown>> = {};\n" : "";
+        const remembers = spec.steps.some((s) => s.action === "remember" || (s.action === "assert" && s.check === "remembered"));
+        const requests = spec.steps.some((s) => s.action === "request");
         // Popups and uploads add their pieces only to the scripts that use them, so every other script stays exactly as it was.
-        const popupSetup = usesPopups(spec) ? POPUP_SETUP : "";
+        const popupSetup = interruptionSetup + (usesPopups(spec) ? POPUP_SETUP : "");
         const uploads = spec.steps.some((s) => s.action === "upload");
 
         // Only scripts that audit accessibility depend on @axe-core/playwright.
@@ -244,7 +378,8 @@ export const playwrightGenerator: ScriptGenerator = {
         const dataRows = dataRowsFor(spec, ctx);
         // Generated test data (testData.runTag): the records the page creates with it are written down for cleanup.
         const runTag = runTagOf(spec);
-        const content = `${fileHeader(spec, "Playwright")}
+        const newer = newerPlaywrightNeeded(spec);
+        const content = `${fileHeader(spec, "Playwright")}${newer ? `\n${needsPlaywrightLine(newer)}` : ""}
 import { test, expect } from "@playwright/test";
 ${RUN_ADDRESS_IMPORT}${a11yImports}${needsTotp(spec) ? 'import { createHmac } from "node:crypto";\n' : ""}${uploads ? UPLOAD_IMPORTS : ""}${runTag ? 'import * as cleanupFs from "node:fs";\nimport * as cleanupPath from "node:path";\n' : ""}
 const BASE_URL = process.env.BASE_URL ?? ${lit(ctx.baseUrl)};
@@ -258,9 +393,9 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }, testInfo) => {
     await evidenceAttach(page, testInfo);
 });
-${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
-${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, { tag: ${JSON.stringify(spec.tags.map((t) => `@${t}`))} }, async ({ page }) => {
-${dataRows ? `    ${ROW_SETUP}\n` : ""}${healthSetup}${popupSetup}${steps}${healthEnd}
+${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${interruptions}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
+${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ page }) => {
+${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
 });
 ${dataRows ? "}\n" : ""}`;
         return { framework: "playwright", filename: scriptFilename(spec), content, language: "typescript" };

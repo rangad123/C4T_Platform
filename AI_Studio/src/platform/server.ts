@@ -1,4 +1,5 @@
 import dns from "node:dns/promises";
+import { withProjectNotes } from "./render-context.js";
 import { effectiveLimits, isLevel, LEVEL_SETTINGS, LEVELS } from "../engine/levels.js";
 import fs from "node:fs";
 import net from "node:net";
@@ -943,7 +944,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const origin = new URL(repo.getLatestApplicationPublic(t.projectId)?.url as string).origin;
         let script;
         try {
-            script = renderWithAdapter(t.spec, framework, { baseUrl: origin, dataSets: dataSetsFor(repo, t.projectId), ...(objectsFor(repo, t.projectId) ? { objects: objectsFor(repo, t.projectId) } : {}), ...(blocksFor(repo.db, t.projectId) ? { blocks: blocksFor(repo.db, t.projectId) } : {}) });
+            script = renderWithAdapter(t.spec, framework, await withProjectNotes(repo.db, t.projectId, { baseUrl: origin, dataSets: dataSetsFor(repo, t.projectId), ...(objectsFor(repo, t.projectId) ? { objects: objectsFor(repo, t.projectId) } : {}), ...(blocksFor(repo.db, t.projectId) ? { blocks: blocksFor(repo.db, t.projectId) } : {}) }));
         } catch (e) {
             throw new HttpError(422, e instanceof Error ? e.message : "Cannot render this spec for that framework");
         }

@@ -164,7 +164,7 @@ export class HardSignInExecutor implements ScriptExecutor {
 
     constructor(
         private readonly inner: ScriptExecutor,
-        private readonly session: { state: StorageState; appUrl: string } | undefined,
+        private readonly session: { state: StorageState; appUrl: string; checkUrl?: string } | undefined,
         private readonly mail: MailSource | undefined,
     ) {
         this.name = inner.name;
@@ -174,7 +174,7 @@ export class HardSignInExecutor implements ScriptExecutor {
     execute(adapterId: string, batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions): Promise<ScriptRun[]> {
         const sessionApplies = this.session && sameOrigin(env.run.baseUrl, this.session.appUrl);
         const scripts = sessionApplies ? batch.scripts.map((s) => (s.custom || signsInByItself(s.content) ? s : { ...s, session: true })) : batch.scripts;
-        const runEnv = sessionApplies && scripts.some((s) => s.session) ? { ...env.run, storageState: JSON.stringify(this.session!.state) } : env.run;
+        const runEnv = sessionApplies && scripts.some((s) => s.session) ? { ...env.run, storageState: JSON.stringify({ ...this.session!.state, ...(this.session!.checkUrl ? { checkUrl: this.session!.checkUrl } : {}) }) } : env.run;
         return this.inner.execute(adapterId, { ...batch, scripts }, { ...env, run: runEnv }, this.mail && !this.inner.remote ? { ...opts, mail: this.mail } : opts);
     }
 }
@@ -201,7 +201,8 @@ export async function prepareJobSignIn(ctx: EngineContext, db: Db, config: Pick<
     const mail = mailSourceFor(store, projectId);
     const saved = store.sessionState(projectId, MAIN_ACCOUNT);
     const applies = saved && sameOrigin(saved.row.appUrl, appUrl);
-    let session: { state: StorageState; appUrl: string } | undefined;
+    // The check page goes with the session, so a run can sign in again once when the session runs out meanwhile (auth/run-session.ts).
+    let session: { state: StorageState; appUrl: string; checkUrl?: string } | undefined;
     if (saved && applies) {
         const expires = saved.row.expiresAt ? Date.parse(saved.row.expiresAt) : undefined;
         if (expires !== undefined && expires <= Date.now()) {
@@ -212,7 +213,7 @@ export async function prepareJobSignIn(ctx: EngineContext, db: Db, config: Pick<
         if (config.EXECUTION_MODE === "runners") {
             // This server opens no browser (runner-only.ts): the sign-in is not checked first. It goes to the runner as it is, and a test that finds it expired fails and says so.
             ctx.emit({ stage: "orchestration", kind: "sign_in_unchecked", level: "warn", message: "The saved sign-in was not checked before the run: tests run only on runners here, and the platform opens no browser of its own. It goes to the runner with the tests." });
-            session = { state: saved.state, appUrl: saved.row.appUrl };
+            session = { state: saved.state, appUrl: saved.row.appUrl, checkUrl: saved.row.checkUrl };
         }
     }
     if (saved && applies && !session) {
@@ -231,7 +232,7 @@ export async function prepareJobSignIn(ctx: EngineContext, db: Db, config: Pick<
             if (!v.signedIn) return { stop: signInAgainMessage(MAIN_ACCOUNT, v.reason) };
             ctx.emit({ stage: "orchestration", kind: "sign_in_saved_session", message: "Tests start signed in with the saved sign-in (tests that sign in by themselves start signed out)." });
         }
-        session = { state: saved.state, appUrl: saved.row.appUrl };
+        session = { state: saved.state, appUrl: saved.row.appUrl, checkUrl: saved.row.checkUrl };
     }
     const inner = ctx.executor ?? localExecutor;
     if (session || mail) ctx.executor = new HardSignInExecutor(inner, session, mail);

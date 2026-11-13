@@ -152,6 +152,8 @@ export interface AppModel {
     journeys: JourneyModel[];
     /** Hosts the app talks to that are not its own (analytics, CDNs, payment providers...). */
     externalDependencies: string[];
+    /** WebSocket endpoints the app's pages opened while exploring (no query string), and on which pages. Absent on older models. */
+    webSockets?: Array<{ url: string; usedIn: string[] }>;
     /** Test cases / API docs found on the site itself (e.g. /test_cases, /api_list), see discovery/docs.ts. */
     documentedTestCases: Array<{ id?: string; name: string; description?: string; steps?: string[]; category?: string }>;
     stats: { pagesVisited: number; pagesSkipped: number; apisFound: number; durationMs: number };

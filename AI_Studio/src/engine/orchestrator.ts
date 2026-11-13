@@ -49,7 +49,7 @@ import { TestSpecSchema, type Scenario, type TestSpec } from "./spec/schema.js";
 import { analyzeApplication } from "./understanding/analyzer.js";
 import type { ApiEndpointModel, AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
-import { runVariantChecks, type VariantRecord } from "./validation/variants.js";
+import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
 import { authorWebSpec, toSpec } from "./web/author.js";
 import { checkStrength } from "./mutation/strength.js";
@@ -300,6 +300,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 allowedHosts: req.apiBaseUrl ? [new URL(req.apiBaseUrl).host] : [],
                 ...(req.savedSession ? { storageState: req.savedSession.storageState } : {}),
                 authHeaders: { headers: exploreAuth, origins: [origin, ...(req.apiBaseUrl ? [req.apiBaseUrl] : [])] },
+                ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
             });
             try {
                 if (req.savedSession) {
@@ -441,6 +442,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     openApi: openApiInfo,
                     authentication: authState,
                     externalDependencies: external,
+                    ...(session.network.getWebSockets().length ? { webSockets: session.network.getWebSockets() } : {}),
                     documentedTestCases,
                     stats: { pagesVisited: pages.length, pagesSkipped: skipped, apisFound: apis.length, durationMs: Date.now() - started },
                     ...(wantWeb && pages.length ? { screenMap: buildScreenMap({ pages, transitions: crawlTransitions }, roleCrawls) } : {}),
@@ -564,7 +566,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         const handles = new Map<string, TestHandle>();
         /** Current script row per test, so executions always reference the script version that ran. */
         const scriptIds = new Map<string, string>();
-        const renderCtx = { baseUrl: origin, apiBaseUrl: req.apiBaseUrl ?? (specBaseTrusted ? model.openApi?.baseUrl : undefined) ?? origin, deleteOps: deleteOperationsOf(model.apis) };
+        const renderCtx = { baseUrl: origin, apiBaseUrl: req.apiBaseUrl ?? (specBaseTrusted ? model.openApi?.baseUrl : undefined) ?? origin, deleteOps: deleteOperationsOf(model.apis), ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}) };
 
         /** What each new test was created with, so later additions (its strength) keep the rest. */
         const metas = new Map<string, Record<string, unknown>>();
@@ -841,6 +843,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     maxRepairAttempts: ctx.config.MAX_REPAIR_ATTEMPTS < 2 ? ctx.config.MAX_REPAIR_ATTEMPTS : levelSettings(req).repairAttempts,
                     // A new test that still fails runs once more, so its reason says flaky or broken.
                     confirmFailures: true,
+                    // A new test that passed runs the level's number of times more; any failure makes it flaky.
+                    repeatPasses: levelSettings(req).repeatPasses,
                     workers: ctx.config.CONCURRENCY,
                     cleanup: req.cleanup,
                 },
@@ -893,11 +897,22 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     req.variants,
                 );
             }
+            // Deep and Everything: the key validated web tests also run under the level's conditions (dark mode, another locale), unless asked for already.
+            const levelConditions = levelSettings(req).conditionVariants.filter((v) => !req.variants?.includes(v));
+            if (levelConditions.length) {
+                throwIfAborted(ctx.signal);
+                await runVariantChecks(
+                    ctx,
+                    { scratchDir: ctx.config.scratchDir, env: { baseUrl: origin, credentials: creds, roles: req.roles, headless: ctx.config.HEADLESS }, render: renderCtx, workers: ctx.config.CONCURRENCY, sink },
+                    outcomes.flatMap((o) => (o.status === "NOT_RUN" || !isKeyTest(o.spec) ? [] : [{ handle: handles.get(o.spec.testId)!, spec: o.spec, validationStatus: o.status, scriptId: scriptIds.get(o.spec.testId) }])),
+                    levelConditions,
+                );
+            }
             // Testing the tests: validated web tests replayed with deliberate faults in their browser; one that misses some is given a stronger check once.
             throwIfAborted(ctx.signal);
             const strength = await checkStrength(
                 ctx,
-                { scratchDir: ctx.config.scratchDir, env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, headless: ctx.config.HEADLESS }, render: renderCtx, workers: ctx.config.CONCURRENCY, browser, baseUrl: origin, model, credentials: creds && authState.loggedIn ? creds : undefined, maxSteps: levelSettings(req).authoringMaxSteps, limit: levelSettings(req).strengthTests },
+                { scratchDir: ctx.config.scratchDir, env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, headless: ctx.config.HEADLESS }, render: renderCtx, workers: ctx.config.CONCURRENCY, browser, baseUrl: origin, model, credentials: creds && authState.loggedIn ? creds : undefined, maxSteps: levelSettings(req).authoringMaxSteps, limit: levelSettings(req).strengthTests, webSockets: Boolean(model.webSockets?.length) },
                 outcomes.flatMap((o) => (o.status === "NOT_RUN" ? [] : [{ spec: o.spec, validationStatus: o.status, scenario: pending.find((t) => t.spec.testId === o.spec.testId)?.scenario }])),
                 {
                     async onStrengthened(testId, spec, run) {

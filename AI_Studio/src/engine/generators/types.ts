@@ -18,6 +18,10 @@ export interface RenderContext {
     objects?: import("../locators/refs.js").ObjectIndex;
     /** The project's reusable steps. A `useBlock` step is replaced by the block's steps before rendering (see ../blocks/expand.ts); generators never see one. */
     blocks?: import("../blocks/model.js").BlockIndex;
+    /** The project's notes for the AI: the overlays they name ("close the newsletter popup") are closed in web scripts, as consent banners are. */
+    notes?: readonly import("../memory/notes.js").SiteNote[];
+    /** Open bugs linked to tests (test id -> the bug's reference, e.g. "PROJ-12 https://..."): such a test renders as `test.fail()`, so it stays green while the bug is there. */
+    knownBugs?: Record<string, string>;
 }
 
 export interface RenderedScript {

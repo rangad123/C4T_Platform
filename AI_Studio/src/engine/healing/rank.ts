@@ -143,6 +143,10 @@ export function describeLocator(l: Locator): string {
             return `the element marked ${quote(v)}`;
         case "css":
             return `the element matching ${quote(v)}`;
+        case "altText":
+            return `the image described as ${quote(v)}`;
+        case "title":
+            return `the element titled ${quote(v)}`;
     }
 }
 
