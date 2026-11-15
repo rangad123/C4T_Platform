@@ -38,6 +38,7 @@ import { registerImportRoutes } from "./imports.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerMemoryRoutes } from "./memory.js";
 import { registerNotesRoutes } from "./notes.js";
+import { registerAppIntelRoutes } from "./app-intel.js";
 import { registerOpsRoutes } from "./ops.js";
 import { registerLocatorRoutes } from "./locators.js";
 import { registerManualCaseRoutes } from "./manual-cases.js";
@@ -88,6 +89,7 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerMemoryRoutes(ctx);
     // Notes for the AI, written by people (routes/notes.ts, round 53).
     registerNotesRoutes(ctx);
+    registerAppIntelRoutes(ctx);
     registerEnvironmentRoutes(ctx);
     registerHealingRoutes(ctx);
     registerTriggerRoutes(ctx);

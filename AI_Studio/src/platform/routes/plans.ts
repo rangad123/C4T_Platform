@@ -40,8 +40,19 @@ const CreateBody = z
         accessChecks: z.boolean().optional(),
         visual: z.boolean().optional(),
         excludeIdeas: z.array(z.string().min(1).max(100)).max(500).optional(),
+        /**
+         * Create the rest of a plan whose earlier creation was stopped (every earlier creation from it was cancelled before it finished,
+         * or ended unfinished by itself because the AI provider kept limiting requests): the ideas already made are listed in
+         * excludeIdeas. Off by default: a plan is created once.
+         */
+        continueStopped: z.boolean().optional(),
     })
     .strict();
+
+/** The AI layer's words for a rate-limited provider in a job's error (engine/llm/errors.ts), and the provider's own. */
+const RATE_LIMITED = /rate[ _-]?limit|too many requests|\b429\b|limiting how many requests/i;
+/** A creation that did not make all of its plan and may be continued: stopped by a person or a cap, or ended unfinished on the rate limit. */
+const stoppedEarly = (j: JobRow) => j.cancelRequested || j.error === "Cancelled" || (j.status !== "COMPLETED" && RATE_LIMITED.test(j.error ?? ""));
 
 /** What a person sees of a phone plan (no element details, no locators, no steps: those are in the tests once created). */
 function phoneAnswer(plan: NonNullable<StoredPlan["mobile"]>, found: NonNullable<StoredPlan["model"]["mobile"]>, _excluded?: string[]) {
@@ -138,7 +149,12 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         const job = planJob(id, jobId);
         if (job.status === "FAILED" || ACTIVE_STATES.includes(job.status) || job.status === "QUEUED") throw new HttpError(409, "This exploration has no plan to create tests from.");
         const body = CreateBody.parse(req.body ?? {});
-        if (usedBy(id, jobId)) throw new HttpError(409, "The tests for this plan were already created. Explore again to get a new plan.");
+        const earlier = repo.listJobs(id).filter((j) => j.options.fromPlan === jobId);
+        if (earlier.length) {
+            if (!body.continueStopped) throw new HttpError(409, "The tests for this plan were already created. Explore again to get a new plan.");
+            if (earlier.some((j) => ACTIVE_STATES.includes(j.status) || j.status === "QUEUED")) throw new HttpError(409, "The tests of this plan are still being created.");
+            if (!earlier.every(stoppedEarly)) throw new HttpError(409, "The tests for this plan were already created. Only a creation that was stopped can be continued.");
+        }
         const loaded = await loadStoredPlan(repo, p.store, jobId);
         if (!loaded.ok) throw new HttpError(410, PLAN_GONE);
         const plan = loaded.plan;
@@ -156,7 +172,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
 
         // Who started the plan is not who creates its tests: the person acting now is recorded (createJob), so their AI key and runner are used.
         const { planOnly: _p, fromPlan: _f, excludeIdeas: _e, requirementsText: _r, startedBy: _s, ...kept } = job.options;
-        const { targets: _t, excludeIdeas: _x, ...switches } = body;
+        const { targets: _t, excludeIdeas: _x, continueStopped: _cs, ...switches } = body;
         const asked: JobOptions = {
             ...kept,
             ...Object.fromEntries(Object.entries(switches).filter(([, v]) => v !== undefined)),

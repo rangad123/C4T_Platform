@@ -256,6 +256,57 @@ describe("explore first, create after the person has looked", () => {
         expect(run.tests.length).toBe(tests.length);
     }, 240_000);
 
+    it("the rest of a plan is created only when every earlier creation was stopped, and only when asked (continueStopped)", async () => {
+        const create = (body: unknown) => call("POST", `/api/projects/${projectId}/plans/${planJob}/create`, body);
+        // The earlier creation finished: continuing it is refused, as is a plain second creation.
+        expect((await create({ continueStopped: true })).status).toBe(409);
+        // As if the daily call cap had stopped it.
+        const earlier = platform.repo.listJobs(projectId).filter((j) => j.options.fromPlan === planJob);
+        expect(earlier.length).toBe(1);
+        for (const j of earlier) platform.db.run("UPDATE generation_jobs SET status = 'FAILED', error = 'Cancelled', cancel_requested = 1 WHERE id = ?", j.id);
+        expect((await create({})).status).toBe(409);
+        const ideas = (plan.ideas as Array<{ id: string }>).map((i) => i.id);
+        const off = { accessibility: false, healthChecks: false, inputChecks: false, securityChecks: false, contractChecks: false, accessChecks: false };
+        // Every idea already made and nothing else asked for: nothing is left.
+        const none = await create({ continueStopped: true, excludeIdeas: ideas, targets: ["web"], ...off });
+        expect(none.status).toBe(400);
+        expect(String(none.body.error)).toMatch(/Nothing is (left|selected) to create/);
+        // One idea left: a second creation from the same plan starts, carrying the plan and the ideas left out.
+        const one = await create({ continueStopped: true, excludeIdeas: ideas.slice(1), targets: ["web"], ...off });
+        expect(one.status, JSON.stringify(one.body)).toBe(202);
+        const row = platform.repo.getJob(one.body.jobId)!;
+        expect(row.options.fromPlan).toBe(planJob);
+        expect(row.options.excludeIdeas).toEqual(ideas.slice(1));
+        expect((row.options as unknown as Record<string, unknown>).continueStopped).toBeUndefined();
+        // While it runs, another continuation is refused.
+        expect((await create({ continueStopped: true, excludeIdeas: ideas.slice(1), targets: ["web"], ...off })).status).toBe(409);
+        await call("DELETE", `/api/test-generation/${one.body.jobId}`);
+        await finished(one.body.jobId);
+    }, 240_000);
+
+    it("a creation that ended unfinished on the AI provider's rate limit can be continued (continueStopped); another unfinished one cannot", async () => {
+        const create = (body: unknown) => call("POST", `/api/projects/${projectId}/plans/${planJob}/create`, body);
+        const earlier = platform.repo.listJobs(projectId).filter((j) => j.options.fromPlan === planJob);
+        expect(earlier.length).toBeGreaterThan(0);
+        const ideas = (plan.ideas as Array<{ id: string }>).map((i) => i.id);
+        const off = { accessibility: false, healthChecks: false, inputChecks: false, securityChecks: false, contractChecks: false, accessChecks: false };
+        const body = { continueStopped: true, excludeIdeas: ideas.slice(1), targets: ["web"], ...off };
+        // Ended by itself, not cancelled, for another reason: still refused.
+        for (const j of earlier) platform.db.run("UPDATE generation_jobs SET status = 'PARTIALLY_COMPLETED', error = 'The browser could not start', cancel_requested = 0 WHERE id = ?", j.id);
+        expect((await create(body)).status).toBe(409);
+        // Ended by itself because the provider kept limiting requests (the AI layer's own sentence): continued, never offered without the flag.
+        for (const j of earlier) platform.db.run("UPDATE generation_jobs SET status = 'PARTIALLY_COMPLETED', error = 'The AI provider is limiting how many requests it accepts (rate limited).', cancel_requested = 0 WHERE id = ?", j.id);
+        expect((await create({ ...body, continueStopped: undefined })).status).toBe(409);
+        // A finished creation whose error merely mentions the limit is not a stopped one.
+        platform.db.run("UPDATE generation_jobs SET status = 'COMPLETED', error = 'rate limit reached once, retried' WHERE id = ?", earlier[0]!.id);
+        expect((await create(body)).status).toBe(409);
+        platform.db.run("UPDATE generation_jobs SET status = 'PARTIALLY_COMPLETED', error = 'HTTP 429 Too Many Requests' WHERE id = ?", earlier[0]!.id);
+        const two = await create(body);
+        expect(two.status, JSON.stringify(two.body)).toBe(202);
+        await call("DELETE", `/api/test-generation/${two.body.jobId}`);
+        await finished(two.body.jobId);
+    }, 240_000);
+
     it("a plan that is discarded is gone, and says so", async () => {
         const p2 = await newProject("Discarded plan");
         toolQueue.length = 0;

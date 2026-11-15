@@ -4,6 +4,7 @@
  * holding the API key.
  */
 import { z } from "zod";
+import { BenchHeadlineSchema, BenchmarkSchema } from "./bench/schema.js";
 import { MAX_ENTRIES } from "./corpus.js";
 
 export const MAX_TESTS_PER_ENTRY = 500;
@@ -93,7 +94,8 @@ export const EntryResultSchema = z
 export type EntryResult = z.infer<typeof EntryResultSchema>;
 
 const OverallSchema = MetricsSchema.omit({ coverageUnit: true })
-    .extend({ entries: Count, entriesDone: Count, rates: RatesSchema })
+    /** benchmark: the seeded-defect headline of a benchmark run (src/eval/bench), compared with the previous run like the other numbers. */
+    .extend({ entries: Count, entriesDone: Count, rates: RatesSchema, benchmark: BenchHeadlineSchema.optional() })
     .strict();
 
 const GateSchema = z
@@ -120,6 +122,8 @@ export const EvalRunSchema = z
         entries: z.array(EntryResultSchema).max(MAX_ENTRIES),
         overall: OverallSchema,
         gates: z.array(GateSchema).max(6).optional(),
+        /** A benchmark run (src/eval/bench/controller.ts): the seeded defects, the findings and how each was verified, and what was recorded. */
+        benchmark: BenchmarkSchema.optional(),
     })
     .strict();
 export type EvalRun = z.infer<typeof EvalRunSchema>;

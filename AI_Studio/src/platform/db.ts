@@ -42,6 +42,7 @@ import { APPROVAL_DEPS_MIGRATION } from "./approval-deps.js";
 import { TESTING_AGENTS_MIGRATION } from "./testing-agents.js";
 import { SHARED_INTEGRATIONS_MIGRATION } from "./shared-integrations.js";
 import { PROJECT_APP_MIGRATION } from "./project-app.js";
+import { APP_INTEL_MIGRATION } from "./app-intel-store.js";
 import { agentInputsMigration } from "./agent-inputs-store.js";
 import { sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { sqliteSql, type Sql } from "./sql.js";
@@ -308,6 +309,7 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 59: notes for the AI: plain hints people write for their project, optionally for a path or page pattern (schema lives in notes-store.ts; existing projects have none) */ NOTES_MIGRATION,
     /* 60: the owner's "Show the browser while exploring" switch on their runner (schema lives in agent-store.ts; every existing runner keeps it off) */ RUNNER_SHOW_BROWSER_MIGRATION,
     /* 61: two kinds of AI keys, organisational (assigned to admins and sub-admins) and personal, one chosen key per person, no AI choice on projects (schema lives in ai-config-store.ts; then backfillChosenKeys) */ AI_KEYS_MIGRATION,
+    /* 62: application intelligence: versioned application models and business rules with their source, evidence and validation status (schema lives in app-intel-store.ts; nothing reads it in generation yet) */ APP_INTEL_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */

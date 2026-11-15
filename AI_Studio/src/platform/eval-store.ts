@@ -4,7 +4,7 @@
  * sign-in detail, a page or a screenshot (those stay with the projects the run created).
  */
 import { randomUUID } from "node:crypto";
-import { compareMetrics, type MetricChange } from "../eval/metrics.js";
+import { BENCH_COMPARED, compareMetrics, type MetricChange } from "../eval/metrics.js";
 import type { EvalRun } from "../eval/run.js";
 import type { Db, Row } from "./db.js";
 
@@ -107,7 +107,9 @@ export class EvalStore {
     compare(s: EvalRunSummary, run?: EvalRun): Comparison | null {
         const prev = this.previousOf(s);
         if (!prev) return null;
-        const out: Comparison = { comparedWith: { id: prev.id, startedAt: prev.startedAt }, overall: compareMetrics(prev.overall, s.overall), entries: [] };
+        // A benchmark run is also compared on its seeded-defect numbers (other runs have none).
+        const overall = [...compareMetrics(prev.overall, s.overall), ...(s.overall.benchmark ? compareMetrics(prev.overall, s.overall, BENCH_COMPARED) : [])];
+        const out: Comparison = { comparedWith: { id: prev.id, startedAt: prev.startedAt }, overall, entries: [] };
         if (run) {
             const before = this.get(prev.id)?.run;
             for (const e of run.entries) {

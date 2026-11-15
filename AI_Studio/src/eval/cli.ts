@@ -44,7 +44,8 @@ export const USAGE = `Usage: node scripts/eval.mjs [options]
   --toggle <A,B=value>   with --compare: the settings that differ (default: every saving; a model setting takes =<model>)
   --max-quality-drop <m> with --compare: e.g. pass=2,false=0 (pass rate points, extra false failures; the defaults)
   --warm                 with --compare: explore and create each entry once first, not measured, so unchanged pages can be reused
-Environment: AITP_EVAL_URL and AITP_EVAL_API_KEY to use a running platform instead of starting one (not with --compare).`;
+Environment: AITP_EVAL_URL and AITP_EVAL_API_KEY to use a running platform instead of starting one (not with --compare).
+The seeded-defect benchmark: node scripts/eval.mjs bench --help`;
 
 interface Args {
     corpus: string;
@@ -107,6 +108,11 @@ function resultBase(dir: string, run: EvalRun): string {
 }
 
 export async function main(argv: string[], deps: CliDeps = {}): Promise<number> {
+    // The seeded-defect benchmark has its own options (src/eval/bench/cli.ts).
+    if (argv[0] === "bench") {
+        const { benchMain } = await import("./bench/cli.js");
+        return benchMain(argv.slice(1), deps);
+    }
     const log = deps.log ?? ((s: string) => console.log(s));
     const env = deps.env ?? process.env;
     let args: Args;

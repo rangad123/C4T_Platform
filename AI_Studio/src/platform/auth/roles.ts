@@ -186,6 +186,11 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/projects/:id/notes": "ai_studio.project.settings",
     "PATCH /api/projects/:id/notes/:noteId": "ai_studio.project.settings",
     "DELETE /api/projects/:id/notes/:noteId": "ai_studio.project.settings",
+    // Application intelligence (routes/app-intel.ts, testing-engine Phase 1): anyone on the project reads it; a person who writes tests confirms or rejects a rule.
+    "GET /api/projects/:id/intel/models": "read",
+    "GET /api/projects/:id/intel/models/:version": "read",
+    "GET /api/projects/:id/intel/rules": "read",
+    "PUT /api/projects/:id/intel/rules/:ruleId/decision": "ai_studio.tests.write",
     "DELETE /api/projects/:id/memory": "ai_studio.tests.delete",
     "GET /api/projects/:id/cleanup": "read",
     "PUT /api/projects/:id/cleanup/settings": "ai_studio.project.settings",

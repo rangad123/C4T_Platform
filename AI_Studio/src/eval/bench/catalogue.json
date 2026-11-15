@@ -1,0 +1,190 @@
+{
+    "version": "2026-11-14.1",
+    "note": "Read only by the benchmark controller. Never give any of this to the application under test or to the test-generation engine.",
+    "apps": {
+        "bench-shop": { "server": "examples/bench-shop/server.mjs", "accounts": [{ "email": "alice@example.test", "password": "Password1!" }, { "email": "bob@example.test", "password": "Password1!" }] },
+        "bench-rbac": { "server": "examples/bench-rbac/server.mjs", "accounts": [{ "email": "ana@example.test", "password": "Password1!", "role": "user" }, { "email": "ben@example.test", "password": "Password1!", "role": "user" }, { "email": "mia@example.test", "password": "Password1!", "role": "manager" }, { "email": "ada@example.test", "password": "Password1!", "role": "admin" }] }
+    },
+    "defects": [
+        {
+            "id": "BS-01", "app": "bench-shop", "workflow": "cart-discount", "category": "business-logic",
+            "expected": "Code SAVE10 takes 10% off the whole order subtotal, as the cart page and API description say.",
+            "actual": "The 10% is taken from the first cart line only; with several lines the discount is too small.",
+            "preconditions": "Signed in; cart with at least two different products.",
+            "reproduction": ["Sign in as alice@example.test", "Add Desk Lamp ($34.50) and Water Bottle ($18.00) to the cart", "Apply code SAVE10", "Discount shows −$3.45 instead of −$5.25"],
+            "verifier": "BS-01", "severity": "high", "impact": "Customers are charged more than the advertised discount.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs a computed expectation (10% of the subtotal) from the page text; the author may assert the shown value instead." }
+        },
+        {
+            "id": "BS-02", "app": "bench-shop", "workflow": "cart", "category": "calculation",
+            "expected": "Subtotal equals the sum of the line totals.",
+            "actual": "With two or more lines, the last line counts once in the subtotal whatever its quantity.",
+            "preconditions": "Signed in; cart with two lines, the last with quantity above 1.",
+            "reproduction": ["Sign in", "Add Pocket Notebook × 1, then Trail Mug × 3", "Line totals $4.25 and $37.50; subtotal shows $16.75 instead of $41.75"],
+            "verifier": "BS-02", "severity": "critical", "impact": "Totals and charges are wrong.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Requires comparing displayed numbers (remember/remembered or an exact computed value)." }
+        },
+        {
+            "id": "BS-03", "app": "bench-shop", "workflow": "cart-quantity", "category": "boundary",
+            "expected": "At most 10 of each item (product page and API description); 11 is refused with a message.",
+            "actual": "11 is accepted; 12 is refused.",
+            "preconditions": "Signed in; one item in the cart.",
+            "reproduction": ["Sign in", "Add any product", "Change its quantity to 11 and update", "The cart accepts 11"],
+            "verifier": "BS-03", "severity": "medium", "impact": "Stock and purchase limits are not enforced at the edge.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs a boundary value from the stated limit; current boundary checks do not use stated limits." }
+        },
+        {
+            "id": "BS-04", "app": "bench-shop", "workflow": "registration", "category": "validation",
+            "expected": "Registration refuses an email address without a valid form (the page asks for a valid email).",
+            "actual": "Any non-empty text is accepted as an email and the account is created.",
+            "preconditions": "Signed out.",
+            "reproduction": ["Open Create account", "Enter name, email 'not-an-email', password 'Password1!'", "The account is created"],
+            "verifier": "BS-04", "severity": "medium", "impact": "Accounts with unusable contact addresses.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "A negative case on a data-changing form; input checks do not submit POST forms by default." }
+        },
+        {
+            "id": "BS-05", "app": "bench-shop", "workflow": "order-lifecycle", "category": "state-transition",
+            "expected": "A shipped order cannot be cancelled (order page: 'You can cancel an order until it ships').",
+            "actual": "Cancelling a shipped order succeeds and its status becomes Cancelled.",
+            "preconditions": "Signed in as alice@example.test, who has shipped order ord-1000.",
+            "reproduction": ["Sign in as alice", "Open order ord-1000 (Shipped)", "Click Cancel order", "Status becomes Cancelled"],
+            "verifier": "BS-05", "severity": "high", "impact": "Order states contradict fulfilment; refunds for shipped goods.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs a data-changing action and an expectation from the stated rule." }
+        },
+        {
+            "id": "BS-06", "app": "bench-shop", "workflow": "account-profile", "category": "persistence",
+            "expected": "Saving the account form stores the new name and address; a reload shows them.",
+            "actual": "The page says 'Saved.' and the API answers with the new values, but nothing is stored; a reload shows the old values.",
+            "preconditions": "Signed in.",
+            "reproduction": ["Sign in", "Open Account", "Change the address and Save ('Saved.' appears)", "Reload: the old address is back"],
+            "verifier": "BS-06", "severity": "high", "impact": "Changes silently lost; orders go to the old address.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs a persistence check after reload; the planner asks for it sometimes." }
+        },
+        {
+            "id": "BS-07", "app": "bench-shop", "workflow": "checkout", "category": "duplicate-operation",
+            "expected": "Placing an order empties the cart; placing again is refused ('Your cart is empty').",
+            "actual": "The cart is kept after the order; placing again creates a second identical order.",
+            "preconditions": "Signed in; items in the cart; delivery address set.",
+            "reproduction": ["Sign in", "Add an item, check out, set an address, Place order", "Go back and place the order again", "Two orders exist"],
+            "verifier": "BS-07", "severity": "critical", "impact": "Duplicate charges and shipments.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a repeated data-changing action; not planned or allowed by default." }
+        },
+        {
+            "id": "BS-08", "app": "bench-shop", "workflow": "order-history", "category": "authorization",
+            "expected": "A person sees only their own orders; another person's order is 'Order not found' (404).",
+            "actual": "Any signed-in person can open any order by its number, including other people's addresses.",
+            "preconditions": "Signed in as alice@example.test; bob@example.test owns ord-1001.",
+            "reproduction": ["Sign in as alice", "Open /orders/ord-1001", "Bob's order and address are shown"],
+            "verifier": "BS-08", "severity": "critical", "impact": "Personal data of other customers is exposed (horizontal access).",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs two accounts and an object-level check; current access checks compare roles on privileged-looking paths." }
+        },
+        {
+            "id": "BS-09", "app": "bench-shop", "workflow": "cart", "category": "api-contract",
+            "expected": "POST /api/cart/items with an unknown product answers 404 (documented in /openapi.json).",
+            "actual": "It answers 200 with the unchanged cart.",
+            "preconditions": "Signed in.",
+            "reproduction": ["Sign in", "POST /api/cart/items {\"productId\":\"nope\"}", "200 instead of 404"],
+            "verifier": "BS-09", "severity": "low", "impact": "Clients cannot tell a failed add from a successful one.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "The OpenAPI document states 404; data-changing API cases are off by default." }
+        },
+        {
+            "id": "BS-10", "app": "bench-shop", "workflow": "checkout", "category": "workflow",
+            "expected": "An order needs a delivery address (step 1); the review step without one sends you back to step 1 and placing is refused.",
+            "actual": "Opening the review step directly works, and the order is placed with an empty address.",
+            "preconditions": "Signed in; items in the cart; no address entered in this checkout.",
+            "reproduction": ["Sign in", "Add an item", "Open /checkout/review directly", "Place order succeeds with no address"],
+            "verifier": "BS-10", "severity": "high", "impact": "Orders that cannot be delivered.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a deliberate step skip and a data-changing action." }
+        },
+        {
+            "id": "BS-11", "app": "bench-shop", "workflow": "cart-shipping", "category": "boundary",
+            "expected": "Shipping is free when the subtotal after discount is $50.00 or more.",
+            "actual": "At exactly $50.00 shipping of $5.00 is charged; only above $50.00 is it free.",
+            "preconditions": "Signed in.",
+            "reproduction": ["Sign in", "Add Trail Mug × 4 ($50.00)", "Shipping shows $5.00 instead of Free"],
+            "verifier": "BS-11", "severity": "medium", "impact": "Customers are charged contrary to the stated offer.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs the exact boundary value from the stated rule." }
+        },
+        {
+            "id": "BS-12", "app": "bench-shop", "workflow": "order-history", "category": "persistence",
+            "expected": "Order history lists all of your orders, newest first.",
+            "actual": "With two or more orders, the newest order is missing from the list (it still opens by number).",
+            "preconditions": "Signed in as alice@example.test (one shipped order) and place one more order.",
+            "reproduction": ["Sign in as alice", "Place an order", "Open Orders", "Only the older order is listed"],
+            "verifier": "BS-12", "severity": "medium", "impact": "Customers cannot find their latest order.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs placing an order and checking it appears in the list." }
+        },
+        {
+            "id": "BR-01", "app": "bench-rbac", "workflow": "notes-read", "category": "authorization",
+            "expected": "A user reads only their own notes and notes shared with them; another user's private note is 'Note not found' (404).",
+            "actual": "Any signed-in user can open any note by its address.",
+            "preconditions": "Signed in as ana@example.test; ben@example.test owns private note n2.",
+            "reproduction": ["Sign in as ana", "Open /notes/n2", "Ben's private note is shown"],
+            "verifier": "BR-01", "severity": "critical", "impact": "Private notes exposed (horizontal access).",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs a second account's object id; access checks are role-based." }
+        },
+        {
+            "id": "BR-02", "app": "bench-rbac", "workflow": "notes-edit", "category": "authorization",
+            "expected": "Only the owner can change a note; a person it is shared with gets 403.",
+            "actual": "A person a note is shared with can change it through the API (the page hides the form).",
+            "preconditions": "Signed in as ana@example.test; ben's note n3 is shared with ana.",
+            "reproduction": ["Sign in as ana", "PUT /api/notes/n3 with a new title", "200 and the title changes"],
+            "verifier": "BR-02", "severity": "high", "impact": "Shared readers can tamper with others' notes.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a data-changing API call outside the UI under another account." }
+        },
+        {
+            "id": "BR-03", "app": "bench-rbac", "workflow": "admin-people", "category": "authorization",
+            "expected": "Only admins can list people (GET /api/admin/users answers 403 to others).",
+            "actual": "Any signed-in user gets the full list with emails and roles (the People page itself is refused).",
+            "preconditions": "Signed in as a user or manager.",
+            "reproduction": ["Sign in as ana", "GET /api/admin/users", "200 with everyone's emails"],
+            "verifier": "BR-03", "severity": "high", "impact": "Directory of all accounts exposed (vertical access).",
+            "detectableWithCurrentInfrastructure": { "level": "yes", "why": "Access checks probe privileged-looking GET endpoints per role when role accounts are given." }
+        },
+        {
+            "id": "BR-04", "app": "bench-rbac", "workflow": "admin-roles", "category": "authorization",
+            "expected": "Only admins can change roles.",
+            "actual": "Managers can change any role, including making themselves admin.",
+            "preconditions": "Signed in as mia@example.test (manager).",
+            "reproduction": ["Sign in as mia", "PATCH /api/admin/users/u3 {\"role\":\"admin\"}", "Mia is now admin"],
+            "verifier": "BR-04", "severity": "critical", "impact": "Privilege escalation.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a data-changing request as a manager." }
+        },
+        {
+            "id": "BR-05", "app": "bench-rbac", "workflow": "session", "category": "authorization",
+            "expected": "After signing out, the old session no longer works.",
+            "actual": "The browser's cookie is cleared, but the old session value keeps working if sent again.",
+            "preconditions": "Signed in; note the session cookie.",
+            "reproduction": ["Sign in, copy the sid cookie", "Sign out", "Send a request with the old sid", "Still signed in"],
+            "verifier": "BR-05", "severity": "high", "impact": "Stolen or shared sessions cannot be ended.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs replaying a cookie after sign-out." }
+        },
+        {
+            "id": "BR-06", "app": "bench-rbac", "workflow": "notes-share", "category": "authorization",
+            "expected": "After 'Stop sharing', that person can no longer read the note.",
+            "actual": "The page shows the person removed, but they can still read the note.",
+            "preconditions": "Signed in as ben@example.test; n3 shared with ana.",
+            "reproduction": ["Sign in as ben", "Open n3 and stop sharing with Ana", "Sign in as ana and open /notes/n3", "Still readable"],
+            "verifier": "BR-06", "severity": "high", "impact": "Revoked access persists.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a data-changing action by one account and a check as another." }
+        },
+        {
+            "id": "BR-07", "app": "bench-rbac", "workflow": "registration", "category": "validation",
+            "expected": "Passwords need at least 8 characters (stated on the page and in the API description).",
+            "actual": "A 3-character password is accepted.",
+            "preconditions": "Signed out.",
+            "reproduction": ["Open Create account", "Enter a name, a new email and password 'abc'", "Account created"],
+            "verifier": "BR-07", "severity": "medium", "impact": "Weak passwords allowed.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Negative case on a data-changing form." }
+        },
+        {
+            "id": "BR-08", "app": "bench-rbac", "workflow": "notes-create", "category": "api-contract",
+            "expected": "Creating a note without a title is refused with 400 (documented; the page says every note needs a title).",
+            "actual": "A note with an empty title is created (201).",
+            "preconditions": "Signed in.",
+            "reproduction": ["Sign in", "New note with an empty title, Save", "The note is created as '(untitled)'"],
+            "verifier": "BR-08", "severity": "low", "impact": "Untitled notes; the documented contract is broken.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Negative case on a data-changing form or API." }
+        }
+    ]
+}

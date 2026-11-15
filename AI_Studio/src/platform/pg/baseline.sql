@@ -1759,3 +1759,41 @@ CREATE TABLE security_scanner_settings (
     enabled_json TEXT NOT NULL DEFAULT '[]',
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE app_model_versions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    application_id TEXT REFERENCES applications(id) ON DELETE SET NULL,
+    version BIGINT NOT NULL,
+    app_type TEXT NOT NULL DEFAULT '',
+    context_sources_json TEXT NOT NULL DEFAULT '[]',
+    model_json TEXT NOT NULL,
+    diff_json TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_app_model_versions_project ON app_model_versions (project_id, version);
+
+CREATE TABLE app_rules (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    model_version_id TEXT REFERENCES app_model_versions(id) ON DELETE SET NULL,
+    ref TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    description TEXT NOT NULL,
+    expected TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_ref TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    explicitness TEXT NOT NULL,
+    confidence DOUBLE PRECISION NOT NULL,
+    links_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL,
+    decided_by TEXT,
+    decided_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_app_rules_ref ON app_rules (project_id, ref);
+CREATE INDEX idx_app_rules_status ON app_rules (project_id, status);

@@ -1,0 +1,147 @@
+/**
+ * Benchmark numbers (pure functions, unit-tested in tests/bench-metrics-unit.test.ts). Definitions, with their denominators:
+ *
+ *   finding                a test the platform reported as a possible application problem (validation status NEEDS_REVIEW)
+ *   detected               a seeded defect at least one CONFIRMED finding was attributed to by replay
+ *   detection rate         detected / seeded defects switched on in the run                       (null when none was seeded)
+ *   precision              true positives / all reported findings                                (null when nothing was reported)
+ *                          true positive = a confirmed or combined finding (both verified by replay against the correct app)
+ *   precision (verified)   true positives / (true positives + false positives)                   (unreproduced findings left out)
+ *   false-positive rate    false positives / all reported findings                               (null when nothing was reported)
+ *                          false positive = a finding that also fails with every defect off, or one a person labelled so
+ *   reproduction rate      findings that failed again in the replay with the defects on / findings selected for verification
+ *                          (every reported finding is selected)
+ *   detection time         benchmark start to the first failure the platform recorded for a confirmed finding (null when none)
+ *   cost per confirmed defect   estimated AI cost / detected defects                             (null when no cost or none detected)
+ *
+ * A finding a person labelled with a defect (only possible for an unreproduced finding) is counted in `detectedLabeled`, never in `detected`.
+ */
+import type { BenchFinding, BenchMetrics, FindingCategory, ReplayVerdict } from "./schema.js";
+
+const failing = (v: ReplayVerdict | null | undefined): boolean => v === "failed" || v === "finding";
+
+/** What a finding is, from its replays alone. */
+export function categorize(replay: BenchFinding["replay"]): { category: FindingCategory; defects: string[] } {
+    if (!failing(replay.seeded)) return { category: "unreproduced", defects: [] };
+    if (replay.clean === null || replay.clean === "not_run") return { category: "unreproduced", defects: [] };
+    if (failing(replay.clean)) return { category: "false_positive", defects: [] };
+    const defects = Object.entries(replay.single)
+        .filter(([, v]) => failing(v))
+        .map(([id]) => id)
+        .sort();
+    return defects.length ? { category: "confirmed", defects } : { category: "combined", defects: [] };
+}
+
+const rate = (n: number, d: number): number | null => (d > 0 ? n / d : null);
+
+export interface MetricInputs {
+    /** The defects switched on in the run. */
+    seeded: string[];
+    findings: BenchFinding[];
+    /** When the benchmark started (ISO). */
+    startedAt: string;
+    cost: number | null;
+    testsGenerated: number;
+    workflows: number;
+    workflowsCovered: number;
+    executionFailures: number;
+    flaky: number;
+    durationMs: number;
+    aiCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+}
+
+export function benchMetrics(i: MetricInputs): BenchMetrics {
+    const seeded = new Set(i.seeded);
+    const detected = new Set<string>();
+    const labeled = new Set<string>();
+    let tp = 0;
+    let fp = 0;
+    let unreproduced = 0;
+    let reproduced = 0;
+    let first: number | null = null;
+    for (const f of i.findings) {
+        if (failing(f.replay.seeded)) reproduced++;
+        if (f.category === "confirmed" || f.category === "combined") tp++;
+        if (f.category === "false_positive" || (f.category === "unreproduced" && f.label === "false_positive")) fp++;
+        if (f.category === "unreproduced") unreproduced++;
+        if (f.category === "confirmed") {
+            for (const d of f.defects) if (seeded.has(d)) detected.add(d);
+            if (f.firstSeenAt) {
+                const t = Date.parse(f.firstSeenAt) - Date.parse(i.startedAt);
+                if (Number.isFinite(t)) first = first === null ? Math.max(0, t) : Math.min(first, Math.max(0, t));
+            }
+        }
+        if (f.category === "unreproduced" && f.label && f.label !== "false_positive" && seeded.has(f.label)) labeled.add(f.label);
+    }
+    for (const d of detected) labeled.delete(d);
+    const n = i.findings.length;
+    return {
+        seeded: seeded.size,
+        detected: detected.size,
+        missed: seeded.size - detected.size,
+        detectedLabeled: labeled.size,
+        findings: n,
+        truePositives: tp,
+        falsePositives: fp,
+        unreproduced,
+        selectedForVerification: n,
+        reproduced,
+        detectionRate: rate(detected.size, seeded.size),
+        precision: rate(tp, n),
+        precisionVerified: rate(tp, tp + fp),
+        falsePositiveRate: rate(fp, n),
+        reproductionRate: rate(reproduced, n),
+        detectionTimeMs: first === null ? null : Math.round(first),
+        cost: i.cost,
+        costPerConfirmedDefect: i.cost === null || detected.size === 0 ? null : i.cost / detected.size,
+        testsGenerated: i.testsGenerated,
+        workflows: i.workflows,
+        workflowsCovered: i.workflowsCovered,
+        executionFailures: i.executionFailures,
+        flaky: i.flaky,
+        durationMs: i.durationMs,
+        aiCalls: i.aiCalls,
+        inputTokens: i.inputTokens,
+        outputTokens: i.outputTokens,
+        cacheReadTokens: i.cacheReadTokens,
+        cacheWriteTokens: i.cacheWriteTokens,
+    };
+}
+
+const SUMMED = ["seeded", "detected", "missed", "detectedLabeled", "findings", "truePositives", "falsePositives", "unreproduced", "selectedForVerification", "reproduced", "testsGenerated", "workflows", "workflowsCovered", "executionFailures", "flaky", "durationMs", "aiCalls", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"] as const;
+
+/** The whole benchmark: counts summed over the apps, rates recomputed from the sums (never averaged), detection time the earliest. */
+export function combineMetrics(parts: BenchMetrics[]): BenchMetrics {
+    const s = Object.fromEntries(SUMMED.map((k) => [k, parts.reduce((n, m) => n + m[k], 0)])) as Record<(typeof SUMMED)[number], number>;
+    const costs = parts.map((m) => m.cost).filter((c): c is number => c !== null);
+    const cost = costs.length ? costs.reduce((a, b) => a + b, 0) : null;
+    const times = parts.map((m) => m.detectionTimeMs).filter((t): t is number => t !== null);
+    return {
+        ...s,
+        detectionRate: rate(s.detected, s.seeded),
+        precision: rate(s.truePositives, s.findings),
+        precisionVerified: rate(s.truePositives, s.truePositives + s.falsePositives),
+        falsePositiveRate: rate(s.falsePositives, s.findings),
+        reproductionRate: rate(s.reproduced, s.selectedForVerification),
+        detectionTimeMs: times.length ? Math.min(...times) : null,
+        cost,
+        costPerConfirmedDefect: cost === null || s.detected === 0 ? null : cost / s.detected,
+    };
+}
+
+/**
+ * The estimated cost of AI use from token counts and a price table (USD per million tokens), the same arithmetic as the platform's
+ * usage page (engine/llm/usage.ts costOf): cache reads at the cached price, cache writes at the write price, the rest at the input price.
+ * Null when the model has no price.
+ */
+export function costOfTokens(t: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }, price: { inputPerMTok: number; outputPerMTok: number; cachedInputPerMTok?: number; cacheWritePerMTok?: number } | undefined): number | null {
+    if (!price) return null;
+    const read = Math.min(Math.max(0, t.cacheReadTokens), t.inputTokens);
+    const write = Math.min(Math.max(0, t.cacheWriteTokens), t.inputTokens - read);
+    const plain = t.inputTokens - read - write;
+    return (plain * price.inputPerMTok + read * (price.cachedInputPerMTok ?? price.inputPerMTok) + write * (price.cacheWritePerMTok ?? price.inputPerMTok) + t.outputTokens * price.outputPerMTok) / 1_000_000;
+}

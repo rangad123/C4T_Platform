@@ -280,8 +280,14 @@ const DIRECTION: Record<string, "up" | "down" | "neutral"> = {
     aiCalls: "down",
     cost: "down",
     safetyRefusals: "neutral",
+    // Benchmark runs only (src/eval/bench): compared only when the current run is a benchmark (BENCH_COMPARED).
+    "benchmark.detectionRate": "up",
+    "benchmark.precision": "up",
+    "benchmark.falsePositiveRate": "down",
+    "benchmark.reproductionRate": "up",
 };
-export const COMPARED = Object.keys(DIRECTION);
+export const BENCH_COMPARED = Object.keys(DIRECTION).filter((k) => k.startsWith("benchmark."));
+export const COMPARED = Object.keys(DIRECTION).filter((k) => !k.startsWith("benchmark."));
 
 const pick = (o: unknown, key: string): number | null => {
     let v: unknown = o;
@@ -290,8 +296,8 @@ const pick = (o: unknown, key: string): number | null => {
 };
 
 /** Each compared number of `current` against `previous` (overall or one entry: both have the same fields, entries' rates are added by the caller). */
-export function compareMetrics(previous: unknown, current: unknown): MetricChange[] {
-    return COMPARED.map((metric) => {
+export function compareMetrics(previous: unknown, current: unknown, metrics: readonly string[] = COMPARED): MetricChange[] {
+    return metrics.map((metric) => {
         const p = previous === undefined ? null : pick(previous, metric);
         const c = pick(current, metric);
         let change: Change;

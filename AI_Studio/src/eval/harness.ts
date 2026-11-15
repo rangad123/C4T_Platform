@@ -36,6 +36,8 @@ export interface HarnessOptions {
      * starts from site memory, so exploration reuse has something to reuse. The warm-up's tests and AI use are left out of the numbers.
      */
     warm?: boolean;
+    /** More exploration options sent as they are (the benchmark's level, page and scenario limits, data-changing tests on its own apps). */
+    exploration?: Record<string, unknown>;
 }
 
 const DONE = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -138,6 +140,7 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
             ...(entry.maxScenarios ? { maxScenarios: entry.maxScenarios } : {}),
             ...checks,
             ...(credentials ? { credentials } : {}),
+            ...(o.exploration ?? {}),
         };
         /** Tests the warm-up created: not part of what is measured. */
         const warmTests = new Set<string>();

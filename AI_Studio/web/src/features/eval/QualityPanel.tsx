@@ -6,6 +6,7 @@ import { BadgeKey, HelpTip, Tooltip, keyEntries } from "../../components/Tooltip
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { duration, FAILURE_WORD, HEADLINE, OUTCOME_WORD, pct, STATUS_WORD, when, type Change, type MetricChange, type RunDetail, type RunSummary } from "./eval";
+import { BenchmarkScores, BenchmarkView } from "./Benchmark";
 import "./eval.css";
 
 const COMMAND = "node scripts/eval.mjs";
@@ -102,6 +103,9 @@ function RunRow({ run, onRemoved }: { run: RunSummary; onRemoved: () => void }) 
                             {run.corpus}, {o.entriesDone} of {o.entries} {o.entries === 1 ? "entry" : "entries"} finished{run.planOnly ? ", plan only" : `, ${o.created} tests`}
                         </span>
                     </span>
+                    {o.benchmark ? (
+                        <BenchmarkScores b={o.benchmark} />
+                    ) : (
                     <span className="eval-scores">
                         {HEADLINE.map((h) => (
                             <Tooltip key={h.key} content={h.hint}>
@@ -116,6 +120,7 @@ function RunRow({ run, onRemoved }: { run: RunSummary; onRemoved: () => void }) 
                             </Tooltip>
                         ))}
                     </span>
+                    )}
                 </summary>
                 {open && <RunDetailView id={run.id} onRemoved={onRemoved} />}
             </details>
@@ -136,8 +141,12 @@ const COMPARE_LABEL: Record<string, string> = {
     aiCalls: "AI calls",
     cost: "Cost",
     safetyRefusals: "Actions refused as unsafe",
+    "benchmark.detectionRate": "Seeded defects found",
+    "benchmark.precision": "Precision",
+    "benchmark.falsePositiveRate": "False positives",
+    "benchmark.reproductionRate": "Findings reproduced",
 };
-const shown = (metric: string, v: number | null) => (v === null ? "Not measured" : metric.startsWith("rates.") ? pct(v) : metric === "durationMs" ? duration(v) : String(v));
+const shown = (metric: string, v: number | null) => (v === null ? "Not measured" : metric.startsWith("rates.") || metric.startsWith("benchmark.") ? pct(v) : metric === "durationMs" ? duration(v) : String(v));
 
 function RunDetailView({ id, onRemoved }: { id: string; onRemoved: () => void }) {
     const detail = useFetch<RunDetail>(`/eval/runs/${id}`);
@@ -161,6 +170,7 @@ function RunDetailView({ id, onRemoved }: { id: string; onRemoved: () => void })
                 {d.run.planOnly ? "Explored and planned only: nothing was created or run." : `Every created test was run ${d.run.repeat} more times.`} AI model {d.run.platform.model}. {o.aiCalls} AI calls, {duration(o.durationMs)}.
                 {o.created > 0 && ` Of the tests that kept failing, ${o.failingProduct} look like product problems and ${o.failingTestWrong} like a wrong test (a guess from the reason, check a few).`}
             </p>
+            {d.run.benchmark && <BenchmarkView b={d.run.benchmark} />}
             {d.run.gates?.length ? (
                 <ul className="eval-gates" aria-label="Quality gates">
                     {d.run.gates.map((g) => (
