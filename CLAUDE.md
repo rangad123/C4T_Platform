@@ -2,7 +2,7 @@
 
 This repo implements the Crowd4Test marketing site in Next.js (App Router, TypeScript)
 from the design handoff in `web/design-handoff/`. Read its `README.md`
-before making structural decisions. These rules apply to every change, always.
+before making structural decisions.
 
 ## Hard rules
 

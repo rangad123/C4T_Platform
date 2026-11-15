@@ -46,7 +46,7 @@ Traced from the code (read), and confirmed with a scratch test that used the rep
 
 The result: a customer or admin could install a runner and see "Connected", save "On a runner", and still find every Run button disabled and every run refused.
 
-**This round:** a runner-only execution mode for the hosted platform, a dispatch worker that runs several runner jobs at once and never runs test code, schedules and housekeeping in that mode, server-side browser work closed in that mode, and personal runners for anyone who may run tests. All are built in this round (decisions 1 and 2 below).
+**This stage:** a runner-only execution mode for the hosted platform, a dispatch worker that runs several runner jobs at once and never runs test code, schedules and housekeeping in that mode, server-side browser work closed in that mode, and personal runners for anyone who may run tests. All are built in this round (decisions 1 and 2 below).
 
 ---
 
@@ -107,7 +107,7 @@ Not run: `tests/agent-platform.test.ts` and `tests/stream-agent.test.ts` (fixed 
 - The agent's own states (`starting`, `connected`, `reconnecting`, `stopping`, `stopped`, `agent.ts:77-78`) are not reported to the platform.
 - A result is retried 6 times over about 23 s (`task-runner.ts:50,614-628`), and an upload 3 times (`:586-601`). A platform outage longer than that loses a finished result.
 
-**This round:** identity fields (OS version, memory, CPU count, Playwright version, adapters), a real agent version where the build gives one, the code-scripts switch on the runner, durable results kept on disk, typed live events and a stop file for graceful stops are built in this round. A display check for headed runs was built too (reject reason `no-display`); the real agent version was not (`AGENT_VERSION` is still `"1.0.0"`). Per-task disk checks and resource limits are not built.
+**This stage:** identity fields (OS version, memory, CPU count, Playwright version, adapters), a real agent version where the build gives one, the code-scripts switch on the runner, durable results kept on disk, typed live events and a stop file for graceful stops are built in this round. A display check for headed runs was built too (reject reason `no-display`); the real agent version was not (`AGENT_VERSION` is still `"1.0.0"`). Per-task disk checks and resource limits are not built.
 
 ---
 
@@ -268,7 +268,7 @@ ASSIGNED, ACCEPTED, PREPARING and UPLOADING were all just `running`. REJECTED, T
 - **The `queuedFor` limit of 50** hides a matching task behind 50 non-matching ones (`agent-store.ts:527-535`). Low risk while one worker exists.
 - **Pruning only on the scheduler tick** (`schedule-services.ts:63`), so with the scheduler off every runner artifact stays stored twice (see section 5).
 
-**This round:** runs routed to runners in runners mode, a dispatch worker with several runner jobs at once, per-run runner choice, cancelling the old attempt's task when a job is re-queued, tests left as they were after a runner failure, task phases written by the server, events for re-offers and missing files, `ranOn` kept past the prune, and housekeeping in runners mode are built in this round. The `queuedFor` limit is not built.
+**This stage:** runs routed to runners in runners mode, a dispatch worker with several runner jobs at once, per-run runner choice, cancelling the old attempt's task when a job is re-queued, tests left as they were after a runner failure, task phases written by the server, events for re-offers and missing files, `ranOn` kept past the prune, and housekeeping in runners mode are built in this round. The `queuedFor` limit is not built.
 
 ---
 
@@ -297,7 +297,7 @@ ASSIGNED, ACCEPTED, PREPARING and UPLOADING were all just `running`. REJECTED, T
   3. Each open poll reads the queue every 250 ms, and each active runner job runs a sweep transaction every second (`routes/agents.ts:254-261`, `agent-services.ts:206-233,768`).
   4. `heartbeat` read-modify-writes `log_json` without a row lock (`agent-store.ts:597-601`). Low risk.
 
-**This round:** typed live events stored as job events (replayed after a refresh), heartbeat lines scrubbed before storing, phases and where-it-ran kept on the task or job, and the old attempt's uploads kept apart are built in this round. S3, signed links and the asynchronous PostgreSQL stores are not built in this round; they belong to the PostgreSQL migration stages.
+**This stage:** typed live events stored as job events (replayed after a refresh), heartbeat lines scrubbed before storing, phases and where-it-ran kept on the task or job, and the old attempt's uploads kept apart are built in this stage. S3, signed links and the asynchronous PostgreSQL stores are not built in this stage; they belong to the PostgreSQL migration stages.
 
 ---
 
