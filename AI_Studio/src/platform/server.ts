@@ -31,7 +31,7 @@ import { hasScreenshotStep } from "../engine/visual/baseline.js";
 import { storeScript } from "./repo-sink.js";
 import { quarantineGate } from "./quarantine-store.js";
 import type { QuarantineGate } from "../engine/quarantine/rules.js";
-import { DEFAULT_JOB_OPTIONS, type JobRow, type JobOptions } from "./repo.js";
+import { DEFAULT_JOB_OPTIONS, unreadableTestSentence, type JobRow, type JobOptions } from "./repo.js";
 import { cancelSummary } from "./cancel-summary.js";
 import { asExecutions, failureSummary, withFailureFacts } from "./failure-view.js";
 import { assessProjectQuality } from "../engine/quality/rules.js";
@@ -664,17 +664,32 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (!hasScreenshotStep(t.spec)) throw new HttpError(422, "This test has no screenshot assertion");
         refuseUnlessRunsStart(p); // accepting means confirming by a run: nothing is accepted when no run can start
         await assertNoActiveJob(t.projectId);
-        const latest = repo.listExecutions(t.id)[0] as { artifacts: Array<{ kind: string; path: string }> } | undefined;
+        const latest = repo.listExecutions(t.id)[0] as { artifacts: Array<{ kind: string; path: string; pruned_at?: string | null }> } | undefined;
         const actuals = (latest?.artifacts ?? []).filter((a) => a.kind === "visual-actual");
         if (!actuals.length) throw new HttpError(409, "The latest run has no new screenshot to accept (it matched the baseline or did not reach the screenshot)");
+        // Every screenshot must still be there before anything is accepted: retention may have removed one (or it went missing).
+        const stillThere = await Promise.all(actuals.map(async (a) => !a.pruned_at && (await p.store.exists(a.path).catch(() => false))));
+        if (stillThere.includes(false)) {
+            throw new HttpError(409, "The screenshots of the latest run are no longer kept (they expired or are missing), so there is nothing to accept. Run the test again, then accept the new screenshots.");
+        }
 
-        const accepted: string[] = [];
+        // All or nothing: every screenshot is read before any baseline is replaced, so one that retention removes meanwhile leaves
+        // every baseline as it was, with the same plain answer.
+        const images: Array<{ name: string; bytes: Buffer }> = [];
         for (const a of actuals) {
-            const name = path.posix.basename(a.path).replace(/-actual\.png$/, ".png");
-            const rel = path.posix.join(t.projectId, "_baselines", t.testKey, name);
-            const saved = await p.store.copy(a.path, rel);
+            try {
+                images.push({ name: path.posix.basename(a.path).replace(/-actual\.png$/, ".png"), bytes: await p.store.getBytes(a.path) });
+            } catch (e) {
+                if (await p.store.exists(a.path).catch(() => false)) throw e;
+                throw new HttpError(409, "The screenshots of the latest run are no longer kept (they expired or are missing), so there is nothing to accept. Run the test again, then accept the new screenshots.");
+            }
+        }
+        const accepted: string[] = [];
+        for (const img of images) {
+            const rel = path.posix.join(t.projectId, "_baselines", t.testKey, img.name);
+            const saved = await p.store.put(rel, img.bytes, { contentType: "image/png", size: img.bytes.length });
             repo.replaceArtifact({ projectId: t.projectId, testId: t.id, kind: "baseline", path: rel, size: saved.size });
-            accepted.push(name);
+            accepted.push(img.name);
         }
         const application = await applicationFor(t.projectId);
         const job = await startValidationJob(t.projectId, application.id, [t.id]);
@@ -857,7 +872,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         priority: t.priority,
         framework: t.framework,
         validationStatus: t.validationStatus,
-        validationReason: t.validationReason,
+        validationReason: t.unreadable ? unreadableTestSentence(t.testKey) : t.validationReason,
+        ...(t.unreadable ? { unreadable: true as const } : {}),
         severity: assessSeverity(t.spec, t.validationStatus, t.validationReason) ?? null,
         attempts: t.attempts,
         updatedAt: t.updatedAt,

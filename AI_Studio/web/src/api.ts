@@ -83,6 +83,8 @@ export interface TestSummary {
     framework: string;
     validationStatus: ValidationStatus;
     validationReason: string | null;
+    /** Its stored steps cannot be read: it is left out of runs (validationReason says so). */
+    unreadable?: true;
     attempts: number;
     /** Only for NEEDS_REVIEW findings. */
     severity: { severity: Severity; basis: string } | null;

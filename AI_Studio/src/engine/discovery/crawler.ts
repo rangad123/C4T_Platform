@@ -442,9 +442,24 @@ async function sameDocument(page: Page): Promise<boolean> {
     return page.evaluate(() => (window as unknown as { __aitpDoc?: boolean }).__aitpDoc === true).catch(() => false);
 }
 
+/**
+ * page.goto, once more from a blank page when another navigation cut it off: the page still open sent the browser elsewhere while this
+ * load was going (a late redirect after signing in). Playwright reports that as "interrupted by another navigation" or as
+ * net::ERR_ABORTED. Once only; any other error, or a second failure, is passed on. The same rule as the security assessment's discovery.
+ */
+export async function gotoOnceMore(page: Page, url: string) {
+    try {
+        return await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    } catch (e) {
+        if (!/interrupted by another navigation|net::ERR_ABORTED/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        await page.goto("about:blank", { waitUntil: "load", timeout: 5_000 }).catch(() => undefined);
+        return await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    }
+}
+
 /** Load a URL and return its HTTP status. */
 async function load(page: Page, url: string): Promise<number> {
-    let resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    let resp = await gotoOnceMore(page, url);
     // A hash-only change is a same-document navigation with no response: reload so the view starts
     // clean (no state left from the previous route) and we get a real status.
     if (!resp) resp = await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });

@@ -6,6 +6,7 @@ import { collapseBlocks } from "../engine/blocks/expand.js";
 import { collapseRefs, refNames } from "../engine/locators/refs.js";
 import type { TestSpec } from "../engine/spec/schema.js";
 import { syncLocatorUsage } from "./locator-store.js";
+import { readStoredSpec } from "./stored-spec.js";
 import type { AppModel } from "../engine/understanding/app-model.js";
 import { Db, type Row } from "./db.js";
 import { SecretBox } from "./secrets.js";
@@ -282,9 +283,51 @@ export interface TestRow {
     generationMeta: Record<string, unknown> | null;
     createdAt: string;
     updatedAt: string;
+    /** Its stored steps could not be read (a damaged or very old record): `spec` is then an empty stand-in, and the test never runs. */
+    unreadable?: true;
 }
 
-const toTest = (r: Row): TestRow => ({
+/** A sentence about a test whose stored steps cannot be read: names it, never says what the record holds. */
+export const unreadableTestSentence = (testKey: string): string => `${testKey}: its stored steps cannot be read, so it is left out of runs. Open it to fix or delete it.`;
+
+function readJsonObject(json: unknown): Record<string, unknown> | null {
+    if (typeof json !== "string" || !json) return null;
+    try {
+        const v = JSON.parse(json) as unknown;
+        return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+    } catch {
+        return null;
+    }
+}
+
+/** What an unreadable test reads as: every default of a spec, no steps (so nothing can run it, and nothing that reads specs breaks). */
+const unreadableStandIn = (r: Row): TestSpec =>
+    ({
+        testId: String(r.test_key ?? ""),
+        title: String(r.title ?? ""),
+        description: "",
+        kind: r.kind,
+        category: "General",
+        type: r.type ?? "functional",
+        priority: r.priority ?? "medium",
+        preconditions: [],
+        steps: [],
+        expectedResults: [],
+        testData: {},
+        tags: [],
+        source: { origin: "manual" },
+    }) as unknown as TestSpec;
+
+const toTest = (r: Row): TestRow => {
+    const spec = readStoredSpec(r.spec_json);
+    return {
+        ...toTestFields(r),
+        spec: spec ?? unreadableStandIn(r),
+        ...(spec ? {} : { unreadable: true as const }),
+    };
+};
+
+const toTestFields = (r: Row): Omit<TestRow, "spec" | "unreadable"> => ({
     id: r.id,
     projectId: r.project_id,
     suiteId: r.suite_id,
@@ -299,8 +342,7 @@ const toTest = (r: Row): TestRow => ({
     validationReason: r.validation_reason,
     framework: r.framework,
     attempts: r.attempts,
-    spec: JSON.parse(r.spec_json),
-    generationMeta: r.generation_meta_json ? JSON.parse(r.generation_meta_json) : null,
+    generationMeta: readJsonObject(r.generation_meta_json),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
 });

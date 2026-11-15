@@ -55,7 +55,7 @@ export async function runnableTestIds(repo: Repo, projectId: string, shape: RunS
     const ids = repo
         .listTests(projectId)
         .filter((t) => {
-            if (pluginOut.has(t.id)) return false;
+            if (t.unreadable || pluginOut.has(t.id)) return false;
             const adapter = adapterForSpec(t.spec);
             return adapter.executable && (!needsDevice(adapter) || (adapter.needs.ios ? iosOk : mobileOk)) && !isLoadSpec(view(t.spec)) && switchedOff[adapter.id as keyof typeof switchedOff] !== false;
         })

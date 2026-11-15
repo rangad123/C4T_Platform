@@ -21,7 +21,7 @@ import type { Platform } from "./bootstrap.js";
 import { CustomScriptStore } from "./custom-script-store.js";
 import { HttpError } from "./http-error.js";
 import { runnerRefusal } from "./runner-only.js";
-import type { JobOptions, Repo } from "./repo.js";
+import { unreadableTestSentence, type JobOptions, type Repo } from "./repo.js";
 import { getAgentServices, jobOwnerId, ownerOfNewJob } from "./agent-services.js";
 import { ownerIdOfActor } from "./agent-store.js";
 import { currentActor } from "./auth/actor.js";
@@ -161,6 +161,19 @@ export async function noteCustomSkipped(repo: Repo, jobId: string, projectId: st
         const job = repo.getJob(jobId);
         const message = await customSkippedNote(repo, projectId, job ? jobOwnerId(job.options) : null);
         if (message) repo.addEvent(jobId, { stage: "validation", kind: "custom_skipped", level: "warn", message });
+    } catch {
+        /* a note is a convenience */
+    }
+    // Every automated run notes here what it left out: tests whose stored steps cannot be read are named too (runnableTestIds skips them).
+    try {
+        const unreadable = repo.listTests(projectId).filter((t) => t.unreadable).map((t) => t.testKey);
+        if (unreadable.length)
+            repo.addEvent(jobId, {
+                stage: "validation",
+                kind: "unreadable_skipped",
+                level: "warn",
+                message: unreadable.length === 1 ? unreadableTestSentence(unreadable[0]!) : `${unreadable.length} tests cannot be read and are left out of runs: ${unreadable.slice(0, 10).join(", ")}. Open them to fix or delete them.`,
+            });
     } catch {
         /* a note is a convenience */
     }

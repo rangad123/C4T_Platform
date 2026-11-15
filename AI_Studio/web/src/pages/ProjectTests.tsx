@@ -452,7 +452,7 @@ function ScriptRowView({ t, projectId, app, reqs, review, selection }: { t: Test
                     {KIND_LABEL[t.kind]}
                     {t.kind === "mobile" && app ? <span className="ph-app">, {app}</span> : null}
                 </span>
-                {t.validationStatus !== "VALIDATED" && t.validationReason && <span className="meta truncate" style={{ color: tone }}>{cleanReason(t.validationReason)}</span>}
+                {(t.validationStatus !== "VALIDATED" || t.unreadable) && t.validationReason && <span className="meta truncate" style={{ color: tone }}>{cleanReason(t.validationReason)}</span>}
                 {t.quarantine && <span className="meta truncate" data-testid="quarantine-reason">In quarantine, not counted: {t.quarantine.reason}</span>}
                 {(t.custom || t.quarantine || t.quality?.level === "weak" || t.compat || t.severity) && (
                     <span className="sr-badges">

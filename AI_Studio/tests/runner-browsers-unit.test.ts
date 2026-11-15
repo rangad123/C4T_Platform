@@ -200,11 +200,11 @@ describe("the run's Playwright config", () => {
         expect(noVideo).toContain('video: "off",');
         expect(noVideo).not.toContain('video: { mode: "retain-on-failure"');
         expect(noVideo).toContain('trace: { mode: "retain-on-failure-and-retries"'); // traces need no video tool
-        expect(noVideo.replace('video: "off",', () => 'video: { mode: "retain-on-failure", show: { actions: {}, test: { level: "step" } } },')).toBe(configFor([], undefined, edge));
+        expect(noVideo.replace('video: "off",', () => 'video: { mode: "retain-on-failure", show: { actions: {} } },')).toBe(configFor([], undefined, edge));
         expect(configFor(projects, undefined, { ...edge, video: false })).toContain('video: "off",');
         // With the tool there (or no installed browser at all) videos are kept as before.
         expect(configFor([], undefined, { ...edge, video: true })).toBe(configFor([], undefined, edge));
-        expect(configFor([])).toContain('video: { mode: "retain-on-failure", show: { actions: {}, test: { level: "step" } } },');
+        expect(configFor([])).toContain('video: { mode: "retain-on-failure", show: { actions: {} } },');
     });
     it("finds Playwright's video tool only where Playwright keeps a finished install of it", () => {
         const dir = fresh("ffmpeg");

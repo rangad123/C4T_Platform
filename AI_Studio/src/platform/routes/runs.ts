@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getAdapter, hasAdapter } from "../../engine/frameworks/index.js";
 import { EXTRA_VARIANT_IDS, normalizeVariants } from "../../engine/validation/variants.js";
 import { HttpError } from "../http-error.js";
-import { DEFAULT_JOB_OPTIONS } from "../repo.js";
+import { DEFAULT_JOB_OPTIONS, unreadableTestSentence } from "../repo.js";
 import { buildRunDetail } from "../run-view.js";
 import { refuseUnlessRunsStart } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
@@ -45,6 +45,10 @@ export function registerRunRoutes(ctx: RouteCtx): void {
         // A test that is stored but cannot be executed by anything here is named, not silently left out (the job would only skip it too).
         const skipped: Array<{ id: string; testId: string; reason: string }> = [];
         const willRun = chosen.filter((t) => {
+            if (t.unreadable) {
+                skipped.push({ id: t.id, testId: t.testKey, reason: unreadableTestSentence(t.testKey) });
+                return false;
+            }
             if (hasAdapter(t.framework) && !getAdapter(t.framework).executable) {
                 skipped.push({ id: t.id, testId: t.testKey, reason: `${t.testKey} is stored but this platform cannot execute it.` });
                 return false;

@@ -84,11 +84,11 @@ afterAll(async () => {
 describe("a real agent run, watched live", () => {
     it("shows what the agent is doing as it happens, test by test, long before the heartbeat interval", async () => {
         const projectId = (await admin("POST", "/api/projects", { name: "Live agent" })).body.id as string;
-        const made = { status: 201, body: { secret: personalRunner(platform, { label: "live", replace: true }).secret } };
+        const made = { status: 201, body: { secret: personalRunner(platform, { label: "Maya's laptop", replace: true }).secret } };
         const { log } = memoryLogger();
         // A 6 s heartbeat: without early beats, nothing but the first (empty) beat would reach the platform before the run is over.
         agent = new Agent({
-            config: { baseUrl: `http://127.0.0.1:${PORT}`, token: made.body.secret, name: "Maya's laptop", concurrency: 1, workDir: agentWork, allowInsecure: false, cacheBytes: 64 * 1024 * 1024, tokenSource: "env" },
+            config: { baseUrl: `http://127.0.0.1:${PORT}`, token: made.body.secret, name: "MAYA-PC", concurrency: 1, workDir: agentWork, allowInsecure: false, cacheBytes: 64 * 1024 * 1024, tokenSource: "env" },
             log,
             heartbeatMs: 6000,
             backoff: { baseMs: 100, maxMs: 500 },

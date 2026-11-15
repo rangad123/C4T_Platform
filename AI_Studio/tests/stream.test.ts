@@ -528,10 +528,11 @@ describe("a real validation job, from start to end", () => {
 describe("a runner agent's progress", () => {
     it("appears as events as the heartbeat arrives, named after the agent, with credentials scrubbed", async () => {
         const projectId = await newProject("Agent progress");
+        // Named as Settings names the runner (its label), not what the computer calls itself.
         // Round 45: runs started with the shared key have no owner, so this run is started by a person whose runner takes it.
         PERSON = testPerson(platform).token;
-        const made = { status: 201, body: { secret: personalRunner(platform, { label: "maya", replace: true }).secret } };
-        const agent = new FakeAgent(viaFetch(`http://127.0.0.1:${PORT}`), made.body.secret, { name: "Maya’s laptop", capabilities: defaultCaps(), concurrency: 1 });
+        const made = { status: 201, body: { secret: personalRunner(platform, { label: "Maya’s laptop", replace: true }).secret } };
+        const agent = new FakeAgent(viaFetch(`http://127.0.0.1:${PORT}`), made.body.secret, { name: "MAYA-PC", capabilities: defaultCaps(), concurrency: 1 });
         expect((await agent.hello()).status).toBe(200);
         const [t1] = await importTests(admin, projectId, [["Health answers", "/health", 200]]);
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);

@@ -153,8 +153,10 @@ export default defineConfig({
         screenshot: "only-on-failure",
         // Kept for a failing run (and any retry), with the accessibility tree at each action next to the page itself.
         trace: { mode: "retain-on-failure-and-retries", snapshots: { dom: true, aria: true, screen: true } },
-        // Recorded for every run but kept only when a test fails, so reviewers can watch what happened: each action and step is shown on the video.
-        video: { mode: "retain-on-failure", show: { actions: {}, test: { level: "step" } } },
+        // Recorded for every run but kept only when a test fails, so reviewers can watch what happened: each action is shown on the video. No step
+        // titles: Playwright draws them as markup with an inline style, which a page's strict style-src policy refuses with a console error that
+        // the page health check would report as the page's own.
+        video: { mode: "retain-on-failure", show: { actions: {} } },
         // Routes (the bearer token, deliberate faults) must see every request: a service worker would answer some itself.
         serviceWorkers: "block",
         actionTimeout: 10_000,

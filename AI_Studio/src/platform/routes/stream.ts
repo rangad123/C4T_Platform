@@ -151,10 +151,10 @@ export function registerStreamRoutes(ctx: RouteCtx): void {
         return {
             async write(chunk) {
                 if (over || raw.destroyed || raw.writableEnded) return false;
-                const ok = raw.write(chunk);
                 // A client that cannot keep up is dropped rather than buffered: it reconnects and resumes from Last-Event-ID.
+                // Checked before writing: what writes queue up to the socket's high-water mark (64 KiB on Node 24) is normal, not a slow client.
                 if (raw.writableLength > cfg.maxBufferBytes) return false;
-                return ok ? true : waitDrain();
+                return raw.write(chunk) ? true : waitDrain();
             },
             end(destroy) {
                 over = true;

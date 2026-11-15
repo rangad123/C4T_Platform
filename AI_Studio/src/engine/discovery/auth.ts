@@ -59,12 +59,75 @@ async function passOneTimeCode(page: Page, secret: string | undefined): Promise<
     const form = field.locator("xpath=ancestor::form[1]");
     const root = (await form.count()) > 0 ? form : page;
     const submit = root.locator("button[type=submit]:visible, input[type=submit]:visible").or(root.getByRole("button", { name: /verify|confirm|continue|submit|log\s?in|sign\s?in/i })).first();
+    const beforeCode = page.url();
+    const sent = watchSubmit(page);
     if (await submit.count()) await submit.click({ timeout: 5_000 }).catch(() => undefined);
     else await field.press("Enter");
-    await settle(page, 8_000);
+    await sent.outcome(beforeCode, async () => (await page.locator(OTP_FIELD).first().count()) > 0);
     // Still being asked: the code was not accepted.
     if (await page.locator(OTP_FIELD).first().count()) return { asked: true, error: "The one-time code was not accepted. Check that the authenticator secret belongs to this account and that this computer's clock is correct." };
     return { asked: true };
+}
+
+/**
+ * Wait for what sending a sign-in form (or a code step) led to, instead of judging the page right after the click: a form sent by a
+ * script (fetch, then `location.href`) has not navigated yet when the click returns, and the already-loaded page gives `settle()` nothing
+ * to wait for. `watchSubmit` starts listening before the click (the request may be answered during it); `outcome` then waits until the
+ * form is gone, the address changed, or the page has been quiet for a second after its last request (a wrong password shown in place, so
+ * a failure is not held for the whole deadline). A main-frame navigation that has started is always waited for. Bounded by `deadlineMs`.
+ * Only waits: it clicks, types and sends nothing.
+ */
+function watchSubmit(page: Page) {
+    let pending = 0;
+    let lastActivity = Date.now();
+    /** Main-frame navigation requests not answered yet (a redirect's hops each count until answered). */
+    const navigations = new Set<unknown>();
+    const isMainNavigation = (r: { isNavigationRequest(): boolean; frame(): unknown }): boolean => {
+        try {
+            return r.isNavigationRequest() && r.frame() === page.mainFrame();
+        } catch {
+            return false; // a request without a frame (a service worker's)
+        }
+    };
+    const onRequest = (r: { isNavigationRequest(): boolean; frame(): unknown }) => {
+        pending++;
+        lastActivity = Date.now();
+        if (isMainNavigation(r)) navigations.add(r);
+    };
+    const onDone = (r: unknown) => {
+        pending = Math.max(0, pending - 1);
+        lastActivity = Date.now();
+        navigations.delete(r);
+    };
+    const onResponse = (resp: { request(): unknown }) => navigations.delete(resp.request());
+    page.on("request", onRequest);
+    page.on("response", onResponse);
+    page.on("requestfinished", onDone);
+    page.on("requestfailed", onDone);
+    const stop = () => {
+        page.off("request", onRequest);
+        page.off("response", onResponse);
+        page.off("requestfinished", onDone);
+        page.off("requestfailed", onDone);
+    };
+    return {
+        async outcome(preUrl: string, stillForm: () => Promise<boolean>, deadlineMs = 15_000): Promise<void> {
+            const end = Date.now() + deadlineMs;
+            try {
+                while (Date.now() < end) {
+                    if (navigations.size === 0) {
+                        if (page.url() !== preUrl) break;
+                        if (!(await stillForm().catch(() => true))) break;
+                        if (pending === 0 && Date.now() - lastActivity >= 1_000) break;
+                    }
+                    await new Promise((r) => setTimeout(r, 100));
+                }
+            } finally {
+                stop();
+            }
+            await settle(page, 8_000);
+        },
+    };
 }
 
 /** Does the current page contain a visible password field (i.e. is it a login/sign-up form)? */
@@ -77,6 +140,8 @@ async function navigateToLogin(page: Page): Promise<boolean> {
     const way = page.getByRole("link", { name: TO_SIGN_IN }).or(page.getByRole("button", { name: TO_SIGN_IN })).first();
     if (await way.isVisible().catch(() => false)) {
         await way.click({ timeout: 5_000 }).catch(() => undefined);
+        // A sign-in form a script shows after the click (a client-side route, a dialog) needs a moment to appear.
+        await page.locator("input[type=password]:visible").first().waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
         await settle(page);
         if (await hasPasswordField(page)) return true;
     }
@@ -122,9 +187,11 @@ export async function login(session: BrowserSession, startUrl: string, creds: Cr
         .locator('button[type=submit]:visible, input[type=submit]:visible')
         .or(root.getByRole("button", { name: SEND_FORM }))
         .first();
+    // The outcome, not the page as it is right after the click (a script-sent form navigates later).
+    const sent = watchSubmit(page);
     if (await submit.count()) await submit.click({ timeout: 5_000 }).catch(() => undefined);
     else await pw.press("Enter");
-    await settle(page, 8_000);
+    await sent.outcome(preUrl, () => hasPasswordField(page));
 
     const otp = await passOneTimeCode(page, creds.totpSecret);
     if (otp.error) return { ok: false, error: otp.error, loginPath, mechanisms: ["form", "totp"] };

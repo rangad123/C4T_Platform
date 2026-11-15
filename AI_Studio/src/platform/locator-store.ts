@@ -4,6 +4,7 @@
  * Usage is not typed in by anyone: `syncLocatorUsage` rebuilds a test's rows from its spec every time the spec is stored (repo.ts
  * calls it from insertTest / updateTest), so the table cannot drift from the specs. `rebuildProject` recomputes a whole project.
  */
+import { readStoredSpec } from "./stored-spec.js";
 import { randomUUID } from "node:crypto";
 import { nameKey, tidy, type ElementKind } from "../engine/locators/model.js";
 import { indexOf, refCounts, type ObjectIndex } from "../engine/locators/refs.js";
@@ -186,7 +187,10 @@ export class LocatorStore {
     rebuildProject(projectId: string): void {
         const tests = this.db.all("SELECT id, spec_json FROM test_cases WHERE project_id = ?", projectId);
         this.db.tx(() => {
-            for (const t of tests) syncLocatorUsage(this.db, projectId, t.id, JSON.parse(t.spec_json) as TestSpec);
+            for (const t of tests) {
+                const spec = readStoredSpec(t.spec_json);
+                if (spec) syncLocatorUsage(this.db, projectId, t.id, spec);
+            }
         });
     }
 }
