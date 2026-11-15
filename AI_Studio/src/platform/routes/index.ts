@@ -71,6 +71,7 @@ import { registerPortableRoutes } from "./portable.js";
 import { registerReviewRoutes } from "./reviews.js";
 import { registerTestingAgentRoutes } from "./testing-agents.js";
 import { registerAgentInputRoutes } from "./agent-inputs.js";
+import { registerProjectSignInRoutes } from "./project-sign-in.js";
 import { registerSecurityRoutes } from "../../security/routes/index.js";
 
 export type { RouteCtx } from "./types.js";
@@ -153,6 +154,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerTestingAgentRoutes(ctx);
     // What a project's testing agents need, kept on its Requirements tab (routes/agent-inputs.ts, round 38).
     registerAgentInputRoutes(ctx);
+    // The project's sign-in, for any project: what runs type for {{credentials.*}} (routes/project-sign-in.ts).
+    registerProjectSignInRoutes(ctx);
     // Reusable libraries of an organisation, and a project using and publishing their items (routes/libraries.ts, round 37).
     registerLibraryRoutes(ctx);
     registerLlmHealthRoutes(ctx);

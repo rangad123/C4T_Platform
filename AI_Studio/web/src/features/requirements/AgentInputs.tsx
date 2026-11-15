@@ -48,12 +48,12 @@ export function inputsSummary(data: AgentInputs): string {
 }
 
 type SecretKey = "password" | "totpSecret" | "apiToken" | "clientSecret";
-interface SecretState {
+export interface SecretState {
     value: string;
     replacing: boolean;
     remove: boolean;
 }
-const FRESH: SecretState = { value: "", replacing: false, remove: false };
+export const FRESH: SecretState = { value: "", replacing: false, remove: false };
 
 /**
  * "What the agents need", on the Requirements tab of a project tested by the AI agent: the sign-in, API access, the OpenAPI document
@@ -179,6 +179,9 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                             <div>
                                 <div className="t-card">Sign in</div>
                                 <p className="hint">Optional. Lets the agents test pages behind a login. Use a dedicated test account, never a real one.</p>
+                                <p className="hint" data-testid="agent-inputs-same-sign-in">
+                                    This is the project’s one sign-in, the same as in <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>: a change in either place shows in both.
+                                </p>
                             </div>
                             <div className="grid-2">
                                 <div className="field">
@@ -301,8 +304,8 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
     );
 }
 
-/** A write-only field: empty when nothing is saved; "Saved" with Replace and Remove when something is. */
-function SecretField({ id, label, saved, state, onChange, canEdit, hint, removable = true }: { id: string; label: string; saved: boolean; state: SecretState; onChange: (s: Partial<SecretState>) => void; canEdit: boolean; hint?: string; removable?: boolean }) {
+/** A write-only field: empty when nothing is saved; "Saved" with Replace and Remove when something is (also the Settings → Sign-in card). */
+export function SecretField({ id, label, saved, state, onChange, canEdit, hint, removable = true }: { id: string; label: string; saved: boolean; state: SecretState; onChange: (s: Partial<SecretState>) => void; canEdit: boolean; hint?: string; removable?: boolean }) {
     const hintId = hint ? `${id}-hint` : undefined;
     const showInput = canEdit && (!saved || state.replacing) && !state.remove;
     return (

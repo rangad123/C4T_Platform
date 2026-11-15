@@ -27,6 +27,7 @@ import { CleanupCard } from "../cleanup/CleanupCard";
 import { TestDataPanel } from "../environments/TestDataPanel";
 import { HardSignInPanel } from "../identity/HardSignInPanel";
 import { TestAccountsPanel } from "../identity/TestAccountsPanel";
+import { ProjectSignInPanel } from "../identity/ProjectSignIn";
 import { ResetHookCard } from "../webpages/ResetHookCard";
 import { TestFilesCard } from "../webpages/TestFilesCard";
 import "./setup.css";
@@ -90,8 +91,8 @@ function GeneralSetting({ id }: { id: string }) {
 }
 
 /**
- * The project's Settings place (it used to be called Setup). General and members first, then what tests use (environments, test
- * data, accounts, AI), how they run (frameworks, the mobile app), who is told (alerts, issue tracker) and storage. Runners are
+ * The project's Settings place (it used to be called Setup). General and members first, then what tests use (the sign-in, environments,
+ * test data, accounts, AI), how they run (frameworks, the mobile app), who is told (alerts, issue tracker) and storage. Runners are
  * per person: each person sets up their own runner in Settings (round 45).
  * Settings that rarely change sit behind a titled row with "Change".
  */
@@ -111,6 +112,7 @@ export function SetupPage({ id }: { id: string }) {
                 </div>
             ),
         },
+        { key: "signin", label: "Sign-in", hint: "The user name and password your tests sign in with", render: () => <ProjectSignInPanel projectId={id} /> },
         { key: "environments", label: "Environments", hint: "Staging, production and other addresses to run against", render: () => <EnvironmentsPanel projectId={id} onStarted={() => undefined} /> },
         {
             key: "data",
@@ -128,7 +130,7 @@ export function SetupPage({ id }: { id: string }) {
         {
             key: "accounts",
             label: "Test accounts",
-            hint: "Logins your tests sign in with",
+            hint: "More logins, to check what each kind of user can see and do",
             render: () => (
                 <div className="stack">
                     <TestAccountsPanel projectId={id} />

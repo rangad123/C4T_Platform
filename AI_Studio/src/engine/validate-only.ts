@@ -6,6 +6,7 @@
  * is the same as in the full pipeline (orchestrator.ts): the same validator, the same repair loop
  * and the same GenerationSink persistence, so an imported test ends up exactly like a generated one.
  */
+import { missingSignIn } from "./spec/sign-in-needed.js";
 import { resolveApiToken, type OAuth2ClientCredentials } from "./api/oauth.js";
 import { throwIfAborted, type EngineContext } from "./context.js";
 import { launchChromium } from "./discovery/browser.js";
@@ -154,6 +155,19 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
     for (const t of runnable) {
         handles.set(t.spec.testId, t.handle);
         await sink.updateTest(t.handle, { validation: "VALIDATING" });
+        // A test that types the project's sign-in fails here with where to enter it, instead of typing empty text and failing elsewhere.
+        const noSignIn = missingSignIn(t.spec.testId, t, req.credentials);
+        if (noSignIn) {
+            await sink.updateTest(t.handle, { validation: "FAILED_VALIDATION", reason: noSignIn });
+            ctx.emit({ stage: "validation", kind: "sign_in_missing", level: "error", message: noSignIn });
+            summary.testsFailedValidation++;
+            summary.errors.push(noSignIn);
+            if (req.stopOnFirstFailure) {
+                stoppedBy = t.spec.testId;
+                break;
+            }
+            continue;
+        }
         // A hand-written test: the stored script is the source of truth and runs as it is.
         if (t.custom) {
             if (t.custom.scriptId) scriptIds.set(t.spec.testId, t.custom.scriptId);

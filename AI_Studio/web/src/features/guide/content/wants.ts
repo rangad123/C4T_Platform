@@ -31,7 +31,7 @@ export const wantList: Want[] = [
     { text: "Be told when something breaks", topic: "alerts" },
     { text: "File a problem in GitHub, Jira or Notion", topic: "issue-trackers" },
     { text: "Run one test with many sets of values", topic: "test-data" },
-    { text: "Add the sign-in a test uses", topic: "test-accounts" },
+    { text: "Add the sign-in a test uses", topic: "project-sign-in" },
     { text: "Bring in tests I already have", topic: "import-tests" },
     { text: "Write a test as lines of text", topic: "write-test-as-text" },
     { text: "Write code for a test", topic: "write-code" },

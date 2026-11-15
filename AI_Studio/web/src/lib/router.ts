@@ -41,7 +41,7 @@ export const CASES_SECTIONS = ["all", "automated", "manual"] as const;
 export const SCRIPTS_SECTIONS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 export const RUNS_SECTIONS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
 // Runners are not a project setting: each person sets up their own runner once in Settings (round 45).
-export const SETTINGS_SECTIONS = ["general", "members", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+export const SETTINGS_SECTIONS = ["general", "members", "signin", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 export type CasesSection = (typeof CASES_SECTIONS)[number];
 export type ScriptsSection = (typeof SCRIPTS_SECTIONS)[number];
 export type RunsSection = (typeof RUNS_SECTIONS)[number];
@@ -49,7 +49,7 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 /** The sections the old places had: their links still work and land where each section lives now (lib/aliases.ts). */
 export const LIBRARY_SECTIONS = ["steps", "elements", "helpers", "data", "accounts"] as const;
-export const SETUP_SECTIONS = ["runners", "frameworks", "environments", "mobile", "alerts", "issues", "storage"] as const;
+export const SETUP_SECTIONS = ["runners", "frameworks", "signin", "environments", "mobile", "alerts", "issues", "storage"] as const;
 export const RELEASE_SECTIONS = ["releases", "manual", "compliance"] as const;
 export type LibrarySection = (typeof LIBRARY_SECTIONS)[number];
 export type SetupSection = (typeof SETUP_SECTIONS)[number];

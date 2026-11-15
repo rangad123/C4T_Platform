@@ -257,7 +257,9 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                                 <input type="checkbox" checked={form.useProjectAccounts} onChange={(e) => patch({ useProjectAccounts: e.target.checked })} />
                                 <span>
                                     <span className="title">Use the project’s test accounts here</span>
-                                    <span className="hint">For access-control checks that sign in as different accounts. Turn off if the accounts don’t exist in this environment.</span>
+                                    <span className="hint">
+                                        For access-control checks that sign in as different accounts. Also uses the project’s sign-in when this environment has none of its own and is at exactly the project’s address (never for production). Turn off if the accounts don’t exist here.
+                                    </span>
                                 </span>
                             </label>
 

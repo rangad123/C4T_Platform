@@ -208,6 +208,8 @@ export default defineConfig({
             "tests/sql-async-unit.test.ts",
             "tests/sink-queue-unit.test.ts",
             "tests/agent-inputs.test.ts",
+            "tests/project-sign-in.test.ts",
+            "tests/sign-in-run-unit.test.ts",
             "tests/generate-cases.test.ts",
             "tests/generate-scripts.test.ts",
             "tests/generate-phone-scripts.test.ts",

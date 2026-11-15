@@ -295,7 +295,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Clean up records that tests created.", button: "Read about cleaning up", to: { topic: "test-data-cleanup", search: "clean up test data" } },
         ],
         words: ["test-data", "test"],
-        next: [{ text: "Sign-in details for tests live in Test accounts.", button: "Open Test accounts", to: here("library", "accounts"), ui: ["Test accounts"] }],
+        next: [{ text: "The sign-in tests type lives in Sign-in.", button: "Open Sign-in", to: here("setup", "signin"), ui: ["Sign-in"] }],
         topic: "test-data",
     },
     "library-accounts": {
@@ -369,6 +369,18 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         words: ["runner", "run"],
         next: [{ text: "Add an environment such as staging, if you test more than one address.", button: "Open Environments", to: here("setup", "environments"), ui: ["Environments"] }],
         topic: "runners",
+    },
+    "setup-signin": {
+        title: "Sign-in",
+        what: "The user name and password your tests type where a step uses {{credentials.username}} and {{credentials.password}}. The password is kept hidden.",
+        canDo: [
+            { text: "Enter the user name and password, then choose Save sign-in.", button: "Read about the sign-in", to: { topic: "project-sign-in", search: "sign-in" }, ui: ["Save sign-in"] },
+            { text: "Give an environment its own sign-in when staging and production differ.", button: "Open Environments", to: here("setup", "environments"), ui: ["Environments"] },
+            { text: "Add more users to check what each kind of user can see.", button: "Open Test accounts", to: here("library", "accounts"), ui: ["Test accounts"] },
+        ],
+        words: ["test-account", "environment"],
+        next: [{ text: "Use the sign-in in a test from its Steps tab.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "Steps"] }],
+        topic: "project-sign-in",
     },
     "setup-environments": {
         title: "Environments",
@@ -802,7 +814,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Set who is told when a run finds something.", button: "Open alerts", to: here("setup", "alerts") },
         ],
         words: ["environment", "runner"],
-        next: [{ text: "Add the logins your tests sign in with.", button: "Read about test accounts", to: { topic: "test-accounts" } }],
+        next: [{ text: "Add the login your tests sign in with.", button: "Read about the sign-in", to: { topic: "project-sign-in" } }],
         topic: "settings-page",
     },
     "settings-members": {

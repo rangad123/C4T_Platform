@@ -14,9 +14,10 @@ import { blocksFor, blockView } from "./block-store.js";
 import { LocatorStore } from "./locator-store.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import { CustomScriptStore } from "./custom-script-store.js";
-import type { JobRow, Repo } from "./repo.js";
+import type { Credentials, JobRow, Repo } from "./repo.js";
 import { SecretBox } from "./secrets.js";
 import { envSecrets } from "./agent-routing.js";
+import { WHERE_TO_ENTER_SIGN_IN } from "../engine/spec/sign-in-needed.js";
 
 export function environmentStore(repo: Repo, config: Pick<Config, "dataDir" | "SECRET_KEY">): EnvironmentStore {
     return new EnvironmentStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY));
@@ -76,12 +77,32 @@ export function projectAccountsReach(appUrl: string, env: Pick<Environment, "bas
     return [env.baseUrl, env.apiBaseUrl].filter((u): u is string => !!u).every((u) => siteOf(u) === site);
 }
 
+const originOf = (u: string | undefined): string | undefined => {
+    try {
+        return u ? new URL(u).origin : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+/**
+ * May the project's own sign-in go to this environment? Only when its address is exactly the project application's origin (scheme, host
+ * and port) and its API address, if it has one, is that origin or the project's own API address.
+ */
+export function signInReaches(app: { url: string; config?: Record<string, any> }, env: Pick<Environment, "baseUrl" | "apiBaseUrl">): boolean {
+    const own = originOf(app.url);
+    if (!own || own === "null" || originOf(env.baseUrl) !== own) return false;
+    if (!env.apiBaseUrl) return true;
+    const api = originOf(env.apiBaseUrl);
+    return api === own || (api !== undefined && api === originOf(typeof app.config?.apiBaseUrl === "string" ? app.config.apiBaseUrl : undefined));
+}
+
 /** Inputs of an environment job, resolved at the time it runs. Throws a plain Error when it must not run. */
 export async function prepareEnvironmentRun(
     repo: Repo,
     config: Pick<Config, "dataDir" | "SECRET_KEY">,
     job: JobRow,
-    app: { url: string; config: Record<string, any> },
+    app: { url: string; config: Record<string, any>; credentials?: Credentials },
     roles: Role[],
 ): Promise<{ request: EnvironmentRunRequest; tests: EnvironmentTest[]; missing: string[]; notes: string[]; secrets: string[] }> {
     const name = job.options.environment;
@@ -92,7 +113,18 @@ export async function prepareEnvironmentRun(
     // A production run needs the confirmation that was given when it was queued; a stored job without one never runs there.
     if (env.production && !job.options.confirmProduction) throw new Error(PRODUCTION_CONFIRM_MESSAGE(env.name));
     await assertEnvironmentTargets(env);
-    const secrets = store.secretsOf(env);
+    const own = store.secretsOf(env);
+    // The environment's own sign-in when it has one. Otherwise the project's sign-in (routes/project-sign-in.ts), only with "Use the
+    // project's accounts" on, never on production (it needs its own), and only on exactly the project application's origin (scheme,
+    // host and port; an API address too must be that origin or the project's own API address): a shared host such as *.vercel.app or
+    // another port is someone else's site. The named test accounts keep the wider same-site rule below (projectAccountsReach).
+    const p = app.credentials;
+    const reachable = !env.production && signInReaches(app, env);
+    const borrow = !own.username && !own.password && env.useProjectAccounts && reachable && p?.username && p.password;
+    const secrets = borrow ? { ...own, username: p.username, password: p.password, ...(p.totpSecret ? { totpSecret: p.totpSecret } : {}) } : own;
+    const signInWhere = !reachable
+        ? `the settings of the environment “${env.name}” (Environments): the project's sign-in is not sent to ${env.production ? "a production environment" : "an address other than the project's own"}`
+        : `the environment “${env.name}” (Environments), or in ${WHERE_TO_ENTER_SIGN_IN}${env.useProjectAccounts ? "" : " with “Use the project's accounts” on"}`;
     const target: EnvironmentTarget = {
         name: env.name,
         production: env.production,
@@ -119,6 +151,7 @@ export async function prepareEnvironmentRun(
     // Shared elements (object repository): a test that refers to one is resolved when its script is rendered.
     const objects = new LocatorStore(repo.db).index(job.projectId);
     const blocks = blocksFor(repo.db, job.projectId);
+    // The named test accounts: the same site is enough for them (projectAccountsReach), as before.
     const accounts = env.useProjectAccounts && projectAccountsReach(app.url, env);
     const notes =
         env.useProjectAccounts && !accounts && roles.length
@@ -131,6 +164,7 @@ export async function prepareEnvironmentRun(
         request: {
             target,
             roles: accounts ? roles : [],
+            signInWhere,
             render: { baseUrl: isAppUri(app.url) ? env.baseUrl : new URL(app.url).origin, ...(app.config.apiBaseUrl ? { apiBaseUrl: app.config.apiBaseUrl } : {}), dataSets: new DataSetStore(repo.db).asMap(job.projectId), ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) },
         },
         tests,

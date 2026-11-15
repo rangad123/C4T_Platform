@@ -628,7 +628,9 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
                                 <div className="stack-sm">
                                     <p className="hint">Names you can use in steps as {"{{name}}"}. {data.placeholders.dataSet ? `The data set “${data.placeholders.dataSet}” stays attached.` : ""}</p>
                                     <MapField key={resets} id="bld-values" label="Test values" value={testData} hidden={["dataSet"]} nameLabel="Name" valueLabel="Value" onChange={(v) => setTestData(v ?? {})} />
-                                    <p className="hint">Do not type passwords or keys here. Use the saved sign-in placeholders in a step instead.</p>
+                                    <p className="hint">
+                                        Do not type passwords or keys here. Use the saved sign-in placeholders in a step instead; the sign-in is set in <a href={routes.projectSettings(data.projectId, "signin")}>Settings → Sign-in</a>.
+                                    </p>
                                 </div>
                             </Disclosure>
                         </section>

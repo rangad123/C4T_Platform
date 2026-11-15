@@ -9,6 +9,7 @@
  *
  * Production is read-only: tests that change data are skipped and say so.
  */
+import { missingSignIn } from "../spec/sign-in-needed.js";
 import { throwIfAborted, type EngineContext } from "../context.js";
 import type { RenderContext } from "../generators/index.js";
 import { defaultAdapterFor, groupByRuntime, localExecutor, renderWithAdapter, type ScriptExecutor } from "../frameworks/index.js";
@@ -59,6 +60,8 @@ export interface EnvironmentRunRequest {
     executor?: ScriptExecutor;
     /** Shared helper modules the code tests import (./helpers/<name>). */
     helpers?: Array<{ name: string; content: string }>;
+    /** Where to enter the sign-in, for a test that types one this run does not have (default: the environment's own settings). */
+    signInWhere?: string;
 }
 
 /** Why a test is not run in this environment, or undefined when it is. */
@@ -115,6 +118,15 @@ export async function runEnvironmentJob(ctx: EngineContext, req: EnvironmentRunR
         if (off) {
             skipped++;
             await record(t, { status: "skipped", reason: off });
+            continue;
+        }
+        // A test that types the sign-in this environment run does not have fails with where to enter it (sign-in-needed.ts).
+        const noSignIn = missingSignIn(t.spec.testId, t, target.credentials, req.signInWhere ?? `the settings of the environment “${target.name}” (Environments)`);
+        if (noSignIn) {
+            summary.testsGenerated++;
+            summary.testsFailedValidation++;
+            summary.errors.push(noSignIn);
+            await record(t, { status: "failed", reason: noSignIn });
             continue;
         }
         try {

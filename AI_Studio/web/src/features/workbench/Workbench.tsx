@@ -18,6 +18,7 @@ import { TestHeader } from "./TestHeader";
 import { SavedBar } from "./UnsavedBar";
 import { TAB_LABEL, TABS, lastEditBeforeFailure, marksCurrent, stepMarks, testTabHref, type Detail, type SpecVersionRow, type Tab } from "./test-model";
 import { restoreSpecVersion } from "./restore";
+import { MissingSignInHint, usesCredentials } from "../identity/ProjectSignIn";
 import "./workbench.css";
 
 const FINAL = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -342,6 +343,9 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                             onDismiss={() => setSaved(null)}
                         />
                     )}
+
+                    {/* The test types the project's sign-in ({{credentials.*}}): say where to add it when none is saved. */}
+                    {usesCredentials(JSON.stringify(t.spec?.steps ?? []) + (t.custom ? t.scripts.map((s) => s.content).join("\n") : "")) && <MissingSignInHint projectId={t.projectId} />}
 
                     {editorOpen && (
                         <div role="tabpanel" id="wb-panel-edit" data-tour="wb-edit" aria-labelledby={`wb-tab-${showEditor ? tab : lastView.current}`} hidden={!showEditor}>

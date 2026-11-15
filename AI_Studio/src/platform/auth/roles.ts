@@ -604,6 +604,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     // What the agents need (routes/agent-inputs.ts, round 38): reading the sign-in name is like reading the test accounts; saving is a setting.
     "GET /api/projects/:id/agent-inputs": "read",
     "PUT /api/projects/:id/agent-inputs": "ai_studio.project.settings",
+    // The project's sign-in (routes/project-sign-in.ts): reading the user name is like reading the test accounts; saving is a setting.
+    "GET /api/projects/:id/sign-in": "read",
+    "PUT /api/projects/:id/sign-in": "ai_studio.project.settings",
     "GET /api/projects/:id/setup-check": "read",
     // Crowd4Test projects of the project's organisation: only for choosing the reference link (US-011).
     "GET /api/projects/:id/c4t-projects": "ai_studio.project.settings",

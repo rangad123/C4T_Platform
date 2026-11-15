@@ -155,7 +155,7 @@ const CASES = ["all", "automated", "manual"] as const;
 const SCRIPTS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 const RUNS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
 // Round 37: runners are machine-level, on the Runners page, not a project setting.
-const SETTINGS = ["general", "members", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+const SETTINGS = ["general", "members", "signin", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 const PLACES: Array<{ tab: string; h: () => string; title: string; sections: string[]; at: (i: number) => string }> = [
     { tab: "Test scripts", h: () => routes.scripts(P()), title: "Test scripts", sections: ["Scripts", "Review", "Reusable steps", "Shared elements", "Helpers (code)", "Reusable libraries"], at: (i) => routes.scripts(P(), SCRIPTS[i]) },
     { tab: "Runs", h: () => routes.runs(P()), title: "Runs", sections: ["All runs", "Schedules", "After a deploy", "Trends", "Releases", "Compliance"], at: (i) => routes.runs(P(), RUNS[i]) },
@@ -163,7 +163,7 @@ const PLACES: Array<{ tab: string; h: () => string; title: string; sections: str
         tab: "Settings",
         h: () => routes.projectSettings(P()),
         title: "Settings",
-        sections: ["General", "Members", "Environments", "Test data", "Test accounts", "Frameworks", "Mobile app", "Alerts", "Issue tracker", "Storage and backup"],
+        sections: ["General", "Members", "Sign-in", "Environments", "Test data", "Test accounts", "Frameworks", "Mobile app", "Alerts", "Issue tracker", "Storage and backup"],
         at: (i) => routes.projectSettings(P(), SETTINGS[i]),
     },
 ];
@@ -176,7 +176,7 @@ const SINGLE: Array<{ tab: string; h: () => string; title: string }> = [
 ];
 
 // The name of each section in its row (old section keys kept their names when they moved).
-const SECTION_NAME: Record<string, string> = { steps: "Reusable steps", elements: "Shared elements", helpers: "Helpers (code)", data: "Test data", accounts: "Test accounts", runners: "Runners", environments: "Environments", frameworks: "Frameworks", mobile: "Mobile app", alerts: "Alerts", issues: "Issue tracker", storage: "Storage and backup" };
+const SECTION_NAME: Record<string, string> = { steps: "Reusable steps", elements: "Shared elements", helpers: "Helpers (code)", data: "Test data", accounts: "Test accounts", signin: "Sign-in", runners: "Runners", environments: "Environments", frameworks: "Frameworks", mobile: "Mobile app", alerts: "Alerts", issues: "Issue tracker", storage: "Storage and backup" };
 
 // ── the project's places ────────────────────────────────────────────────────
 
