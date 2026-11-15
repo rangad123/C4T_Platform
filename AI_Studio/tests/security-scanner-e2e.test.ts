@@ -115,7 +115,10 @@ describeIf("a real assessment, through the platform's own API, against a real ZA
         const authorized = await call("POST", `${API}/applications/${applicationId}/authorizations`, {
             basis: "owner",
             approverName: "E2E Owner",
+            approverRole: "Head of Engineering",
+            approverEmail: "owner@client.example",
             documentReference: "E2E-1",
+            authority: "Signed E2E-1 for the application's owner.",
             confirm: true,
         });
         expect(authorized.status, `recording the authorization failed: ${JSON.stringify(authorized.body)}`).toBe(201);
@@ -224,7 +227,7 @@ describeIf("a real assessment, through the platform's own API, against a real ZA
         });
         expect(slow.status, `creating the slow application failed: ${JSON.stringify(slow.body)}`).toBe(201);
         const slowId = slow.body.application.id;
-        const ok = await call("POST", `${API}/applications/${slowId}/authorizations`, { basis: "owner", approverName: "E2E Owner", confirm: true });
+        const ok = await call("POST", `${API}/applications/${slowId}/authorizations`, { basis: "owner", approverName: "E2E Owner", approverRole: "Head of Engineering", approverEmail: "owner@client.example", documentReference: "SOW-1", authority: "Signed SOW-1 for the application's owner.", confirm: true });
         expect(ok.status).toBe(201);
 
         const started = await call("POST", `${API}/applications/${slowId}/assessments`, {});

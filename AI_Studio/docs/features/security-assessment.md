@@ -38,6 +38,19 @@ routes, jobs, pages and reports. Functional testing never imports `src/security`
 - Recording a new authorization revokes the earlier ones ("replaced by a newer authorization"). **Revoking** one (owner) also asks a
   running assessment of that application to stop.
 - While an assessment runs, the target, scope, exclusions and rate cannot be changed and the application cannot be deleted (409).
+- **Required authorizer details.** Recording an authorization needs, at every level: the basis (the client owns the application, or the
+  owner gave documented permission), the authorizing person's name, role and email address, the reference of the document that records
+  the permission, a statement of their authority, and the confirmation box. A missing one is refused with a sentence naming it. The record
+  also fingerprints the application's environment, the sign-in details of the test accounts it uses, the cross-account designation and
+  the wording of the profile it allows; a change to any of them makes it out of date too.
+- **Expiry.** An authorization lasts **90 days** from when it was recorded (`AUTHORIZATION_VALID_DAYS`, `src/security/authorization.ts`);
+  then it reads *"The authorization has expired …"* and a new one is needed. A Crowd4Test admin's approval of a profile above passive is a
+  separate record and lasts **30 days** (`APPROVAL_VALID_DAYS`, `src/security/profile-gate.ts`).
+- **Legacy authorizations** (recorded before the role and authority were required; shown as "details not recorded") cover passive only
+  and stop counting **90 days after the release** that introduced the rule. That moment is a constant shipped with the code,
+  `LEGACY_AUTHORIZATION_RELEASE_AT` in `src/security/release.ts`, so a database restored from an older backup cannot extend it. **Release
+  checklist:** set it to the deploy day (earlier is stricter, never later); a release test fails when it is unset, unreadable, in the
+  future or before the rule was built.
 
 ## Safety: the scope guard
 
@@ -71,6 +84,11 @@ allowed); DNS is checked again at every request.
 handlers (a browser used for an assessment must block service workers); after a redirect the guard followed for the browser, the page keeps the
 address it asked for. Assessment requests connect directly to the checked address; only with `SECURITY_USE_PROXY=on` do they go
 through the company proxy, and then the proxy resolves the name itself (see "The company proxy (OPS)" below).
+
+External scanners are separate programs, so they cannot use this guard directly: every scanner request goes through the **request guard**
+(`src/security/egress/guard.ts`), a forward proxy that applies the same scope rules request by request, and above passive the scanners
+must also run in a proven **isolated network** (`src/security/egress/isolation.ts`). See [security-scanners.md](security-scanners.md),
+"The request guard and network isolation".
 
 ## Data
 
@@ -381,7 +399,7 @@ never contacted, excluded paths never requested, nothing but GET/HEAD/OPTIONS re
 409s, tenant isolation, retest marking fixed, cancel, emergency stop, time limit, partial completion, restart safety, revoked
 authorization).
 
-## The screens (UI)
+## The screens (screens)
 
 Code: `web/src/features/security/` (`security.ts` words, routes and data helpers; `SecurityChrome.tsx` layout, tabs, badges, emergency
 stop; `TestingType.tsx`; `Overview.tsx`; `Applications.tsx`; `Assessments.tsx`; `Findings.tsx`; `Reports.tsx`; `SecurityPage.tsx` routes,
@@ -419,7 +437,7 @@ project is made).
 - **Roles.** The page reads the person's role and does not offer what the server would refuse (viewer: no add, start, stop, state change;
   editor: no authorization, delete or risk acceptance). The server still checks every action; a refusal is shown in plain words.
 
-### Tests (UI)
+### Tests (screens)
 
 - `tests/security-ui.test.ts`: real browser against a fake security API (`tests/fixtures/security-fake-api.ts`, the real routes' answer
   shapes): the switch off and on, the testing type (new project security-only and both, Setup, tab, summary card, security-only redirect,
@@ -430,7 +448,7 @@ project is made).
 - `tests/security-ui-real.test.ts`: the same screens against the real platform (CORE, RUN, FIND, the real assessment loop) and the
   fixture application: project, application, authorization, a real passive assessment, findings, a state change, overview and report.
 
-### What is not covered (UI)
+### What is not covered (screens)
 
 - The role shown is the person's platform role; a project-level role that differs is enforced by the server (the page then shows the
   refusal) rather than predicted by the page.
@@ -824,10 +842,17 @@ another project's targets.
 
 ### Profiles, and the approval an intrusive one needs
 
-`passive` sends ordinary and known-file requests. `conservative-active` sends crafted requests bounded by the rate and the budget.
-`advanced` may send requests that change what the application holds (POST, PUT, PATCH, DELETE): it needs a **recorded approval** (who, when,
-which environment, the exact statement shown) and is **refused in production**. Every profile also carries a `never` list, shown before a
-scan starts and printed in the report.
+`passive` sends the ordinary requests a visitor's browser makes. `conservative-active` sends crafted read requests (GET, HEAD, OPTIONS)
+for known configuration problems. `advanced` adds checks that need many repeated requests or a signed-in test account. Every profile is
+read-only. Both profiles above passive need the client's authorization naming the profile, a Crowd4Test admin's **recorded approval** (who,
+when, which environment, the exact statement shown; it lasts 30 days), an application marked development or staging (never production),
+a machine that can isolate the scanners' network, and `SECURITY_ACTIVE_PROFILES=on` (default off). Every profile also carries a `never`
+list, shown before a scan starts and printed in the report.
+
+Every scanner request goes through the request guard (GET, HEAD and OPTIONS on in-scope addresses only; HTTPS targets are refused because
+the guard does not decrypt). Above passive the scanners must run in an isolated network whose only way out is the guard: ZAP, an
+externally managed daemon, is therefore **passive only**; Nuclei and Schemathesis start their tools inside the isolated network. Details
+and the machine prerequisites: [security-scanners.md](security-scanners.md).
 
 ### What a scanner's findings become
 

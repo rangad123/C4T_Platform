@@ -137,7 +137,7 @@ beforeAll(async () => {
     const r = await api("POST", `${API}/projects/${projectId}/applications`, { name: "Fixture shop", targetUrl: `${fixture.origin}/`, environment: "development", excludedPaths: ["/admin"], maxRequestsPerSecond: 10, signInAccount: "main" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
     appId = r.json.application.id;
-    const auth = await api("POST", `${API}/applications/${appId}/authorizations`, { basis: "owner", approverName: "Test Owner", confirm: true });
+    const auth = await api("POST", `${API}/applications/${appId}/authorizations`, { basis: "owner", approverName: "Test Owner", approverRole: "Head of Engineering", approverEmail: "owner@client.example", documentReference: "SOW-1", authority: "Signed SOW-1 for the application's owner.", confirm: true });
     expect(auth.status, JSON.stringify(auth.json)).toBe(201);
 }, 60_000);
 

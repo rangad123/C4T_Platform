@@ -78,15 +78,37 @@ The health view reports the two separately, because they are different problems 
 it in the environment file, `not-allowed` means somebody must allow it for this project. One project's allow-list grants nothing over another
 project's targets.
 
+### The gate is checked again while a run goes on
+
+Passing the start gate once is not enough (`src/security/assessment/runner.ts`). The whole gate (for passive a current authorization; above
+passive also the authorization it started under, its profile, a current Crowd4Test admin approval, the environment, the switch and the
+isolation) is judged again:
+
+- when the assessment is claimed, or picked up again after a restart, before anything is requested;
+- before the external scanners start, before each scanner, and after the scanners have finished
+  (`src/security/scanners/orchestration/run.ts`): a scanner whose turn comes after the gate stopped holding is recorded as not run, with why;
+- every 5 seconds while the assessment runs, together with the renewal of its lease.
+
+A check that cannot be made (the database busy for a moment) is tried again at the next one; **3 failed checks in a row stop the run**, as a
+refused gate would, with a sentence saying the conditions could not be checked. Withdrawing a Crowd4Test admin approval
+(`DELETE /api/v1/security/applications/:appId/approvals/:approvalId`) also stops a running assessment at that profile at once, in the
+gate's words.
+
 ## The profiles
 
 | Profile | What it may do | Needs approval | Refused in production |
 | --- | --- | --- | --- |
-| `passive` | Ordinary requests, plus known-file and configuration requests that aim to change nothing. | No | No |
-| `conservative-active` | Crafted requests aimed at the application, bounded by the budget and the rate. | No | No |
-| `advanced` | Methods that may change what the application holds (POST, PUT, PATCH, DELETE). | **Yes** | **Yes** |
+| `passive` | The same ordinary requests a visitor's browser makes. | No | No |
+| `conservative-active` | Crafted read requests (GET, HEAD, OPTIONS) that look for known configuration problems: missing headers, exposed files, known bad defaults. | **Yes** | **Yes** |
+| `advanced` | Checks that need many repeated requests, or that reach a signed-in area with a test account. Still read-only. | **Yes** | **Yes** |
 
-Every profile also carries a `never` list, shown to the client before a scan starts and printed in the report.
+Every profile, passive included, is read-only: no create, update, delete or overwrite. A check that would need one is skipped and listed
+as skipped. Every profile also carries a `never` list, shown to the client before a scan starts and printed in the report.
+
+Both profiles above passive need all of these, checked on the server at start (`src/security/profile-gate.ts`): an application marked
+development or staging; the client's authorization naming that profile (or a higher one); a Crowd4Test admin's approval of that profile for
+the application's environment; a machine that can run the scanners in an isolated network (see "The request guard and network
+isolation" below); and `SECURITY_ACTIVE_PROFILES=on` (default off). With the default, passive is the only profile that runs.
 
 `GET /api/v1/security/projects/:id/scanners?profile=advanced` answers with what that profile would do and whether it is allowed **for the
 application named by `?applicationId=`.** Without an application there is no environment to judge against, so the answer reports
@@ -94,12 +116,67 @@ application named by `?applicationId=`.** Without an application there is no env
 
 ### The approval
 
-An `advanced` scan needs a recorded `ScanApproval`: who approved it (`approvedByUserId`, `approvedByName`), when, which environment, and the
+A scan above passive needs a recorded `ScanApproval` by a Crowd4Test admin: who approved it (`approvedByUserId`, `approvedByName`), when, which environment, and the
 exact statement shown. It is stored on the run row, so a report months later can show who agreed to send requests that might change the
 application. Without one, nothing starts, and the assessment says why in the coverage list.
 
 Schemathesis additionally checks its own gate: it will not put a state-changing method in `--include-method` without an approval at the
 `advanced` profile.
+
+## The request guard and network isolation
+
+**The request guard** (`src/security/egress/guard.ts`) is a forward proxy on the platform's machine that every scanner request goes
+through, at every profile. It checks each request, not only the first one:
+
+- it allows only GET, HEAD and OPTIONS without a body, to addresses inside the application's authorized scope and outside its excluded
+  paths, using the same scope guard as the read-only checks (names resolved, every answer checked, the connection made to the checked
+  address), with the application's rate limit and the scan's request budget;
+- it refuses, with a plain reason, any other method, a body, an address outside the scope, an excluded path, a protocol upgrade
+  (WebSockets) and a request not addressed through a proxy;
+- it refuses HTTPS tunnels (CONNECT): inside one it cannot see the method or the address, and it does not decrypt traffic. An application
+  served over HTTPS is therefore refused before any scanner starts, and the coverage list says why;
+- redirects go back to the scanner as they are; a followed redirect is a new request and is checked again;
+- it logs every request (time, method, host, path; never the query string, headers or bodies) with its verdict and who sent it.
+
+A tool that cannot be pointed at the guard does not run (Promptfoo: it sends its test messages with POST). A tool that sent no request
+through the guard has its results discarded, because its traffic cannot be shown to have stayed in bounds.
+
+**The platform's own checks use the same guard.** Discovery, the read-only checks, the API document's operations, the sign-in check and the
+cross-account reads leave through a request guard started for the assessment (`src/security/assessment/guard.ts`), after the scope guard
+has checked them. There is no direct way out: when that guard cannot start, nothing is sent and the step fails with a plain sentence. The
+one exception is the TLS handshake that reads the certificate: it is not an HTTP request, so the guard cannot carry it; it is the only
+direct connection, and it is logged as `platform:tls`.
+
+**One request log per assessment** (`src/security/egress/request-log.ts`). The scanners' requests and the platform's own are merged into
+one list, oldest first, each entry with its source: `scanner:<id>` (`scanner:zap`) or `platform:<check family>` (`platform:discovery`,
+`platform:checks`, `platform:api-document`, `platform:sign-in`, `platform:cross-account`, `platform:tls`). What the platform refuses
+before a request reaches the guard (an out-of-scope address, a write a page tried) is added with the same shape. The first 2,000 entries
+**of each source** are kept, so one busy sender never crowds another out; the counts, also per source, cover every request.
+`GET /api/v1/security/assessments/:aid/scans` returns it as `requestLog`.
+
+**Network isolation** (`src/security/egress/isolation.ts`) is required above passive: the guard only helps if a scanner cannot go round
+it. Before any scanner runs at a profile above passive, the platform starts the scanner's process inside a new user, network and mount
+namespace (`unshare -rn -m`) whose only way out is a relay to the guard's Unix socket. Inside it `/run`, `/tmp`, `/var/tmp` and `/dev/shm`
+are private and empty apart from the run's own folders, so the machine's own sockets (name resolver, Docker, the message bus) and other
+runs' guard sockets cannot be reached. The relay needs its capabilities inside the namespace to make that masking; the scanner does not
+get them. It is started through `setpriv` with empty capability bounding and inheritable sets and no way to gain any back (no_new_privs),
+so it cannot mount or unmount anything and cannot take the masking away. The platform proves all of this from the scanner's own context:
+a direct connection fails, the machine's sockets and another run's socket cannot be opened, a name lookup through the machine fails, each
+masked folder **cannot be unmounted** (`umount -l` is tried and must be refused), and a request through the guard arrives. If any check
+fails the scanners do not start, and the refusal names the check. Passive keeps the guard alone.
+
+| Tool | Above passive |
+| --- | --- |
+| ZAP | **Passive only.** ZAP is an externally managed daemon that the platform does not start, so it cannot be placed in the isolated network; above passive it is reported as not run, with why. At passive the platform points the daemon's upstream proxy at the guard for the scan (one ZAP scan at a time holds it). |
+| Nuclei | Isolation-ready: the adapter starts nuclei inside the isolated network. A template that opens its own connection instead of an ordinary HTTP request (an `ssl` section or any other non-HTTP section, or HTTP requests marked `unsafe` or `pipeline`, which nuclei sends with its raw-socket client) would not go through the guard, so it is only selected when the run is isolated; at passive it is always skipped and listed with why. |
+| Schemathesis | Isolation-ready: the adapter starts schemathesis inside the isolated network. |
+| Promptfoo | Not run at any profile (see above). |
+
+**Production prerequisites for profiles above passive**, on the machine that runs the scanners: Linux; the `unshare`, `mount`, `umount` and
+`setpriv` commands (util-linux) and the `ip` command (iproute2); unprivileged user namespaces allowed (`kernel.unprivileged_userns_clone`); and an AppArmor policy that lets
+`unshare` create them. Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor by default, so a profile for `unshare` (or the
+platform's process) must allow them. The platform never installs anything and never needs root: it tries to create a namespace once per
+process, and when anything is missing every assessment above passive is refused at start with a sentence naming what is missing.
 
 ## What a scanner's findings become
 
@@ -139,6 +216,7 @@ Read this before promising a client anything.
   anything needing a person's judgement.
 - **nuclei**: only the reviewed templates an administrator installed **and reviewed**. A template that was never reviewed does not run. Any
   template outside the configured directory is ignored, so a template that can execute code or read a key cannot be pulled in by accident.
+  Templates that dial the target directly (TLS checks, raw `unsafe` or `pipeline` requests) run only in an isolated run.
 - **Schemathesis**: only operations the API document describes. An operation missing from the document is invisible to it. It also does not
   check whether user A may read user B's record.
 - **Promptfoo**: only the defined cases, as observed behaviour. Not the model's internals, and nothing the defined cases do not ask about.
@@ -235,9 +313,18 @@ Real, learned the hard way running these tools here:
   than guessing one.
 - **ZAP keeps one alert table for the whole daemon**, and `core/view/alerts` returns everything it has ever raised, not only what this
   run produced. Asking it for the target's origin still returns alerts for pages this assessment never visited. Verified on 2.17.0: a run
-  given a single address was handed alerts for three, while its own coverage line said one address was in scope. An alert is therefore
-  only kept when its own address is one this run was actually given (`alertIsInScope`), and the coverage list reports how many were left
-  out and why.
+  given a single address was handed alerts for three, while its own coverage line said one address was in scope. **A run reports only its
+  own alerts:** before it sends anything it deletes the alerts ZAP already holds for the target (repeated, because ZAP shows one alert per
+  rule and page and the hidden repeats take the deleted rows' place); any that are still there are remembered and left out, and when
+  deletion worked but alerts remain the run fails rather than report less than it found. Of the rest, an alert is only kept when its own
+  address is one this run was actually given (`alertIsInScope`), and the coverage list reports how many were left out and why.
+- **Alert caps.** ZAP is asked to raise at most 50 alerts for each rule (`pscan/action/setMaxAlertsPerRule`, or the core option on older
+  versions); when it does not accept that, the coverage list says it kept its own setting. The platform keeps at most 2,000 alerts per run.
+- **The saved sign-in** is given to ZAP as a Replacer rule (a request header) named for the run and limited to the target's own origin
+  and what is under it, never a longer host that starts the same. The rule is read back before any request, and the scan is refused when
+  ZAP does not confirm the limit. The daemon is shared, so every platform sign-in rule is removed (and the removal confirmed) at the start
+  and at the end of every run; a run whose sign-in rule could not be confirmed gone is not reported as finished. The header's value is
+  never logged.
 - A spec file written with a BOM makes Schemathesis fail to parse it.
 - On Windows a `.cmd` shim must be launched with `/c` and **one** argument (the whole quoted command line) and
   `windowsVerbatimArguments: true`; `src/security/scanners/cmd-shim.ts` handles this.
@@ -267,6 +354,8 @@ templates next to it. Two notes for anyone extending it:
 ## Limits
 
 - Four tools, four adapters. Adding a fifth is a new adapter plus one id; the platform never grows a code path per tool.
-- A tool that needs a running service (ZAP) is only as good as that service being up. That is reported, not worked around.
+- A tool that needs a running service (ZAP) is only as good as that service being up. That is reported, not worked around. It is also
+  passive only, because a service the platform does not start cannot be isolated.
+- The request guard does not decrypt HTTPS, so external scanners do not run against an application served over HTTPS.
 - The AI cases are reviewed and bounded. They are not a substitute for someone who understands the client's model and its data.
 - A scanner finding is evidence, not a verdict. Nobody is exempt from reading the evidence before telling a client something is wrong.

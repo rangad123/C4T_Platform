@@ -56,7 +56,7 @@ export async function requestDocumentOperations(
         }
         try {
             sent++;
-            const a = await guard.fetch(url, { method: "GET", headers: { accept: "application/json, application/problem+json;q=0.9, */*;q=0.5" }, maxBytes: 64_000, signal });
+            const a = await guard.fetch(url, { method: "GET", headers: { accept: "application/json, application/problem+json;q=0.9, */*;q=0.5" }, maxBytes: 64_000, signal, source: "api-document" });
             record.requested.push({ path: o.path, status: a.status });
             if (d.apiAnswers.length < DISCOVERY_CAPS.apiAnswers + API_DOCUMENT_MAX_REQUESTS) {
                 d.apiAnswers.push({ status: a.status, headers: a.headers, text: a.text.slice(0, DISCOVERY_CAPS.apiText), url: a.url, setCookies: a.setCookies, sent: { accept: "application/json" } });

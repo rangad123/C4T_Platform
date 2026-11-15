@@ -363,7 +363,7 @@ export interface ProxiedRequest {
     /** Headers added to the request (Host of the site, Proxy-Authorization). */
     headers: Record<string, string>;
     /** Recognises an answer that is the proxy's own refusal rather than the site's (plain-http requests): the plain reason, or undefined. */
-    checkAnswer?(status: number, headers: Record<string, string>): string | undefined;
+    checkAnswer?(status: number, headers: Record<string, string>, body: Buffer): string | undefined;
 }
 
 export interface FetchInit {
@@ -575,7 +575,7 @@ export class ScopeSession {
                         clearTimeout(timer);
                         this.stats.bytes += size;
                         const { headers: hs, setCookies } = flatHeaders(res.headers);
-                        const proxyProblem = via?.checkAnswer?.(res.statusCode ?? 0, hs);
+                        const proxyProblem = via?.checkAnswer?.(res.statusCode ?? 0, hs, Buffer.concat(chunks));
                         if (proxyProblem) return reject(new Error(proxyProblem));
                         resolve({ url: u.href, status: res.statusCode ?? 0, headers: hs, setCookies, body: Buffer.concat(chunks), truncated, address: pinned, tls, timeMs: this.clock.now() - started });
                     };

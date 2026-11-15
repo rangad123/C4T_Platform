@@ -1,5 +1,5 @@
 /**
- * The test-data reset request, the cleanup DELETEs and an API description download connect only to the address that was checked
+ * The test-data reset request, the cleanup DELETEs and an API description download connect only to the address that was checked:
  * (round 47): a name that resolves to a public address when checked and to this computer when connecting (DNS rebinding) reaches
  * nothing. A redirect is still answered with today's words. A local stand-in server on port 8881; no other address is called.
  */

@@ -17,7 +17,7 @@ import { resolveExecutable } from "../src/security/scanners/binaries.js";
 import { checksFor, methodsFor, parseSchemathesisNdjson, rewriteServers, SAFE_METHODS, schemathesisEnv, schemathesisFailureToFinding, STATE_CHANGING_METHODS, stripBom } from "../src/security/scanners/schemathesis/adapter.js";
 import { failureReasonOf, parsePromptfooResults, promptfooCaseToFinding, promptfooCoverage, promptfooEnv, renderPromptfooConfig, SYSTEM_REFERENCE } from "../src/security/scanners/promptfoo/adapter.js";
 import { AI_EVALUATION_CASES, casesFor } from "../src/security/scanners/promptfoo/cases.js";
-import { parseNucleiLine, nucleiFindingToFinding, cwesOf } from "../src/security/scanners/nuclei/adapter.js";
+import { parseNucleiLine, nucleiFindingToFinding, cwesOf, templateSendsSafeMethodsOnly } from "../src/security/scanners/nuclei/adapter.js";
 import { templateAllowed, MAX_TEMPLATES_PER_RUN } from "../src/security/scanners/nuclei/policy.js";
 import { ZapAdapter, alertIsInScope, zapAlertToFinding, zapUrl, zapCoverage, zapReachability } from "../src/security/scanners/zap/adapter.js";
 import { ScannerError } from "../src/security/scanners/contract.js";
@@ -74,11 +74,11 @@ describe("Schemathesis output, as the tool actually wrote it", () => {
         }
     });
 
-    it("never lets a state-changing method into a run that did not ask for one", () => {
+    it("never lets a state-changing method into a run, at any profile", () => {
         expect(methodsFor("passive")).toEqual([...SAFE_METHODS]);
         expect(methodsFor("conservative-active")).toEqual([...SAFE_METHODS]);
-        for (const level of ["passive", "conservative-active"] as const) for (const m of STATE_CHANGING_METHODS) expect(methodsFor(level)).not.toContain(m);
-        expect(methodsFor("advanced")).toContain("POST");
+        expect(methodsFor("advanced")).toEqual([...SAFE_METHODS]);
+        for (const level of ["passive", "conservative-active", "advanced"] as const) for (const m of STATE_CHANGING_METHODS) expect(methodsFor(level)).not.toContain(m);
     });
 
     it("keeps the checks that send deliberately invalid data for an approved advanced run only", () => {
@@ -205,14 +205,34 @@ describe("Nuclei output and its reviewed-template policy", () => {
     });
 
     it("refuses a template whose tags or severity the reviewed policy does not permit", () => {
-        const allowed = { id: "safe", severity: "info", tags: ["exposure", "misconfig"], path: "/t/a.yaml" };
+        const allowed = { id: "safe", severity: "info", tags: ["exposure", "misconfig"], path: "/t/a.yaml", readOnly: true };
         expect(templateAllowed(allowed, "passive").ok).toBe(true);
+        // At the passive profile a template that is not known to only read (GET or HEAD) is refused.
+        expect(templateAllowed({ ...allowed, readOnly: undefined }, "passive").ok).toBe(false);
         // A tag outside the profile's allow-list is refused: the list is an allow-list, never a deny-list.
         expect(templateAllowed({ ...allowed, tags: ["unreviewed-tag"] }, "passive").ok).toBe(false);
         // Exploitation categories are refused at EVERY profile, including advanced.
  for (const level of ["passive", "conservative-active", "advanced"] as const) expect(templateAllowed({ ...allowed, tags: ["rce"] }, level).ok).toBe(false);
         expect(templateAllowed({ ...allowed, severity: "catastrophic" }, "passive").ok).toBe(false);
         expect(MAX_TEMPLATES_PER_RUN).toBeGreaterThan(0);
+    });
+
+    it("skips, at every profile, a template that may send a method able to change data", () => {
+        const cve = { id: "c", severity: "high", tags: ["cve"], path: "/t/c.yaml", readOnly: false };
+        for (const level of ["conservative-active", "advanced"] as const) {
+            const no = templateAllowed({ ...cve, safeMethodsOnly: false }, level);
+            expect(no.ok).toBe(false);
+            expect(no.reason).toMatch(/can change data .* skipped/);
+            expect(templateAllowed({ ...cve, safeMethodsOnly: undefined }, level).ok).toBe(false);
+            expect(templateAllowed({ ...cve, safeMethodsOnly: true }, level).ok).toBe(true);
+        }
+        expect(templateSendsSafeMethodsOnly({ id: "a", http: [{ method: "GET", path: ["x"], payloads: { q: ["'"] } }] })).toBe(true);
+        expect(templateSendsSafeMethodsOnly({ id: "a", http: [{ method: "OPTIONS", path: ["x"] }] })).toBe(true);
+        expect(templateSendsSafeMethodsOnly({ id: "a", http: [{ method: "POST", path: ["x"] }] })).toBe(false);
+        expect(templateSendsSafeMethodsOnly({ id: "a", http: [{ raw: ["DELETE /x HTTP/1.1"] }] })).toBe(false);
+        expect(templateSendsSafeMethodsOnly({ id: "a", http: [{ raw: ["{{verb}} /x HTTP/1.1"] }] })).toBe(false);
+        expect(templateSendsSafeMethodsOnly({ id: "a", http: [{ method: "GET", fuzzing: [{}] }] })).toBe(false);
+        expect(templateSendsSafeMethodsOnly({ id: "a", javascript: [{}] })).toBe(false);
     });
 });
 

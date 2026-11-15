@@ -8,6 +8,10 @@
  * address, the saved sign-in itself); a restore makes a new project where nothing is authorized or running (authorizations withdrawn, an
  * unfinished assessment cancelled), ids are new, the trail says it was restored, and a hand-edited file is redacted again or refused as
  * damaged with nothing created; a functional-only project's backup has no security.json.
+ * Also (the newer security tables): the authorization's profile, cross-account accounts, role and authority, Crowd4Test admin profile
+ * approvals, schedules and cross-account designations round-trip with new ids; a restored approval never counts (withdrawn, no approver
+ * id, no details fingerprint); a restored schedule is switched off with no next run; the test accounts are listed as sign-ins to enter
+ * again; a backup made before these fields restores as before.
  *
  * No ports (inject only). Run under the lock (it starts the platform server):
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/security-ops-backup.test.ts
@@ -28,6 +32,9 @@ import { addTest, type Seed } from "./fixtures/retention-seed.js";
 import { buildServer } from "../src/platform/server.js";
 import { saveApiDocument } from "../src/security/extras.js";
 import { securityStoreFor, type SecurityStore } from "../src/security/store.js";
+import { readDesignation, writeDesignation } from "../src/security/cross-account-store.js";
+import { addApproval, currentApproval, listApprovals } from "../src/security/profile-gate.js";
+import { SecurityScheduleStore } from "../src/security/schedules.js";
 
 const sqlite = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 const KEY = "sec-ops-backup-key-0123456789";
@@ -350,5 +357,118 @@ describe("security assessment data in backups", () => {
         const token = users.createToken(ed.id, { name: "t", role: "editor" }).token;
         const refused = await app.inject({ method: "GET", url: `/api/projects/${pid}/backup?withoutSecurity=true`, headers: { "x-api-key": token } });
         expect(refused.statusCode).toBe(403);
+    });
+});
+
+describe("the newer security tables in backups (profile approvals, schedules, cross-account designations)", () => {
+    let platform: Platform;
+    let app: FastifyInstance;
+    let store: SecurityStore;
+    let pid: string;
+    let appId: string;
+    let zip: Uint8Array;
+    const designation = { accountA: "alice", accountB: "bob", resources: [{ path: "/api/notes/42", kind: "item" as const, owner: "B" as const, label: "B's note" }], ownerField: "ownerId", ownerValueB: "user-bob-77" };
+
+    const call = async (method: string, url: string, body?: Uint8Array) => {
+        const r = await app.inject({ method: method as never, url, headers: { "x-api-key": KEY, ...(body ? { "content-type": "application/octet-stream" } : {}) }, ...(body ? { payload: Buffer.from(body) } : {}) });
+        const text = r.rawPayload.toString("utf8");
+        return { status: r.statusCode, body: text.startsWith("{") ? JSON.parse(text) : text, raw: r.rawPayload };
+    };
+    const appOf = (id: string) => store.getApplication(id)! as never;
+
+    beforeAll(async () => {
+        platform = bootstrap(loadConfig({ DATA_DIR: tmp(), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY }));
+        app = await buildServer(platform);
+        await app.ready();
+        store = securityStoreFor(platform.db);
+        pid = (await app.inject({ method: "POST", url: "/api/projects", headers: { "x-api-key": KEY, "content-type": "application/json" }, payload: JSON.stringify({ name: "Client B" }) })).json().id;
+        const a = store.createApplication(pid, { name: "Notes", targetUrl: "https://notes.example.com/", environment: "staging", scope: [], excludedPaths: [], maxRequestsPerSecond: 2, signInAccount: "alice" } as never);
+        appId = a.id;
+        writeDesignation(platform.db, a.id, designation, "Olga");
+        store.addAuthorization(a.id, { basis: "client-permission", approverName: "Dana Client", approverRole: "Head of engineering", approverEmail: "dana@client.example", documentReference: "SOW-12", authority: "Signed engagement letter, section 4.", statement: "I confirm …", confirmedByUserId: "u1", confirmedByName: "Olga", maxProfile: "conservative-active", crossAccounts: ["alice", "bob"] });
+        const admin = accessControlOf(app).users.create({ email: "admin@example.com", name: "Ada Admin", role: "owner" });
+        platform.db.run("UPDATE users SET c4t_role = 'ADMIN' WHERE id = ?", admin.id);
+        addApproval(platform.db, a.id, { profile: "conservative-active", environment: "staging", statement: "As a Crowd4Test admin, I approve …", byUserId: admin.id, byName: "Ada Admin" });
+        new SecurityScheduleStore(platform.db).set({ id: a.id, projectId: pid }, { type: "weekly", weekday: 2, time: "03:30" }, { id: "u1", name: "Olga" });
+        // The original is live: the approval counts and the schedule is on.
+        expect(currentApproval(platform.db, appOf(a.id), "conservative-active")).toBeDefined();
+        expect(new SecurityScheduleStore(platform.db).get(a.id)).toMatchObject({ enabled: true });
+    }, 60_000);
+    afterAll(async () => {
+        await app?.close();
+        platform?.db.close();
+    });
+
+    it("exports each table with references, names only, and lists the test accounts to sign in again", async () => {
+        const r = await call("GET", `/api/projects/${pid}/backup`);
+        expect(r.status).toBe(200);
+        zip = new Uint8Array(r.raw);
+        const files = unzipSync(zip);
+        const doc = JSON.parse(strFromU8(files["security.json"]!));
+        expect(doc.authorizations[0]).toMatchObject({ maxProfile: "conservative-active", crossAccounts: ["alice", "bob"], approverRole: "Head of engineering", authority: "Signed engagement letter, section 4." });
+        expect(doc.profileApprovals).toEqual([{ applicationRef: "app-1", profile: "conservative-active", environment: "staging", approvedByName: "Ada Admin", approvedAt: expect.any(String), statement: "As a Crowd4Test admin, I approve …", withdrawnAt: null, withdrawnBy: null }]);
+        expect(doc.schedules).toEqual([expect.objectContaining({ applicationRef: "app-1", cadence: { type: "weekly", weekday: 2, time: "03:30" }, enabled: true, makerName: "Olga" })]);
+        expect(doc.crossAccount).toEqual([{ applicationRef: "app-1", designation, updatedAt: expect.any(String) }]);
+        const text = strFromU8(files["security.json"]!);
+        expect(text).not.toContain(appId);
+        expect(text).not.toMatch(/approvedByUserId|makerId|maker_id/);
+        const needs = JSON.parse(strFromU8(files["secrets-needed.json"]!)) as Array<{ label: string }>;
+        const labels = needs.map((n) => n.label);
+        expect(labels).toEqual(expect.arrayContaining(["Test account “alice” for the cross-account checks of “Notes”", "Test account “bob” for the cross-account checks of “Notes”"]));
+        expect(JSON.parse(strFromU8(files["manifest.json"]!)).counts).toMatchObject({ securityProfileApprovals: 1, securitySchedules: 1, securityCrossAccount: 1 });
+    });
+
+    it("restores each table with new ids; the approval never counts, the schedule is switched off, the authorization withdrawn", async () => {
+        const r = await call("POST", "/api/projects/restore?name=Copy", zip);
+        expect(r.status, JSON.stringify(r.body)).toBe(201);
+        expect(r.body.restored).toMatchObject({ securityProfileApprovals: 1, securitySchedules: 1, securityCrossAccount: 1 });
+        const notes = r.body.notes.join(" ");
+        expect(notes).toMatch(/profile approvals were restored as history and withdrawn/);
+        expect(notes).toMatch(/schedules were restored switched off/);
+        const np = r.body.project.id as string;
+        const na = store.listApplications(np)[0]!;
+        expect(na.id).not.toBe(appId);
+
+        const auth = store.listAuthorizations(na.id)[0]!;
+        expect(auth).toMatchObject({ maxProfile: "conservative-active", crossAccounts: ["alice", "bob"], approverRole: "Head of engineering", authority: "Signed engagement letter, section 4.", confirmedByUserId: null });
+        expect(auth.revokedAt).not.toBeNull();
+        expect(store.currentAuthorization(na)).toBeUndefined();
+
+        const approvals = listApprovals(platform.db, na.id);
+        expect(approvals).toHaveLength(1);
+        expect(approvals[0]).toMatchObject({ profile: "conservative-active", environment: "staging", approvedByName: "Ada Admin", approvedByUserId: null, detailsFingerprint: null, withdrawnBy: "Restored from a backup: a Crowd4Test admin approves again on this server." });
+        expect(approvals[0]!.withdrawnAt).not.toBeNull();
+        expect(currentApproval(platform.db, na as never, "conservative-active")).toBeUndefined();
+        // Even if someone cleared the withdrawal by hand, it still could not count: no approver id, no fingerprint.
+        platform.db.run("UPDATE security_profile_approvals SET withdrawn_at = NULL WHERE application_id = ?", na.id);
+        expect(currentApproval(platform.db, na as never, "conservative-active")).toBeUndefined();
+
+        const sched = new SecurityScheduleStore(platform.db);
+        expect(sched.get(na.id)).toMatchObject({ projectId: np, cadence: { type: "weekly", weekday: 2, time: "03:30" }, enabled: false, nextRunAt: null, lastOutcome: "stopped" });
+        expect(sched.due(Date.now() + 365 * 86_400_000).map((x) => x.applicationId)).not.toContain(na.id);
+
+        expect(readDesignation(platform.db, na.id)).toEqual(designation);
+
+        // The original is untouched.
+        expect(currentApproval(platform.db, appOf(appId), "conservative-active")).toBeDefined();
+        expect(sched.get(appId)).toMatchObject({ enabled: true });
+    });
+
+    it("a backup made before these fields restores as before; a schedule pointing nowhere is refused as damaged", async () => {
+        const files = unzipSync(zip);
+        const old = JSON.parse(strFromU8(files["security.json"]!));
+        for (const k of ["profileApprovals", "schedules", "crossAccount"]) delete old[k];
+        for (const a of old.authorizations) for (const k of ["maxProfile", "crossAccounts", "approverRole", "authority", "detailsFingerprint"]) delete a[k];
+        const r = await call("POST", "/api/projects/restore?name=Older", zipSync({ ...files, "security.json": strToU8(JSON.stringify(old)) }));
+        expect(r.status, JSON.stringify(r.body)).toBe(201);
+        const na = store.listApplications(r.body.project.id)[0]!;
+        expect(store.listAuthorizations(na.id)[0]).toMatchObject({ maxProfile: "passive", crossAccounts: [], approverRole: null });
+        expect(listApprovals(platform.db, na.id)).toEqual([]);
+
+        const broken = JSON.parse(strFromU8(files["security.json"]!));
+        broken.schedules[0].applicationRef = "app-9";
+        const bad = await call("POST", "/api/projects/restore", zipSync({ ...files, "security.json": strToU8(JSON.stringify(broken)) }));
+        expect(bad.status).toBe(400);
+        expect(bad.body.error).toBe("The backup is damaged: security.json: a profile approval, schedule or cross-account designation refers to something that is not in the backup.");
     });
 });

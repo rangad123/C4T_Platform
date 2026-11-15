@@ -27,12 +27,14 @@
  * security_finding_sightings and goes with the assessment when retention prunes it. Values are stored as given: redaction is done before
  * (FIND's ingest and manual entry), never here.
  */
+import { ensureScheduleTables } from "./schedule-schema.js";
 import { randomUUID } from "node:crypto";
 import type { Db, Row } from "../platform/db.js";
 import { actorLabel, currentActor } from "../platform/auth/actor.js";
 import {
     FINISHED_STATES,
     ASSESSMENT_KINDS,
+    type AssessmentKind,
     type AssessmentState,
     type Confidence,
     type Evidence,
@@ -45,9 +47,13 @@ import {
     type Severity,
     type ValidationState,
 } from "./contract.js";
-import { authorizationStateOf, scopeFingerprint, type AuthorizationState } from "./authorization.js";
+import { AUTHORIZATION_VALID_DAYS, authorizationStateOf, expiryOf, LEGACY_AUTHORIZATION_EXPIRES_AT, scopeFingerprint, type AuthorizationState } from "./authorization.js";
 import { apiDocumentSummary, ensureExtrasTables, readExtras, writeExtras } from "./extras.js";
 import { ensureScannerTables } from "./scanners/store.js";
+import { ensureCrossAccountTables } from "./cross-account-store.js";
+import { approvalCheck, authorizationFingerprint, crossAccountsOf, ensureProfileGateTables, GATE_WORDS, maxProfileOf, startRefusal, type ProfileApproval } from "./profile-gate.js";
+import { SCAN_PROFILES } from "./scanners/profiles.js";
+import type { ScanApproval } from "./scanners/contract.js";
 import type { SensitiveWorkflow } from "./contract.js";
 
 /** Migration slot 31: all security tables. `IF NOT EXISTS` so `ensureSecurityTables` can also make sure of it on first use. */
@@ -198,6 +204,12 @@ export function ensureSecurityTables(db: Db): void {
     ensureExtrasTables(db);
     // Round (SCAN): the scanner run and project scanner tables, plus the additive approval column on an assessment that predates them.
     ensureScannerTables(db);
+    // Scheduled passive assessments (schedules.ts).
+    ensureScheduleTables(db);
+    // The read-only cross-account designation of an application (cross-account-store.ts).
+    ensureCrossAccountTables(db);
+    // The profile gate (profile-gate.ts): the most an authorization allows, the accounts it names, and the approvals of a profile.
+    ensureProfileGateTables(db);
     ensured.add(db);
 }
 
@@ -226,6 +238,8 @@ export const SECURITY_LIMITS = {
     approverNameMax: 200,
     emailMax: 254,
     documentReferenceMax: 500,
+    approverRoleMax: 200,
+    authorityMax: 2000,
     restrictionsMax: 2000,
     findingTextMax: 8000,
     findingTitleMax: 300,
@@ -259,12 +273,19 @@ export interface AuthorizationInput {
     basis: SecurityAuthorization["basis"];
     approverName: string;
     approverEmail?: string | null;
+    /** The authorizing person's role and documented authority. With the email and the document reference all given, the record
+     *  carries a details fingerprint and expires; without them it is an older-style record (passive only, expires at the release + 90 days, release.ts). The API requires them. */
+    approverRole?: string | null;
+    authority?: string | null;
     documentReference?: string | null;
     restrictions?: string | null;
     /** The sentence shown to the person and confirmed (authorization.ts `authorizationStatement`). */
     statement: string;
     confirmedByUserId?: string | null;
     confirmedByName: string;
+    /** The most it allows (default passive) and the cross-account test accounts it names (profile-gate.ts). */
+    maxProfile?: AssessmentKind;
+    crossAccounts?: string[];
 }
 
 export interface AssessmentPatch {
@@ -368,6 +389,14 @@ export const SECURITY_AUDIT_ACTIONS = [
     "project.restored",
     // Round 21: a project backup downloaded without its security data (for a platform from before round 20).
     "project.backup-without-security",
+    // Scheduled passive assessments (schedules.ts): set or switched off by a person, or switched off by itself.
+    "schedule.changed",
+    "schedule.stopped",
+    // The read-only cross-account designation (accounts A and B, the resources whose owner is known) set or removed.
+    "cross-account.changed",
+    // The profile gate (profile-gate.ts): approvals of a profile above passive.
+    "approval.recorded",
+    "approval.withdrawn",
 ] as const;
 export type SecurityAuditAction = (typeof SECURITY_AUDIT_ACTIONS)[number];
 
@@ -375,7 +404,7 @@ export interface SecurityAuditEvent {
     projectId: string;
     applicationId?: string | null;
     action: SecurityAuditAction;
-    objectType: "application" | "authorization" | "assessment" | "finding" | "report" | "project" | "retention";
+    objectType: "application" | "authorization" | "assessment" | "finding" | "report" | "project" | "retention" | "approval";
     objectId?: string | null;
     /** One plain sentence without secrets ("Added the application “Shop” (https://shop.example.com)."). */
     summary: string;
@@ -419,7 +448,20 @@ const appOf = (r: Row): SecurityApplication => ({
 });
 
 /** The contract shape, plus the confirmed sentence and who revoked it (additive fields). */
-export type StoredAuthorization = SecurityAuthorization & { statement: string; revokedBy: string | null; revokedReason: string | null };
+export type StoredAuthorization = SecurityAuthorization & {
+    statement: string;
+    revokedBy: string | null;
+    revokedReason: string | null;
+    /** The authorizing person's role at the client, and their documented authority (null: not recorded, an older record). */
+    approverRole: string | null;
+    authority: string | null;
+    /** The details fingerprint (authorization.ts detailsFingerprint); null on an older record, which allows passive only and expires at the release + 90 days. */
+    detailsFingerprint: string | null;
+    /** True when recorded with the authorizing person's role, email, document reference and authority. */
+    detailsRecorded: boolean;
+    /** When it stops counting: AUTHORIZATION_VALID_DAYS after it was recorded, or for an older record the release + 90 days (release.ts). */
+    expiresAt: string | null;
+};
 
 const authOf = (r: Row): StoredAuthorization => ({
     id: r.id,
@@ -434,9 +476,16 @@ const authOf = (r: Row): StoredAuthorization => ({
     confirmedAt: r.confirmed_at,
     scopeFingerprint: r.scope_fingerprint,
     revokedAt: r.revoked_at ?? null,
+    maxProfile: maxProfileOf(r.max_profile),
+    crossAccounts: crossAccountsOf(r.cross_accounts_json),
     statement: r.statement,
     revokedBy: r.revoked_by ?? null,
     revokedReason: r.revoked_reason ?? null,
+    approverRole: r.approver_role ?? null,
+    authority: r.authority ?? null,
+    detailsFingerprint: r.details_fingerprint ?? null,
+    detailsRecorded: Boolean(r.details_fingerprint),
+    expiresAt: r.details_fingerprint ? expiryOf(r.confirmed_at, AUTHORIZATION_VALID_DAYS) : LEGACY_AUTHORIZATION_EXPIRES_AT,
 });
 
 const assessmentOf = (r: Row): SecurityAssessment & { cancelRequested: boolean } => ({
@@ -569,6 +618,10 @@ export class SecurityStore {
         if (!app) throw new Error(`Unknown application ${appId}`);
         const id = randomUUID();
         const at = nowIso();
+        const maxProfile = input.maxProfile ?? "passive";
+        const crossAccounts = input.crossAccounts?.slice(0, 2) ?? [];
+        const complete = [input.approverName, input.approverRole, input.approverEmail, input.documentReference, input.authority].every((v) => typeof v === "string" && v.trim() !== "");
+        const details = complete ? authorizationFingerprint(this.db, app, maxProfile, crossAccounts) : null;
         this.db.tx(() => {
             this.db.run(
                 "UPDATE security_authorizations SET revoked_at = ?, revoked_by = ?, revoked_reason = ? WHERE application_id = ? AND revoked_at IS NULL",
@@ -578,7 +631,7 @@ export class SecurityStore {
                 appId,
             );
             this.db.run(
-                "INSERT INTO security_authorizations (id, application_id, basis, approver_name, approver_email, document_reference, restrictions, statement, confirmed_by_user_id, confirmed_by_name, confirmed_at, scope_fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO security_authorizations (id, application_id, basis, approver_name, approver_email, document_reference, restrictions, statement, confirmed_by_user_id, confirmed_by_name, confirmed_at, scope_fingerprint, max_profile, cross_accounts_json, approver_role, authority, details_fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 id,
                 appId,
                 input.basis,
@@ -591,6 +644,11 @@ export class SecurityStore {
                 clip(input.confirmedByName, 200),
                 at,
                 scopeFingerprint(app),
+                maxProfile,
+                crossAccounts.length ? JSON.stringify(crossAccounts) : null,
+                input.approverRole ?? null,
+                input.authority ?? null,
+                details,
             );
         });
         return this.getAuthorization(id)!;
@@ -615,36 +673,83 @@ export class SecurityStore {
         return this.getAuthorization(id);
     }
 
-    /** The authorization an assessment may start under: not revoked, and recorded for the target, scope, exclusions and rate it has now. */
-    currentAuthorization(app: SecurityApplication): StoredAuthorization | undefined {
+    /**
+     * The authorization an assessment may start under: not revoked, and recorded for the target, scope, exclusions and rate it has now;
+     * a record with the authorizer details also not expired and recorded for the details it has now (authorization.ts).
+     */
+    currentAuthorization(app: SecurityApplication, now = Date.now()): StoredAuthorization | undefined {
         const fp = scopeFingerprint(app);
         const r = this.db.get(`SELECT * FROM security_authorizations WHERE application_id = ? AND revoked_at IS NULL AND scope_fingerprint = ? ORDER BY confirmed_at DESC, ${this.db.dialect.insertionOrder()} DESC LIMIT 1`, app.id, fp);
-        return r ? authOf(r) : undefined;
+        if (!r) return undefined;
+        const a = authOf(r);
+        return authorizationStateOf(app, a, { details: this.detailsNow(app, a), now }).state === "current" ? a : undefined;
     }
 
-    /** "current" | "stale" | "revoked" | "none", with the plain sentence the API and the UI show. */
-    authorizationState(app: SecurityApplication): AuthorizationState {
-        return authorizationStateOf(app, this.listAuthorizations(app.id)[0]);
+    /** The details fingerprint a record with the authorizer details would have for the application now (undefined for an older record: not judged on it). */
+    private detailsNow(app: SecurityApplication, a: StoredAuthorization): string | undefined {
+        return a.detailsFingerprint ? authorizationFingerprint(this.db, app, a.maxProfile, a.crossAccounts) : undefined;
+    }
+
+    /** "current" | "stale" | "expired" | "revoked" | "none", with the plain sentence the API and the UI show. Judged on the server, now. */
+    authorizationState(app: SecurityApplication, now = Date.now()): AuthorizationState {
+        const latest = this.listAuthorizations(app.id)[0];
+        return authorizationStateOf(app, latest, { ...(latest ? { details: this.detailsNow(app, latest) } : {}), now });
+    }
+
+    /**
+     * The whole start gate (profile-gate.ts), judged now: a current authorization; above passive also the authorization the assessment
+     * started under still being the current one (`authorizationId`; null at start), naming the profile, a current Crowd4Test admin
+     * approval, the environment, the server switch and the network isolation. Used at start, when the loop claims or picks up an
+     * assessment, before the external scanners and while it runs. `approval` is the approval that lets it run (above passive).
+     */
+    gateCheck(
+        app: SecurityApplication,
+        a: { kind: AssessmentKind; authorizationId: string | null },
+        opts: { activeProfilesOn: boolean; crowd4testOn: boolean; isolationProblem: () => string | undefined },
+        now = Date.now(),
+    ): { refused?: string; approval?: ProfileApproval } {
+        const auth = this.authorizationState(app, now);
+        if (auth.state !== "current" || !auth.authorizationId) return { refused: auth.message };
+        if (a.kind === "passive") return {};
+        if (a.authorizationId != null && a.authorizationId !== auth.authorizationId) return { refused: GATE_WORDS.authorizationReplaced(SCAN_PROFILES[a.kind].title) };
+        const record = this.getAuthorization(auth.authorizationId);
+        const { approval, problem } = approvalCheck(this.db, app, a.kind, now);
+        const gate = {
+            kind: a.kind,
+            environment: app.environment,
+            authorizationMaxProfile: record?.maxProfile ?? "passive",
+            authorizationDetailsRecorded: record?.detailsRecorded ?? false,
+            approval,
+            ...(problem ? { approvalProblem: problem } : {}),
+            activeProfilesOn: opts.activeProfilesOn,
+            crowd4testOn: opts.crowd4testOn,
+        };
+        // Every other condition (the server switch among them) first; the machine's isolation only when nothing else refuses, so a
+        // refused or switched-off start never asks for it.
+        const refused = startRefusal(gate) ?? startRefusal({ ...gate, egressIsolationProblem: opts.isolationProblem() });
+        return refused ? { refused } : { ...(approval ? { approval } : {}) };
     }
 
     // ── assessments ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    createAssessment(input: { applicationId: string; authorizationId: string; startedBy: string; retestOf?: string | null; progressText?: string }): SecurityAssessment {
+    createAssessment(input: { applicationId: string; authorizationId: string; startedBy: string; retestOf?: string | null; progressText?: string; kind?: AssessmentKind; approval?: ScanApproval | null }): SecurityAssessment {
         const app = this.getApplication(input.applicationId);
         if (!app) throw new Error(`Unknown application ${input.applicationId}`);
         const id = randomUUID();
         this.db.run(
-            "INSERT INTO security_assessments (id, application_id, project_id, authorization_id, kind, state, progress, progress_text, started_by, created_at, retest_of) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO security_assessments (id, application_id, project_id, authorization_id, kind, state, progress, progress_text, started_by, created_at, retest_of, approval_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             id,
             app.id,
             app.projectId,
             input.authorizationId,
-            "passive",
+            // The start route decides the profile through the gate (profile-gate.ts); without one it is passive, as every assessment was before.
+            input.kind ?? "passive",
             "QUEUED",
             0,
             input.progressText ?? "Waiting to start.",
             clip(input.startedBy, 200),
             nowIso(),
             input.retestOf ?? null,
+            input.approval ? JSON.stringify(input.approval) : null,
         );
         return this.getAssessment(id)!;
     }

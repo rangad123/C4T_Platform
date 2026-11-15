@@ -98,6 +98,8 @@ export function registerSecurityRoutes(ctx: RouteCtx): void {
         (await import("./notifications.js")).registerSecurityNotificationRoutes(sctx); // OPS: messages when an assessment ends
         (await import("./signin.js")).registerSecuritySignInRoutes(sctx); // SIGN: saved sign-ins, uploaded API documents
         (await import("./scanners.js")).registerSecurityScannerRoutes(sctx); // SCAN: which external scanners this project may use, and what they did
+        (await import("./schedule.js")).registerSecurityScheduleRoutes(sctx); // Scheduled passive assessments
+        (await import("./cross-account.js")).registerSecurityCrossAccountRoutes(sctx); // read-only cross-account designation of an application
     });
 
     // The daily retention prune: first a few minutes after start (not during start-up), then once a day. Timers never keep the process up.

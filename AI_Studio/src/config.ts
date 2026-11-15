@@ -190,6 +190,8 @@ const EnvSchema = z.object({
     /** Assessments through the company proxy (HTTPS_PROXY / HTTP_PROXY / NO_PROXY): on/off, default off; a proxy on a private address needs SECURITY_PROXY_ALLOW_PRIVATE=true. */
     SECURITY_USE_PROXY: z.string().optional(),
     SECURITY_PROXY_ALLOW_PRIVATE: z.string().optional(),
+    /** Assessments above passive (src/security/profile-gate.ts): on/off, default off. Even when on, each needs an authorization naming the profile and an approval. */
+    SECURITY_ACTIVE_PROFILES: z.string().optional(),
     /**
      * SCAN: external scanners (src/security/scanners). Every one is off unless SECURITY_SCANNERS names it, so installing a tool on
      * the machine never silently makes it runnable from the product. The paths and the ZAP API key are read on the server only and

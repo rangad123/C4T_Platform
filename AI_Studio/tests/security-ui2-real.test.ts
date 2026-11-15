@@ -91,7 +91,11 @@ describe("round 20 screens against the real platform", () => {
         expect(stored.signInAccount).toBe("main");
         expect(stored.sensitiveWorkflows).toEqual([{ name: "Payments", pathPrefixes: ["/checkout/pay"], note: "Real card payments" }]);
         const auth = page.getByTestId("sec-auth-form");
-        await auth.getByLabel("Approved by").fill("Alice Client");
+        await auth.getByLabel("Authorized by").fill("Alice Client");
+        await auth.getByLabel("Their role").fill("Head of Engineering");
+        await auth.getByLabel("Their email").fill("alice@client.example");
+        await auth.getByLabel("Permission document").fill("SOW-12");
+        await auth.getByLabel("Their authority to permit testing").fill("Signed SOW-12 for the owner.");
         await auth.getByRole("checkbox", { name: /I confirm the statement above/ }).check();
         await auth.getByRole("button", { name: "Record authorization", exact: true }).click();
         await pwExpect(page.locator(".page-head")).toContainText("Authorized");

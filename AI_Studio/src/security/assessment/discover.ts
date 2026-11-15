@@ -176,6 +176,7 @@ export async function discover(guard: Guard, opts: DiscoverOptions, partial: Dis
             if (!/^https?:/i.test(url)) return route.continue(); // data:, blob: and the like never reach the network
             if (!READ_METHODS.has(method)) {
                 push(result.blockedWrites, { method, url: url.split("?")[0]!.slice(0, 300) }, DISCOVERY_CAPS.blockedWrites);
+                guard.note?.({ source: "discovery", method, url, verdict: "refused", reason: `A ${method} request was not sent: the assessment only reads.` });
                 return refuse(route, "blocked");
             }
             if (capHit || opts.signal.aborted) return refuse(route, "blocked");
@@ -191,7 +192,7 @@ export async function discover(guard: Guard, opts: DiscoverOptions, partial: Dis
             try {
                 // Redirects are followed here, each hop checked by the guard. A 3xx is never handed to the browser: Chromium follows a
                 // fulfilled redirect by itself, without calling this handler again (the tests saw it reach an out-of-scope host that way).
-                answer = await guard.fetch(url, { method: method as "GET" | "HEAD" | "OPTIONS", headers: { ...headers, ...session }, redirect: "follow", maxBytes: BROWSER_MAX_BYTES, signal: opts.signal, savedCookies: false });
+                answer = await guard.fetch(url, { method: method as "GET" | "HEAD" | "OPTIONS", headers: { ...headers, ...session }, redirect: "follow", maxBytes: BROWSER_MAX_BYTES, signal: opts.signal, savedCookies: false, source: "discovery" });
             } catch (e) {
                 if (e instanceof RequestCapError) capHit = e;
                 else if (e instanceof RefusedError) noteOutOfScope(e.url, e.reason);
@@ -448,7 +449,7 @@ export async function discover(guard: Guard, opts: DiscoverOptions, partial: Dis
             return;
         }
         try {
-            const answer = await guard.fetch(url, { method: "GET", maxBytes: 2_000_000, signal: opts.signal, headers: { accept: "application/json, application/yaml, text/yaml, */*" } });
+            const answer = await guard.fetch(url, { method: "GET", maxBytes: 2_000_000, signal: opts.signal, source: "discovery", headers: { accept: "application/json, application/yaml, text/yaml, */*" } });
             result.apiSpec = { url: url.split("?")[0]!, status: answer.status, operations: answer.status < 400 ? countApiOperations(answer.text) : 0 };
             push(result.apiAnswers, { status: answer.status, headers: answer.headers, text: answer.text.slice(0, DISCOVERY_CAPS.apiText), url: answer.url, setCookies: answer.setCookies }, DISCOVERY_CAPS.apiAnswers);
         } catch (e) {
@@ -466,7 +467,7 @@ export async function discover(guard: Guard, opts: DiscoverOptions, partial: Dis
  */
 export async function checkSignInPlain(guard: Guard, checkUrl: string, signal: AbortSignal): Promise<{ ok: boolean; reason: string } | undefined> {
     try {
-        const a = await guard.fetch(checkUrl, { method: "GET", maxBytes: 256_000, signal, headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } });
+        const a = await guard.fetch(checkUrl, { method: "GET", maxBytes: 256_000, signal, source: "sign-in", headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } });
         if (a.blockedRedirect) {
             const moved = judgeSignedInPage({ status: 200, finalUrl: a.blockedRedirect.url, hasPasswordField: false }, checkUrl);
             return moved.ok ? undefined : moved;

@@ -10,8 +10,10 @@ import { relativeTime } from "../../lib/format";
 import { normalizeUrl } from "../../lib/url";
 import { go, useRoute } from "../../lib/router";
 import { ApiDocumentPanel, SignInChoice, SignInPanel, signInLabel } from "./ApplicationExtras";
+import { CrossAccountPanel } from "./CrossAccount";
+import { SchedulePanel } from "./SchedulePanel";
 import { AuthTag, SecurityLayout, StateTag, authKey, canApprove, canRun, stateKey, useRole } from "./SecurityChrome";
-import { AUTH_WORDS, ENVIRONMENT_ORDER, ENVIRONMENT_WORDS, SEC, authStateOf, isRunning, sec, when, listOf, oneOf, type AppAnswer, type AppRow, type AssessmentRow, type SecurityAuthorization, type SecurityEnvironment, type SensitiveWorkflow } from "./security";
+import { AUTH_WORDS, NOT_RECORDED, ENVIRONMENT_ORDER, ENVIRONMENT_WORDS, PROFILE_ORDER, PROFILE_WORDS, SEC, authStateOf, isRunning, sec, when, listOf, oneOf, type AppAnswer, type AppRow, type AssessmentRow, type ProfileApprovalRow, type ProfileKey, type RecordedAuthorization, type SecurityAuthorization, type SecurityEnvironment, type SensitiveWorkflow } from "./security";
 
 // ── the list ─────────────────────────────────────────────────────────────────
 
@@ -358,7 +360,7 @@ export function ApplicationDetail({ id, appId }: { id: string; appId: string }) 
     const app = useFetch<AppAnswer>(`${SEC}/applications/${appId}`);
     const auths = useFetch<unknown>(`${SEC}/applications/${appId}/authorizations`);
     const assessments = useFetch<unknown>(`${SEC}/projects/${id}/assessments`, (d) => (listOf<AssessmentRow>(d, "assessments").some((x) => x.applicationId === appId && isRunning(x.state)) ? 3000 : null));
-    const authList = listOf<SecurityAuthorization>(auths.data, "authorizations");
+    const authList = listOf<RecordedAuthorization>(auths.data, "authorizations");
     const [editing, setEditing] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const a = app.data ? oneOf<AppRow>(app.data, "application") : undefined;
@@ -444,10 +446,13 @@ export function ApplicationDetail({ id, appId }: { id: string; appId: string }) 
                                 )}
                             </dl>
                         </section>
-                        <AuthorizationPanel app={a} auths={authList} state={state} stateText={stateText} statement={statement} openForm={authorizeAsked || state === "stale"} onChanged={() => void Promise.all([app.reload(), auths.reload()])} />
+                        <AuthorizationPanel app={a} auths={authList} state={state} stateText={stateText} statement={statement} openForm={authorizeAsked || state === "stale" || state === "expired"} onChanged={() => void Promise.all([app.reload(), auths.reload()])} />
+                        <ApprovalsPanel app={a} />
                         {/* Round 20 (SIGN's fields): shown when the server knows them. */}
                         {a.signInAccount !== undefined && <SignInPanel projectId={id} app={a} onChanged={() => void app.reload()} />}
                         {a.apiDocument !== undefined && <ApiDocumentPanel app={a} onChanged={() => void app.reload()} />}
+                        <CrossAccountPanel projectId={id} app={a} onChanged={() => void Promise.all([app.reload(), auths.reload()])} />
+                        <SchedulePanel app={a} canChange={canRun(role)} authorized={state === "current"} />
                     </div>
                     <section className="stack-sm" aria-labelledby="sa-runs-h">
                         <div className="row" style={{ gap: 4 }}>
@@ -568,7 +573,7 @@ export function statementFor(app: AppRow, basis: SecurityAuthorization["basis"])
         : `I confirm that the owner of ${app.targetUrl}${scope} has given documented permission to assess it passively within the scope listed, at no more than ${app.maxRequestsPerSecond} requests per second${app.excludedPaths.length ? `, never requesting ${app.excludedPaths.join(", ")}` : ""}.`;
 }
 
-function AuthorizationPanel({ app, auths, state, stateText, statement, openForm, onChanged }: { app: AppRow; auths: SecurityAuthorization[]; state: ReturnType<typeof authStateOf>; stateText: string; statement?: string; openForm: boolean; onChanged: () => void }) {
+function AuthorizationPanel({ app, auths, state, stateText, statement, openForm, onChanged }: { app: AppRow; auths: RecordedAuthorization[]; state: ReturnType<typeof authStateOf>; stateText: string; statement?: string; openForm: boolean; onChanged: () => void }) {
     const role = useRole();
     const [form, setForm] = useState(openForm && state !== "current");
     useEffect(() => setForm(openForm && state !== "current"), [openForm, state]);
@@ -586,11 +591,15 @@ function AuthorizationPanel({ app, auths, state, stateText, statement, openForm,
                 <dl className="kv">
                     <dt>Basis</dt>
                     <dd>{live.basis === "owner" ? "We own the application" : "The owner gave documented permission"}</dd>
-                    <dt>Approved by</dt>
+                    <dt>Authorized by</dt>
                     <dd>
                         {live.approverName}
                         {live.approverEmail ? `, ${live.approverEmail}` : ""}
                     </dd>
+                    <dt>Their role</dt>
+                    <dd data-testid="sec-auth-role">{live.approverRole ?? NOT_RECORDED}</dd>
+                    <dt>Their authority</dt>
+                    <dd data-testid="sec-auth-authority">{live.authority ?? NOT_RECORDED}</dd>
                     <dt>Document</dt>
                     <dd>{live.documentReference ?? "None given"}</dd>
                     <dt>Restrictions</dt>
@@ -599,15 +608,28 @@ function AuthorizationPanel({ app, auths, state, stateText, statement, openForm,
                     <dd>
                         {when(live.confirmedAt)} by {live.confirmedByName}
                     </dd>
+                    <dt>Expires</dt>
+                    <dd data-testid="sec-auth-expires">{live.expiresAt ? when(live.expiresAt) : "Not known yet"}</dd>
+                    <dt>Allows at most</dt>
+                    <dd data-testid="sec-auth-max">{PROFILE_WORDS[(live.maxProfile ?? "passive") as ProfileKey] ?? PROFILE_WORDS.passive}</dd>
+                    <dt>Cross-account test accounts</dt>
+                    <dd>{live.crossAccounts?.length ? live.crossAccounts.map(signInLabel).join(" and ") : "None named"}</dd>
                 </dl>
             ) : (
                 <p className="t-secondary">{stateText}</p>
+            )}
+            {live && live.detailsRecorded === false && (
+                <p className="hint" data-testid="sec-auth-details-missing">
+                    Recorded before the authorizing person’s role and documented authority were asked for: it covers passive assessments only
+                    {live.expiresAt ? `, and it stops counting on ${when(live.expiresAt)} (90 days after the server was updated to require those details)` : ""}. Record a new authorization with
+                    those details before then, and before anything above passive.
+                </p>
             )}
             {!form && (
                 <div className="row">
                     {canApprove(role) && (
                         <Button variant={state === "current" ? "secondary" : "primary"} icon={ShieldCheck} onClick={() => setForm(true)}>
-                            {state === "current" ? "Record a new authorization" : state === "stale" ? "Confirm the authorization again" : "Record authorization"}
+                            {state === "current" ? "Record a new authorization" : state === "stale" || state === "expired" ? "Confirm the authorization again" : "Record authorization"}
                         </Button>
                     )}
                     {canApprove(role) && live && <Revoke auth={live} onDone={onChanged} />}
@@ -646,9 +668,11 @@ function AuthorizationPanel({ app, auths, state, stateText, statement, openForm,
     );
 }
 
-function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }: { app: AppRow; statement?: string; previous?: SecurityAuthorization; onCancel: () => void; onDone: () => void }) {
+function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }: { app: AppRow; statement?: string; previous?: RecordedAuthorization; onCancel: () => void; onDone: () => void }) {
     const [basis, setBasis] = useState<SecurityAuthorization["basis"]>(previous?.basis ?? "client-permission");
     const [approverName, setName] = useState(previous?.approverName ?? "");
+    const [approverRole, setRole] = useState(previous?.approverRole ?? "");
+    const [authority, setAuthority] = useState(previous?.authority ?? "");
     const [approverEmail, setEmail] = useState(previous?.approverEmail ?? "");
     const [documentReference, setDoc] = useState(previous?.documentReference ?? "");
     const [restrictions, setRestrictions] = useState(previous?.restrictions ?? "");
@@ -656,13 +680,26 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [problem, setProblem] = useState("");
     const [busy, setBusy] = useState(false);
+    // The profile gate: the most this authorization allows (passive unless chosen) and, when the application has a cross-account
+    // designation, whether it names that designation's two test accounts.
+    const [maxProfile, setMaxProfile] = useState<ProfileKey>("passive");
+    const designation = useFetch<{ designation: { accountA: string; accountB: string } | null }>(`${SEC}/applications/${app.id}/cross-account`);
+    const pair = designation.data?.designation ? [designation.data.designation.accountA, designation.data.designation.accountB] : null;
+    const [nameAccounts, setNameAccounts] = useState(true);
+    const crossAccounts = pair && nameAccounts ? pair : [];
+    const query = new URLSearchParams({ ...(maxProfile !== "passive" ? { maxProfile } : {}), ...(crossAccounts.length ? { crossAccounts: crossAccounts.join(",") } : {}) }).toString();
+    const preview = useFetch<{ statement: string }>(query ? `${SEC}/applications/${app.id}/authorization-statement?${query}` : null);
     // The server words the statement (it names the organization); the page words one itself only when the server sends none.
-    const statement = given ?? statementFor(app, basis);
+    const statement = (query ? preview.data?.statement : undefined) ?? given ?? statementFor(app, basis);
     async function submit(e: React.FormEvent) {
         e.preventDefault();
         const errs: Record<string, string> = {};
-        if (!approverName.trim()) errs.name = "Enter the name of the person who approved the assessment.";
-        if (approverEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(approverEmail.trim())) errs.email = "Enter an email address like name@example.com, or leave it empty.";
+        if (!approverName.trim()) errs.name = "Enter the name of the person at the client who authorized the assessment.";
+        if (!approverRole.trim()) errs.role = "Enter the authorizing person’s role at the client, for example their job title.";
+        if (!approverEmail.trim()) errs.email = "Enter the authorizing person’s email address.";
+        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(approverEmail.trim())) errs.email = "Enter an email address like name@example.com.";
+        if (!documentReference.trim()) errs.doc = "Enter the reference of the document that records the permission.";
+        if (!authority.trim()) errs.authority = "Say what gives this person the authority to permit testing on behalf of the application’s owner.";
         if (!confirmed) errs.confirm = "Tick the box to confirm the statement.";
         setErrors(errs);
         if (Object.keys(errs).length) return;
@@ -671,7 +708,18 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
         try {
             await api(`${SEC}/applications/${app.id}/authorizations`, {
                 method: "POST",
-                body: { basis, approverName: approverName.trim(), approverEmail: approverEmail.trim() || null, documentReference: documentReference.trim() || null, restrictions: restrictions.trim() || null, confirm: true },
+                body: {
+                    basis,
+                    approverName: approverName.trim(),
+                    approverRole: approverRole.trim(),
+                    approverEmail: approverEmail.trim(),
+                    documentReference: documentReference.trim(),
+                    authority: authority.trim(),
+                    restrictions: restrictions.trim() || null,
+                    confirm: true,
+                    ...(maxProfile !== "passive" ? { maxProfile } : {}),
+                    ...(crossAccounts.length ? { crossAccounts } : {}),
+                },
             });
             onDone();
         } catch (err) {
@@ -689,7 +737,7 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
                     <input type="radio" name="sa-basis" checked={basis === "client-permission"} onChange={() => setBasis("client-permission")} />
                     <span>
                         <span className="title">The owner gave documented permission</span>
-                        <span className="hint">For a client’s application: an engagement letter or a written permission.</span>
+                        <span className="hint">For a client’s application: an engagement letter or a written permission. Give the name of the person at the client who authorized it.</span>
                     </span>
                 </label>
                 <label className="check">
@@ -701,7 +749,7 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
             </fieldset>
             <div className="grid-2">
                 <div className="field">
-                    <label htmlFor="sa-approver">Approved by</label>
+                    <label htmlFor="sa-approver">Authorized by</label>
                     <input id="sa-approver" className="input" autoComplete="off" value={approverName} onChange={(e) => setName(e.target.value)} aria-invalid={!!errors.name} aria-describedby={errors.name ? "sa-approver-err" : undefined} />
                     {errors.name && (
                         <div className="error-text" id="sa-approver-err">
@@ -710,7 +758,16 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
                     )}
                 </div>
                 <div className="field">
-                    <label htmlFor="sa-approver-email">Their email (optional)</label>
+                    <label htmlFor="sa-approver-role">Their role</label>
+                    <input id="sa-approver-role" className="input" autoComplete="off" value={approverRole} onChange={(e) => setRole(e.target.value)} placeholder="For example “Head of Engineering”" aria-invalid={!!errors.role} aria-describedby={errors.role ? "sa-approver-role-err" : undefined} />
+                    {errors.role && (
+                        <div className="error-text" id="sa-approver-role-err">
+                            {errors.role}
+                        </div>
+                    )}
+                </div>
+                <div className="field">
+                    <label htmlFor="sa-approver-email">Their email</label>
                     <input id="sa-approver-email" className="input" type="email" autoComplete="off" value={approverEmail} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!errors.email} aria-describedby={errors.email ? "sa-approver-email-err" : undefined} />
                     {errors.email && (
                         <div className="error-text" id="sa-approver-email-err">
@@ -720,13 +777,52 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
                 </div>
             </div>
             <div className="field">
-                <label htmlFor="sa-doc">Permission document (optional)</label>
-                <input id="sa-doc" className="input" value={documentReference} onChange={(e) => setDoc(e.target.value)} placeholder="For example “Engagement letter 2026-114, signed 12 October”" />
+                <label htmlFor="sa-doc">Permission document</label>
+                <input id="sa-doc" className="input" value={documentReference} onChange={(e) => setDoc(e.target.value)} placeholder="For example “Engagement letter 2026-114, signed 12 October”" aria-invalid={!!errors.doc} aria-describedby={errors.doc ? "sa-doc-err" : undefined} />
+                {errors.doc && (
+                    <div className="error-text" id="sa-doc-err">
+                        {errors.doc}
+                    </div>
+                )}
+            </div>
+            <div className="field">
+                <FieldHelp htmlFor="sa-authority" label="Their authority to permit testing" helpLabel="Authority" help="What gives this person the right to permit security testing on behalf of the application’s owner: for example “Signed the engagement letter as the owner’s CTO” or “Named as the testing contact in the statement of work, section 4”." />
+                <textarea id="sa-authority" className="input" rows={2} value={authority} onChange={(e) => setAuthority(e.target.value)} aria-invalid={!!errors.authority} aria-describedby={errors.authority ? "sa-authority-err" : undefined} />
+                {errors.authority && (
+                    <div className="error-text" id="sa-authority-err">
+                        {errors.authority}
+                    </div>
+                )}
             </div>
             <div className="field">
                 <FieldHelp htmlFor="sa-restrictions" label="Restrictions (optional)" helpLabel="Restrictions" help="Kept with the authorization and printed in the reports. The platform does not enforce them: use the exclusions and the request limit for what it must never do." />
                 <textarea id="sa-restrictions" className="input" rows={2} value={restrictions} onChange={(e) => setRestrictions(e.target.value)} placeholder="For example “Weekdays after 18:00 only”" />
             </div>
+            <fieldset className="stack-sm" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                <legend className="t-card" style={{ marginBottom: 8 }}>
+                    The most it allows
+                </legend>
+                {PROFILE_ORDER.map((k) => (
+                    <label className="check" key={k}>
+                        <input type="radio" name="sa-max-profile" checked={maxProfile === k} onChange={() => setMaxProfile(k)} />
+                        <span>
+                            <span className="title">{PROFILE_WORDS[k]}</span>
+                            {k !== "passive" && <span className="hint">Development or staging only, and read requests only: no request is meant to change data, though an application can still react to a read request in a way nobody intended. This authorization does not approve the profile: each assessment at it also needs a Crowd4Test admin’s approval for this application’s environment.</span>}
+                        </span>
+                    </label>
+                ))}
+            </fieldset>
+            {pair && (
+                <label className="check">
+                    <input type="checkbox" checked={nameAccounts} onChange={(e) => setNameAccounts(e.target.checked)} />
+                    <span>
+                        <span className="title">Name the cross-account test accounts</span>
+                        <span className="hint">
+                            {signInLabel(pair[0]!)} and {signInLabel(pair[1]!)}. The cross-account checks run only when the authorization names both.
+                        </span>
+                    </span>
+                </label>
+            )}
             <p className="sec-statement" data-testid="sec-statement">
                 {statement}
             </p>
@@ -734,7 +830,7 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
                 <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} aria-invalid={!!errors.confirm} aria-describedby={errors.confirm ? "sa-confirm-err" : undefined} />
                 <span>
                     <span className="title">I confirm the statement above</span>
-                    <span className="hint">It is recorded with your name and the time. A change to the target, scope, exclusions, request limit, saved sign-in or sensitive workflows asks for it again.</span>
+                    <span className="hint">It is recorded with your name and the time, and lasts 90 days. A change to the target, environment, scope, exclusions, request limit, saved sign-in, sensitive workflows or the test accounts it uses asks for it again.</span>
                 </span>
             </label>
             {errors.confirm && (
@@ -756,6 +852,131 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
                 </Button>
             </div>
         </form>
+    );
+}
+
+/** Approvals of a profile above passive (src/security/profile-gate.ts): listed for everyone, recorded and withdrawn by a Crowd4Test admin only. */
+function ApprovalsPanel({ app }: { app: AppRow }) {
+    const answer = useFetch<{ approvals: ProfileApprovalRow[]; statements: Record<string, string>; activeProfilesOn: boolean; environmentAllowed?: boolean; mayApprove?: boolean; approveRefusal?: string | null }>(`${SEC}/applications/${app.id}/approvals`);
+    const [profile, setProfile] = useState<Exclude<ProfileKey, "passive">>("conservative-active");
+    const [open, setOpen] = useState(false);
+    const [confirmed, setConfirmed] = useState(false);
+    const [problem, setProblem] = useState("");
+    const [busy, setBusy] = useState(false);
+    if (!answer.data) return null;
+    const live = answer.data.approvals.filter((x) => !x.withdrawnAt);
+    // The server decides who may approve (a Crowd4Test admin) and where (development or staging only).
+    const mayApprove = answer.data.mayApprove === true && answer.data.environmentAllowed !== false;
+    async function approve() {
+        if (!confirmed) {
+            setProblem("Tick the box to confirm the approval.");
+            return;
+        }
+        setBusy(true);
+        setProblem("");
+        try {
+            await api(`${SEC}/applications/${app.id}/approvals`, { method: "POST", body: { profile, confirm: true } });
+            setOpen(false);
+            setConfirmed(false);
+            await answer.reload();
+        } catch (err) {
+            setProblem(describeApiError(err));
+        } finally {
+            setBusy(false);
+        }
+    }
+    async function withdraw(id: string) {
+        try {
+            await api(`${SEC}/applications/${app.id}/approvals/${id}`, { method: "DELETE" });
+            await answer.reload();
+        } catch (err) {
+            setProblem(describeApiError(err));
+        }
+    }
+    return (
+        <section className="card card-pad stack-sm" aria-labelledby="sa-approvals-h" data-testid="sec-approvals">
+            <h2 className="t-section" id="sa-approvals-h">
+                Profiles above passive
+            </h2>
+            <p className="t-secondary">An assessment above passive starts only against a development or staging application, with the client’s authorization allowing that profile and, separately, a Crowd4Test admin’s approval for its environment. Only a signed-in Crowd4Test admin approves; the client’s authorization never does.</p>
+            {answer.data.environmentAllowed === false && (
+                <Callout tone="info" title="Only passive assessments for this application">
+                    It is marked as {app.environment}. Profiles above passive run only against an application marked as development or staging.
+                </Callout>
+            )}
+            {!answer.data.activeProfilesOn && (
+                <Callout tone="info" title="Only passive assessments start on this server">
+                    Profiles above passive are switched off here (the platform setting SECURITY_ACTIVE_PROFILES). Approvals are kept, but they start nothing.
+                </Callout>
+            )}
+            {live.length ? (
+                <ul className="sec-history">
+                    {live.map((x) => (
+                        <li key={x.id}>
+                            <span>
+                                {PROFILE_WORDS[x.profile]}, approved by the Crowd4Test admin {x.approvedByName} {when(x.approvedAt)} for {x.environment}
+                            </span>
+                            {x.current && (
+                                <span className="t-meta" data-testid="sec-approval-state">
+                                    {x.current.message}
+                                </span>
+                            )}
+                            {mayApprove && (
+                                <Button size="sm" variant="ghost" icon={Undo2} onClick={() => void withdraw(x.id)} aria-label={`Withdraw the approval of ${PROFILE_WORDS[x.profile]}`}>
+                                    Withdraw
+                                </Button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            ) : (
+                <p className="hint">No profile above passive is approved for this application.</p>
+            )}
+            {mayApprove && !open && (
+                <div className="row">
+                    <Button variant="secondary" icon={ShieldCheck} onClick={() => setOpen(true)}>
+                        Approve a profile
+                    </Button>
+                </div>
+            )}
+            {mayApprove && open && (
+                <div className="stack-sm" data-testid="sec-approval-form">
+                    <div className="field">
+                        <label htmlFor="sa-approve-profile">Profile</label>
+                        <select id="sa-approve-profile" className="input" value={profile} onChange={(e) => setProfile(e.target.value as Exclude<ProfileKey, "passive">)}>
+                            <option value="conservative-active">{PROFILE_WORDS["conservative-active"]}</option>
+                            <option value="advanced">{PROFILE_WORDS.advanced}</option>
+                        </select>
+                    </div>
+                    <p className="sec-statement">{answer.data.statements[profile]}</p>
+                    <label className="check">
+                        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+                        <span>
+                            <span className="title">I approve this profile for this application</span>
+                            <span className="hint">Recorded with your name, as a Crowd4Test admin, and the time. It lasts 30 days, and stops counting at once if the application’s target, scope, environment, saved sign-in or test accounts change.</span>
+                        </span>
+                    </label>
+                    {problem && (
+                        <Callout tone="danger" title="We couldn’t record the approval">
+                            {problem}
+                        </Callout>
+                    )}
+                    <div className="row">
+                        <Button variant="primary" icon={ShieldCheck} loading={busy} onClick={() => void approve()}>
+                            Record approval
+                        </Button>
+                        <Button variant="ghost" onClick={() => setOpen(false)}>
+                            Cancel
+                        </Button>
+                    </div>
+                </div>
+            )}
+            {!mayApprove && answer.data.environmentAllowed !== false && (
+                <p className="hint" data-testid="sec-approve-refusal">
+                    {answer.data.approveRefusal || "Only a Crowd4Test admin can approve a profile above passive."}
+                </p>
+            )}
+        </section>
     );
 }
 

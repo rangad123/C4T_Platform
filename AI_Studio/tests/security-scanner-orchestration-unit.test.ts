@@ -14,7 +14,8 @@ import type { ScanIntensity, ScannerAdapter, ScannerAvailability, ScannerFinding
 import { buildTarget, profileStatementFor, runScanners, scannerCoverageLines, scannerErrorMessage } from "../src/security/scanners/orchestration/run.js";
 import { adaptersForProject, allAdapters, profileProblem, scannerHealth, usableAdapters } from "../src/security/scanners/registry.js";
 import { scannerSettings } from "../src/security/scanners/settings.js";
-import { projectScanners, setProjectScanners } from "../src/security/scanners/store.js";
+import { MAX_PER_SOURCE } from "../src/security/egress/request-log.js";
+import { PLATFORM_SOURCES, projectScanners, requestLogOfAssessment, savePlatformRequests, setProjectScanners } from "../src/security/scanners/store.js";
 import type { SecurityApplication } from "../src/security/contract.js";
 import { SecurityStore } from "../src/security/store.js";
 import { Db } from "../src/platform/db.js";
@@ -209,7 +210,8 @@ describe("an intrusive profile needs its recorded approval", () => {
     it("refuses an advanced profile for production, before anything starts", () => {
         expect(profileProblem("advanced", "production", true)).toMatch(/production/i);
         expect(profileProblem("advanced", "staging", false)).toMatch(/approval/i);
-        expect(profileProblem("conservative-active", "production", false)).toBe("");
+        expect(profileProblem("conservative-active", "production", false)).toMatch(/development or staging/);
+        expect(profileProblem("conservative-active", "staging", true)).toBe("");
         expect(profileProblem("passive", "production", false)).toBe("");
     });
 });
@@ -295,5 +297,31 @@ describe("what the report is told about the run", () => {
         expect(zap.covers).toMatch(/Not covered/);
         expect(zap.purpose.length).toBeGreaterThan(20);
         expect(zap.documentationUrl).toBe("https://example.com");
+    });
+});
+
+describe("a stored platform request log is bounded by the number of sources too", () => {
+    it("maps every unknown platform source to platform:checks, so a log naming a new source per entry keeps at most one share", () => {
+        const { db, app, assessmentId, close } = withDb();
+        try {
+            const at = new Date().toISOString();
+            const n = MAX_PER_SOURCE * 3;
+            const entries = Array.from({ length: n }, (_, i) => ({ at, source: `platform:made-up-${i}`, method: "GET", host: "shop.example.com", path: `/p${i}`, verdict: "allowed" as const, status: 200 }));
+            const totals: Record<string, { total: number; allowed: number; refused: number; failed: number; byMethod: Record<string, number> }> = {};
+            for (let i = 0; i < 500; i++) totals[`platform:made-up-${i}`] = { total: 1, allowed: 1, refused: 0, failed: 0, byMethod: { [`M${"x".repeat(i % 40)}`]: 1, GET: 1 } };
+            totals["platform:discovery"] = { total: 2, allowed: 2, refused: 0, failed: 0, byMethod: { GET: 2 } };
+            const a = { id: assessmentId, projectId: app.projectId, applicationId: app.id, kind: "passive" };
+            savePlatformRequests(db, a, "steps", { entries: [...entries, { at, source: "platform:discovery", method: "GET", host: "shop.example.com", path: "/", verdict: "allowed", status: 200 }], totals });
+            const kept = requestLogOfAssessment(db, assessmentId);
+            expect(kept.entries.length).toBe(MAX_PER_SOURCE + 1);
+            expect(Object.keys(kept.totals).sort()).toEqual(["platform:checks", "platform:discovery"]);
+            for (const s of Object.keys(kept.totals)) expect(PLATFORM_SOURCES).toContain(s);
+            expect(kept.totals["platform:checks"]!.total).toBe(500);
+            // Method names are bounded too: only names that look like methods, and a few of them.
+            expect(Object.keys(kept.totals["platform:checks"]!.byMethod).length).toBeLessThanOrEqual(16);
+            expect(Object.keys(kept.totals["platform:checks"]!.byMethod).every((m) => /^[A-Z]{1,16}$/.test(m))).toBe(true);
+        } finally {
+            close();
+        }
     });
 });

@@ -10,15 +10,19 @@
  *
  * What travels: the testing type, the assessment-message setting, applications (with sensitive workflows, the name of the saved sign-in
  * they use and the uploaded API document), every authorization record (the exact statement, approver, basis, document reference,
- * restrictions, who confirmed it and when, revocation), assessments (state, coverage, timestamps, the retest link), findings with their
- * evidence, validation history and sightings, and the module's audit trail. Ids are replaced by references inside the document and new
+ * restrictions, who confirmed it and when, revocation; the most it allows, the cross-account test accounts it names, the authorizing
+ * person's role and documented authority), assessments (state, profile, the approval it ran under, coverage, timestamps, the retest link),
+ * findings with their evidence, validation history and sightings, Crowd4Test admin profile approvals, assessment schedules, cross-account
+ * designations (account names, paths and ownership fields only), and the module's audit trail. Ids are replaced by references inside the document and new
  * ids are made on restore.
  * What never travels: secrets. Evidence was redacted when it was stored and is redacted again on restore (a backup is a file someone may
  * have edited); the saved signed-in state itself (cookies, tokens) is not in a backup, only the account's name, and the restore lists it as
  * something to enter again; alert channels are not in a backup (their addresses are secrets), so chosen channels are dropped.
  *
  * On restore, nothing runs and nothing is authorized: authorizations come back as history and are marked withdrawn ("Restored from a
- * backup: record a new authorization before the next assessment"), and an assessment that had not finished comes back cancelled.
+ * backup: record a new authorization before the next assessment"), profile approvals come back withdrawn and can never count again (an
+ * approval belongs to the server and admin that gave it), schedules come back switched off, and an assessment that had not finished comes
+ * back cancelled. The test accounts a designation or an authorization names are listed as sign-ins to enter again, like a saved sign-in.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -27,11 +31,15 @@ import type { Db, Row } from "../platform/db.js";
 import { recordSecurityEvent, SECURITY_ACTIVITY_PREFIX } from "./audit.js";
 import { currentActor } from "../platform/auth/actor.js";
 import { UserStore } from "../platform/user-store.js";
-import { ASSESSMENT_STATES, CATEGORIES, CONFIDENCES, ENVIRONMENTS, FINISHED_STATES, SEVERITIES, VALIDATION_STATES } from "./contract.js";
+import { ASSESSMENT_KINDS, ASSESSMENT_STATES, CATEGORIES, CONFIDENCES, ENVIRONMENTS, FINISHED_STATES, SEVERITIES, VALIDATION_STATES } from "./contract.js";
 import { apiDocumentText, EXTRAS_LIMITS, saveApiDocument, writeExtras } from "./extras.js";
 import { redactEvidence, redactText } from "./findings/redact.js";
 import { forgetNotificationSettings, notificationSettings, saveNotificationSettings } from "./notify.js";
 import { SECURITY_LIMITS as L, securityStoreFor, TESTING_TYPES } from "./store.js";
+import { DesignationSchema } from "./assessment/cross-account.js";
+import { readDesignation } from "./cross-account-store.js";
+import { listApprovals } from "./profile-gate.js";
+import { SecurityCadenceSchema } from "./schedules.js";
 
 /** Caps on what one project's security document may hold (export keeps the newest within them; restore refuses more). */
 export const SECURITY_BACKUP_LIMITS = {
@@ -51,7 +59,16 @@ const B = SECURITY_BACKUP_LIMITS;
 
 // ── the document ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 const s = (max: number) => z.string().max(max);
-const iso = s(40);
+/** A real ISO date-time, not in the future (a few minutes of clock difference between servers allowed). */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+const CLOCK_SKEW_MS = 5 * 60_000;
+/**
+ * Stored in the one form the platform writes itself (`toISOString`: UTC, milliseconds, "Z"). Dates are ordered as text in the
+ * database, so an offset form (`+23:59`) of a past instant would otherwise sort after every real record until that text's day.
+ */
+const iso = s(40)
+    .refine((v) => ISO_DATE.test(v) && !Number.isNaN(Date.parse(v)) && Date.parse(v) <= Date.now() + CLOCK_SKEW_MS, { message: "Not a date and time in the past (ISO 8601)." })
+    .transform((v) => new Date(Date.parse(v)).toISOString());
 const ref = s(100).min(1);
 
 const EvidenceDoc = z.object({ kind: z.enum(["response-header", "cookie", "status", "body-excerpt", "tls", "note"]), label: s(400), value: s(L.evidenceValueMax + 100), observedAt: iso });
@@ -103,13 +120,47 @@ const AuthorizationDoc = z.object({
     revokedAt: iso.nullable(),
     revokedBy: s(200).nullable(),
     revokedReason: s(300).nullable(),
+    // The authorizer details and the profile gate (older backups have none of these: they read as before).
+    maxProfile: z.enum(ASSESSMENT_KINDS).default("passive"),
+    crossAccounts: z.array(s(60)).max(2).default([]),
+    approverRole: s(L.approverNameMax).nullable().default(null),
+    authority: s(L.authorityMax).nullable().default(null),
+    detailsFingerprint: s(200).nullable().default(null),
 });
+
+const ProfileApprovalDoc = z.object({
+    applicationRef: ref,
+    profile: z.enum(ASSESSMENT_KINDS).exclude(["passive"]),
+    environment: z.enum(ENVIRONMENTS),
+    approvedByName: s(200),
+    approvedAt: iso,
+    statement: s(2000),
+    withdrawnAt: iso.nullable(),
+    withdrawnBy: s(200).nullable(),
+});
+
+const ScheduleDoc = z.object({
+    applicationRef: ref,
+    cadence: z.lazy(() => SecurityCadenceSchema), // lazy: schedules.ts reaches the platform modules, which import this file
+    enabled: z.boolean(),
+    makerName: s(200),
+    lastRunAt: iso.nullable(),
+    lastOutcome: z.enum(["started", "skipped", "stopped", "error"]).nullable(),
+    lastNote: s(400).nullable(),
+    lastAssessmentRef: ref.nullable(),
+    createdAt: iso,
+});
+
+const CrossAccountDoc = z.object({ applicationRef: ref, designation: DesignationSchema, updatedAt: iso });
 
 const AssessmentDoc = z.object({
     ref,
     applicationRef: ref,
     authorizationRef: ref,
     state: z.enum(ASSESSMENT_STATES),
+    kind: z.enum(ASSESSMENT_KINDS).default("passive"),
+    /** The Crowd4Test admin approval it ran under, as kept with it (history only; never an approval on restore). */
+    approval: z.object({ profile: s(40), approvedByName: s(200), approvedAt: iso, environment: s(40), statement: s(2000) }).nullable().default(null),
     progress: z.number().int().min(0).max(100),
     progressText: s(500),
     coverage: z
@@ -173,6 +224,9 @@ export const SecurityBackupSchema = z.object({
     assessments: z.array(AssessmentDoc).max(B.assessments),
     findings: z.array(FindingDoc).max(B.findings),
     audit: z.array(AuditDoc).max(B.audit),
+    profileApprovals: z.array(ProfileApprovalDoc).max(B.authorizations).default([]),
+    schedules: z.array(ScheduleDoc).max(B.applications).default([]),
+    crossAccount: z.array(CrossAccountDoc).max(B.applications).default([]),
     /** What the export left out to stay within the caps, in plain words (shown as restore notes). */
     omitted: z.array(s(400)).max(20).default([]),
 });
@@ -254,7 +308,31 @@ export function exportSecurityData(db: Db, projectId: string): { doc: SecurityBa
         revokedAt: r.revokedAt,
         revokedBy: r.revokedBy,
         revokedReason: r.revokedReason,
+        maxProfile: r.maxProfile,
+        crossAccounts: r.crossAccounts,
+        approverRole: r.approverRole,
+        authority: r.authority,
+        detailsFingerprint: r.detailsFingerprint,
     }));
+    const profileApprovals = apps.flatMap((a) =>
+        listApprovals(db, a.id).map((p) => ({ applicationRef: appRef.get(a.id)!, profile: p.profile, environment: p.environment as SecurityBackupDoc["applications"][number]["environment"], approvedByName: p.approvedByName, approvedAt: p.approvedAt, statement: p.statement, withdrawnAt: p.withdrawnAt, withdrawnBy: p.withdrawnBy })),
+    ).slice(0, B.authorizations);
+    const crossAccount = apps.flatMap((a) => {
+        const designation = readDesignation(db, a.id);
+        if (!designation) return [];
+        const updatedAt = db.get<{ updated_at: string }>("SELECT updated_at FROM security_cross_account WHERE application_id = ?", a.id)!.updated_at;
+        return [{ applicationRef: appRef.get(a.id)!, designation, updatedAt }];
+    });
+    // Test accounts are named only; their signed-in state is a secret, entered again after a restore (the saved-sign-in rule).
+    const accountsOf = new Map<string, Set<string>>();
+    for (const r of authRows) for (const n of r.crossAccounts) accountsOf.set(r.applicationId, (accountsOf.get(r.applicationId) ?? new Set()).add(n));
+    for (const c of crossAccount) {
+        const id = [...appRef].find(([, v]) => v === c.applicationRef)![0];
+        for (const n of [c.designation.accountA, c.designation.accountB]) accountsOf.set(id, (accountsOf.get(id) ?? new Set()).add(n));
+    }
+    for (const a of apps)
+        for (const n of accountsOf.get(a.id) ?? [])
+            needs.push({ label: `Test account “${n.slice(0, 60)}” for the cross-account checks of “${a.name.slice(0, 60)}”`, detail: "The signed-in state is not in the backup. Sign in again in Settings before the cross-account checks run." });
 
     // Newest first within the cap; an assessment whose authorization did not make it is left out with it.
     const assessRows = db.all<Row>(`SELECT * FROM security_assessments WHERE project_id = ? ORDER BY created_at DESC, ${db.dialect.insertionOrder()} DESC LIMIT ?`, projectId, B.assessments).filter((r) => authRef.has(r.authorization_id));
@@ -266,6 +344,11 @@ export function exportSecurityData(db: Db, projectId: string): { doc: SecurityBa
         applicationRef: appRef.get(r.application_id)!,
         authorizationRef: authRef.get(r.authorization_id)!,
         state: r.state,
+        kind: (ASSESSMENT_KINDS as readonly string[]).includes(r.kind) ? r.kind : "passive",
+        approval: (() => {
+            const a = json<{ profile?: unknown; approvedByName?: unknown; approvedAt?: unknown; environment?: unknown; statement?: unknown } | null>(r.approval_json, null);
+            return a ? { profile: String(a.profile ?? ""), approvedByName: String(a.approvedByName ?? ""), approvedAt: String(a.approvedAt ?? ""), environment: String(a.environment ?? ""), statement: String(a.statement ?? "") } : null;
+        })(),
         progress: r.progress,
         progressText: r.progress_text,
         coverage: json(r.coverage_json, null),
@@ -276,6 +359,21 @@ export function exportSecurityData(db: Db, projectId: string): { doc: SecurityBa
         finishedAt: r.finished_at ?? null,
         retestOfRef: r.retest_of ? (assessRef.get(r.retest_of) ?? null) : null,
     }));
+
+    const schedules = db
+        .all<Row>("SELECT * FROM security_schedules WHERE project_id = ?", projectId)
+        .filter((r) => appRef.has(r.application_id))
+        .map((r) => ({
+            applicationRef: appRef.get(r.application_id)!,
+            cadence: JSON.parse(r.cadence_json),
+            enabled: Number(r.enabled) === 1,
+            makerName: r.maker_name,
+            lastRunAt: r.last_run_at ?? null,
+            lastOutcome: r.last_outcome ?? null,
+            lastNote: r.last_note ?? null,
+            lastAssessmentRef: r.last_assessment_id ? (assessRef.get(r.last_assessment_id) ?? null) : null,
+            createdAt: r.created_at,
+        }));
 
     const findRows = db.all<Row>("SELECT * FROM security_findings WHERE project_id = ? ORDER BY last_seen_at DESC, id LIMIT ?", projectId, B.findings);
     const totalFindings = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM security_findings WHERE project_id = ?", projectId)?.n ?? 0;
@@ -337,6 +435,9 @@ export function exportSecurityData(db: Db, projectId: string): { doc: SecurityBa
         assessments,
         findings,
         audit,
+        profileApprovals,
+        schedules,
+        crossAccount,
         omitted,
     };
     // Keep the document within what a restore reads: per-assessment evidence first, then the API documents, go when it is too large.
@@ -351,7 +452,7 @@ export function exportSecurityData(db: Db, projectId: string): { doc: SecurityBa
     }
     if (size() > B.maxBytes) throw new HttpError(413, "The project's security assessment data is too large for a project backup (more than 30 MB). Use the scheduled full backup of the platform (BACKUP_DIR) to keep it.");
 
-    const counts = { securityApplications: applications.length, securityAuthorizations: authorizations.length, securityAssessments: assessments.length, securityFindings: findings.length, securityAuditLines: audit.length };
+    const counts = { securityApplications: applications.length, securityAuthorizations: authorizations.length, securityAssessments: assessments.length, securityFindings: findings.length, securityAuditLines: audit.length, securityProfileApprovals: profileApprovals.length, securitySchedules: schedules.length, securityCrossAccount: crossAccount.length };
     return { doc, counts, needs };
 }
 
@@ -385,6 +486,12 @@ export function securityBackupProblem(d: SecurityBackupDoc): string | undefined 
         )
             ? "a finding refers to something that is not in the backup"
             : undefined) ??
+        ([...d.profileApprovals, ...d.schedules, ...d.crossAccount].some((x) => !apps.has(x.applicationRef)) || d.schedules.some((x) => x.lastAssessmentRef !== null && !assess.has(x.lastAssessmentRef))
+            ? "a profile approval, schedule or cross-account designation refers to something that is not in the backup"
+            : undefined) ??
+        (new Set(d.schedules.map((x) => x.applicationRef)).size !== d.schedules.length || new Set(d.crossAccount.map((x) => x.applicationRef)).size !== d.crossAccount.length
+            ? "an application has two schedules or two cross-account designations"
+            : undefined) ??
         (new Set(d.findings.map((f) => `${f.applicationRef}\n${f.fingerprint}`)).size !== d.findings.length ? "two findings of one application are the same finding" : undefined) ??
         ([...countBy(d.findings.map((f) => f.applicationRef)).values()].some((n) => n > L.findingsPerApplication) ? "an application has more findings than one may have" : undefined) ??
         (d.applications.some((a) => {
@@ -400,6 +507,8 @@ export function securityBackupProblem(d: SecurityBackupDoc): string | undefined 
 }
 
 const RESTORED_REASON = "Restored from a backup: record a new authorization before the next assessment.";
+const APPROVAL_RESTORED = "Restored from a backup: a Crowd4Test admin approves again on this server.";
+const SCHEDULE_RESTORED = "Restored from a backup switched off: switch it on again to schedule assessments.";
 const UNFINISHED_WORDS = "Restored from a backup before it had finished; it was not run again.";
 const clean = (v: string | null, max: number) => (v === null ? null : redactText(v, max));
 
@@ -474,14 +583,40 @@ export function importSecurityData(db: Db, projectId: string, d: SecurityBackupD
             r.statement,
             null,
             r.confirmedByName,
-            r.confirmedAt,
+            // Never later than now, so a restored record can never shadow an authorization recorded after the restore.
+            Date.parse(r.confirmedAt) < Date.parse(now) ? r.confirmedAt : now,
             r.scopeFingerprint,
-            r.revokedAt ?? now,
-            r.revokedAt ? r.revokedBy : "Restore",
-            r.revokedAt ? r.revokedReason : RESTORED_REASON,
+            // Always revoked from the moment of the restore, whatever the file says.
+            now,
+            r.revokedAt != null ? r.revokedBy : "Restore",
+            r.revokedAt != null ? r.revokedReason : RESTORED_REASON,
+        );
+        db.run("UPDATE security_authorizations SET max_profile = ?, cross_accounts_json = ?, approver_role = ?, authority = ?, details_fingerprint = ? WHERE id = ?", r.maxProfile, r.crossAccounts.length ? JSON.stringify(r.crossAccounts) : null, r.approverRole, r.authority, r.detailsFingerprint, id);
+    }
+    if (d.authorizations.some((r) => r.revokedAt == null)) notes.push("Security assessment authorizations were restored as history and withdrawn: record a new authorization before the next assessment.");
+
+    // Profile approvals: history only. Withdrawn, with no approver id and no details fingerprint, so none can ever count here.
+    for (const p of d.profileApprovals) {
+        db.run(
+            "INSERT INTO security_profile_approvals (id, application_id, profile, environment, approved_by_user_id, approved_by_name, approved_at, statement, withdrawn_at, withdrawn_by, details_fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            randomUUID(),
+            appIds.get(p.applicationRef)!,
+            p.profile,
+            p.environment,
+            null,
+            p.approvedByName,
+            p.approvedAt,
+            p.statement,
+            now,
+            p.withdrawnAt != null ? p.withdrawnBy : APPROVAL_RESTORED,
+            null,
         );
     }
-    if (d.authorizations.some((r) => !r.revokedAt)) notes.push("Security assessment authorizations were restored as history and withdrawn: record a new authorization before the next assessment.");
+    if (d.profileApprovals.some((p) => !p.withdrawnAt)) notes.push("Crowd4Test admin profile approvals were restored as history and withdrawn: an admin approves again before an assessment above passive.");
+
+    for (const c of d.crossAccount) {
+        db.run("INSERT INTO security_cross_account (application_id, designation_json, updated_by, updated_at) VALUES (?,?,?,?)", appIds.get(c.applicationRef)!, JSON.stringify(c.designation), "Restore", c.updatedAt);
+    }
 
     for (const a of d.assessments) assessIds.set(a.ref, randomUUID());
     let unfinished = 0;
@@ -506,6 +641,8 @@ export function importSecurityData(db: Db, projectId: string, d: SecurityBackupD
             done ? a.finishedAt : (a.finishedAt ?? now),
             a.retestOfRef ? assessIds.get(a.retestOfRef)! : null,
         );
+        // The profile it ran under, and the approval it carried (without the approver's id on the other server): history only.
+        db.run("UPDATE security_assessments SET kind = ?, approval_json = ? WHERE id = ?", a.kind, a.approval ? JSON.stringify({ ...a.approval, approvedByUserId: "" }) : null, assessIds.get(a.ref)!);
     }
     if (unfinished) notes.push(`${unfinished} security assessment${unfinished === 1 ? " had" : "s had"} not finished when the backup was made; ${unfinished === 1 ? "it was" : "they were"} restored as cancelled.`);
 
@@ -564,6 +701,28 @@ export function importSecurityData(db: Db, projectId: string, d: SecurityBackupD
         }
     }
 
+    // Schedules: every one comes back switched off, with no next run; whoever switches it on becomes its maker (schedules.ts set()).
+    const restorer = currentActor();
+    for (const x of d.schedules) {
+        db.run(
+            "INSERT INTO security_schedules (application_id, project_id, cadence_json, enabled, next_run_at, maker_id, maker_name, last_run_at, last_outcome, last_note, last_assessment_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            appIds.get(x.applicationRef)!,
+            projectId,
+            JSON.stringify(x.cadence),
+            0,
+            null,
+            restorer.id ?? "open",
+            restorer.name.slice(0, 200),
+            x.lastRunAt,
+            "stopped",
+            SCHEDULE_RESTORED,
+            x.lastAssessmentRef ? assessIds.get(x.lastAssessmentRef)! : null,
+            x.createdAt,
+            now,
+        );
+    }
+    if (d.schedules.some((x) => x.enabled)) notes.push("Security assessment schedules were restored switched off: switch them on again after recording a new authorization.");
+
     const objectId = (r: string | null): string | null => (r === "project" ? projectId : r ? (appIds.get(r) ?? authIds.get(r) ?? assessIds.get(r) ?? findIds.get(r) ?? null) : null);
     for (const e of d.audit) {
         db.run(
@@ -581,7 +740,7 @@ export function importSecurityData(db: Db, projectId: string, d: SecurityBackupD
         );
     }
 
-    const counts = { securityApplications: d.applications.length, securityAuthorizations: d.authorizations.length, securityAssessments: d.assessments.length, securityFindings: d.findings.length, securityHistory: history, securitySightings: sightings, securityAuditLines: d.audit.length };
+    const counts = { securityApplications: d.applications.length, securityAuthorizations: d.authorizations.length, securityAssessments: d.assessments.length, securityFindings: d.findings.length, securityHistory: history, securitySightings: sightings, securityAuditLines: d.audit.length, securityProfileApprovals: d.profileApprovals.length, securitySchedules: d.schedules.length, securityCrossAccount: d.crossAccount.length };
     const words = `${d.applications.length} application${d.applications.length === 1 ? "" : "s"}, ${d.assessments.length} assessment${d.assessments.length === 1 ? "" : "s"}, ${d.findings.length} finding${d.findings.length === 1 ? "" : "s"}`;
     recordSecurityEvent(db, { projectId, action: "project.restored", objectType: "project", objectId: projectId, summary: `Restored the security assessment data from a project backup: ${words}. Earlier authorizations are kept as history; record a new one before the next assessment.` });
     return { counts, notes };

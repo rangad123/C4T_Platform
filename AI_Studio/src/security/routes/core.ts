@@ -12,6 +12,11 @@
  *   GET    /api/v1/security/applications/:appId/authorizations      { authorizations, authorization, statement }
  *   POST   /api/v1/security/applications/:appId/authorizations      201 { authorization: record, state }
  *   DELETE /api/v1/security/authorizations/:authId                  { authorization: record, state, stoppedAssessmentId }
+ *   GET    /api/v1/security/applications/:appId/authorization-statement?maxProfile=&crossAccounts=a,b   { statement } for that choice
+ *   GET    /api/v1/security/applications/:appId/approvals           { approvals, statements, activeProfilesOn, environmentAllowed, mayApprove, approveRefusal }  (profile-gate.ts)
+ *   POST   /api/v1/security/applications/:appId/approvals           { profile, confirm } → 201 { approval }  (a Crowd4Test admin only, no fallback; development or staging only)
+ *   DELETE /api/v1/security/applications/:appId/approvals/:approvalId   { approval, stoppedAssessmentId } (withdrawn; a Crowd4Test admin; a running
+ *                                                                    assessment at that profile is stopped)
  *   GET    /api/v1/security/projects/:id/activity                   { events }
  *   GET    /api/v1/security/projects/:id/testing-type               { testingType }
  *   PUT    /api/v1/security/projects/:id/testing-type               { testingType }
@@ -20,11 +25,16 @@ import net from "node:net";
 import { z } from "zod";
 import { HttpError } from "../../platform/http-error.js";
 import { runnersOnly } from "../../platform/runner-only.js";
-import { authorizationStatement } from "../authorization.js";
-import { ENVIRONMENTS, type SecurityApplication } from "../contract.js";
+import { authorizationStatement, signInLabel } from "../authorization.js";
+import { ASSESSMENT_KINDS, ENVIRONMENTS, type AssessmentKind, type SecurityApplication } from "../contract.js";
+import { ACTIVE_ENVIRONMENTS, addApproval, approvalStateOf, isCrowd4TestAdminUser, approvalStatement, GATE_WORDS, getApproval, listApprovals, withdrawApproval } from "../profile-gate.js";
+import { sideOf, type Actor } from "../../platform/auth/actor.js";
+import { crowd4testOn } from "../../platform/ai-config.js";
+import { profileRefusal, rank, SCAN_PROFILES } from "../scanners/profiles.js";
 import { METADATA_HOSTS, addressClass, staticTargetProblem } from "../scope.js";
 import { SECURITY_LIMITS as L, TESTING_TYPES, type ApplicationPatch } from "../store.js";
 import { SECURITY_API, type SecurityRouteCtx } from "./context.js";
+import { stopOne } from "./assessments.js";
 import { EXTRAS_LIMITS } from "../extras.js";
 import { accountNames, signInStatus } from "../signin.js";
 import { ACCOUNT_NAME } from "../../platform/session-store.js";
@@ -99,6 +109,15 @@ const ExcludedPath = z
     .max(L.excludedPathMax, `An excluded path can be at most ${L.excludedPathMax} characters.`)
     .regex(/^\/\S*$/, "An excluded path starts with / and has no spaces, like /admin/billing.");
 
+/** Required text whose every way of being missing (absent, null, empty, blank) gets the same plain sentence. */
+const requiredText = (max: number, what: string, missing: string) =>
+    z
+        .string({ message: missing })
+        .trim()
+        .min(1, missing)
+        .max(max, `${what} can be at most ${max} characters.`)
+        .regex(TEXT_OK, `${what} contains characters that are not allowed.`);
+
 const nullableText = (max: number, what: string) =>
     plainText(max, what)
         .nullable()
@@ -161,21 +180,48 @@ const PatchApplication = z
     })
     .strict();
 
+/** Two different test accounts, or none. */
+const CrossAccounts = z
+    .array(z.string().trim().min(1).max(100))
+    .max(2)
+    .optional()
+    .refine((v) => !v || v.length === 0 || (v.length === 2 && v[0] !== v[1]), { message: "Name the two different test accounts of the cross-account checks, or none." });
+
 const RecordAuthorization = z
     .object({
-        basis: z.enum(["owner", "client-permission"], { message: "Say whether you own the application or have the owner's documented permission." }),
-        approverName: plainText(L.approverNameMax, "The approver's name").min(1, "Give the name of the person who approved the assessment."),
-        approverEmail: z
-            .string()
-            .trim()
-            .max(L.emailMax)
-            .email("The approver's email address does not look right.")
-            .nullable()
-            .optional()
-            .or(z.literal("").transform(() => null)),
-        documentReference: nullableText(L.documentReferenceMax, "The document reference"),
+        basis: z.enum(["owner", "client-permission"], { message: "Say whether the client owns the application or the owner gave documented permission." }),
+        approverName: requiredText(L.approverNameMax, "The name of the person who authorized it", "Give the name of the person at the client who authorized the assessment."),
+        // The authorizing person's role, email, the document that records the permission and a statement of their authority are
+        // all required, at every level (an older record without them reads "not recorded" and covers passive only).
+        approverRole: requiredText(L.approverRoleMax, "The authorizing person's role", "Give the authorizing person's role at the client (for example their job title)."),
+        approverEmail: z.string({ message: "Give the authorizing person's email address." }).trim().min(1, "Give the authorizing person's email address.").max(L.emailMax).email("The authorizing person's email address does not look right."),
+        documentReference: requiredText(L.documentReferenceMax, "The document reference", "Give the reference of the document that records the permission (for example the engagement letter or statement of work)."),
+        authority: requiredText(L.authorityMax, "The statement of authority", "Say what gives the authorizing person the authority to permit testing on behalf of the application's owner."),
         restrictions: nullableText(L.restrictionsMax, "The restrictions"),
         confirm: z.boolean({ message: "Tick the box to confirm the statement." }).refine((v) => v === true, { message: "Tick the box to confirm the statement." }),
+        // The profile gate (profile-gate.ts): the most it allows (default passive) and the cross-account test accounts it names.
+        maxProfile: z.enum(ASSESSMENT_KINDS, { message: "Choose passive, conservative active checks or the advanced assessment." }).optional(),
+        crossAccounts: CrossAccounts,
+    })
+    .strict();
+
+/** The statement a person is about to confirm, for the choice they are making (GET .../authorization-statement). */
+const StatementQuery = z
+    .object({
+        maxProfile: z.enum(ASSESSMENT_KINDS).optional(),
+        crossAccounts: z
+            .string()
+            .max(300)
+            .optional()
+            .transform((v) => (v ? v.split(",").map((x) => x.trim()).filter(Boolean) : undefined))
+            .pipe(CrossAccounts),
+    })
+    .strict();
+
+const ApprovalBody = z
+    .object({
+        profile: z.enum(["conservative-active", "advanced"], { message: "Choose the profile to approve: conservative active checks or the advanced assessment." }),
+        confirm: z.boolean({ message: "Tick the box to confirm the approval." }).refine((v) => v === true, { message: "Tick the box to confirm the approval." }),
     })
     .strict();
 
@@ -235,7 +281,8 @@ export function registerSecurityCoreRoutes(ctx: SecurityRouteCtx): void {
     };
     const signInView = (a: SecurityApplication) => (a.signInAccount ? signInStatus(ctx.p.db, ctx.p.config, a.projectId, a.signInAccount, a) : null);
 
-    const statementFor = (a: SecurityApplication) => authorizationStatement(String(ctx.project(a.projectId).name ?? ""), a);
+    const statementFor = (a: SecurityApplication, allows: { maxProfile?: AssessmentKind; crossAccounts?: readonly string[] } = {}) =>
+        authorizationStatement(String(ctx.project(a.projectId).name ?? ""), a, allows);
     const appView = (a: SecurityApplication) => ({ ...a, authorization: store.authorizationState(a), activeAssessmentId: store.activeAssessment(a.id)?.id ?? null });
     const limits = () => ({
         applicationsPerProject: L.applicationsPerProject,
@@ -313,20 +360,91 @@ export function registerSecurityCoreRoutes(ctx: SecurityRouteCtx): void {
         const body = ctx.body(RecordAuthorization, req.body);
         if (store.countAuthorizations(a.id) >= L.authorizationsPerApplication) throw new HttpError(409, `This application already has ${L.authorizationsPerApplication} recorded authorizations, the most it can keep.`);
         const actor = ctx.actor(req);
+        for (const account of body.crossAccounts ?? []) assertAccount(a.projectId, account);
+        const allows = { maxProfile: body.maxProfile ?? "passive", crossAccounts: body.crossAccounts ?? [] } as const;
         const record = store.addAuthorization(a.id, {
+            maxProfile: allows.maxProfile,
+            crossAccounts: [...allows.crossAccounts],
             basis: body.basis,
             approverName: body.approverName,
-            approverEmail: body.approverEmail ?? null,
-            documentReference: body.documentReference ?? null,
+            approverRole: body.approverRole,
+            approverEmail: body.approverEmail,
+            authority: body.authority,
+            documentReference: body.documentReference,
             restrictions: body.restrictions ?? null,
-            statement: statementFor(a),
+            statement: statementFor(a, allows),
             confirmedByUserId: actor.kind === "user" ? (actor.id ?? null) : null,
             confirmedByName: actor.name,
         });
         const basis = body.basis === "owner" ? "the organization owns it" : "the owner gave documented permission";
-        ctx.audit({ projectId: a.projectId, applicationId: a.id, action: "authorization.recorded", objectType: "authorization", objectId: record.id, summary: `Recorded the authorization to assess “${a.name}” (${basis}), approved by ${body.approverName}${body.documentReference ? `, reference ${body.documentReference}` : ""}.` });
+        ctx.audit({ projectId: a.projectId, applicationId: a.id, action: "authorization.recorded", objectType: "authorization", objectId: record.id, summary: `Recorded the client's authorization to assess “${a.name}” (${basis}), authorized by ${body.approverName} (${body.approverRole}), reference ${body.documentReference}. It allows at most the ${SCAN_PROFILES[allows.maxProfile].title} profile${allows.crossAccounts.length ? ` and names ${allows.crossAccounts.map(signInLabel).join(" and ")} for the cross-account checks` : ""}.` });
         reply.code(201);
         return { authorization: record, state: store.authorizationState(a) };
+    });
+
+    app.get(`${SECURITY_API}/applications/:appId/authorization-statement`, async (req) => {
+        const a = ctx.application(params(req).appId!, req);
+        const q = ctx.body(StatementQuery, req.query);
+        return { statement: statementFor(a, { ...(q.maxProfile ? { maxProfile: q.maxProfile } : {}), ...(q.crossAccounts ? { crossAccounts: q.crossAccounts } : {}) }) };
+    });
+
+    // ── approvals of a profile above passive (profile-gate.ts) ────────────────────────────────────────────────────────────────────────
+    // Only a Crowd4Test admin (signed in through Crowd4Test, C4T role ADMIN) approves (approved policy). No fallback: on a
+    // server without Crowd4Test sign-in nobody approves, and neither does the open server, an access key or a local account, whatever
+    // they hold. Checked here, on the server, on top of the route's permission; the store and the start check it again (profile-gate.ts).
+    // The C4T role is read from the people table when asked (the sign-in keeps it current there).
+    const approveRefusal = (actor: Actor): string | undefined => {
+        if (!crowd4testOn(ctx.p.config)) return GATE_WORDS.noCrowd4Test;
+        if (actor.kind !== "user" || !actor.id || sideOf(actor) !== "admin") return GATE_WORDS.onlyAdmins;
+        return isCrowd4TestAdminUser(ctx.p.db, actor.id) ? undefined : GATE_WORDS.onlyAdmins;
+    };
+    app.get(`${SECURITY_API}/applications/:appId/approvals`, async (req) => {
+        const a = ctx.application(params(req).appId!, req);
+        return {
+            // Each with whether it counts now (expiry, changed details, withdrawn, approver no longer an admin), judged on the server.
+            approvals: listApprovals(ctx.p.db, a.id).map((x) => ({ ...x, current: approvalStateOf(ctx.p.db, a, x) })),
+            statements: { "conservative-active": approvalStatement("conservative-active", a), advanced: approvalStatement("advanced", a) },
+            activeProfilesOn: settings.activeProfiles === true,
+            environmentAllowed: ACTIVE_ENVIRONMENTS.includes(a.environment),
+            mayApprove: !approveRefusal(ctx.actor(req)),
+            approveRefusal: approveRefusal(ctx.actor(req)) ?? null,
+        };
+    });
+
+    app.post(`${SECURITY_API}/applications/:appId/approvals`, async (req, reply) => {
+        const a = ctx.application(params(req).appId!, req);
+        const body = ctx.body(ApprovalBody, req.body);
+        const actor = ctx.actor(req);
+        const notAdmin = approveRefusal(actor);
+        if (notAdmin || actor.kind !== "user" || !actor.id) throw new HttpError(403, notAdmin ?? GATE_WORDS.onlyAdmins);
+        // Never an approval the start would refuse anyway: not for production or "other", and not where the profile itself is refused.
+        if (!ACTIVE_ENVIRONMENTS.includes(a.environment)) throw new HttpError(409, GATE_WORDS.wrongEnvironment(a.environment));
+        const refused = profileRefusal(body.profile, a.environment, true);
+        if (refused) throw new HttpError(409, refused);
+        // Only against the client's current authorization (not expired, not changed), recorded with the authorizing person's
+        // details, that allows this profile.
+        const auth = store.currentAuthorization(a);
+        if (!auth || !auth.detailsRecorded || rank(auth.maxProfile) < rank(body.profile)) throw new HttpError(409, GATE_WORDS.approvalNeedsAuthorization(SCAN_PROFILES[body.profile].title));
+        const record = addApproval(ctx.p.db, a.id, { profile: body.profile, environment: a.environment, statement: approvalStatement(body.profile, a), byUserId: actor.id, byName: actor.name });
+        ctx.audit({ projectId: a.projectId, applicationId: a.id, action: "approval.recorded", objectType: "approval", objectId: record.id, summary: `Approved, as a Crowd4Test admin, the ${SCAN_PROFILES[body.profile].title} profile for “${a.name}” (${a.environment}).` });
+        reply.code(201);
+        return { approval: record };
+    });
+
+    app.delete(`${SECURITY_API}/applications/:appId/approvals/:approvalId`, async (req) => {
+        const a = ctx.application(params(req).appId!, req);
+        const found = getApproval(ctx.p.db, params(req).approvalId!);
+        if (!found || found.applicationId !== a.id) throw new HttpError(404, "Approval not found");
+        const notAdmin = approveRefusal(ctx.actor(req));
+        if (notAdmin) throw new HttpError(403, notAdmin);
+        if (found.withdrawnAt != null) return { approval: found, stoppedAssessmentId: null };
+        const record = withdrawApproval(ctx.p.db, found.id, ctx.actorName(req));
+        // As revoking an authorization does: an assessment running at this profile is stopped (the loop also re-checks the gate).
+        const title = SCAN_PROFILES[found.profile].title;
+        const active = store.activeAssessment(a.id);
+        const stopped = active && active.kind === found.profile && stopOne(ctx.p.db, store, active.id, `${GATE_WORDS.stopped(GATE_WORDS.approvalWithdrawn(title))} Nothing was requested.`) ? active.id : null;
+        ctx.audit({ projectId: a.projectId, applicationId: a.id, action: "approval.withdrawn", objectType: "approval", objectId: found.id, summary: `Withdrew the Crowd4Test admin approval of the ${title} profile for “${a.name}”.${stopped ? " The running assessment at that profile was asked to stop." : ""}` });
+        return { approval: record, stoppedAssessmentId: stopped };
     });
 
     app.delete(`${SECURITY_API}/authorizations/:authId`, async (req) => {
@@ -337,7 +455,7 @@ export function registerSecurityCoreRoutes(ctx: SecurityRouteCtx): void {
         // No assessment goes on without a current authorization: one that is running is asked to stop (the assessment loop honours it).
         const active = store.activeAssessment(a.id);
         const stopped = active && store.requestCancel(active.id) ? active.id : null;
-        ctx.audit({ projectId: a.projectId, applicationId: a.id, action: "authorization.revoked", objectType: "authorization", objectId: auth.id, summary: `Revoked the authorization to assess “${a.name}”.${stopped ? " The running assessment was asked to stop." : ""}` });
+        ctx.audit({ projectId: a.projectId, applicationId: a.id, action: "authorization.revoked", objectType: "authorization", objectId: auth.id, summary: `Revoked the client's authorization to assess “${a.name}”.${stopped ? " The running assessment was asked to stop." : ""}` });
         return { authorization: record, state: store.authorizationState(a), stoppedAssessmentId: stopped };
     });
 

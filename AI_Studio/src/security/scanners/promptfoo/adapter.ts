@@ -221,6 +221,10 @@ export function promptfooCoverage(input: { total: number; passed: number; errors
     };
 }
 
+/** Why the AI evaluation does not run: said the same way wherever it is refused. */
+export const NO_AI_INTERFACE = "The AI evaluation was not run: it needs the address of the application's AI interface, and no AI interface is set for this application.";
+export const NO_AI_INTERFACE_REMEDY = "This platform has no setting for an application's AI interface yet, so the AI evaluation cannot run. It never guesses that a website uses AI, and it does not test a model's internals.";
+
 export class PromptfooAdapter implements ScannerAdapter {
     readonly id = "promptfoo" as const;
     readonly name = "Promptfoo";
@@ -316,7 +320,7 @@ export class PromptfooAdapter implements ScannerAdapter {
         const allowed: string[] = [];
         const refused: ScannerScopeCheck["refused"] = [];
         const ai = target.aiInterface;
-        if (!ai?.url) return { ok: false, allowed, refused: [{ url: target.origin, code: "no-targets", reason: "No AI interface is configured for this application, so there is nothing to evaluate." }] };
+        if (!ai?.url) return { ok: false, allowed, refused: [{ url: target.origin, code: "no-targets", reason: NO_AI_INTERFACE }] };
         let parsed: URL;
         try {
             parsed = new URL(ai.url);
@@ -340,18 +344,12 @@ export class PromptfooAdapter implements ScannerAdapter {
 
     async start(target: ScanTarget, profile: ScanIntensity, options: StartOptions): Promise<ScanHandle> {
         if (!this.supports(profile)) throw new ScannerError("profile_unsupported", this.id, `The AI evaluation is not used at the ${profile} profile.`);
+        const ai = target.aiInterface;
+        // The guard the whole module depends on: no AI interface, no AI assessment. Checked before the tool itself, because it is the reason
+        // that holds whatever is installed: the platform has no setting for an application's AI interface yet, so none is ever given.
+        if (!ai?.url) throw new ScannerError("not_configured", this.id, NO_AI_INTERFACE, NO_AI_INTERFACE_REMEDY);
         const file = this.binary();
         if (!file) throw new ScannerError("unavailable", this.id, "Promptfoo is not installed on this machine.", notInstalledReason("Promptfoo", "SECURITY_PROMPTFOO_PATH", "").remedy);
-
-        const ai = target.aiInterface;
-        // The guard the whole module depends on: no configured interface, no AI assessment.
-        if (!ai?.url)
-            throw new ScannerError(
-                "not_configured",
-                this.id,
-                "No AI interface is configured for this application, so no evaluation was run.",
-                "Configure the AI interface (its address, and for an OpenAI-compatible one the model name) on the application first. The platform does not guess that a website uses AI, and it does not test a model's internals.",
-            );
 
         const scope = await this.validateScope(target);
         if (!scope.ok) throw new ScannerError("out_of_scope", this.id, "The configured AI interface is not inside the authorized scope, so it was not evaluated.", scope.refused.map((r) => r.reason).join("; "));

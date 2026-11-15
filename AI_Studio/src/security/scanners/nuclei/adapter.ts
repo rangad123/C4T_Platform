@@ -2,7 +2,7 @@
  * The Nuclei adapter (https://github.com/projectdiscovery/nuclei), driving an independently installed `nuclei` binary.
  *
  * How it is driven: `nuclei -jsonl -silent -t <the selected template files> -l <the scope-checked targets> -rl <rate> -c <concurrency>
- * -timeout <s> -retries <n> -duc -nc -ni`, with the target list and the template list written to a secure temporary directory that is
+ * -timeout <s> -retries <n> -duc -nc -ni -etags <blocked tags> [-H <header file>]`, with the target list and the template list written to a secure temporary directory that is
  * removed whatever happens.
  *
  * What it deliberately does NOT do:
@@ -26,10 +26,12 @@ import { parse as parseYaml } from "yaml";
 import { ScannerError, type ConfigCheck, type ScanHandle, type ScanIntensity, type ScanResultSet, type ScannerAdapter, type ScannerAvailability, type ScannerFinding, type ScannerScopeCheck, type ScanTarget, type StartOptions } from "../contract.js";
 import { hasFilesIn, notConfiguredReason, notInstalledReason, resolveExecutable } from "../binaries.js";
 import { isDirectory, runProcess, withSecureTempDir, type SecureTempDir } from "../process.js";
+import { egressEnv } from "../../egress/guard.js";
+import { isolationFor } from "../../egress/isolation.js";
 import { isSwitchedOn, notEnabledReason, type ScannerSettings } from "../settings.js";
 import { categoryFor, severityOf } from "../normalize.js";
 import { MAX_SCANNER_EVIDENCE } from "../normalize.js";
-import { MAX_TEMPLATES_PER_RUN, concurrencyFor, rateFor, templateAllowed, type TemplateFacts } from "./policy.js";
+import { BLOCKED_TAGS, MAX_TEMPLATES_PER_RUN, concurrencyFor, rateFor, templateAllowed, type TemplateFacts, type TemplateRunContext } from "./policy.js";
 
 /** How much of a template's own request and response is kept as evidence, before redaction. */
 export const MAX_RAW_EVIDENCE = 1_500;
@@ -52,15 +54,78 @@ const versionOf = (stdout: string): string | undefined => {
 export async function readTemplateFacts(file: string): Promise<TemplateFacts | undefined> {
     try {
         const text = await fs.readFile(file, "utf8");
-        const doc = (parseYaml(text) ?? {}) as { id?: unknown; info?: { severity?: unknown; tags?: unknown } };
+        const doc = (parseYaml(text) ?? {}) as { id?: unknown; info?: { severity?: unknown; tags?: unknown } } & Record<string, unknown>;
         const id = typeof doc.id === "string" ? doc.id.trim() : "";
         if (!id) return undefined;
         const raw = doc.info?.tags;
         const tags = Array.isArray(raw) ? raw.map((t) => String(t)) : typeof raw === "string" ? raw.split(",").map((t) => t.trim()) : [];
-        return { id, severity: String(doc.info?.severity ?? "info").toLowerCase(), tags, path: file };
+        return { id, severity: String(doc.info?.severity ?? "info").toLowerCase(), tags, path: file, readOnly: templateIsReadOnly(doc), safeMethodsOnly: templateSendsSafeMethodsOnly(doc), dialsDirectly: templateDialsDirectly(doc) };
     } catch {
         return undefined;
     }
+}
+
+const READ_ONLY_METHODS = new Set(["GET", "HEAD"]);
+/** Request sections a template may have and still only read: HTTP (`http`, or the older `requests`) and a TLS handshake (`ssl`). */
+const READ_ONLY_SECTIONS = new Set(["http", "requests", "ssl"]);
+/** Top-level keys that are not request sections. */
+const TEMPLATE_META = new Set(["id", "info", "variables", "self-contained", "stop-at-first-match", "signature", "constants"]);
+
+/** Does this template only read (GET/HEAD over HTTP, or a TLS handshake), with no payloads, fuzzing or attack? Unknown shapes: no. */
+export function templateIsReadOnly(doc: Record<string, unknown>): boolean {
+    return templateShapeOk(doc, READ_ONLY_METHODS, false);
+}
+
+/** HTTP request sections: nuclei sends these through its `-proxy`, and so through the request guard. */
+const HTTP_SECTIONS = new Set(["http", "requests"]);
+/**
+ * Does this template open a connection of its own (any request section that is not HTTP, such as `ssl`)? Those connections ignore
+ * nuclei's HTTP proxy, so they would reach the target without the request guard unless the run is isolated.
+ *
+ * HTTP requests marked `unsafe: true` (or `pipeline: true`) are sent by nuclei's raw-socket client rather than its ordinary HTTP client,
+ * and that client is not shown to honour `-proxy`: they are treated the same way, so they never run without isolation.
+ */
+export function templateDialsDirectly(doc: Record<string, unknown>): boolean {
+    return Object.entries(doc).some(([key, value]) => {
+        if (TEMPLATE_META.has(key)) return false;
+        if (!HTTP_SECTIONS.has(key)) return true;
+        return Array.isArray(value) && value.some((item) => Boolean(item) && typeof item === "object" && (isOn((item as Record<string, unknown>).unsafe) || isOn((item as Record<string, unknown>).pipeline)));
+    });
+}
+const isOn = (v: unknown): boolean => v === true || String(v).trim().toLowerCase() === "true";
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+/**
+ * Does this template send nothing but GET, HEAD or OPTIONS (crafted values allowed, no fuzzing, which may rewrite the request)? The rule
+ * above passive: no profile sends a method that can change data, so a template that may is skipped and listed. Unknown shapes: no.
+ */
+export function templateSendsSafeMethodsOnly(doc: Record<string, unknown>): boolean {
+    return templateShapeOk(doc, SAFE_METHODS, true);
+}
+
+function templateShapeOk(doc: Record<string, unknown>, methods: ReadonlySet<string>, crafted: boolean): boolean {
+    let sections = 0;
+    for (const [key, value] of Object.entries(doc)) {
+        if (TEMPLATE_META.has(key)) continue;
+        if (!READ_ONLY_SECTIONS.has(key)) return false;
+        if (!Array.isArray(value)) return false;
+        sections++;
+        if (key === "ssl") continue;
+        for (const item of value) {
+            if (!item || typeof item !== "object") return false;
+            const r = item as Record<string, unknown>;
+            if (r.fuzzing !== undefined || (!crafted && (r.payloads !== undefined || r.attack !== undefined || r.body !== undefined))) return false;
+            if (r.method !== undefined && !methods.has(String(r.method).toUpperCase())) return false;
+            if (r.raw !== undefined) {
+                if (!Array.isArray(r.raw)) return false;
+                for (const raw of r.raw) {
+                    const first = String(raw ?? "").trimStart().split(/\s+/, 1)[0]!.toUpperCase();
+                    if (!methods.has(first)) return false;
+                }
+            }
+        }
+    }
+    return sections > 0;
 }
 
 /** Every template file in a directory, one level deep and in `.yaml` subdirectories, sorted so a run is reproducible. */
@@ -90,7 +155,7 @@ export class NucleiAdapter implements ScannerAdapter {
     readonly name = "ProjectDiscovery Nuclei";
     readonly documentationUrl = "https://github.com/projectdiscovery/nuclei";
     readonly description = "Template-driven checks from a reviewed template directory. Installed separately; it is only used when an administrator names it in SECURITY_SCANNERS.";
-    readonly capabilities = { progress: true, cancel: true, sharedDaemon: false, specDriven: false, aiDriven: false };
+    readonly capabilities = { progress: true, cancel: true, sharedDaemon: false, specDriven: false, aiDriven: false, egressProxy: true, egressIsolation: true };
 
     private readonly settings: ScannerSettings;
     private readonly resolve: typeof resolveExecutable;
@@ -186,7 +251,9 @@ export class NucleiAdapter implements ScannerAdapter {
         const scope = await this.validateScope(target);
         if (!scope.ok) throw new ScannerError("out_of_scope", this.id, "None of the addresses for this scan may be requested by Nuclei.", scope.refused.map((r) => `${r.url}: ${r.reason}`).join("; "));
 
-        const picked = await this.selectTemplates(dir, profile);
+        // A template that dials the target itself (an `ssl` section) is only selected when the run is isolated: outside the namespace its
+        // connection would not go through the request guard.
+        const picked = await this.selectTemplates(dir, profile, { isolated: isolationFor(target) !== undefined });
         if (!picked.selected.length)
             throw new ScannerError("not_configured", this.id, `No template in ${path.basename(dir)} may be used at the ${profile} profile.`, picked.refused.map((r) => `${r.id}: ${r.reason}`).join("; "));
 
@@ -197,6 +264,8 @@ export class NucleiAdapter implements ScannerAdapter {
             // One `-t` naming a file that lists the selected templates, rather than one `-t` per template: nuclei accepts a list file, and
             // a directory full of reviewed templates can reach MAX_TEMPLATES_PER_RUN, which would overflow the command line on Windows.
             const templateFile = await temp.write("templates.txt", `${picked.selected.map((t) => t.path).join("\n")}\n`);
+            const auth = target.authHeader?.name && target.authHeader.value && !/[\r\n]/.test(target.authHeader.name + target.authHeader.value) ? target.authHeader : null;
+            const headerFile = auth ? await temp.write("headers.txt", `${auth.name}: ${auth.value}\n`) : undefined;
 
             const rate = rateFor(profile, target.maxRequestsPerSecond, this.settings.maxRequestsPerSecond);
             const concurrency = concurrencyFor(profile, this.settings.nuclei.concurrency);
@@ -223,7 +292,15 @@ export class NucleiAdapter implements ScannerAdapter {
                 "-sj",
                 "-si",
                 "2",
-                ...(profile === "passive" ? ["-passive"] : []),
+                // The reviewed policy's blocked tags again, inside nuclei: a template that slipped into the list still does not run.
+                "-etags",
+                BLOCKED_TAGS.join(","),
+                // A saved sign-in as one header, read from a file in the run's secure temp folder (nuclei's -H takes a file), so the
+                // secret is never on the command line or in a log.
+                ...(headerFile ? ["-H", headerFile] : []),
+                // The platform's request guard, when the run has one: every template request goes through it (the flag, and the proxy
+                // environment for anything nuclei starts itself).
+                ...(target.egress ? ["-proxy", target.egress.proxyUrl] : []),
             ];
 
             const findings: ScannerFinding[] = [];
@@ -231,10 +308,13 @@ export class NucleiAdapter implements ScannerAdapter {
             let message = "Nuclei is starting.";
             let finished = false;
 
+            // Above passive the run has an isolated network whose only way out is the request guard: nuclei is started inside it.
+            const cmd = isolationFor(target)?.wrap(file, args) ?? { file, args };
             const runPromise = this.run({
-                file,
-                args,
+                file: cmd.file,
+                args: cmd.args,
                 cwd: temp.dir,
+                ...(target.egress ? { env: egressEnv(target.egress.proxyUrl) } : {}),
                 signal: options.signal,
                 timeoutMs: target.timeoutMs,
                 maxOutputBytes: 16 * 1024 * 1024,
@@ -307,14 +387,14 @@ export class NucleiAdapter implements ScannerAdapter {
     }
 
     /** Read the configured directory and keep only the templates the reviewed policy allows at this profile. */
-    private async selectTemplates(dir: string, profile: ScanIntensity): Promise<{ selected: TemplateFacts[]; refused: Array<TemplateFacts & { reason: string }> }> {
+    private async selectTemplates(dir: string, profile: ScanIntensity, run: TemplateRunContext): Promise<{ selected: TemplateFacts[]; refused: Array<TemplateFacts & { reason: string }> }> {
         const files = await listTemplateFiles(dir);
         const selected: TemplateFacts[] = [];
         const refused: Array<TemplateFacts & { reason: string }> = [];
         for (const file of files) {
             const facts = await readTemplateFacts(file);
             if (!facts) continue;
-            const decision = templateAllowed(facts, profile);
+            const decision = templateAllowed(facts, profile, run);
             if (decision.ok) {
                 if (selected.length < MAX_TEMPLATES_PER_RUN) selected.push(facts);
                 else refused.push({ ...facts, reason: `more than ${MAX_TEMPLATES_PER_RUN} templates may run in one scan.` });

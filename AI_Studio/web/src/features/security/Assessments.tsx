@@ -3,7 +3,7 @@ import { useState } from "react";
 import { api } from "../../api";
 import { Modal } from "../../components/Modal";
 import { Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, Metric, Skeleton } from "../../components/ui";
-import { BadgeKey, HelpTip } from "../../components/Tooltip";
+import { BadgeKey, FieldHelp, HelpTip } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
 import { help } from "../../lib/help";
 import { friendlyError, describeApiError } from "../../lib/labels";
@@ -11,7 +11,7 @@ import { duration, relativeTime } from "../../lib/format";
 import { go, routes, useRoute } from "../../lib/router";
 import { isRunnerRefusal, refusalLink, useReadiness } from "../runners/my-runner";
 import { AuthTag, SecurityLayout, StateTag, canRun, stateKey, useRole } from "./SecurityChrome";
-import { AUTH_WORDS, SEC, STATE_WORDS, STEPS, authStateOf, isRunning, listOf, oneOf, sec, useApps, useAssessments, useSecurityStatus, when, type AppRow, type AssessmentRow, type AssessmentState, type SecurityAssessment, type SecurityAuthorization } from "./security";
+import { AUTH_WORDS, PROFILE_ORDER, PROFILE_WORDS, SEC, STATE_WORDS, STEPS, authStateOf, type ProfileKey, isRunning, listOf, oneOf, sec, useApps, useAssessments, useSecurityStatus, when, type AppRow, type AssessmentRow, type AssessmentState, type SecurityAssessment, type SecurityAuthorization } from "./security";
 
 // ── new assessment ───────────────────────────────────────────────────────────
 
@@ -43,6 +43,8 @@ export function NewAssessmentPage({ id }: { id: string }) {
     const [busy, setBusy] = useState(false);
     const [problem, setProblem] = useState("");
     const [problemLink, setProblemLink] = useState<string | null>(null);
+    // The profile (src/security/profile-gate.ts): passive unless chosen; the server refuses any other without its authorization and approval.
+    const [kind, setKind] = useState<ProfileKey>("passive");
     // Round 52: on a platform that runs tests only on runners, the assessment runs on the person's runner (a start is refused without one).
     const ready = useReadiness({ can: ["assessment"] });
     const runnerBlocks = ready.mode === "runners" && !ready.ready;
@@ -57,7 +59,7 @@ export function NewAssessmentPage({ id }: { id: string }) {
         setProblem("");
         setProblemLink(null);
         try {
-            const answer = await api<unknown>(`${SEC}/applications/${chosen.id}/assessments`, { method: "POST", body: retestOf ? { retestOf } : {} });
+            const answer = await api<unknown>(`${SEC}/applications/${chosen.id}/assessments`, { method: "POST", body: { ...(retestOf ? { retestOf } : {}), ...(kind !== "passive" ? { kind } : {}) } });
             go(sec.assessment(id, oneOf<SecurityAssessment>(answer, "assessment")!.id));
         } catch (e) {
             setProblem(describeApiError(e));
@@ -114,6 +116,23 @@ export function NewAssessmentPage({ id }: { id: string }) {
                             <dt>Authorization</dt>
                             <dd>{auths.loading ? "Checking…" : <AuthTag state={auth} tipFocusable />}</dd>
                         </dl>
+                    )}
+                    {chosen && !retestOf && (
+                        <div className="field">
+                            <FieldHelp
+                                htmlFor="na-profile"
+                                label="Profile"
+                                helpLabel="Profile"
+                                help="Passive is the default and needs nothing more. A profile above passive starts only on a development or staging application, when the client’s current authorization allows it and a Crowd4Test admin has approved it for this application’s environment; the server checks all of them. The client’s authorization lasts 90 days and the admin’s approval 30 days. Every profile only reads: no request is meant to change data, though an application can still react to a read request in a way nobody intended."
+                            />
+                            <select id="na-profile" className="input" value={kind} onChange={(e) => setKind(e.target.value as ProfileKey)}>
+                                {PROFILE_ORDER.map((k) => (
+                                    <option key={k} value={k}>
+                                        {PROFILE_WORDS[k]}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
                     )}
                 </div>
                 <div className="sec-does">

@@ -69,9 +69,8 @@ describeIf("external scanners against the platform's fixture", () => {
             console.warn("skip: nuclei is not available - " + (available.reason ?? available.state));
             return;
         }
-        // conservative-active, not passive: at the passive profile the adapter passes nuclei's own -passive, which leaves out any template
-        // nuclei does not judge passive (verified on nuclei 3.11.1: 1 of these 3 survives it). Which templates are passive is nuclei's call,
-        // not the platform's, so this test runs the profile where the reviewed templates actually run.
+        // conservative-active, not passive: the passive profile runs only templates that send nothing but GET or HEAD (the platform's own
+        // read-only rule; nuclei's -passive flag is its offline mode and is not used), and this test wants every fixture template to run.
         const out = await adapter.start(target([`${base}/`, `${base}/search?q=hello`, `${base}/debug/config.json`]), "conservative-active", { signal: AbortSignal.timeout(240_000) });
         const results = await out.results();
         await out.cleanup();

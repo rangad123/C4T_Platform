@@ -15,12 +15,15 @@ import { checkSignInPlain, discover, emptyDiscovery, type DiscoverOptions } from
 import { guardFor } from "./guard.js";
 import { scan, type ScanStepOutcome } from "./scan.js";
 import { RequestCapError, type DiscoveryResult, type Guard } from "./types.js";
+import { mergeRequestLogs, type StoredRequestLog } from "../egress/request-log.js";
 
 /** What the steps keep (the assessment's work data keeps the same fields, so a restarted assessment does not send the requests again). */
 export interface ProbeWork {
     discovery?: DiscoveryResult;
     discoveryDone?: boolean;
     scan?: { results: RawResult[]; outcomes: ScanStepOutcome[]; capReached: boolean; requested: number };
+    /** The request log of the platform's own requests ("platform:<family>"), added up over restarts; capped per source (request-log.ts). */
+    requestLog?: StoredRequestLog;
 }
 
 export interface ProbeLimits {
@@ -58,6 +61,25 @@ export interface ProbeInput extends ProbeRequest {
 
 /** Run the steps not done yet. "aborted": the signal ended them (what was seen is in `work`); otherwise every step is done. Throws a real failure. */
 export async function probe(i: ProbeInput, work: ProbeWork, extra: string[]): Promise<"done" | "aborted"> {
+    try {
+        return await steps(i, work, extra);
+    } finally {
+        // The guard's local listener ends with the steps; its log goes into the work data and the coverage list.
+        const log = i.guard.requestLog?.();
+        if (log) {
+            const c = log.counts();
+            work.requestLog = mergeRequestLogs([work.requestLog, log.stored()]);
+            if (c.total) {
+                const methods = Object.entries(c.byMethod).map(([m, n]) => `${m} ${n}`).join(", ");
+                extra.push(`Request log: the platform's own checks made ${plural(c.total, "request")} (${methods}), every HTTP one through the request guard; ${c.allowed} allowed, ${c.refused} refused, ${c.failed} failed.`);
+            }
+            i.save();
+        }
+        await i.guard.close?.();
+    }
+}
+
+async function steps(i: ProbeInput, work: ProbeWork, extra: string[]): Promise<"done" | "aborted"> {
     const { guard, app, signIn, limits, retest, signal } = i;
     const update = i.update;
     // Discovery interrupted half-way starts again from the beginning (its queue is not kept); a finished one is reused.

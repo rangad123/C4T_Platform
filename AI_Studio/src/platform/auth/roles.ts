@@ -544,6 +544,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/v1/security/assessments/:aid": "read",
     "POST /api/v1/security/assessments/:aid/cancel": "ai_studio.security.use",
     "POST /api/v1/security/projects/:id/stop-all": "ai_studio.security.use",
+    // Scheduled passive assessments (src/security/routes/schedule.ts): reading is reading, setting one is security.use.
+    "GET /api/v1/security/applications/:appId/schedule": "read",
+    "PUT /api/v1/security/applications/:appId/schedule": "ai_studio.security.use",
     // FIND (src/security/routes/findings.ts): report downloads are reports.export; validating and entering findings is security.use
     // (marking a finding an accepted risk additionally needs tests.approve, checked in the route).
     "GET /api/v1/security/projects/:id/findings": "read",
@@ -563,6 +566,15 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/v1/security/applications/:appId/api-document": "read",
     "PUT /api/v1/security/applications/:appId/api-document": "ai_studio.security.use",
     "DELETE /api/v1/security/applications/:appId/api-document": "ai_studio.security.use",
+    "GET /api/v1/security/applications/:appId/cross-account": "read",
+    "PUT /api/v1/security/applications/:appId/cross-account": "ai_studio.security.use",
+    "DELETE /api/v1/security/applications/:appId/cross-account": "ai_studio.security.use",
+    // The profile gate (src/security/profile-gate.ts): reading is reading; approving a profile above passive is a sign-off, and the route
+    // also requires a Crowd4Test admin (C4T role ADMIN; without Crowd4Test sign-in, platform-settings holders).
+    "GET /api/v1/security/applications/:appId/authorization-statement": "read",
+    "GET /api/v1/security/applications/:appId/approvals": "read",
+    "POST /api/v1/security/applications/:appId/approvals": "ai_studio.tests.approve",
+    "DELETE /api/v1/security/applications/:appId/approvals/:approvalId": "ai_studio.tests.approve",
     // SCAN (src/security/routes/scanners.ts): allowing a scanner for this project is security.use.
     // Nothing here starts a scan: a scan runs inside an assessment, under that assessment's authorization.
     "GET /api/v1/security/projects/:id/scanners": "read",

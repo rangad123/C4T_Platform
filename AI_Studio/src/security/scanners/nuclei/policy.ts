@@ -48,7 +48,8 @@ export const BLOCKED_TAGS: readonly string[] = [
  * confirmation, not from a community exploitation template.
  */
 export const PROFILE_TAGS: Record<ScanIntensity, readonly string[]> = {
-    passive: ["exposure", "misconfig", "tech", "ssl", "header", "config", "default-login", "cve", "headless"],
+    // No "default-login" (it signs in with guessed passwords), no "cve" (a CVE template may exploit), no "headless" (blocked anyway).
+    passive: ["exposure", "misconfig", "tech", "ssl", "header", "config"],
     "conservative-active": ["exposure", "misconfig", "tech", "ssl", "header", "config", "default-login", "cve", "files", "backup", "swagger", "graphql", "jwt", "exposure"],
     advanced: ["exposure", "misconfig", "tech", "ssl", "header", "config", "default-login", "cve", "files", "backup", "swagger", "graphql", "jwt", "exposure", "misconfiguration"],
 };
@@ -68,6 +69,25 @@ export interface TemplateFacts {
     tags: string[];
     /** The file it came from (only ever a file inside the configured directory). */
     path?: string;
+    /**
+     * Read from the template's own request blocks: true when it only sends GET or HEAD over HTTP (or only opens a TLS connection), with
+     * no payloads, fuzzing or attack section. Undefined when not known; the passive profile then refuses it.
+     */
+    readOnly?: boolean;
+    /** True when it sends nothing but GET, HEAD or OPTIONS (crafted values allowed). Above passive a template must be this or read-only. */
+    safeMethodsOnly?: boolean;
+    /**
+     * True when it opens its own connection rather than sending HTTP requests (an `ssl` section dials `{{Host}}:{{Port}}` or a fixed
+     * port itself). Such a connection does not go through the request guard's proxy, so it skips the scope, rate and budget checks
+     * and the request log. Only allowed when the run is isolated, where the guard is the only way out.
+     */
+    dialsDirectly?: boolean;
+}
+
+/** What the run itself offers, for the decisions that depend on it. */
+export interface TemplateRunContext {
+    /** The run has an isolated network whose only way out is the request guard (src/security/egress/isolation.ts). */
+    isolated?: boolean;
 }
 
 export interface TemplateDecision {
@@ -77,13 +97,19 @@ export interface TemplateDecision {
 }
 
 /** May this template run at this profile at all? Tags decide; severity is checked separately. */
-export function templateAllowed(template: TemplateFacts, profile: ScanIntensity): TemplateDecision {
+export function templateAllowed(template: TemplateFacts, profile: ScanIntensity, run: TemplateRunContext = {}): TemplateDecision {
     const tags = (template.tags ?? []).map((t) => String(t).toLowerCase());
     const blocked = tags.find((t) => BLOCKED_TAGS.includes(t));
     if (blocked) return { ok: false, reason: `Tag "${blocked}" is not used by this platform at any profile.` };
     const allowed = PROFILE_TAGS[profile] ?? [];
     if (!tags.some((t) => allowed.includes(t))) return { ok: false, reason: `None of its tags (${tags.join(", ") || "none"}) is in the ${profile} list.` };
     if (!ALLOWED_SEVERITIES.includes(template.severity as Severity)) return { ok: false, reason: `It claims the severity "${template.severity}", which is not one of the five this platform uses.` };
+    // nuclei has no live read-only mode (its -passive flag processes stored responses instead), so the passive profile's promise is kept here.
+    if (profile === "passive" && template.readOnly !== true) return { ok: false, reason: "At the passive profile only templates that send nothing but GET or HEAD requests are used, and this one may send more." };
+    // No profile changes data: above passive a template that may send any other method than GET, HEAD or OPTIONS is skipped (and listed).
+    if (template.readOnly !== true && template.safeMethodsOnly !== true) return { ok: false, reason: "It may send a request that can change data (a method other than GET, HEAD or OPTIONS), and no profile sends one, so it was skipped." };
+    if (template.dialsDirectly === true && run.isolated !== true)
+        return { ok: false, reason: "It opens its own connection to the target (a TLS check, or a raw request nuclei sends outside its proxy) instead of an ordinary HTTP request, which would bypass the platform's request guard, and this run is not isolated, so it was skipped." };
     return { ok: true };
 }
 

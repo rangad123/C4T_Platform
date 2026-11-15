@@ -91,7 +91,7 @@ const storageState = (value = FIXTURE_SESSION_VALUE, expires = Math.floor(Date.n
 });
 
 const authorize = async (id: string) => {
-    const r = await api("POST", `${API}/applications/${id}/authorizations`, { basis: "owner", approverName: "Test Owner", confirm: true });
+    const r = await api("POST", `${API}/applications/${id}/authorizations`, { basis: "owner", approverName: "Test Owner", approverRole: "Head of Engineering", approverEmail: "owner@client.example", documentReference: "SOW-1", authority: "Signed SOW-1 for the application's owner.", confirm: true });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
     return r.json;
 };

@@ -26,7 +26,11 @@ import { currentActor, runAs, SYSTEM_ACTOR } from "../../platform/auth/actor.js"
 import type { Db } from "../../platform/db.js";
 import { HttpError } from "../../platform/http-error.js";
 import { recordSecurityEvent } from "../audit.js";
-import { ASSESSMENT_STATES, FINISHED_STATES, type SecurityApplication, type SecurityAssessment } from "../contract.js";
+import { ASSESSMENT_KINDS, ASSESSMENT_STATES, FINISHED_STATES, type SecurityApplication, type SecurityAssessment } from "../contract.js";
+import { scanApprovalOf } from "../profile-gate.js";
+import { egressIsolationProblem, isolationReady, warmIsolation } from "../egress/isolation.js";
+import { crowd4testOn } from "../../platform/ai-config.js";
+import { SCAN_PROFILES } from "../scanners/profiles.js";
 import { guardFor } from "../assessment/guard.js";
 import { AssessmentLoop, type RunnerDeps } from "../assessment/runner.js";
 import { resolveSignIn } from "../signin.js";
@@ -62,6 +66,11 @@ export function recordFinished(db: Db, a: SecurityAssessment, app: SecurityAppli
     );
 }
 
+/** What the start gate needs from the platform (store.ts gateCheck): the same at start and while the assessment runs. */
+export function gateOptions(ctx: Pick<SecurityRouteCtx, "p" | "settings">) {
+    return { activeProfilesOn: ctx.settings.activeProfiles === true, crowd4testOn: crowd4testOn(ctx.p.config), isolationProblem: () => egressIsolationProblem() };
+}
+
 /** Loop dependencies for a platform (tests build their own with smaller limits and a stand-in browser). */
 export function loopDeps(ctx: Pick<SecurityRouteCtx, "p" | "settings">): RunnerDeps {
     const scanners = scannerSettings(ctx.p.config as unknown as Record<string, string | undefined>);
@@ -81,6 +90,7 @@ export function loopDeps(ctx: Pick<SecurityRouteCtx, "p" | "settings">): RunnerD
                 void notifyAssessmentFinished(ctx.p, a, app);
             },
             onRunner: assessOnRunner(ctx.p, ctx.settings),
+            gate: gateOptions(ctx),
             ...(scanners.enabled.length ? { scannersLeftOut: SCANNERS_NOT_ON_RUNNER } : {}),
         };
     }
@@ -89,6 +99,7 @@ export function loopDeps(ctx: Pick<SecurityRouteCtx, "p" | "settings">): RunnerD
         settings: ctx.settings,
         headless: ctx.p.config.HEADLESS,
         guardFor: (app, signal, signIn) => guardFor(app, ctx.settings, signal, {}, signIn),
+        gate: gateOptions(ctx),
         // Round 20 (SIGN): the saved sign-in the application names (decrypted for the assessment only, limited to the scope).
         signInFor: (app) => resolveSignIn(ctx.p.db, ctx.p.config, app),
         onFinished: (a, app) => {
@@ -108,7 +119,13 @@ export function loopDeps(ctx: Pick<SecurityRouteCtx, "p" | "settings">): RunnerD
     };
 }
 
-const StartBody = z.object({ retestOf: z.string().min(1).max(100).nullable().optional() }).strict();
+const StartBody = z
+    .object({
+        retestOf: z.string().min(1).max(100).nullable().optional(),
+        // The profile (profile-gate.ts). Left out: passive, exactly as every assessment before the gate.
+        kind: z.enum(ASSESSMENT_KINDS, { message: "Choose passive, conservative active checks or the advanced assessment." }).optional(),
+    })
+    .strict();
 const ListQuery = z.object({
     applicationId: z.string().max(100).optional(),
     state: z.enum(ASSESSMENT_STATES).optional(),
@@ -123,7 +140,7 @@ const isFinished = (s: SecurityAssessment["state"]) => FINISHED_STATES.includes(
  * Stop one assessment: an unclaimed queued one ends at once (nothing was requested); a running one is asked to stop and its loop ends it
  * within seconds. True when something was stopped or asked to stop.
  */
-function stopOne(db: Db, store: SecurityStore, id: string, words: string): boolean {
+export function stopOne(db: Db, store: SecurityStore, id: string, words: string): boolean {
     if (!store.requestCancel(id)) return false;
     // Only when no loop holds it: otherwise the loop records the end itself (and keeps what it had found).
     db.run(
@@ -142,13 +159,29 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
     const view = (a: SecurityAssessment & { cancelRequested?: boolean }) => ({ ...a, cancelRequested: a.cancelRequested ?? false, applicationName: store.getApplication(a.applicationId)?.name ?? null });
 
     let loop: AssessmentLoop | undefined;
+    // With profiles above passive on, this machine's isolation is checked in the background as soon as the server is ready, wherever the
+    // loop runs: the start gate never runs the check itself (it answers "still running" until there is a result).
+    // Closing waits for a check still running, so it finishes and removes its temporary folders.
+    if (ctx.settings.activeProfiles) {
+        app.addHook("onReady", async () => void warmIsolation());
+        app.addHook("onClose", async () => void (await isolationReady()));
+    }
     // EXECUTION_MODE=runners: the loop runs here whatever WORKER_EMBEDDED says (it opens no browser and sends nothing: the runner does).
     if ((p.config.WORKER_EMBEDDED || runnersOnly(p.config)) && ctx.settings.enabled && !loops.has(p.db)) {
         loop = new AssessmentLoop(loopDeps(ctx), 1_500);
         loops.set(p.db, loop);
-        // Started once the server is ready (not while routes are still being registered), stopped with it.
-        app.addHook("onReady", async () => loop!.start());
+        // Started once the server is ready (not while routes are still being registered), stopped with it. With profiles above passive
+        // switched on, this machine's isolation is checked first, in the background: the checks take seconds, and run synchronously
+        // later (in a request or in the loop's first claim, after its lease was taken) they would hold up every request meanwhile.
+        let closed = false;
+        app.addHook("onReady", async () => {
+            if (!ctx.settings.activeProfiles) return loop!.start();
+            void warmIsolation().finally(() => {
+                if (!closed) loop!.start();
+            });
+        });
         app.addHook("onClose", async () => {
+            closed = true;
             await loop!.stop();
             loops.delete(p.db);
         });
@@ -170,7 +203,17 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
         const actor = currentActor();
         const ownerId = ownerIdOfActor(actor);
         if (runnersOnly(p.config)) assertAssessmentRunner(p, { kind: actor.kind, ownerId }, a.projectId, a.targetUrl);
+        // The gate (profile-gate.ts), on the server: above passive only with an authorization naming the profile, an approval for the
+        // application's environment by someone who is still a Crowd4Test admin (none on a server without Crowd4Test sign-in), the
+        // profile's own refusal not applying, and SECURITY_ACTIVE_PROFILES on. Passive is never asked.
+        const kind = body.kind ?? "passive";
+        // The authorization's expiry and details were judged by authorizationState above; an approval counts only within its
+        // 30 days and for the application's details as they are now. The same check runs again while it runs (store.ts gateCheck).
+        const { refused, approval } = store.gateCheck(a, { kind, authorizationId: null }, gateOptions(ctx));
+        if (refused) throw new HttpError(409, refused);
         const created = store.createAssessment({
+            kind,
+            approval: approval ? scanApprovalOf(approval) : null,
             applicationId: a.id,
             authorizationId: auth.authorizationId,
             startedBy: ctx.actorName(req),
@@ -185,7 +228,11 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
             action: "assessment.started",
             objectType: "assessment",
             objectId: created.id,
-            summary: body.retestOf ? `Started a retest of the earlier findings of “${a.name}” (${a.targetUrl}).` : `Started a passive assessment of “${a.name}” (${a.targetUrl}), at most ${a.maxRequestsPerSecond} requests a second.`,
+            summary: body.retestOf
+                ? `Started a retest of the earlier findings of “${a.name}” (${a.targetUrl}).`
+                : kind === "passive"
+                  ? `Started a passive assessment of “${a.name}” (${a.targetUrl}), at most ${a.maxRequestsPerSecond} requests a second.`
+                  : `Started an assessment of “${a.name}” (${a.targetUrl}) at the ${SCAN_PROFILES[kind].title} profile, approved by the Crowd4Test admin ${approval!.approvedByName}, at most ${a.maxRequestsPerSecond} requests a second.`,
         });
         loops.get(p.db)?.poke();
         reply.code(201);

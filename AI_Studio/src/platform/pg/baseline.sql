@@ -1196,6 +1196,11 @@ CREATE TABLE security_authorizations (
     revoked_at TEXT,
     revoked_by TEXT,
     revoked_reason TEXT,
+    max_profile TEXT NOT NULL DEFAULT 'passive',
+    cross_accounts_json TEXT,
+    approver_role TEXT,
+    authority TEXT,
+    details_fingerprint TEXT,
     seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
 CREATE INDEX idx_sec_auth_app ON security_authorizations (application_id, confirmed_at);
@@ -1303,6 +1308,23 @@ CREATE TABLE security_project_settings (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE security_schedules (
+    application_id TEXT PRIMARY KEY REFERENCES security_applications(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL,
+    cadence_json TEXT NOT NULL,
+    enabled BIGINT NOT NULL,
+    next_run_at BIGINT,
+    maker_id TEXT NOT NULL,
+    maker_name TEXT NOT NULL,
+    last_run_at TEXT,
+    last_outcome TEXT,
+    last_note TEXT,
+    last_assessment_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_sec_schedules_due ON security_schedules (enabled, next_run_at);
+
 CREATE TABLE user_projects (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1332,6 +1354,29 @@ CREATE TABLE security_api_documents (
     summary_json TEXT NOT NULL,
     uploaded_at TEXT NOT NULL,
     uploaded_by TEXT NOT NULL
+);
+
+CREATE TABLE security_profile_approvals (
+    id TEXT PRIMARY KEY,
+    application_id TEXT NOT NULL REFERENCES security_applications(id) ON DELETE CASCADE,
+    profile TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    approved_by_user_id TEXT,
+    approved_by_name TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    withdrawn_at TEXT,
+    withdrawn_by TEXT,
+    details_fingerprint TEXT,
+    seq BIGINT GENERATED ALWAYS AS IDENTITY
+);
+CREATE INDEX idx_sec_profile_approvals_app ON security_profile_approvals (application_id, profile);
+
+CREATE TABLE security_cross_account (
+    application_id TEXT PRIMARY KEY REFERENCES security_applications(id) ON DELETE CASCADE,
+    designation_json TEXT NOT NULL,
+    updated_by TEXT,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE ops_heartbeats (
@@ -1748,7 +1793,8 @@ CREATE TABLE security_scan_runs (
     error TEXT,
     coverage_json TEXT NOT NULL DEFAULT '{}',
     approval_json TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    superseded_at TEXT
 );
 CREATE INDEX idx_sec_scanrun_assessment ON security_scan_runs (assessment_id, created_at);
 CREATE INDEX idx_sec_scanrun_project ON security_scan_runs (project_id, created_at);

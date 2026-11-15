@@ -22,6 +22,35 @@ import type {
     ValidationState,
 } from "../../../../src/security/contract";
 
+/** The assessment profiles (src/security/profile-gate.ts), in the words the pages use. Passive is the default and needs nothing more. */
+export const PROFILE_WORDS = {
+    passive: "Passive",
+    "conservative-active": "Conservative active checks",
+    advanced: "Advanced assessment (controlled environment only)",
+} as const;
+export type ProfileKey = keyof typeof PROFILE_WORDS;
+export const PROFILE_ORDER: ProfileKey[] = ["passive", "conservative-active", "advanced"];
+
+/** GET /applications/:appId/approvals: one approval of a profile above passive. */
+export interface ProfileApprovalRow {
+    id: string;
+    profile: Exclude<ProfileKey, "passive">;
+    environment: string;
+    approvedByName: string;
+    approvedAt: string;
+    statement: string;
+    withdrawnAt: string | null;
+    /** When it stops counting, and whether it counts now, judged on the server. */
+    expiresAt?: string;
+    current?: { state: string; message: string };
+}
+
+/** Shown where an older authorization has no value for a field that is required now. */
+export const NOT_RECORDED = "Not recorded";
+
+/** An authorization as the routes answer it: the contract's fields plus the authorizer details and expiry. */
+export type RecordedAuthorization = SecurityAuthorization & { approverRole?: string | null; authority?: string | null; detailsRecorded?: boolean; expiresAt?: string | null };
+
 export type { ApiDocumentSummary, AssessmentState, Confidence, Evidence, FindingCategory, SecurityApplication, SecurityAssessment, SecurityAuthorization, SecurityEnvironment, SecurityFinding, SensitiveWorkflow, Severity, ValidationState } from "../../../../src/security/contract";
 
 /** Every security route lives under this prefix (the `api` helper adds `/api`). */
@@ -129,10 +158,12 @@ export interface SecurityStatus {
 
 /** Whether an application's recorded authorization covers its current target, scope and limits. */
 export interface AuthorizationState {
-    state: "current" | "stale" | "none" | "revoked";
+    state: "current" | "stale" | "expired" | "none" | "revoked";
     /** The server's plain sentence for the state. */
     message?: string;
     authorizationId?: string | null;
+    expiresAt?: string | null;
+    detailsRecorded?: boolean;
 }
 
 /** The security routes answer objects (`{ applications: [...] }`); this reads the list either way. */
@@ -200,7 +231,7 @@ export interface HistoryRow {
 export function authStateOf(app: AppRow | undefined, auths?: Array<SecurityAuthorization & { current?: boolean; stale?: boolean }>): AuthorizationState["state"] {
     if (!app) return "none";
     const a = app.authorization as (AuthorizationState & Partial<SecurityAuthorization>) | null | undefined;
-    if (a && typeof a === "object" && typeof (a as AuthorizationState).state === "string" && ["current", "stale", "none", "revoked"].includes((a as AuthorizationState).state)) return (a as AuthorizationState).state;
+    if (a && typeof a === "object" && typeof (a as AuthorizationState).state === "string" && ["current", "stale", "expired", "none", "revoked"].includes((a as AuthorizationState).state)) return (a as AuthorizationState).state;
     if (app.authorizationState) return app.authorizationState;
     if (typeof app.authorizationCurrent === "boolean" && app.authorizationCurrent) return "current";
     const list = auths ?? (a && typeof a === "object" && "confirmedAt" in a ? [a as SecurityAuthorization] : []);
@@ -215,7 +246,8 @@ export function authStateOf(app: AppRow | undefined, auths?: Array<SecurityAutho
 
 export const AUTH_WORDS: Record<AuthorizationState["state"], { label: string; tone: Tone; text: string }> = {
     current: { label: "Authorized", tone: "success", text: "A current authorization covers this application: its scope, limits, saved sign-in and sensitive workflows." },
-    stale: { label: "Authorization out of date", tone: "warning", text: "The target, scope, exclusions, request limit, saved sign-in or sensitive workflows changed after the authorization was recorded. Confirm it again before the next assessment." },
+    stale: { label: "Authorization out of date", tone: "warning", text: "The target, scope, exclusions, request limit, saved sign-in, sensitive workflows, environment, a test account’s sign-in details, the cross-account designation or the description of the profile it allows changed after the authorization was recorded. Confirm it again before the next assessment." },
+    expired: { label: "Authorization expired", tone: "warning", text: "The authorization lasts 90 days from when it was recorded; one recorded without the authorizing person’s role and documented authority stops counting 90 days after the server was updated to require them. Record a new authorization from the client before the next assessment." },
     none: { label: "Not authorized yet", tone: "warning", text: "Record the client’s authorization before the first assessment." },
     revoked: { label: "Authorization withdrawn", tone: "neutral", text: "The authorization was withdrawn, or it came back withdrawn from a restored backup. Record a new one before the next assessment." },
 };

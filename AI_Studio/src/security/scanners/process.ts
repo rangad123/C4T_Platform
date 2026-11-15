@@ -217,6 +217,17 @@ export function runProcess(options: RunOptions): Promise<RunOutcome> {
             if (timer) clearTimeout(timer);
             reject(e);
         });
+        // A stopped tool that exits on the polite stop may leave helpers behind in its process group (with their own stdio, so `close`
+        // does not wait for them). Once it has exited, the group is killed once more so nothing it started keeps running.
+        child.on("exit", () => {
+            if (stopped && process.platform !== "win32" && child.pid) {
+                try {
+                    process.kill(-child.pid, "SIGKILL");
+                } catch {
+                    /* ESRCH: nothing left; EPERM: not ours */
+                }
+            }
+        });
         child.on("close", finish);
     });
 }

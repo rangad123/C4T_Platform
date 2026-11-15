@@ -28,11 +28,13 @@ export interface SecuritySettings {
     useProxy?: boolean;
     /** SECURITY_PROXY_ALLOW_PRIVATE=true (default off). */
     allowPrivateProxy?: boolean;
+    /** SECURITY_ACTIVE_PROFILES=on (default off): only then may an assessment start above passive, and only through the gate (profile-gate.ts). */
+    activeProfiles?: boolean;
 }
 
 type Source = Partial<
     Record<
-        "SECURITY_ASSESSMENT" | "SECURITY_ALLOW_PRIVATE_TARGETS" | "SECURITY_RETENTION_DAYS" | "SECURITY_MAX_REQUESTS" | "SECURITY_MAX_RESPONSE_BYTES" | "SECURITY_ASSESSMENT_MINUTES" | "SECURITY_USE_PROXY" | "SECURITY_PROXY_ALLOW_PRIVATE",
+        "SECURITY_ASSESSMENT" | "SECURITY_ALLOW_PRIVATE_TARGETS" | "SECURITY_RETENTION_DAYS" | "SECURITY_MAX_REQUESTS" | "SECURITY_MAX_RESPONSE_BYTES" | "SECURITY_ASSESSMENT_MINUTES" | "SECURITY_USE_PROXY" | "SECURITY_PROXY_ALLOW_PRIVATE" | "SECURITY_ACTIVE_PROFILES",
         string | undefined
     >
 >;
@@ -61,5 +63,7 @@ export function securitySettings(src: Source): SecuritySettings {
         // Default off; only an explicit on/true/1/yes sends assessments through the proxy.
         useProxy: ["on", "true", "1", "yes"].includes(flag(src.SECURITY_USE_PROXY)),
         allowPrivateProxy: flag(src.SECURITY_PROXY_ALLOW_PRIVATE) === "true",
+        // Default off; only an explicit on/true/1/yes lets the gate open at all.
+        activeProfiles: ["on", "true", "1", "yes"].includes(flag(src.SECURITY_ACTIVE_PROFILES)),
     };
 }

@@ -67,7 +67,7 @@ describe("a passive assessment through the company proxy", () => {
         const created = await api("POST", `/api/v1/security/projects/${projectId}/applications`, { name: "Shop behind the proxy", targetUrl: `http://shop.test:${APP_PORT}/`, environment: "staging", excludedPaths: ["/admin"], maxRequestsPerSecond: 10 });
         expect(created.status, JSON.stringify(created.json)).toBe(201);
         const appId = created.json.application.id as string;
-        expect((await api("POST", `/api/v1/security/applications/${appId}/authorizations`, { basis: "owner", approverName: "Test Owner", confirm: true })).status).toBe(201);
+        expect((await api("POST", `/api/v1/security/applications/${appId}/authorizations`, { basis: "owner", approverName: "Test Owner", approverRole: "Head of Engineering", approverEmail: "owner@client.example", documentReference: "SOW-1", authority: "Signed SOW-1 for the application's owner.", confirm: true })).status).toBe(201);
         const started = await api("POST", `/api/v1/security/applications/${appId}/assessments`, {});
         expect(started.status).toBe(201);
         const id = started.json.assessment.id as string;

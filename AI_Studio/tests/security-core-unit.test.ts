@@ -469,3 +469,6 @@ describe("guardedFetch against the local app", () => {
         expect(typeof browserRouteGuard(app())).toBe("function");
     });
 });
+
+// The isolation check, the umount probe and the certificate handshake, kept in their own file.
+import "./security-isolation-and-handshake.cases.js";

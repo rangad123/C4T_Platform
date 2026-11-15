@@ -82,8 +82,11 @@ describe("Security Assessment through the screens, against the real platform and
         await pwExpect(auth).toBeVisible();
         await pwExpect(page.getByTestId("sec-statement")).toContainText("I confirm that Fixture client owns");
         await pwExpect(page.locator(".page-head")).toContainText("Not authorized yet");
-        await auth.getByLabel("Approved by").fill("Dana Client");
-        await auth.getByLabel("Their email (optional)").fill("dana@client.example");
+        await auth.getByLabel("Authorized by").fill("Dana Client");
+        await auth.getByLabel("Their role").fill("Head of Engineering");
+        await auth.getByLabel("Their email").fill("dana@client.example");
+        await auth.getByLabel("Permission document").fill("SOW-12");
+        await auth.getByLabel("Their authority to permit testing").fill("Signed SOW-12 for the owner.");
         await auth.getByRole("checkbox", { name: /I confirm the statement above/ }).check();
         await auth.getByRole("button", { name: "Record authorization", exact: true }).click();
         await pwExpect(page.locator(".page-head")).toContainText("Authorized");

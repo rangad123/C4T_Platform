@@ -77,7 +77,7 @@ async function person(name: string) {
     const made = await call("POST", `/api/v1/security/projects/${project}/applications`, { name: `${name} shop`, targetUrl: `${fixture.origin}/`, environment: "development", excludedPaths: ["/admin"], maxRequestsPerSecond: 10 }, who.token);
     expect(made.status, made.text).toBe(201);
     const appId = made.body.application.id as string;
-    const auth = await call("POST", `/api/v1/security/applications/${appId}/authorizations`, { basis: "owner", approverName: "Test Owner", confirm: true }, who.token);
+    const auth = await call("POST", `/api/v1/security/applications/${appId}/authorizations`, { basis: "owner", approverName: "Test Owner", approverRole: "Head of Engineering", approverEmail: "owner@client.example", documentReference: "SOW-1", authority: "Signed SOW-1 for the application's owner.", confirm: true }, who.token);
     expect(auth.status, auth.text).toBe(201);
     return { ...who, project, appId };
 }

@@ -1,3 +1,5 @@
+import { fireDueSecuritySchedules } from "../security/schedules.js";
+import { assessmentLoopOf } from "../security/routes/assessments.js";
 import type { Platform } from "./bootstrap.js";
 import { AlertService, AlertStore, isAlertable, type DeliveryOptions } from "./alerts.js";
 import { serverSmtp } from "./alert-email.js";
@@ -71,6 +73,8 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
     const scheduler = new Scheduler({ store, repo: p.repo, startRun: startDue, clock: opts.clock, tickMs: p.config.SCHEDULER_TICK_MS, onTick: (now) => {
         void new QuarantineStore(p.db, () => now).sweep(now);
         void getAgentServices(p).maintain().catch((err) => console.error("[agents] housekeeping failed:", err));
+        // Scheduled passive security assessments ride on the same tick (security/schedules.ts).
+        void fireDueSecuritySchedules(p, now, () => assessmentLoopOf(p.db)?.poke()).catch((err) => console.error("[security] schedules failed:", err));
     }, afterPass: (nowMs) => runScheduledRetention(p, nowMs) });
 
     // Deliveries run in the background: a receiver that is down must not hold up the worker's next job.

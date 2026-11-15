@@ -88,7 +88,7 @@ async function newApp(name: string, extra: Record<string, unknown> = {}): Promis
     });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
     const id = r.json.application.id as string;
-    const auth = await api("POST", `/api/v1/security/applications/${id}/authorizations`, { basis: "owner", approverName: "Test Owner", confirm: true });
+    const auth = await api("POST", `/api/v1/security/applications/${id}/authorizations`, { basis: "owner", approverName: "Test Owner", approverRole: "Head of Engineering", approverEmail: "owner@client.example", documentReference: "SOW-1", authority: "Signed SOW-1 for the application's owner.", confirm: true });
     expect(auth.status, JSON.stringify(auth.json)).toBe(201);
     return id;
 }

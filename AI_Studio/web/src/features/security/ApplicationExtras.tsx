@@ -35,7 +35,7 @@ export interface SignInStatus {
     site?: string | null;
 }
 export const signInLabel = (account: string) => (account === "main" ? "The project’s own sign-in" : `Test account “${account}”`);
-const SIGNIN_WORDS: Record<SignInStatus["state"], string> = {
+export const SIGNIN_WORDS: Record<SignInStatus["state"], string> = {
     ready: "saved sign-in ready",
     "not-checked": "saved sign-in, not checked yet",
     expired: "saved sign-in expired",

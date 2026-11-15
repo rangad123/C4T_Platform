@@ -76,7 +76,7 @@ describe("security assessment CORE API", () => {
     });
 
     const shop = { name: "Shop", targetUrl: "https://shop.example.com/#top", environment: "staging", scope: ["https://API.example.com", "*.cdn.example.net"], excludedPaths: ["/admin/billing"], maxRequestsPerSecond: 3, notes: "Main site" };
-    const authBody = { basis: "client-permission", approverName: "Dana Client", approverEmail: "dana@client.example", documentReference: "SOW-12", restrictions: "Weekdays only", confirm: true };
+    const authBody = { basis: "client-permission", approverName: "Dana Client", approverRole: "Head of Engineering", approverEmail: "dana@client.example", documentReference: "SOW-12", authority: "Signed SOW-12 for the application's owner.", restrictions: "Weekdays only", confirm: true };
 
     it("says it is on, with its limits", async () => {
         const r = await viewer("GET", `${API}/status`);
@@ -120,9 +120,25 @@ describe("security assessment CORE API", () => {
         expect((await editor("POST", `${API}/applications/${appId}/authorizations`, authBody)).status).toBe(403);
         expect((await owner("POST", `${API}/applications/${appId}/authorizations`, { ...authBody, confirm: false })).body.error).toBe("Tick the box to confirm the statement.");
         expect((await owner("POST", `${API}/applications/${appId}/authorizations`, { ...authBody, approverEmail: "nope" })).body.error).toMatch(/email address does not look right/);
+        // The authorizing person's role, email, document reference and authority are all required, at every level.
+        const missing = async (field: string, value: unknown) => {
+            const r = await owner("POST", `${API}/applications/${appId}/authorizations`, { ...authBody, [field]: value });
+            expect(r.status, field).toBe(400);
+            return r.body.error as string;
+        };
+        for (const v of [undefined, "", "   "]) {
+            expect(await missing("approverRole", v)).toMatch(/role/);
+            expect(await missing("approverEmail", v)).toMatch(/email address/);
+            expect(await missing("documentReference", v)).toMatch(/document/);
+            expect(await missing("authority", v)).toMatch(/authority/);
+            expect(await missing("approverName", v)).toMatch(/name/);
+        }
+        expect(await missing("approverEmail", null)).toMatch(/email address/);
+        expect(securityStoreFor(platform.db).listAuthorizations(appId)).toHaveLength(0);
         const r = await owner("POST", `${API}/applications/${appId}/authorizations`, authBody);
         expect(r.status).toBe(201);
-        expect(r.body.authorization).toMatchObject({ applicationId: appId, basis: "client-permission", approverName: "Dana Client", approverEmail: "dana@client.example", documentReference: "SOW-12", restrictions: "Weekdays only", confirmedByName: "Olga", revokedAt: null });
+        expect(r.body.authorization).toMatchObject({ applicationId: appId, basis: "client-permission", approverName: "Dana Client", approverRole: "Head of Engineering", approverEmail: "dana@client.example", documentReference: "SOW-12", authority: "Signed SOW-12 for the application's owner.", restrictions: "Weekdays only", confirmedByName: "Olga", revokedAt: null, detailsRecorded: true });
+        expect(Date.parse(r.body.authorization.expiresAt) - Date.parse(r.body.authorization.confirmedAt)).toBe(90 * 86_400_000);
         expect(r.body.authorization.confirmedByUserId).toBeTruthy();
         expect(r.body.authorization.statement).toMatch(/Client A owns https:\/\/shop\.example\.com\/.*Also in scope: https:\/\/api\.example\.com, \*\.cdn\.example\.net\. Never requested: \/admin\/billing\./);
         expect(r.body.state.state).toBe("current");
@@ -137,7 +153,7 @@ describe("security assessment CORE API", () => {
         expect(renamed.status).toBe(200);
         expect(renamed.body).toMatchObject({ application: { name: "Shop (EU)", notes: null }, authorization: { state: "current" }, changed: ["name", "notes"] });
         const scoped = await editor("PATCH", `${API}/applications/${appId}`, { excludedPaths: ["/admin/billing", "/checkout"] });
-        expect(scoped.body.authorization).toEqual({ state: "stale", message: AUTHORIZATION_WORDS.stale, authorizationId: expect.any(String) });
+        expect(scoped.body.authorization).toEqual({ state: "stale", message: AUTHORIZATION_WORDS.stale, authorizationId: expect.any(String), expiresAt: expect.any(String), detailsRecorded: true });
         expect(scoped.body.application.authorization.state).toBe("stale");
         // Recording again makes it current; the old one is kept, revoked as replaced.
         const again = await owner("POST", `${API}/applications/${appId}/authorizations`, { ...authBody, basis: "owner" });
@@ -199,7 +215,7 @@ describe("security assessment CORE API", () => {
             "Eve: application.changed",
             "Olga: authorization.revoked",
         ]);
-        expect(events.find((e) => e.action === "authorization.revoked")!.summary).toBe("Revoked the authorization to assess “Shop”. The running assessment was asked to stop.");
+        expect(events.find((e) => e.action === "authorization.revoked")!.summary).toBe("Revoked the client's authorization to assess “Shop”. The running assessment was asked to stop.");
         expect(events.find((e) => e.action === "application.created")!.summary).toBe("Added the application “Shop” (https://shop.example.com/, staging) to “Client A”.");
         // No approver email in a summary.
         expect(JSON.stringify(events)).not.toContain("dana@client.example");
@@ -208,7 +224,7 @@ describe("security assessment CORE API", () => {
         const rows = (Array.isArray(activity) ? activity : ((activity as { activity?: unknown[]; rows?: unknown[] }).activity ?? (activity as { rows?: unknown[] }).rows ?? [])) as Array<{ action: string; projectId: string | null; actor: { name: string }; status: number | null; detail: string | null }>;
         const security = rows.filter((r) => r.action.startsWith("security:"));
         expect(security.filter((r) => r.projectId === pA)).toHaveLength(7);
-        expect(security.find((r) => r.action === "security:authorization.recorded")).toMatchObject({ actor: { name: "Olga" }, projectId: pA, detail: expect.stringContaining("approved by Dana Client") });
+        expect(security.find((r) => r.action === "security:authorization.recorded")).toMatchObject({ actor: { name: "Olga" }, projectId: pA, detail: expect.stringContaining("authorized by Dana Client") });
         // The generic "METHOD /route" line is not written for audited changes, only for refused ones (with the status).
         const generic = rows.filter((r) => r.action.includes("/api/v1/security/"));
         expect(generic.length).toBeGreaterThan(0);

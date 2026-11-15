@@ -30,7 +30,8 @@ export interface GuardFetchInit {
      */
     redirect?: "manual" | "follow";
     /** Signed-in assessments (round 20): false = do not add the saved sign-in's cookies (the browser passes its own). Default true. */
-    savedCookies?: boolean;
+    savedCookies?: boolean;    /** The check family in the request log ("discovery", "api-document" …): attributed "platform:<family>". Default: the guard's own. */
+    source?: string;
 }
 
 /** Thrown when the scope guard refuses an address (out of scope, excluded, a private or metadata address). */
@@ -67,10 +68,21 @@ export interface Guard {
     requestsSent(): number;
     /** Checks what must hold before the first request (the company proxy, when one is used); throws the plain reason. */
     ready?(): Promise<void>;
+    /**
+     * The one host and port the certificate handshake (scan.ts observeTls) may connect to: the assessment's own target (its https port,
+     * or 443 for an http target). Set by the guard from the application, never by a caller; without it there is no handshake.
+     */
+    readonly tlsTarget?: { host: string; port: number };
     /** A raw connection to an https address through the company proxy (for the TLS handshake), or undefined to connect directly. */
     tunnel?(url: string, signal: AbortSignal): Promise<import("node:net").Socket | undefined>;
     /** Round 21: the saved sign-in stopped working: from now on plain requests carry none of its cookies (sign-out addresses stay refused). */
     endSignIn?(): void;
+    /** Adds to the request log something not sent through fetch (a write a page tried, the TLS handshake), as "platform:<source>". */
+    note?(e: { source?: string; method: string; url: string; verdict: "allowed" | "refused" | "failed"; reason?: string }): void;
+    /** The request log of this guard (the platform's own requests, refused ones included). */
+    requestLog?(): import("../egress/request-log.js").RequestLog;
+    /** Stops the request guard this Guard started (its local listener). */
+    close?(): Promise<void>;
 }
 
 export interface FormSeen {

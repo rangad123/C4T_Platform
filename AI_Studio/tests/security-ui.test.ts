@@ -257,14 +257,25 @@ describe("applications and the authorization", () => {
 
         const auth = page.getByTestId("sec-auth-form");
         await auth.getByRole("button", { name: "Record authorization", exact: true }).click();
-        await pwExpect(auth.getByText("Enter the name of the person who approved the assessment.", { exact: true })).toBeVisible();
+        await pwExpect(auth.getByText("Enter the name of the person at the client who authorized the assessment.", { exact: true })).toBeVisible();
         await pwExpect(auth.getByText("Tick the box to confirm the statement.", { exact: true })).toBeVisible();
-        await auth.getByLabel("Approved by").fill("Gavin Client");
-        await auth.getByLabel("Permission document (optional)").fill("Engagement letter 7");
+        // The role, email, document and authority are required too, each with its own sentence.
+        await pwExpect(auth.getByText("Enter the authorizing person’s role at the client, for example their job title.", { exact: true })).toBeVisible();
+        await pwExpect(auth.getByText("Enter the authorizing person’s email address.", { exact: true })).toBeVisible();
+        await pwExpect(auth.getByText("Enter the reference of the document that records the permission.", { exact: true })).toBeVisible();
+        await pwExpect(auth.getByText("Say what gives this person the authority to permit testing on behalf of the application’s owner.", { exact: true })).toBeVisible();
+        expect(fake.called("POST", /authorizations$/)).toHaveLength(0);
+        await auth.getByLabel("Authorized by").fill("Gavin Client");
+        await auth.getByLabel("Their role").fill("Head of Engineering");
+        await auth.getByLabel("Their email").fill("gavin@client.example");
+        await auth.getByLabel("Permission document").fill("Engagement letter 7");
+        await auth.getByLabel("Their authority to permit testing").fill("Signed the engagement letter for the owner.");
         await auth.getByRole("checkbox", { name: /I confirm the statement above/ }).check();
         await auth.getByRole("button", { name: "Record authorization", exact: true }).click();
         await pwExpect(page.locator(".page-head")).toContainText("Authorized");
-        expect(fake.called("POST", /authorizations$/)[0]!.body).toEqual({ basis: "client-permission", approverName: "Gavin Client", approverEmail: null, documentReference: "Engagement letter 7", restrictions: null, confirm: true });
+        expect(fake.called("POST", /authorizations$/)[0]!.body).toEqual({ basis: "client-permission", approverName: "Gavin Client", approverRole: "Head of Engineering", approverEmail: "gavin@client.example", documentReference: "Engagement letter 7", authority: "Signed the engagement letter for the owner.", restrictions: null, confirm: true });
+        await pwExpect(page.getByTestId("sec-auth-role")).toHaveText("Head of Engineering");
+        await pwExpect(page.getByTestId("sec-auth-authority")).toHaveText("Signed the engagement letter for the owner.");
         await pwExpect(page.getByTestId("sec-authorization")).toContainText("Gavin Client");
     });
 

@@ -12,7 +12,16 @@
  *     --checks <a reviewed list> --include-method <safe methods only> --mode positive
  *     --max-examples <n> --workers 1 --rate-limit <n>/m --no-shrink (deliberately NOT --generation-deterministic: see below)
  *     --report ndjson,json --report-ndjson-path <temp> --report-json-path <temp>
- *     --output-sanitize true --generation-deterministic --max-time <seconds>
+ *     --output-sanitize true --max-time <seconds> --exclude-path-regex <each excluded prefix>
+ *     [--config-file <temp>/schemathesis.toml, only when a saved sign-in is presented: its header value comes from the environment]
+ *
+ * The API document handed to it never holds an excluded operation: every operation under an excluded path or a sensitive workflow is
+ * removed from the document before it is written out (`withoutExcludedOperations`), so Schemathesis cannot generate a request to one;
+ * `--exclude-path-regex` repeats the rule as a second guard. A document that cannot be read while paths are excluded is refused.
+ *
+ * Check names depend on the installed version (`checksForVersion`): a check newer than the installed Schemathesis is left out and the
+ * coverage says so, because the CLI refuses the whole run over one unknown name. Versions before 4.0 are refused: the report flags used
+ * here exist from 4.0 on.
  *
  * Facts verified against schemathesis 4.32.4 on Windows, which this adapter depends on and its tests pin:
  *   - The child MUST be given PYTHONIOENCODING=utf-8 and PYTHONUTF8=1. Without them it dies with a UnicodeEncodeError while
@@ -24,10 +33,10 @@
  *     back before it is removed.
  *
  * Safety rules kept here rather than in the interface:
- *   - Only the methods `--mode positive` and the reviewed check list allow are generated, and state-changing methods are excluded
- *     unless the profile is `advanced` AND the caller presented a recorded approval for this environment.
+ *   - Only the methods `--mode positive` and the reviewed check list allow are generated, and state-changing methods are excluded at
+ *     EVERY profile, advanced included (no profile creates, updates, deletes or overwrites data; the coverage lists them as skipped).
  *   - `--rate-limit` is the application's own agreed rate, and `--workers 1` keeps the load to one request stream.
- *   - No state-changing operation is ever requested by default. POST/PUT/PATCH/DELETE are refused at conservative profiles.
+ *   - No state-changing operation is ever requested. POST/PUT/PATCH/DELETE are never passed to `--include-method`.
  *   - The base URL is the origin the scope guard already pinned. Schemathesis follows the document's own paths from there; a
  *     document naming a different server is rewritten by the adapter before it is written out.
  *
@@ -40,14 +49,17 @@ import fs from "node:fs/promises";
 import { ScannerError, type ConfigCheck, type ScanHandle, type ScanIntensity, type ScanResultSet, type ScannerAdapter, type ScannerAvailability, type ScannerFinding, type ScannerScopeCheck, type ScanTarget, type StartOptions } from "../contract.js";
 import { notConfiguredReason, notInstalledReason, resolveExecutable } from "../binaries.js";
 import { runProcess, withSecureTempDir, type SecureTempDir } from "../process.js";
+import { egressEnv } from "../../egress/guard.js";
+import { isolationFor } from "../../egress/isolation.js";
 import { isSwitchedOn, notEnabledReason, type ScannerSettings } from "../settings.js";
 import { categoryFor, MAX_SCANNER_EVIDENCE, severityOf } from "../normalize.js";
+import { parse as parseYaml } from "yaml";
 
 /** Most operations one run may generate cases for. Small on purpose: the tool is slow and the request budget is the real limit. */
 export const SCHEMATHESIS_MAX_EXAMPLES = 5;
-/** Methods that cannot change the application's state. Everything else is refused unless an approved advanced profile asked for it. */
+/** Methods that cannot change the application's state. The only ones any profile generates. */
 export const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"] as const;
-/** Methods that may change data. Only reachable from an approved advanced profile. */
+/** Methods that may change data. Never generated, at any profile: operations using them are skipped and listed as skipped. */
 export const STATE_CHANGING_METHODS = ["POST", "PUT", "PATCH", "DELETE"] as const;
 /**
  * The reviewed check list. Each one compares an answer against the document's own promise, which is why they are safe to run:
@@ -56,6 +68,83 @@ export const STATE_CHANGING_METHODS = ["POST", "PUT", "PATCH", "DELETE"] as cons
 export const REVIEWED_CHECKS = ["not_a_server_error", "status_code_conformance", "content_type_conformance", "response_headers_conformance", "response_schema_conformance", "missing_required_header", "allow_header_conformance"] as const;
 /** Checks that need two identities with different roles, or that deliberately send broken input. Never run without an approval. */
 export const ADVANCED_ONLY_CHECKS = ["negative_data_rejection", "positive_data_acceptance", "unsupported_method", "ignored_auth", "object_level_authorization", "ensure_resource_availability", "use_after_free"] as const;
+/**
+ * The first Schemathesis release with each check, where it is later than 4.0.0 (from its CHANGELOG.md and src/schemathesis/specs/openapi/
+ * checks.py at v4.32.4). Every other check of the two lists exists from 4.0.0 on.
+ */
+export const CHECK_SINCE: Readonly<Record<string, string>> = { allow_header_conformance: "4.25.0", object_level_authorization: "4.31.0" };
+/** The oldest Schemathesis this adapter drives: the NDJSON report and `--mode` came with 4.0. */
+export const SCHEMATHESIS_MIN_VERSION = "4.0.0";
+
+const versionNumber = (v: string): number[] => v.split(".").map((x) => Number.parseInt(x, 10) || 0);
+/** a >= b for dotted versions. */
+export function versionAtLeast(a: string, b: string): boolean {
+    const x = versionNumber(a);
+    const y = versionNumber(b);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+        const d = (x[i] ?? 0) - (y[i] ?? 0);
+        if (d !== 0) return d > 0;
+    }
+    return true;
+}
+
+/** The checks a profile may run on this installed version, and the ones left out because the version does not know them yet. */
+export function checksForVersion(profile: ScanIntensity, version: string | undefined): { checks: string[]; leftOut: string[] } {
+    const all = checksFor(profile);
+    if (!version) return { checks: all.filter((c) => !CHECK_SINCE[c]), leftOut: all.filter((c) => CHECK_SINCE[c]) };
+    return { checks: all.filter((c) => !CHECK_SINCE[c] || versionAtLeast(version, CHECK_SINCE[c]!)), leftOut: all.filter((c) => CHECK_SINCE[c] && !versionAtLeast(version, CHECK_SINCE[c]!)) };
+}
+
+const underPrefix = (p: string, prefix: string): boolean => {
+    if (!prefix) return false;
+    const bare = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
+    // A whole path boundary, the same rule as the scope checks: /admin covers /admin/users, never /administer.
+    return p === bare || p.startsWith(`${bare}/`);
+};
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The API document without the operations under an excluded path or a sensitive workflow, as JSON. A path counts with and without
+ * the document's own base path (OpenAPI `servers[0].url`, Swagger `basePath`). Unreadable while something must be excluded: refused.
+ */
+export function withoutExcludedOperations(text: string, excludedPaths: readonly string[]): { text: string; removed: string[] } | { refused: string } {
+    const prefixes = excludedPaths.filter(Boolean);
+    if (!prefixes.length) return { text, removed: [] };
+    let doc: { paths?: Record<string, unknown>; servers?: Array<{ url?: unknown }>; basePath?: unknown } | null = null;
+    try {
+        doc = JSON.parse(stripBom(text));
+    } catch {
+        try {
+            doc = parseYaml(stripBom(text)) as typeof doc;
+        } catch {
+            doc = null;
+        }
+    }
+    if (!doc || typeof doc !== "object" || !doc.paths || typeof doc.paths !== "object")
+        return { refused: "The API document could not be read, so the excluded paths could not be taken out of it: Schemathesis was not run." };
+    const base = documentBasePath(doc);
+    const removed: string[] = [];
+    const paths: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(doc.paths)) {
+        const full = `${base}${key.startsWith("/") ? "" : "/"}${key}`;
+        if (prefixes.some((pre) => underPrefix(key, pre) || underPrefix(full, pre))) removed.push(key);
+        else paths[key] = value;
+    }
+    return { text: JSON.stringify({ ...doc, paths }), removed };
+}
+
+/** `--exclude-path-regex` for each excluded prefix: the same rule again, inside Schemathesis. */
+export function excludePathArgs(excludedPaths: readonly string[]): string[] {
+    return excludedPaths.filter(Boolean).flatMap((pre) => ["--exclude-path-regex", `^${escapeRegex(pre.endsWith("/") ? pre.slice(0, -1) : pre)}(/|$)`]);
+}
+
+/** The environment variable that carries a saved sign-in's header value into the config file; the value itself never is in a file or an argument. */
+export const AUTH_ENV = "AITP_SCAN_AUTH_VALUE";
+/** The config file for a signed-in run: the header's name, and its value as an environment placeholder (Schemathesis `${VAR}`). */
+export function authConfigToml(name: string): string {
+    const safe = name.replace(/[^A-Za-z0-9-]/g, "");
+    return `headers = { "${safe}" = "\${${AUTH_ENV}}" }\n`;
+}
 
 export interface SchemathesisAdapterOptions {
     settings: ScannerSettings;
@@ -92,9 +181,9 @@ export function checksFor(profile: ScanIntensity): string[] {
     return profile === "advanced" ? [...REVIEWED_CHECKS, ...ADVANCED_ONLY_CHECKS] : [...REVIEWED_CHECKS];
 }
 
-/** The methods a run may generate. State-changing methods need an approved advanced profile; everything else is refused. */
-export function methodsFor(profile: ScanIntensity): string[] {
-    return profile === "advanced" ? [...SAFE_METHODS, ...STATE_CHANGING_METHODS] : [...SAFE_METHODS];
+/** The methods a run may generate: the safe ones only, at every profile (no profile changes data). */
+export function methodsFor(_profile: ScanIntensity): string[] {
+    return [...SAFE_METHODS];
 }
 
 /** The child environment Schemathesis needs on Windows, plus nothing else: the platform's own secrets are not inherited. */
@@ -229,7 +318,7 @@ export function schemathesisFailureToFinding(f: SchemathesisFailure, baseUrl: st
 }
 
 /** Coverage in plain words. A contract mismatch is evidence to investigate, not a confirmed vulnerability. */
-export function schemathesisCoverage(input: { operations: number; tested: number; skipped: number; methods: string[]; findings: number }): ScanResultSet["coverage"] {
+export function schemathesisCoverage(input: { operations: number; tested: number; skipped: number; methods: string[]; findings: number; checksLeftOut?: string[]; operationsRemoved?: number; version?: string }): ScanResultSet["coverage"] {
     const advanced = input.methods.some((m) => (STATE_CHANGING_METHODS as readonly string[]).includes(m));
     return {
         inspected: [
@@ -238,20 +327,49 @@ export function schemathesisCoverage(input: { operations: number; tested: number
         ],
         notInspected: [
             "Schemathesis only tests operations the document describes. An endpoint that is missing from the document is never reached, so this is not a complete inventory of the API.",
-            ...(advanced ? [] : [`Operations that change data (${STATE_CHANGING_METHODS.join(", ")}) were excluded, so nothing was created, updated or deleted.`]),
+            ...(advanced ? [] : [`Operations that change data (${STATE_CHANGING_METHODS.join(", ")}) were skipped, as at every profile: no request it sent was meant to create, update or delete anything.`]),
             ...(input.skipped ? [`${input.skipped} operation${input.skipped === 1 ? " was" : "s were"} skipped because the document gave no usable example for ${input.skipped === 1 ? "it" : "them"}.`] : []),
             "A mismatch between the document and the answer is a contradiction to investigate. It is not by itself a security vulnerability, and the platform does not mark it confirmed.",
             "Schemathesis does not look for broken access control between two different users unless an approved advanced profile with two test identities is used.",
+            ...(input.checksLeftOut?.length ? [`These checks were left out because the installed Schemathesis${input.version ? ` (${input.version})` : ""} does not have them yet: ${input.checksLeftOut.join(", ")}.`] : []),
+            ...(input.operationsRemoved ? [`${input.operationsRemoved} operation${input.operationsRemoved === 1 ? " was" : "s were"} taken out of the document before the run because ${input.operationsRemoved === 1 ? "it is" : "they are"} under an excluded path or a sensitive workflow.`] : []),
         ],
     };
 }
 
-/** The specification, with its own `servers` entry pointed at the origin the scope guard already checked. */
+/** The document's own base path (OpenAPI `servers[0].url`, Swagger `basePath`), without a trailing slash; "" when it has none. */
+export function documentBasePath(doc: { servers?: unknown; basePath?: unknown } | null | undefined): string {
+    try {
+        const first = Array.isArray(doc?.servers) ? (doc.servers[0] as { url?: unknown } | undefined)?.url : undefined;
+        if (typeof first === "string") return new URL(first, "http://placeholder.invalid").pathname.replace(/\/+$/, "");
+        if (typeof doc?.basePath === "string") return doc.basePath.replace(/\/+$/, "");
+    } catch {
+        /* no usable base path */
+    }
+    return "";
+}
+
+/** The address Schemathesis is given (`--url`): the checked origin plus the document's own base path, so /v1 is not lost. */
+export function apiBaseUrl(text: string, origin: string): string {
+    let doc: { servers?: unknown; basePath?: unknown } | null = null;
+    try {
+        doc = JSON.parse(stripBom(text));
+    } catch {
+        try {
+            doc = parseYaml(stripBom(text)) as typeof doc;
+        } catch {
+            doc = null;
+        }
+    }
+    return `${origin.replace(/\/+$/, "")}${documentBasePath(doc && typeof doc === "object" ? doc : null)}`;
+}
+
+/** The specification, with its own `servers` entry pointed at the origin the scope guard already checked, keeping its base path. */
 export function rewriteServers(text: string, origin: string): string {
     try {
         const doc = JSON.parse(stripBom(text)) as { servers?: unknown[]; host?: string; basePath?: string; schemes?: string[] };
         if (Array.isArray(doc.servers)) {
-            doc.servers = [{ url: origin }];
+            doc.servers = [{ url: apiBaseUrl(text, origin) }];
             return JSON.stringify(doc);
         }
         return text;
@@ -267,7 +385,7 @@ export class SchemathesisAdapter implements ScannerAdapter {
     readonly documentationUrl = "https://github.com/schemathesis/schemathesis";
     readonly description =
         "Schema-driven API validation: it generates test data from the client's own API document and reports where an answer contradicts it. Installed separately; only used when an administrator names it in SECURITY_SCANNERS.";
-    readonly capabilities = { progress: true, cancel: true, sharedDaemon: false, specDriven: true, aiDriven: false };
+    readonly capabilities = { progress: true, cancel: true, sharedDaemon: false, specDriven: true, aiDriven: false, egressProxy: true, egressIsolation: true };
 
     private readonly settings: ScannerSettings;
     private readonly resolve: typeof resolveExecutable;
@@ -385,19 +503,34 @@ export class SchemathesisAdapter implements ScannerAdapter {
         const scope = await this.validateScope(target);
         if (!scope.ok) throw new ScannerError("out_of_scope", this.id, "None of the addresses for this scan may be tested by Schemathesis.", scope.refused.map((r) => `${r.url}: ${r.reason}`).join("; "));
 
-        // State-changing operations are opt-in: they need an approved advanced profile recorded for this environment.
-        const wantsStateChanging = profile === "advanced";
-        if (wantsStateChanging && !options.approval)
-            throw new ScannerError("profile_unsupported", this.id, "State-changing operations need a recorded approval.", "Run the assessment at a conservative profile, or record an approved advanced profile for a non-production environment first.");
+        // The advanced profile's extra checks need the Crowd4Test admin's approval recorded for this environment. It still never sends a
+        // state-changing method (methodsFor).
+        if (profile === "advanced" && !options.approval)
+            throw new ScannerError("profile_unsupported", this.id, "The advanced profile needs a recorded approval.", "Run the assessment at a conservative profile, or have a Crowd4Test admin approve the advanced profile for a development or staging application first.");
         if (options.approval && options.approval.profile !== profile)
             throw new ScannerError("invalid_config", this.id, "The recorded approval is for a different profile than this run.", `The approval covers ${options.approval.profile}; this run is ${profile}.`);
 
         const methods = methodsFor(profile);
-        const checks = checksFor(profile);
+        // The installed version decides which check names the CLI knows: one unknown name would refuse the whole run.
+        let version: string | undefined;
+        try {
+            const v = await this.run({ file, args: ["--version"], timeoutMs: 60_000, signal: options.signal, maxOutputBytes: 64 * 1024, env: schemathesisEnv() });
+            version = versionOf(v.stdout + v.stderr);
+        } catch {
+            version = undefined;
+        }
+        if (version && !versionAtLeast(version, SCHEMATHESIS_MIN_VERSION))
+            throw new ScannerError("unavailable", this.id, `Schemathesis ${version} is older than ${SCHEMATHESIS_MIN_VERSION}, which this platform needs.`, "Install a current Schemathesis 4 (`pip install --upgrade schemathesis`).");
+        const { checks, leftOut } = checksForVersion(profile, version);
+        // No operation under an excluded path or a sensitive workflow may be in the document Schemathesis generates requests from.
+        const filtered = withoutExcludedOperations(stripBom(target.spec.text), target.excludedPaths);
+        if ("refused" in filtered) throw new ScannerError("invalid_config", this.id, filtered.refused, "Upload the API document as OpenAPI or Swagger JSON or YAML.");
+        const auth = target.authHeader?.name && target.authHeader.value ? target.authHeader : null;
         let temp: SecureTempDir | undefined;
         try {
             temp = await withSecureTempDir("schemathesis");
-            const specFile = await temp.write("schema.json", rewriteServers(stripBom(target.spec.text), target.origin));
+            const specFile = await temp.write("schema.json", rewriteServers(filtered.text, target.origin));
+            const configFile = auth ? await temp.write("schemathesis.toml", authConfigToml(auth.name)) : undefined;
             const ndjsonFile = path.join(temp.dir, "report.ndjson");
             const jsonFile = path.join(temp.dir, "report.json");
 
@@ -410,7 +543,7 @@ export class SchemathesisAdapter implements ScannerAdapter {
                 "run",
                 specFile,
                 "--url",
-                target.origin,
+                apiBaseUrl(filtered.text, target.origin),
                 "--checks",
                 checks.join(","),
                 "--mode",
@@ -438,21 +571,28 @@ export class SchemathesisAdapter implements ScannerAdapter {
                 jsonFile,
                 // The safe-method gate: without it state-changing operations would be generated too.
                 ...methods.map((m) => ["--include-method", m]).flat(),
+                ...excludePathArgs(target.excludedPaths),
+                // The platform's request guard, when the run has one (schemathesis 4 `--proxy`, plus the proxy environment below).
+                ...(target.egress ? ["--proxy", target.egress.proxyUrl] : []),
             ];
+            // `--config-file` belongs to the top-level command, before `run`.
+            if (configFile) args.unshift("--config-file", configFile);
 
             const findings: ScannerFinding[] = [];
             let finished = false;
             let percent = 0;
             const message = "Schemathesis is reading the API document.";
 
+            // Above passive the run has an isolated network whose only way out is the request guard: Schemathesis is started inside it.
+            const cmd = isolationFor(target)?.wrap(file, args) ?? { file, args };
             const runPromise = this.run({
-                file,
-                args,
+                file: cmd.file,
+                args: cmd.args,
                 // Schemathesis writes a `.schemathesis` cache directory into its working directory and offers no environment variable to
                 // move it (DEFAULT_ROOT = Path(".schemathesis") in schemathesis/core/storage.py). Run it inside the run's own temporary
                 // directory so a scan never drops a cache folder into whatever directory the platform happened to be started in.
                 cwd: temp.dir,
-                env: schemathesisEnv(),
+                env: schemathesisEnv({ ...(auth ? { [AUTH_ENV]: auth.value } : {}), ...(target.egress ? egressEnv(target.egress.proxyUrl) : {}) }),
                 signal: options.signal,
                 timeoutMs: target.timeoutMs,
                 maxOutputBytes: 8 * 1024 * 1024,
@@ -463,7 +603,7 @@ export class SchemathesisAdapter implements ScannerAdapter {
                 },
             });
             options.onProgress?.({ percent: 0, message, done: false });
-            options.log?.("started", { scanner: this.id, profile, checks: checks.length, methods: methods.length, rate });
+            options.log?.("started", { scanner: this.id, profile, version: version ?? "unknown", checks: checks.length, checksLeftOut: leftOut, methods: methods.length, rate, operationsRemoved: filtered.removed.length, signedIn: Boolean(auth) });
 
             let outcome: Awaited<typeof runPromise>;
             try {
@@ -509,7 +649,7 @@ export class SchemathesisAdapter implements ScannerAdapter {
             // proved it can read, and counting the distinct operations it actually exercised cannot report zero for a run that tested.
             const operations = parsed.operations.size;
 
-            const coverage = schemathesisCoverage({ operations, tested: parsed.tested, skipped: parsed.skipped, methods, findings: findings.length });
+            const coverage = schemathesisCoverage({ operations, tested: parsed.tested, skipped: parsed.skipped, methods, findings: findings.length, checksLeftOut: leftOut, operationsRemoved: filtered.removed.length, ...(version ? { version } : {}) });
             if (outcome.stopped)
                 coverage.notInspected.push(
                     outcome.stopReason === "timeout"

@@ -380,6 +380,17 @@ export class SecurityFake {
             return undefined;
         }
 
+        // The profile gate's read routes (src/security/profile-gate.ts): no approvals, passive only, no cross-account designation.
+        if ((m = s.match(/^\/applications\/([^/]+)\/(approvals|cross-account|authorization-statement|schedule)$/)) && method === "GET") {
+            const app = this.apps.get(m[1]!);
+            if (!app) return this.refuse(404, "Application not found");
+            // src/security/routes/schedule.ts: no schedule set.
+            if (m[2] === "schedule") return { body: { schedule: null } };
+            if (m[2] === "approvals") return { body: { approvals: [], statements: { "conservative-active": "", advanced: "" }, activeProfilesOn: false, environmentAllowed: false, mayApprove: false, approveRefusal: "Only a Crowd4Test admin can approve a profile above passive." } };
+            if (m[2] === "cross-account") return { body: { designation: null, ready: { ok: false, problems: [] }, signIns: null } };
+            return { body: { statement: this.statement(app) } };
+        }
+
         if ((m = s.match(/^\/applications\/([^/]+)(?:\/(authorizations|assessments|findings|api-document|saved-sign-in))?$/))) {
             const app = this.apps.get(m[1]!);
             if (!app) return this.refuse(404, "Application not found");
@@ -402,8 +413,14 @@ export class SecurityFake {
                 const no = this.needs("owner");
                 if (no) return no;
                 if (body?.confirm !== true) return this.refuse(400, "Tick the box to confirm the statement.");
-                if (!body?.approverName) return this.refuse(400, "Give the name of the person who approved the assessment.");
-                const r = this.authorize(app.id, { basis: body.basis, approverName: body.approverName, approverEmail: body.approverEmail ?? null, documentReference: body.documentReference ?? null, restrictions: body.restrictions ?? null, confirmedAt: new Date().toISOString() });
+                if (!body?.approverName) return this.refuse(400, "Give the name of the person at the client who authorized the assessment.");
+                // As the server: the role, email, document reference and authority are required.
+                if (!body?.approverRole) return this.refuse(400, "Give the authorizing person's role at the client (for example their job title).");
+                if (!body?.approverEmail) return this.refuse(400, "Give the authorizing person's email address.");
+                if (!body?.documentReference) return this.refuse(400, "Give the reference of the document that records the permission (for example the engagement letter or statement of work).");
+                if (!body?.authority) return this.refuse(400, "Say what gives the authorizing person the authority to permit testing on behalf of the application's owner.");
+                const confirmedAt = new Date().toISOString();
+                const r = this.authorize(app.id, { basis: body.basis, approverName: body.approverName, approverRole: body.approverRole, approverEmail: body.approverEmail, documentReference: body.documentReference, authority: body.authority, restrictions: body.restrictions ?? null, confirmedAt, detailsRecorded: true, expiresAt: new Date(Date.parse(confirmedAt) + 90 * 86_400_000).toISOString() });
                 return { status: 201, body: { authorization: r, state: this.authState(app) } };
             }
             if (sub === "assessments" && method === "POST") {

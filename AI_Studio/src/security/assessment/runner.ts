@@ -30,7 +30,14 @@ import type { GuardSignIn } from "./guard.js";
 import { apiDocumentCoverage, requestDocumentOperations } from "./api-operations.js";
 import type { ScanIntensity, ScannerAdapter } from "../scanners/contract.js";
 import { scannerCoverageLines, runScanners } from "../scanners/orchestration/run.js";
+import { savePlatformRequests, supersedeScannerRuns } from "../scanners/store.js";
+import { mergeRequestLogs, type StoredRequestLog } from "../egress/request-log.js";
 import type { ScannerSettings } from "../scanners/settings.js";
+import { readDesignation } from "../cross-account-store.js";
+import { crossAccountConsentProblem, GATE_WORDS } from "../profile-gate.js";
+import { egressIsolationProblem } from "../egress/isolation.js";
+import { signInLabel } from "../authorization.js";
+import { CROSS_ACCOUNT_NOT_ON_RUNNER, environmentProblem, runCrossAccount, type Designation, type Identity } from "./cross-account.js";
 
 export const LEASE_MS = 60_000;
 /** How often the loop renews its lease and looks for a cancel request. */
@@ -92,6 +99,11 @@ export interface RunnerDeps {
         keepTask(): boolean;
         update(patch: ProbeProgress): void;
     }): Promise<AssessmentOnRunnerOutcome>;
+    /**
+     * What the start gate needs from the platform (store.ts gateCheck), checked again when an assessment is claimed or picked up, before
+     * the external scanners and while it runs. Absent: no Crowd4Test sign-in, so nothing above passive goes on.
+     */
+    gate?: { activeProfilesOn: boolean; crowd4testOn: boolean; isolationProblem: () => string | undefined };
     /** For tests: how the browser is started. */
     launch?: DiscoverOptions["launch"];
     log?(event: string, data: Record<string, unknown>): void;
@@ -109,7 +121,11 @@ interface WorkData {
      * Additive (SCAN): what the external scanners did. Kept in the assessment's own work data so a restarted loop does not run a
      * scanner twice, and so a cancelled assessment can report exactly which tool had finished and which had not.
      */
-    scanners?: { results: RawResult[]; lines: string[]; failed: number; ran: string[] };
+    scanners?: { results: RawResult[]; lines: string[]; failed: number; ran: string[]; notes?: string[] };
+    /** The read-only cross-account step (cross-account.ts), when the application has a designation. `ran`: false when it was refused. */
+    crossAccount?: { results: RawResult[]; lines: string[]; ran: boolean };
+    /** The steps' request log (probe.ts), added up over restarts; stored beside the scanners' when the steps end. */
+    requestLog?: StoredRequestLog;
     ingested?: boolean;
 }
 
@@ -127,6 +143,9 @@ export function withSensitiveExclusions(app: SecurityApplication): SecurityAppli
     return extra.length ? { ...app, excludedPaths: [...new Set([...app.excludedPaths, ...extra])] } : app;
 }
 
+/** How many gate checks in a row may fail (throw) while a run goes on, before the run is stopped: about 15 seconds. */
+export const GATE_CHECK_FAILURES = 3;
+export const GATE_UNCHECKED_WORDS = "Stopped because the conditions this assessment needs to keep running (a current authorization and, above passive, a current approval) could not be checked for several seconds in a row.";
 const UNAUTHORIZED_WORDS = "Stopped because the authorization is no longer current (it was revoked, or the target, scope, exclusions, request limit, saved sign-in or sensitive workflows changed).";
 
 /** Structured, secret-free log lines (ids, states, counts: never addresses with queries, headers or bodies). */
@@ -280,23 +299,64 @@ export class AssessmentLoop {
         const abort = new AbortController();
         let cov: CoverageContext = {};
         let reason: StopReason | undefined;
+        /** Above passive: the plain sentence when the start gate no longer holds (it replaces the passive "unauthorized" words). */
+        let gateWords: string | undefined;
         const stopFor = (r: StopReason) => {
             if (!reason) reason = r;
             abort.abort();
         };
+        // The whole start gate, judged now (store.ts gateCheck): for passive a current authorization, as always; above passive also the
+        // authorization it started under, its profile, a current Crowd4Test admin approval, the environment, the switch and the isolation.
+        const gate = this.deps.gate ?? { activeProfilesOn: this.deps.settings.activeProfiles === true, crowd4testOn: false, isolationProblem: () => egressIsolationProblem() };
+        const gateNow = (): string | undefined => {
+            const cur = store.getApplication(a.applicationId);
+            if (!cur) return "The application was deleted.";
+            return store.gateCheck(cur, { kind: a.kind, authorizationId: a.authorizationId }, gate).refused;
+        };
+        const stopForGate = (why: string) => {
+            if (a.kind !== "passive") gateWords ??= GATE_WORDS.stopped(why);
+            stopFor("unauthorized");
+        };
+        /** True when the gate stopped it (above passive also when a cancel was asked for because of it, e.g. a withdrawn approval). */
+        const gateStops = (): boolean => {
+            const why = gateNow();
+            if (why) stopForGate(why);
+            return Boolean(why);
+        };
         const owns = () => reason !== "lease";
         let ticks = 0;
+        let gateFailures = 0;
         const ticker = setInterval(() => {
-            try {
-                if (++ticks % RENEW_EVERY_TICKS === 0) {
+            if (++ticks % RENEW_EVERY_TICKS === 0) {
+                try {
                     if (!store.renewLease(id, this.owner, LEASE_MS)) stopFor("lease");
-                    // No request goes out without a current authorization: a change of scope or a revoke stops the assessment.
-                    const cur = store.getApplication(a.applicationId);
-                    if (!cur || store.authorizationState(cur).state !== "current") stopFor("unauthorized");
+                    // No request goes out without a current authorization (a change of scope or a revoke stops the assessment), and above
+                    // passive without the whole start gate (a withdrawn or expired approval, a replaced authorization, the switch turned off).
+                    gateStops();
+                    gateFailures = 0;
+                } catch {
+                    // The database busy for a moment is tried again at the next check. A check that keeps failing (an unreadable row, a
+                    // database that stays away) is not a pass: after a few in a row the run stops, as a refused gate would stop it.
+                    if (++gateFailures >= GATE_CHECK_FAILURES) {
+                        gateWords ??= GATE_UNCHECKED_WORDS;
+                        stopFor("unauthorized");
+                    }
                 }
-                if (store.cancelRequested(id)) stopFor("cancel");
+            }
+            try {
+                if (store.cancelRequested(id)) {
+                    // Above passive, a cancel caused by the gate is reported in the gate's words; a gate that cannot be read never holds
+                    // a cancel back.
+                    let gated = false;
+                    try {
+                        gated = a.kind !== "passive" && gateStops();
+                    } catch {
+                        gated = false;
+                    }
+                    if (!gated) stopFor("cancel");
+                }
             } catch {
-                /* the database is busy for a moment: try again next tick */
+                /* the cancel flag could not be read this tick: try again next tick */
             }
         }, TICK_MS);
         const startedMs = a.startedAt ? Date.parse(a.startedAt) : Date.now();
@@ -321,8 +381,14 @@ export class AssessmentLoop {
 
         try {
             if (!app) return finish("FAILED", { error: "The application was deleted before the assessment could run.", progressText: "Failed." });
-            if (store.cancelRequested(id)) return finish("CANCELLED", { progressText: "Cancelled before it started. Nothing was requested.", coverage: null });
-            if (store.authorizationState(app).state !== "current") return finish("CANCELLED", { progressText: `${UNAUTHORIZED_WORDS} Nothing was requested.`, coverage: null });
+            // Claimed, or picked up again after a restart: the whole start gate again, before anything is requested.
+            const refused = gateNow();
+            if (store.cancelRequested(id) && !(a.kind !== "passive" && refused)) return finish("CANCELLED", { progressText: "Cancelled before it started. Nothing was requested.", coverage: null });
+            if (refused) {
+                stopForGate(refused);
+                if (work.discovery) return await this.endEarly(id, "unauthorized", work, work.discovery, [], limits, finish, {}, [], gateWords);
+                return finish("CANCELLED", { progressText: `${gateWords ?? UNAUTHORIZED_WORDS} Nothing was requested.`, coverage: null });
+            }
             if (work.attempts > MAX_ATTEMPTS) return finish("FAILED", { error: "The assessment was interrupted three times (the platform restarted or lost it while it ran), so it was stopped.", progressText: "Failed." });
             if (!a.startedAt) update({ startedAt: new Date().toISOString() });
             // Round 20 (SIGN): the saved sign-in (or why it is not used), and the sensitive workflows excluded like excluded paths.
@@ -375,24 +441,45 @@ export class AssessmentLoop {
                 log("claimed", { assessment: id, attempt: work.attempts, retest: Boolean(a.retestOf) });
                 ended = await probe({ ...request, guard, headless: this.deps.headless, launch: this.deps.launch, signal: abort.signal, update, save }, work, extra);
             }
+            // The platform's own requests are kept beside the scanners' (one request log per assessment: scanners/store.ts).
+            savePlatformRequests(this.deps.db, a, "steps", work.requestLog);
             const discovery = work.discovery!;
-            if (ended === "aborted" || !work.scan) return await this.endEarly(id, reason ?? "lease", work, discovery, extra, limits, finish, cov, secrets);
+            if (ended === "aborted" || !work.scan) return await this.endEarly(id, reason ?? "lease", work, discovery, extra, limits, finish, cov, secrets, gateWords);
 
             // ── EXTERNAL SCANNERS (SCAN) ──
             // Run after the platform's own read-only checks and before VALIDATING, so a scanner's findings go through exactly the
             // same redaction, deduplication, history and retest code as the built-in ones. Each tool's outcome is recorded on its own:
             // one tool failing is a gap in the coverage list, never the end of the assessment.
-            if (this.deps.scanners && !work.scanners) {
-                await this.runScanners(id, scoped, discovery, work, extra, update, abort.signal);
-                if (abort.signal.aborted) return await this.endEarly(id, reason!, work, discovery, extra, limits, finish, cov, secrets);
+            if (this.deps.scanners && work.scanners) {
+                // Picked up after the stage was done: its sentences still belong in this report's coverage list.
+                extra.push(...(work.scanners.notes ?? work.scanners.lines));
             }
+            if (this.deps.scanners && !work.scanners) {
+                // The start gate again right before any scanner (and before each one: orchestration/run.ts), and once they are done.
+                if (!gateStops()) await this.runScanners(id, scoped, discovery, work, extra, update, abort.signal, gateNow, () => reason === "lease");
+                if (!abort.signal.aborted) gateStops();
+                if (abort.signal.aborted) return await this.endEarly(id, reason!, work, discovery, extra, limits, finish, cov, secrets, gateWords);
+            }
+
+            // ── CROSS-ACCOUNT (read-only) ── only for an application with a designation (cross-account.ts); nothing changes otherwise.
+            const designation = readDesignation(this.deps.db, app.id);
+            if (designation && !work.crossAccount) {
+                update({ state: "SCANNING", progress: 80, progressText: "Checking what one test account can read of another's." });
+                // The accounts the CURRENT authorization names (a newer one may have narrowed what the assessment started under).
+                const named = this.store.currentAuthorization(this.store.getApplication(app.id) ?? app)?.crossAccounts ?? [];
+                work.crossAccount = await this.crossAccountStep(scoped, designation, named, abort.signal, (more) => (secrets = [...secrets, ...more]), (kept) => savePlatformRequests(this.deps.db, a, "cross-account", kept));
+                save();
+                if (abort.signal.aborted) return await this.endEarly(id, reason!, work, discovery, extra, limits, finish, cov, secrets, gateWords);
+            }
+            if (work.crossAccount) extra.push(...work.crossAccount.lines);
 
             // ── VALIDATING ── (FIND: normalize, redact, deduplicate, keep people's validation; a retest marks what is gone as fixed)
             const failedSteps = work.scan.outcomes.filter((o) => !o.ok);
-            const complete = failedSteps.length === 0 && !work.scan.capReached && discovery.failures.length === 0;
+            // A designated cross-account step that could not run leaves the assessment incomplete (a retest then marks none of its findings fixed).
+            const complete = failedSteps.length === 0 && !work.scan.capReached && discovery.failures.length === 0 && (!designation || work.crossAccount?.ran === true);
             update({ state: "VALIDATING", progress: 85, progressText: "Comparing with earlier findings." });
             scrub();
-            const summary = await ingest(this.deps.db, a, work.scan.results, { retestComplete: complete });
+            const summary = await ingest(this.deps.db, a, [...work.scan.results, ...(work.crossAccount?.results ?? [])], { retestComplete: complete });
             work.ingested = true;
             save();
 
@@ -419,6 +506,8 @@ export class AssessmentLoop {
                 finish("PARTIALLY_COMPLETED", { progress: 100, progressText: `Finished with gaps: ${counts}.`, error: why.join(" ").slice(0, 1500) });
             }
         } catch (e) {
+            // The steps keep their request log even when they fail (probe.ts).
+            savePlatformRequests(this.deps.db, a, "steps", work.requestLog);
             log("failed", { assessment: id, error: first(e) });
             finish("FAILED", { error: plainFailure(e), progressText: "Failed." });
         } finally {
@@ -440,6 +529,8 @@ export class AssessmentLoop {
         finish: (state: SecurityAssessment["state"], patch: Parameters<SecurityStore["updateAssessment"]>[1]) => void,
         cov: CoverageContext = {},
         secrets: string[] = [],
+        /** Above passive: why the start gate stopped it (replaces the passive "unauthorized" words). */
+        gateWords?: string,
     ): Promise<void> {
         // Losing the lease (another loop has it, or this one is shutting down): record nothing; the next owner continues from work data.
         if (reason === "lease") return;
@@ -452,18 +543,62 @@ export class AssessmentLoop {
             const pages = discovery.documents.filter((c) => c.status >= 200 && c.status < 300 && /text\/html/i.test(c.headers["content-type"] ?? ""));
             results = [...(await judgeHeaders(pages)), ...(await judgeCookies([...discovery.documents, ...discovery.apiAnswers])), ...(await judgeDisclosure([...discovery.documents, ...discovery.apiAnswers]))];
         }
-        const summary = await ingest(this.deps.db, a, scrubSecrets(results, secrets), { retestComplete: false });
+        const summary = await ingest(this.deps.db, a, scrubSecrets([...results, ...(work.crossAccount?.results ?? [])], secrets), { retestComplete: false });
         const where = { DISCOVERING: "while looking at the pages", SCANNING: "while making the checks", VALIDATING: "while comparing findings", GENERATING_REPORT: "while preparing the report" }[stage as string] ?? "";
         const kept = `What was seen until then is kept (${plural(summary.created + summary.updated, "finding")}); the steps after it were not made.`;
         const words =
             reason === "cancel"
                 ? `Cancelled ${where}. ${kept}`
                 : reason === "unauthorized"
-                  ? `${UNAUTHORIZED_WORDS} ${kept}`
+                  ? `${gateWords ?? UNAUTHORIZED_WORDS} ${kept}`
                   : `The time limit (${Math.round(limits.timeoutMs / 60_000) || "under 1"} min) was reached ${where}. ${kept}`;
         const coverage = { pagesSeen: discovery.pages.length, formsSeen: discovery.forms.length, apiCallsSeen: discovery.apiCalls.length, notInspected: notInspected(discovery, work.scan?.outcomes ?? [], [words, ...extra], limits, cov) };
         if (reason === "cancel" || reason === "unauthorized") finish("CANCELLED", { progressText: words, coverage });
         else finish("PARTIALLY_COMPLETED", { progressText: words, coverage, error: words });
+    }
+
+    /**
+     * The read-only cross-account step: A's, B's and a signed-out visitor's view of each designated resource, each through a guard of its
+     * own (GET only, the same scope, excluded paths and sensitive workflows, sign-out addresses refused). Refused, with a coverage sentence,
+     * on a platform that runs assessments on runners, for an application not marked development or staging, and when A's or B's saved
+     * sign-in cannot be used. Every value of both saved sign-ins is scrubbed from what is kept (`addSecrets`).
+     */
+    private async crossAccountStep(app: SecurityApplication, d: Designation, named: readonly string[], signal: AbortSignal, addSecrets: (s: string[]) => void, keepLog: (log: StoredRequestLog) => void): Promise<NonNullable<WorkData["crossAccount"]>> {
+        const skip = (line: string) => ({ results: [], lines: [line], ran: false });
+        if (this.deps.onRunner) return skip(CROSS_ACCOUNT_NOT_ON_RUNNER);
+        const env = environmentProblem(app.environment);
+        if (env) return skip(env);
+        // Its two test accounts must be named in the authorization the assessment runs under (profile-gate.ts).
+        const consent = crossAccountConsentProblem(named, d.accountA, d.accountB, signInLabel);
+        if (consent) return skip(consent);
+        if (!this.deps.signInFor) return skip("Cross-account checks were not made: saved sign-ins cannot be read here.");
+        const labels = { A: signInLabel(d.accountA), B: signInLabel(d.accountB) };
+        const signIns = { A: this.deps.signInFor({ ...app, signInAccount: d.accountA }), B: this.deps.signInFor({ ...app, signInAccount: d.accountB }) };
+        addSecrets([...(signIns.A?.secrets ?? []), ...(signIns.B?.secrets ?? [])]);
+        for (const who of ["A", "B"] as const) {
+            const s = signIns[who];
+            if (!s?.state) return skip(`Cross-account checks were not made: the saved sign-in of ${labels[who]} (account ${who}) cannot be used. ${s?.problem ?? "No sign-in is saved for it."}`);
+        }
+        const guards: Record<Identity, Guard> = {
+            A: this.deps.guardFor(app, signal, { state: signIns.A!.state!, refuseSignOut: true, source: "cross-account" }),
+            B: this.deps.guardFor(app, signal, { state: signIns.B!.state!, refuseSignOut: true, source: "cross-account" }),
+            visitor: this.deps.guardFor(app, signal, { refuseSignOut: true, source: "cross-account" }),
+        };
+        // Each guard owns a local proxy server: always closed, whatever happens.
+        try {
+            for (const g of Object.values(guards)) await g.ready?.();
+            const run = await runCrossAccount({
+                targetUrl: app.targetUrl,
+                designation: d,
+                labels,
+                signal,
+                fetchAs: (who, path) => guards[who].fetch(new URL(path, app.targetUrl).href, { method: "GET", maxBytes: 512_000, signal }),
+            });
+            return { results: run.results, lines: run.lines, ran: !signal.aborted };
+        } finally {
+            keepLog(mergeRequestLogs(Object.values(guards).map((g) => g.requestLog?.().stored())));
+            for (const g of Object.values(guards)) await g.close?.();
+        }
     }
 
     /**
@@ -483,6 +618,9 @@ export class AssessmentLoop {
         extra: string[],
         update: (patch: Parameters<SecurityStore["updateAssessment"]>[1]) => void,
         signal: AbortSignal,
+        gateRefusal?: () => string | undefined,
+        /** True when this loop lost the assessment mid-stage: nothing is recorded, so the next owner runs the whole stage again. */
+        leaseLost: () => boolean = () => false,
     ): Promise<void> {
         const deps = this.deps.scanners!;
         const a = this.store.getAssessment(id);
@@ -493,7 +631,7 @@ export class AssessmentLoop {
         // enough here: a path the read-only checks never request is never handed to a tool that sends crafted requests either.
         const urls = [...new Set(seen)].filter((u) => !scoped.excludedPaths.some((p) => p && safeStartsWith(u, p)));
         if (!urls.length) {
-            work.scanners = { results: [], lines: ["No external scanner ran: no in-scope address was reached during discovery."], failed: 0, ran: [] };
+            work.scanners = { results: [], lines: ["No external scanner ran: no in-scope address was reached during discovery."], failed: 0, ran: [], notes: ["No external scanner ran: no in-scope address was reached during discovery."] };
             saveWork(this.store, id, work);
             return;
         }
@@ -509,6 +647,8 @@ export class AssessmentLoop {
         }
 
         update({ progress: 80, progressText: "Running the configured security scanners." });
+        // An earlier attempt of this stage that lost its lease left runs behind: this attempt replaces them in the run lists.
+        supersedeScannerRuns(this.deps.db, id);
         try {
             const out = await runScanners({
                 db: this.deps.db,
@@ -516,6 +656,8 @@ export class AssessmentLoop {
                 assessmentId: id,
                 profile,
                 approval: a?.approval ?? null,
+                ...(gateRefusal ? { gateRefusal } : {}),
+                allowPrivateTargets: this.deps.settings.allowPrivateTargets,
                 signal,
                 target: { urls, origin: new URL(scoped.targetUrl).origin },
                 settings: deps.settings,
@@ -525,6 +667,12 @@ export class AssessmentLoop {
                 log: (event, data) => deps.log?.(event, data),
                 ...(deps.adapters ? { adapters: deps.adapters } : {}),
             });
+            // Stopped part-way because another loop has it (or this one is shutting down): the scanners that had not run would be
+            // skipped for good if this partial outcome were kept, so nothing is: the next owner runs the stage again.
+            if (leaseLost()) {
+                deps.log?.("scanners-interrupted", { assessment: id });
+                return;
+            }
             const lines = scannerCoverageLines(out.outcomes);
             const failed = out.outcomes.filter((o) => o.state === "FAILED").length;
             // Scanner results join the built-in ones and are judged by exactly the same pipeline.
@@ -532,15 +680,17 @@ export class AssessmentLoop {
                 work.scan.results = [...work.scan.results, ...out.results];
                 for (const o of out.outcomes) if (o.state === "FAILED") work.scan.outcomes.push({ step: `External scanner: ${o.scanner}`, ok: false, reason: o.reason });
             }
-            work.scanners = { results: out.results, lines, failed, ran: out.outcomes.filter((o) => o.state === "COMPLETED").map((o) => o.scanner) };
             // The limitation sentences belong in the report's "what was not inspected" list, where a client will actually read them.
-            extra.push(...out.outcomes.flatMap((o) => o.coverage.notInspected).slice(0, 20));
+            const notes = out.outcomes.flatMap((o) => o.coverage.notInspected).slice(0, 20);
+            work.scanners = { results: out.results, lines, failed, ran: out.outcomes.filter((o) => o.state === "COMPLETED").map((o) => o.scanner), notes };
+            extra.push(...notes);
             saveWork(this.store, id, work);
             deps.log?.("scanners-finished", { assessment: id, ran: work.scanners.ran.length, failed, findings: out.results.length });
         } catch (e) {
+            if (leaseLost()) return;
             // The scanner layer failing must not fail the assessment: say so plainly and let the built-in results stand.
             const message = `The external scanners did not run: ${first(e)}`;
-            work.scanners = { results: [], lines: [message], failed: 1, ran: [] };
+            work.scanners = { results: [], lines: [message], failed: 1, ran: [], notes: [message] };
             work.scan?.outcomes.push({ step: "External scanners", ok: false, reason: message });
             saveWork(this.store, id, work);
             deps.log?.("scanners-failed", { assessment: id, error: first(e) });

@@ -70,23 +70,36 @@ describe("scan profiles", () => {
         expect(atMost("advanced", "advanced")).toBe(true);
     });
 
-    it("needs no approval for the passive and conservative levels", () => {
+    it("needs no approval for passive, and a Crowd4Test admin's approval for every level above it", () => {
         expect(SCAN_PROFILES.passive.requiresApproval).toBe(false);
-        expect(SCAN_PROFILES["conservative-active"].requiresApproval).toBe(false);
+        expect(SCAN_PROFILES["conservative-active"].requiresApproval).toBe(true);
         expect(SCAN_PROFILES.advanced.requiresApproval).toBe(true);
     });
 
-    it("refuses an advanced run for production even when an approval exists", () => {
-        expect(profileRefusal("advanced", "production", true)).toMatch(/production/i);
-        expect(profileRefusal("advanced", "staging", false)).toMatch(/approval/i);
-        expect(profileRefusal("advanced", "staging", true)).toBeUndefined();
-        expect(profileRefusal("conservative-active", "production", false)).toBeUndefined();
+    it("refuses every level above passive outside development and staging, even when an approval exists", () => {
+        for (const level of ["conservative-active", "advanced"] as const) {
+            for (const env of ["production", "other"]) expect(profileRefusal(level, env, true)).toMatch(new RegExp(`development or staging, and this one is marked “${env}”`));
+            expect(profileRefusal(level, "staging", false)).toMatch(/Crowd4Test admin's approval/);
+            expect(profileRefusal(level, "staging", true)).toBeUndefined();
+            expect(profileRefusal(level, "development", true)).toBeUndefined();
+        }
+        expect(profileRefusal("passive", "production", false)).toBeUndefined();
+        // The old contradiction is gone: no profile is said to change what the application holds.
+        expect(profileRefusal("advanced", "production", true)).not.toMatch(/may change/);
+    });
+
+    it("no wording says an application owner approves a Crowd4Test profile", () => {
+        for (const level of ["conservative-active", "advanced"] as const) expect(profileRefusal(level, "staging", false)).not.toMatch(/by an owner/);
+        for (const profile of Object.values(SCAN_PROFILES)) expect(profile.never.join(" ")).not.toMatch(/by an owner/);
     });
 
     it("never promises anything it does not do, at any level", () => {
         for (const profile of Object.values(SCAN_PROFILES)) {
             const text = profile.never.join(" ").toLowerCase();
-            expect(text).toContain("never deletes");
+            // Every profile, passive included, rules out data changes and says what happens to a check that would need one.
+            expect(text).toContain("never intentionally creates, updates, deletes or overwrites");
+            expect(text).toContain("skipped, and the report lists it as skipped");
+            expect(text).toContain("no further request is made to undo it");
             expect(text).toContain("persistence");
             expect(text).toContain("steals a credential");
             expect(text).toContain("bypass");

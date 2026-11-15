@@ -73,14 +73,34 @@ export async function fetchWithRetry(guard: Guard, url: string, init: GuardFetch
 
 const first = (e: unknown) => (e instanceof Error ? e.message : String(e)).split("\n")[0]!.slice(0, 200);
 
-/** The certificate the site presents, read with one TLS handshake to the address the guard checked (no second DNS lookup). */
+/** Why observeTls refused an address that is not the assessment's own target. */
+export const TLS_ONLY_TARGET = "The certificate is read only from the application's own address (its host and HTTPS port); this address is not it.";
+
+/**
+ * The certificate the site presents, read with one TLS handshake to the address the guard checked (no second DNS lookup). The platform's
+ * only connection to the application that does not go through the request guard, and narrow on purpose: only to the guard's
+ * `tlsTarget` (the assessment's own host and port), only while the request guard is up (a guard that cannot start refuses it too:
+ * GuardDownError), counted and logged as "platform:tls", and nothing but the handshake: no HTTP bytes, closed right after it.
+ */
 export async function observeTls(guard: Guard, url: string, signal: AbortSignal): Promise<TlsObservation> {
     const u = new URL(url);
+    const host = u.hostname.replace(/^\[|\]$/g, "");
+    const target = guard.tlsTarget;
+    if (u.protocol !== "https:" || !target || host.toLowerCase() !== target.host || (Number(u.port) || 443) !== target.port) {
+        guard.note?.({ source: "tls", method: "TLS", url, verdict: "refused", reason: TLS_ONLY_TARGET });
+        throw new RefusedError(url, TLS_ONLY_TARGET);
+    }
+    try {
+        await guard.ready?.();
+    } catch (e) {
+        guard.note?.({ source: "tls", method: "TLS", url, verdict: "refused", reason: (e as Error).message });
+        throw e;
+    }
     const refusal = await guard.refusal(url);
     if (refusal) throw new RefusedError(url, refusal);
-    const host = u.hostname.replace(/^\[|\]$/g, "");
     const address = (await guard.pinnedAddress?.(url)) ?? host;
     await guard.take?.();
+    guard.note?.({ source: "tls", method: "TLS", url, verdict: "allowed", reason: "A TLS handshake to read the certificate; it is not an HTTP request, so it does not pass through the request guard." });
     const isIp = /^[\d.]+$|:/.test(host);
     // Through the company proxy (SECURITY_USE_PROXY) the handshake goes through a CONNECT tunnel; otherwise straight to the checked address.
     const tunnel = await guard.tunnel?.(url, signal);

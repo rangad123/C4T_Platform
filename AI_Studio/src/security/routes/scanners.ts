@@ -17,14 +17,14 @@
  * The profile a client may ask for is reported, not applied, here: `GET .../scanners?profile=advanced` answers with what that profile
  * would do and whether it is allowed, so the interface can say no before a scan is started rather than failing one halfway through.
  * Which profiles are allowed depends on the application's environment, so `?applicationId=` names the application being judged; without
- * one the answer reports only what does not depend on the environment (an intrusive profile always needs an owner's approval) and says
+ * one the answer reports only what does not depend on the environment (an intrusive profile always needs a Crowd4Test admin's approval) and says
  * `allowedHere: null` rather than guessing at an environment nobody named.
  */
 import { z } from "zod";
 import { HttpError } from "../../platform/http-error.js";
 import { ASSESSMENT_KINDS, type SecurityEnvironment } from "../contract.js";
 import { profileProblem, scannerHealth } from "../scanners/registry.js";
-import { listRuns, projectScanners, runsOfAssessment, setProjectScanners } from "../scanners/store.js";
+import { listRuns, projectScanners, requestLogOfAssessment, runsOfAssessment, setProjectScanners } from "../scanners/store.js";
 import { scannerSettings, scannerSettingsPublic } from "../scanners/settings.js";
 import { approvalProblem, SCAN_PROFILES } from "../scanners/profiles.js";
 import { AI_EVALUATION_CASES } from "../scanners/promptfoo/cases.js";
@@ -112,7 +112,13 @@ export function registerSecurityScannerRoutes(ctx: SecurityRouteCtx): void {
     app.get(`${SECURITY_API}/assessments/:aid/scans`, async (req) => {
         const { aid } = params(req);
         const assessment = ctx.assessment(aid!, req);
-        return { assessmentId: assessment.id, profile: assessment.kind, runs: runsOfAssessment(p.db, assessment.id) };
+        // `requestLog`: every request of the assessment in one list, the scanners' and the platform's own checks', each with its source.
+        // Each run's own copy of its log is left out of `runs`, so every entry is answered once.
+        const runs = runsOfAssessment(p.db, assessment.id).map((run) => {
+            const { requestLog: _listedBelow, ...coverage } = run.coverage as typeof run.coverage & { requestLog?: unknown };
+            return { ...run, coverage };
+        });
+        return { assessmentId: assessment.id, profile: assessment.kind, runs, requestLog: requestLogOfAssessment(p.db, assessment.id) };
     });
 
     app.get(`${SECURITY_API}/scanners`, async () => ({

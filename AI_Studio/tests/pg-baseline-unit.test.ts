@@ -15,7 +15,7 @@ const BASELINE = path.resolve(__dirname, "../src/platform/pg/baseline.sql");
 /** Tables ordered with `db.dialect.insertionOrder()`: on PostgreSQL they carry `seq`, which SQLite has as its rowid. */
 const SEQ_TABLES = [
     "agent_tasks", "agent_tokens", "applications", "artifacts", "generation_jobs", "healing_proposals", "manual_cases", "quarantine_entries",
-    "releases", "run_summaries", "runbook_runs", "runbooks", "security_assessments", "security_authorizations", "test_executions", "trigger_tokens",
+    "releases", "run_summaries", "runbook_runs", "runbooks", "security_assessments", "security_authorizations", "security_profile_approvals", "test_executions", "trigger_tokens",
 ];
 /** SQLite type as declared → baseline type. Slots from 34 on may declare the portable BIGINT and SMALLINT directly (§5.3). */
 const TYPE_MAP: Record<string, string> = { INTEGER: "BIGINT", BIGINT: "BIGINT", SMALLINT: "SMALLINT", TEXT: "TEXT", REAL: "DOUBLE PRECISION" };

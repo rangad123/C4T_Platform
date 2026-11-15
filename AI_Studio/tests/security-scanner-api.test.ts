@@ -74,7 +74,7 @@ describe("security assessment SCAN API", () => {
     });
 
     const shop = { name: "Shop", targetUrl: "https://shop.example.com/", environment: "staging", excludedPaths: ["/admin"] };
-    const authBody = { basis: "owner", approverName: "Dana", confirm: true };
+    const authBody = { basis: "owner", approverName: "Dana", approverRole: "Head of Engineering", approverEmail: "owner@client.example", documentReference: "SOW-1", authority: "Signed SOW-1 for the application's owner.", confirm: true };
 
     let appId: string;
     let appB: string;
@@ -149,13 +149,14 @@ describe("security assessment SCAN API", () => {
         // Without an application there is no environment to judge against, so an intrusive profile is "ask again with one", not a yes.
         expect(none.body.profiles.find((p: { id: string }) => p.id === "passive")).toMatchObject({ allowedHere: true, problem: null, intrusive: false });
         expect(none.body.profiles.find((p: { id: string }) => p.id === "advanced")).toMatchObject({ allowedHere: null, requiresApproval: true, intrusive: true });
-        expect(none.body.profiles.find((p: { id: string }) => p.id === "advanced").problem).toMatch(/approval recorded by an owner/);
-        // Named: a staging application may be scanned actively, but not at the intrusive profile without an approval.
+        expect(none.body.profiles.find((p: { id: string }) => p.id === "advanced").problem).toMatch(/needs a Crowd4Test admin's approval/);
+        // Named: a staging application is a place where active profiles may run, but not without a Crowd4Test admin's approval.
         const staging = await viewer("GET", `${API}/projects/${pA}/scanners?applicationId=${appId}`);
         expect(staging.body.application).toMatchObject({ id: appId, environment: "staging" });
-        expect(staging.body.profiles.find((p: { id: string }) => p.id === "conservative-active")).toMatchObject({ allowedHere: true, problem: null });
+        expect(staging.body.profiles.find((p: { id: string }) => p.id === "conservative-active")).toMatchObject({ allowedHere: false });
+        expect(staging.body.profiles.find((p: { id: string }) => p.id === "conservative-active").problem).toMatch(/needs a Crowd4Test admin's approval/);
         expect(staging.body.profiles.find((p: { id: string }) => p.id === "advanced")).toMatchObject({ allowedHere: false });
-        expect(staging.body.profiles.find((p: { id: string }) => p.id === "advanced").problem).toMatch(/approval recorded by an owner/);
+        expect(staging.body.profiles.find((p: { id: string }) => p.id === "advanced").problem).toMatch(/needs a Crowd4Test admin's approval/);
         // An application of another project is a 404, not another project's environment leaking through.
         expect((await viewer("GET", `${API}/projects/${pA}/scanners?applicationId=${appB}`)).status).toBe(404);
     });

@@ -83,6 +83,10 @@ export interface SecurityAuthorization {
     confirmedAt: string;
     scopeFingerprint: string;
     revokedAt: string | null;
+    /** The most this authorization allows (profile-gate.ts). One recorded before the gate, or naming no profile, allows passive only. */
+    maxProfile: AssessmentKind;
+    /** The test accounts of the read-only cross-account checks this authorization names (none before the gate). */
+    crossAccounts: string[];
 }
 
 /**

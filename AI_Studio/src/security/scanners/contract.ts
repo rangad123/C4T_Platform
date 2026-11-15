@@ -73,6 +73,16 @@ export interface ScannerCapabilities {
     specDriven: boolean;
     /** The tool evaluates an AI interface with test cases, not a website (Promptfoo). */
     aiDriven: boolean;
+    /**
+     * The adapter sends every request of its tool through the platform's request guard (`ScanTarget.egress`). An adapter without it is
+     * refused wherever the guard is required, because nothing would stop its tool sending other methods or reaching other addresses.
+     */
+    egressProxy?: boolean;
+    /**
+     * The adapter starts its own tool process through `isolationFor(target).wrap` (src/security/egress/isolation.ts) whenever the run
+     * has an isolated network, so the tool's only way out is the request guard. Required above passive; a shared daemon never has it.
+     */
+    egressIsolation?: boolean;
 }
 
 /** The outcome of `validateConfig`: problems are plain sentences, never raw tool output with keys in it. */
@@ -121,6 +131,11 @@ export interface ScanTarget {
     spec?: { fileName: string; text: string } | null;
     /** For AI tools: the interface to evaluate. Required before an AI scanner may run at all. */
     aiInterface?: AiInterface | null;
+    /**
+     * The platform's request guard (../egress/guard.ts) for this run. When set, the adapter must make its tool send every request
+     * through it (proxy flag, proxy environment, ZAP upstream proxy) and refuse to start if it cannot.
+     */
+    egress?: { proxyUrl: string } | null;
 }
 
 /**
@@ -195,6 +210,8 @@ export interface ScannerCoverage {
     inspected: string[];
     /** Plain sentences: what this run could not or did not cover. A report prints these as the tool's limitations. */
     notInspected: string[];
+    /** The request guard's log for this run: method, host, path (no query), verdict. Absent when no guard was used. */
+    requestLog?: Array<{ at: string; method: string; host: string; path: string; verdict: "allowed" | "refused" | "failed"; status?: number; reason?: string }>;
 }
 
 export interface ScanProgress {

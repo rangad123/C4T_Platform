@@ -24,6 +24,9 @@ import { randomUUID } from "node:crypto";
 import type { Db, Row } from "../../platform/db.js";
 import { SCANNER_IDS, type ScannerId } from "./contract.js";
 import type { ScanApproval, ScannerCoverage, ScanIntensity } from "./contract.js";
+import { MAX_PER_SOURCE, mergeRequestLogs, totalsOfEntries, type StoredRequestLog } from "../egress/request-log.js";
+import type { EgressCounts, EgressEntry } from "../egress/guard.js";
+import { redactText } from "../../shared/redact-text.js";
 
 /** How one tool's run ended. Deliberately not the assessment's states: a run is a step inside an assessment. */
 export const SCAN_RUN_STATES = ["QUEUED", "RUNNING", "COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED", "SKIPPED", "UNAVAILABLE"] as const;
@@ -69,6 +72,8 @@ export function ensureScannerTables(db: Db): void {
     // SQLite has no ADD COLUMN IF NOT EXISTS, so the existing columns are read once and only what is missing is added.
     for (const [table, column, definition] of [
         ["security_assessments", "approval_json", "TEXT"],
+        // Set on the runs of a scanner stage that was interrupted and is being run again (supersedeScannerRuns).
+        ["security_scan_runs", "superseded_at", "TEXT"],
     ] as const) {
         if (db.dialect.tableExists(db, table) && !db.dialect.columnExists(db, table, column)) db.raw.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
@@ -188,13 +193,125 @@ export function getRun(db: Db, id: string): ScanRun | undefined {
 /** Every run of one assessment, oldest first (the order they were meant to run in). */
 export function runsOfAssessment(db: Db, assessmentId: string): ScanRun[] {
     ensureScannerTables(db);
-    return db.all<Row>("SELECT * FROM security_scan_runs WHERE assessment_id = ? ORDER BY created_at, id", assessmentId).map(rowOf);
+    return db.all<Row>("SELECT * FROM security_scan_runs WHERE assessment_id = ? AND scanner <> ? AND superseded_at IS NULL ORDER BY created_at, id", assessmentId, PLATFORM_REQUESTS).map(rowOf);
+}
+
+/**
+ * A scanner stage is about to run (again) for this assessment: the runs an interrupted earlier attempt left are superseded, so the run
+ * lists show each scanner once. Their request logs stay in the assessment's request log (those requests were made).
+ */
+export function supersedeScannerRuns(db: Db, assessmentId: string): void {
+    ensureScannerTables(db);
+    db.run("UPDATE security_scan_runs SET superseded_at = ? WHERE assessment_id = ? AND scanner <> ? AND superseded_at IS NULL", new Date().toISOString(), assessmentId, PLATFORM_REQUESTS);
+}
+
+// ── the assessment's one request log ────────────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * The platform's own requests are kept beside the scanners': rows of this table whose `scanner` is PLATFORM_REQUESTS, one per part of the
+ * assessment (`reference`: "steps", "cross-account"), holding only a request log in their coverage. They are not tool runs (the run
+ * lists leave them out); they exist so that one read gives every request of an assessment, and so the platform's log is kept and
+ * deleted exactly as a scanner's is (with its assessment).
+ */
+export const PLATFORM_REQUESTS = "platform";
+
+/**
+ * The check families the platform's own requests are logged under. A stored log names only these: a log can come back from a runner,
+ * and one that named a new source for every entry would otherwise be kept in full (the cap is per source).
+ */
+export const PLATFORM_SOURCES: readonly string[] = ["discovery", "checks", "api-document", "sign-in", "cross-account", "tls"].map((family) => `platform:${family}`);
+/** The source an entry is stored under: one of the known families, and "platform:checks" for anything else. */
+export const platformSource = (source: unknown): string => (PLATFORM_SOURCES.includes(String(source ?? "")) ? String(source) : "platform:checks");
+/** Most method names counted for one source of a stored log. */
+const MAX_METHODS = 16;
+
+/** One source's counts as stored: numbers only, and method names that look like method names, a bounded number of them. */
+function cleanCounts(c: EgressCounts): EgressCounts {
+    const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
+    const byMethod: Record<string, number> = {};
+    for (const [method, count] of Object.entries(c.byMethod && typeof c.byMethod === "object" ? c.byMethod : {})) {
+        if (!/^[A-Za-z]{1,16}$/.test(method)) continue;
+        const key = method.toUpperCase();
+        if (!(key in byMethod) && Object.keys(byMethod).length >= MAX_METHODS) continue;
+        byMethod[key] = (byMethod[key] ?? 0) + n(count);
+    }
+    return { total: n(c.total), allowed: n(c.allowed), refused: n(c.refused), failed: n(c.failed), byMethod };
+}
+
+/** Field sizes and the shared redaction once more: a log can come back from a runner, and what is stored is shown to the run's viewers. */
+function cleanEntry(e: EgressEntry): EgressEntry | undefined {
+    if (!e || typeof e !== "object" || !["allowed", "refused", "failed"].includes(e.verdict)) return undefined;
+    return {
+        at: String(e.at ?? "").slice(0, 40),
+        source: platformSource(e.source),
+        method: String(e.method ?? "").slice(0, 16),
+        host: String(e.host ?? "").slice(0, 255),
+        path: redactText(String(e.path ?? "").split(/[?#]/)[0]!.slice(0, 500), 500),
+        verdict: e.verdict,
+        ...(typeof e.status === "number" ? { status: e.status } : {}),
+        ...(e.reason ? { reason: redactText(String(e.reason).slice(0, 300), 300) } : {}),
+    };
+}
+
+/** Keep (replace) the platform's request log of one part of an assessment. Always "platform:<family>" sources, whatever the log says. */
+export function savePlatformRequests(db: Db, a: { id: string; projectId: string; applicationId: string; kind?: string }, part: string, log: StoredRequestLog | undefined): void {
+    if (!log || !Array.isArray(log.entries)) return;
+    ensureScannerTables(db);
+    // Totals per known family; whatever else the log names is counted under "platform:checks", as its entries are.
+    const perSource: StoredRequestLog[] = [];
+    for (const [source, c] of Object.entries(log.totals && typeof log.totals === "object" ? log.totals : {}).slice(0, 1_000)) if (source.startsWith("platform:") && c && typeof c === "object") perSource.push({ entries: [], totals: { [platformSource(source)]: cleanCounts(c) } });
+    const clean = mergeRequestLogs([{ entries: log.entries.map(cleanEntry).filter((e): e is EgressEntry => Boolean(e)), totals: {} }, ...perSource]);
+    for (const [source, c] of Object.entries(clean.totals)) clean.totals[source] = cleanCounts(c);
+    const coverage = JSON.stringify({ inspected: [], notInspected: [], requestLog: clean.entries, requestTotals: clean.totals });
+    const now = new Date().toISOString();
+    const existing = db.get<Row>("SELECT id FROM security_scan_runs WHERE assessment_id = ? AND scanner = ? AND reference = ?", a.id, PLATFORM_REQUESTS, part);
+    if (existing) db.run("UPDATE security_scan_runs SET coverage_json = ?, finished_at = ? WHERE id = ?", coverage, now, String(existing.id));
+    else
+        db.run(
+            `INSERT INTO security_scan_runs (id, assessment_id, project_id, application_id, scanner, profile, state, reference, finished_at, findings_count, coverage_json, created_at)
+             VALUES (?,?,?,?,?,?, 'COMPLETED', ?, ?, 0, ?, ?)`,
+            randomUUID(),
+            a.id,
+            a.projectId,
+            a.applicationId,
+            PLATFORM_REQUESTS,
+            isProfile(String(a.kind)) ? String(a.kind) : "passive",
+            part,
+            now,
+            coverage,
+            now,
+        );
+}
+
+export interface AssessmentRequestLog extends StoredRequestLog {
+    /** Most entries listed per source; `totals` always count every request. */
+    capPerSource: number;
+    /** Per source: requests counted but not listed (over the cap). A scanner's own counts beyond its listed entries are not stored. */
+    notListed: Record<string, number>;
+}
+
+/** Every request of one assessment, scanners' and the platform's together, in time order, each with its source. */
+export function requestLogOfAssessment(db: Db, assessmentId: string): AssessmentRequestLog {
+    ensureScannerTables(db);
+    const logs: StoredRequestLog[] = [];
+    for (const r of db.all<Row>("SELECT scanner, coverage_json FROM security_scan_runs WHERE assessment_id = ? ORDER BY created_at, id", assessmentId)) {
+        const coverage = json<ScannerCoverage & { requestTotals?: Record<string, EgressCounts> }>(r.coverage_json, { inspected: [], notInspected: [] });
+        const platform = String(r.scanner) === PLATFORM_REQUESTS;
+        // A scanner's entries are its own whatever they say; the platform's rows were made "platform:*" when they were saved.
+        const entries = ((coverage.requestLog ?? []) as EgressEntry[]).map((e) => (platform ? e : { ...e, source: `scanner:${String(r.scanner)}` }));
+        logs.push({ entries, totals: platform && coverage.requestTotals ? coverage.requestTotals : totalsOfEntries(entries) });
+    }
+    const merged = mergeRequestLogs(logs);
+    const listed: Record<string, number> = {};
+    for (const e of merged.entries) listed[e.source ?? ""] = (listed[e.source ?? ""] ?? 0) + 1;
+    const notListed: Record<string, number> = {};
+    for (const [source, c] of Object.entries(merged.totals)) if (c.total > (listed[source] ?? 0)) notListed[source] = c.total - (listed[source] ?? 0);
+    return { ...merged, capPerSource: MAX_PER_SOURCE, notListed };
 }
 
 /** Every run of one project, most recent first, for the project's scanner history. */
 export function listRuns(db: Db, projectId: string, limit = 100): ScanRun[] {
     ensureScannerTables(db);
-    return db.all<Row>("SELECT * FROM security_scan_runs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?", projectId, limit).map(rowOf);
+    return db.all<Row>("SELECT * FROM security_scan_runs WHERE project_id = ? AND scanner <> ? AND superseded_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?", projectId, PLATFORM_REQUESTS, limit).map(rowOf);
 }
 
 /** The scanners this project allows. Empty means none: a tool switched on platform-wide still may not scan this client's targets. */

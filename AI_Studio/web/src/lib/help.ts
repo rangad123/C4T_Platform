@@ -227,9 +227,12 @@ export const RISK_LEVEL: Record<"not-assessed" | "high" | "medium" | "low" | "no
     "not-assessed": "No assessment of this project has finished yet, and no finding was entered by hand.",
 };
 
-export const AUTHORIZATION_STATE: Record<"current" | "stale" | "none" | "revoked", string> = {
-    current: "A recorded authorization covers the current address, scope, exclusions, request limit, saved sign-in and sensitive workflows, so assessments can start.",
-    stale: "The address, scope, exclusions, request limit, saved sign-in or sensitive workflows changed after the authorization was recorded. Record a new one before assessing.",
+// Matches AUTHORIZATION_WORDS (src/security/authorization.ts): a client authorization lasts 90 days from when it was recorded; one
+// recorded without the authorizing person's role and documented authority stops counting 90 days after the server was updated to require them.
+export const AUTHORIZATION_STATE: Record<"current" | "stale" | "expired" | "none" | "revoked", string> = {
+    current: "A recorded authorization covers the current target, scope, exclusions, request limit, environment, test-account sign-in details, saved sign-in and sensitive workflows, and it has not expired, so assessments can start within that scope.",
+    stale: "The target, scope, exclusions, request limit, saved sign-in, sensitive workflows, environment, a test account's sign-in details, the cross-account designation or the description of the profile it allows changed after the authorization was recorded. Record a new one before the next assessment.",
+    expired: "The authorization has expired: it lasts 90 days from when it was recorded, or, if recorded without the authorizing person's role and documented authority, 90 days from when the server was updated to require them. Record a new one from the client before the next assessment.",
     none: "No authorization is recorded. No assessment starts without one.",
     // A restored backup brings authorizations back as history, withdrawn (src/security/backup.ts importSecurityData).
     revoked: "The authorization was withdrawn, or it came back withdrawn from a restored backup. No assessment starts until a new one is recorded.",
