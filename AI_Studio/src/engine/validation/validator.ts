@@ -41,6 +41,7 @@ import { deterministicRepairOn } from "../llm/without-ai.js";
 import type { MobileRunEnv } from "./mobile-runner.js";
 import type { IosRunEnv } from "../mobile/ios-runner.js";
 import { missingApiTokenReason } from "../evidence/failure-facts.js";
+import { secretsOfRun } from "../evidence/model.js";
 import { KNOWN_BUG_FIXED, markUnfinishedAsNotRun, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
 // A phone run the phone itself could not carry out (device/infra.ts): said plainly, never a failing test of the app, never repaired.
 import { isPhoneInfrastructure } from "../mobile/device/infra.js";
@@ -323,6 +324,7 @@ export async function validateBatch(
                         run,
                         credentials: deps.env.credentials,
                         attempt,
+                        secrets: secretsOfRun(deps.env),
                     });
                 } else if (t.spec.kind === "api") {
                     repair = await repairApi(ctx, t.spec, run, t.endpointDoc);

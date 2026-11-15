@@ -168,18 +168,20 @@ describe("evidence from real failing runs", () => {
         }
     });
 
-    it("a passing test stores no evidence, and the API says so in words", async () => {
+    it("a passing test stores only its footprint (what it touched), and the API says in words there is no failure to explain", async () => {
         const detail = (await call("GET", `/api/tests/${ids.home}`)).body;
         expect(detail.executions[0].status).toBe("passed");
-        expect(detail.executions[0].artifacts.some((a: any) => a.kind === "evidence")).toBe(false);
+        expect(detail.executions[0].artifacts.some((a: any) => a.kind === "evidence")).toBe(true);
         expect(await evidence("home")).toMatchObject({ available: false, message: "The latest run passed, so there is no failure to explain." });
-        // asking for that very run by id: also a plain answer
+        // asking for that very run by id: a plain answer, with the footprint and no failure details
         const byId = await evidence("home", `?executionId=${detail.executions[0].id}`);
-        expect(byId).toMatchObject({ available: false });
-        expect(byId.message).toContain("No network or console details were recorded for this run");
+        expect(byId).toMatchObject({ available: false, message: "This run passed: only the pages and endpoints it touched were kept." });
+        expect(byId.footprint.endpoints.some((e: any) => e.path === "/api/hello" && e.statuses.includes(200))).toBe(true);
+        expect(byId.evidence).toBeUndefined();
         const rows = platform.db.all<{ test_case_id: string }>("SELECT test_case_id FROM artifacts WHERE kind = 'evidence'");
         expect(rows.length).toBeGreaterThanOrEqual(4);
-        expect(rows.some((r) => r.test_case_id === ids.home || r.test_case_id === ids.api)).toBe(false);
+        // API tests record no browser evidence at all.
+        expect(rows.some((r) => r.test_case_id === ids.api)).toBe(false);
     });
 
     it("API tests and unknown tests or runs get clear answers", async () => {
@@ -267,7 +269,11 @@ describe("the script itself", () => {
         };
         const normal = (await run(false))[0]!;
         expect(normal.status).toBe("passed");
-        expect(normal.artifacts.some((a) => a.kind === "evidence")).toBe(false);
+        // Without the switch a passing test keeps only its footprint: no console text, no request list.
+        const footprint = JSON.parse(fs.readFileSync(normal.artifacts.find((a) => a.kind === "evidence")!.path, "utf8"));
+        expect(footprint.requests).toEqual([]);
+        expect(footprint.console).toEqual([]);
+        expect(footprint.footprint.endpoints.some((e: any) => e.path === "/api/hello")).toBe(true);
         const kept = (await run(true))[0]!;
         expect(kept.status).toBe("passed");
         const file = kept.artifacts.find((a) => a.kind === "evidence");

@@ -162,6 +162,8 @@ export async function runPlainAuthoring(ctx: EngineContext, req: PlainRequest, s
                     model,
                     scenario: scenario!,
                     credentials: login,
+                    // What the app shows in the browser is masked with every secret of the request before the model or the record sees it.
+                    secrets: [req.credentials?.password, req.credentials?.totpSecret, req.credentials?.apiToken, req.credentials?.apiAuthHeader, ...(req.roles ?? []).flatMap((r) => [r.password, r.totpSecret, r.apiToken])].filter((v): v is string => typeof v === "string" && v.length >= 4),
                     onAction: (a) => sink.agentAction(runId, a),
                     maxSteps: PLAIN_MAX_STEPS,
                     ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),

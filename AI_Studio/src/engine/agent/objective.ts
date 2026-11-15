@@ -231,7 +231,7 @@ async function pursue(input: ObjectiveInput): Promise<ObjectiveOutcome> {
     const line = (text: unknown, max = 400) => scrub(cleanLine(text, max));
     const inFence = (text: string) => `${fence.open}\n${scrub(cleanBlock(text, RAW_SNAPSHOT_MAX).text).split(fence.open).join("").split(fence.close).join("")}\n${fence.close}`;
 
-    const session = await BrowserSession.launch(browser, { startUrl: baseUrl, ...(input.storageState ? { storageState: input.storageState } : {}) });
+    const session = await BrowserSession.launch(browser, { startUrl: baseUrl, secrets: [...secrets], ...(input.storageState ? { storageState: input.storageState } : {}) });
     const { page } = session;
     page.setDefaultTimeout(6_000);
     // The time limit ends a model call that is under way too; a person's Stop and the job's own stop arrive through ctx.signal.

@@ -220,8 +220,8 @@ describe("an agent running real tests for a fake platform", () => {
         expect(r.ok, r.error).toBe(true);
         expect(r.runs.map((x) => [x.testId, x.status])).toEqual([["WEB-001", "passed"], ["WEB-002", "failed"], ["API-001", "passed"]]);
 
-        // a passing script leaves nothing behind
-        expect(runOf(r, "WEB-001").artifacts).toEqual([]);
+        // a passing web script leaves only its compact passing-run record (no screenshot, trace or video); an API script nothing
+        expect(runOf(r, "WEB-001").artifacts.map((a) => a.kind)).toEqual(["evidence"]);
         expect(runOf(r, "API-001").artifacts).toEqual([]);
 
         // the failing one has its screenshot, trace and video (and evidence) as uploaded files
@@ -245,8 +245,10 @@ describe("an agent running real tests for a fake platform", () => {
         const evidence = failed.artifacts.find((x) => x.kind === "evidence");
         if (evidence) expect(JSON.parse(bytesOf(fake, t.taskId, evidence.ref).toString("utf8"))).toBeTruthy();
 
-        // nothing but the failing script's files was uploaded, and no local path leaked into the result
-        expect([...uploadsOf(fake, t.taskId).keys()].every((n) => n.startsWith("WEB-002-"))).toBe(true);
+        // nothing but the failing script's files and the passing web script's compact record was uploaded, the record is small
+        // (no screenshot, trace or video), and no local path leaked into the result
+        expect([...uploadsOf(fake, t.taskId).keys()].every((n) => n.startsWith("WEB-002-") || n === "WEB-001-evidence.json")).toBe(true);
+        expect(bytesOf(fake, t.taskId, "WEB-001-evidence.json").length).toBeLessThanOrEqual(6 * 1024);
         expect(JSON.stringify(r)).not.toContain(workDir);
 
         // heartbeats carried progress, and the scratch folder is gone

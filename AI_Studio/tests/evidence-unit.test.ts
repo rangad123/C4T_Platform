@@ -271,15 +271,21 @@ describe("the generated script", () => {
         expect(content).toContain("await evidenceAttach(page, testInfo);");
         expect(content).toContain("evidenceStep(page, 1);\n    await test.step(");
         expect(content).toContain("evidenceStep(page, 2);");
-        // on failure only: the hook returns before attaching unless the test failed
-        expect(EVIDENCE_HELPER_SOURCE).toContain('if (testInfo.status === testInfo.expectedStatus && process.env.AITP_EVIDENCE !== "always") return;');
+        // A failed test attaches its full evidence; a passing one only its footprint (none with AITP_EVIDENCE=failures).
+        expect(EVIDENCE_HELPER_SOURCE).toContain('const passed = testInfo.status === testInfo.expectedStatus && process.env.AITP_EVIDENCE !== "always";');
+        expect(EVIDENCE_HELPER_SOURCE).toContain('if (passed && process.env.AITP_EVIDENCE === "failures") return;');
+        expect(EVIDENCE_HELPER_SOURCE).toContain("passed ? evidenceFootprint(rec, secrets) : evidenceSerialize(rec, secrets)");
     });
-    it("never reads bodies, headers or cookies", () => {
-        // The one permitted read is the Content-Length of an answer; the console text is the message the page itself wrote.
+    it("never reads bodies, request headers or cookies; of a response's headers only the length and the allow-listed correlation ones", () => {
+        // The permitted reads are the Content-Length of an answer and its allow-listed correlation headers; the console text is the message
+        // the page itself wrote.
         const source = EVIDENCE_HELPER_SOURCE.replace("m.text()", "m.message");
-        for (const forbidden of [".body()", ".text()", ".json()", "allHeaders", "headersArray", ".cookies(", "postData"]) expect(source, forbidden).not.toContain(forbidden);
-        expect(EVIDENCE_HELPER_SOURCE.match(/headers\(\)\[/g)).toHaveLength(1);
-        expect(EVIDENCE_HELPER_SOURCE).toContain('res.headers()["content-length"]');
+        for (const forbidden of [".body()", ".text()", ".json()", "allHeaders", "headersArray", ".cookies(", "postData", "setExtraHTTPHeaders", "r.headers()"]) expect(source, forbidden).not.toContain(forbidden);
+        expect(EVIDENCE_HELPER_SOURCE.match(/headers\(\)/g)).toHaveLength(1);
+        expect(EVIDENCE_HELPER_SOURCE).toContain("const headers = res.headers();");
+        expect(EVIDENCE_HELPER_SOURCE).toContain('headers["content-length"]');
+        expect(EVIDENCE_HELPER_SOURCE).toContain('const EVIDENCE_CORRELATION_HEADERS = ["x-request-id", "x-correlation-id", "traceparent", "x-amzn-trace-id", "cf-ray"];');
+        expect(EVIDENCE_HELPER_SOURCE).toContain("for (const h of EVIDENCE_CORRELATION_HEADERS) {");
     });
     it("is plain JavaScript that compiles on its own", () => {
         expect(() => new Function(`${EVIDENCE_HELPER_SOURCE}\nreturn installEvidence;`)).not.toThrow();

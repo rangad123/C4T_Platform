@@ -20,6 +20,8 @@ export interface StrengthDeps extends FaultDeps {
     model: AppModel;
     credentials?: { username: string; password: string };
     maxSteps?: number;
+    /** The run's known secrets: what the app shows in the browser while a test is strengthened is masked with them. */
+    secrets?: readonly string[];
     /** How many tests are checked (the level's strengthTests; Infinity: all). */
     limit: number;
 }
@@ -57,7 +59,7 @@ export async function checkStrength(ctx: EngineContext, deps: StrengthDeps, test
             throwIfAborted(ctx.signal);
             const note = strengthenNote(scores.get(t.spec.testId)!.missed);
             try {
-                const out = await authorWebSpec({ ctx, browser: deps.browser!, baseUrl: deps.baseUrl, model: deps.model, scenario: t.scenario!, credentials: deps.credentials, maxSteps: deps.maxSteps, resume: { prefix: t.spec.steps, failure: note, review: true } });
+                const out = await authorWebSpec({ ctx, browser: deps.browser!, baseUrl: deps.baseUrl, model: deps.model, scenario: t.scenario!, credentials: deps.credentials, maxSteps: deps.maxSteps, ...(deps.secrets ? { secrets: [...deps.secrets] } : {}), resume: { prefix: t.spec.steps, failure: note, review: true } });
                 if (out.status !== "complete" || out.steps.length <= t.spec.steps.length) return [];
                 return [{ t, spec: { ...t.spec, steps: out.steps, testData: { ...t.spec.testData, ...out.testData } } as TestSpec }];
             } catch (err) {

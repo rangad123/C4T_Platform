@@ -692,6 +692,12 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
             }
         } catch (err) {
             skipped++;
+            const lost = session.lostReason();
+            if (lost) {
+                // Every page after this one would fail the same way: one warning, and the crawl ends with what it found.
+                ctx.emit({ stage: "discovery", kind: "discovery_browser_crashed", level: "warn", message: `${lost} while loading ${next.url}; exploring stopped with the ${pages.length} pages found so far` });
+                break;
+            }
             ctx.emit({
                 stage: "discovery",
                 kind: "page_failed",

@@ -66,6 +66,8 @@ export interface StepResult {
     title: string;
     status: "passed" | "failed";
     error?: string;
+    /** How long the step took, from the test runner's own report (missing when it gave none). */
+    durationMs?: number;
 }
 
 export interface ScriptRun {
@@ -518,8 +520,8 @@ export async function runScripts(
                 return [[`${k}_USERNAME`, r.username], [`${k}_PASSWORD`, r.password], [`${k}_TOTP_SECRET`, r.totpSecret ?? ""], [`${k}_API_TOKEN`, r.apiToken ?? ""]] as Array<[string, string]>;
             }),
         ),
-        // AITP_EVIDENCE=always keeps the page's network/console evidence for passing tests too (it is only kept on failure otherwise).
-        ...(process.env.AITP_EVIDENCE === "always" ? { AITP_EVIDENCE: "always" } : {}),
+        // AITP_EVIDENCE=always keeps the full network/console evidence for passing tests too (they keep only a footprint otherwise); =failures keeps nothing for them.
+        ...(process.env.AITP_EVIDENCE === "always" || process.env.AITP_EVIDENCE === "failures" ? { AITP_EVIDENCE: process.env.AITP_EVIDENCE } : {}),
         // A runner caps the heap of the test runner and its workers (agent/resources.ts): a number only, never other Node options.
         ...(/^[1-9]\d{2,5}$/.test(process.env.AITP_TEST_HEAP_MB ?? "") ? { NODE_OPTIONS: `--max-old-space-size=${process.env.AITP_TEST_HEAP_MB}` } : {}),
         API_TOKEN: env.apiToken ?? "",
@@ -607,6 +609,7 @@ async function storeEvidence(runDir: string, runs: ScriptRun[], texts: Map<strin
         if (!text) continue;
         const evidence = parseEvidence(text, secrets);
         if (!evidence) continue;
+        withStepTimes(evidence, run.steps);
         const file = path.join(runDir, "artifacts", `${run.testId}${run.variant ? `-${run.variant}` : ""}-evidence.json`);
         try {
             await fs.mkdir(path.dirname(file), { recursive: true });
@@ -618,8 +621,18 @@ async function storeEvidence(runDir: string, runs: ScriptRun[], texts: Map<strin
     }
 }
 
+/** Each evidence step gets how long it took (ms), from the run's step results: step n is the result with index n - 1. */
+export function withStepTimes(evidence: { steps: Array<{ n: number; t: number; ms?: number }> }, steps: readonly StepResult[]): void {
+    const took = new Map(steps.filter((x) => x.durationMs !== undefined).map((x) => [x.index + 1, x.durationMs!]));
+    for (const st of evidence.steps) {
+        const ms = took.get(st.n);
+        if (ms !== undefined) st.ms = ms;
+    }
+}
+
 interface PwStep {
     title: string;
+    duration?: number;
     error?: { message?: string };
     steps?: PwStep[];
 }
@@ -742,6 +755,7 @@ export async function parseReport(runDir: string, scripts: ScriptInput[], stderr
                 title: st.error && merged?.row ? `${st.title} (data row ${merged.row.n} of ${merged.row.of})` : st.title,
                 status: st.error ? "failed" : "passed",
                 error: st.error?.message?.replace(ANSI, "").slice(0, 800),
+                ...(typeof st.duration === "number" && Number.isFinite(st.duration) && st.duration >= 0 ? { durationMs: Math.round(st.duration) } : {}),
             });
         }
         const failed = steps.find((x) => x.status === "failed");

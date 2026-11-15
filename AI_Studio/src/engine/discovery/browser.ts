@@ -6,6 +6,7 @@
  * here: cross-host *document* navigations are aborted at the network layer (context.route)
  * instead of being stopped after they start. Each session watches its page's API traffic (./network.ts).
  */
+import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
 import { chromium, type Browser, type BrowserContext, type Dialog, type Page } from "playwright";
 import type { SiteNote } from "../memory/notes.js";
 import { installOverlayHandlers, overlayRules } from "../web/interruptions.js";
@@ -26,6 +27,8 @@ export interface SessionOptions {
     authHeaders?: { headers: Record<string, string>; origins: string[] };
     /** The project's notes: the overlays they name ("close the newsletter popup") are closed before each action, as consent banners are. */
     notes?: readonly SiteNote[];
+    /** The run's known secrets: console and page errors, failed requests and dialog messages are masked with them before they are kept. */
+    secrets?: ReadonlyArray<string | undefined>;
 }
 
 /** What happened on the session's pages since it was last asked (see BrowserSession.takeEvents). */
@@ -40,6 +43,8 @@ export interface SessionEvents {
     serverError: boolean;
     /** Downloads started (their suggested file names). */
     downloads: string[];
+    /** Set when a page of the session crashed or the browser went away since the last call: what happened, in words. */
+    crashed?: string;
 }
 
 type Armed = { response: "accept" | "dismiss"; promptText?: string; seen: (message: string) => void };
@@ -126,14 +131,45 @@ export class BrowserSession {
         context.on("page", (p) => (session ? session.watch(p, rules) : early.push(p)));
         const page = await context.newPage();
         session = new BrowserSession(browser, context, page, host, guard);
+        session.masks = observedTextSecrets(opts.secrets ?? []);
+        // The browser going away (killed, out of memory) ends every page at once: recorded once, the work then stops with that reason.
+        const s = session;
+        s.onDisconnect = () => s.noteCrash("The browser closed unexpectedly");
+        browser.on("disconnected", s.onDisconnect);
         for (const p of early) await session.watch(p, rules);
         session.network.attach(page);
         return session;
     }
 
     private events: SessionEvents = { dialogs: [], opened: [], problems: [], serverError: false, downloads: [] };
+    /** The forms of the run's secrets (SessionOptions.secrets) every observed text is masked with. */
+    private masks: string[] = [];
 
     private inFlight = 0;
+    private crashedWhy: string | undefined;
+    private onDisconnect: (() => void) | undefined;
+
+    /** Why the session can no longer work (a page crashed, the browser closed), or undefined while it can. Stays set once set. */
+    get crashed(): string | undefined {
+        return this.crashedWhy;
+    }
+
+    /** Why the session can no longer work, checked now: the browser's own "disconnected" event can arrive after the error it caused. */
+    lostReason(opts: { pageClosedCounts?: boolean } = {}): string | undefined {
+        if (!this.crashedWhy && !this.browser.isConnected()) this.noteCrash("The browser closed unexpectedly");
+        // While the browser is still shutting down it reports itself connected, but the session's own page is already closed. Only where the
+        // work needs that one page (a crawl): a test being written can go on in a tab the application opened.
+        else if (!this.crashedWhy && opts.pageClosedCounts !== false && this.page.isClosed()) this.noteCrash("The browser page closed unexpectedly");
+        return this.crashedWhy;
+    }
+
+    /** A crash or a lost browser: kept for the session and reported once in the events. */
+    private noteCrash(why: string): void {
+        if (this.crashedWhy) return;
+        this.crashedWhy = why;
+        this.events.crashed = why;
+        if (this.events.problems.length < 20) this.events.problems.push(why);
+    }
     /**
      * After an action: a short pause for what it starts (a new tab, a fetch), then until the session's requests are answered (at most
      * `ms`). Playwright's "networkidle" cannot tell: once a page reached it, waiting for it returns at once.
@@ -157,7 +193,7 @@ export class BrowserSession {
         watchedPages.add(p);
         if (p !== this.page) this.events.opened.push(p);
         const problem = (text: string) => {
-            if (this.events.problems.length < 20) this.events.problems.push(text.replace(/\s+/g, " ").slice(0, 300));
+            if (this.events.problems.length < 20) this.events.problems.push(maskObservedText(text, this.masks, 300));
         };
         const own = (url: string) => {
             try {
@@ -173,7 +209,7 @@ export class BrowserSession {
         p.on("dialog", (d) => {
             const armed = armedDialogs.get(p);
             armedDialogs.delete(p);
-            this.events.dialogs.push({ type: d.type(), message: d.message().slice(0, 300), answer: armed?.response === "accept" ? "accepted" : "dismissed", armed: !!armed });
+            this.events.dialogs.push({ type: d.type(), message: maskObservedText(d.message(), this.masks, 300), answer: armed?.response === "accept" ? "accepted" : "dismissed", armed: !!armed });
             answer(d, armed);
         });
         p.on("request", () => void this.inFlight++);
@@ -192,10 +228,12 @@ export class BrowserSession {
             if (own(r.url()) && !/BLOCKED_BY_CLIENT|ERR_ABORTED/i.test(why)) problem(`${r.method()} ${where(r.url())} failed: ${why}`);
         });
         p.on("download", (d) => void this.events.downloads.push(d.suggestedFilename()));
+        p.on("crash", () => this.noteCrash("The page crashed in the browser"));
         await installOverlayHandlers(p, rules);
     }
 
     async close(): Promise<void> {
+        if (this.onDisconnect) this.browser.off("disconnected", this.onDisconnect);
         await this.context.close().catch(() => undefined);
         await this.guard?.close().catch(() => undefined);
     }

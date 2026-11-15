@@ -6,6 +6,7 @@
  * is exercised by scripts/e2e.ts with real credentials).
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { request } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -93,7 +94,16 @@ describe("deterministic pipeline", () => {
         expect(by["WEB-003"]!.error).toMatch(/Nonexistent button|Timeout/i);
         // failures keep a screenshot, trace, video and the page's network/console evidence; passing runs keep none
         expect(by["WEB-003"]!.artifacts.map((a) => a.kind).sort()).toEqual(["evidence", "screenshot", "trace", "video"]);
-        expect(by["WEB-001"]!.artifacts).toEqual([]);
+        // A passing web script keeps only the compact passing-run record (approved policy: about 5 KB, no bodies, credentials,
+        // cookies or pictures) and no screenshot, trace or video.
+        expect(by["WEB-001"]!.artifacts.map((a) => a.kind)).toEqual(["evidence"]);
+        {
+            const raw = fs.readFileSync(by["WEB-001"]!.artifacts[0]!.path, "utf8");
+            expect(raw.length).toBeLessThanOrEqual(6 * 1024);
+            const ev = JSON.parse(raw) as Record<string, unknown>;
+            expect(ev.footprint).toBeTruthy();
+            expect(ev.requests ?? []).toEqual([]);
+        }
     }, 120_000);
 
     it("never embeds credentials in rendered scripts", () => {

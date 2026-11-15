@@ -49,7 +49,7 @@ export interface AuthorInput {
     credentials?: { username: string; password: string };
     /** Resume mode (repair): steps to replay first, and why the previous version failed. */
     resume?: { prefix: Step[]; failure: string; /** The note is a review's list of changes, not a failed run. */ review?: boolean };
-    /** Called for each tool action, for observability (agent_actions). */
+    /** Called for each tool action (the job sink takes it; tool calls are not stored, see repo-sink.ts agentAction). */
     onAction?: (a: { tool: string; args: unknown; ok: boolean; observation: string }) => void;
     maxSteps?: number;
     /** Opt-in (job option visionChecks): the agent gets a lookAtScreen tool backed by a vision model. */
@@ -64,7 +64,17 @@ export interface AuthorInput {
     notes?: SiteNote[];
     /** Generated test data for the run (data-changing tests on): the agent gets a testValue tool, and the spec records the run tag. */
     testData?: TestData;
+    /**
+     * The run's other known secrets (authenticator secrets, API tokens, other accounts' passwords): what the application shows in the
+     * console, page errors, failed requests and dialogs is masked with them (and the sign-in password) before the AI or a stored record sees
+     * it, and the kept trace of a blocked attempt is cleaned with them.
+     */
+    secrets?: string[];
 }
+
+/** Every secret this authoring run knows: the sign-in password and the caller's list. */
+const runSecretsOf = (input: Pick<AuthorInput, "credentials" | "secrets">): string[] =>
+    [input.credentials?.password, ...(input.secrets ?? [])].filter((s): s is string => typeof s === "string" && s.length >= 4);
 
 /** `observations`: screens the vision model judged to look wrong while authoring (only when `vision` was on). */
 export type AuthorOutcome =
@@ -259,7 +269,7 @@ async function reviewAndFix(input: AuthorInput, out: AuthorOutcome): Promise<Aut
 
 async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     const { ctx, browser, baseUrl, model, scenario, credentials, resume } = input;
-    const session = await BrowserSession.launch(browser, { startUrl: baseUrl, ...(input.notes?.length ? { notes: input.notes } : {}) });
+    const session = await BrowserSession.launch(browser, { startUrl: baseUrl, secrets: runSecretsOf(input), ...(input.notes?.length ? { notes: input.notes } : {}) });
     const { page } = session;
     page.setDefaultTimeout(6_000);
     /** The new tab the agent works in (a click opened it), else the page the test started on. */
@@ -329,6 +339,15 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         const refuse = refusedBy(input.notes);
         let notesShownFor = pathOf(page.url());
         const record = async (step: Step, toolName: string, args: unknown) => {
+            // The browser crashed or went away: nothing more can be done in it, so the scenario ends here with that reason.
+            const lost = session.lostReason({ pageClosedCounts: false });
+            if (lost) {
+                if (!outcome) {
+                    outcome = { status: "blocked", steps: recorded, testData, explanation: `${lost}, so this test could not be finished.` };
+                    ctx.emit({ stage: "generation", kind: "browser_crashed", level: "warn", message: `${scenario.scenarioId}: ${lost}` });
+                }
+                return { success: false, error: `${lost}.`, url: "" };
+            }
             // A "never ..." note for this page is a hard rule: the control it names is not used.
             const loc = "locator" in step ? (step.locator as Locator | undefined) : undefined;
             const banned = step.action !== "assert" && loc ? refuse({ name: loc.value, url: here().url() }) : undefined;
@@ -645,7 +664,7 @@ export async function pruneAuthoringTraces(scratchDir: string, now = Date.now())
     }
 }
 
-/** A blocked scenario keeps its authoring trace (masked with the sign-in password) in the scratch folder; any other ending drops it. Never throws. */
+/** A blocked scenario keeps its authoring trace (masked with every secret the run knows) in the scratch folder; any other ending drops it. Never throws. */
 async function keepBlockedTrace(input: AuthorInput, session: BrowserSession, finished: AuthorOutcome | undefined): Promise<void> {
     try {
         if (finished?.status !== "blocked") {
@@ -656,7 +675,7 @@ async function keepBlockedTrace(input: AuthorInput, session: BrowserSession, fin
         await fs.mkdir(path.dirname(file), { recursive: true });
         await session.context.tracing.stop({ path: file });
         await pruneAuthoringTraces(input.ctx.config.scratchDir);
-        const clean = await scrubTraceFile(file, input.credentials?.password ? [input.credentials.password] : []);
+        const clean = await scrubTraceFile(file, runSecretsOf(input));
         if (!clean.ok) {
             await fs.rm(file, { force: true });
             return;
@@ -683,7 +702,7 @@ export async function pruneByReplay(
     credentials: { username: string; password: string } | undefined,
     requireAllAssertsPass: boolean,
 ): Promise<{ steps: Step[]; dropped: number }> {
-    const session = await BrowserSession.launch(browser, { startUrl: baseUrl });
+    const session = await BrowserSession.launch(browser, { startUrl: baseUrl, ...(credentials ? { secrets: [credentials.password] } : {}) });
     session.page.setDefaultTimeout(5_000);
     const data = runtimeData({}, credentials);
     const kept: Step[] = [];

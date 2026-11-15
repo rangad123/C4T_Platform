@@ -301,6 +301,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 ...(req.savedSession ? { storageState: req.savedSession.storageState } : {}),
                 authHeaders: { headers: exploreAuth, origins: [origin, ...(req.apiBaseUrl ? [req.apiBaseUrl] : [])] },
                 ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
+                secrets: authoringSecretsOf(req),
             });
             try {
                 if (req.savedSession) {
@@ -348,6 +349,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                             maxDepth: req.maxDepth,
                             perPattern: levelSettings(req).perPattern,
                             ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
+                            ...(req.apiBaseUrl ? { apiHosts: [req.apiBaseUrl] } : {}),
                             onCrawl: (who, r) => {
                                 if (who !== "anonymous") roleCrawls.push({ who, pages: r.pages, transitions: r.transitions });
                             },
@@ -605,6 +607,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         retryBlocked: true,
                         ...(testData ? { testData } : {}),
                         ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
+                        // Masking only: what the application shows the AI is cleaned of every secret of the run, not just the sign-in password.
+                        secrets: authoringSecretsOf(req),
                     });
                     await sink.finishAgentRun(runId, outcome.status, outcome.explanation);
                     if (outcome.status === "blocked") {
@@ -742,7 +746,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // 4d3. Passive security checks (deterministic, GET-only) for the application origin.
         // 4d2a. Access control (deterministic): pages some account reached that a lesser account (or a visitor) may not open.
         if (wantWeb && req.accessChecks !== false && accessReach.length > 1) {
-            const access = generateAccessSpecs(accessReach);
+            const access = generateAccessSpecs(accessReach, { maxSpecs: 8, maxOrdinary: 3, appUrl: req.url, ...(req.apiBaseUrl ? { apiHosts: [req.apiBaseUrl] } : {}) });
             for (const d of access) {
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { access: true });
@@ -912,7 +916,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             throwIfAborted(ctx.signal);
             const strength = await checkStrength(
                 ctx,
-                { scratchDir: ctx.config.scratchDir, env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, headless: ctx.config.HEADLESS }, render: renderCtx, workers: ctx.config.CONCURRENCY, browser, baseUrl: origin, model, credentials: creds && authState.loggedIn ? creds : undefined, maxSteps: levelSettings(req).authoringMaxSteps, limit: levelSettings(req).strengthTests, webSockets: Boolean(model.webSockets?.length) },
+                { scratchDir: ctx.config.scratchDir, env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, headless: ctx.config.HEADLESS }, render: renderCtx, workers: ctx.config.CONCURRENCY, browser, baseUrl: origin, model, credentials: creds && authState.loggedIn ? creds : undefined, maxSteps: levelSettings(req).authoringMaxSteps, secrets: authoringSecretsOf(req), limit: levelSettings(req).strengthTests, webSockets: Boolean(model.webSockets?.length) },
                 outcomes.flatMap((o) => (o.status === "NOT_RUN" ? [] : [{ spec: o.spec, validationStatus: o.status, scenario: pending.find((t) => t.spec.testId === o.spec.testId)?.scenario }])),
                 {
                     async onStrengthened(testId, spec, run) {
@@ -963,3 +967,9 @@ async function closeBrowser(b: Browser): Promise<void> {
     await b.close().catch(() => undefined);
 }
 
+/** Every secret of an exploration the authoring agent could see echoed by the application (masked before the AI or a record sees it). */
+function authoringSecretsOf(req: Pick<GenerationRequest, "credentials" | "roles">): string[] {
+    const c = req.credentials;
+    const list = [c?.password, c?.totpSecret, c?.apiToken, c?.apiAuthHeader, ...(req.roles ?? []).flatMap((r) => [r.password, r.totpSecret, r.apiToken])];
+    return list.filter((v): v is string => typeof v === "string" && v.length >= 4);
+}

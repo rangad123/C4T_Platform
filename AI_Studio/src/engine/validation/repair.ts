@@ -74,6 +74,8 @@ export async function repairWeb(args: {
     credentials?: { username: string; password: string };
     /** 1-based repair attempt for this test. Later attempts re-author from scratch. */
     attempt?: number;
+    /** The run's known secrets: what the app shows in the browser while the test is re-authored is masked with them. */
+    secrets?: readonly string[];
 }): Promise<Repair> {
     const { ctx, spec, run } = args;
     const t = await triage(ctx, spec, run);
@@ -102,6 +104,7 @@ export async function repairWeb(args: {
         model: args.model,
         scenario: args.scenario,
         credentials: args.credentials,
+        ...(args.secrets ? { secrets: [...args.secrets] } : {}),
         resume: { prefix, failure: failureText(spec, run) },
     });
     if (outcome.status === "complete") {
