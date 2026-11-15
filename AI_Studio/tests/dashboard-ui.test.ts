@@ -164,7 +164,7 @@ describe("Projects dashboard", () => {
     it("links to the project, its attention list and its runs", async () => {
         await open();
         await rows().nth(1).getByRole("link", { name: "Attention list" }).click();
-        await page.waitForURL(new RegExp(`#/projects/${ids["Billing API"]}/tests\\?status=review`));
+        await page.waitForURL(new RegExp(`#/projects/${ids["Billing API"]}/scripts\\?status=review`));
         await pwExpect(page.getByRole("button", { name: /^Needs a look/ })).toHaveAttribute("aria-pressed", "true");
 
         await open();

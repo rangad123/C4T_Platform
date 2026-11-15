@@ -98,9 +98,12 @@ export function sparkSegments(points: Array<{ passRate: number | null }>, w: num
     return segments;
 }
 
-/** Where the "Attention list" link goes: the review list first, then the tests that could not be validated. */
+/**
+ * Where the "Attention list" link goes: the review list first, then the tests that could not be validated. Both live on the Test
+ * scripts list (round 38: the runnable tests), so the link names that address instead of the old `/tests` one the router rewrites.
+ */
 export function attentionHref(p: FleetProject): string {
-    const base = `#/projects/${p.id}/tests`;
+    const base = `#/projects/${p.id}/scripts`;
     if (p.tests.needsAttention > 0) return `${base}?status=review`;
     if (p.tests.couldNotValidate > 0) return `${base}?status=failed`;
     return base;

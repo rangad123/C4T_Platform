@@ -165,9 +165,9 @@ describe("dashboard page helpers", () => {
         expect(matches({ name: "Atlas shop", host: "atlas.example.test" }, "example.test")).toBe(true);
         expect(matches({ name: "Atlas shop", host: "atlas.example.test" }, "billing")).toBe(false);
         const p = (t: ReturnType<typeof tests>) => ({ id: "p1", tests: t }) as FleetProject;
-        expect(attentionHref(p(tests(1, 1, 1, 0)))).toBe("#/projects/p1/tests?status=review");
-        expect(attentionHref(p(tests(1, 0, 1, 0)))).toBe("#/projects/p1/tests?status=failed");
-        expect(attentionHref(p(tests(1, 0, 0, 0)))).toBe("#/projects/p1/tests");
+        expect(attentionHref(p(tests(1, 1, 1, 0)))).toBe("#/projects/p1/scripts?status=review");
+        expect(attentionHref(p(tests(1, 0, 1, 0)))).toBe("#/projects/p1/scripts?status=failed");
+        expect(attentionHref(p(tests(1, 0, 0, 0)))).toBe("#/projects/p1/scripts");
     });
 });
 
