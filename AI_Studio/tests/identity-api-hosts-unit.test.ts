@@ -53,6 +53,15 @@ describe("sibling and shared-hosting API hosts stay refused unless set as the pr
             expect(ownApiHost(url, app, [`${new URL(url).origin}/v1`]), `${url} configured`).toBe(true);
         }
     });
+    it("at the survey on a hosting domain: another customer's app is refused, the app's own hosts and its API address are not", () => {
+        expect(ownApiHost("https://mallory.github.io/v1/note?id=1", "https://alice.github.io/")).toBe(false);
+        expect(ownApiHost("https://bucket-b.s3.amazonaws.com/notes/1", "https://bucket-a.s3.amazonaws.com/")).toBe(false);
+        // Not even when a known API address is on the hosting domain: only that host and its own sub-domains are the application's.
+        expect(ownApiHost("https://b.vercel.app/v1/x", "https://www.shop.example/", ["https://api-a.vercel.app/v1"])).toBe(false);
+        expect(ownApiHost("https://api.a.vercel.app/v1/note?id=1", "https://a.vercel.app/")).toBe(true);
+        expect(ownApiHost("https://a.vercel.app:8443/v1/note?id=1", "https://a.vercel.app/")).toBe(true);
+        expect(ownApiHost("https://api-a.vercel.app/v1/x", "https://www.shop.example/", ["https://api-a.vercel.app/v1"])).toBe(true);
+    });
     it("at spec generation: no check replays a record on a sibling or neighbour host", () => {
         for (const [url, app] of SIBLINGS) {
             const origin = new URL(url).origin;

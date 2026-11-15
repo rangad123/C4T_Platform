@@ -38,8 +38,6 @@ export const NODE_MIN = 24;
 /** Packages whose code is copied into the bundle (everything esbuild followed into node_modules). */
 // Round 51: an exploration runs the engine on the runner (src/agent/explore-child.ts), which brings the AI SDK and what it imports.
 // @ai-sdk/provider-utils ships without a LICENSE file: it is part of the AI SDK, under the same Apache-2.0 licence as "ai" listed here.
-// tldts (the public suffix list behind src/shared/site.ts) is used only by the server, so it is not in the bundle. If engine
-// code imports src/shared/site.ts again, esbuild bundles it (plain JavaScript, like zod): add "tldts" and "tldts-core" here (tests/site-runner-kit.test.ts checks).
 export const BUNDLED_LICENCES = ["zod", "yaml", "fflate", "ai", "@ai-sdk/gateway", "@ai-sdk/provider", "eventsource-parser", "@opentelemetry/api", "@vercel/oidc"];
 
 /** A package's folder as Node finds it from `root`: root/node_modules first, then each parent folder's node_modules (as esbuild does). */

@@ -287,6 +287,19 @@ describe("own hosts: the API checks' strict rule, never a shared parent domain",
         expect(p.fullRunRequired).toBe(false);
     });
 
+    it("on a hosting domain: the app's own sub-domains are its own, another customer's app is not, and a change naming it still matches", () => {
+        expect(isOwnHost("api.a.vercel.app", { appHost: "a.vercel.app" })).toBe(true);
+        expect(isOwnHost("x.github.io", { appHost: "y.github.io" })).toBe(false);
+        expect(isOwnHost("bucket-b.s3.amazonaws.com", { appHost: "bucket-a.s3.amazonaws.com" })).toBe(false);
+        expect(isOwnHost("shop.other.co.uk", { appHost: "shop.example.co.uk" })).toBe(false);
+        expect(isOwnHost("api.shop.example.co.uk", { appHost: "shop.example.co.uk" })).toBe(true);
+        expect(preview("a.vercel.app", "api.a.vercel.app").p.matched.map((t) => t.testId)).toEqual(["t1"]);
+        const app = { appHost: "a.vercel.app" };
+        const other = extractCoverage(test([{ action: "navigate", url: "/" }], { runs: [called("b.vercel.app")] }), app);
+        expect(other.items.find((i) => i.path === "/orders")).toMatchObject({ host: "b.vercel.app", external: true });
+        expect(previewSelection([other], readChanges({ endpoints: ["POST https://b.vercel.app/orders"] }, app).changes).matched.map((t) => t.testId)).toEqual(["t1"]);
+    });
+
     it("a look-alike name is never the application's own: under the app's name means a dot boundary, API hosts match exactly", () => {
         expect(isOwnHost("evilshop.example", { appHost: "shop.example" })).toBe(false);
         expect(isOwnHost("evil-api.example", { appHost: "shop.example", apiHosts: ["api.example"] })).toBe(false);

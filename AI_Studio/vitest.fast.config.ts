@@ -186,7 +186,6 @@ export default defineConfig({
             "tests/selection-freshness.test.ts",
             "tests/retention-agent-shots.test.ts",
             "tests/identity-api-hosts-unit.test.ts",
-            "tests/site-same-site.test.ts",
             "tests/site-runner-kit.test.ts",
             "tests/security-profile-gate-expiry-legacy.test.ts",
             "tests/retention-other-records.test.ts",
