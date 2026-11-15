@@ -173,6 +173,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/performance": "read",
     "GET /api/projects/:id/api-changes": "read",
     "POST /api/projects/:id/api-diff": "ai_studio.tests.write",
+    // Test-selection preview (routes/selection.ts): reads only, so anyone on the project may ask.
+    "GET /api/projects/:id/test-coverage": "read",
+    "POST /api/projects/:id/selection-preview": "read",
+    "GET /api/projects/:id/selection-preview/detected-changes": "read",
     "PUT /api/projects/:id/mobile-app": "ai_studio.project.settings",
     "PUT /api/projects/:id/explore-level": "ai_studio.project.settings",
     "POST /api/projects/:id/mobile-app/apk": "ai_studio.project.settings",

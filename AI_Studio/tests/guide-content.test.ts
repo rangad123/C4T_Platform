@@ -17,6 +17,7 @@ const FEATURE_DOCS = join(ROOT, "docs", "features");
 
 /** Feature documents that are not the "more detail" of any topic, each with the reason. */
 const NOT_A_TOPIC: Record<string, string> = {
+    "selection-preview.md": "the selection preview card on Runs, After a deploy, says what a tester needs in its own sentences (what each list means, \"This is a recommendation only. No test was skipped or run\"); the document is the technical detail of the mapping",
     "crowd4test-sign-in.md": "how aistudio.crowd4test.com shares the crowd4test.com sign-in, and the settings an administrator sets for it; a tester never sees a sign-in here at all, only the portal's AI Studio entry and the Portal button",
     "phone-test-ideas.md": "how a phone plan's ideas, screen names and locators are made: each idea's own sentence (\"Covers the Jobs tab.\") and the plan say what a tester needs; the document is the technical detail",
     "phone-test-runs.md": "how a phone run picks its device and opens the app: the run's own sentences (\"Ran on CPH2467 (R58N20ABCDE), a phone on this computer.\"), the \"Where phone tests run\" setting's help and the user guide's phone sections say what a tester needs; the document is the technical detail",

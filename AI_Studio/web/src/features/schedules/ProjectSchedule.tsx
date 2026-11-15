@@ -4,6 +4,7 @@ import { useFetch, useOnFinish } from "../../lib/hooks";
 import { isActive } from "../../lib/labels";
 import { useRoute } from "../../lib/router";
 import { RunbooksPanel } from "../runbooks/RunbooksPanel";
+import { SelectionPreviewCard } from "../selection/SelectionPreviewCard";
 import { TriggersPanel } from "../triggers/TriggersPanel";
 import { FlakyPanel } from "./FlakyPanel";
 import { SchedulesPanel } from "./SchedulesPanel";
@@ -46,7 +47,12 @@ export function ProjectSchedule({ id, section }: { id: string; section: Schedule
                     <FlakyPanel projectId={id} reloadKey={reloadKey} />
                 </>
             )}
-            {section === "deploys" && <TriggersPanel projectId={id} reloadKey={reloadKey} />}
+            {section === "deploys" && (
+                <>
+                    <TriggersPanel projectId={id} reloadKey={reloadKey} />
+                    <SelectionPreviewCard projectId={id} />
+                </>
+            )}
         </div>
     );
 }

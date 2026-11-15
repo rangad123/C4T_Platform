@@ -5,6 +5,7 @@ import { registerAuthoringRoutes } from "./authoring.js";
 import { registerBlockRoutes } from "./blocks.js";
 import { registerCleanupRoutes } from "./cleanup.js";
 import { registerContractRoutes } from "./contracts.js";
+import { registerSelectionRoutes } from "./selection.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerDslRoutes } from "./dsl.js";
 import { registerGenerateScriptRoutes } from "./generate-scripts.js";
@@ -83,6 +84,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerIntegrationRoutes(ctx);
     registerPerformanceRoutes(ctx);
     registerContractRoutes(ctx);
+    // Which tests a change would call for: a read-only recommendation (routes/selection.ts).
+    registerSelectionRoutes(ctx);
     registerIdentityRoutes(ctx);
     registerHardSignInRoutes(ctx);
     registerReportRoutes(ctx);
