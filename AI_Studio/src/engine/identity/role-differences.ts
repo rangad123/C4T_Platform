@@ -27,7 +27,8 @@ export function roleDifferences(reach: Reach[], max = 24): string[] {
             if (a === b) continue;
             const mine = screens.get(a.who)!;
             const theirs = screens.get(b.who)!;
-            for (const [pat, p] of mine) {
+            // A crawl cut short by a browser crash says nothing about what that account cannot reach.
+            for (const [pat, p] of b.incomplete ? [] : mine) {
                 if (pat === "/" || theirs.has(pat)) continue;
                 reachLines.push(`“${a.who}” can open ${p.path}${p.heading ? ` (“${p.heading}”)` : ""}; “${b.who}” did not reach it.`);
             }

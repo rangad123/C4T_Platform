@@ -15,12 +15,15 @@
  * that is simply public but was not linked where the crawl looked can be flagged. Severity reflects that: a page whose address
  * looks privileged (/admin, /users, /billing, /settings...) is high, anything else low. Only GET requests are made.
  */
-import type { Browser } from "playwright";
+import { createHmac, randomBytes } from "node:crypto";
+import type { Browser, Response } from "playwright";
 import type { DraftSpec } from "../api/test-specs.js";
 import type { EngineContext } from "../context.js";
 import { login } from "../discovery/auth.js";
 import { BrowserSession } from "../discovery/browser.js";
 import { crawl, type CrawlOptions, type CrawlResult } from "../discovery/crawler.js";
+import { isApiRequest } from "../discovery/network.js";
+import { ownAppHost } from "../../shared/app-host.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ScriptRun } from "../validation/runner.js";
 
@@ -82,17 +85,26 @@ async function accessSignIn(p, base, role) {
 }
 
 /**
- * spec = JSON {as, path, marker, by, sev}: as = "anonymous" or a test account name; by = who normally reaches the page.
+ * spec = JSON {as, path, marker, by, sev, of?, pattern?}: as = "anonymous" or a test account name; by = who normally reaches the page;
+ * of = for a record of another account of the same kind (horizontal), the account it belongs to, and pattern = the address kind.
  * Opens the page directly in a fresh browser context and fails only when its marker is shown to someone it should be hidden from.
  */
 async function accessAssert(page, base, spec) {
     const cfg = JSON.parse(spec);
+    if (cfg.api) return await accessApiAssert(page, base, cfg);
+    // The page must be one of the application's own (the address the run was started for): a path that names its own host
+    // ("//other.example/x", "http://10.0.0.5/") or a scheme is refused before anything is opened, like a request step's address.
+    const home = new URL(base).origin;
+    const pagePath = typeof cfg.path === "string" ? cfg.path.split(/[?#]/)[0] : "";
+    let pageTarget;
+    try { pageTarget = new URL(String(cfg.path), base); } catch { pageTarget = null; }
+    if (!/^\/(?![\/\\])/.test(pagePath) || /\\/.test(pagePath) || !pageTarget || pageTarget.origin !== home) throw new Error("The address " + cfg.path + " is not a page of the application (" + home + "), so it was not opened and it could not be judged whether it is open to “" + cfg.as + "”.");
     const browser = page.context().browser();
     const ctx = browser ? await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } }) : page.context();
     const p = await ctx.newPage();
     try {
         if (cfg.as !== "anonymous") await accessSignIn(p, base, cfg.as);
-        const res = await p.goto(new URL(cfg.path, base).toString(), { waitUntil: "load", timeout: 30000 }).catch(() => null);
+        const res = await p.goto(pageTarget.toString(), { waitUntil: "load", timeout: 30000 }).catch(() => null);
         await p.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => undefined);
         const status = res ? res.status() : 0;
         const finalPath = new URL(p.url()).pathname;
@@ -103,11 +115,136 @@ async function accessAssert(page, base, spec) {
         const shown = text.toLowerCase().indexOf(String(cfg.marker).toLowerCase()) >= 0;
         // A page that could not be loaded at all, an error status, a sign-in redirect/form, or no trace of the marker: not open.
         if (status === 0 || status >= 400 || redirectedAway || hasPassword || deniedText || !shown) return;
+        if (cfg.of) throw new Error(ACCESS_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user can open " + cfg.path + " and see “" + cfg.marker + "”, which belongs to the “" + cfg.of + "” account (each account reaches its own records at addresses like " + cfg.pattern + "), so this is possible broken access control between accounts: check that one account cannot open another account's records");
         const who = cfg.as === "anonymous" ? "Anyone who is not signed in" : "A signed-in “" + cfg.as + "” user";
         throw new Error(ACCESS_PREFIX + " 1 page may be open to someone who should not see it\n- [" + cfg.sev + "] " + who + " can open " + cfg.path + " and see “" + cfg.marker + "”. It is normally reached only by " + (cfg.by === "anonymous" ? "visitors" : "“" + cfg.by + "”") + ", so this is possible broken access control: check that this page is meant to be open to them");
     } finally {
         await p.close().catch(() => undefined);
         if (browser) await ctx.close().catch(() => undefined);
+    }
+}
+
+/**
+ * Same-level API check: is another account's record readable through the API by cfg.as? The check stores no values and no
+ * fingerprints of them, only which fields held the owner's content (cfg.evidence: field name, length, a preview without characters).
+ * So each run first reads the record as its owner (cfg.of) and keeps that account's values of those fields in memory, then makes one
+ * GET as cfg.as. It is open only when that answer is a 2xx JSON body holding one of the owner's values. Any other answer (refused,
+ * redirected, not JSON, none of the owner's values) is not open. When the owner's own read does not give its record, nothing can be
+ * judged and the check says so (it is not a finding). The address must stay on the recorded API host. GET only; nothing is changed.
+ */
+async function accessApiAssert(page, base, cfg) {
+    const where = (cfg.origin || "") + cfg.path;
+    const origin = cfg.origin || new URL(base).origin;
+    // The API host comes from the check's own settings, which a person can edit: it is called only when it is the application's own
+    // (the address the run was started for, or its API address; the same machine name on another port counts, as when it was recorded).
+    if (!accessOwnApi(origin, base)) throw new Error("The API host " + origin + " in this check is not the application's own address (" + new URL(base).origin + ") or its API address, so it was not called and it could not be judged whether GET " + where + " is open to “" + cfg.as + "”. If it is the application's API, set it as the project's API address.");
+    const q = cfg.path.indexOf("?");
+    const pathOnly = q < 0 ? cfg.path : cfg.path.slice(0, q);
+    // A path that names its own host ("//other.example/x", "/\\other.example/x") or a scheme would send the account's API credentials elsewhere.
+    let target;
+    try { target = new URL(pathOnly, origin); } catch { target = null; }
+    if (!/^\/(?![\/\\])/.test(pathOnly) || /\\/.test(pathOnly) || !target || target.origin !== origin) throw new Error("The address " + where + " is not a path on the application's API host (" + origin + "), so it was not called and it could not be judged whether it is open to “" + cfg.as + "”.");
+    if (!cfg.of) throw new Error("The check does not name the account the record belongs to, so it could not be judged whether GET " + where + " is open to “" + cfg.as + "”.");
+    const evidence = (cfg.evidence || []).map((e) => {
+        const m = /\((\d+) characters\)/.exec(e.mask || "");
+        return { key: e.key, length: typeof e.length === "number" ? e.length : m ? Number(m[1]) : -1 };
+    });
+    const ownerRead = await accessApiRead(page, base, cfg, cfg.of, origin, target, where);
+    if (!ownerRead || ownerRead.body === undefined) throw new Error("The “" + cfg.of + "” account's own GET " + where + " was not answered with its record (" + (ownerRead ? "HTTP " + ownerRead.status : "no answer") + "), so it could not be judged whether it is open to “" + cfg.as + "”.");
+    const ownerValues = new Map();
+    accessWalk(ownerRead.body, "", (v, key) => {
+        const e = evidence.find((x) => x.key === key && x.length === v.length);
+        if (e && !ownerValues.has(v)) ownerValues.set(v, e);
+    });
+    if (!ownerValues.size) throw new Error("The “" + cfg.of + "” account's own GET " + where + " no longer holds the content it had when this check was made, so it could not be judged whether it is open to “" + cfg.as + "”. Generate the access checks again.");
+    const read = await accessApiRead(page, base, cfg, cfg.as, origin, target, where);
+    if (!read || read.body === undefined) return;
+    const hits = new Map();
+    accessWalk(read.body, "", (v) => { if (ownerValues.has(v)) hits.set(v, ownerValues.get(v)); });
+    if (!hits.size) return;
+    const shown = [...new Set([...hits.values()])].map((e) => e.key + ": " + "•".repeat(Math.min(6, Math.max(1, e.length))) + " (" + e.length + " characters)").join("; ");
+    throw new Error(ACCESS_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user can call GET " + where + " (HTTP " + read.status + ") and the answer holds content of a record that belongs to the “" + cfg.of + "” account (" + shown + "; values masked, compared with the “" + cfg.of + "” account's own answer in this run only). Each account reaches its own records through addresses like " + cfg.pattern + ", so this is possible broken access control between accounts: check that the API refuses one account's records to another account");
+}
+
+/**
+ * Whether an origin is the application's own: http(s) on the machine name of the run's address or of its API address (API_BASE_URL), or
+ * under the app's own name (api.shop.example for shop.example or www.shop.example). Another host of the same site that is not under it
+ * (api.shop.example for app.shop.example) counts only once it is the project's API address: without the public suffix list here,
+ * shop-b.herokuapp.com must never pass for shop-a.herokuapp.com's.
+ */
+function accessOwnApi(origin, base) {
+    let o;
+    try { o = new URL(origin); } catch { return false; }
+    if ((o.protocol !== "http:" && o.protocol !== "https:") || o.origin !== String(origin).replace(/\/+$/, "")) return false;
+    const h = o.hostname.toLowerCase();
+    const hostOf = (u) => { try { return u ? new URL(u).hostname.toLowerCase() : ""; } catch { return ""; } };
+    const app = hostOf(base);
+    const under = (name) => !!name && !/^[\d.]+$|^\[|:/.test(name) && name.includes(".") && h.endsWith("." + name);
+    return h === app || h === hostOf(process.env.API_BASE_URL) || under(app) || under(app.replace(/^www\./, ""));
+}
+
+/** Every trimmed string in a JSON answer with the name of the field holding it (an array keeps its field's name). Bounded. */
+function accessWalk(body, key0, visit) {
+    let leaves = 0;
+    const walk = (v, key, depth) => {
+        if (depth > 8 || leaves > 5000 || v === null || v === undefined) return;
+        if (typeof v === "string") { leaves++; visit(v.trim(), key); }
+        else if (Array.isArray(v)) for (const x of v) walk(x, key, depth + 1);
+        else if (typeof v === "object") for (const k of Object.keys(v)) walk(v[k], k, depth + 1);
+    };
+    walk(body, key0, 0);
+}
+
+/**
+ * One GET of the record as one account (or anonymously), in its own fresh browser context: signs in, takes that account's own
+ * Authorization header and its own values of the address's secret-named query parameters (cfg.secrets) from the app's calls to the API
+ * host, and calls target. Returns the status and the JSON body (undefined when not 2xx JSON), or null when there was no answer.
+ */
+async function accessApiRead(page, base, cfg, who, origin, target, where) {
+    const browser = page.context().browser();
+    if (!browser) throw new Error("A separate browser context could not be opened, so it could not be judged whether GET " + where + " is open to “" + cfg.as + "”.");
+    const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
+    const p = await ctx.newPage();
+    let auth = "";
+    const own = {};
+    const secrets = cfg.secrets || [];
+    const seen = (r) => {
+        try {
+            const u = new URL(r.url());
+            if (u.origin !== origin) return;
+            const h = r.headers()["authorization"];
+            if (h) auth = h;
+            for (const k of secrets) { const v = u.searchParams.get(k); if (v) own[k] = v; }
+        } catch {}
+    };
+    if (cfg.header || secrets.length) p.on("request", seen);
+    try {
+        if (who !== "anonymous") await accessSignIn(p, base, who);
+        const missing = () => secrets.filter((k) => !own[k]);
+        if (((cfg.header && !auth) || missing().length) && cfg.page) {
+            await p.goto(new URL(cfg.page, base).toString(), { waitUntil: "load", timeout: 30000 }).catch(() => null);
+            await p.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => undefined);
+        }
+        if (cfg.header && !auth) throw new Error("The app's own calls for the “" + who + "” account carried no API credentials after signing in, so it could not be judged whether GET " + where + " is open to “" + cfg.as + "”.");
+        if (missing().length) throw new Error("The app's own calls for the “" + who + "” account carried no value of its own for " + missing().join(", ") + " after signing in, so it could not be judged whether GET " + where + " is open to “" + cfg.as + "”.");
+        // The address as stored has its secret-named query values masked: each is replaced by this account's own value.
+        const url = new URL(target.toString());
+        const q = cfg.path.indexOf("?");
+        if (q >= 0) url.search = cfg.path.slice(q + 1).split("&").map((pair) => {
+            const i = pair.indexOf("=");
+            const k = decodeURIComponent((i < 0 ? pair : pair.slice(0, i)).replace(/\+/g, " "));
+            return secrets.includes(k) ? encodeURIComponent(k) + "=" + encodeURIComponent(own[k]) : pair;
+        }).join("&");
+        if (url.origin !== origin) throw new Error("The address " + where + " is not on the application's API host, so it was not called.");
+        const res = await ctx.request.get(url.toString(), { headers: auth ? { authorization: auth } : {}, maxRedirects: 0, failOnStatusCode: false, timeout: 30000 }).catch(() => null);
+        if (!res) return null;
+        const status = res.status();
+        if (status < 200 || status >= 300) return { status, body: undefined };
+        try { return { status, body: JSON.parse(await res.text()) }; } catch { return { status, body: undefined }; }
+    } finally {
+        p.off("request", seen);
+        await p.close().catch(() => undefined);
+        await ctx.close().catch(() => undefined);
     }
 }
 `;
@@ -153,7 +290,42 @@ export interface Reach {
     /** The account's sign-in asked for an authenticator code (lets signed-in speed / visual checks repeat it). */
     needsCode?: boolean;
     /** Buttons, tabs and menu entries shown on each page reached (role scenarios: "the admin sees Delete"). */
+    /**
+     * Why this viewer's crawl ended early (the browser crashed): its reach is not the whole of what it can open, so it is never taken
+     * as evidence that a page or record is closed to it (no "cannot open" checks are made for it as the viewer).
+     */
+    incomplete?: string;
     controls?: Array<{ path: string; names: string[] }>;
+    /** Record-scoped API reads (GET, an id in the path, a 2xx JSON answer) the app made for this account while it was surveyed. */
+    api?: ApiRecordSeen[];
+}
+
+/** One record the app read from its own API for a signed-in account. Values are kept only as fingerprints and masked previews. */
+export interface ApiRecordSeen {
+    /** Address path called, with its query string; the values of secret-named query parameters are masked (•••), never stored. */
+    path: string;
+    /** The API host's origin when it is not the app's own (a separate API host of the application, see ownApiHost). */
+    origin?: string;
+    /** Names of the secret-named query parameters in path: the check fills in the viewer's own values. */
+    secrets?: string[];
+    /** The kind of record, e.g. /api/notes/{} or /v1/note?id={} (with the origin in front for a separate API host). */
+    pattern: string;
+    /** The page that made the call (to repeat it for the account's own credentials). */
+    page: string;
+    /** The call carried an Authorization header (the app does not rely on cookies alone). */
+    header?: boolean;
+    /** Content values of the record: field name, a fingerprint for comparing within the survey, length and masked preview. */
+    values: ApiValue[];
+}
+
+export interface ApiValue {
+    key: string;
+    /** Fingerprint under the survey's own random key (newEvidenceKey): compares values within that survey only; never written into a test. */
+    hash: string;
+    /** Characters in the trimmed value. */
+    length: number;
+    /** A preview without any of the value's characters: "•••••• (19 characters)". */
+    mask: string;
 }
 
 /** How big each viewer's crawl is. */
@@ -165,6 +337,8 @@ export interface SurveyOptions {
     onCrawl?: (who: string, result: CrawlResult) => void;
     /** The project's "never ..." notes refuse these controls and links (memory/notes.ts refusedBy). */
     refuse?: CrawlOptions["refuse"];
+    /** The project's known API addresses (its API base URL): their hosts count as the application's own API hosts. */
+    apiHosts?: string[];
 }
 
 /** Fewest pages each viewer's crawl gets, however many accounts share the level's budget. */
@@ -179,7 +353,184 @@ const CONTROL_ROLES = new Set(["button", "menuitem", "tab", "checkbox", "switch"
 
 const pathOf = (p: { path: string }) => (p.path || "/").split(/[?#]/)[0] || "/";
 
-async function surveyOne(ctx: EngineContext, browser: Browser, startUrl: string, role: RoleLogin | undefined, opts: SurveyOptions): Promise<Reach | undefined> {
+/** Most API records kept per account, the largest answer read, and the most values kept per record. */
+const MAX_API_RECORDS = 40;
+const MAX_API_BODY = 256 * 1024;
+const MAX_RECORD_VALUES = 20;
+/**
+ * Field names whose values are credentials or sensitive personal or payment data: never fingerprinted or previewed, and neither is
+ * anything nested under such a field ({"credentials": {"value": ...}}).
+ */
+const SECRET_FIELD =
+    /pass(word|phrase)?|secret|token|authoriz|credential|api[-_]?key|private[-_]?key|session|signature|cookie|csrf|ssn|social[-_]?security|national[-_]?id|tax[-_]?id|passport|card[-_]?(num|no|number)|credit[-_]?card|cc[-_]?(num|number)|cvv|cvc|cvn|security[-_]?code|iban|swift|routing[-_]?(num|number)?|sort[-_]?code|(bank|account|acct)[-_]?(num|no|number)|^(auth|sig|otp|pin|code|pan|bic|key)$/i;
+
+/**
+ * The key of this process's fingerprints: random, held only in memory, never stored or written into a test. A survey makes its own
+ * (newEvidenceKey), so fingerprints compare only within one survey and cannot be looked up against a list of likely values later.
+ */
+const PROCESS_EVIDENCE_KEY = randomBytes(32);
+export const newEvidenceKey = (): Buffer => randomBytes(32);
+
+/** A fingerprint for comparing values within one survey: HMAC-SHA-256 of the trimmed value under a random key, first 32 hex. */
+export function valueHash(value: string, key: Buffer = PROCESS_EVIDENCE_KEY): string {
+    return createHmac("sha256", key).update(value.trim()).digest("hex").slice(0, 32);
+}
+
+/** A preview that shows what kind of value matched without showing any of it: "•••••• (19 characters)". */
+export function maskValue(value: string): string {
+    const v = value.trim();
+    return `${"•".repeat(Math.min(6, Math.max(1, v.length)))} (${v.length} characters)`;
+}
+
+/**
+ * The values of a JSON record that identify its content: string fields of 4-200 characters that are not ids, numbers, dates, addresses
+ * or credentials. Numbers and ids are left out because two accounts' records easily share them.
+ */
+export function recordValues(body: unknown, evidenceKey: Buffer = PROCESS_EVIDENCE_KEY): ApiValue[] {
+    const out: ApiValue[] = [];
+    const seen = new Set<string>();
+    const walk = (v: unknown, key: string, depth: number) => {
+        if (depth > 5 || out.length >= MAX_RECORD_VALUES || v === null || v === undefined) return;
+        // A secret-named field hides its value and everything under it.
+        if (key && SECRET_FIELD.test(key)) return;
+        if (typeof v === "string") {
+            const t = v.trim();
+            if (t.length < 4 || t.length > 200) return;
+            if (/^[\d\s.,:+\-/TZ]+$/.test(t) || /^(true|false|null|undefined)$/i.test(t) || /^[0-9a-f-]{12,}$/i.test(t) || /^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return;
+            const hash = valueHash(t, evidenceKey);
+            if (seen.has(hash)) return;
+            seen.add(hash);
+            out.push({ key: key || "value", hash, length: t.length, mask: maskValue(t) });
+            return;
+        }
+        if (Array.isArray(v)) for (const x of v.slice(0, 20)) walk(x, key, depth + 1);
+        else if (typeof v === "object") for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, k, depth + 1);
+    };
+    walk(body, "", 0);
+    return out;
+}
+
+/**
+ * Whether an API host the app's own pages called is the application's own, so its record reads may be replayed as another account.
+ * Own: the app's host name (any port or scheme), the host of one of the project's known API addresses (apiHosts), or a host under the
+ * app's own name (api.shop-a.herokuapp.com for shop-a.herokuapp.com; www. dropped, so api.shop.example for www.shop.example), by the
+ * shared rule in src/shared/app-host.ts (the selection preview uses it too). Nothing is
+ * inferred from a shared parent domain or hosting provider: api.shop.example for app.shop.example (a sibling), b.vercel.app for
+ * a.vercel.app are not the application's unless set as the project's API address. The same rule as the script's check (accessOwnApi).
+ * An IP or a one-label name (localhost) counts only by its exact name.
+ * Anything else, such as a third-party service the page happens to call, is never replayed: the check would send the viewer's own
+ * credentials for that host there, and the host belongs to someone else.
+ */
+export function ownApiHost(url: string, appUrl: string, apiHosts: string[] = []): boolean {
+    let u: URL;
+    let app: URL;
+    try {
+        u = new URL(url);
+        app = new URL(appUrl);
+    } catch {
+        return false;
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    const h = u.hostname.toLowerCase();
+    const hostOf = (a: string) => {
+        try {
+            return new URL(a).hostname;
+        } catch {
+            return "";
+        }
+    };
+    return ownAppHost(h, app.hostname, apiHosts.map(hostOf));
+}
+
+/** Query parameters whose values are credentials: masked in what is kept, and replayed with the viewer's own value. */
+const SECRET_PARAM = /pass|secret|token|^auth|authoriz|api[-_]?key|session|signature|^sig$|cookie|csrf|jwt|otp|nonce|^(key|sid|code|pin|hash)$/i;
+/** Query parameters that name a record (?id=, ?noteId=, ?note_id=). */
+const ID_PARAM = /^(?:id|uuid|guid)$|[_-](?:id|uuid|guid)$|[a-z](?:Id|ID|Uuid|Guid)$/;
+const SECRET_MASK = "•••";
+const isIdValue = (v: string) => /^\d+$/.test(v) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || /^[0-9a-f]{12,}$/i.test(v);
+
+/**
+ * How a record read is kept: the address path with its query string (secret-named values masked), the secret names, and the kind of
+ * record (ids in the path or in id-named query parameters become {}). Undefined when the address names no record.
+ */
+export function apiRecordAddress(url: URL): { path: string; pattern: string; secrets: string[] } | undefined {
+    // "//other.example/x" would name another host when the check resolves it against the API host: never kept.
+    if (/^\/[\/\\]/.test(url.pathname) || url.pathname.includes("\\")) return undefined;
+    const pathPattern = recordPattern(url.pathname);
+    const enc = encodeURIComponent;
+    const text: string[] = [];
+    const kind: string[] = [];
+    const secrets: string[] = [];
+    let scoped = false;
+    for (const [k, v] of url.searchParams) {
+        if (SECRET_PARAM.test(k)) {
+            if (!secrets.includes(k)) secrets.push(k);
+            text.push(`${enc(k)}=${SECRET_MASK}`);
+            kind.push(`${enc(k)}=${SECRET_MASK}`);
+        } else {
+            const id = ID_PARAM.test(k) && isIdValue(v);
+            scoped ||= id;
+            text.push(`${enc(k)}=${enc(v)}`);
+            kind.push(`${enc(k)}=${id ? "{}" : enc(v)}`);
+        }
+    }
+    if (!pathPattern && !scoped) return undefined;
+    const q = (parts: string[]) => (parts.length ? `?${parts.join("&")}` : "");
+    return { path: url.pathname + q(text), pattern: (pathPattern ?? url.pathname) + q(kind), secrets };
+}
+
+const recordKey = (r: ApiRecordSeen) => (r.origin ?? "") + r.path;
+
+/** Notes one answer the app received while an account was surveyed, if it is a record-scoped GET read from the application's own API host. */
+async function noteApiRecord(res: Response, appUrl: string, apiHosts: string[], pageUrl: string, out: ApiRecordSeen[], evidenceKey: Buffer): Promise<void> {
+    const req = res.request();
+    if (req.method() !== "GET" || !isApiRequest(req.url(), req.resourceType()) || !ownApiHost(req.url(), appUrl, apiHosts)) return;
+    const u = new URL(req.url());
+    const addr = apiRecordAddress(u);
+    if (!addr || res.status() < 200 || res.status() >= 300) return;
+    const origin = u.origin === new URL(appUrl).origin ? undefined : u.origin;
+    const seen: ApiRecordSeen = { path: addr.path, ...(origin ? { origin } : {}), ...(addr.secrets.length ? { secrets: addr.secrets } : {}), pattern: (origin ?? "") + addr.pattern, page: "/", values: [] };
+    const known = () => out.length >= MAX_API_RECORDS || out.some((r) => recordKey(r) === recordKey(seen));
+    if (!/json/i.test(res.headers()["content-type"] ?? "") || known()) return;
+    const header = Boolean(req.headers()["authorization"]);
+    if (!(await smallAnswer(res))) return;
+    const buf = await res.body();
+    if (buf.length > MAX_API_BODY) return;
+    let body: unknown;
+    try {
+        body = JSON.parse(buf.toString("utf8"));
+    } catch {
+        return;
+    }
+    const values = recordValues(body, evidenceKey);
+    if (!values.length || known()) return;
+    let page = "/";
+    try {
+        page = new URL(pageUrl).pathname || "/";
+    } catch {
+        /* keep the start page */
+    }
+    out.push({ ...seen, page, ...(header ? { header } : {}), values });
+}
+
+/**
+ * Whether an answer is small enough to read (at most MAX_API_BODY) before its body is fetched from the browser: by its Content-Length,
+ * else by the size the browser received. Playwright has no streamed read of a page's answer, so an answer of unknown size is not read.
+ */
+export async function smallAnswer(res: Pick<Response, "headerValue" | "request">): Promise<boolean> {
+    const declared = await res.headerValue("content-length").catch(() => null);
+    if (declared !== null && declared.trim() !== "") {
+        const n = Number(declared);
+        return Number.isFinite(n) && n >= 0 && n <= MAX_API_BODY;
+    }
+    const sizes = await res
+        .request()
+        .sizes()
+        .catch(() => undefined);
+    return sizes !== undefined && sizes.responseBodySize >= 0 && sizes.responseBodySize <= MAX_API_BODY;
+}
+
+async function surveyOne(ctx: EngineContext, browser: Browser, startUrl: string, role: RoleLogin | undefined, opts: SurveyOptions, evidenceKey: Buffer): Promise<Reach | undefined> {
     const session = await BrowserSession.launch(browser, { startUrl });
     try {
         let seed: string | undefined;
@@ -193,16 +544,26 @@ async function surveyOne(ctx: EngineContext, browser: Browser, startUrl: string,
             seed = r.landingUrl;
             needsCode = r.mechanisms.includes("totp");
         }
+        // Signed in: the record-scoped API reads the app makes for this account (for the same-level API checks).
+        const api: ApiRecordSeen[] = [];
+        const reads: Array<Promise<void>> = [];
+        const onResponse = (res: Response) => void reads.push(noteApiRecord(res, startUrl, opts.apiHosts ?? [], session.page.url(), api, evidenceKey).catch(() => undefined));
+        if (role) session.page.on("response", onResponse);
         const result = await crawl(session, ctx, { startUrl, maxPages: opts.maxPages, maxDepth: opts.maxDepth ?? 2, maxPerPattern: opts.perPattern ?? 2, seedUrls: seed ? [seed] : undefined, ...(opts.refuse ? { refuse: opts.refuse } : {}) });
+        if (role) session.page.off("response", onResponse);
+        await Promise.allSettled(reads);
         const who = role?.name ?? "anonymous";
         opts.onCrawl?.(who, result);
+        // A crawl the browser crash cut short saw only part of what this viewer can open: it is kept, but never as evidence of a closed page.
+        const lost = session.lostReason();
+        if (lost) ctx.emit({ stage: "discovery", kind: "access_survey_incomplete", level: "warn", message: `The access survey for ${role ? `test account “${role.name}”` : "visitors who are not signed in"} stopped early (${lost}); no “cannot open” checks are made for it.` });
         const ok = result.pages.filter((p) => p.type !== "error" && p.type !== "login" && (p.status === 0 || (p.status >= 200 && p.status < 400)));
         const pages = ok.map((p) => ({ path: pathOf(p), heading: (p.headings.find((h) => h.trim()) ?? p.title ?? "").trim() }));
         const seen = new Set<string>();
         const controls = ok
             .map((p) => ({ path: pathOf(p), names: [...new Set(p.components.filter((c) => CONTROL_ROLES.has(c.role)).map((c) => c.name))].slice(0, 30) }))
             .filter((c) => c.names.length);
-        return { who, pages: pages.filter((p) => (seen.has(p.path) ? false : (seen.add(p.path), true))), ...(needsCode ? { needsCode } : {}), ...(controls.length ? { controls } : {}) };
+        return { who, pages: pages.filter((p) => (seen.has(p.path) ? false : (seen.add(p.path), true))), ...(needsCode ? { needsCode } : {}), ...(controls.length ? { controls } : {}), ...(api.length ? { api } : {}), ...(lost ? { incomplete: lost } : {}) };
     } finally {
         await session.close();
     }
@@ -215,10 +576,12 @@ async function surveyOne(ctx: EngineContext, browser: Browser, startUrl: string,
 export async function surveyAccess(ctx: EngineContext, browser: Browser, startUrl: string, roles: RoleLogin[], size: number | SurveyOptions = 12): Promise<Reach[]> {
     const opts: SurveyOptions = typeof size === "number" ? { maxPages: size } : size;
     const out: Reach[] = [];
-    const anon = await surveyOne(ctx, browser, startUrl, undefined, opts);
+    // One random fingerprint key per survey, held only here: the accounts' record values compare with each other and nothing else.
+    const evidenceKey = newEvidenceKey();
+    const anon = await surveyOne(ctx, browser, startUrl, undefined, opts, evidenceKey);
     if (anon) out.push(anon);
     for (const role of roles) {
-        const r = await surveyOne(ctx, browser, startUrl, role, opts);
+        const r = await surveyOne(ctx, browser, startUrl, role, opts, evidenceKey);
         if (r) out.push(r);
     }
     return out;
@@ -233,11 +596,42 @@ export interface AccessGenOptions {
     maxSpecs: number;
     /** At most this many checks for pages whose address does not sound privileged (they are the likelier false alarms). */
     maxOrdinary: number;
+    /** At most this many checks of one account's records opened as another account of the same kind (default 4). */
+    maxHorizontal?: number;
+    /** At most this many checks of one account's API records read as another account of the same kind (default 4). */
+    maxApiHorizontal?: number;
+    /**
+     * The application's address and the project's API addresses: when given, API records on any other host (ownApiHost) are dropped before
+     * checks are made, so no check is generated for a sibling or shared-hosting neighbour the survey should not have kept.
+     */
+    appUrl?: string;
+    apiHosts?: string[];
+}
+
+/**
+ * The kind of record an address shows ("/notes/{}"), or undefined when the address names no record (no id-like segment): an id is a
+ * number, a UUID or a long hex string. Two accounts that each reach their own records of one kind are the evidence that records are owned.
+ */
+export function recordPattern(path: string): string | undefined {
+    let found = false;
+    const out = path
+        .split("/")
+        .map((seg) => {
+            if (isIdValue(seg)) {
+                found = true;
+                return "{}";
+            }
+            return seg;
+        })
+        .join("/");
+    return found ? out : undefined;
 }
 
 const GENERIC_HEADING = /^(home|welcome|index|menu|dashboard|untitled|page)$/i;
 
-export function generateAccessSpecs(reaches: Reach[], opts: AccessGenOptions = { maxSpecs: 8, maxOrdinary: 3 }): DraftSpec[] {
+export function generateAccessSpecs(given: Reach[], opts: AccessGenOptions = { maxSpecs: 8, maxOrdinary: 3 }): DraftSpec[] {
+    const appUrl = opts.appUrl;
+    const reaches = appUrl ? given.map((r) => (r.api ? { ...r, api: r.api.filter((a) => !a.origin || ownApiHost(`${a.origin}/`, appUrl, opts.apiHosts ?? [])) } : r)) : given;
     const byWho = new Map(reaches.map((r) => [r.who, r]));
     const viewers = reaches.map((r) => r.who);
     interface Candidate {
@@ -248,8 +642,15 @@ export function generateAccessSpecs(reaches: Reach[], opts: AccessGenOptions = {
         privileged: boolean;
     }
     const candidates: Candidate[] = [];
+    // Two or more test accounts: a record of a kind the viewer also has records of is another account's record (the horizontal pass
+    // below), not a page reserved for a more privileged account.
+    const named = reaches.filter((r) => r.who !== "anonymous");
+    const horizontalOn = named.length >= 2;
+    const patternsOf = (r: Reach) => new Set(r.pages.map((p) => recordPattern(p.path)).filter((x): x is string => Boolean(x)));
     for (const viewer of viewers) {
         const vReach = byWho.get(viewer)!;
+        if (vReach.incomplete) continue;
+        const vPatterns = horizontalOn && viewer !== "anonymous" ? patternsOf(vReach) : new Set<string>();
         const vPaths = new Set(vReach.pages.map((p) => p.path));
         const vHeadings = new Set(vReach.pages.map((p) => p.heading.toLowerCase()));
         for (const owner of reaches) {
@@ -258,6 +659,8 @@ export function generateAccessSpecs(reaches: Reach[], opts: AccessGenOptions = {
             if (viewer !== "anonymous" && owner.pages.length <= vReach.pages.length) continue;
             for (const page of owner.pages) {
                 if (vPaths.has(page.path) || page.path === "/") continue;
+                const kind = recordPattern(page.path);
+                if (kind && vPatterns.has(kind)) continue;
                 const marker = page.heading;
                 // The marker must say something about this page: long enough, not generic, and not a heading the viewer already sees elsewhere.
                 if (marker.length < 4 || marker.length > 80 || GENERIC_HEADING.test(marker) || vHeadings.has(marker.toLowerCase())) continue;
@@ -269,7 +672,109 @@ export function generateAccessSpecs(reaches: Reach[], opts: AccessGenOptions = {
     }
     const privileged = candidates.filter((c) => c.privileged);
     const ordinary = candidates.filter((c) => !c.privileged).slice(0, opts.maxOrdinary);
-    return [...privileged, ...ordinary].slice(0, opts.maxSpecs).map((c) => specFor(c));
+    const vertical = [...privileged, ...ordinary].slice(0, opts.maxSpecs).map((c) => specFor(c));
+    return horizontalOn ? [...vertical, ...horizontalSpecs(named, opts.maxHorizontal ?? 4), ...horizontalApiSpecs(named, opts.maxApiHorizontal ?? 4)] : vertical;
+}
+
+/**
+ * One account's records opened by another test account. A check is made only with evidence that the record is the owner's: both accounts
+ * reach records of the same kind (the same address pattern) at different addresses, the viewer never reached this one, and its heading is
+ * one the viewer saw nowhere (a heading every record shares, or one both see, says nothing about who owns it). Without that evidence
+ * nothing is generated. The check opens the address once, GET only, and fails only when the owner's heading is shown to the viewer.
+ */
+function horizontalSpecs(named: Reach[], max: number): DraftSpec[] {
+    const out: Array<{ as: string; of: string; path: string; marker: string; pattern: string }> = [];
+    for (const viewer of named) {
+        if (viewer.incomplete) continue;
+        const vPaths = new Set(viewer.pages.map((p) => p.path));
+        const vPatterns = new Set(viewer.pages.map((p) => recordPattern(p.path)).filter((x): x is string => Boolean(x)));
+        const vHeadings = new Set(viewer.pages.map((p) => p.heading.toLowerCase()));
+        for (const owner of named) {
+            if (owner.who === viewer.who) continue;
+            for (const page of owner.pages) {
+                const pattern = recordPattern(page.path);
+                if (!pattern || !vPatterns.has(pattern) || vPaths.has(page.path)) continue;
+                const marker = page.heading;
+                if (marker.length < 4 || marker.length > 80 || GENERIC_HEADING.test(marker) || vHeadings.has(marker.toLowerCase())) continue;
+                // A heading the owner's other records of this kind also carry is a page title, not the record's own content.
+                if (owner.pages.some((q) => q.path !== page.path && recordPattern(q.path) === pattern && q.heading.toLowerCase() === marker.toLowerCase())) continue;
+                if (out.some((c) => c.as === viewer.who && c.path === page.path)) continue;
+                out.push({ as: viewer.who, of: owner.who, path: page.path, marker, pattern });
+            }
+        }
+    }
+    return out.slice(0, max).map((c) => ({
+        title: `“${c.as}” account: cannot open a record of “${c.of}” (${c.path})`,
+        description: `The “${c.as}” account opens ${c.path} directly by its address. While browsing, only “${c.of}” reached this record, and “${c.as}” reached its own records of the same kind (${c.pattern}), so it belongs to “${c.of}”. Fails if the record's content ("${c.marker}") is shown. Only a page address is requested; nothing is changed.`,
+        kind: "web",
+        category: "Access control",
+        type: "security",
+        priority: "high",
+        preconditions: [`Test accounts named “${c.as}” and “${c.of}” are set up for this project`],
+        steps: [
+            { action: "navigate", url: "/", description: "Start at the home page" },
+            {
+                action: "assert",
+                check: "accessDenied",
+                expected: JSON.stringify({ as: c.as, path: c.path, marker: c.marker, by: c.of, sev: "high", of: c.of, pattern: c.pattern }),
+                description: `The “${c.as}” account cannot open ${c.path} (a record of “${c.of}”)`,
+            },
+        ],
+        expectedResults: [`${c.path} is not shown to the “${c.as}” account`],
+        testData: {},
+        tags: ["security", "access-control", "cross-account"],
+        source: { origin: "access-check" },
+    }));
+}
+
+/**
+ * The same-level pass for API records: account A's record-scoped GET reads are replayed as account B. A check is made only with evidence
+ * that the record is A's: both accounts read records of the same kind (the same address pattern) at different addresses, B never read this
+ * one, and the record holds values B saw in none of its own records and A's other records of this kind do not share (the evidence). The
+ * check (accessApiAssert) keeps only those values' field names and lengths; each run reads the record as A, then makes one GET as B and
+ * fails only when a 2xx answer holds one of A's values of those fields.
+ */
+function horizontalApiSpecs(named: Reach[], max: number): DraftSpec[] {
+    const out: Array<{ as: string; of: string; rec: ApiRecordSeen; evidence: ApiValue[]; page: string }> = [];
+    for (const viewer of named) {
+        if (viewer.incomplete) continue;
+        const vRecs = viewer.api ?? [];
+        const vPaths = new Set(vRecs.map(recordKey));
+        const vHashes = new Set(vRecs.flatMap((r) => r.values.map((v) => v.hash)));
+        for (const owner of named) {
+            if (owner.who === viewer.who) continue;
+            for (const rec of owner.api ?? []) {
+                const own = vRecs.find((r) => r.pattern === rec.pattern);
+                if (!own || vPaths.has(recordKey(rec))) continue;
+                const shared = new Set((owner.api ?? []).filter((r) => recordKey(r) !== recordKey(rec) && r.pattern === rec.pattern).flatMap((r) => r.values.map((v) => v.hash)));
+                const evidence = rec.values.filter((v) => !vHashes.has(v.hash) && !shared.has(v.hash)).slice(0, 5);
+                if (!evidence.length || out.some((c) => c.as === viewer.who && recordKey(c.rec) === recordKey(rec))) continue;
+                out.push({ as: viewer.who, of: owner.who, rec, evidence, page: own.page });
+            }
+        }
+    }
+    return out.slice(0, max).map((c) => ({
+        title: `“${c.as}” account: cannot read a record of “${c.of}” through the API (GET ${recordKey(c.rec)})`,
+        description: `The “${c.as}” account calls GET ${recordKey(c.rec)} directly. While browsing, the app read this record only for “${c.of}”, and read “${c.as}”'s own records of the same kind (${c.rec.pattern}), so it belongs to “${c.of}”. Fails if the answer holds the record's content, compared with “${c.of}”'s own answer read in the same run (values are not stored).${c.rec.secrets ? ` Its ${c.rec.secrets.join(", ")} value is masked here and replaced by “${c.as}”'s own when the request is made.` : ""} A single GET request; nothing is changed.`,
+        kind: "web",
+        category: "Access control",
+        type: "security",
+        priority: "high",
+        preconditions: [`Test accounts named “${c.as}” and “${c.of}” are set up for this project`],
+        steps: [
+            { action: "navigate", url: "/", description: "Start at the home page" },
+            {
+                action: "assert",
+                check: "accessDenied",
+                expected: JSON.stringify({ api: true, as: c.as, path: c.rec.path, ...(c.rec.origin ? { origin: c.rec.origin } : {}), ...(c.rec.secrets ? { secrets: c.rec.secrets } : {}), by: c.of, of: c.of, sev: "high", pattern: c.rec.pattern, page: c.page, ...(c.rec.header ? { header: true } : {}), evidence: c.evidence.map((e) => ({ key: e.key, ...(typeof e.length === "number" ? { length: e.length } : {}), mask: e.mask.replace(/^[^•]*/, "") })) }),
+                description: `The “${c.as}” account cannot read GET ${recordKey(c.rec)} (a record of “${c.of}”)`,
+            },
+        ],
+        expectedResults: [`GET ${recordKey(c.rec)} does not give the “${c.as}” account the content of a record of “${c.of}”`],
+        testData: {},
+        tags: ["security", "access-control", "cross-account", "api"],
+        source: { origin: "access-check" },
+    }));
 }
 
 function specFor(c: { as: string; by: string; path: string; marker: string; privileged: boolean }): DraftSpec {
