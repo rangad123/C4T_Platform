@@ -15,6 +15,7 @@ import { installCompactSnapshots } from "./snapshot-settings.js";
 import { installLlmRouting } from "./llm-routing.js";
 import { installPromptCache } from "./prompt-cache-settings.js";
 import { installWithoutAi } from "./without-ai-settings.js";
+import { recordRetentionStart } from "./retention-runner.js";
 
 export interface Platform {
     config: Config;
@@ -32,6 +33,7 @@ export function bootstrap(config: Config = loadConfig()): Platform {
     const db = new Db(config.dbPath);
     const repo = new Repo(db, new SecretBox(config.dataDir, config.SECRET_KEY));
     repo.ensureDefaultUser();
+    recordRetentionStart(db); // first-deploy retention grace: written once (INSERT ... ON CONFLICT DO NOTHING), never moved by restarts
     // Fallback models saved in Settings, and AI model health shared between processes (docs/features/ai-model-reliability.md).
     installLlmHealth(db);
     // Smaller page snapshots switch saved in Settings (snapshot-settings.ts): read when an authoring session or phone exploration starts.

@@ -69,15 +69,20 @@ export interface Policy {
     enabled: boolean;
     keepDays: number;
     keepFailedDays: number;
-    keepLatestRuns: number;
+    /** No longer used by the server (still sent); not shown. */
+    keepLatestRuns?: number;
     maxArtifactMB: number | null;
 }
 
 export interface RetentionState {
     policy: Policy;
     source: "project" | "platform" | "default";
+    /** The saved periods are longer than the server allows: they apply shortened. */
+    heldToLimits?: boolean;
     platformDefaultDays: number | null;
-    limits: Record<"keepDays" | "keepFailedDays" | "keepLatestRuns" | "maxArtifactMB", { min: number; max: number; default?: number }>;
+    /** RETENTION_DEFAULT_DAYS=off: projects without a policy keep everything. */
+    platformDefaultOff?: boolean;
+    limits: Record<"keepDays" | "keepFailedDays" | "maxArtifactMB", { min: number; max: number; default?: number }>;
     busy: boolean;
     recent: Array<{ id: number; at: string; trigger: "manual" | "scheduled"; files: number; bytes: number; errors: number; errorSample: string | null }>;
 }
@@ -92,8 +97,47 @@ export interface Preview {
     byKind: Record<string, { files: number; bytes: number }>;
     kept: Record<string, number>;
     sentence: string;
+    /** Runs and run summaries past the period whose failure details are cleared (the runs stay), and the sentence saying so. */
+    runs?: number;
+    summaries?: number;
+    details?: string | null;
     sample: Array<{ id: string; kind: string; size: number; test: string | null }>;
     sampleOf: number;
+    /** Other records whose failure text is replaced (job messages, test reasons, agent runs), and how many of them are AI agent runs. */
+    records?: number;
+    agentRuns?: number;
+    /** First-deploy grace: files and records from before retention was first switched on that are kept for now, and when that ends. */
+    grace?: number;
+    graceRecords?: number;
+    graceUntil?: string | null;
+    /** Files kept because the time of their run could not be read. */
+    undated?: number;
+    undatedNote?: string | null;
+    /** During the first-deploy grace: the size limit does not count the held files (sentence from the server). */
+    sizeLimitNote?: string | null;
+}
+
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** The extra lines of a preview, in plain words: other records cleared, what the first 14 days keep (with the end date), unreadable times. */
+export function previewNotes(p: Preview): string[] {
+    const out: string[] = [];
+    const records = p.records ?? 0;
+    const agentRuns = p.agentRuns ?? 0;
+    if (records > 0) {
+        const agents = agentRuns > 0 ? ` (${count(agentRuns, "AI agent run")} among them)` : "";
+        out.push(`The failure details of ${count(records, "other record")}${agents} are replaced with “Details expired.”: job messages, test reasons and AI agent runs. The records stay.`);
+    }
+    const files = p.grace ?? 0;
+    const held = p.graceRecords ?? 0;
+    if (files > 0 || held > 0) {
+        const what = [files ? count(files, "file") : "", held ? `the details of ${count(held, "record")}` : ""].filter(Boolean).join(" and ");
+        const until = p.graceUntil ? ` until ${formatDate(p.graceUntil)}` : " for now";
+        out.push(`Kept${until}: ${what} from before retention was first switched on. Nothing from before then is removed in the first 14 days.`);
+    }
+    if (p.sizeLimitNote) out.push(p.sizeLimitNote);
+    if ((p.undated ?? 0) > 0) out.push(p.undatedNote ?? `${count(p.undated!, "file")} kept: the time of the run could not be read.`);
+    return out;
 }
 
 export interface RestoreResult {
@@ -135,8 +179,8 @@ const formatDate = (iso: string) => {
     return Number.isNaN(d.getTime()) ? "an unknown date" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 };
 
-/** "This recording was removed to save space on Oct 5, 2026." (the same sentence the server uses). */
-export const prunedNote = (kind: string, prunedAt: string): string => `This ${fileLabel(kind)} was removed to save space on ${formatDate(prunedAt)}.`;
+/** "This recording expired and was removed on Oct 5, 2026 (the project's retention policy)." (the same sentence the server uses). */
+export const prunedNote = (kind: string, prunedAt: string): string => `This ${fileLabel(kind)} expired and was removed on ${formatDate(prunedAt)} (the project's retention policy).`;
 
 /** What a run of the cleanup did, in words, for the history list. */
 export function logLine(r: { trigger: "manual" | "scheduled"; files: number; bytes: number; errors: number }): string {

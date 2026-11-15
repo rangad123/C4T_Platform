@@ -120,7 +120,7 @@ export async function evidenceView(repo: Repo, store: ArtifactStore, testId: str
     if (!artifact) {
         return { available: false, execution, message: "No network or console details were recorded for this run. Runs made before this was added do not have them. Run the test again to capture them.", outcomes: outcomesOf(repo, testId, chosen) };
     }
-    // The retention policy may have removed the file to save space; say that, not "could not be read".
+    // The retention policy may have removed the file when it expired; say that, not "could not be read".
     if (artifact.pruned_at) return { available: false, execution, message: prunedMessage("evidence", artifact.pruned_at) };
     let evidence: Evidence | undefined;
     try {

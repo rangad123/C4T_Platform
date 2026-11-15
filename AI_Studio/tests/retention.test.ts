@@ -2,7 +2,9 @@
  * Storage, retention and backup against a real platform (database, artifact store on disk, HTTP routes through the real server),
  * no browser and no model. Evidence files are real files; their runs carry fake old timestamps.
  *  - retention off removes nothing; a run needs a policy that is on and { confirm: true }; policy bounds
- *  - preview equals run; protected files survive (baselines, latest runs, current failures, issues, releases, pending visual changes);
+ *  - preview equals run; only baselines and files of no run outlive their period (not the latest run, a failure, an issue, a release
+ *    or a pending visual change); passed runs keep no trace or recording; an unknown kind expires with its run; confirmed findings,
+ *    their history, issues and test results survive and the readers say the evidence expired; a restore without a policy is on;
  *    run history, trends and flaky detection are unchanged; removed files are marked and say so (410, evidence message)
  *  - a running job blocks pruning; the daily pass runs once a day; a file that cannot be removed is logged, not fatal; a path that
  *    leaves the artifact folder is never touched; the platform default
@@ -27,9 +29,11 @@ import { runScheduledRetention } from "../src/platform/retention-runner.js";
 import { RunbookStore } from "../src/platform/runbook-store.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { ScheduleStore } from "../src/platform/schedule-store.js";
+import { gatherReport, renderReportHtml } from "../src/platform/reports/project-report.js";
 import { buildServer } from "../src/platform/server.js";
+import { SecurityStore } from "../src/security/store.js";
 import { forgetUsage } from "../src/platform/storage-usage.js";
-import { addBaseline, addRun, addTest, DAY, exists, seedProject, type Seed, type SeedFile } from "./fixtures/retention-seed.js";
+import { addBaseline, addRun, addTest, DAY, exists, pastGrace, type Seed, type SeedFile, seedProject } from "./fixtures/retention-seed.js";
 
 // Distinct, greppable values, the same shapes as tests/secret-leak.test.ts.
 const SECRETS = {
@@ -82,6 +86,7 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-retention-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic" }));
+    pastGrace(platform); // an installation long past its first-deploy grace (the grace itself: retention-other-records.test.ts)
     server = await buildServer(platform);
 }, 60_000);
 afterAll(async () => {
@@ -103,17 +108,17 @@ const ok = (r: Answer, status: number) => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("retention is off by default and cannot be run by accident", () => {
+describe("retention is on by default (7 / 30 days) and a run cannot be started by accident", () => {
     let seed: Seed;
     let files: SeedFile[] = [];
 
-    it("a new project has retention off, with nothing scheduled", async () => {
+    it("a new project has retention on: failed runs' media 7 days, passed runs' records 30 days, nothing run yet", async () => {
         seed = project("Off by default");
         const t = addTest(platform, seed);
         files = [...Array.from({ length: 4 }, (_, i) => addRun(platform, seed, t, { daysAgo: 100 + i, files: [{ kind: "video", size: 4000 }, { kind: "screenshot" }] }).files).flat(), ...addRun(platform, seed, t, { daysAgo: 1, files: [{ kind: "screenshot" }] }).files];
         const r = await call("GET", `/api/projects/${seed.projectId}/retention`);
         expect(r.status).toBe(200);
-        expect(r.body.policy).toMatchObject({ enabled: false, keepDays: 30, keepFailedDays: 90, keepLatestRuns: 5, maxArtifactMB: null });
+        expect(r.body.policy).toMatchObject({ enabled: true, keepDays: 30, keepFailedDays: 7, keepLatestRuns: 5, maxArtifactMB: null });
         expect(r.body.source).toBe("default");
         expect(r.body.platformDefaultDays).toBeNull();
         expect(r.body.recent).toEqual([]);
@@ -153,9 +158,7 @@ describe("retention is off by default and cannot be run by accident", () => {
             [{ keepDays: 3 }, /at least 7/],
             [{ keepDays: 400 }, /at most 365/],
             [{ keepFailedDays: 800 }, /at most 730/],
-            [{ keepLatestRuns: 0 }, /at least 1/],
-            [{ keepLatestRuns: 51 }, /at most 50/],
-            [{ keepDays: 100, keepFailedDays: 50 }, /at least as long/],
+            [{ keepFailedDays: 6 }, /at least 7/],
             [{ maxArtifactMB: 5 }, /at least 10/],
             [{ keepDays: "thirty" }, /./],
             [{ surprise: true }, /Unknown or invalid/],
@@ -166,7 +169,10 @@ describe("retention is off by default and cannot be run by accident", () => {
             expect(r.body.error, JSON.stringify(body)).toMatch(message);
         }
         const now = await call("GET", `/api/projects/${seed.projectId}/retention`);
-        expect(now.body.policy).toMatchObject({ enabled: true, keepDays: 30, keepFailedDays: 90, keepLatestRuns: 1 });
+        expect(now.body.policy).toMatchObject({ enabled: true, keepDays: 30, keepFailedDays: 7 });
+        // the removed "latest runs" setting: an older client may still send it; it is accepted and changes nothing
+        ok(await call("PUT", `/api/projects/${seed.projectId}/retention`, { keepLatestRuns: 0 }), 200);
+        expect((await call("GET", `/api/projects/${seed.projectId}/retention`)).body.limits.keepLatestRuns).toBeUndefined();
         expect((await call("GET", `/api/projects/nope/retention`)).status).toBe(404);
         expect((await call("POST", `/api/projects/nope/retention/preview`)).status).toBe(404);
     });
@@ -189,16 +195,16 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         statuses: JSON.stringify(platform.db.all("SELECT id, validation_status, validation_reason FROM test_cases WHERE project_id = ? ORDER BY id", seed.projectId)),
     });
 
-    it("seeds a project with every kind of file worth protecting", async () => {
+    it("seeds a project: nothing but baselines and files of no run outlive their period (approved policy)", async () => {
         seed = project("Retention rules");
         const { projectId } = seed;
 
-        // A: old passed runs; only the newest is a "latest run". The three old runs go.
+        // A: old passed runs go; the recent passed run's screenshot stays
         const a = addTest(platform, seed, "A passes");
         for (const d of [200, 190, 180]) gone.push(...addRun(platform, seed, a, { daysAgo: d, files: [{ kind: "video", size: 5000 }, { kind: "screenshot", size: 300 }] }).files);
         kept.push(...addRun(platform, seed, a, { daysAgo: 1, files: [{ kind: "screenshot", size: 300 }] }).files);
 
-        // B: failing now. Its newest run stays, however it looks; the failed run older than 90 days goes.
+        // B: failing now. The failed run older than 90 days goes; the recent one stays
         const b = addTest(platform, seed, "B fails");
         gone.push(...addRun(platform, seed, b, { daysAgo: 230, status: "failed", files: [{ kind: "trace", size: 2000 }, { kind: "screenshot", size: 300 }] }).files);
         kept.push(...addRun(platform, seed, b, { daysAgo: 5, status: "failed", files: [{ kind: "trace", size: 2000 }, { kind: "video", size: 3000 }] }).files);
@@ -208,26 +214,26 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         kept.push(addBaseline(platform, seed, c));
         kept.push(...addRun(platform, seed, c, { daysAgo: 1, files: [{ kind: "screenshot" }] }).files);
 
-        // D: an issue was filed from the failed run 150 days ago; the passed run in between goes
+        // D: an issue filed from the failed run 150 days ago no longer keeps its files (the issue link itself stays)
         const d = addTest(platform, seed, "D has an issue");
-        kept.push(...addRun(platform, seed, d, { daysAgo: 150, status: "failed", files: [{ kind: "screenshot", size: 400 }] }).files);
+        gone.push(...addRun(platform, seed, d, { daysAgo: 150, status: "failed", files: [{ kind: "screenshot", size: 400 }] }).files);
         gone.push(...addRun(platform, seed, d, { daysAgo: 100, files: [{ kind: "screenshot", size: 400 }] }).files);
         kept.push(...addRun(platform, seed, d, { daysAgo: 1, files: [{ kind: "screenshot", size: 400 }] }).files);
         platform.db.run("INSERT INTO issue_links (id, test_case_id, integration_id, provider, external_id, url, title, created_at) VALUES (?,?,?,?,?,?,?,?)", "il-1", d.id, null, "github", "12", "https://github.example/issues/12", "Fails", new Date(Date.now() - 140 * DAY).toISOString());
 
-        // E: a release was snapshotted 245 days ago; the newest run at that moment stays, the one after it goes
+        // E: a release snapshotted 245 days ago no longer keeps the run it looked at (the release itself stays)
         const e = addTest(platform, seed, "E is in a release");
-        kept.push(...addRun(platform, seed, e, { daysAgo: 250, files: [{ kind: "video", size: 800 }] }).files);
+        gone.push(...addRun(platform, seed, e, { daysAgo: 250, files: [{ kind: "video", size: 800 }] }).files);
         gone.push(...addRun(platform, seed, e, { daysAgo: 240, files: [{ kind: "video", size: 800 }] }).files);
-        kept.push(...addRun(platform, seed, e, { daysAgo: 1, files: [{ kind: "video", size: 800 }] }).files);
+        kept.push(...addRun(platform, seed, e, { daysAgo: 1, files: [{ kind: "screenshot", size: 800 }] }).files);
         const at = new Date(Date.now() - 245 * DAY).toISOString();
         platform.db.run("INSERT INTO releases (id, project_id, name, notes, status, snapshot_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)", "rel-1", projectId, "1.0", "", "open", at, at, at);
 
-        // F: a visual change waiting to be accepted
+        // F: an old visual change waiting to be accepted is no longer kept; neither is the newest run of a failing test
         const f = addTest(platform, seed, "F has a pending visual change");
-        kept.push(...addRun(platform, seed, f, { daysAgo: 200, status: "failed", files: [{ kind: "visual-actual", size: 500 }, { kind: "visual-diff", size: 500 }] }).files);
+        gone.push(...addRun(platform, seed, f, { daysAgo: 200, status: "failed", files: [{ kind: "visual-actual", size: 500 }, { kind: "visual-diff", size: 500 }] }).files);
         gone.push(...addRun(platform, seed, f, { daysAgo: 190, status: "failed", files: [{ kind: "screenshot", size: 500 }] }).files);
-        kept.push(...addRun(platform, seed, f, { daysAgo: 180, status: "failed", files: [] }).files);
+        gone.push(...addRun(platform, seed, f, { daysAgo: 180, status: "failed", files: [{ kind: "trace", size: 500 }] }).files);
 
         // G: a web test whose old failed run recorded network calls and console messages
         const g = addTest(platform, seed, "G records evidence", "web");
@@ -237,16 +243,23 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         gone.push(...oldRun.files);
         kept.push(...addRun(platform, seed, g, { daysAgo: 10, status: "failed", files: [{ kind: "evidence", size: 600 }] }).files);
 
-        // H: a browser variant has its own runs: its newest is kept too
+        // H: a browser variant's runs expire like any other, its newest included
         const h = addTest(platform, seed, "H on firefox");
         gone.push(...addRun(platform, seed, h, { daysAgo: 120, variant: "firefox", files: [{ kind: "screenshot", size: 200 }] }).files);
-        kept.push(...addRun(platform, seed, h, { daysAgo: 110, variant: "firefox", files: [{ kind: "screenshot", size: 200 }] }).files);
+        gone.push(...addRun(platform, seed, h, { daysAgo: 110, variant: "firefox", files: [{ kind: "screenshot", size: 200 }] }).files);
         kept.push(...addRun(platform, seed, h, { daysAgo: 2, files: [{ kind: "screenshot", size: 200 }] }).files);
+
+        // I: a passed run keeps no trace or recording, however recent; a kind nobody has heard of expires with its run
+        const i = addTest(platform, seed, "I passed on a retry");
+        const retried = addRun(platform, seed, i, { daysAgo: 2, files: [{ kind: "trace", size: 900 }, { kind: "video", size: 900 }, { kind: "evidence", size: 90 }] }).files;
+        gone.push(...retried.filter((x) => x.kind !== "evidence"));
+        kept.push(...retried.filter((x) => x.kind === "evidence"));
+        gone.push(...addRun(platform, seed, i, { daysAgo: 40, files: [{ kind: "network-footprint", size: 70 }] }).files);
 
         // an artifact without a run, and an app model: never removed
         kept.push({ id: platform.repo.addArtifact({ projectId, kind: "app-model", path: `${projectId}/_artifacts/job/app-model.json`, size: 10 }), kind: "app-model", rel: "", abs: "", size: 10 });
 
-        await setPolicy(projectId, { enabled: true, keepDays: 30, keepFailedDays: 90, keepLatestRuns: 1 });
+        await setPolicy(projectId, { enabled: true, keepDays: 30, keepFailedDays: 90 });
         before = await snapshot();
     });
 
@@ -256,12 +269,12 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         const expectedBytes = gone.reduce((n, f) => n + f.size, 0);
         expect(r.body).toMatchObject({ enabled: true, files: gone.length, bytes: expectedBytes });
         expect(r.body.size).toMatch(/KB|bytes/);
-        expect(r.body.sentence).toBe(`This would remove ${gone.length} files (${r.body.size}) older than 30 days (90 for failed runs).`);
+        expect(r.body.sentence).toBe(`This would remove ${gone.length} files (${r.body.size}), to keep within 30 days for passed runs and 90 days for failed runs. 7 traces or recordings of passed runs are among them: passed runs keep none.`);
         expect(new Date(r.body.oldest).getTime()).toBeLessThan(new Date(r.body.newest).getTime());
         expect(r.body.sample.length).toBe(Math.min(20, gone.length));
         expect(r.body.sample.every((s: any) => typeof s.id === "string" && !("path" in s))).toBe(true);
         expect(r.body.byKind.video.files).toBe(gone.filter((f) => f.kind === "video").length);
-        expect(r.body.kept["latest-runs"]).toBeGreaterThan(0);
+        expect(r.body.kept).toEqual({ kind: 1, "no-run": 1 });
         // exactly the files the test expects, by id
         const ids = new Set(gone.map((f) => f.id));
         expect(r.body.sample.every((s: any) => ids.has(s.id))).toBe(true);
@@ -283,7 +296,7 @@ describe("a run removes exactly what the preview promised, and keeps everything 
             expect(exists(f), `${f.kind} should be gone`).toBe(false);
             const row = platform.db.get<any>("SELECT pruned_at, pruned_reason FROM artifacts WHERE id = ?", f.id);
             expect(row.pruned_at).toBeTruthy();
-            expect(["age", "age-failed", "size-cap"]).toContain(row.pruned_reason);
+            expect(["age", "age-failed", "passed-media"]).toContain(row.pruned_reason);
         }
         for (const k of kept) {
             if (k.abs) expect(exists(k), `${k.kind} ${k.rel} should stay`).toBe(true);
@@ -315,7 +328,7 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         const removed = gone.find((f) => f.kind === "video")!;
         const r = await call("GET", `/api/artifacts/${removed.id}`);
         expect(r.status).toBe(410);
-        expect(r.body.error).toMatch(/^This recording was removed to save space on [A-Z][a-z]{2} \d{1,2}, \d{4}\.$/);
+        expect(r.body.error).toMatch(/^This recording expired and was removed on [A-Z][a-z]{2} \d{1,2}, \d{4} \(the project's retention policy\)\.$/);
         const ok = kept.find((f) => f.kind === "screenshot")!;
         const got = await call("GET", `/api/artifacts/${ok.id}`);
         expect(got.status).toBe(200);
@@ -330,7 +343,7 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         expect(detail.executions[0].artifacts.every((x: any) => !x.pruned_at)).toBe(true); // the latest run is intact
         const ev = (await call("GET", `/api/tests/${webTestId}/evidence?executionId=${oldWebRun}`)).body;
         expect(ev.available).toBe(false);
-        expect(ev.message).toMatch(/^This list of network calls and console messages was removed to save space on /);
+        expect(ev.message).toMatch(/^This list of network calls and console messages expired and was removed on /);
     });
 });
 
@@ -356,7 +369,7 @@ describe("a running job blocks pruning; the daily pass runs once a day", () => {
 
         platform.repo.setJobStatus(job.id, "COMPLETED");
         const ok = await call("POST", `/api/projects/${seed.projectId}/retention/run`, { confirm: true });
-        expect(ok.body.files).toBe(3); // the newest run (no files) is the latest run; the three old ones go
+        expect(ok.body.files).toBe(3); // the three old runs' files go
         expect(old.filter(exists).length).toBe(0);
     });
 
@@ -470,19 +483,21 @@ describe("a file that cannot be removed, and a path that must not be touched", (
 });
 
 describe("the platform default", () => {
-    it("is off unless set, ignores anything that is not a number of days, and applies only to projects without a policy of their own", async () => {
+    it("is the built-in default (on) unless set, can be switched off, ignores anything else, and applies only to projects without a policy of their own", async () => {
         const seed = project("Default days");
         const t = addTest(platform, seed);
         const old = [100, 101, 102].flatMap((d) => addRun(platform, seed, t, { daysAgo: d, files: [{ kind: "video" }] }).files);
         addRun(platform, seed, t, { daysAgo: 1, files: [] });
-        for (const raw of [undefined, "", "abc", "6", "9999", "30 days"]) expect(new RetentionStore(platform.db, raw).effective(seed.projectId), String(raw)).toMatchObject({ enabled: false, source: "default" });
-        expect(new RetentionStore(platform.db, "45").effective(seed.projectId)).toMatchObject({ enabled: true, keepDays: 45, keepFailedDays: 135, source: "platform" });
-        expect((await runScheduledRetention(platform, Date.now())).find((r) => r.projectId === seed.projectId)).toBeUndefined();
+        for (const raw of [undefined, "", "abc", "6", "9999", "30 days"]) expect(new RetentionStore(platform.db, raw).effective(seed.projectId), String(raw)).toMatchObject({ enabled: true, keepDays: 30, keepFailedDays: 7, source: "default" });
+        expect(new RetentionStore(platform.db, "off").effective(seed.projectId)).toMatchObject({ enabled: false, source: "platform" });
+        expect(new RetentionStore(platform.db, "45").effective(seed.projectId)).toMatchObject({ enabled: true, keepDays: 45, keepFailedDays: 7, source: "platform" });
+        const off = { ...platform, config: { ...platform.config, RETENTION_DEFAULT_DAYS: "off" } } as Platform;
+        expect((await runScheduledRetention(off, Date.now())).find((r) => r.projectId === seed.projectId)).toBeUndefined();
 
         const withDefault = { ...platform, config: { ...platform.config, RETENTION_DEFAULT_DAYS: "30" } } as Platform;
-        // keepLatestRuns is 5 by default: three old runs are all "latest", so nothing goes yet
-        expect((await runScheduledRetention(withDefault, Date.now())).find((r) => r.projectId === seed.projectId)).toMatchObject({ result: "pruned", files: 0 });
-        expect(old.every(exists)).toBe(true);
+        // nothing keeps the latest runs any more: the three old runs' files go under the platform default too
+        expect((await runScheduledRetention(withDefault, Date.now())).find((r) => r.projectId === seed.projectId)).toMatchObject({ result: "pruned", files: 3 });
+        expect(old.some(exists)).toBe(false);
         // the project's own choice wins over the platform default, including "off"
         await setPolicy(seed.projectId, { enabled: false });
         expect(new RetentionStore(platform.db, "30").effective(seed.projectId)).toMatchObject({ enabled: false, source: "project" });
@@ -492,6 +507,115 @@ describe("the platform default", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+
+describe("the decided defaults remove the stored files themselves, within the server's limits (2026-11-14)", () => {
+    it("removes a failed run's trace and video after 7 days and a passed run's record after 30 days, from disk, the latest run included", async () => {
+        const seed = project("Decision defaults");
+        const t = addTest(platform, seed);
+        // The failed run 8 days ago is the test's latest run: it is not kept for that.
+        const failedOld = addRun(platform, seed, t, { daysAgo: 8, status: "failed", files: [{ kind: "trace", size: 7000 }, { kind: "video", size: 9000 }] }).files;
+        const passedRecent = addRun(platform, seed, t, { daysAgo: 20, files: [{ kind: "evidence", size: 300 }] }).files;
+        const passedOld = addRun(platform, seed, t, { daysAgo: 31, files: [{ kind: "evidence", size: 400 }] }).files;
+        expect([...failedOld, ...passedRecent, ...passedOld].every(exists)).toBe(true);
+        forgetUsage(platform);
+        const before = (await call("GET", `/api/projects/${seed.projectId}/storage`)).body.usage.bytes as number;
+
+        const pass = (await runScheduledRetention(platform, Date.now())).find((r) => r.projectId === seed.projectId);
+        expect(pass).toMatchObject({ result: "pruned", files: 3 });
+        // The files are gone from the store, not only marked in the database.
+        expect(failedOld.some(exists)).toBe(false);
+        expect(passedOld.some(exists)).toBe(false);
+        expect(passedRecent.every(exists)).toBe(true);
+        const rows = platform.db.all<{ kind: string; pruned_reason: string | null }>("SELECT kind, pruned_reason FROM artifacts WHERE project_id = ? AND pruned_at IS NOT NULL ORDER BY kind", seed.projectId);
+        expect(rows).toEqual([
+            { kind: "evidence", pruned_reason: "age" },
+            { kind: "trace", pruned_reason: "age-failed" },
+            { kind: "video", pruned_reason: "age-failed" },
+        ]);
+        const after = (await call("GET", `/api/projects/${seed.projectId}/storage`)).body;
+        expect(after.usage.bytes).toBe(before - 16_400);
+        expect(after.removed.files).toBe(3);
+    });
+
+    it("refuses a project setting above the server's limit, and holds an older, longer policy to it", async () => {
+        const limited = { ...platform, config: { ...platform.config, RETENTION_MAX_METADATA_DAYS: "60", RETENTION_MAX_FAILED_MEDIA_DAYS: "14" } } as Platform;
+        const app = await buildServer(limited);
+        try {
+            const seed = project("Server limits");
+            // A policy saved before the limit existed (the old meaning of the same two numbers) still loads.
+            new RetentionStore(platform.db).save(seed.projectId, { enabled: true, keepDays: 90, keepFailedDays: 270, keepLatestRuns: 5, maxArtifactMB: null });
+            const got = await call("GET", `/api/projects/${seed.projectId}/retention`, undefined, { app });
+            expect(got.status).toBe(200);
+            expect(got.body).toMatchObject({ policy: { enabled: true, keepDays: 60, keepFailedDays: 14 }, source: "project", heldToLimits: true });
+            expect(got.body.limits.keepDays.max).toBe(60);
+            expect(got.body.limits.keepFailedDays.max).toBe(14);
+            const over = await call("PUT", `/api/projects/${seed.projectId}/retention`, { keepFailedDays: 30 }, { app });
+            expect(over.status).toBe(400);
+            expect(over.body.error).toMatch(/failed runs for at most 14 days/);
+            const tooLong = await call("PUT", `/api/projects/${seed.projectId}/retention`, { keepDays: 61, keepFailedDays: 14 }, { app });
+            expect(tooLong.status).toBe(400);
+            expect(tooLong.body.error).toMatch(/at most 60 days/);
+            ok(await call("PUT", `/api/projects/${seed.projectId}/retention`, { keepDays: 60, keepFailedDays: 14 }, { app }), 200);
+            // Without the limits (the same project on the normal server), the saved policy applies as saved.
+            expect((await call("GET", `/api/projects/${seed.projectId}/retention`)).body).toMatchObject({ policy: { keepDays: 60, keepFailedDays: 14 }, source: "project" });
+        } finally {
+            await app.close();
+        }
+    });
+});
+
+describe("confirmed findings survive the expiry of their run's files (2026-11-14)", () => {
+    it("keeps the finding, its status and history, the issue and the test result; the files go and the report says the evidence expired", async () => {
+        const seed = project("Findings keep their records");
+        const t = addTest(platform, seed, "Checkout shows the total", "web");
+        const failed = addRun(platform, seed, t, { daysAgo: 8, status: "failed", files: [{ kind: "screenshot", size: 500 }, { kind: "evidence", size: 300 }, { kind: "trace", size: 900 }] });
+        platform.repo.updateTest(t.id, { validationStatus: "NEEDS_REVIEW", reason: "The total is wrong" });
+        platform.db.run("INSERT INTO issue_links (id, test_case_id, integration_id, provider, external_id, url, title, created_at) VALUES (?,?,?,?,?,?,?,?)", "il-find", t.id, null, "github", "7", "https://github.example/issues/7", "Total wrong", new Date(Date.now() - 7 * DAY).toISOString());
+        const sec = new SecurityStore(platform.db);
+        const app = sec.createApplication(seed.projectId, { name: "Shop", targetUrl: "http://127.0.0.1:9611/", environment: "staging" });
+        const { finding } = sec.upsertFinding({ projectId: seed.projectId, applicationId: app.id, assessmentId: null, fingerprint: "fp-1", title: "Missing header", category: "headers", severity: "medium", confidence: "high", location: "/", description: "d", impact: "i", remediation: "r", evidence: [], source: "manual", seenAt: new Date(Date.now() - 40 * DAY).toISOString() });
+        sec.setValidation(finding.id, "confirmed", { comment: "Reproduced" });
+        const rows = () => ({
+            test: platform.db.get("SELECT validation_status, validation_reason FROM test_cases WHERE id = ?", t.id),
+            // the run rows stay; their failure text expires with the files (checked below)
+            executions: platform.db.all("SELECT id, status, started_at, duration_ms, attempt FROM test_executions WHERE test_case_id = ?", t.id),
+            issue: platform.db.get("SELECT * FROM issue_links WHERE id = 'il-find'"),
+            finding: sec.getFinding(finding.id),
+            history: sec.findingHistory(finding.id),
+        });
+        const before = JSON.stringify(rows());
+
+        expect((await runScheduledRetention(platform, Date.now())).find((r) => r.projectId === seed.projectId)).toMatchObject({ result: "pruned", files: 3 });
+        expect(failed.files.some(exists)).toBe(false);
+        expect(JSON.stringify(rows())).toBe(before);
+        expect(platform.db.get<{ error: string | null }>("SELECT error FROM test_executions WHERE id = ?", failed.executionId)!.error).toBeNull();
+        expect(rows().finding?.validation).toBe("confirmed");
+        expect(rows().history.length).toBeGreaterThan(0);
+
+        // the readers say so in words: no broken link, no crash
+        expect((await call("GET", `/api/artifacts/${failed.files[0]!.id}`)).status).toBe(410);
+        const ev = (await call("GET", `/api/tests/${t.id}/evidence`)).body;
+        expect(ev).toMatchObject({ available: false });
+        expect(ev.message).toMatch(/expired and was removed on /);
+        const report = (await gatherReport(platform.repo, platform.store, seed.projectId))!;
+        const f = report.findings.find((x) => x.key === t.key)!;
+        expect(f.hasScreenshot).toBeUndefined(); // integration: the report no longer embeds images (report-shots); nothing claims a screenshot is kept
+        expect(f.expired).toMatch(/^The evidence for this finding expired and was removed on .+ The finding itself is kept\.$/);
+        expect(renderReportHtml(report)).toContain("The evidence for this finding expired");
+    });
+});
+
+describe("a restored project without a saved policy has retention on", () => {
+    it("restores with the built-in default (on: 7 / 30 days)", async () => {
+        const seed = project("Restored default");
+        addTest(platform, seed);
+        const zip = ok(await call("GET", `/api/projects/${seed.projectId}/backup`), 200).raw;
+        const restored = ok(await call("POST", "/api/projects/restore", zip), 201).body;
+        const r = (await call("GET", `/api/projects/${restored.project.id}/retention`)).body;
+        expect(r).toMatchObject({ source: "default", policy: { enabled: true, keepDays: 30, keepFailedDays: 7 } });
+        expect(new RetentionStore(platform.db).saved(restored.project.id)).toBeUndefined();
+    });
+});
 
 describe("the storage view", () => {
     let seed: Seed;
@@ -798,9 +922,10 @@ describe("backup and restore", () => {
         expect((await call("GET", `/api/projects/${id}/integrations`)).body).toEqual([]);
         expect((await call("GET", `/api/projects/${id}/roles`)).body.roles ?? []).toEqual([]);
         expect((await call("GET", `/api/projects/${id}/triggers`)).body.tokens).toEqual([]);
-        // the retention policy comes back, switched off
+        // the retention policy comes back with its periods, switched on (a backup is never a way around retention, 2026-11-14)
         const pol = (await call("GET", `/api/projects/${id}/retention`)).body;
-        expect(pol.policy).toMatchObject({ enabled: false, keepDays: 14, keepFailedDays: 60, keepLatestRuns: 3 });
+        expect(pol.policy).toMatchObject({ enabled: true, keepDays: 14, keepFailedDays: 60 });
+        expect(pol.source).toBe("project");
 
         const needs = (await call("GET", `/api/projects/${id}/storage`)).body.needsSecrets as Array<{ kind: string; label: string }>;
         expect(needs.length).toBeGreaterThan(5);

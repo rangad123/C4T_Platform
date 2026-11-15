@@ -127,8 +127,9 @@ QAAgency and autonomous-qa-agent were **not** run — they need provider keys an
 | Validator | no | Execute, classify, drive repair |
 | Failure triage / repair | yes | Decide fixable vs defect; regenerate |
 
-Observability stores concise events and agent tool calls (`agent_events`, `agent_runs`,
-`agent_actions`) — never model reasoning.
+Observability stores concise events and one record per sub-agent run (`agent_events`,
+`agent_runs`) — never model reasoning. Individual agent tool calls (AI action records) are not
+stored: the `agent_actions` table was dropped in migration slot 63.
 
 ## 5. Canonical test specification
 
@@ -217,9 +218,9 @@ SQLite (`node:sqlite`, WAL), migrations in `platform/db.ts`.
 latest `app_model_json`), `environments`, `test_suites`, `generation_jobs` (queue + progress +
 counters), `test_cases` (canonical `spec_json`, validation status/reason, framework, attempts,
 generation metadata), `generated_scripts` (versioned, `is_current`, `executable`),
-`test_executions` + `test_execution_steps`, `agent_runs` + `agent_actions` + `agent_events`,
-`artifacts`. `AgentObservation` from the brief is folded into `agent_actions.observation` and
-`agent_events`.
+`test_executions` + `test_execution_steps`, `agent_runs` + `agent_events`, `artifacts`.
+`AgentObservation` from the design is folded into `agent_events`; per-tool-call records are not kept
+(`agent_actions` was dropped in migration slot 63).
 
 Artifacts: `data/generated-tests/<projectId>/<suite-slug>/<TEST-ID>.spec.ts` and
 `…/_artifacts/<TEST-ID>/attempt-N/{screenshot,trace}`, `…/_artifacts/<jobId>/application-model.json`.

@@ -94,7 +94,7 @@ export const bigPicture: Topic[] = [
             step("Choose Export as JSON for every test, or Download results for a results file other tools read.", "Export as JSON", "Download results"),
         ],
         goodToKnow: [
-            "The report has a plain headline, the most serious findings with screenshots, coverage by area and the full test list.",
+            "The report has a plain headline, the most serious findings, coverage by area and the full test list. Screenshots stay in AI Studio; the report only says one exists.",
             "Credentials are never included.",
         ],
         open: { label: "Open Test scripts", to: { place: "tests" } },

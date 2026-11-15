@@ -37,20 +37,26 @@ export const FILE_NAMES: Record<string, string> = {
     "vision-shot": "screenshot",
 };
 
-/** "This recording was removed to save space on Oct 5, 2026." The kind may be any stored kind. */
+/** "This recording expired and was removed on Oct 5, 2026 (the project's retention policy)." The kind may be any stored kind. */
 export function prunedMessage(kind: string, prunedAt: string): string {
     const name = FILE_NAMES[kind] ?? "file";
-    return `This ${name} was removed to save space on ${formatDate(prunedAt)}.`;
+    return `This ${name} expired and was removed on ${formatDate(prunedAt)} (the project's retention policy).`;
+}
+
+/** For a finding whose run's files are gone: the finding itself stays, its evidence does not. */
+export function evidenceExpiredMessage(prunedAt: string): string {
+    return `The evidence for this finding expired and was removed on ${formatDate(prunedAt)} (the project's retention policy). The finding itself is kept.`;
 }
 
 /** The sentence under the Preview button. */
 export function previewSentence(plan: Pick<PrunePlan, "files" | "bytes" | "byReason">, policy: RetentionPolicy): string {
-    if (plan.files === 0) return "Nothing to remove right now. Every file is newer than the limit or is being kept for a reason.";
+    if (plan.files === 0) return "Nothing to remove right now. Every file is newer than the limit.";
     const parts: string[] = [];
     if (plan.byReason.age > 0) parts.push(`${policy.keepDays} days for passed runs`);
     if (plan.byReason["age-failed"] > 0) parts.push(`${policy.keepFailedDays} days for failed runs`);
     if (plan.byReason["size-cap"] > 0) parts.push(`the ${policy.maxArtifactMB} MB size limit`);
     const why = parts.length ? `, to keep within ${parts.join(" and ")}` : "";
-    const head = plan.byReason.age + plan.byReason["age-failed"] === plan.files && policy.maxArtifactMB == null ? ` older than ${policy.keepDays === policy.keepFailedDays ? `${policy.keepDays} days` : `${policy.keepDays} days (${policy.keepFailedDays} for failed runs)`}` : "";
-    return `This would remove ${plural(plan.files, "file")} (${formatBytes(plan.bytes)})${head || why}.`;
+    const head = plan.byReason.age + plan.byReason["age-failed"] === plan.files && plan.byReason["passed-media"] === 0 && policy.maxArtifactMB == null ? ` older than ${policy.keepDays === policy.keepFailedDays ? `${policy.keepDays} days` : `${policy.keepDays} days (${policy.keepFailedDays} for failed runs)`}` : "";
+    const media = plan.byReason["passed-media"] > 0 ? ` ${plural(plan.byReason["passed-media"], "trace or recording", "traces or recordings")} of passed runs ${plan.byReason["passed-media"] === 1 ? "is" : "are"} among them: passed runs keep none.` : "";
+    return `This would remove ${plural(plan.files, "file")} (${formatBytes(plan.bytes)})${head || why}.${media}`;
 }

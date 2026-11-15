@@ -1,5 +1,5 @@
 /**
- * One browser journey through storage, retention and backup in the real UI (platform on port 5750, no model):
+ * One browser journey through storage, retention and backup in the real UI (platform on port 9610, no model):
  *  Settings -> Storage (sizes, bar, table by project) -> project page -> "Storage and backup" (usage, retention form, preview sentence,
  *  save, remove with a confirm dialog, files really gone) -> download a backup (a real zip without secrets) -> restore it as a new
  *  project (summary, what to enter again) -> a removed file's page says so -> axe-clean and no sideways scroll at phone width.
@@ -20,9 +20,9 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { securityStoreFor } from "../src/security/store.js";
-import { addRun, addTest, exists, seedProject, type Seed, type SeedFile } from "./fixtures/retention-seed.js";
+import { addRun, addTest, exists, pastGrace, type Seed, type SeedFile, seedProject } from "./fixtures/retention-seed.js";
 
-const PORT = 5750;
+const PORT = 9610;
 const BASE = `http://127.0.0.1:${PORT}`;
 const SECRET = "LEAKCHECK-UiPassword-6c2d41";
 
@@ -41,6 +41,7 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-retention-ui-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT) }));
+    pastGrace(platform); // an installation long past its first-deploy grace (the grace itself: retention-other-records.test.ts)
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
 
@@ -73,36 +74,44 @@ describe("storage, retention and backup in the UI", () => {
         await pwExpect(section.getByRole("img", { name: /Test files by kind/ })).toBeVisible();
         await pwExpect(section.getByRole("list", { name: "Files by kind" }).getByText("Recordings", { exact: true })).toBeVisible();
         await pwExpect(section.getByRole("link", { name: "Storage UI", exact: true })).toBeVisible();
-        await pwExpect(section.getByRole("cell", { name: "Kept", exact: true }).first()).toBeVisible();
+        // Retention is on by default (7 / 30 days): a project without a policy of its own removes old files.
+        await pwExpect(section.getByRole("cell", { name: "Removed automatically", exact: true }).first()).toBeVisible();
         const scan = await new AxeBuilder({ page }).include("[aria-label='Storage']").analyze();
         expect(scan.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     });
 
-    it("the project page shows usage and a retention form that is off by default", async () => {
+    it("the project page shows usage and a retention form that is on by default, and can be turned off", async () => {
         // Storage and backup is in the project's Settings now, a titled row with a summary; the form opens with "Change".
         await page.goto(`${BASE}/#/projects/${seed.projectId}/settings?section=storage`);
         await pwExpect(page.getByTestId("setting-storage")).toContainText("This project’s files use");
         await page.getByRole("button", { name: "Change storage and backup", exact: true }).click();
         await pwExpect(card().getByRole("heading", { name: "Storage and backup", exact: true })).toBeVisible();
         await pwExpect(card().getByTestId("storage-summary")).toContainText("This project’s files use");
+        await pwExpect(card().getByText("Old files are removed automatically", { exact: true })).toBeVisible();
+        await pwExpect(card().getByLabel("Remove old files automatically")).toBeChecked();
+        await pwExpect(card().getByLabel("Keep traces, recordings and screenshots of failed runs for (days, at most 730)")).toHaveValue("7");
+        await pwExpect(card().getByLabel("Keep the records of passed runs for (days, at most 365)")).toHaveValue("30");
+        // Turned off and saved, nothing can be removed until it is turned on again.
+        await card().getByLabel("Remove old files automatically").uncheck();
+        await card().getByRole("button", { name: "Save settings", exact: true }).click();
         await pwExpect(card().getByText("Old files are kept", { exact: true })).toBeVisible();
-        await pwExpect(card().getByLabel("Remove old files automatically")).not.toBeChecked();
         await pwExpect(card().getByRole("button", { name: "Remove old files now", exact: true })).toBeDisabled();
         await pwExpect(card().getByText("Turn on automatic removal and save to remove files.", { exact: true })).toBeVisible();
     });
 
     it("a preview says what would go and removes nothing; invalid values are explained", async () => {
-        await card().getByLabel("Always keep the latest runs of each test").fill("1");
+        // the "always keep the latest runs" setting is gone (2026-11-14)
+        await pwExpect(card().getByLabel("Always keep the latest runs of each test")).toHaveCount(0);
         await card().getByRole("button", { name: "Preview", exact: true }).click();
         const sentence = card().getByText(/^This would remove 6 files \(/);
         await pwExpect(sentence).toBeVisible();
-        await pwExpect(sentence).toContainText("older than 30 days (90 for failed runs)");
+        await pwExpect(sentence).toContainText("to keep within 30 days for passed runs. 3 traces or recordings of passed runs are among them: passed runs keep none.");
         expect(old.every(exists)).toBe(true);
 
-        await card().getByLabel("Keep files of passed runs for (days)").fill("3");
+        await card().getByLabel("Keep the records of passed runs for (days, at most 365)").fill("3");
         await card().getByRole("button", { name: "Preview", exact: true }).click();
         await pwExpect(card().getByRole("alert")).toContainText("at least 7");
-        await card().getByLabel("Keep files of passed runs for (days)").fill("30");
+        await card().getByLabel("Keep the records of passed runs for (days, at most 365)").fill("30");
     });
 
     it("turning it on and saving still removes nothing; removing asks first, and Cancel keeps the files", async () => {
@@ -136,7 +145,7 @@ describe("storage, retention and backup in the UI", () => {
     it("a removed file answers with a plain sentence instead of a broken download", async () => {
         const res = await fetch(`${BASE}/api/artifacts/${old[0]!.id}`);
         expect(res.status).toBe(410);
-        expect(((await res.json()) as { error: string }).error).toMatch(/^This (recording|screenshot) was removed to save space on /);
+        expect(((await res.json()) as { error: string }).error).toMatch(/^This (recording|screenshot) expired and was removed on /);
     });
 
     it("Download backup saves a real zip with no secret in it", async () => {
@@ -167,7 +176,8 @@ describe("storage, retention and backup in the UI", () => {
         await pwExpect(page.getByText("Some details need entering again", { exact: true })).toBeVisible();
         await page.getByRole("link", { name: "Open Storage and backup", exact: true }).click();
         await page.getByRole("button", { name: "Change storage and backup", exact: true }).click();
-        await pwExpect(card().getByLabel("Remove old files automatically")).not.toBeChecked();
+        // The backup carried the source project's saved policy: it comes back switched on (backup.ts; a backup is never a way around retention).
+        await pwExpect(card().getByLabel("Remove old files automatically")).toBeChecked();
         await pwExpect(card().getByText(/Sign-in details for the application/)).toBeVisible();
         await card().getByRole("button", { name: "I have entered them", exact: true }).click();
         await pwExpect(card().getByText("Enter these again, they are not in a backup", { exact: true })).toBeHidden();
@@ -227,3 +237,57 @@ describe("storage, retention and backup in the UI", () => {
         await page.setViewportSize({ width: 1280, height: 900 });
     });
 });
+
+describe("the preview says what else is cleared, what the first 14 days keep and what has no readable time", () => {
+    const DAY_MS = 86_400_000;
+    const iso = (daysAgo: number) => new Date(Date.now() - daysAgo * DAY_MS).toISOString();
+    let grace: Seed;
+
+    it("shows the other records and AI agent runs to clear, the files and records kept until the end date, and the unreadable time", async () => {
+        // Retention was first switched on 9 days ago: what is older is kept for 14 days, what came after follows the normal periods.
+        pastGrace(platform, 9);
+        grace = seedProject(platform, "Grace UI");
+        const t = addTest(platform, grace, "The cart adds up");
+        const before = addRun(platform, grace, t, { daysAgo: 12, status: "failed", files: [{ kind: "screenshot", size: 4000 }] });
+        platform.db.run("UPDATE artifacts SET created_at = ? WHERE execution_id = ?", iso(12), before.executionId);
+        const odd = addRun(platform, grace, addTest(platform, grace, "Odd time"), { daysAgo: 1, status: "failed", files: [{ kind: "screenshot", size: 4000 }] });
+        platform.db.run("UPDATE test_executions SET started_at = 'not a date' WHERE id = ?", odd.executionId);
+        const job = (id: string, daysAgo: number) =>
+            platform.db.run(
+                "INSERT INTO generation_jobs (id, project_id, application_id, status, options_json, progress_json, counters_json, error, created_at, started_at, finished_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                id, grace.projectId, grace.appId, "FAILED", "{}", "{}", "{}", "The page said: welcome back", iso(daysAgo), iso(daysAgo), iso(daysAgo), iso(daysAgo),
+            );
+        job("grace-ui-after", 8); // after retention was switched on, past the 7 days: cleared
+        job("grace-ui-before", 12); // from before: kept for now
+        platform.db.run("INSERT INTO agent_runs (id, job_id, role, subject, status, summary, started_at, finished_at) VALUES (?,?,?,?,?,?,?,?)", "grace-ui-arun", "grace-ui-after", "author", "WEB-001", "DONE", "Read the page", iso(8), iso(8));
+
+        await page.goto(`${BASE}/#/projects/${grace.projectId}/settings?section=storage`);
+        await page.reload();
+        await page.getByRole("button", { name: "Change storage and backup", exact: true }).click();
+        await card().getByRole("button", { name: "Preview", exact: true }).click();
+        const notes = card().getByRole("list", { name: "What else the preview found" });
+        await pwExpect(notes).toBeVisible();
+        const until = new Date(Date.now() + 5 * DAY_MS).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+        await pwExpect(notes.getByText("The failure details of 2 other records (1 AI agent run among them) are replaced with “Details expired.”: job messages, test reasons and AI agent runs. The records stay.", { exact: true })).toBeVisible();
+        await pwExpect(notes.getByText(`Kept until ${until}: 1 file and the details of 2 records from before retention was first switched on. Nothing from before then is removed in the first 14 days.`, { exact: true })).toBeVisible();
+        await pwExpect(notes.getByText("1 file is kept because the time of its run could not be read.", { exact: true })).toBeVisible();
+        // The same numbers as the server's preview, which a manual run then clears exactly (retention-other-records.test.ts).
+        const res = await server.inject({ method: "POST", url: `/api/projects/${grace.projectId}/retention/preview` });
+        expect(res.json()).toMatchObject({ records: 2, agentRuns: 1, grace: 1, graceRecords: 2, undated: 1 });
+    });
+
+    it("is axe-clean with the notes showing, in the light and the dark theme, and fits a phone screen", async () => {
+        for (const scheme of ["light", "dark"] as const) {
+            await page.emulateMedia({ colorScheme: scheme });
+            const scan = await new AxeBuilder({ page }).include("[aria-label='Storage and backup']").analyze();
+            expect(scan.violations.map((v) => `${scheme} ${v.id}: ${v.help}`)).toEqual([]);
+        }
+        await page.emulateMedia({ colorScheme: null });
+        await page.setViewportSize({ width: 375, height: 800 });
+        await page.waitForTimeout(300);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        pastGrace(platform);
+    });
+});
+

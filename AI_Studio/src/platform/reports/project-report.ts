@@ -2,14 +2,16 @@
  * Shareable project report: one self-contained, print-friendly HTML page (and a PDF made from it) for people who
  * will not open the platform. Everything is computed from stored data when asked for; nothing is stored.
  *
- * Safety: every piece of text that came from the tested application, the AI or a user is HTML-escaped, evidence
- * images are inlined (size-capped), and no credentials, tokens or server file paths are ever included.
+ * Safety: every piece of text that came from the tested application, the AI or a user is HTML-escaped, no image is
+ * embedded (screenshots stay in AI Studio until visual redaction exists), and no credentials, tokens or server file
+ * paths are ever included.
  */
 import { complianceReport } from "../../engine/compliance/map.js";
 import { assessProjectQuality } from "../../engine/quality/rules.js";
 import { assessSeverity, SEVERITIES, type Severity } from "../../engine/validation/severity.js";
 import { cleanReason } from "../../cli/model.js";
 import { withExpandedSpecs } from "../block-store.js";
+import { evidenceExpiredMessage } from "../../engine/retention/format.js";
 import { evidenceSentence } from "../evidence-read.js";
 import { projectSlowest } from "../perf-store.js";
 import type { Repo } from "../repo.js";
@@ -20,9 +22,11 @@ import { passRate } from "../../engine/summary/pass-rate.js";
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** Evidence screenshots: at most this many in the report, each at most this large (bytes). */
-const MAX_IMAGES = 6;
-const MAX_IMAGE_BYTES = 350_000;
+/**
+ * Screenshots are never put into an exported report: a report leaves AI Studio, and a screenshot shows whatever the page showed (no visual
+ * redaction exists yet). The report says a screenshot exists; people with access open it in AI Studio.
+ */
+const SCREENSHOT_LINE = "A screenshot of this failure is kept in AI Studio. People with access to the project can open it on the test's page.";
 
 interface Finding {
     key: string;
@@ -31,9 +35,12 @@ interface Finding {
     severity: Severity;
     basis: string;
     reason: string;
-    image?: string;
+    /** The latest failed run kept a screenshot (shown in AI Studio, never embedded in the report). */
+    hasScreenshot?: boolean;
     /** One sentence on what the page did during the failed run (network calls, console), when it was recorded. */
     evidence?: string;
+    /** The run's files expired under the retention policy: said in words instead of a missing picture. */
+    expired?: string;
 }
 
 export interface ProjectReportData {
@@ -97,22 +104,22 @@ export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: 
     }
     findings.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.key.localeCompare(b.key));
 
-    // Evidence for the most serious findings: the latest run's failure screenshot, if small enough.
-    let images = 0;
-    for (const f of findings.slice(0, 10)) {
-        if (images >= MAX_IMAGES) break;
+    // Whether the most serious findings' latest run kept a screenshot: only that it exists, never its picture (see SCREENSHOT_LINE).
+    // Files that expired under the retention policy are said in words instead.
+    for (const f of findings.slice(0, 15)) {
         const test = tests.find((t) => t.testKey === f.key)!;
-        const latest = repo.listExecutions(test.id)[0] as { artifacts: Array<{ kind: string; path: string }> } | undefined;
-        const shot = latest?.artifacts.find((x) => x.kind === "visual-diff") ?? latest?.artifacts.find((x) => x.kind === "screenshot");
+        const latest = repo.listExecutions(test.id)[0] as { artifacts: Array<{ kind: string; path: string; pruned_at?: string | null }> } | undefined;
+        const gone = latest?.artifacts.find((x) => x.pruned_at);
+        const left = latest?.artifacts.filter((x) => !x.pruned_at && x.kind !== "baseline") ?? [];
+        // "Expired" only when no evidence file of the run is left: a run that lost its trace to the size limit but kept its screenshot
+        // says it kept a screenshot, never both.
+        if (gone && !left.length) f.expired = evidenceExpiredMessage(String(gone.pruned_at));
+        const shot = left.find((x) => x.kind === "visual-diff") ?? left.find((x) => x.kind === "screenshot");
         if (!shot) continue;
         try {
-            const info = await store.head(shot.path);
-            if (!info) throw new Error("gone");
-            if (info.size > MAX_IMAGE_BYTES) continue;
-            f.image = `data:image/png;base64,${(await store.getBytes(shot.path)).toString("base64")}`;
-            images++;
+            if (await store.head(shot.path)) f.hasScreenshot = true;
         } catch {
-            /* evidence vanished: report without it */
+            /* evidence vanished: report without the line */
         }
     }
 
@@ -182,7 +189,7 @@ export function renderReportHtml(d: ProjectReportData): string {
         .slice(0, 15)
         .map(
             (f) => `<article class="card"><header><span class="sev sev-${f.severity}">${esc(cap(f.severity))}</span> <strong>${esc(f.title)}</strong> <span class="meta">${esc(f.key)} · ${esc(f.area)}</span></header>
-<p class="meta">${esc(f.basis)}</p><p class="reason">${esc(f.reason)}</p>${f.evidence ? `<p class="meta">What the page did: ${esc(f.evidence)}</p>` : ""}${f.image ? `<figure><img alt="Screenshot of the problem" src="${f.image}"></figure>` : ""}</article>`,
+<p class="meta">${esc(f.basis)}</p><p class="reason">${esc(f.reason)}</p>${f.evidence ? `<p class="meta">What the page did: ${esc(f.evidence)}</p>` : ""}${f.expired ? `<p class="meta">${esc(f.expired)}</p>` : ""}${f.hasScreenshot ? `<p class="meta">${esc(SCREENSHOT_LINE)}</p>` : ""}</article>`,
         )
         .join("");
 

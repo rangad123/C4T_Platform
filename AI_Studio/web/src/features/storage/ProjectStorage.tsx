@@ -11,25 +11,23 @@ import { useCan } from "../auth/permissions";
 import { useHere } from "../auth/project-access";
 import { UsageBar } from "./StorageSettings";
 import { FieldHelp } from "../../components/Tooltip";
-import { logLine, type Preview, type ProjectStorage as ProjectStorageData, type RestoreResult, type RetentionState } from "./storage";
+import { logLine, previewNotes, type Preview, type ProjectStorage as ProjectStorageData, type RestoreResult, type RetentionState } from "./storage";
 import "./storage.css";
 
 interface Form {
     enabled: boolean;
     keepDays: string;
     keepFailedDays: string;
-    keepLatestRuns: string;
     maxArtifactMB: string;
 }
 const toForm = (r: RetentionState): Form => ({
     enabled: r.policy.enabled,
     keepDays: String(r.policy.keepDays),
     keepFailedDays: String(r.policy.keepFailedDays),
-    keepLatestRuns: String(r.policy.keepLatestRuns),
     maxArtifactMB: r.policy.maxArtifactMB ? String(r.policy.maxArtifactMB) : "",
 });
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s));
-const bodyOf = (f: Form) => ({ enabled: f.enabled, keepDays: num(f.keepDays), keepFailedDays: num(f.keepFailedDays), keepLatestRuns: num(f.keepLatestRuns), maxArtifactMB: f.maxArtifactMB.trim() === "" ? null : num(f.maxArtifactMB) });
+const bodyOf = (f: Form) => ({ enabled: f.enabled, keepDays: num(f.keepDays), keepFailedDays: num(f.keepFailedDays), maxArtifactMB: f.maxArtifactMB.trim() === "" ? null : num(f.maxArtifactMB) });
 
 /** Raw requests (a zip goes in and out, so these are not JSON calls). */
 async function raw(path: string, init?: { method?: string; body?: Blob }): Promise<Response> {
@@ -139,8 +137,8 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
         setBusy("run");
         setError("");
         try {
-            const out = await api<{ sentence: string }>(`/projects/${projectId}/retention/run`, { method: "POST", body: { confirm: true } });
-            setNotice(out.sentence);
+            const out = await api<{ sentence: string; details?: string | null }>(`/projects/${projectId}/retention/run`, { method: "POST", body: { confirm: true } });
+            setNotice(out.details ? `${out.sentence} ${out.details}` : out.sentence);
             setPreview(null);
             await Promise.all([storage.reload(), retention.reload()]);
         } catch (e) {
@@ -188,7 +186,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
 
     const canRemove = saved.enabled && !dirty && r.policy.enabled && !r.busy;
     const keptLines = preview
-        ? Object.entries(preview.kept).filter(([, n]) => n > 0).map(([k, n]) => `${plural(n, "old file")} kept: ${KEPT[k] ?? k}`)
+        ? [...previewNotes(preview), ...Object.entries(preview.kept).filter(([, n]) => n > 0).map(([k, n]) => `${plural(n, "file")} kept: ${KEPT[k] ?? k}`)]
         : [];
 
     return (
@@ -201,7 +199,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
             </div>
             <p className="t-secondary" data-testid="storage-summary">
                 This project’s files use <strong>{s.usage.text}</strong> ({plural(s.usage.files, "file")}).
-                {s.removed.files > 0 ? ` ${plural(s.removed.files, "file")} (${s.removed.text}) were removed earlier to save space.` : ""}
+                {s.removed.files > 0 ? ` ${plural(s.removed.files, "file")} (${s.removed.text}) expired and were removed earlier.` : ""}
             </p>
             <UsageBar usage={s.usage} label={`This project’s files by kind, ${s.usage.text} in total`} />
 
@@ -221,35 +219,32 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
             >
                 <h3 className="t-card">Remove old files</h3>
                 <p className="t-secondary">
-                    Screenshots, recordings and traces of old runs can be removed to save space. Your tests, their results and history, issues and releases are never removed.
-                    {r.source === "platform" && r.platformDefaultDays ? ` This project uses the platform default of ${r.platformDefaultDays} days until you save your own settings.` : ""}
+                    Traces, recordings and screenshots of failed runs, and the records of passed runs, are removed after the days below. Your tests, their results and history, findings, issues and releases are never removed.
+                    {r.source === "platform" && r.platformDefaultDays ? ` This project uses the platform default of ${r.platformDefaultDays} days for passed runs until you save your own settings.` : ""}
+                    {r.heldToLimits ? " The saved periods are longer than this server allows, so its limits apply." : ""}
                 </p>
                 <label className="check">
                     <input type="checkbox" checked={form.enabled} disabled={Boolean(noPlatform)} onChange={(e) => setField("enabled", e.target.checked)} />
                     <span>
                         <span className="title">Remove old files automatically</span>
-                        <span className="hint">Once a day, and never while a run is going. Off by default.</span>
+                        <span className="hint">Once a day, and never while a run is going. On by default.</span>
                     </span>
                 </label>
                 <div className="st-grid">
                     <div className="field">
-                        <label htmlFor="st-days">Keep files of passed runs for (days)</label>
+                        <label htmlFor="st-days">Keep the records of passed runs for (days, at most {r.limits.keepDays.max})</label>
                         <input id="st-days" className="input" type="number" inputMode="numeric" min={r.limits.keepDays.min} max={r.limits.keepDays.max} value={form.keepDays} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepDays", e.target.value)} />
                     </div>
                     <div className="field">
-                        <label htmlFor="st-failed">Keep files of failed runs for (days)</label>
+                        <label htmlFor="st-failed">Keep traces, recordings and screenshots of failed runs for (days, at most {r.limits.keepFailedDays.max})</label>
                         <input id="st-failed" className="input" type="number" inputMode="numeric" min={r.limits.keepFailedDays.min} max={r.limits.keepFailedDays.max} value={form.keepFailedDays} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepFailedDays", e.target.value)} />
                     </div>
                     <div className="field">
-                        <FieldHelp htmlFor="st-latest" label="Always keep the latest runs of each test" helpLabel="keeping the newest runs" help="The newest runs of every test, per browser and environment, keep their files however old they are." />
-                        <input id="st-latest" className="input" type="number" inputMode="numeric" min={r.limits.keepLatestRuns.min} max={r.limits.keepLatestRuns.max} value={form.keepLatestRuns} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepLatestRuns", e.target.value)} />
-                    </div>
-                    <div className="field">
-                        <FieldHelp htmlFor="st-cap" label="Size limit in MB (optional)" helpLabel="the size limit" help="When this project’s files take more than this, the oldest files that nothing keeps are removed until they fit." />
+                        <FieldHelp htmlFor="st-cap" label="Size limit in MB (optional)" helpLabel="the size limit" help="When this project’s files take more than this, the oldest run files are removed until they fit." />
                         <input id="st-cap" className="input" type="number" inputMode="numeric" min={r.limits.maxArtifactMB.min} placeholder="No limit" value={form.maxArtifactMB} disabled={Boolean(noPlatform)} onChange={(e) => setField("maxArtifactMB", e.target.value)} />
                     </div>
                 </div>
-                <p className="t-meta">Files of tests that are failing now, of runs an issue or a release is based on, and approved screenshots are always kept.</p>
+                <p className="t-meta">Nothing keeps a run’s files past these days, not even the latest run, an issue or a release. Passed runs keep no traces or recordings. Approved screenshots are always kept, and findings keep their details when their evidence expires.</p>
                 <div className="st-actions">
                     <Button type="submit" variant="primary" loading={busy === "save"} disabled={busy !== "" || !dirty || Boolean(noPlatform)} tip={noPlatform}>Save settings</Button>
                     <Button type="button" onClick={() => void showPreview()} loading={busy === "preview"} disabled={busy !== "" || Boolean(noSettings)} tip={noSettings ?? "Counts what the values in the form would remove. Nothing is removed."}>Preview</Button>
@@ -261,10 +256,11 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
                 {preview && (
                     <Callout tone="info" title={preview.sentence}>
                         {preview.files > 0 ? `The oldest are from ${new Date(preview.oldest!).toLocaleDateString()}. Nothing has been removed yet.` : "Nothing has been removed."}
+                        {preview.details ? ` ${preview.details}` : ""}
                     </Callout>
                 )}
                 {keptLines.length > 0 && (
-                    <ul className="st-kept" aria-label="Old files that are kept">
+                    <ul className="st-kept" aria-label="What else the preview found">
                         {keptLines.map((l) => (
                             <li key={l}>{l}</li>
                         ))}
@@ -355,11 +351,6 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
 const KEPT: Record<string, string> = {
     kind: "approved screenshots and other files that are never removed",
     "no-run": "files that belong to no run",
-    "latest-runs": "the latest runs of each test",
-    failure: "tests that are failing now",
-    visual: "screenshots waiting to be accepted as the new baseline",
-    issue: "the run an issue was filed from",
-    release: "the runs a release was based on",
 };
 
 /** Asks before removing. It recalculates what will go, so the number is current. */
@@ -385,12 +376,14 @@ function ConfirmRemove({ projectId, preview, onCancel, onConfirm }: { projectId:
             }
         >
             {fresh ? <p>{fresh.sentence}</p> : !failed && <p>Checking what would be removed.</p>}
+            {fresh?.details && <p>{fresh.details}</p>}
+            {fresh && previewNotes(fresh).map((l) => <p key={l}>{l}</p>)}
             {failed && (
                 <Callout tone="danger" title="Could not check what would be removed">
                     {failed}
                 </Callout>
             )}
-            <p className="t-secondary">This deletes the files from the disk and cannot be undone. Test results and history stay.</p>
+            <p className="t-secondary">This deletes the files from the disk and cannot be undone. Test results and run history stay; runs past the period lose their failure details.</p>
         </Modal>
     );
 }

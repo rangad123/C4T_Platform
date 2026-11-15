@@ -665,7 +665,7 @@ On a first exploration most of these checks are on by default. Each finding says
 
 - **Why you'd use it:** You send results to a manager, a client or an auditor.
 - **How:** Open **Test scripts**, then **More actions**, then **Export…**. The dialog offers **Download PDF**, a web page version, **Download tests** (the passing tests as a zip you can run in your own pipeline), **Export as JSON** (every test, in the format **Import scripts…** understands) and **Download results** (a results file in the standard JUnit format that other tools read).
-- **Good to know:** The report has a plain headline, the most serious findings with screenshots, coverage by area, security-control coverage, browser differences, slowest pages, weak tests and the full test list. Text from your application is made safe, and credentials are never included. More: [reports.md](features/reports.md).
+- **Good to know:** The report has a plain headline, the most serious findings (screenshots stay in AI Studio; the report only says one exists), coverage by area, security-control coverage, browser differences, slowest pages, weak tests and the full test list. Text from your application is made safe, and credentials are never included. More: [reports.md](features/reports.md).
 
 #### Run downloaded tests on your own computer
 

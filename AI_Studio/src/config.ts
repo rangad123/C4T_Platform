@@ -132,11 +132,15 @@ const EnvSchema = z.object({
     SMTP_FROM: z.string().optional(),
 
     /**
-     * Platform-wide retention: when set (7-365), projects without a policy of their own remove evidence files (screenshots, recordings,
-     * traces) of passed runs after this many days. Kept as a plain string so an empty line or a typo counts as "not set": see
-     * engine/retention/policy.ts. Off unless set.
+     * Platform-wide retention for projects without a policy of their own: a number of days (7-365) passed runs keep their files, or
+     * "off" to keep everything. Unset or unreadable: the built-in default (on: failed runs' traces, recordings and screenshots 7 days,
+     * passed runs' records 30 days). Kept as a plain string: see engine/retention/policy.ts.
      */
     RETENTION_DEFAULT_DAYS: z.string().optional(),
+    /** The longest a project may keep the records of passed runs (7-365 days; default 365). A project's own setting cannot exceed it. */
+    RETENTION_MAX_METADATA_DAYS: z.string().optional(),
+    /** The longest a project may keep traces, recordings and screenshots of failed runs (7-730 days; default 730). */
+    RETENTION_MAX_FAILED_MEDIA_DAYS: z.string().optional(),
 
     MAX_REPAIR_ATTEMPTS: z.coerce.number().min(0).max(5).default(2),
     /**

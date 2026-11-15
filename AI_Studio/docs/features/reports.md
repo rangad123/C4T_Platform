@@ -8,7 +8,7 @@ One document for people who will never open the platform: a manager, a client, a
 ## What it contains
 - **Headline in words** ("1 finding (1 high) needs attention, and 1 test could not be validated"), the number of tests, pass rate, findings, tests not validated, tests not run yet.
 - **Pass rate over recent runs** (a small chart, once scheduled or repeated runs exist).
-- **What needs attention:** the most serious 15 findings with severity, what is wrong, and a screenshot where one was captured.
+- **What needs attention:** the most serious 15 findings with severity, what is wrong, and, where the failed run kept a screenshot, a line saying so. The picture itself is never put into the report: people with access open it on the test's page in AI Studio.
 - **Tests that could not be validated**, **coverage by area**, **security control coverage** (indicative, not an assessment),
   **browser and screen-size differences**, **slowest pages**, **tests that check very little**, and the **full list of tests** with their result.
 - Sections without content are left out.
@@ -17,7 +17,7 @@ The pass-rate tile is the share of tests that have a result (passed, found a pro
 
 ## Safe to share
 - All text that came from the tested application, the AI or a user is escaped, so a hostile page title cannot inject markup into the report.
-- It is one self-contained page with no scripts and no external assets; screenshots are embedded (at most 6, each under 350 KB).
+- It is one self-contained page with no scripts, no external assets and no images. Screenshots are not embedded (HTML or PDF): a screenshot shows whatever the page showed, and there is no visual redaction yet, so a report that leaves AI Studio never carries one.
 - It never includes credentials, tokens or server file paths. (Test titles and findings are included as they are, so check them before sending outside your organisation.)
 
 ## How it works

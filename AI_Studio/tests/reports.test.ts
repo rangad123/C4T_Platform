@@ -66,7 +66,9 @@ describe("report data", () => {
         expect(d.counts).toEqual({ validated: 2, needsReview: 1, failed: 1, notRun: 1 });
         expect(d.passRate).toBe(50); // 2 of the 4 that ran
         expect(d.bySeverity.high).toBe(1);
-        expect(d.findings[0]!.image).toMatch(/^data:image\/png;base64,/);
+        // A screenshot exists for the finding: the report knows that, and never holds its picture.
+        expect(d.findings[0]!.hasScreenshot).toBe(true);
+        expect(JSON.stringify(d)).not.toContain("base64");
         expect(d.weak.map((w) => w.key)).toEqual(["WEB-003"]);
         expect(d.areas).toEqual([{ name: "Checkout", total: 5, validated: 2, attention: 2 }]);
     });
@@ -89,7 +91,12 @@ describe("HTML report", () => {
         expect(html).toContain("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
         expect(html).not.toMatch(/<(?:link|script)[^>]+(?:src|href)=["']https?:/); // no external assets
         expect(html).toContain("@media print");
-        expect(html).toContain("<img alt=\"Screenshot of the problem\" src=\"data:image/png;base64,");
+        // Screenshots are never embedded (no visual redaction yet): only a line that one exists in AI Studio, with no file path.
+        expect(html).not.toContain("<img");
+        expect(html).not.toContain("data:image");
+        expect(html).not.toContain(PNG.toString("base64").slice(0, 40));
+        expect(html).not.toContain("screenshot.png");
+        expect(html).toContain("A screenshot of this failure is kept in AI Studio. People with access to the project can open it on the test&#39;s page.");
     });
 
     it("says in words what needs attention", async () => {
@@ -116,10 +123,12 @@ describe("HTML report", () => {
         expect((await get("nope")).statusCode).toBe(404);
     });
 
-    it("caps inlined evidence", async () => {
+    it("says nothing about a screenshot when none was kept", async () => {
         const d = (await gatherReport(platform.repo, platform.store, projectId))!;
-        const big = { ...d, findings: d.findings.map((f) => ({ ...f, image: undefined })) };
-        expect(renderReportHtml(big)).not.toContain("<img");
+        const none = { ...d, findings: d.findings.map((f) => ({ ...f, hasScreenshot: undefined })) };
+        const html = renderReportHtml(none);
+        expect(html).not.toContain("<img");
+        expect(html).not.toContain("A screenshot of this failure");
     });
 });
 
@@ -138,5 +147,44 @@ describe("PDF report", () => {
         expect(text).toContain("Add to cart updates the count");
         expect(text).toContain("Opens the shop page");
         expect(text).not.toContain(SECRET);
+        expect(text).toContain("A screenshot of this failure is kept in AI Studio");
+        // No picture inside the PDF either: no image object at all.
+        expect(bytes.toString("latin1")).not.toMatch(/\/Subtype\s*\/Image/);
     }, 90_000);
+});
+
+describe("evidence that expired under the retention policy", () => {
+    // One finding per case, in its own project, its latest run holding a screenshot file and a trace row.
+    async function findingWith(prunedKinds: string[]) {
+        const { repo } = platform;
+        const pid = repo.createProject({ name: `Expiry ${prunedKinds.join("+") || "none"}` }).id as string;
+        repo.createApplication(pid, "https://shop.example.test", {}, {});
+        const spec = TestSpecSchema.parse({ testId: "WEB-010", title: "Cart total", kind: "web", category: "Checkout", priority: "high", steps: [{ action: "navigate", url: "/" }] });
+        const id = repo.insertTest({ projectId: pid, suiteId: repo.getOrCreateSuite(pid, "Checkout", "checkout"), jobId: null, spec, framework: "playwright", validationStatus: "PENDING" });
+        repo.updateTest(id, { validationStatus: "NEEDS_REVIEW", reason: "Server error: GET /api/cart returned 503." });
+        const exec = repo.addExecution({ testId: id, scriptId: null, jobId: null, attempt: 1, status: "failed", durationMs: 50, startedAt: new Date().toISOString(), steps: [] });
+        for (const kind of ["screenshot", "trace"]) {
+            const rel = path.posix.join(pid, "_artifacts", "WEB-010", "attempt-1", kind === "trace" ? "trace.zip" : "screenshot.png");
+            const pruned = prunedKinds.includes(kind);
+            if (!pruned) {
+                fs.mkdirSync(path.dirname(path.join(platform.config.artifactsDir, rel)), { recursive: true });
+                fs.writeFileSync(path.join(platform.config.artifactsDir, rel), PNG);
+            }
+            const aid = repo.addArtifact({ projectId: pid, testId: id, executionId: exec, kind, path: rel, size: PNG.length });
+            if (pruned) platform.db.run("UPDATE artifacts SET pruned_at = ?, pruned_reason = ? WHERE id = ?", "2026-10-05T10:00:00.000Z", "size-cap", aid);
+        }
+        return (await gatherReport(platform.repo, platform.store, pid))!.findings[0]!;
+    }
+
+    it("a run whose trace went to the size limit but whose screenshot is kept says the screenshot is kept, not that the evidence expired", async () => {
+        const f = await findingWith(["trace"]);
+        expect(f.hasScreenshot).toBe(true);
+        expect(f.expired).toBeUndefined();
+    });
+
+    it("a run with no evidence file left says the evidence expired, and claims no screenshot", async () => {
+        const f = await findingWith(["trace", "screenshot"]);
+        expect(f.hasScreenshot).toBeUndefined();
+        expect(f.expired).toMatch(/^The evidence for this finding expired and was removed on Oct 5, 2026/);
+    });
 });

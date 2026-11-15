@@ -92,7 +92,9 @@ Fast model for routine steps ([model-routing.md](features/model-routing.md)): `L
 | `ALLOW_CUSTOM_SCRIPTS` | `false` | Allow code tests to run on this computer (see section 3) |
 | `ALLOW_ADAPTER_PLUGINS` / `ADAPTER_PLUGINS` | off / none | Load plug-in frameworks (see section 13) |
 | `AI_MONTHLY_TOKEN_LIMIT` / `AI_JOB_TOKEN_LIMIT` | none | Default AI usage limits (see section 12) |
-| `RETENTION_DEFAULT_DAYS` | off | Default retention for projects with no policy of their own (see section 11) |
+| `RETENTION_DEFAULT_DAYS` | built-in default (on) | Days passed runs keep their records for projects with no policy of their own, or `off` to keep everything (see section 11) |
+| `RETENTION_MAX_METADATA_DAYS` | 365 | The longest any project may keep the records of passed runs (7-365) |
+| `RETENTION_MAX_FAILED_MEDIA_DAYS` | 730 | The longest any project may keep traces, recordings and screenshots of failed runs (7-730) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | none | Mail server for email alerts (see section 10) |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | none | Company proxy for the server's own outbound calls (AI model, webhooks and notifications, issue trackers). Its own addresses are always reached directly. Email does not use it. A password in the address is never printed (`http://user:***@host:port`) |
 | `AITP_SYSTEM_CA` | on | The server trusts its computer's certificate store as well as Node.js's own list, so a company security tool's root certificate installed there works. `0` turns it off. `NODE_EXTRA_CA_CERTS` keeps working. See [company-networks.md](features/company-networks.md) |
@@ -308,7 +310,15 @@ More: [notifications-and-import.md](features/notifications-and-import.md), [sche
 
 ## 11. Storage, retention and backup
 
-- **Retention** is off by default. When a project turns it on (**Setup → Storage and backup**), old screenshots, videos, traces and evidence are removed after the days you choose. A preview shows what would go before you confirm. `RETENTION_DEFAULT_DAYS` (7 to 365) turns it on for projects with no policy of their own. Failed runs are kept three times as long. Tests, run history, issues, releases, approved baselines, the newest runs and the files behind an open issue or a signed release are never removed.
+- **Release note, before the first deploy with retention on.** The first daily pass runs right after the deploy, across every project without a policy of its own, and what it removes cannot be brought back. Two protections:
+  - **First-deploy grace:** for **14 days** after the platform first starts a version with retention, files stored before that start are kept (a run's files made after it follow the normal periods from the start). The start is recorded once in the database (`auth_settings`, key `retention.first_deploy`); restarts and later deployments do not move it, and a restored database keeps it. The same holds for text: the failure details of runs, run summaries, jobs, tests and AI agent runs dated before that start are not cleared during the 14 days (a file or record whose date cannot be read counts as before it). Held files do not count toward a project's size limit during the grace, so they never push newer files out; once the grace is over they count again, oldest first. If the recorded start is damaged (cannot be read as a time), the grace starts at that moment and the record is rewritten, so it never fails towards deleting. The storage preview says how many files and records are kept and until which date, and, when a size limit is set, that the limit does not count the held files.
+  - **Back up first**, both halves:
+    1. Stop the platform (or at least make sure no run is going), then back up the database: `npx tsx src/platform/ops/backup-cli.ts` with `BACKUP_DIR` set (a consistent copy of `platform.db` plus the key file), or copy `DATA_DIR/platform.db` while the platform is stopped.
+    2. Back up the object store: the `generated-tests` folder in the data folder (local disk), or the S3 bucket (`aws s3 sync s3://<bucket> <backup folder>`, or a bucket snapshot/versioning).
+    3. Verify: `npx tsx src/platform/ops/backup-cli.ts --verify <backup file>` (or `sqlite3 <copy> "PRAGMA integrity_check;"`, which must print `ok`), and compare the file count of the copy with the source (`find DATA_DIR/generated-tests -type f | wc -l` against the same command on the copy; `aws s3 ls --recursive s3://<bucket> | wc -l` for S3) and with `sqlite3 <copy> "SELECT COUNT(*) FROM artifacts WHERE pruned_at IS NULL;"` (about the same or fewer; files never stored on this disk are not counted).
+  - **To pause retention**, set `RETENTION_DEFAULT_DAYS=off` before deploying (projects without a policy of their own then keep everything; a project with a saved policy keeps it, so switch those off under **Setup → Storage and backup** if needed), then remove the setting when ready.
+- **Retention** is on by default: every file of a failed run (traces, recordings, screenshots, evidence) is removed after **7 days**, and the records of passed runs after **30 days**; a passed run keeps no trace or recording at all (any that slips through, for example from a retry, goes at the next pass). It runs once a day and never while a run is going, and covers every kind of file a run stores. Nothing else keeps a run's files longer: not the latest runs of a test, a failing test, an issue, a release or a pending visual change. A project can change both periods or turn retention off (**Setup → Storage and backup**), but never above the server's limits (`RETENTION_MAX_METADATA_DAYS`, `RETENTION_MAX_FAILED_MEDIA_DAYS`; a longer setting is refused); a policy saved before a limit was lowered is held to it. A preview shows what would go before a manual run. `RETENTION_DEFAULT_DAYS` sets the passed-run period for projects with no policy of their own, or `off` keeps everything; a project restored from a backup always has retention on (a policy in the backup keeps its periods but comes back on). The files themselves are deleted from storage; their rows stay, marked removed, and so do the run rows, so run history and trends do not change, but a run past its period loses its failure messages (and old run summaries their reasons) in the same pass. The same pass, with the same ages, replaces the failure text other records hold with "Details expired." and keeps the rows: warning and error job events of a finished job (and their error and address fields), the job's error, a test's validation reason (cut to the step and its code where it can be, not for a test waiting for review), the detail of an agent run's steps (its address cut to origin and path), an authoring agent's summary and an agent run's reasoning and stop reason (its objective, verdict and approvals stay); the preview counts these records before a manual run. A job's fixed error ("Cancelled", "Nothing ran: ...") and a skipped variant or environment's reason are kept, and a file or run whose time cannot be read is kept and counted in the preview. Tests, their results, run history, findings with their status and history, issues, releases and approved baselines are never removed: a finding whose evidence expired keeps every detail and says that its evidence expired.
+- **Masking on write.** Machine-written free text is masked before it is stored: job events and errors, test validation reasons, agent run summaries and agent run steps. First the run's own secrets (passwords, authenticator secrets, API tokens) become `[hidden]`, then the shared pattern filter (`src/shared/redact-text.ts`, the same one the security module uses) hides e-mail addresses, bearer and basic credentials, tokens, secret query parameters, `key=value` secrets and long hex or base64 values (`src/platform/redact-text.ts`). Record ids (UUIDs) stay unless they are the value of a secret-named parameter. It is a pattern filter, not a guarantee. The individual tool calls of the AI agents are not stored at all.
 - **Download backup** saves a project as a zip (tests, scripts, manual cases, releases, run sequences, environments, test data, schedules), without any secrets. **Restore from a backup** creates a new project from it, with tests waiting to be run and a list of secrets to enter again.
 - **Settings → Storage** shows the disk the whole platform uses.
 - Always capture and compare visual baselines on the same operating system (for example always in Docker), because fonts render differently.
@@ -473,8 +483,8 @@ More: [production-hosting.md](features/production-hosting.md).
 
 ## 21. Security assessment
 
-A separate module for passive, read-only security assessments of applications a client authorized (no attack payloads, no external
-scanners). It is on by default; `SECURITY_ASSESSMENT=off` removes its pages and answers 404 on its routes, and functional testing is
+A separate module for read-only security assessments of applications a client authorized (no attack payloads; external scanners are
+optional and off by default). It is on by default; `SECURITY_ASSESSMENT=off` removes its pages and answers 404 on its routes, and functional testing is
 unchanged either way.
 
 | Setting | Default | Meaning |
@@ -487,6 +497,7 @@ unchanged either way.
 | `SECURITY_ASSESSMENT_MINUTES` | 30 | time limit of one assessment |
 | `SECURITY_USE_PROXY` | off | `on` sends assessment requests through the company proxy (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`). The guard still checks every address and its DNS answers first, but the proxy then resolves the name itself, so the private-address protection also depends on the proxy. Use it only when the client's application is reachable only through the proxy. |
 | `SECURITY_PROXY_ALLOW_PRIVATE` | off | `true` lets that proxy be on a loopback or private address (most company proxies are). A proxy on a cloud metadata address is always refused. |
+| `SECURITY_ACTIVE_PROFILES` | off | `on` lets an assessment start above passive, and only through the profile gate (development or staging application, client authorization naming the profile, a Crowd4Test admin's approval, network isolation on this machine) |
 
 Who may do what: viewers read, editors register applications and run assessments, **owners record or revoke the client's
 authorization** and delete applications. No assessment starts without a current authorization, and changing an application's target,
@@ -496,6 +507,13 @@ activity and in Settings, People, Activity. The scheduled full backup (`BACKUP_D
 project's security data too (secrets left out; restored authorizations are withdrawn, so a new one is needed). When an assessment ends,
 the project's alert channels can be told (new critical or high findings and failures by default; set per project in its security
 section, under Notifications).
+
+**Authorizations expire.** Recording one needs the authorizing person's name, role and email address, the document reference and a
+statement of their authority. An authorization lasts 90 days from when it was recorded; a Crowd4Test admin's approval of a profile above
+passive lasts 30 days. An authorization recorded before the role and authority were required covers passive only and stops counting 90
+days after the release constant `LEGACY_AUTHORIZATION_RELEASE_AT` in `src/security/release.ts`. **Release checklist step:** set that
+constant to the deploy day before deploying (earlier is stricter, never later); the release test
+`tests/security-profile-gate-expiry-legacy.test.ts` fails when it is unset, unreadable, in the future or too early.
 
 **Restoring on an older platform.** A platform version from before the security data was part of a project backup (round 20) refuses a
 backup that holds it, with: *"The file is not a backup this platform made: it holds “security.json”, which a backup never contains."*
@@ -510,7 +528,27 @@ everything else stays off whatever is installed on the machine. An editor must t
 Nuclei only ever runs templates from SECURITY_NUCLEI_TEMPLATES (review them before pointing it at a client), ZAP needs SECURITY_ZAP_URL
 and SECURITY_ZAP_API_KEY (server-side only, never returned by the API), and Schemathesis and Promptfoo are found on the path or named
 explicitly. A tool that is not installed, not configured, not allowed or refused at the profile is reported as such and produces no
-findings, and one tool failing never fails the assessment. More: [security-scanners.md](features/security-scanners.md).
+findings, and one tool failing never fails the assessment. Every scanner request goes through the platform's **request guard**
+(`src/security/egress/guard.ts`): only GET, HEAD and OPTIONS without a body, on in-scope addresses, each logged; HTTPS tunnels are refused,
+so scanners do not run against an HTTPS application. Above passive the scanners must also run in a proven **isolated network**
+(`src/security/egress/isolation.ts`) whose only way out is the guard. The scanners start there with no capabilities (`setpriv`), so they
+cannot unmount the folders the isolation hides, and the isolation check proves that too before any scanner starts. ZAP is an externally
+managed daemon the platform does not start, so it is **passive only**; Nuclei and Schemathesis start inside the isolated network. Nuclei
+templates that dial the target directly (an `ssl` or other non-HTTP section, or requests marked `unsafe` or `pipeline`) are skipped unless
+the run is isolated. ZAP's saved sign-in rule is limited to the target's own address and removed at the start and end of every run, a ZAP
+run reports only its own alerts, and ZAP is asked for at most 50 alerts per rule.
+
+The platform's own checks go through the same kind of request guard, and each assessment has **one merged request log** (scanners and
+platform checks, each entry naming its source, the first 2,000 entries of each source kept, counts covering every request). The TLS
+certificate check is the only direct connection; it is logged as `platform:tls`. **The gate is checked again during a run**: when the
+assessment is claimed, before the scanners, before each scanner and after them, and every 5 seconds; 3 failed checks in a row stop the run,
+and withdrawing a Crowd4Test admin approval stops a running assessment at that profile.
+
+**Production prerequisites for profiles above passive** (on the machine that runs the scanners): Linux, `unshare`, `mount`, `umount` and
+`setpriv` (util-linux) and `ip` (iproute2), unprivileged user namespaces allowed, and an AppArmor policy that lets `unshare` create them. Ubuntu 24.04 restricts
+unprivileged user namespaces through AppArmor by default, so add a policy that allows them. Without all of these every assessment above
+passive is refused at start, with a sentence naming what is missing; passive is unaffected. More:
+[security-scanners.md](features/security-scanners.md).
 
 **Starting the ZAP daemon.** It is a separate service and it has to be started by hand:
 

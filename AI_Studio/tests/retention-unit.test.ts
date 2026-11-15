@@ -1,226 +1,255 @@
 /**
  * Storage, retention and backup, browser-free and database-free:
- *  - the retention rule table (age, keep-latest and keep-failed boundaries, every protected category, rule order, the size limit);
+ *  - the retention rule table (outcome and age over every kind of run file, nothing kept past expiry, the size limit);
  *  - policy bounds and the platform default;
  *  - size and message wording, the storage kind helpers, the web helpers;
  *  - the backup documents' schemas, secret scrubbing, entry-name safety and hostile zips (traversal, too many entries, bombs, bad JSON,
  *    unknown versions).
  */
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { strToU8, zipSync, type Zippable } from "fflate";
 import { describe, expect, it } from "vitest";
 import { BACKUP_FORMAT, BACKUP_KIND, BACKUP_LIMITS, badEntryName, checkEntryList, isKnownEntry, looksSensitive, ManifestSchema, ReleaseEntrySchema, scrubUrl, TestEntrySchema } from "../src/engine/retention/backup-model.js";
-import { formatBytes, formatDate, previewSentence, prunedMessage } from "../src/engine/retention/format.js";
-import { DEFAULT_POLICY, mergePolicy, platformDefaultDays, policyFromPlatformDefault, RetentionPolicySchema, type RetentionPolicy } from "../src/engine/retention/policy.js";
-import { DAY_MS, isPrunableKind, planPrune, protectedRuns, type RetentionArtifact, type RetentionExecution, type RetentionInput } from "../src/engine/retention/rules.js";
+import { evidenceExpiredMessage, formatBytes, formatDate, previewSentence, prunedMessage } from "../src/engine/retention/format.js";
+import { DEFAULT_POLICY, limitProblem, mergePolicy, platformDefaultDays, platformDefaultOff, policyFromPlatformDefault, retentionLimits, RetentionPolicySchema, withinLimits, type RetentionPolicy } from "../src/engine/retention/policy.js";
+import { DAY_MS, isPrunableKind, planPrune, type RetentionArtifact, type RetentionExecution, type RetentionInput } from "../src/engine/retention/rules.js";
 import { scrubConfig, unpackBackup, readManifest } from "../src/platform/backup.js";
+import { knownSchemaVersion } from "../src/platform/db.js";
 import { usageKindOfArtifact, usageKindOfPath } from "../src/platform/storage-usage.js";
 import { fileLabel, prunedNote, sizeBar, STORAGE_KIND_LABELS } from "../web/src/features/storage/storage.js";
 
 const NOW = Date.UTC(2026, 9, 8, 12, 0, 0);
-const policy = (over: Partial<RetentionPolicy> = {}): RetentionPolicy => ({ ...DEFAULT_POLICY, enabled: true, keepDays: 30, keepFailedDays: 90, keepLatestRuns: 2, ...over });
+/** The decided defaults: failed runs' files 7 days, passed runs' records 30 days. */
+const policy = (over: Partial<RetentionPolicy> = {}): RetentionPolicy => ({ ...DEFAULT_POLICY, ...over });
 
 let n = 0;
-const exec = (testId: string, daysAgo: number, passed = true, group = ""): RetentionExecution => ({ id: `e${++n}`, testId, group, startedAt: NOW - daysAgo * DAY_MS, passed });
+const exec = (daysAgo: number, passed = true): RetentionExecution => ({ id: `e${++n}`, startedAt: NOW - daysAgo * DAY_MS, passed });
 const art = (e: RetentionExecution | null, kind = "screenshot", size = 1000): RetentionArtifact => ({ id: `a${++n}`, kind, size, executionId: e?.id ?? null, at: e ? e.startedAt : NOW - 400 * DAY_MS });
-const plan = (executions: RetentionExecution[], artifacts: RetentionArtifact[], over: Partial<RetentionInput> = {}) =>
-    planPrune({ now: NOW, policy: policy(), executions, artifacts, issueTimes: new Map(), releaseMoments: [], ...over });
+const plan = (executions: RetentionExecution[], artifacts: RetentionArtifact[], over: Partial<RetentionInput> = {}) => planPrune({ now: NOW, policy: policy(), executions, artifacts, ...over });
 const ids = (p: ReturnType<typeof plan>) => p.prune.map((x) => x.id).sort();
+const justOver = (days: number, passed: boolean) => ({ ...exec(days, passed), startedAt: NOW - days * DAY_MS - 1 });
 
-describe("retention rules: age", () => {
-    // Three newer runs shield nothing here because keepLatestRuns is 2 and the run under test is the 4th newest.
-    const filler = (t: string) => [exec(t, 1), exec(t, 2), exec(t, 3)];
-
-    it("keeps a file exactly keepDays old and removes one a moment older (passed run)", () => {
-        const t = "t1";
-        const f = filler(t);
-        const exactly = exec(t, 30);
-        const older = { ...exec(t, 30), startedAt: NOW - 30 * DAY_MS - 1 };
-        const a = art(exactly);
-        const b = art(older);
-        const p = plan([...f, exactly, older], [a, b]);
-        expect(ids(p)).toEqual([b.id]);
-        expect(p.prune[0]!.reason).toBe("age");
+describe("retention rules: outcome and age (fake clock)", () => {
+    it("a failed run's trace, video, screenshot and evidence stay exactly 7 days and go a moment later", () => {
+        const exactly = exec(7, false);
+        const older = justOver(7, false);
+        const kinds = ["trace", "video", "screenshot", "evidence"];
+        const keep = kinds.map((k) => art(exactly, k));
+        const go = kinds.map((k) => art(older, k));
+        const p = plan([exactly, older], [...keep, ...go]);
+        expect(ids(p)).toEqual(go.map((a) => a.id).sort());
+        expect(p.byReason["age-failed"]).toBe(4);
     });
 
-    it("uses keepFailedDays for a run that did not pass", () => {
-        const t = "t2";
-        const newer = [exec(t, 1), exec(t, 2), exec(t, 3)];
-        const failedAt60 = exec(t, 60, false);
-        const failedAt91 = exec(t, 91, false);
-        const a = art(failedAt60);
-        const b = art(failedAt91);
-        const p = plan([...newer, failedAt60, failedAt91], [a, b]);
-        expect(ids(p)).toEqual([b.id]);
-        expect(p.prune[0]!.reason).toBe("age-failed");
+    it("a passed run's records (evidence, screenshots) stay exactly 30 days and go a moment later", () => {
+        const at7 = exec(8);
+        const exactly = exec(30);
+        const older = justOver(30, true);
+        const keep = [art(at7, "evidence"), art(exactly, "evidence"), art(exactly, "screenshot")];
+        const go = [art(older, "evidence"), art(older, "vision-shot")];
+        const p = plan([at7, exactly, older], [...keep, ...go]);
+        expect(ids(p)).toEqual(go.map((a) => a.id).sort());
+        expect(p.byReason.age).toBe(2);
+    });
+
+    it("a passed run keeps no trace or recording: they go at the next pass, whatever their age", () => {
+        const today = exec(0);
+        const files = [art(today, "trace"), art(today, "video"), art(today, "evidence")];
+        const p = plan([today], files);
+        expect(ids(p)).toEqual([files[0]!.id, files[1]!.id].sort());
+        expect(p.byReason["passed-media"]).toBe(2);
+    });
+
+    it("covers every kind of file a run stores, including a kind added later (a passed run's footprint, an unknown kind)", () => {
+        const passed = justOver(30, true);
+        const failed = justOver(7, false);
+        const files = [art(passed, "footprint"), art(passed, "something-new"), art(failed, "something-new"), art(failed, "evidence")];
+        expect(plan([passed, failed], files).files).toBe(4);
+        expect(isPrunableKind("something-new")).toBe(false); // the backup's list, not what expiry looks at
     });
 
     it("removes nothing from a project whose files are all recent", () => {
-        const e = [exec("t", 1), exec("t", 2), exec("t", 3), exec("t", 4)];
-        expect(plan(e, e.map((x) => art(x))).files).toBe(0);
+        const e = [exec(1), exec(2, false), exec(6, false), exec(29)];
+        expect(plan(e, e.map((x) => art(x, "evidence"))).files).toBe(0);
     });
 });
 
-describe("retention rules: keep the latest runs", () => {
-    it("keeps the newest N runs of a test however old they are, removes older ones", () => {
-        const t = "t";
-        const runs = [exec(t, 400), exec(t, 300), exec(t, 200), exec(t, 100)]; // all far beyond 30 days
-        const arts = runs.map((r) => art(r));
-        const p = plan(runs, arts); // keepLatestRuns 2: the two newest (100, 200 days) stay
-        expect(ids(p)).toEqual([arts[0]!.id, arts[1]!.id].sort());
-        expect(p.protectedFiles["latest-runs"]).toBe(2);
+describe("retention rules: run rows past their period lose their details (fake clock)", () => {
+    it("lists runs strictly past 7 days (failed) or 30 days (passed) that still hold details, with or without files", () => {
+        const failedExact = exec(7, false);
+        const failedOver = justOver(7, false);
+        const passedExact = exec(30);
+        const passedOver = justOver(30, true);
+        const passedEight = exec(8); // a passed run inside its 30 days keeps its row details
+        const alreadyCleared = { ...justOver(40, false), details: false };
+        const p = plan([failedExact, failedOver, passedExact, passedOver, passedEight, alreadyCleared], [art(failedOver, "screenshot")]);
+        expect(p.expiredRuns).toEqual([failedOver.id, passedOver.id].sort());
     });
 
-    it("counts runs per test, so one busy test does not push another test's runs out", () => {
-        const busy = [exec("a", 100), exec("a", 101), exec("a", 102), exec("a", 103)];
-        const quiet = [exec("b", 200)];
-        const p = plan([...busy, ...quiet], [...busy, ...quiet].map((r) => art(r)));
-        // b's only run is among its latest N; a keeps two, loses two
-        expect(p.files).toBe(2);
-    });
-
-    it("counts a browser variant and an environment separately from the main run", () => {
-        const main = [exec("t", 100), exec("t", 101), exec("t", 102)];
-        const firefox = [exec("t", 100, true, "variant:firefox"), exec("t", 101, true, "variant:firefox"), exec("t", 102, true, "variant:firefox")];
-        const p = plan([...main, ...firefox], [...main, ...firefox].map((r) => art(r)));
-        expect(p.files).toBe(2); // one old run from each group
-    });
-
-    it("keepLatestRuns 1 keeps only the newest", () => {
-        const runs = [exec("t", 90), exec("t", 80), exec("t", 70)];
-        const p = plan(runs, runs.map((r) => art(r)), { policy: policy({ keepLatestRuns: 1 }) });
-        expect(p.files).toBe(2);
+    it("follows the project's periods and is empty when nothing is past them", () => {
+        const e = justOver(10, false);
+        expect(plan([e], [], { policy: policy({ keepFailedDays: 14 }) }).expiredRuns).toEqual([]);
+        expect(plan([e], [], { policy: policy({ keepFailedDays: 7 }) }).expiredRuns).toEqual([e.id]);
     });
 });
 
-describe("retention rules: everything that must survive", () => {
-    const old = (t: string) => [exec(t, 200), exec(t, 201), exec(t, 202), exec(t, 203)];
+describe("retention rules: nothing keeps a run's files past expiry", () => {
+    it("the latest run of a test is no longer kept: its only, newest, failing run goes after 7 days", () => {
+        const only = exec(8, false);
+        const files = [art(only, "trace"), art(only, "screenshot")];
+        const p = plan([only], files);
+        expect(p.files).toBe(2);
+        expect(Object.keys(p.protectedFiles).sort()).toEqual(["kind", "no-run"]);
+    });
 
-    it("never removes approved baselines, app models or reports, whatever their age", () => {
-        const e = exec("t", 500);
-        const arts = ["baseline", "app-model", "requirements-coverage", "report", "something-new"].map((k) => art(e, k));
-        const p = plan([e], arts);
+    it("keepLatestRuns in an old saved policy changes nothing", () => {
+        const runs = [exec(400), exec(300), exec(200), exec(100)];
+        const files = runs.map((r) => art(r, "evidence"));
+        expect(plan(runs, files, { policy: policy({ keepLatestRuns: 50 }) }).files).toBe(4);
+    });
+
+    it("never removes approved baselines, whatever their age or run", () => {
+        const e = exec(500);
+        const p = plan([e], [art(e, "baseline"), art(null, "baseline")]);
         expect(p.files).toBe(0);
-        expect(p.protectedFiles.kind).toBe(5);
+        expect(p.protectedFiles.kind).toBe(2);
         expect(isPrunableKind("baseline")).toBe(false);
-        for (const k of ["screenshot", "video", "trace", "evidence", "visual-actual", "visual-diff", "vision-shot"]) expect(isPrunableKind(k)).toBe(true);
     });
 
-    it("never removes a file that belongs to no run", () => {
-        const a = art(null, "video");
-        const p = plan([], [a]);
+    it("never removes a file that belongs to no run (plans, app models, reports)", () => {
+        const p = plan([], [art(null, "video"), art(null, "app-model"), art(null, "plan")]);
         expect(p.files).toBe(0);
-        expect(p.protectedFiles["no-run"]).toBe(1);
+        expect(p.protectedFiles["no-run"]).toBe(3);
     });
 
-    it("keeps the files of a failing test's newest run, however old (current failure), but not its older failures", () => {
-        const runs = [exec("t", 400, false), exec("t", 300, false), exec("t", 250, false), exec("t", 200, false)]; // newest first = 200
-        const arts = runs.map((r) => art(r));
-        // keepLatestRuns 1 keeps the newest; keepFailedDays 90 makes the rest old
-        const p = plan(runs, arts, { policy: policy({ keepLatestRuns: 1 }) });
-        expect(ids(p)).toEqual([arts[0]!.id, arts[1]!.id, arts[2]!.id].sort());
+    it("an agent run's screenshots (no test run) go as a failed run's media: kept at 6.9 days, removed at 7.1", () => {
+        const shot = (days: number): RetentionArtifact => ({ id: `a${++n}`, kind: "vision-shot", size: 10, executionId: null, at: NOW - days * DAY_MS });
+        const keep = shot(6.9);
+        const go = shot(7.1);
+        const p = plan([], [keep, go, art(null, "plan"), art(null, "baseline")]);
+        expect(ids(p)).toEqual([go.id]);
+        expect(p.byReason["age-failed"]).toBe(1);
+        expect(p.protectedFiles).toEqual({ kind: 1, "no-run": 1 });
+    });
+});
+
+describe("retention rules: a time that cannot be read is unknown, never old", () => {
+    it("a run whose start is 0 or NaN keeps its files (age and size limit) and its details; it is counted as undated", () => {
+        const zero: RetentionExecution = { id: `e${++n}`, startedAt: 0, passed: false };
+        const nan: RetentionExecution = { id: `e${++n}`, startedAt: Number.NaN, passed: false };
+        const files = [art(zero, "trace"), art(zero, "screenshot"), art(nan, "evidence")];
+        const p = plan([zero, nan], files, { policy: policy({ maxArtifactMB: 0.001 }) });
+        expect(p.files).toBe(0);
+        expect(p.undated).toBe(3);
+        expect(p.expiredRuns).toEqual([]);
+        expect(p.oldest).toBeNull();
     });
 
-    it("the failure rule holds on its own too (defence in depth: it does not depend on keepLatestRuns)", () => {
-        const runs = [exec("t", 400, false), exec("t", 200, false)];
-        const kept = protectedRuns({ executions: runs, artifacts: [], issueTimes: new Map(), releaseMoments: [], policy: policy({ keepLatestRuns: 0 }) });
-        expect([...kept.entries()]).toEqual([[runs[1]!.id, "failure"]]);
+    it("an agent screenshot with no time is kept; a passed run's trace still goes (that rule does not depend on age)", () => {
+        const passed: RetentionExecution = { id: `e${++n}`, startedAt: 0, passed: true };
+        const trace = art(passed, "trace");
+        const evidence = art(passed, "evidence");
+        const shot: RetentionArtifact = { id: `a${++n}`, kind: "vision-shot", size: 10, executionId: null, at: 0 };
+        const p = plan([passed], [trace, evidence, shot]);
+        expect(ids(p)).toEqual([trace.id]);
+        expect(p.undated).toBe(2);
+        expect(p.oldest).toBeNull();
     });
+});
 
-    it("keeps the files of the run an issue was filed from (and only that failed run)", () => {
-        const [r1, r2, r3, r4] = [exec("t", 300, false), exec("t", 250, false), exec("t", 200, true), exec("t", 150, true)];
-        const arts = [r1, r2, r3, r4].map((r) => art(r));
-        // an issue was filed 240 days ago: the newest failed run at or before that moment is r2 (250 days ago)
-        const p = plan([r1, r2, r3, r4], arts, { policy: policy({ keepLatestRuns: 1 }), issueTimes: new Map([["t", [NOW - 240 * DAY_MS]]]) });
-        expect(ids(p)).toContain(arts[0]!.id);
-        expect(ids(p)).not.toContain(arts[1]!.id);
-        expect(p.protectedFiles.issue).toBe(1);
-    });
-
-    it("keeps what each release looked at: the newest run of every test at the moment of its snapshot", () => {
-        const a = [exec("a", 300), exec("a", 250), exec("a", 100), exec("a", 90)];
-        const b = [exec("b", 280), exec("b", 120), exec("b", 95), exec("b", 91)];
-        const all = [...a, ...b];
-        const arts = all.map((r) => art(r));
-        const p = plan(all, arts, { policy: policy({ keepLatestRuns: 1 }), releaseMoments: [NOW - 260 * DAY_MS, NOW - 110 * DAY_MS] });
-        const kept = new Set(arts.map((x) => x.id).filter((i) => !ids(p).includes(i)));
-        // snapshot at 260 days ago: a's run at 300 days; b's run at 280. Snapshot at 110: a's 250?? no: newest at/before 110 days ago is a@250? it is a@250 only if nothing newer is older than 110 days: a@100 is newer than 110 days ago, so a@250.
-        expect(kept.has(arts[0]!.id)).toBe(true); // a@300 (release 1)
-        expect(kept.has(arts[4]!.id)).toBe(true); // b@280 (release 1)
-        expect(kept.has(arts[1]!.id)).toBe(true); // a@250 (release 2)
-        expect(kept.has(arts[5]!.id)).toBe(true); // b@120 -> newest b at/before 110 days ago is b@120 (release 2)
-        expect(p.protectedFiles.release).toBeGreaterThan(0);
-    });
-
-    it("keeps new/different screenshots waiting to be accepted as the new baseline", () => {
-        const runs = [exec("t", 300, false), exec("t", 250, false), exec("t", 200, false)];
-        const diff = art(runs[1]!, "visual-diff");
-        const actual = art(runs[1]!, "visual-actual");
-        const old = art(runs[0]!, "visual-diff");
-        // the test's newest run (200 days) failed without a screenshot; the newest run that has visual images (250) is the pending change
-        const p = plan(runs, [diff, actual, old], { policy: policy({ keepLatestRuns: 1 }) });
-        expect(ids(p)).toEqual([old.id]);
-        expect(p.protectedFiles.visual).toBe(2);
-    });
-
-    it("does not treat visual images of a passing test as pending", () => {
-        const runs = [exec("t", 300), exec("t", 250), exec("t", 100)];
-        const a = art(runs[1]!, "visual-actual");
-        const p = plan(runs, [a], { policy: policy({ keepLatestRuns: 1 }) });
-        expect(ids(p)).toEqual([a.id]);
-    });
-
-    it("protects in a fixed order: the first rule that applies is the one reported", () => {
-        const e = exec("t", 400, false);
-        const arts = [art(e)];
-        const p = plan([e], arts);
-        // it is the newest run (latest-runs) AND a current failure AND could be a release moment; latest-runs comes first
-        expect(protectedRuns({ executions: [e], artifacts: arts, issueTimes: new Map(), releaseMoments: [NOW], policy: policy() }).get(e.id)).toBe("latest-runs");
-        expect(p.protectedFiles["latest-runs"]).toBe(1);
-        expect(p.protectedFiles.failure).toBe(0);
+describe("the PostgreSQL baseline's header", () => {
+    it("names the schema version the file describes (the current migration count)", () => {
+        const head = readFileSync(new URL("../src/platform/pg/baseline.sql", import.meta.url), "utf8").split("\n").slice(0, 6).join("\n");
+        expect(head).toContain(`slots 1-${knownSchemaVersion()} plus`);
+        expect(head).toContain(`records schema_version ${knownSchemaVersion()};`);
     });
 });
 
 describe("retention rules: the size limit", () => {
-    it("removes the oldest unprotected files until the project fits, never protected ones", () => {
-        const t = "t";
-        const MB = 1024 * 1024;
-        // five recent passed runs of 10 MB each (all newer than keepDays), the two newest protected by keepLatestRuns
-        const runs = [exec(t, 5), exec(t, 4), exec(t, 3), exec(t, 2), exec(t, 1)];
-        const arts = runs.map((r) => art(r, "video", 10 * MB));
-        const p = plan(runs, arts, { policy: policy({ maxArtifactMB: 25 }) });
-        // 50 MB total, limit 25 MB: the three oldest are candidates, remove until <= 25 MB: removes 3 (50 - 30 = 20)
-        expect(p.prune.map((x) => x.id)).toEqual([arts[0]!.id, arts[1]!.id, arts[2]!.id]);
-        expect(p.prune.every((x) => x.reason === "size-cap")).toBe(true);
+    const MB = 1024 * 1024;
+    it("removes the oldest files that are not yet due until the project fits", () => {
+        const runs = [exec(5), exec(4), exec(3), exec(2), exec(1)];
+        const files = runs.map((r) => art(r, "evidence", 10 * MB));
+        const p = plan(runs, files, { policy: policy({ maxArtifactMB: 25 }) });
+        // 50 MB, limit 25 MB: the three oldest go (20 MB left)
+        expect(p.prune.map((x) => x.id)).toEqual([files[0]!.id, files[1]!.id, files[2]!.id]);
         expect(p.byReason["size-cap"]).toBe(3);
     });
 
-    it("stops early when what remains is protected: the limit is a goal, not a licence", () => {
-        const MB = 1024 * 1024;
-        const runs = [exec("t", 2), exec("t", 1)];
-        const arts = runs.map((r) => art(r, "video", 10 * MB));
-        const p = plan(runs, arts, { policy: policy({ maxArtifactMB: 10 }) }); // both are the latest runs
-        expect(p.files).toBe(0);
-    });
-
-    it("counts only removable kinds toward the limit and does not double count what age removes", () => {
-        const MB = 1024 * 1024;
-        const runs = [exec("t", 400), exec("t", 300), exec("t", 2), exec("t", 1)];
-        const arts = runs.map((r) => art(r, "video", 10 * MB));
+    it("does not count baselines toward the limit and does not double count what age removes", () => {
+        const runs = [exec(400), exec(300), exec(2), exec(1)];
+        const files = runs.map((r) => art(r, "evidence", 10 * MB));
         const baseline = art(runs[3]!, "baseline", 500 * MB);
-        const p = plan(runs, [...arts, baseline], { policy: policy({ maxArtifactMB: 30 }) });
-        // age removes the two old ones (20 MB); the remaining 20 MB fits the 30 MB limit, so nothing is removed for size
+        const p = plan(runs, [...files, baseline], { policy: policy({ maxArtifactMB: 30 }) });
         expect(p.byReason.age).toBe(2);
         expect(p.byReason["size-cap"]).toBe(0);
     });
 });
 
+describe("retention rules: the size limit counts only what it may remove", () => {
+    const MB = 1024 * 1024;
+    const DEPLOY = NOW - 5 * DAY_MS; // the first deployment with retention, five days ago: the grace is running
+    const stored = (a: RetentionArtifact, at: number): RetentionArtifact => ({ ...a, createdAt: at });
+
+    it("files held by the first-deploy grace do not push the files of newer runs out", () => {
+        // 480 MB from before the deployment, a 500 MB limit, and 60 MB of runs made since: nothing may go.
+        const old = [exec(20), exec(15), exec(10)];
+        const held = old.map((r) => stored(art(r, "evidence", 160 * MB), DEPLOY - DAY_MS));
+        const fresh = [exec(3, false), exec(2), exec(1, false)];
+        const since = fresh.map((r) => stored(art(r, "screenshot", 20 * MB), r.startedAt));
+        const p = plan([...old, ...fresh], [...held, ...since], { policy: policy({ keepDays: 365, keepFailedDays: 365, maxArtifactMB: 500 }), graceFrom: DEPLOY });
+        expect(p.prune).toEqual([]);
+        expect(p).toMatchObject({ files: 0, grace: 3, heldBytes: 480 * MB });
+        expect(p.byReason["size-cap"]).toBe(0);
+    });
+
+    it("the limit still applies among the files made since the deployment, oldest first", () => {
+        const old = exec(20);
+        const held = stored(art(old, "evidence", 480 * MB), DEPLOY - DAY_MS);
+        const fresh = [exec(4), exec(3), exec(2), exec(1)];
+        const since = fresh.map((r) => stored(art(r, "evidence", 10 * MB), r.startedAt));
+        const p = plan([old, ...fresh], [held, ...since], { policy: policy({ keepDays: 365, keepFailedDays: 365, maxArtifactMB: 25 }), graceFrom: DEPLOY });
+        // 40 MB since the deployment against 25 MB: the two oldest of those go; the held file is neither counted nor chosen.
+        expect(p.prune.map((x) => x.id)).toEqual([since[0]!.id, since[1]!.id]);
+        expect(p.heldBytes).toBe(480 * MB);
+    });
+
+    it("a file stored in the same millisecond as the grace start is held, not aged (the grace fails towards keeping)", () => {
+        const runs = [exec(30, false), exec(30, false)];
+        const same = stored(art(runs[0]!, "screenshot", MB), DEPLOY);
+        const after = stored(art(runs[1]!, "screenshot", MB), DEPLOY + 1);
+        const p = plan(runs, [same, after], { policy: policy({ keepDays: 7, keepFailedDays: 7 }), graceFrom: DEPLOY });
+        expect(p.prune.map((x) => x.id)).toEqual([after.id]);
+        expect(p.grace).toBe(1);
+    });
+
+    it("once the grace is over the same files count again and the oldest go first", () => {
+        const old = exec(40);
+        const held = stored(art(old, "evidence", 480 * MB), NOW - 30 * DAY_MS);
+        const fresh = exec(1);
+        const since = stored(art(fresh, "evidence", 40 * MB), fresh.startedAt);
+        const p = plan([old, fresh], [held, since], { policy: policy({ keepDays: 365, keepFailedDays: 365, maxArtifactMB: 500 }), graceFrom: NOW - 20 * DAY_MS });
+        expect(p.prune.map((x) => x.id)).toEqual([held.id]);
+        expect(p).toMatchObject({ grace: 0, heldBytes: 0 });
+    });
+
+    it("files whose time cannot be read do not push dated files out either", () => {
+        const odd: RetentionExecution = { id: `e${++n}`, startedAt: 0, passed: false };
+        const unknown = art(odd, "screenshot", 480 * MB);
+        const fresh = [exec(2), exec(1)];
+        const dated = fresh.map((r) => art(r, "evidence", 10 * MB));
+        const p = plan([odd, ...fresh], [unknown, ...dated], { policy: policy({ maxArtifactMB: 490 }) });
+        expect(p.prune).toEqual([]);
+        expect(p).toMatchObject({ undated: 1, heldBytes: 480 * MB });
+    });
+});
+
 describe("retention rules: the plan", () => {
     it("lists files oldest first with totals, per-kind sums and dates", () => {
-        const t = "t";
-        const runs = [exec(t, 300), exec(t, 200), exec(t, 100), exec(t, 90), exec(t, 80)];
-        const arts = [art(runs[0]!, "video", 5000), art(runs[1]!, "screenshot", 200), art(runs[2]!, "trace", 700)];
-        const p = plan(runs, arts, { policy: policy({ keepLatestRuns: 2 }) });
+        const runs = [exec(300, false), exec(200), exec(100, false), exec(1)];
+        const files = [art(runs[0]!, "video", 5000), art(runs[1]!, "screenshot", 200), art(runs[2]!, "trace", 700), art(runs[3]!, "evidence", 9)];
+        const p = plan(runs, files);
         expect(p.prune.map((x) => x.kind)).toEqual(["video", "screenshot", "trace"]);
         expect(p.bytes).toBe(5900);
         expect(p.byKind.video).toEqual({ files: 1, bytes: 5000 });
@@ -229,16 +258,15 @@ describe("retention rules: the plan", () => {
     });
 
     it("is deterministic: the same rows give the same plan in any input order", () => {
-        const runs = [exec("t", 100), exec("t", 200), exec("t", 300), exec("t", 400), exec("u", 150), exec("u", 250), exec("u", 350)];
-        const arts = runs.map((r) => art(r));
-        const a = plan(runs, arts);
-        const b = plan([...runs].reverse(), [...arts].reverse());
+        const runs = [exec(100), exec(200, false), exec(3, false), exec(40), exec(10, false)];
+        const files = runs.map((r) => art(r));
+        const a = plan(runs, files);
+        const b = plan([...runs].reverse(), [...files].reverse());
         expect(b.prune.map((x) => x.id)).toEqual(a.prune.map((x) => x.id));
     });
 
     it("an empty project gives an empty plan", () => {
-        const p = plan([], []);
-        expect(p).toMatchObject({ files: 0, bytes: 0, oldest: null, newest: null });
+        expect(plan([], [])).toMatchObject({ files: 0, bytes: 0, oldest: null, newest: null });
     });
 });
 
@@ -250,30 +278,48 @@ describe("retention policy", () => {
         for (const bad of [{ keepDays: 6 }, { keepDays: 366 }, { keepFailedDays: 731 }, { keepLatestRuns: 0 }, { keepLatestRuns: 51 }, { keepDays: 10.5 }, { maxArtifactMB: 5 }]) expect(RetentionPolicySchema.safeParse({ ...ok, keepFailedDays: 100, ...bad }).success, JSON.stringify(bad)).toBe(false);
     });
 
-    it("refuses to keep failed runs for less time than passed runs", () => {
-        const r = RetentionPolicySchema.safeParse({ enabled: true, keepDays: 60, keepFailedDays: 30, keepLatestRuns: 5 });
-        expect(r.success).toBe(false);
+    it("lets failed runs' media go sooner than passed runs' records (approved policy: 7 and 30 days)", () => {
+        expect(RetentionPolicySchema.safeParse({ enabled: true, keepDays: 30, keepFailedDays: 7, keepLatestRuns: 5 }).success).toBe(true);
+        expect(RetentionPolicySchema.safeParse({ enabled: true, keepDays: 30, keepFailedDays: 6, keepLatestRuns: 5 }).success).toBe(false);
     });
 
-    it("is off by default", () => {
-        expect(DEFAULT_POLICY.enabled).toBe(false);
+    it("is on by default: failed runs' traces, recordings and screenshots 7 days, passed runs' records 30 days", () => {
+        expect(DEFAULT_POLICY).toMatchObject({ enabled: true, keepFailedDays: 7, keepDays: 30 });
     });
 
     it("merges a patch onto what is there and validates the whole", () => {
         const base = { ...DEFAULT_POLICY };
-        expect(mergePolicy(base, { enabled: true, keepDays: 14 })).toMatchObject({ enabled: true, keepDays: 14, keepFailedDays: 90 });
-        expect(() => mergePolicy(base, { keepDays: 120 })).toThrow(); // failed (90) would be shorter than passed (120)
+        expect(mergePolicy(base, { enabled: true, keepDays: 14 })).toMatchObject({ enabled: true, keepDays: 14, keepFailedDays: 7 });
+        expect(() => mergePolicy(base, { keepDays: 400 })).toThrow(); // beyond the schema's 365
+        expect(() => mergePolicy(base, { keepFailedDays: 3 })).toThrow(); // under the 7-day minimum
         expect(mergePolicy({ ...base, maxArtifactMB: 500 }, { maxArtifactMB: null }).maxArtifactMB).toBeNull();
+        // the removed "latest runs" setting: an older client may still send it; it is accepted and ignored
+        expect(mergePolicy(base, { keepLatestRuns: 0 } as never).keepLatestRuns).toBe(base.keepLatestRuns);
     });
 
-    it("reads the platform default only when it is a whole number of days in range", () => {
+    it("reads the platform default only when it is a whole number of days in range, or off", () => {
         expect(platformDefaultDays(undefined)).toBeUndefined();
-        for (const raw of ["", " ", "abc", "6", "366", "-30", "3.5", "30 days", "0"]) expect(platformDefaultDays(raw), raw).toBeUndefined();
+        for (const raw of ["", " ", "abc", "6", "366", "-30", "3.5", "30 days", "0", "off"]) expect(platformDefaultDays(raw), raw).toBeUndefined();
         expect(platformDefaultDays("30")).toBe(30);
         expect(platformDefaultDays(" 7 ")).toBe(7);
         expect(platformDefaultDays("365")).toBe(365);
-        expect(policyFromPlatformDefault(30)).toMatchObject({ enabled: true, keepDays: 30, keepFailedDays: 90 });
-        expect(policyFromPlatformDefault(365).keepFailedDays).toBe(730);
+        expect(policyFromPlatformDefault(30)).toMatchObject({ enabled: true, keepDays: 30, keepFailedDays: 7 });
+        expect(policyFromPlatformDefault(365).keepFailedDays).toBe(7);
+        for (const raw of ["off", " OFF ", "Off"]) expect(platformDefaultOff(raw), raw).toBe(true);
+        for (const raw of [undefined, "", "30", "of", "offline"]) expect(platformDefaultOff(raw), String(raw)).toBe(false);
+    });
+
+    it("holds a policy to the server's limits and says why a longer one is refused", () => {
+        const l = retentionLimits({ RETENTION_MAX_METADATA_DAYS: "60", RETENTION_MAX_FAILED_MEDIA_DAYS: "14" });
+        expect(l).toEqual({ maxKeepDays: 60, maxKeepFailedDays: 14 });
+        // Unset or unreadable: the schema's own maxima; out-of-range values are brought into range.
+        expect(retentionLimits({})).toEqual({ maxKeepDays: 365, maxKeepFailedDays: 730 });
+        expect(retentionLimits({ RETENTION_MAX_METADATA_DAYS: "abc", RETENTION_MAX_FAILED_MEDIA_DAYS: "2" })).toEqual({ maxKeepDays: 365, maxKeepFailedDays: 7 });
+        const p = { ...DEFAULT_POLICY, keepDays: 90, keepFailedDays: 30 };
+        expect(limitProblem(p, l)).toMatch(/at most 60 days/);
+        expect(limitProblem({ ...p, keepDays: 60 }, l)).toMatch(/failed runs for at most 14 days/);
+        expect(limitProblem({ ...p, keepDays: 60, keepFailedDays: 14 }, l)).toBeUndefined();
+        expect(withinLimits(p, l)).toMatchObject({ keepDays: 60, keepFailedDays: 14 });
     });
 });
 
@@ -292,18 +338,20 @@ describe("wording and size helpers", () => {
     });
 
     it("says what a preview would do", () => {
-        const base = { files: 214, bytes: 1.8 * 1024 ** 3, byReason: { age: 214, "age-failed": 0, "size-cap": 0 } };
+        const base = { files: 214, bytes: 1.8 * 1024 ** 3, byReason: { age: 214, "age-failed": 0, "passed-media": 0, "size-cap": 0 } };
         expect(previewSentence(base, policy({ keepFailedDays: 30 }))).toBe("This would remove 214 files (1.8 GB) older than 30 days.");
-        expect(previewSentence(base, policy())).toBe("This would remove 214 files (1.8 GB) older than 30 days (90 for failed runs).");
-        expect(previewSentence({ files: 1, bytes: 2048, byReason: { age: 0, "age-failed": 0, "size-cap": 1 } }, policy({ maxArtifactMB: 500 }))).toContain("1 file (2 KB)");
-        expect(previewSentence({ files: 0, bytes: 0, byReason: { age: 0, "age-failed": 0, "size-cap": 0 } }, policy())).toContain("Nothing to remove");
+        expect(previewSentence(base, policy())).toBe("This would remove 214 files (1.8 GB) older than 30 days (7 for failed runs).");
+        expect(previewSentence({ files: 3, bytes: 3072, byReason: { age: 1, "age-failed": 0, "passed-media": 2, "size-cap": 0 } }, policy())).toBe("This would remove 3 files (3 KB), to keep within 30 days for passed runs. 2 traces or recordings of passed runs are among them: passed runs keep none.");
+        expect(previewSentence({ files: 1, bytes: 2048, byReason: { age: 0, "age-failed": 0, "passed-media": 0, "size-cap": 1 } }, policy({ maxArtifactMB: 500 }))).toContain("1 file (2 KB)");
+        expect(previewSentence({ files: 0, bytes: 0, byReason: { age: 0, "age-failed": 0, "passed-media": 0, "size-cap": 0 } }, policy())).toContain("Nothing to remove");
     });
 
-    it("says honestly that a file was removed", () => {
+    it("says plainly that a file expired, and that a finding's evidence expired while the finding stays", () => {
         expect(formatDate("2026-10-05T10:00:00Z")).toBe("Oct 5, 2026");
-        expect(prunedMessage("video", "2026-10-05T10:00:00Z")).toBe("This recording was removed to save space on Oct 5, 2026.");
-        expect(prunedMessage("screenshot", "2026-10-05T10:00:00Z")).toBe("This screenshot was removed to save space on Oct 5, 2026.");
-        expect(prunedMessage("whatever", "2026-10-05T10:00:00Z")).toBe("This file was removed to save space on Oct 5, 2026.");
+        expect(prunedMessage("video", "2026-10-05T10:00:00Z")).toBe("This recording expired and was removed on Oct 5, 2026 (the project's retention policy).");
+        expect(prunedMessage("screenshot", "2026-10-05T10:00:00Z")).toBe("This screenshot expired and was removed on Oct 5, 2026 (the project's retention policy).");
+        expect(prunedMessage("whatever", "2026-10-05T10:00:00Z")).toBe("This file expired and was removed on Oct 5, 2026 (the project's retention policy).");
+        expect(evidenceExpiredMessage("2026-10-05T10:00:00Z")).toBe("The evidence for this finding expired and was removed on Oct 5, 2026 (the project's retention policy). The finding itself is kept.");
     });
 
     it("groups stored files into the kinds the storage view shows", () => {

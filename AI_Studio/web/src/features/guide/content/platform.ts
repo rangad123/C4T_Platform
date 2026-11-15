@@ -91,12 +91,12 @@ export const platform: Topic[] = [
         why: "You keep the disk from filling up, and you keep a copy.",
         steps: [
             step("Open Settings, then Storage and backup.", "Settings", "Storage and backup"),
-            step("Turn on automatic clean-up and choose the number of days."),
+            step("Check the number of days old files are kept, and change it if you need to."),
             step("Read the preview of what would go, then confirm."),
             step("Choose Download backup to save the project as a zip file.", "Download backup"),
         ],
         goodToKnow: [
-            "Clean-up is off by default. Tests, run history, issues and signed releases are never removed.",
+            "Clean-up is on: failed runs' media go after 7 days, passed runs' records after 30. Tests and history stay.",
             "A backup contains no secrets. After Restore from a backup, you enter them again.",
         ],
         open: { label: "Open Storage and backup", to: { place: "setup", section: "storage" } },

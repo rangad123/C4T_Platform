@@ -5,7 +5,7 @@
  * Pruned evidence files stay as rows in `artifacts` (marked with `pruned_at` and a reason) so run history, trends and flaky
  * detection never change; only the file on disk is gone.
  */
-import { DEFAULT_POLICY, platformDefaultDays, policyFromPlatformDefault, type RetentionPolicy } from "../engine/retention/policy.js";
+import { DEFAULT_POLICY, platformDefaultDays, platformDefaultOff, policyFromPlatformDefault, withinLimits, type RetentionLimits, type RetentionPolicy } from "../engine/retention/policy.js";
 import type { Db, Row } from "./db.js";
 
 export const RETENTION_MIGRATION = `
@@ -46,6 +46,8 @@ CREATE INDEX idx_restore_needs_project ON restore_needs(project_id);
 export interface EffectivePolicy extends RetentionPolicy {
     /** Where the numbers come from: this project's own saved policy, the platform default, or the built-in defaults. */
     source: "project" | "platform" | "default";
+    /** The saved periods were longer than the server allows: they apply shortened to its limits. */
+    heldToLimits?: boolean;
 }
 
 export interface RetentionLogRow {
@@ -73,6 +75,8 @@ export class RetentionStore {
         private readonly db: Db,
         /** RETENTION_DEFAULT_DAYS as written in the environment. */
         private readonly platformDefault?: string,
+        /** The server's limits (RETENTION_MAX_*); none: the schema's own maxima. */
+        private readonly limits?: RetentionLimits,
     ) {}
 
     /** The policy saved for the project, if any. */
@@ -82,13 +86,20 @@ export class RetentionStore {
         return { enabled: Boolean(r.enabled), keepDays: r.keep_days, keepFailedDays: r.keep_failed_days, keepLatestRuns: r.keep_latest_runs, maxArtifactMB: r.max_artifact_mb ?? null };
     }
 
-    /** What applies to the project: its own policy, else the platform default (when the operator set one), else "off". */
+    /**
+     * What applies to the project: its own policy (held to the server's limits), else the platform default (RETENTION_DEFAULT_DAYS:
+     * a number of days, or "off"), else the built-in default (on: failed runs' media 7 days, passed runs' records 30 days).
+     */
     effective(projectId: string): EffectivePolicy {
         const own = this.saved(projectId);
-        if (own) return { ...own, source: "project" };
+        if (own) {
+            const held = this.limits ? withinLimits(own, this.limits) : own;
+            return { ...held, source: "project", ...(held.keepDays !== own.keepDays || held.keepFailedDays !== own.keepFailedDays ? { heldToLimits: true } : {}) };
+        }
         const days = platformDefaultDays(this.platformDefault);
-        if (days !== undefined) return { ...policyFromPlatformDefault(days), source: "platform" };
-        return { ...DEFAULT_POLICY, source: "default" };
+        const base = platformDefaultOff(this.platformDefault) ? { ...DEFAULT_POLICY, enabled: false } : days !== undefined ? policyFromPlatformDefault(days) : DEFAULT_POLICY;
+        const source = days !== undefined || platformDefaultOff(this.platformDefault) ? "platform" : "default";
+        return { ...(this.limits ? withinLimits(base, this.limits) : base), source };
     }
 
     save(projectId: string, p: RetentionPolicy): void {

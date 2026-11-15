@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { formatBytes } from "../../engine/retention/format.js";
 import { BACKUP_LIMITS } from "../../engine/retention/backup-model.js";
-import { KEEP_DAYS, KEEP_FAILED_DAYS, KEEP_LATEST_RUNS, MAX_ARTIFACT_MB, mergePolicy, platformDefaultDays, RetentionPolicyPatchSchema } from "../../engine/retention/policy.js";
+import { KEEP_DAYS, KEEP_FAILED_DAYS, limitProblem, MAX_ARTIFACT_MB, mergePolicy, platformDefaultDays, platformDefaultOff, RetentionPolicyPatchSchema, retentionLimits } from "../../engine/retention/policy.js";
 import { buildBackup, DEFAULT_EVIDENCE_MB, MAX_EVIDENCE_MB, restoreBackup } from "../backup.js";
 import { recordBackupWithoutSecurity, securityDataCounts } from "../../security/backup.js";
 import { HttpError } from "../http-error.js";
@@ -15,8 +15,8 @@ import type { RouteCtx } from "./types.js";
  *
  *   GET    /api/storage                              disk used by the platform: database, files by kind, biggest projects, free disk space
  *   GET    /api/projects/:id/storage                 the same for one project, with its retention state and anything still to re-enter after a restore
- *   GET    /api/projects/:id/retention               the policy that applies (saved, platform default, or off), limits, and the last runs
- *   PUT    /api/projects/:id/retention               save the policy (off unless enabled)
+ *   GET    /api/projects/:id/retention               the policy that applies (saved, platform default, or the built-in default: on), limits, and the last runs
+ *   PUT    /api/projects/:id/retention               save the policy (refused above the server's RETENTION_MAX_* limits)
  *   POST   /api/projects/:id/retention/preview       exactly what a run would remove now; removes nothing
  *   POST   /api/projects/:id/retention/run           remove it; needs an enabled policy, { confirm: true }, and no job running
  *   GET    /api/projects/:id/backup                  a zip of the project (no secrets); ?evidence=true adds baselines and recent evidence;
@@ -28,18 +28,29 @@ export function registerRetentionRoutes(ctx: RouteCtx): void {
     const { app, p, project } = ctx;
     const store = () => retentionStore(p);
 
+    const limits = () => retentionLimits(p.config);
     const policyBody = (id: string, patch: z.infer<typeof RetentionPolicyPatchSchema>) => {
+        let next;
         try {
-            const { source: _source, ...base } = store().effective(id);
-            return mergePolicy(base, patch);
+            const { source: _source, heldToLimits: _held, ...base } = store().effective(id);
+            next = mergePolicy(base, patch);
         } catch (e) {
             if (e instanceof z.ZodError) throw new HttpError(400, e.issues[0]?.message ?? "Invalid retention settings", e.issues);
             throw e;
         }
+        // The server's limits are enforced here, not only in the form.
+        const over = limitProblem(next, limits());
+        if (over) throw new HttpError(400, over);
+        return next;
+    };
+    // The limits a project's settings are held to: the schema's range, narrowed by the server's maxima.
+    const limitsAnswer = () => {
+        const l = limits();
+        return { keepDays: { ...KEEP_DAYS, max: l.maxKeepDays }, keepFailedDays: { ...KEEP_FAILED_DAYS, max: l.maxKeepFailedDays }, maxArtifactMB: MAX_ARTIFACT_MB };
     };
     const patchOf = (body: unknown) => {
         const r = RetentionPolicyPatchSchema.safeParse(body ?? {});
-        if (!r.success) throw new HttpError(400, "Unknown or invalid retention setting. Allowed: enabled, keepDays, keepFailedDays, keepLatestRuns, maxArtifactMB.", r.error.issues);
+        if (!r.success) throw new HttpError(400, "Unknown or invalid retention setting. Allowed: enabled, keepDays, keepFailedDays, maxArtifactMB.", r.error.issues);
         return r.data;
     };
 
@@ -90,12 +101,14 @@ export function registerRetentionRoutes(ctx: RouteCtx): void {
         const { id } = req.params as { id: string };
         project(id);
         const eff = store().effective(id);
-        const { source, ...policy } = eff;
+        const { source, heldToLimits, ...policy } = eff;
         return {
             policy: { ...policy, maxArtifactMB: policy.maxArtifactMB ?? null },
             source,
+            ...(heldToLimits ? { heldToLimits: true } : {}),
             platformDefaultDays: platformDefaultDays(p.config.RETENTION_DEFAULT_DAYS) ?? null,
-            limits: { keepDays: KEEP_DAYS, keepFailedDays: KEEP_FAILED_DAYS, keepLatestRuns: KEEP_LATEST_RUNS, maxArtifactMB: MAX_ARTIFACT_MB },
+            platformDefaultOff: platformDefaultOff(p.config.RETENTION_DEFAULT_DAYS),
+            limits: limitsAnswer(),
             busy: Boolean(await activeJobOf(p.repo, id)),
             recent: store().recent(id, 10),
         };
@@ -107,7 +120,7 @@ export function registerRetentionRoutes(ctx: RouteCtx): void {
         const next = policyBody(id, patchOf(req.body));
         store().save(id, next);
         const eff = store().effective(id);
-        const { source, ...policy } = eff;
+        const { source, heldToLimits: _held, ...policy } = eff;
         return { policy: { ...policy, maxArtifactMB: policy.maxArtifactMB ?? null }, source };
     });
 

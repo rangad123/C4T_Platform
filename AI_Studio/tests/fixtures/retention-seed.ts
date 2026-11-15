@@ -85,3 +85,9 @@ export function addBaseline(p: Platform, s: Seed, t: SeedTest, name = "home.png"
 }
 
 export const exists = (f: SeedFile) => fs.existsSync(f.abs);
+
+/** Put the platform well past its first-deploy grace (retention-runner.ts), as an installation that has run retention for a long time. */
+export function pastGrace(p: Platform, daysAgo = 4000): void {
+    const at = new Date(Date.now() - daysAgo * DAY).toISOString();
+    p.db.run("INSERT INTO auth_settings (key, value_json, updated_at) VALUES ('retention.first_deploy', ?, ?) ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json", JSON.stringify(at), at);
+}

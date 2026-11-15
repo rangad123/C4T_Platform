@@ -8,7 +8,9 @@
  * Restore: always creates a NEW project; it never overwrites an existing one. The zip is untrusted: it is unpacked as a stream
  * with hard limits (entries, bytes per file, bytes in total), every entry name is checked, every document is validated, and the
  * only paths ever written are ones this code builds itself from ids it just generated. Restored tests start as PENDING (nothing is
- * re-run automatically), schedules start switched off, and retention starts switched off.
+ * re-run automatically) and schedules start switched off. Retention always starts switched ON (a backup
+ * must not be a way around it): a saved policy comes back with its periods (held to this server's limits) but enabled, whatever the
+ * file says, and a backup without a policy leaves the project on the default, which is on.
  */
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -747,9 +749,10 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
         }
         if (counts.schedules! > 0) notes.push("Schedules were restored switched off. Switch them on when you are ready.");
 
-        // retention comes back switched off, and only if it still fits today's limits
+        // retention comes back switched on (never off: see the top of the file), with its periods only if they fit the schema; the
+        // server's limits then hold them (RetentionStore.effective). Without a saved policy the default applies, which is on.
         if (projectDoc.retention) {
-            const pol = RetentionPolicySchema.safeParse({ enabled: false, ...projectDoc.retention });
+            const pol = RetentionPolicySchema.safeParse({ ...projectDoc.retention, enabled: true });
             if (pol.success) retentionStore(p).save(pid, pol.data);
         }
 
