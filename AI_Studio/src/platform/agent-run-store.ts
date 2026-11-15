@@ -2,8 +2,9 @@
  * Agent runs (migration slot 44; the tables are named objective_runs, as `agent_runs` holds the authoring agents' work): a person gives an objective, the AI pursues it in a real browser, and the run keeps what happened: every
  * step, every approval, the result. The work happens in a job of mode "agent" (agent-run.ts); these tables are its record.
  *
- * A step holds stand-ins, never a secret, and its text is scrubbed before it gets here. An approval row is the only way a waiting run goes on:
- * the job polls it, so a person's answer works whichever process serves the page.
+ * A step holds stand-ins, never a secret, and its text is scrubbed before it gets here; its summary, detail and address, and the run's
+ * reasoning and stop reason, are also masked here with the shared patterns (redact-text.ts: e-mail addresses, tokens in addresses).
+ * An approval row is the only way a waiting run goes on: the job polls it, so a person's answer works whichever process serves the page.
  */
 import { randomUUID } from "node:crypto";
 import type { AgentVerdict, FailureCategory, ObjectiveLimits, StepStatus } from "../engine/agent/objective.js";
@@ -11,6 +12,7 @@ import type { HighImpactKind } from "../engine/agent/high-impact.js";
 import type { Step } from "../engine/spec/schema.js";
 import type { Row } from "./db.js";
 import type { Sql } from "./sql.js";
+import { maskOptional, maskText } from "./redact-text.js";
 
 export const AGENT_RUNS_MIGRATION = `
 CREATE TABLE objective_runs (
@@ -220,7 +222,7 @@ export class AgentRunStore {
 
     async addStep(runId: string, s: { seq: number; tool: string; summary: string; status: StepStatus; detail?: string; url: string; step?: Step; screenshotId?: string }): Promise<void> {
         await this.sql.tx(async (t) => {
-            await t.run("INSERT INTO objective_run_steps (id, run_id, seq, tool, summary, status, detail, url, step_json, screenshot_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", randomUUID(), runId, s.seq, s.tool, s.summary, s.status, s.detail ?? null, s.url, s.step ? JSON.stringify(s.step) : null, s.screenshotId ?? null, now());
+            await t.run("INSERT INTO objective_run_steps (id, run_id, seq, tool, summary, status, detail, url, step_json, screenshot_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", randomUUID(), runId, s.seq, s.tool, maskText(s.summary), s.status, maskOptional(s.detail) ?? null, maskText(s.url), s.step ? JSON.stringify(s.step) : null, s.screenshotId ?? null, now());
             await t.run("UPDATE objective_runs SET steps_taken = steps_taken + 1, updated_at = ? WHERE id = ?", now(), runId);
         });
     }
@@ -248,8 +250,8 @@ export class AgentRunStore {
                 "UPDATE objective_runs SET state = ?, verdict = ?, reasoning = ?, stop_reason = ?, failure_category = ?, finished_at = ?, updated_at = ? WHERE id = ? AND state NOT IN ('finished', 'stopped')",
                 r.state,
                 r.verdict,
-                r.reasoning || null,
-                r.stopReason ?? null,
+                maskOptional(r.reasoning) || null,
+                maskOptional(r.stopReason) ?? null,
                 r.failureCategory ?? null,
                 t,
                 t,

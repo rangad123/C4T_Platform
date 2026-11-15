@@ -17,6 +17,7 @@ import { trackTestVersion, type VersionSource } from "./review-store.js";
 import { currentActor } from "./auth/actor.js";
 import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
 import { HANDED_OVER } from "./runner-handover.js";
+import { maskText, maskValue } from "./redact-text.js";
 
 export const JOB_STATES = [
     "QUEUED",
@@ -702,6 +703,10 @@ export class Repo {
     }
 
     // ── events / agent runs ─────────────────────────────────────────────────
+    /**
+     * Every writer's events (the job's sink, runner live events, model events, schedulers) are masked here with the shared patterns
+     * (redact-text.ts); the run's own secrets are masked before, by the writer that knows them (RepoSink, agent-services.ts).
+     */
     addEvent(jobId: string, e: EngineEvent): void {
         this.db.run(
             "INSERT INTO agent_events (job_id, stage, kind, level, message, data_json, created_at) VALUES (?,?,?,?,?,?,?)",
@@ -709,8 +714,8 @@ export class Repo {
             e.stage,
             e.kind,
             e.level ?? "info",
-            e.message.slice(0, 1000),
-            j(e.data),
+            maskText(e.message).slice(0, 1000),
+            j(maskValue(e.data)),
             now(),
         );
         // Wakes live streams in this process at once; other processes are seen through the database (stream-core.ts).
@@ -730,9 +735,6 @@ export class Repo {
     }
     finishAgentRun(id: string, status: string, summary?: string): void {
         this.db.run("UPDATE agent_runs SET status = ?, summary = ?, finished_at = ? WHERE id = ?", status, summary?.slice(0, 1000) ?? null, now(), id);
-    }
-    addAgentAction(runId: string, a: { tool: string; args: unknown; ok: boolean; observation: string }): void {
-        this.db.run("INSERT INTO agent_actions (run_id, tool, args_json, ok, observation, created_at) VALUES (?,?,?,?,?,?)", runId, a.tool, j(a.args), a.ok ? 1 : 0, a.observation.slice(0, 500), now());
     }
 
     // ── suites / tests ──────────────────────────────────────────────────────

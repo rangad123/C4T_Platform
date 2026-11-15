@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { EVIDENCE_MAX_CONSOLE, EVIDENCE_MAX_REQUESTS, EVIDENCE_MAX_TEXT, loadEvidenceRuntime } from "./capture.js";
+import { runSecretValues, type RunSecretsEnv } from "./secret-policy.js";
 
 /** The stored file may not be larger than this (it is far below it unless every console line is huge). */
 export const EVIDENCE_MAX_BYTES = 600_000;
@@ -54,15 +55,13 @@ export interface Evidence {
     console: EvidenceConsoleLine[];
 }
 
-/** Every credential the run used, as exact strings (the platform knows them; the script masks them again from its environment). */
-export function secretsOfRun(env: {
-    credentials?: { password?: string; totpSecret?: string };
-    roles?: Array<{ password?: string; totpSecret?: string; apiToken?: string }>;
-    apiToken?: string;
-    apiAuthHeader?: string;
-}): string[] {
-    const list = [env.credentials?.password, env.credentials?.totpSecret, env.apiToken, env.apiAuthHeader, ...(env.roles ?? []).flatMap((r) => [r.password, r.totpSecret, r.apiToken])];
-    return loadEvidenceRuntime().evidenceSecrets(list.filter((s): s is string => typeof s === "string" && s.length >= 4));
+/**
+ * Every secret of the run, as exact strings, in the forms the evidence helper masks (the platform knows them; the script masks them again
+ * from its environment). The same list as the failure traces (secret-policy.ts): accounts, tokens, the auth header, a Basic sign-in's
+ * base64, the saved sign-in's values and secret-named settings.
+ */
+export function secretsOfRun(env: RunSecretsEnv): string[] {
+    return loadEvidenceRuntime().evidenceSecrets(runSecretValues(env));
 }
 
 /**

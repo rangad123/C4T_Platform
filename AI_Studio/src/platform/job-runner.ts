@@ -45,6 +45,7 @@ import { deviceOpenerFor } from "./phone-device.js";
 import { MobileTargetSchema } from "../engine/mobile/target.js";
 import type { DeviceOpener } from "../engine/mobile/explore/types.js";
 import { SecretBox } from "./secrets.js";
+import { envSecrets } from "./agent-routing.js";
 import { prepareJobSignIn, type JobSignIn } from "./hard-signin-service.js";
 import { meterFor, PERSONAL_KEY_MODEL } from "./usage-store.js";
 import { routedLlmForJob } from "./llm-routing.js";
@@ -170,6 +171,10 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         repo.setJobStatus(job.id, "FAILED", "Application record not found");
         return;
     }
+    // The run's sign-in details are masked in every event, error and reason this job writes (redact-text.ts).
+    // envSecrets adds the Basic-auth (base64 "user:password") forms and an auth header's value part, which the text may quote instead.
+    const c = app.credentials;
+    sink.addSecrets([...envSecrets({ credentials: c?.password ? { username: c.username ?? "", password: c.password } : undefined, apiToken: c?.apiToken, apiAuthHeader: c?.apiAuthHeader }), c?.totpSecret, c?.oauth2?.clientSecret]);
 
     const abort = new AbortController();
     let leaseLost = false;
@@ -204,14 +209,14 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     // Everything the job wrote before is stored first, so its final status never comes before its last event.
     const finish = async (status: "COMPLETED" | "PARTIALLY_COMPLETED" | "FAILED", error?: string) => {
         await sink.writes.flush();
-        if (repo.ownsJob(job.id, owner)) repo.setJobStatus(job.id, status, error);
+        if (repo.ownsJob(job.id, owner)) repo.setJobStatus(job.id, status, error === undefined ? undefined : sink.mask(error));
         else console.warn(`[job ${job.id.slice(0, 8)}] lease lost; not recording final status ${status}`);
     };
     const emit: EngineContext["emit"] = (e) => {
         // Handed over: the next platform process writes this job's events now.
         if (handingOver) return;
         sink.event(e);
-        const line = `[job ${job.id.slice(0, 8)}] ${e.stage}/${e.kind}: ${e.message}`;
+        const line = `[job ${job.id.slice(0, 8)}] ${e.stage}/${e.kind}: ${sink.mask(e.message)}`;
         if (e.level === "error") console.error(line);
         else if (process.env.LOG_LEVEL === "debug") console.log(line);
     };
@@ -269,6 +274,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         let roles: ReturnType<IdentityStore["get"]> = [];
         try {
             roles = new IdentityStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY)).get(job.projectId);
+            sink.addSecrets(envSecrets({ roles }));
         } catch {
             // Accounts that cannot be read (for example after the encryption key changed) only disable the checks that need them.
         }
@@ -358,6 +364,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             const runId = o.agentRunId ?? "";
             const pursue = onRunner
                 ? async (request: AgentOnRunnerRequest) => {
+                      sink.addSecrets(request.secrets ?? []);
                       try {
                           await exploreOnRunner(onRunner, { deps, job, mode: "agent", request, secrets: request.secrets, modelName: llm.modelName, frameworkSettings: frameworkSettingsOf(repo, job.projectId), signal: abort.signal, emit });
                           return takeAgentOutcome(runId);
@@ -374,6 +381,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         if (o.mode === "environment") {
             // Results for one named environment only: the tests' own validation status and history are never touched.
             const prepared = await prepareEnvironmentRun(repo, config, job, app, roles);
+            sink.addSecrets(prepared.secrets);
             // The approved version's steps and code, where a newer draft waits (review-store.ts).
             if (pins) {
                 prepared.tests = prepared.tests.map((et) => {
@@ -430,7 +438,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 }
                 const resolved = resolveRefs(t);
                 if (!resolved.ok) {
-                    repo.updateTest(t.id, { validationStatus: "FAILED_VALIDATION", reason: `Script could not be rendered: ${resolved.error}` });
+                    repo.updateTest(t.id, { validationStatus: "FAILED_VALIDATION", reason: sink.mask(`Script could not be rendered: ${resolved.error}`) });
                     continue;
                 }
                 const meta = t.generationMeta ?? {};
@@ -532,7 +540,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 if (cancelled) {
                     // A cancel is not a verdict on any test: the ones that did not get to run go back to what they were (status, reason, history).
                     await sink.restoreInterrupted();
-                    repo.setJobStatus(job.id, "FAILED", msg);
+                    repo.setJobStatus(job.id, "FAILED", sink.mask(msg));
                     const facts = cancelSummary(repo.getJob(job.id) ?? { ...job, status: "FAILED", error: msg });
                     if (facts) emit({ stage: "orchestration", kind: "cancel_summary", message: facts.note, data: { planned: facts.planned, ran: facts.ran, notRun: facts.notRun } });
                 } else if (validateOnly && err instanceof RunnerAgentError) {
@@ -543,7 +551,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                     await sink.writes.flush();
                 } else if (validateOnly) {
                     // Tests this job had started must not stay VALIDATING forever (runs that finished were recorded).
-                    repo.resetValidatingTests(o.testIds ?? [], "FAILED_VALIDATION", `Validation interrupted: ${msg}`);
+                    repo.resetValidatingTests(o.testIds ?? [], "FAILED_VALIDATION", sink.mask(`Validation interrupted: ${msg}`));
                 }
             }
             await finish("FAILED", msg);

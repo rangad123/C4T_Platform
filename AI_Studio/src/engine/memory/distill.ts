@@ -11,10 +11,10 @@
  */
 import { createHash } from "node:crypto";
 import type { AppModel, PageModel } from "../understanding/app-model.js";
+import { hideAuthCredentials } from "../../shared/redact-text.js";
 import { MAX_MEMORY_BYTES, MEMORY_VERSION, type SiteKnowledge } from "./types.js";
 
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
-const AUTH_SCHEME = /\b(?:bearer|basic)\s+[\w.~+/=-]{6,}/gi;
 const JWT = /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*/g;
 /** Long strings mixing letters and digits: keys, tokens, ids. */
 const OPAQUE = /(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{24,}/g;
@@ -25,7 +25,7 @@ const SECRET_MIN_LENGTH = 4;
 export function scrubText(text: string | undefined, secrets: string[] = [], max = 120): string {
     let out = String(text ?? "").replace(/\s+/g, " ").trim();
     // Shapes first (so "name@host" becomes one "[email]" rather than leaving "@host" behind), then the exact known values.
-    out = out.replace(JWT, "[token]").replace(AUTH_SCHEME, "[token]").replace(EMAIL, "[email]");
+    out = hideAuthCredentials(out.replace(JWT, "[token]"), () => "[token]", { strict: true }).replace(EMAIL, "[email]");
     for (const s of secrets) if (s.length >= SECRET_MIN_LENGTH) out = out.split(s).join("[redacted]");
     out = out.replace(OPAQUE, "[token]");
     return out.length > max ? `${out.slice(0, max - 1)}…` : out;

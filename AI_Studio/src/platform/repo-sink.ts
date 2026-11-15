@@ -18,6 +18,7 @@ import { JobWriteQueue } from "./job-write-queue.js";
 import { linkGeneratedTest } from "./requirement-store.js";
 import type { EngineEvent } from "../engine/context.js";
 import { CustomScriptStore } from "./custom-script-store.js";
+import { maskOptional, maskText, maskValue } from "./redact-text.js";
 import type { VersionSource } from "./review-store.js";
 
 /**
@@ -49,9 +50,28 @@ export class RepoSink implements GenerationSink {
         private readonly job: { id: string; projectId: string; applicationId: string; mode?: JobMode },
     ) {}
 
-    /** One engine event for this job, in order with the job's other writes (the engine's `emit` stays synchronous). */
+    /** The run's own secrets (sign-in passwords, authenticator secrets, API tokens), masked in everything this sink writes as text. */
+    private readonly secrets = new Set<string>();
+    addSecrets(list: ReadonlyArray<string | null | undefined>): void {
+        for (const s of list) if (typeof s === "string" && s.length >= 4) this.secrets.add(s);
+    }
+    /** Text as this job stores it: its secrets and the shared patterns masked (redact-text.ts). */
+    mask(text: string): string {
+        return maskText(text, [...this.secrets]);
+    }
+    private maskReason<T extends string | null | undefined>(reason: T): T {
+        return maskOptional(reason, [...this.secrets]);
+    }
+    /** A run's step results with each step's error masked (titles come from the test's own steps and stay). */
+    private maskSteps<S extends { error?: string }>(steps: readonly S[]): S[] {
+        return steps.map((st) => (typeof st.error === "string" ? { ...st, error: this.mask(st.error) } : st));
+    }
+
+    /** One engine event for this job, in order with the job's other writes (the engine's `emit` stays synchronous). Masked on write. */
     event(e: EngineEvent): void {
-        this.writes.push(() => this.repo.addEvent(this.job.id, e));
+        const secrets = [...this.secrets];
+        const masked: EngineEvent = { ...e, message: maskText(e.message, secrets), ...(e.data === undefined ? {} : { data: maskValue(e.data, secrets) }) };
+        this.writes.push(() => this.repo.addEvent(this.job.id, masked));
     }
 
     phase: GenerationSink["phase"] = (status, phase, state) =>
@@ -89,7 +109,7 @@ export class RepoSink implements GenerationSink {
             const slug = slugify(spec.category);
             const suiteId = this.repo.getOrCreateSuite(this.job.projectId, spec.category, slug);
             const id = this.repo.insertTest({ projectId: this.job.projectId, suiteId, jobId: this.job.id, spec, framework, validationStatus: validation, meta, versionSource: this.versionSource });
-            if (reason) this.repo.updateTest(id, { reason });
+            if (reason) this.repo.updateTest(id, { reason: this.maskReason(reason) });
             // A test written from a requirements document names the requirements it covers: each that is a requirement record of the
             // project (by its reference) gets a link (requirement-store.ts).
             linkGeneratedTest(this.repo.db, this.job.projectId, id, spec.source.requirements);
@@ -108,7 +128,7 @@ export class RepoSink implements GenerationSink {
             }
             // A test that ran its approved version while a newer draft waits: the run's steps are never written over the draft.
             const spec = this.keepSteps.has(h.id) ? undefined : patch.spec;
-            this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: patch.reason, attempts: patch.attempts, meta: this.shown(patch.meta), versionSource: this.versionSource });
+            this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: this.maskReason(patch.reason), attempts: patch.attempts, meta: this.shown(patch.meta), versionSource: this.versionSource });
         });
 
     /** Tests whose steps this run must not write back (set by the job runner from the versions it pinned, review-store.ts). */
@@ -170,9 +190,9 @@ export class RepoSink implements GenerationSink {
             attempt,
             status: run.status,
             durationMs: run.durationMs,
-            error: run.error,
+            error: this.maskReason(run.error),
             startedAt,
-            steps: run.steps,
+            steps: this.maskSteps(run.steps),
         });
         if (run.metrics?.length) await recordMetrics(this.repo.db.sql, { projectId: this.job.projectId, testId: h.id, executionId, samples: run.metrics });
         // API drift: the shape (never the values) of what the API answered; never throws.
@@ -197,7 +217,8 @@ export class RepoSink implements GenerationSink {
 
     /** A browser / screen-size result: stored as an execution tagged with its variant, with its own evidence files. */
     recordVariant: NonNullable<GenerationSink["recordVariant"]> = async (h, scriptId, r, startedAt) => {
-        if (r.status === "skipped" && r.reason && isRepeatedSkip(this.repo.db, h.id, r.variant, r.reason)) return;
+        const reason = this.maskReason(r.reason);
+        if (r.status === "skipped" && reason && isRepeatedSkip(this.repo.db, h.id, r.variant, reason)) return;
         const run = r.run;
         const executionId = addVariantExecution(this.repo.db, {
             testId: h.id,
@@ -205,10 +226,10 @@ export class RepoSink implements GenerationSink {
             jobId: this.job.id,
             variant: r.variant,
             status: r.status,
-            reason: r.reason,
+            reason,
             durationMs: run?.durationMs ?? 0,
             startedAt,
-            steps: run?.steps ?? [],
+            steps: this.maskSteps(run?.steps ?? []),
         });
         // Only a run that failed has evidence worth keeping (Playwright keeps screenshot / video / trace on failure).
         if (r.status !== "failed") return;
@@ -225,7 +246,8 @@ export class RepoSink implements GenerationSink {
 
     /** A result for one named environment: an execution tagged with it, plus the evidence of a run that went wrong. */
     recordEnvironment: NonNullable<GenerationSink["recordEnvironment"]> = async (h, scriptId, r, startedAt) => {
-        if (r.status === "skipped" && r.reason && isRepeatedEnvironmentSkip(this.repo.db, h.id, r.environment, r.reason)) return;
+        const reason = this.maskReason(r.reason);
+        if (r.status === "skipped" && reason && isRepeatedEnvironmentSkip(this.repo.db, h.id, r.environment, reason)) return;
         const run = r.run;
         const executionId = addEnvironmentExecution(this.repo.db, {
             testId: h.id,
@@ -233,10 +255,10 @@ export class RepoSink implements GenerationSink {
             jobId: this.job.id,
             environment: r.environment,
             status: r.status,
-            reason: r.reason,
+            reason,
             durationMs: run?.durationMs ?? 0,
             startedAt,
-            steps: run?.steps ?? [],
+            steps: this.maskSteps(run?.steps ?? []),
         });
         if (r.status === "passed" || r.status === "skipped") return;
         for (const a of run?.artifacts ?? []) {
@@ -294,7 +316,10 @@ export class RepoSink implements GenerationSink {
     };
 
     startAgentRun: GenerationSink["startAgentRun"] = (role, subject) => this.writes.run(() => this.repo.startAgentRun(this.job.id, role, subject));
-    /** Synchronous for the engine (it is called inside an agent's tool loop): queued in order, so it is written before the run is finished. */
-    agentAction: GenerationSink["agentAction"] = (runId, a) => this.writes.push(() => this.repo.addAgentAction(runId, a));
-    finishAgentRun: GenerationSink["finishAgentRun"] = (runId, status, summary) => this.writes.run(() => this.repo.finishAgentRun(runId, status, summary));
+    /**
+     * An authoring agent's tool call is not stored: nothing reads it, and it held page addresses, error text and
+     * typed values. The engine still reports each one (routing, observability), so the call stays and does nothing here.
+     */
+    agentAction: GenerationSink["agentAction"] = () => undefined;
+    finishAgentRun: GenerationSink["finishAgentRun"] = (runId, status, summary) => this.writes.run(() => this.repo.finishAgentRun(runId, status, this.maskReason(summary)));
 }

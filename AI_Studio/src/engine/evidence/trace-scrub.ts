@@ -39,7 +39,7 @@ import path from "node:path";
 import { webcrypto } from "node:crypto";
 import zlib from "node:zlib";
 import { secretVariants } from "../../agent-protocol/secret-variants.js";
-import { parseStorageState, secretValuesOf } from "../auth/storage-state.js";
+import { isSecretSettingName, runSecretValues, type RunSecretsEnv } from "./secret-policy.js";
 
 /**
  * What a trace may hold before it is refused unread. A failure trace is mostly screenshots, page snapshots and the bodies the page loaded:
@@ -54,41 +54,15 @@ const MASK = "\0";
 /** The sentence a run shows when a trace was held back. */
 export const TRACE_WITHHELD = "The trace was not attached: it could not be cleaned of the run's passwords and tokens safely";
 
-/** Every secret of a run's environment, as exact strings: accounts, tokens, an auth header and its value, a Basic sign-in's base64, a saved sign-in's values. */
-export function traceSecretsOfRun(env: {
-    credentials?: { username?: string; password?: string; totpSecret?: string } | undefined;
-    roles?: Array<{ username?: string; password?: string; totpSecret?: string; apiToken?: string }> | undefined;
-    apiToken?: string | undefined;
-    apiAuthHeader?: string | undefined;
-    storageState?: string | undefined;
-    vars?: Record<string, string> | undefined;
-}): string[] {
-    const out: Array<string | undefined> = [env.credentials?.password, env.credentials?.totpSecret, env.apiToken, env.apiAuthHeader];
-    for (const r of env.roles ?? []) out.push(r.password, r.totpSecret, r.apiToken);
-    // An environment's variables are plain settings; one named like a secret is treated as one.
-    for (const [name, value] of Object.entries(env.vars ?? {})) if (SECRET_VAR_NAME.test(name)) out.push(value);
-    for (const c of [env.credentials, ...(env.roles ?? [])]) {
-        if (!c?.password || c.password.length < 4) continue;
-        const b64 = Buffer.from(`${c.username ?? ""}:${c.password}`, "utf8").toString("base64");
-        out.push(b64, b64.replace(/=+$/, ""));
-    }
-    if (env.storageState) {
-        try {
-            out.push(...secretValuesOf(parseStorageState(env.storageState)));
-        } catch {
-            /* a saved sign-in that does not parse was not used by the run */
-        }
-    }
-    return out.filter((s): s is string => typeof s === "string" && s.length >= 4);
+/** Every secret of a run's environment, as exact strings: accounts, tokens, an auth header and its value, a Basic sign-in's base64, a saved sign-in's values, secret-named settings. The shared policy (secret-policy.ts). */
+export function traceSecretsOfRun(env: RunSecretsEnv): string[] {
+    return runSecretValues(env);
 }
-
-/** An environment variable whose name says it holds a secret (DB_PASSWORD, API_KEY, STRIPE_TOKEN, ...). */
-const SECRET_VAR_NAME = /(?:pass(?:word|code|phrase)?|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|totp|auth[_-]?header|credentials?)$/i;
 
 /** The secrets in a test process's environment (TEST_PASSWORD, TEST_<NAME>_API_TOKEN, API_AUTH_HEADER, TEST_ENV_<SECRET-LIKE NAME> ...): for runners that only have that. */
 export function traceSecretsOfChildEnv(env: NodeJS.ProcessEnv): string[] {
     return Object.entries(env)
-        .filter(([k, v]) => typeof v === "string" && v.length >= 4 && (/(?:^|_)(?:PASSWORD|SECRET|TOKEN|AUTH_HEADER)$/.test(k) || (k.startsWith("TEST_ENV_") && SECRET_VAR_NAME.test(k.slice(9)))))
+        .filter(([k, v]) => typeof v === "string" && v.length >= 4 && (/(?:^|_)(?:PASSWORD|SECRET|TOKEN|AUTH_HEADER)$/.test(k) || (k.startsWith("TEST_ENV_") && isSecretSettingName(k.slice(9)))))
         .map(([, v]) => v as string);
 }
 

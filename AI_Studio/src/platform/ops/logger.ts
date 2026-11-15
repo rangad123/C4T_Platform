@@ -8,6 +8,7 @@
  * hidden, and a deploy-trigger token in a path is hidden by the trigger store's own redaction.
  */
 import { format } from "node:util";
+import { hideAuthCredentials } from "../../shared/redact-text.js";
 import { scrubSecrets } from "../agent-routing.js";
 import { redactStreamUrl } from "../stream-core.js";
 import { redactTriggerUrl } from "../trigger-store.js";
@@ -21,17 +22,16 @@ export function serverSecrets(env: NodeJS.ProcessEnv = process.env): string[] {
     return SERVER_SECRET_VARS.map((k) => env[k]?.trim() ?? "").filter((v) => v.length >= 4);
 }
 
-const AUTH_SCHEME = /\b(bearer|basic)\s+[\w.~+/=-]{6,}/gi;
 const JWT = /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*/g;
 // Same names the discovery code treats as secret in an address (engine/discovery/network.ts), as query parameters inside any text.
-const SECRET_PARAM = /([?&](?:[\w-]*pass(?:word)?|[\w-]*secret|[\w-]*token|authori[sz]ation|auth|api[-_]?key|key|session|signature|sig|ticket|code|otp|cookie)=)[^&#\s"']*/gi;
+const SECRET_PARAM = /([?&](?:[\w-]*pass(?:word)?|[\w-]*secret|[\w-]*token|authori[sz]ation|authentication|auth|api[-_]?key|key|session|signature|sig|ticket|code|otp|cookie)=)[^&#\s"']*/gi;
 const MAX_LINE = 8_000;
 
 /** Remove every secret from one log text (known values first, then shapes). */
 export function scrubLogText(text: string, secrets: readonly string[]): string {
     let out = scrubSecrets(text, [...secrets]);
     out = redactTriggerUrl(redactStreamUrl(out));
-    out = out.replace(JWT, "[token]").replace(AUTH_SCHEME, "$1 [hidden]").replace(SECRET_PARAM, "$1[hidden]");
+    out = hideAuthCredentials(out.replace(JWT, "[token]"), undefined, { strict: true }).replace(SECRET_PARAM, "$1[hidden]");
     return out.length > MAX_LINE ? `${out.slice(0, MAX_LINE)}…(cut)` : out;
 }
 

@@ -162,8 +162,8 @@ describe("the remote generation sink", () => {
         expect(cleanup.mock.calls[0]![0][0]).toMatchObject({ testId: key, id: "7", status: "removed" });
         expect(phone).toHaveBeenCalledWith({ exploredOn: { serial: "emulator-5554", emulator: true } });
         expect(mem.knowledge?.origin).toBe("http://127.0.0.1:9045");
-        const actions = platform.db.all<{ tool: string; ok: number }>("SELECT tool, ok FROM agent_actions WHERE run_id = ? ORDER BY id", runId);
-        expect(actions).toEqual([{ tool: "click", ok: 1 }, { tool: "read", ok: 0 }]);
+        // The runner's agent actions are accepted and not stored (approved policy: nothing reads them).
+        expect(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'agent_actions'")?.n).toBe(0);
         expect(platform.db.get<{ status: string }>("SELECT status FROM agent_runs WHERE id = ?", runId)?.status).toBe("DONE");
         await forgetExploreSink(task.taskId);
     });
@@ -194,8 +194,10 @@ describe("the remote generation sink", () => {
         const runId = await sink.startAgentRun("author", "many");
         for (let i = 0; i < 300; i++) sink.agentAction(runId, { tool: `t${i}`, args: {}, ok: true, observation: "" });
         await sink.flush();
-        const tools = platform.db.all<{ tool: string }>("SELECT tool FROM agent_actions WHERE run_id = ? ORDER BY id", runId).map((r) => r.tool);
+        // Every call reached the platform, in order, and was accepted; agent actions are not stored.
+        const tools = w.bodies.flatMap((b) => b.calls).filter((c) => c.method === "agentAction").map((c) => (c as unknown as { a: { tool: string } }).a.tool);
         expect(tools).toEqual(Array.from({ length: 300 }, (_, i) => `t${i}`));
+        expect(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'agent_actions'")?.n).toBe(0);
         // Fewer posts than calls: batched (at most 200 calls a batch).
         expect(w.bodies.length).toBeLessThan(10);
         await forgetExploreSink(task.taskId);

@@ -27,7 +27,11 @@ import { HttpError } from "./http-error.js";
 import { aiOwnerOfJob, resolveAiFor } from "./ai-config.js";
 import { PERSONAL_KEY_MODEL } from "./usage-store.js";
 import { RepoSink } from "./repo-sink.js";
+import { agentServiceOf } from "./agent-services.js";
 import { applyAgentCall } from "./agent-on-runner.js";
+import { envSecrets } from "./agent-routing.js";
+import { SecretBox } from "./secrets.js";
+import type { TaskOffer } from "../agent-protocol/schema.js";
 
 interface TaskSink {
     attempt: number;
@@ -135,6 +139,19 @@ export function exploreRepoSink(taskId: string): RepoSink | undefined {
     return sinks.get(taskId)?.sink;
 }
 
+/** The secrets of the run environment this task was offered with (as the agent service scrubs them); none when it cannot be read. */
+export function offerSecrets(p: Pick<Platform, "config">, task: Pick<ExploreTaskRef, "taskId" | "projectId">): string[] {
+    try {
+        const t = agentServiceOf(task.projectId)?.store.getTask(task.taskId);
+        if (!t) return [];
+        const offer = new SecretBox(p.config.dataDir, p.config.SECRET_KEY).decrypt<TaskOffer>(t.payloadEnc);
+        const e = offer.env;
+        return [...envSecrets({ credentials: e.credentials, roles: e.roles, apiToken: e.apiToken, apiAuthHeader: e.apiAuthHeader }), ...(offer.explore?.secrets ?? [])];
+    } catch {
+        return [];
+    }
+}
+
 async function sinkFor(p: Platform, task: ExploreTaskRef): Promise<TaskSink> {
     const had = sinks.get(task.taskId);
     if (had && had.attempt === task.attempt) return had;
@@ -149,6 +166,10 @@ async function sinkFor(p: Platform, task: ExploreTaskRef): Promise<TaskSink> {
     // A person's own key: the tests' provenance does not name its model (as on the server, job-runner.ts).
     const repoSink = new RepoSink(p.repo, p.store, { id: job.id, projectId: job.projectId, applicationId: job.applicationId, mode: job.options.mode });
     if ((await resolveAiFor({ sql: p.sql, config: p.config }, aiOwnerOfJob(job.options))).billing.owner === "personal") repoSink.modelShownAs = PERSONAL_KEY_MODEL;
+    // The project's sign-in details are masked in what this task's saves write as text (events, reasons, summaries), as on the server.
+    repoSink.addSecrets(agentServiceOf(job.projectId)?.projectSecrets(job.projectId) ?? []);
+    // And what this task's offer carried: an environment's own sign-in, roles, token and header, with their Basic-auth and header-value forms.
+    repoSink.addSecrets(offerSecrets(p, task));
     const fresh: TaskSink = {
         attempt: task.attempt,
         jobId: job.id,
@@ -377,8 +398,8 @@ async function apply(p: Platform, task: ExploreTaskRef, s: TaskSink, c: SinkCall
             s.agentRuns.add(id);
             return id;
         }
+        // A runner still reports its authoring agent's tool calls (older runners always will): accepted and not stored (repo-sink.ts agentAction).
         case "agentAction":
-            k.agentAction(agentRun(s, c.runId), c.a);
             return null;
         case "finishAgentRun":
             return k.finishAgentRun(agentRun(s, c.runId), c.status, c.summary);

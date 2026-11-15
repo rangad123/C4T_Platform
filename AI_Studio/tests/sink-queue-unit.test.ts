@@ -175,27 +175,16 @@ describe("a job's writes through the sink and the job runner", () => {
         platform.repo.setJobStatus(job.id, "FAILED", "test over");
     });
 
-    it("stores an agent's actions before the run they belong to is finished", async () => {
+    it("stores no agent actions, and an agent run is still finished in order", async () => {
         const job = await claimed([]);
         const { repo } = platform;
         const sink = new RepoSink(repo, platform.store, job);
-        const log: string[] = [];
-        const addAgentAction = repo.addAgentAction.bind(repo);
-        vi.spyOn(repo, "addAgentAction").mockImplementation(((runId: string, a: Parameters<typeof repo.addAgentAction>[1]) =>
-            later().then(() => {
-                addAgentAction(runId, a);
-                log.push(a.tool);
-            })) as never);
-        const finishAgentRun = repo.finishAgentRun.bind(repo);
-        vi.spyOn(repo, "finishAgentRun").mockImplementation((...a) => {
-            log.push("finished");
-            finishAgentRun(...a);
-        });
         const runId = await sink.startAgentRun("web-authoring", "A scenario");
-        sink.agentAction(runId, { tool: "click", args: {}, ok: true, observation: "" });
+        sink.agentAction(runId, { tool: "click", args: { value: "secret-typed" }, ok: true, observation: "url=http://127.0.0.1:9771/reset?token=abc123456" });
         sink.agentAction(runId, { tool: "fill", args: {}, ok: true, observation: "" });
         await sink.finishAgentRun(runId, "done", "ok");
-        expect(log).toEqual(["click", "fill", "finished"]);
+        expect(repo.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'agent_actions'")?.n).toBe(0);
+        expect(repo.db.get<{ status: string; summary: string }>("SELECT status, summary FROM agent_runs WHERE id = ?", runId)).toEqual({ status: "done", summary: "ok" });
         repo.setJobStatus(job.id, "FAILED", "test over");
     });
 

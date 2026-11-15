@@ -16,6 +16,7 @@ import { assertAllowedTarget } from "./net-guard.js";
 import { CustomScriptStore } from "./custom-script-store.js";
 import type { JobRow, Repo } from "./repo.js";
 import { SecretBox } from "./secrets.js";
+import { envSecrets } from "./agent-routing.js";
 
 export function environmentStore(repo: Repo, config: Pick<Config, "dataDir" | "SECRET_KEY">): EnvironmentStore {
     return new EnvironmentStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY));
@@ -82,7 +83,7 @@ export async function prepareEnvironmentRun(
     job: JobRow,
     app: { url: string; config: Record<string, any> },
     roles: Role[],
-): Promise<{ request: EnvironmentRunRequest; tests: EnvironmentTest[]; missing: string[]; notes: string[] }> {
+): Promise<{ request: EnvironmentRunRequest; tests: EnvironmentTest[]; missing: string[]; notes: string[]; secrets: string[] }> {
     const name = job.options.environment;
     if (!name) throw new Error("This run names no environment.");
     const store = environmentStore(repo, config);
@@ -125,6 +126,8 @@ export async function prepareEnvironmentRun(
             : [];
     return {
         notes,
+        // The environment's own secrets (and their Basic-auth and header-value forms), for the job to mask in what it writes.
+        secrets: envSecrets({ credentials: { username: secrets.username ?? "", password: secrets.password ?? "", totpSecret: secrets.totpSecret }, apiToken: secrets.apiToken, apiAuthHeader: secrets.apiAuthHeader }),
         request: {
             target,
             roles: accounts ? roles : [],

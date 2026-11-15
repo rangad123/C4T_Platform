@@ -9,52 +9,15 @@
  */
 import type { Evidence } from "../contract.js";
 
-export const HIDDEN = "[hidden]";
-export const EMAIL_HIDDEN = "[email hidden]";
+import { EMAIL_HIDDEN, HIDDEN, MAX_TEXT, SECRET_KEY, clip, redactText } from "../../shared/redact-text.js";
 
-/** Longest evidence value / free text kept (characters); longer text is cut with a note. */
+export { EMAIL_HIDDEN, HIDDEN, MAX_TEXT, redactText };
+
 export const MAX_EVIDENCE_VALUE = 2000;
-export const MAX_TEXT = 8000;
-
 /** Header names whose whole value is a credential. */
 const SECRET_HEADERS = new Set(["authorization", "proxy-authorization", "cookie", "x-api-key", "x-auth-token", "x-csrf-token", "x-xsrf-token", "api-key", "x-amz-security-token"]);
-
-/** A key name that says its value is secret (or personal), in config lines, query strings and JSON. */
-const SECRET_KEY = String.raw`[A-Za-z0-9_.-]*(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|auth|credential|session|cookie|signature|salt|dsn|conn(?:ection)?[_-]?string)[A-Za-z0-9_.-]*`;
-
-const EMAIL = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}/g;
-const AUTH_SCHEME = /\b(Bearer|Basic|Digest|Token)\s+[A-Za-z0-9._~+/=-]{6,}/gi;
-const JWT = /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*/g;
-const URL_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:"'<>]+(?::[^\s/@"'<>]*)?@/gi;
-const SECRET_PARAM = new RegExp(String.raw`([?&;](?:${SECRET_KEY}|key|code|otp|sig|ticket)=)[^&#\s"'<>]*`, "gi");
-const JSON_PAIR = new RegExp(String.raw`("${SECRET_KEY}"\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\s]+)`, "gi");
-const CONFIG_PAIR = new RegExp(String.raw`\b(${SECRET_KEY})(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;&]+)`, "gi");
-/** 32+ characters of hex, or base64/base64url with both letters and digits: keys, hashes, session ids. */
-const LONG_HEX = /\b[0-9a-fA-F]{32,}\b/g;
-const LONG_B64 = /(?<![A-Za-z0-9+/_-])(?=[A-Za-z0-9+/_-]{32,})(?=[A-Za-z0-9+/_-]*\d)(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{32,}={0,2}/g;
 /** An `.env` / ini style line: `KEY=value`, `export KEY=value`, `key = value`. */
 const ENV_LINE = /^([ \t]*(?:export[ \t]+)?[A-Za-z_][A-Za-z0-9_.-]*[ \t]*[=:][ \t]*)(\S.*)$/gm;
-
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 12)}… (cut)` : s);
-
-/** Clean one piece of free text (descriptions, comments, locations, header values that are not credentials). */
-export function redactText(input: unknown, max = MAX_TEXT): string {
-    let s = String(input ?? "");
-    // Control and direction-override characters never belong in a report.
-    s = s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g, "");
-    s = s
-        .replace(URL_USERINFO, `$1${HIDDEN}@`)
-        .replace(JWT, HIDDEN)
-        .replace(AUTH_SCHEME, `$1 ${HIDDEN}`)
-        .replace(SECRET_PARAM, `$1${HIDDEN}`)
-        .replace(JSON_PAIR, `$1"${HIDDEN}"`)
-        // CORS answers name "credentials" but their values ("true") are the evidence, not a secret.
-        .replace(CONFIG_PAIR, (m: string, k: string, sep: string) => (/allow-credentials$/i.test(k) ? m : `${k}${sep}${HIDDEN}`))
-        .replace(EMAIL, EMAIL_HIDDEN)
-        .replace(LONG_HEX, HIDDEN)
-        .replace(LONG_B64, HIDDEN);
-    return clip(s, max);
-}
 
 /** A body excerpt: every `KEY=value` line keeps only its key, then the general patterns. */
 export function redactExcerpt(input: unknown, max = MAX_EVIDENCE_VALUE): string {

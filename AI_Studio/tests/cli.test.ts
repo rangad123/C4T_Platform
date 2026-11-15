@@ -276,7 +276,8 @@ describe("replay mode (no AI): gate, outputs, secrets", () => {
 
         // the leak: the finding quotes the request path (with the key in it), and the report must hide the key
         expect(by["API-003"]).toMatchObject({ outcome: "finding", severity: "critical", category: "security" });
-        expect(by["API-003"].reason).toContain("/api/products?key=***");
+        // The key is hidden either by the CLI (***) or, earlier, by the platform's masking on write ([hidden]); never the value itself.
+        expect(by["API-003"].reason).toMatch(/\/api\/products\?key=(\*\*\*|\[hidden\])/);
         for (const text of [r.stdout, r.stderr, allText(work), ghComments.map((c) => c.body).join("\n")]) {
             expect(text).not.toContain(PASSWORD);
             expect(text).not.toContain(GH_TOKEN);
