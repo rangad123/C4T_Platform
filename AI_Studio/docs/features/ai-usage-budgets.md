@@ -44,6 +44,18 @@ Before every model call the platform checks the job, the project's month and the
 | Tokens per job | Settings, or `PUT /api/usage/budgets` `{ jobTokens }`; env default `AI_JOB_TOKEN_LIMIT` | none |
 | Warning percentage | `PUT /api/usage/budgets` `{ warnPercent }` (1 to 99) | 80 |
 | One project's month and job limits | Settings, or `PUT /api/projects/:id/usage-budget` `{ monthlyTokens, jobTokens }` | none |
+| US dollars per month on the server's own key (operator access: the shared access key, a server without accounts) | env `AI_SERVER_KEY_MONTHLY_USD_LIMIT` | none |
+
+### The server key's money limit
+
+Work paid by the server's own key is recorded with the payer `server` (Crowd4Test still pays: it counts in the monthly token total too).
+Its cost is worked out from the price table (Settings, AI usage) and the stored token counts, prompt-cache reads and writes included; the
+provider's own invoice is not read. With `AI_SERVER_KEY_MONTHLY_USD_LIMIT` set, each call on the server key is checked first: at or over the
+limit the work stops cleanly ("The server key's monthly AI spending limit was reached: about $X of $Y this month."), and the stop is recorded
+(`cap: "server-spend"`, amounts in cents). A cost that cannot be worked out is never counted as zero: while a limit is set, work on a model
+without a price, or any work when this month already used an unpriced model, is refused with a sentence asking for the price. People who
+change platform settings see the month's spend, the limit and any unpriced models on Settings, AI usage (`GET /api/usage/budgets`
+`serverKey`). Organisational and personal keys are never limited by it.
 
 `null` removes a limit. A value set in the app wins over the `.env` default; saving an empty field in the app means "no limit" even when `.env` has one. Limits are whole numbers of 1 or more. The month is the calendar month in UTC.
 

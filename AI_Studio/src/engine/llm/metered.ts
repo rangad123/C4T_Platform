@@ -21,7 +21,7 @@ import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { EngineEvent } from "../context.js";
 import type { LlmClient, Usage } from "./provider.js";
 import { answeredSlot } from "./resilience.js";
-import { BudgetExceeded, budgetTokens, capDetail, capMessage, decideBudget, estimateTokens, monthOf, normalisePurpose, warningMessage, type CapHit, type Caps, type LlmPurpose, type Used, type UsageBilling } from "./usage.js";
+import { BudgetExceeded, SpendLimitExceeded, budgetTokens, capDetail, capMessage, decideBudget, estimateTokens, monthOf, normalisePurpose, warningMessage, type CapHit, type Caps, type LlmPurpose, type Used, type UsageBilling } from "./usage.js";
 
 /** What the meter needs from the store (implemented by `platform/usage-store.ts`, replaced by plain objects in unit tests). */
 export interface MeterBackend {
@@ -30,7 +30,15 @@ export interface MeterBackend {
     totalsFor(jobId: string, projectId: string, month: string): Used;
     capsFor(projectId: string, billing?: UsageBilling): { caps: Caps; warnPercent: number };
     recordStop(s: { jobId: string; projectId: string; cap: string; used: number; limit: number; at: string }): void;
+    /**
+     * A money limit on the work of whoever pays (the platform's: only for the server's own key), asked before each call: null to go on, or
+     * what stops it (amounts in cents) and the sentence. Optional: a backend without one has no money limit.
+     */
+    spendBlock?(billing: UsageBilling | undefined, model: string, month: string): { usedCents: number; limitCents: number; message: string } | null;
 }
+
+/** The stop record's cap for the server key's monthly money limit (amounts in cents). */
+export const SPEND_CAP = "server-spend";
 
 export interface MeterOptions {
     backend: MeterBackend;
@@ -177,6 +185,9 @@ export class JobMeter {
         });
         const decision = decideBudget(this.used, this.caps, { incoming, warnPercent: this.warnPercent });
         if (!decision.allowed) throw this.refuse(decision.blocked!);
+        let spend: ReturnType<NonNullable<MeterBackend["spendBlock"]>> = null;
+        if (this.backend.spendBlock) this.guard(() => (spend = this.backend.spendBlock!(this.opts.billing, this.modelName, monthOf(this.now()))));
+        if (spend) throw this.refuseSpend(spend);
         this.warn(decision.warnings);
         this.lastPurpose = purpose;
         const overlapped = this.inflight > 0;
@@ -257,6 +268,16 @@ export class JobMeter {
             this.warned.add(h.cap);
             this.opts.emit?.({ stage: "orchestration", kind: "ai_budget_warning", level: "warn", message: warningMessage(h), data: { cap: h.cap, used: h.used, limit: h.limit } });
         }
+    }
+
+    private refuseSpend(s: { usedCents: number; limitCents: number; message: string }): BudgetExceeded {
+        const hit: CapHit = { cap: "month", used: s.usedCents, limit: s.limitCents, percent: s.limitCents === 0 ? 100 : Math.floor((s.usedCents / s.limitCents) * 100) };
+        if (!this.stopped) {
+            this.stopped = hit;
+            this.guard(() => this.backend.recordStop({ jobId: this.opts.jobId, projectId: this.opts.projectId, cap: SPEND_CAP, used: s.usedCents, limit: s.limitCents, at: this.now().toISOString() }));
+            this.opts.emit?.({ stage: "orchestration", kind: "ai_budget_stop", level: "warn", message: `${s.message} AI work stops here; what was already created is kept.`, data: { cap: SPEND_CAP, usedCents: s.usedCents, limitCents: s.limitCents } });
+        }
+        return new SpendLimitExceeded(hit, s.message);
     }
 
     private refuse(hit: CapHit): BudgetExceeded {

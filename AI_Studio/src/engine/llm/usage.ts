@@ -173,6 +173,14 @@ export class BudgetExceeded extends Error {
     }
 }
 
+/** The server key's monthly money limit stopped the work (the engine treats it like any budget stop: what was made is kept). */
+export class SpendLimitExceeded extends BudgetExceeded {
+    constructor(hit: CapHit, message: string) {
+        super(hit);
+        this.message = message;
+    }
+}
+
 export const isBudgetExceeded = (e: unknown): e is BudgetExceeded => e instanceof BudgetExceeded || (e instanceof Error && e.name === "BudgetExceeded");
 
 // ── prices and cost ──────────────────────────────────────────────────────────
@@ -222,7 +230,8 @@ export interface UsageRow {
 }
 
 /** Who pays for a model call: Crowd4Test (an organisational key, or the open server's own key) or a person (their personal key). Nothing is charged here. */
-export type BillingOwner = "crowd4test" | "personal";
+/** crowd4test: an organisational key; server: the server's own key (operator use, also paid by Crowd4Test); personal: a person's own key. */
+export type BillingOwner = "crowd4test" | "server" | "personal";
 export interface UsageBilling {
     owner: BillingOwner;
     /** The person who pays, for a personal key. */

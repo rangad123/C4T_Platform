@@ -5,7 +5,7 @@
  * stopped it -> a third analysis is stopped by the monthly limit and Settings says the limit is used up -> axe-clean in light and dark,
  * and nothing spills sideways on a phone.
  * Everything underneath is real (platform, worker, discovery, authoring agent driving Chromium, validation); only the model is a
- * scripted double. Ports: 5772 fixture shop, 5773 platform.
+ * scripted double. Ports: 9640 fixture shop, 9641 platform.
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
@@ -27,8 +27,8 @@ import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { startMemorySite, type MemorySite } from "./fixtures/memory-site.js";
 
-const SITE_PORT = 5772;
-const PLATFORM_PORT = 5773;
+const SITE_PORT = 9640;
+const PLATFORM_PORT = 9641;
 const SITE = `http://127.0.0.1:${SITE_PORT}`;
 
 let browser: Browser;
@@ -45,6 +45,8 @@ let base: string;
 const toolQueue: Array<{ tool: string; input: Record<string, unknown> }> = [];
 const STEP = { input: 2000, output: 500 };
 const OBJECT = { input: 5000, output: 1000 };
+/** What one text() call (the review of a finished web test) is reported as using. */
+const REVIEW = { input: 1000, output: 500 };
 const model = new MockLanguageModelV3({
     doGenerate: async () => {
         const usage = { inputTokens: { total: STEP.input, noCache: STEP.input, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: STEP.output, text: STEP.output, reasoning: 0 } };
@@ -61,8 +63,12 @@ const scripted: LlmClient = {
     modelName: "scripted-usage",
     model,
     usage: { inputTokens: 0, outputTokens: 0 },
-    text: async () => "",
-    object: (async ({ system }: { system: string }) => {
+    text: async () => {
+        scripted.usage.inputTokens += REVIEW.input;
+        scripted.usage.outputTokens += REVIEW.output;
+        return "OK";
+    },
+    object: (async ({ system, prompt }: { system: string; prompt: string }) => {
         scripted.usage.inputTokens += OBJECT.input;
         scripted.usage.outputTokens += OBJECT.output;
         if (/analysing a web application/.test(system)) {
@@ -78,6 +84,8 @@ const scripted: LlmClient = {
                 authenticationMechanisms: [],
             };
         }
+        // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
+        if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
         for (const s of PLAN) {
             toolQueue.push({ tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: s.heading } } });
             toolQueue.push({ tool: "finish", input: { result: "complete", explanation: "checked" } });
@@ -85,6 +93,32 @@ const scripted: LlmClient = {
         return { scenarios: PLAN.map((s) => ScenarioSchema.omit({ scenarioId: true }).parse({ title: s.title, description: s.title, category: "Browsing", priority: "high", journey: s.journey, startPath: s.startPath, expectedResults: [`${s.heading} is shown`] })) };
     }) as LlmClient["object"],
 };
+
+// ── what the fixture uses, worked out from the constants above ─────────────
+const sum = (...us: Array<{ input: number; output: number }>) => ({ input: us.reduce((n, u) => n + u.input, 0), output: us.reduce((n, u) => n + u.output, 0) });
+const times = (k: number, u: { input: number; output: number }) => ({ input: k * u.input, output: k * u.output });
+const total = (u: { input: number; output: number }) => u.input + u.output;
+/** One analysis: understanding (1 object call), planning (the plan, then the coverage-gap call). */
+const BEFORE_AUTHORING = times(3, OBJECT);
+/** One scenario: two agent steps (assert, finish) and the review of the finished test. */
+const SCENARIO = sum(times(2, STEP), REVIEW);
+/** Shop A runs unlimited: both scenarios. 9 calls. */
+const SHOP_A = sum(BEFORE_AUTHORING, times(2, SCENARIO));
+const SHOP_A_CALLS = 3 + 2 * 3;
+/** Shop B's per-job limit: above what scenario one needs before its review starts (so the review runs), at or below what scenario one ends
+ * on (so scenario two's first step is refused): the job keeps one test and stops on this limit. */
+const JOB_LIMIT = total(BEFORE_AUTHORING) + 2 * total(STEP) + 1000;
+const SHOP_B = sum(BEFORE_AUTHORING, SCENARIO);
+const SHOP_B_CALLS = 3 + 3;
+/** The monthly limit: Shop A, Shop B and Shop C's analysis call fill it exactly, so Shop B is not stopped by it and Shop C stops at planning,
+ * before any test exists. */
+const MONTH_LIMIT = total(SHOP_A) + total(SHOP_B) + total(OBJECT);
+/** Prices the test sets, per million tokens. */
+const PRICE = { input: 10, output: 40 };
+const n = (v: number) => v.toLocaleString("en-US");
+/** The short form the UI uses: 31000 -> "31K", 4500 -> "4.5K". */
+const short = (v: number) => (v < 1000 ? String(v) : `${(v / 1000).toFixed(v < 10_000 ? 1 : 0).replace(/\.0$/, "")}K`);
+const usd = (u: { input: number; output: number }) => `USD ${((u.input / 1e6) * PRICE.input + (u.output / 1e6) * PRICE.output).toFixed(2)}`;
 
 const call = async (method: string, url: string, body?: unknown) => {
     const res = await fetch(`${base}${url}`, { method, headers: body !== undefined ? { "content-type": "application/json" } : {}, body: body !== undefined ? JSON.stringify(body) : undefined });
@@ -155,29 +189,29 @@ describe("AI usage in the UI", () => {
         expect(a.status).toBe("COMPLETED");
         shopA = a;
         await openSettings();
-        await pwExpect(panel().getByTestId("usage-month-tokens")).toHaveText("22,000 tokens");
-        await pwExpect(panel().getByTestId("usage-month-detail")).toContainText("18,000 in, 4,000 out, 6 calls");
+        await pwExpect(panel().getByTestId("usage-month-tokens")).toHaveText(`${n(total(SHOP_A))} tokens`);
+        await pwExpect(panel().getByTestId("usage-month-detail")).toContainText(`${n(SHOP_A.input)} in, ${n(SHOP_A.output)} out, ${SHOP_A_CALLS} calls`);
         await pwExpect(panel().getByTestId("usage-month-detail")).toContainText("Set a price to see a cost.");
-        await pwExpect(panel().getByRole("img", { name: /Tokens per day\. The busiest day was \d{4}-\d{2}-\d{2} with 22K tokens\./ })).toBeVisible();
+        await pwExpect(panel().getByRole("img", { name: new RegExp(`Tokens per day\\. The busiest day was \\d{4}-\\d{2}-\\d{2} with ${short(total(SHOP_A)).replace(".", "\\.")} tokens\\.`) })).toBeVisible();
 
         // by project, then by purpose and by model
         const table = panel().getByTestId("usage-table");
-        await pwExpect(table.getByRole("row", { name: /Shop A/ })).toContainText("6");
+        await pwExpect(table.getByRole("row", { name: /Shop A/ })).toContainText(String(SHOP_A_CALLS));
         await panel().getByRole("button", { name: "By purpose", exact: true }).click();
-        for (const label of ["Understanding the application", "Planning tests", "Writing web tests"]) await pwExpect(table.getByRole("rowheader", { name: label, exact: true })).toBeVisible();
+        for (const label of ["Understanding the application", "Planning tests", "Writing web tests", "Reviewing written tests"]) await pwExpect(table.getByRole("rowheader", { name: label, exact: true })).toBeVisible();
         await panel().getByRole("button", { name: "By model", exact: true }).click();
         await pwExpect(table.getByRole("rowheader", { name: "scripted-usage", exact: true })).toBeVisible();
         await pwExpect(table.getByRole("cell", { name: "no price" })).toBeVisible();
 
         // a price: the cost appears with the label the person chose
         await panel().getByLabel("Model name", { exact: true }).fill("scripted-usage");
-        await panel().getByLabel("Input, per million tokens", { exact: true }).fill("10");
-        await panel().getByLabel("Output, per million tokens", { exact: true }).fill("50");
+        await panel().getByLabel("Input, per million tokens", { exact: true }).fill(String(PRICE.input));
+        await panel().getByLabel("Output, per million tokens", { exact: true }).fill(String(PRICE.output));
         await panel().getByLabel("Currency label", { exact: true }).fill("USD");
         await panel().getByRole("button", { name: "Save price", exact: true }).click();
         await pwExpect(panel().getByText("Price saved for scripted-usage.", { exact: true })).toBeVisible();
-        await pwExpect(panel().getByTestId("usage-cost")).toHaveText("Cost so far: USD 0.38");
-        await pwExpect(table.getByRole("cell", { name: "USD 0.38" })).toBeVisible();
+        await pwExpect(panel().getByTestId("usage-cost")).toHaveText(`Cost so far: ${usd(SHOP_A)}`);
+        await pwExpect(table.getByRole("cell", { name: usd(SHOP_A) })).toBeVisible();
         await pwExpect(panel().getByTestId("usage-price-list")).toContainText("scripted-usage");
     }, 240_000);
 
@@ -188,12 +222,12 @@ describe("AI usage in the UI", () => {
         await panel().getByRole("button", { name: "Save limits", exact: true }).click();
         await pwExpect(panel().getByText(/Use whole numbers: limits of 1 or more/)).toBeVisible();
 
-        await panel().getByLabel("Tokens per job", { exact: true }).first().fill("15000");
-        await panel().getByLabel("Tokens per month, all projects", { exact: true }).fill("40000");
+        await panel().getByLabel("Tokens per job", { exact: true }).first().fill(String(JOB_LIMIT));
+        await panel().getByLabel("Tokens per month, all projects", { exact: true }).fill(String(MONTH_LIMIT));
         await panel().getByRole("button", { name: "Save limits", exact: true }).click();
         await pwExpect(panel().getByText("Limits saved. They apply to the next AI call.", { exact: true })).toBeVisible();
-        await pwExpect(panel().getByTestId("usage-month-limit")).toContainText("55% of the monthly limit of 40,000 tokens.");
-        await pwExpect(panel().getByRole("meter", { name: "AI tokens used this month" })).toHaveAttribute("aria-valuenow", "22000");
+        await pwExpect(panel().getByTestId("usage-month-limit")).toContainText(`${Math.round((total(SHOP_A) / MONTH_LIMIT) * 100)}% of the monthly limit of ${n(MONTH_LIMIT)} tokens.`);
+        await pwExpect(panel().getByRole("meter", { name: "AI tokens used this month" })).toHaveAttribute("aria-valuenow", String(total(SHOP_A)));
 
         // one project's own limit
         await panel().getByLabel("Project", { exact: true }).selectOption({ label: "Shop A" });
@@ -203,7 +237,7 @@ describe("AI usage in the UI", () => {
         const saved = (await call("GET", `/api/projects/${shopA.projectId}/usage-budget`)).body;
         expect(saved).toMatchObject({ monthlyTokens: 99_999, jobTokens: null });
         const platformBudget = (await call("GET", "/api/usage/budgets")).body.platform;
-        expect(platformBudget).toMatchObject({ jobTokens: 15_000, monthlyTokens: 40_000 });
+        expect(platformBudget).toMatchObject({ jobTokens: JOB_LIMIT, monthlyTokens: MONTH_LIMIT });
     }, 120_000);
 
     it("a job stopped by its limit says so on the Overview, with a way to Settings, and in its technical details", async () => {
@@ -220,9 +254,12 @@ describe("AI usage in the UI", () => {
         expect(((await call("GET", `/api/projects/${b.projectId}/tests`)).body as unknown[]).length).toBe(1);
 
         await page.locator("summary", { hasText: "View technical details" }).click();
-        await pwExpect(page.getByTestId("job-ai-use")).toHaveText("14K in, 3K out, 4 calls, cost USD 0.29");
-        await pwExpect(page.getByTestId("job-ai-stop")).toContainText("The AI token limit for this job was reached (this job: 17,000 of 15,000 tokens)");
-        await pwExpect(page.getByLabel("Activity log")).toContainText("AI use has reached 80% of the limit for this job");
+        await pwExpect(page.getByTestId("job-ai-use")).toHaveText(`${short(SHOP_B.input)} in, ${short(SHOP_B.output)} out, ${SHOP_B_CALLS} calls, cost ${usd(SHOP_B)}`);
+        await pwExpect(page.getByTestId("job-ai-stop")).toContainText(`The AI token limit for this job was reached (this job: ${n(total(SHOP_B))} of ${n(JOB_LIMIT)} tokens)`);
+        // the first warning comes after scenario one's first step, the first point at or above 80% of the job limit
+        const warnedAt = total(BEFORE_AUTHORING) + total(STEP);
+        expect(warnedAt * 100).toBeGreaterThanOrEqual(80 * JOB_LIMIT);
+        await pwExpect(page.getByLabel("Activity log")).toContainText(`AI use has reached ${Math.floor((warnedAt / JOB_LIMIT) * 100)}% of the limit for this job (${n(warnedAt)} of ${n(JOB_LIMIT)} tokens).`);
 
         // the link goes to Settings
         await callout.getByRole("link", { name: "Open settings", exact: true }).click();
@@ -241,8 +278,8 @@ describe("AI usage in the UI", () => {
 
         await openSettings();
         await pwExpect(panel().getByText("Limit reached", { exact: true })).toBeVisible();
-        await pwExpect(panel().getByTestId("usage-month-limit")).toContainText("The monthly limit of 40,000 tokens is used up.");
-        await pwExpect(panel().getByTestId("usage-month-tokens")).toHaveText("45,000 tokens");
+        await pwExpect(panel().getByTestId("usage-month-limit")).toContainText(`The monthly limit of ${n(MONTH_LIMIT)} tokens is used up.`);
+        await pwExpect(panel().getByTestId("usage-month-tokens")).toHaveText(`${n(MONTH_LIMIT)} tokens`);
         // a limit can be raised again: the limit says "no limit" when emptied
         await panel().getByLabel("Tokens per month, all projects", { exact: true }).fill("");
         await panel().getByRole("button", { name: "Save limits", exact: true }).click();

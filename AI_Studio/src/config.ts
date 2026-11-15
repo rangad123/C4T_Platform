@@ -149,6 +149,11 @@ const EnvSchema = z.object({
      */
     AI_MONTHLY_TOKEN_LIMIT: tokenLimit(),
     AI_JOB_TOKEN_LIMIT: tokenLimit(),
+    /**
+     * A monthly limit in US dollars on AI work paid by the server's own key (the shared access key, a server without accounts), off unless
+     * set. Worked out from the price table (Settings, AI usage): with a limit set, work on a model without a price is refused.
+     */
+    AI_SERVER_KEY_MONTHLY_USD_LIMIT: z.preprocess((v) => (v === "" || v === undefined ? undefined : v), z.coerce.number().min(0).max(1_000_000).optional()),
     HEADLESS: z
         .string()
         .default("true")

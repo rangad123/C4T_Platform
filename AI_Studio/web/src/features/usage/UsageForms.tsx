@@ -4,7 +4,7 @@ import type { ProjectRow } from "../../api";
 import { Button, Callout, Skeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
-import { exact, limitText, parseLimit, type BudgetsAnswer, type PricesAnswer, type ProjectBudget } from "./usage";
+import { exact, limitText, parseLimit, serverKeySentence, type BudgetsAnswer, type PricesAnswer, type ProjectBudget } from "./usage";
 
 type Notice = { tone: "success" | "danger"; text: string } | null;
 
@@ -87,6 +87,11 @@ export function LimitsForms({ onSaved }: { onSaved: () => Promise<void> | void }
                     Limits for the whole platform
                 </h3>
                 <p className="t-secondary">When a limit is reached, AI work stops cleanly. Tests already created are kept and still run. A limit counts input and output tokens together.</p>
+                {budgets.data?.serverKey && (
+                    <p className="t-secondary" data-testid="server-key-spend">
+                        {serverKeySentence(budgets.data.serverKey)}
+                    </p>
+                )}
                 {budgets.loading ? (
                     <Skeleton h={70} />
                 ) : (

@@ -55,6 +55,8 @@ export const AI_REFUSED = "The AI work stopped: the provider did not accept the 
 export const AI_NO_ANSWER = "The AI work stopped: the provider did not answer with the AI key of the person who started it. Try again later. No other key was used instead.";
 
 const CROWD4TEST: UsageBilling = { owner: "crowd4test" };
+/** Work on the server's own key (the shared access key, a server without accounts): Crowd4Test pays, and its monthly money limit applies. */
+const SERVER_KEY: UsageBilling = { owner: "server" };
 
 export interface AiDeps {
     sql: Sql;
@@ -139,13 +141,13 @@ export function serverHasKey(config: Config): boolean {
  */
 export async function resolveAiFor(d: AiDeps, ownerId: string | null): Promise<WorkAi> {
     if (!ownerId) return { billing: CROWD4TEST, source: "blocked", blocked: NO_PERSON };
-    if (ownerId === ACCESS_KEY_OWNER) return { billing: CROWD4TEST, source: "server" };
+    if (ownerId === ACCESS_KEY_OWNER) return { billing: SERVER_KEY, source: "server" };
     const blocked = (sentence: string, problem?: string): WorkAi => ({ billing: CROWD4TEST, source: "blocked", blocked: sentence, ...(problem ? { problem } : {}) });
     try {
         if (!(await personActive(d.sql, ownerId))) return blocked(PERSON_INACTIVE);
         const store = aiConfigStore(d);
         const chosen = await store.chosenOf(ownerId);
-        if (!chosen) return ownerId === OPEN_OWNER_ID ? { billing: CROWD4TEST, source: "server" } : blocked(NO_AI_KEY);
+        if (!chosen) return ownerId === OPEN_OWNER_ID ? { billing: SERVER_KEY, source: "server" } : blocked(NO_AI_KEY);
         const row = await store.get(chosen);
         if (!row || !(await mayUseKey(store, d, row, ownerId))) return blocked(KEY_NOT_AVAILABLE);
         const u = await usable(store, row);

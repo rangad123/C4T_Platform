@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { SPEND_CAP } from "../../engine/llm/metered.js";
+import { permissionsOf, currentActor } from "../auth/actor.js";
 import { capMessage, capScope, dayOf, daySeries, daysBetween, GROUP_BYS, groupRows, monthBounds, monthOf, shortTokens, totalsOf, type Group, type GroupBy, type Totals, type UsageRow } from "../../engine/llm/usage.js";
 import { HttpError } from "../http-error.js";
 import { CONNECTION_CHECK_PROJECT } from "../llm-health.js";
@@ -160,7 +162,9 @@ export function registerUsageRoutes(ctx: RouteCtx): void {
             withoutAi: withoutAiOfJob(p.db, id),
             summary: totals.calls === 0 ? "No AI calls" : `${shortTokens(totals.inputTokens)} in, ${shortTokens(totals.outputTokens)} out, ${totals.calls} ${totals.calls === 1 ? "call" : "calls"}${cacheSummary(totals)}${escalationSummary(totals)}`,
             stop: stop
-                ? { cap: stop.cap, scope: capScope(stop.cap as "job" | "project" | "month"), message: capMessage(stop.cap as "job" | "project" | "month"), usedTokens: stop.used, limitTokens: stop.limit, at: stop.at }
+                ? stop.cap === SPEND_CAP
+                    ? { cap: stop.cap, scope: "The server key this month", message: "The server key's monthly AI spending limit was reached", usedCents: stop.used, limitCents: stop.limit, at: stop.at }
+                    : { cap: stop.cap, scope: capScope(stop.cap as "job" | "project" | "month"), message: capMessage(stop.cap as "job" | "project" | "month"), usedTokens: stop.used, limitTokens: stop.limit, at: stop.at }
                 : null,
         };
     });
@@ -198,8 +202,15 @@ export function registerUsageRoutes(ctx: RouteCtx): void {
             platform: s.platformBudget(),
             month: monthBlock(s),
             projects: s.projectBudgets().map((b) => ({ projectId: b.projectId, name: projectName(b.projectId), monthlyTokens: b.monthlyTokens, jobTokens: b.jobTokens, usedTokens: s.monthTokens(month, b.projectId) })),
+            // The server key's spend this month against its money limit (AI_SERVER_KEY_MONTHLY_USD_LIMIT): for people who change platform settings.
+            ...(permissionsOf(currentActor()).has("ai_studio.platform.settings") ? { serverKey: serverKeyView(s) } : {}),
         };
     }
+    /** Amounts in US dollars from the price table; models without a price are listed, their cost unknown (never counted as zero). */
+    const serverKeyView = (s: UsageStore) => {
+        const sp = s.serverSpend();
+        return { month: sp.month, spentUsd: Math.round(sp.usd * 100) / 100, limitUsd: sp.limitUsd, calls: sp.calls, unpricedModels: sp.unpricedModels, complete: sp.unpricedModels.length === 0 };
+    };
     app.get("/api/usage/budgets", async () => budgetsView(store()));
     app.put("/api/usage/budgets", async (req) => {
         const body = BudgetBody.parse(req.body);

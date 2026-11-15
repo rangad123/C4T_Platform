@@ -298,8 +298,8 @@ describe("which key the work uses", () => {
     });
 
     it("the open server uses its chosen key if it has one, else the server's own key; so does the shared access key, never a person", async () => {
-        expect(await resolveAiFor(deps(), OPEN_OWNER_ID)).toMatchObject({ source: "server", billing: { owner: "crowd4test" } });
-        expect(await resolveAiFor(deps(), ACCESS_KEY_OWNER)).toMatchObject({ source: "server", billing: { owner: "crowd4test" } });
+        expect(await resolveAiFor(deps(), OPEN_OWNER_ID)).toMatchObject({ source: "server", billing: { owner: "server" } });
+        expect(await resolveAiFor(deps(), ACCESS_KEY_OWNER)).toMatchObject({ source: "server", billing: { owner: "server" } });
         expect((await resolveAiFor(deps(), ids["t-admin"]!)).source).toBe("blocked");
     });
 

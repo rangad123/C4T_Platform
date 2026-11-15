@@ -55,6 +55,25 @@ export interface BudgetsAnswer {
     platform: PlatformBudget;
     month: MonthBlock;
     projects: Array<{ projectId: string; name: string; monthlyTokens: number | null; jobTokens: number | null; usedTokens: number }>;
+    /** The server key's spend this month against its money limit; only for people who change platform settings. */
+    serverKey?: ServerKeySpend;
+}
+export interface ServerKeySpend {
+    month: string;
+    spentUsd: number;
+    limitUsd: number | null;
+    calls: number;
+    /** Models used without a price: their cost is unknown, so the amount is incomplete. */
+    unpricedModels: string[];
+    complete: boolean;
+}
+
+/** One sentence about the server key's spend: the amount, the limit, and what is unknown. */
+export function serverKeySentence(k: ServerKeySpend): string {
+    const amount = "$" + k.spentUsd.toFixed(2);
+    const limit = k.limitUsd === null ? "No money limit is set (AI_SERVER_KEY_MONTHLY_USD_LIMIT)." : `Limit: $${k.limitUsd.toFixed(2)} a month.`;
+    const unknown = k.complete ? "" : ` Not counted, because no price is set: ${k.unpricedModels.slice(0, 3).join(", ")}${k.limitUsd === null ? "" : " (work on these models is refused while a limit is set)"}.`;
+    return `The server's own key, used for operator access, cost about ${amount} in ${k.month} (${k.calls} ${k.calls === 1 ? "call" : "calls"}). ${limit}${unknown}`;
 }
 export interface ProjectBudget {
     projectId: string;

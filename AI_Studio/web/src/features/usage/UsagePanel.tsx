@@ -139,7 +139,7 @@ function DayBars({ series }: { series: UsageGroup[] }) {
 }
 
 const BY_LABEL: Record<GroupBy, string> = { project: "By project", purpose: "By purpose", model: "By model", billing: "By kind of key" };
-const OWNER_LABEL: Record<string, string> = { organisational: "Organisational keys (Crowd4Test pays)", personal: "Personal keys (the person pays)", crowd4test: "Crowd4Test (before AI keys)", organization: "A customer’s organisation (before AI keys)" };
+const OWNER_LABEL: Record<string, string> = { organisational: "Organisational keys (Crowd4Test pays)", server: "The server's own key (operator access, Crowd4Test pays)", personal: "Personal keys (the person pays)", crowd4test: "Crowd4Test (before AI keys)", organization: "A customer’s organisation (before AI keys)" };
 
 function Breakdown({ by, onBy, state, currency }: { by: GroupBy; onBy: (b: GroupBy) => void; state: ReturnType<typeof useFetch<UsageAnswer>>; currency: string }) {
     const rows = state.data?.groups ?? [];

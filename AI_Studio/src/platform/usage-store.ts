@@ -8,7 +8,7 @@
  * Several processes share one database (the API and a separate worker): every write is a single SQL statement and every
  * read goes to the file, so two instances of this class always agree on the totals.
  */
-import { BUDGET_TOKENS_SQL, DEFAULT_WARN_PERCENT, dayOf, decideBudget, monthBounds, monthOf, storedPurpose, type CapHit, type Caps, type Price, type UsageBilling, type UsageRow, type Used } from "../engine/llm/usage.js";
+import { BUDGET_TOKENS_SQL, DEFAULT_WARN_PERCENT, costOf, dayOf, decideBudget, monthBounds, monthOf, storedPurpose, type CapHit, type Caps, type Price, type UsageBilling, type UsageRow, type Used } from "../engine/llm/usage.js";
 import type { Config } from "../config.js";
 import type { EngineEvent } from "../engine/context.js";
 import { JobMeter } from "../engine/llm/metered.js";
@@ -79,11 +79,23 @@ export function addCacheColumns(db: import("node:sqlite").DatabaseSync): void {
 export interface UsageDefaults {
     monthlyTokens?: number;
     jobTokens?: number;
+    /** AI_SERVER_KEY_MONTHLY_USD_LIMIT: the monthly money limit on work paid by the server's own key (US dollars). */
+    serverMonthlyUsd?: number;
+}
+
+/** The server key's spend in a month: priced from the price table; work on a model without a price is not given a cost of zero. */
+export interface ServerSpend {
+    month: string;
+    usd: number;
+    /** Models the server key used this month that have no price: their cost is unknown. */
+    unpricedModels: string[];
+    calls: number;
+    limitUsd: number | null;
 }
 
 /** The store for a platform: the server settings (.env) supply the limits nobody has set in the app. */
-export function usageStoreFor(db: Db, config: Pick<Config, "AI_MONTHLY_TOKEN_LIMIT" | "AI_JOB_TOKEN_LIMIT">, clock?: () => number): UsageStore {
-    return new UsageStore(db, { monthlyTokens: config.AI_MONTHLY_TOKEN_LIMIT, jobTokens: config.AI_JOB_TOKEN_LIMIT }, clock);
+export function usageStoreFor(db: Db, config: Pick<Config, "AI_MONTHLY_TOKEN_LIMIT" | "AI_JOB_TOKEN_LIMIT"> & Partial<Pick<Config, "AI_SERVER_KEY_MONTHLY_USD_LIMIT">>, clock?: () => number): UsageStore {
+    return new UsageStore(db, { monthlyTokens: config.AI_MONTHLY_TOKEN_LIMIT, jobTokens: config.AI_JOB_TOKEN_LIMIT, ...(config.AI_SERVER_KEY_MONTHLY_USD_LIMIT !== undefined ? { serverMonthlyUsd: config.AI_SERVER_KEY_MONTHLY_USD_LIMIT } : {}) }, clock);
 }
 
 /** Counts added to the row of one job x purpose x model x day. */
@@ -179,14 +191,56 @@ export class UsageStore {
 
     /**
      * Tokens used in a calendar month (UTC), for one project, or across projects (counted like `jobTokens`). Across projects means what
-     * Crowd4Test pays for: that total is what the platform's monthly limit protects, and a person's own key is not part of it.
+     * Crowd4Test pays for (its organisational keys and the server's own key): that total is what the platform's monthly limit protects,
+     * and a person's own key is not part of it.
      */
     monthTokens(month: string, projectId?: string): number {
         const { from, to } = monthBounds(month);
         const row = projectId
             ? this.db.get<{ t: number }>(`SELECT COALESCE(SUM(${BUDGET_TOKENS_SQL}), 0) AS t FROM ai_usage WHERE project_id = ? AND day >= ? AND day < ?`, projectId, from, to)
-            : this.db.get<{ t: number }>(`SELECT COALESCE(SUM(${BUDGET_TOKENS_SQL}), 0) AS t FROM ai_usage WHERE day >= ? AND day < ? AND billing_owner = 'crowd4test'`, from, to);
+            : this.db.get<{ t: number }>(`SELECT COALESCE(SUM(${BUDGET_TOKENS_SQL}), 0) AS t FROM ai_usage WHERE day >= ? AND day < ? AND billing_owner IN ('crowd4test', 'server')`, from, to);
         return row?.t ?? 0;
+    }
+
+    /** What the server's own key cost in a calendar month (UTC), from the price table. */
+    serverSpend(month: string = monthOf(this.clock())): ServerSpend {
+        const { from, to } = monthBounds(month);
+        const prices = this.prices();
+        const rows = this.db.all<{ model: string; calls: number; i: number; o: number; cr: number | null; cw: number | null }>(
+            "SELECT model, SUM(calls) AS calls, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw FROM ai_usage WHERE billing_owner = 'server' AND day >= ? AND day < ? GROUP BY model",
+            from,
+            to,
+        );
+        let usd = 0;
+        let calls = 0;
+        const unpriced: string[] = [];
+        for (const r of rows) {
+            calls += r.calls;
+            if (r.i + r.o === 0) continue;
+            const price = prices.get(r.model);
+            if (!price) unpriced.push(r.model);
+            else usd += costOf(r.i, r.o, price, { read: r.cr ?? 0, write: r.cw ?? 0 });
+        }
+        return { month, usd, unpricedModels: unpriced.sort(), calls, limitUsd: this.defaults.serverMonthlyUsd ?? null };
+    }
+
+    /**
+     * Asked before each call (engine/llm/metered.ts): may work on the server's own key go on this month? Only the server key has a money
+     * limit. With a limit set, a cost that cannot be worked out counts as over it (fail closed): the call's model, or a model already used
+     * this month, has no price.
+     */
+    spendBlock(billing: UsageBilling | undefined, model: string, month: string): { usedCents: number; limitCents: number; message: string } | null {
+        if (billing?.owner !== "server") return null;
+        const limit = this.defaults.serverMonthlyUsd;
+        if (limit === undefined) return null;
+        const spend = this.serverSpend(month);
+        const usedCents = Math.round(spend.usd * 100);
+        const limitCents = Math.round(limit * 100);
+        const callModel = model && model !== "unavailable" && !this.prices().has(model) ? [model] : [];
+        const noPrice = [...new Set([...spend.unpricedModels, ...callModel])];
+        if (noPrice.length) return { usedCents, limitCents, message: `The server key's monthly AI spending limit cannot be checked: no price is set for ${noPrice.slice(0, 3).join(", ")}. Set its price in Settings, AI usage.` };
+        if (spend.usd >= limit) return { usedCents, limitCents, message: `The server key's monthly AI spending limit was reached: about ${usdText(spend.usd)} of ${usdText(limit)} this month.` };
+        return null;
     }
 
     totalsFor(jobId: string, projectId: string, month: string): Used {
@@ -350,6 +404,8 @@ export class UsageStore {
     }
 }
 
+const usdText = (v: number) => "$" + v.toFixed(2);
+
 /** What usage pages show for the model of work a personal key paid for: nobody else may learn which model a person's own key uses. */
 export const PERSONAL_KEY_MODEL = "A personal key";
 
@@ -359,6 +415,7 @@ function usageRowOf(r: Record<string, any>): UsageRow {
     if (r.cr) row.cacheReadTokens = r.cr;
     if (r.cw) row.cacheWriteTokens = r.cw;
     if (r.billing_owner === "personal") row.billingOwner = "personal";
+    else if (r.billing_owner === "server") row.billingOwner = "server";
     return row;
 }
 
