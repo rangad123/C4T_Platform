@@ -38,7 +38,18 @@ export const NODE_MIN = 24;
 /** Packages whose code is copied into the bundle (everything esbuild followed into node_modules). */
 // Round 51: an exploration runs the engine on the runner (src/agent/explore-child.ts), which brings the AI SDK and what it imports.
 // @ai-sdk/provider-utils ships without a LICENSE file: it is part of the AI SDK, under the same Apache-2.0 licence as "ai" listed here.
+// tldts (the public suffix list behind src/shared/site.ts) is used only by the server, so it is not in the bundle. If engine
+// code imports src/shared/site.ts again, esbuild bundles it (plain JavaScript, like zod): add "tldts" and "tldts-core" here (tests/site-runner-kit.test.ts checks).
 export const BUNDLED_LICENCES = ["zod", "yaml", "fflate", "ai", "@ai-sdk/gateway", "@ai-sdk/provider", "eventsource-parser", "@opentelemetry/api", "@vercel/oidc"];
+
+/** A package's folder as Node finds it from `root`: root/node_modules first, then each parent folder's node_modules (as esbuild does). */
+function packageDir(name, root) {
+    for (let dir = root; ; dir = path.dirname(dir)) {
+        const at = path.join(dir, "node_modules", ...name.split("/"));
+        if (fs.existsSync(path.join(at, "package.json"))) return at;
+        if (path.dirname(dir) === dir) return path.join(root, "node_modules", ...name.split("/"));
+    }
+}
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -165,7 +176,7 @@ export async function buildRunner({ root = ROOT, outDir = path.join(root, "dist"
     // The bundle holds copies of these packages, whose licences ask for their notice to travel with them. (axe-core, Playwright and the rest are
     // installed from npm by the kit's own package.json and bring their own.)
     const NL = String.fromCharCode(10);
-    const notices = BUNDLED_LICENCES.map((n) => ["=== " + n + " ===", fs.readFileSync(path.join(root, "node_modules", ...n.split("/"), "LICENSE"), "utf8").trim(), ""].join(NL));
+    const notices = BUNDLED_LICENCES.map((n) => ["=== " + n + " ===", fs.readFileSync(path.join(packageDir(n, root), "LICENSE"), "utf8").trim(), ""].join(NL));
     fs.writeFileSync(path.join(outDir, "LICENSES.txt"), ["This runner contains code from these open source packages.", "", ...notices].join(NL) + NL);
 
     const names = [...Object.keys(ENTRIES).map((e) => `${e}.mjs`), "package.json", "LICENSES.txt", ...(lock ? ["package-lock.json"] : [])].sort();
