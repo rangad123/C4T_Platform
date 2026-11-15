@@ -108,9 +108,9 @@ describe("the runner tests in the main CI workflow", () => {
         expect(step.env?.TAQWRIGHT_HOME).toBe("/nonexistent-taqwright");
     });
 
-    it("runs the whole fast tier, away from any real phone", () => {
+    it("runs the whole fast tier, away from any real phone, under the watch that fails when a browser process starts", () => {
         const step = (ci.jobs.quality.steps as Step[]).find((s) => s.name === "Fast tests")!;
-        expect(step?.run).toBe("npm run test:fast");
+        expect(step?.run).toBe("node scripts/no-browser-watch.mjs -- npm run test:fast");
         expect(step.env?.TAQWRIGHT_HOME).toBe("/nonexistent-taqwright");
     });
 });

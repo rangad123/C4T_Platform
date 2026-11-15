@@ -2,7 +2,8 @@
 //   node scripts/test-run.mjs fast|browser|phone|release [--no-retry] [--report <dir>] [--files a,b,...]
 // npm scripts: test:fast (vitest directly), test:browser, test:phone, test:release.
 //
-// - Every vitest run goes through scripts/with-lock.mjs "browser" (re-entrant), so builders and this runner take turns on the machine.
+// - Every browser and phone vitest run goes through scripts/with-lock.mjs "browser" (machine-wide, re-entrant), so everyone on the
+//   machine takes turns. The fast tier starts no browser (its launch guard refuses one), so it runs without waiting for the lock.
 // - fast runs the fast config (parallel); browser and phone run their files one at a time; release runs fast, then browser + phone.
 // - A file with a failure is run once more on its own. A test that passes only on that retry is FLAKY: it is listed in the report and
 //   fails the run unless tests/flaky-allowlist.json allows it (reason + expiry date, at most 90 days ahead). A test that fails twice is
@@ -39,8 +40,9 @@ const rel = (abs) => path.relative(ROOT, abs).replace(/\\/g, "/");
 const mb = () => Math.round(os.freemem() / 1048576);
 const fmt = (ms) => (ms >= 60_000 ? `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s` : `${(ms / 1000).toFixed(1)} s`);
 
-/** One vitest process (under the lock): its JSON results, exit code, wall time, free memory, and the files vitest blamed for unhandled errors. */
+/** One vitest process (browser and phone tiers under the lock): its JSON results, exit code, wall time, free memory, and the files vitest blamed for unhandled errors. */
 function vitest(label, vitestArgs) {
+    const fast = vitestArgs.includes("vitest.fast.config.ts");
     const json = path.join(work, `${label}.json`);
     const logFile = path.join(work, `${label}.log`);
     const log = fs.createWriteStream(logFile);
@@ -48,7 +50,8 @@ function vitest(label, vitestArgs) {
     const freeBefore = mb();
     console.log(`\n[test-run] ${label}: vitest run ${vitestArgs.length > 6 ? `${vitestArgs.length} files` : vitestArgs.join(" ")}`);
     return new Promise((resolve) => {
-        const child = spawn(process.execPath, [LOCK, "browser", "--", process.execPath, VITEST, "run", ...vitestArgs, "--reporter=default", "--reporter=json", `--outputFile.json=${json}`], {
+        const run = [VITEST, "run", ...vitestArgs, "--reporter=default", "--reporter=json", `--outputFile.json=${json}`];
+        const child = spawn(process.execPath, fast ? run : [LOCK, "browser", "--", process.execPath, ...run], {
             cwd: ROOT,
             stdio: ["ignore", "pipe", "pipe"],
             env: { ...process.env, FORCE_COLOR: "0" },

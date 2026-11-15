@@ -68,8 +68,16 @@ jobs:
         env:
           TAQWRIGHT_HOME: /nonexistent-taqwright
 
-      # The quick tier (vitest.fast.config.ts): every test file that starts no browser, in parallel.
+      # The machine-wide locks every browser run takes turns with (scripts/lock.mjs, with-lock.mjs, the fast tier's watch below). No browser
+      # starts and no AI is called; the locks it tests live in temporary folders of its own.
+      - name: Lock tests
+        run: npx vitest run tests/browser-lock-unit.test.ts
+        env:
+          TAQWRIGHT_HOME: /nonexistent-taqwright
+
+      # The quick tier (vitest.fast.config.ts): every test file that starts no browser, in parallel. Its launch guard refuses any
+      # Playwright start in the test processes, and the watch fails the step if a browser process appears under the run in any other way.
       - name: Fast tests
-        run: npm run test:fast
+        run: node scripts/no-browser-watch.mjs -- npm run test:fast
         env:
           TAQWRIGHT_HOME: /nonexistent-taqwright

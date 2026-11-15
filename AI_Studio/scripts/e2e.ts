@@ -5,7 +5,8 @@
  *   npm run demo:e2e -- https://my.app    # tests any reachable site instead
  *
  * Requires LLM credentials (e.g. ANTHROPIC_API_KEY). There is no mock mode: without a key this
- * script exits instead of pretending.
+ * script exits instead of pretending. It starts browsers, so it holds the machine-wide "browser" lock for its whole run
+ * (scripts/lock.mjs): it waits while another run has it.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -16,6 +17,8 @@ import { assertLlmConfigured } from "../src/engine/llm/provider.js";
 import { extractDocumentText } from "../src/engine/requirements/extract.js";
 import { bootstrap } from "../src/platform/bootstrap.js";
 import { Worker } from "../src/platform/worker.js";
+// @ts-expect-error plain JavaScript script (no type declarations)
+import { holdLock } from "./lock.mjs";
 
 const cfg0 = loadConfig();
 try {
@@ -23,6 +26,12 @@ try {
 } catch (e) {
     console.error(`\n${e instanceof Error ? e.message : e}\nThe end-to-end demo needs a real model; see README "LLM configuration".`);
     process.exit(2);
+}
+try {
+    await holdLock("browser", `scripts/e2e.ts ${process.argv.slice(2).join(" ")}`.trim());
+} catch (e) {
+    console.error(e instanceof Error ? e.message : e);
+    process.exit(3);
 }
 
 const target = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : undefined;
