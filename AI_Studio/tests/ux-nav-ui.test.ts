@@ -374,6 +374,21 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         await pwExpect(page.getByRole("heading", { name: /Change reusable steps/ }).first()).toBeVisible();
     });
 
+    it("Test scripts: the library search belongs to its three sections, so it shows under the section row there and nowhere else", async () => {
+        const name = "Search shared steps, elements and helpers";
+        for (const section of ["steps", "elements", "helpers"] as const) {
+            await visit(routes.scripts(P(), section));
+            // Inside the open section, not above the row of sections.
+            await pwExpect(page.locator(".subtabs + .hub-body").getByRole("searchbox", { name, exact: true }), section).toBeVisible();
+            await pwExpect(page.getByRole("searchbox", { name, exact: true }), section).toHaveCount(1);
+        }
+        for (const section of ["scripts", "review", "library"] as const) {
+            await visit(routes.scripts(P(), section));
+            await pwExpect(page.locator(".subtabs + .hub-body")).toBeVisible();
+            await pwExpect(page.getByRole("searchbox", { name, exact: true }), section).toHaveCount(0);
+        }
+    });
+
     it("an empty project: every place still loads and says what to do, no error", async () => {
         const e = empty.projectId;
         for (const h of [routes.project(e), routes.requirements(e), routes.cases(e), routes.cases(e, "manual"), routes.suites(e), routes.scripts(e), routes.scripts(e, "steps"), routes.agentRuns(e), routes.runs(e), routes.runs(e, "releases"), routes.projectSettings(e), `#/projects/${e}/runners`]) {

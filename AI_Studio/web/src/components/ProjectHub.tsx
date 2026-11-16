@@ -25,7 +25,7 @@ export interface HubSection {
  * it is shown "embedded", so it drops its own title, tab bar and breadcrumbs and the hub owns them.
  * Only the chosen section is mounted, so a section that polls or fetches costs nothing until it is opened.
  */
-export function ProjectHub({ id, place, title, subtitle, sections, current, hrefOf, actions, below }: { id: string; place: PlaceKey; title: string; subtitle: ReactNode; sections: HubSection[]; current: string; hrefOf: (key: string) => string; actions?: ReactNode; below?: ReactNode }) {
+export function ProjectHub({ id, place, title, subtitle, sections, current, hrefOf, actions }: { id: string; place: PlaceKey; title: string; subtitle: ReactNode; sections: HubSection[]; current: string; hrefOf: (key: string) => string; actions?: ReactNode }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     useProjectChanged(id, project.reload);
     const name = project.data?.name;
@@ -64,7 +64,6 @@ export function ProjectHub({ id, place, title, subtitle, sections, current, href
             <ProjectTabs id={id} active={place} count={project.data?.test_count} caseCount={project.data?.case_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
             {project.data?.archived_at && <ArchivedNote id={id} />}
             <PlaceHead title={title} subtitle={subtitle} actions={actions} />
-            {below}
             <nav className="subtabs" aria-label={`${title} sections`} ref={nav}>
                 {sections.map((s) => (
                     <Tooltip key={s.key} content={s.hint} placement="bottom">

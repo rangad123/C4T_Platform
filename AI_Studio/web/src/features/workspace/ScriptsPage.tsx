@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { routes, useRoute, type ScriptsSection } from "../../lib/router";
 import { ProjectTests } from "../../pages/ProjectTests";
@@ -19,6 +20,13 @@ export function ScriptsPage({ id }: { id: string }) {
     // A version's own link (`?test=&version=`, features/review/review.ts versionHref) opens it in Review.
     const section = (q.get("section") as ScriptsSection | null) ?? (reviewTest && reviewVersion ? "review" : "scripts");
     const edit = q.get("edit") ?? undefined;
+    // The search covers only the three shared libraries, so it shows inside those sections, under the section row.
+    const withSearch = (page: ReactNode) => (
+        <>
+            <LibrarySearch id={id} />
+            {page}
+        </>
+    );
     const sections: HubSection[] = [
         { key: "scripts", label: "Scripts", hint: "Every test script: run them, make new ones, import and export", render: () => <ProjectTests id={id} /> },
         {
@@ -28,9 +36,9 @@ export function ScriptsPage({ id }: { id: string }) {
             // One version of a test (`?test=&version=`), or the list (features/review/ScriptReview.tsx).
             render: () => (reviewTest && reviewVersion ? <VersionPage projectId={id} testId={reviewTest} version={reviewVersion} key={`${reviewTest}:${reviewVersion}`} /> : <ScriptList id={id} />),
         },
-        { key: "steps", label: "Reusable steps", hint: "Named groups of steps that many tests use", render: () => <BlocksPage id={id} edit={edit} key={edit ?? ""} /> },
-        { key: "elements", label: "Shared elements", hint: "Buttons and fields named once and used by many tests", render: () => <ProjectObjects id={id} /> },
-        { key: "helpers", label: "Helpers (code)", hint: "Code that several code tests import", render: () => <HelpersPage id={id} /> },
+        { key: "steps", label: "Reusable steps", hint: "Named groups of steps that many tests use", render: () => withSearch(<BlocksPage id={id} edit={edit} key={edit ?? ""} />) },
+        { key: "elements", label: "Shared elements", hint: "Buttons and fields named once and used by many tests", render: () => withSearch(<ProjectObjects id={id} />) },
+        { key: "helpers", label: "Helpers (code)", hint: "Code that several code tests import", render: () => withSearch(<HelpersPage id={id} />) },
         { key: "library", label: "Reusable libraries", hint: "Take steps, helpers and elements from your organisation's library, and publish this project's own", render: () => <ProjectLibrary id={id} /> },
     ];
     return (
@@ -42,7 +50,6 @@ export function ScriptsPage({ id }: { id: string }) {
             sections={sections}
             current={section}
             hrefOf={(k) => routes.scripts(id, k as ScriptsSection)}
-            below={section === "scripts" || section === "review" || section === "library" ? undefined : <LibrarySearch id={id} />}
         />
     );
 }
