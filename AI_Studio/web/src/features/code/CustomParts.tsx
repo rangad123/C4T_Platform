@@ -50,7 +50,7 @@ export function CustomCallout({ testId, projectId, custom, onChanged }: { testId
         try {
             const repos = await api<RepoRow[]>(`/projects/${projectId}/git-imports`);
             const repo = repos.find((r) => r.host === g.host && r.path === g.path && r.ref === g.ref) ?? repos.find((r) => r.host === g.host && r.path === g.path);
-            if (!repo) throw new Error("This repository is no longer linked. Import it again with Import on the Test scripts page.");
+            if (!repo) throw new Error("This repository is no longer linked. Import it again from Test scripts, Import, Import from Git.");
             setCheck({ ok: true, res: await api<CheckResult>(`/projects/${projectId}/git-imports/${repo.id}/check`, { method: "POST" }) });
         } catch (e) {
             setCheck({ ok: false, text: describeApiError(e) });

@@ -88,6 +88,13 @@ beforeAll(async () => {
     browser = await chromium.launch();
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } }); // axe-core refuses pages that were not made through a context
     page = await context.newPage();
+    // Since round 57 the dialog asks GET /api/me/ai whether this person's AI can run. On this open server (no sign-in) that answer reads the
+    // server's .env key; here the server's AI is the scripted stand-in on `platform.llm`, so the answer says what that stand-in is.
+    await page.route("**/api/me/ai", async (route) => {
+        const res = await route.fetch();
+        const body = await res.json();
+        await route.fulfill({ response: res, json: body.openServer ? { ...body, openServer: { ...body.openServer, configured: platform.llm.modelName !== "unavailable" } } : body });
+    });
 }, 120_000);
 
 afterAll(async () => {
@@ -203,7 +210,7 @@ describe("Write a test in the UI", () => {
             await page.goto(`${base}/#/projects/${projectId}/scripts`);
             await page.reload(); // the server's capabilities are read once per page load
             await openDescribe();
-            await pwExpect(dialog().getByText("The AI model isn’t set up yet", { exact: true })).toBeVisible();
+            await pwExpect(dialog().getByText("You have no usable AI key", { exact: true })).toBeVisible();
             await box().fill(SENTENCE);
             await pwExpect(dialog().getByRole("button", { name: "Create and run test", exact: true })).toBeDisabled();
         } finally {

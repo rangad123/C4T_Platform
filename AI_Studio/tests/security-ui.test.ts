@@ -198,7 +198,7 @@ describe("testing type", () => {
         await visit(`#/projects/${p.id}/settings?section=general`);
         const row = page.getByTestId("setting-testing-type");
         await pwExpect(row).toContainText("Functional testing.");
-        await row.getByRole("button", { name: "Change testing type", exact: true }).click();
+        await row.getByRole("button", { name: "Change functional or security testing", exact: true }).click();
         await pwExpect(row.getByRole("button", { name: "Save testing type", exact: true })).toBeDisabled();
         await row.getByRole("radio", { name: /^Both/ }).check();
         await row.getByRole("button", { name: "Save testing type", exact: true }).click();
@@ -643,7 +643,7 @@ describe("the bar: keyboard, phone width, targets, contrast", () => {
             await axeBoth(async () => {
                 await visit(hash);
                 await pwExpect(page.locator(".page-head").first()).toBeVisible();
-                if (hash.endsWith("settings?section=general")) await page.getByRole("button", { name: "Change testing type", exact: true }).click();
+                if (hash.endsWith("settings?section=general")) await page.getByRole("button", { name: "Change functional or security testing", exact: true }).click();
             });
         }
     }, 480_000);

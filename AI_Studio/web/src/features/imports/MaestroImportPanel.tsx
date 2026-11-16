@@ -29,7 +29,8 @@ export function MaestroImportPanel({ projectId, busy, onClose, onImported }: { p
     const fail = (e: unknown) => {
         const details = (e as { details?: unknown }).details;
         const list = Array.isArray(details) ? details.filter((d): d is { file: string; message: string } => typeof d?.file === "string" && typeof d?.message === "string") : [];
-        setError({ text: describeApiError(e), files: list });
+        // With a list of files, the server's own sentence heads it (describeApiError would show the first file's parser message instead, twice).
+        setError({ text: list.length && e instanceof Error && e.message ? e.message : describeApiError(e), files: list });
     };
 
     async function choose(list: FileList | null) {

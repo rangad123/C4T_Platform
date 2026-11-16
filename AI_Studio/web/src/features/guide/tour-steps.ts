@@ -134,7 +134,7 @@ export const TOUR_STEPS: TourStep[] = [
     { id: "issues", chapter: "release", target: "settings-issues", page: { kind: "setup", section: "issues" }, needs: P, title: "Issue tracker", text: "Connect GitHub, Jira or Notion to file a problem straight from a failing test." },
     { id: "device-farms", chapter: "release", target: "mobile-app", page: { kind: "setup", section: "mobile" }, needs: [...P, "phone"], title: "Device farms", text: "Under Mobile app, a device farm runs phone tests on real phones in the cloud instead of a phone on this computer." },
     { id: "storage", chapter: "release", target: "settings-storage", page: { kind: "setup", section: "storage" }, needs: P, title: "Storage and backup", text: "What the files use, how long they are kept, and a backup of the project to download or restore." },
-    { id: "testing-type", chapter: "release", target: "testing-type", page: { kind: "settings", section: "general" }, needs: ["project", "module"], title: "Testing type", text: "Functional testing, security assessment, or both. Changing it never deletes anything." },
+    { id: "testing-type", chapter: "release", target: "testing-type", page: { kind: "settings", section: "general" }, needs: ["project", "module"], title: "Functional or security testing", text: "Functional testing, security assessment, or both. Changing it never deletes anything." },
 
     // ── Phones ──
     { id: "phone-app", chapter: "phones", target: "settings-mobile", page: { kind: "setup", section: "mobile" }, needs: [...P, "phone"], title: "Your phone app", text: "Mobile app holds the Android or iPhone app your phone tests run against. Change it here." },
