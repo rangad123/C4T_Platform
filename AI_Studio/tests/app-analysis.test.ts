@@ -192,6 +192,31 @@ describe("analysing again", () => {
         expect(rules.filter((x) => x.expected.includes("wording edited")).map((x) => x.status)).toEqual(["unverified"]);
     });
 
+    it("a rule the model leaves out when reading an unchanged requirement again keeps its decision and its evidence", async () => {
+        const two = (one: string) => [
+            { ref: "REQ-1", title: "Cart size", description: one, acceptanceCriteria: "" },
+            { ref: "REQ-2", title: "Pay", description: "Checkout must take a card or a voucher.", acceptanceCriteria: "" },
+        ];
+        await analysis.run(PID, inputs({ requirements: two("A cart must hold at most 50 lines.") }), { llm: scripted() });
+        const pay = (await intel.rules(PID)).find((x) => x.expected.includes("card"))!;
+        await intel.decide(PID, pay.id, "confirmed", "u-1");
+        const base = scripted();
+        const forgetful = {
+            ...base,
+            object: (async (args: { prompt: string; schema: z.ZodTypeAny }) => {
+                const a = (await base.object(args as never)) as { rules: Array<{ expected: string }> };
+                return { ...a, rules: a.rules.filter((r) => !r.expected.includes("card")) };
+            }) as LlmClient["object"],
+        } as LlmClient;
+        await analysis.run(PID, inputs({ requirements: two("A cart must hold at most 50 lines (wording edited).") }), { llm: forgetful });
+        const after = (await intel.rules(PID)).find((x) => x.id === pay.id)!;
+        expect(after).toMatchObject({ status: "confirmed", decidedBy: "u-1", expected: pay.expected });
+        expect(after.evidenceGone).toBeUndefined();
+        // The same reading of a requirement that is gone leaves the rule with its evidence gone.
+        await analysis.run(PID, inputs({ requirements: two("A cart must hold at most 50 lines (wording edited).").slice(0, 1) }), { llm: forgetful });
+        expect((await intel.rule(PID, pay.id))!.evidenceGone).toEqual({ version: 3, at });
+    });
+
     it("sends only the pages that changed, and keeps the rules of the pages that did not", async () => {
         await analysis.run(PID, inputs(), { llm: scripted() });
         const llm = scripted();

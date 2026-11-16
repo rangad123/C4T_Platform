@@ -247,6 +247,7 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
     if (repairs > 0) notes.push(`${repairs} ${repairs === 1 ? "answer was" : "answers were"} not in the expected form at first and ${repairs === 1 ? "was" : "were"} asked for again.`);
 
     const byRef = new Map(documents.map((d) => [d.ref, d.lines]));
+    const documentPrint = (ref: string) => fingerprintText(`${ref}\n${byRef.get(ref)!.join("\n")}`);
     /** What each piece of evidence was read from (Rule.anchor): the whole document it cites and the lines it cites, as fingerprints. */
     const anchors = new WeakMap<Evidence, NonNullable<Rule["anchor"]>>();
     /**
@@ -264,7 +265,7 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
         if (rule && !supports(text, rule)) return "support";
         const at = cited.length === 1 ? `L${cited[0]}` : `L${cited[0]}-L${cited[cited.length - 1]}`;
         const ev: Evidence = { kind: "quote", ref: `${ref}#${at}`.slice(0, 500), excerpt: hideSecrets(item.quote, hide) };
-        anchors.set(ev, { text: fingerprintText(`${ref}\n${lines.join("\n")}`), lines: fingerprintText(`${ref}\n${cited.map((n) => lines[n - 1]!).join("\n")}`) });
+        anchors.set(ev, { text: documentPrint(ref), lines: fingerprintText(`${ref}\n${cited.map((n) => lines[n - 1]!).join("\n")}`) });
         return ev;
     };
     const evidenceOf = (item: { doc?: string; lines: number[]; quote: string }, rule?: { expected: string; description: string }): Evidence | Why => {
@@ -362,5 +363,9 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
         const why = (Object.keys(DROP_REASONS) as Why[]).filter((k) => dropped[k]).map((k) => `${dropped[k]} ${DROP_REASONS[k][dropped[k] === 1 ? 0 : 1]}`);
         notes.push(`${total} item${total === 1 ? " was" : "s were"} dropped: ${why.join(", ")}.`);
     }
-    return { source: { ...source, status: "processed" }, model, rules: [...rules.values()], notes };
+    // Documents every line of which was in a part that was read (a part past the call limit was not).
+    const seen = new Map<string, number>();
+    for (const part of parts.slice(0, EXTRACTION_LIMITS.maxCalls)) for (const d of part.docs) seen.set(d.ref, (seen.get(d.ref) ?? 0) + d.lines.length);
+    const read = documents.filter((d) => seen.get(d.ref) === d.lines.length).map((d) => documentPrint(d.ref));
+    return { source: { ...source, status: "processed" }, model, rules: [...rules.values()], notes, read: [...new Set(read)].slice(0, 5000) };
 }

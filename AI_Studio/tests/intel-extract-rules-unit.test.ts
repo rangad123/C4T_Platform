@@ -439,4 +439,14 @@ describe("the anchor of a rule read from a document", () => {
         expect(d.anchor!.lines).not.toBe(a.anchor!.lines);
         expect(d.anchor!.text).not.toBe(a.anchor!.text);
     });
+
+    it("the documents read in full are listed by the same fingerprint, so a rule left out of a reading still has its evidence", async () => {
+        const other: ExtractionDocument = { ref: "doc:other", lines: ["Nothing here states a rule."] };
+        const f = await extractRules(scripted([{ ...empty, rules: [rule()] }]), { source: { kind: "requirements", ref: "r" }, sourceType: "requirement", documents: [DOC, other], now: NOW });
+        expect(f.read).toHaveLength(2);
+        expect(f.read).toContain(f.rules[0]!.anchor!.text);
+        // A failed reading lists nothing.
+        const failed = await extractRules(scripted([new Error("down")]), { source: { kind: "requirements", ref: "r" }, sourceType: "requirement", documents: [DOC], now: NOW });
+        expect(failed.read ?? []).toEqual([]);
+    });
 });

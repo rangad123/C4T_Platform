@@ -18,6 +18,11 @@ export const ModelFragmentSchema = z
         rules: z.array(RuleSchema).max(2000).default([]),
         /** Plain sentences about what the source left out (e.g. "3 rules dropped: their quote is not in the document."). */
         notes: z.array(z.string().max(500)).max(50).default([]),
+        /**
+         * The documents this source read in full, as fingerprints (the same as Rule.anchor.text): a stored rule read from one of them still
+         * has its evidence, even when this reading did not state the rule again (carry-forward.ts). Absent for sources not read as text.
+         */
+        read: z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(5000).optional(),
     })
     .strict();
 export type ModelFragment = z.infer<typeof ModelFragmentSchema>;
