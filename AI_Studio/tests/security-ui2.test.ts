@@ -66,8 +66,8 @@ async function tall(loc: ReturnType<Page["locator"]>, what: string) {
 
 // SIGN's judged saved sign-ins (src/security/signin.ts statusOf words).
 const READY_MAIN = { account: "main", state: "ready", message: "The assessment loads the saved sign-in for the project's own account." };
-const MISSING_MAIN = { account: "main", state: "missing", message: "No sign-in is saved for the project's own account. Save one in Settings (Test accounts, Saved sign-ins) or upload one here; until then the assessment visits signed out." };
-const MISSING_ADMIN = { account: "admin", state: "missing", message: "No sign-in is saved for the test account “admin”. Save one in Settings (Test accounts, Saved sign-ins) or upload one here; until then the assessment visits signed out." };
+const MISSING_MAIN = { account: "main", state: "missing", message: "No sign-in is saved for the project's own account. Save one in Settings → Sign-in (“Signed in by hand” under the account) or upload one here; until then the assessment visits signed out." };
+const MISSING_ADMIN = { account: "admin", state: "missing", message: "No sign-in is saved for the test account “admin”. Save one in Settings → Sign-in (“Signed in by hand” under the account) or upload one here; until then the assessment visits signed out." };
 
 /** A security project with one authorized application, a finished assessment and a few events in its trail. */
 function seeded() {

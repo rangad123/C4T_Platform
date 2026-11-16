@@ -171,7 +171,7 @@ export function NewProject({ projectId }: { projectId: string }) {
             </div>
             <p className="t-meta" data-testid="inputs-note">
                 <ListChecks size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 6 }} />
-                Sign-in details, API access, the OpenAPI document and the requirements the agents use are kept on the project’s <a href={routes.requirements(projectId)}>Requirements</a> tab. Which agents test it is set in <a href={routes.projectSettings(projectId)}>Settings → General</a>.
+                The sign-in and API access the agents use are kept in <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>; the OpenAPI document and the requirements on the project’s <a href={routes.requirements(projectId)}>Requirements</a> tab. Which agents test it is set in <a href={routes.projectSettings(projectId)}>Settings → General</a>.
             </p>
             {askOpen && <MissingInputsDialog projectId={projectId} missing={missing} onClose={() => setAskOpen(false)} />}
         </form>

@@ -78,7 +78,7 @@ export function NextSteps({
             done: hasSignIn,
             title: "Add your login",
             text: hasSignIn ? "Sign-in details are saved for this project." : "Your application has a sign-in page. Add a test account so the tests can see what is behind it.",
-            action: <LinkButton href={routes.requirements(projectId)} tip="Opens the Requirements tab. Sign-in details are under What the agents need; the next exploration uses them.">Add sign-in details</LinkButton>,
+            action: <LinkButton href={routes.projectSettings(projectId, "signin")} tip="Opens Settings, Sign-in. The next exploration uses the main account saved there.">Add sign-in details</LinkButton>,
         });
     }
     // Everything that applies is done: the list has nothing left to say.

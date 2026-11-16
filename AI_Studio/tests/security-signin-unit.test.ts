@@ -215,7 +215,7 @@ describe("the saved sign-in an application names", () => {
     it("missing, ready, other site, expired: plain states and coverage sentences, never a value", () => {
         const app = store.createApplication(p1, { name: "Signed", targetUrl: `http://127.0.0.1:${PORT}/`, environment: "development", signInAccount: "main" });
         expect(signInStatus(db, cfg(), p1, "main", app)).toMatchObject({ state: "missing" });
-        expect(resolveSignIn(db, cfg(), app)).toMatchObject({ problem: "Signed-in pages were not inspected: no sign-in is saved for the project's own account. Save one in Settings (Test accounts, Saved sign-ins).", secrets: [] });
+        expect(resolveSignIn(db, cfg(), app)).toMatchObject({ problem: "Signed-in pages were not inspected: no sign-in is saved for the project's own account. Save one in Settings → Sign-in (“Signed in by hand” under the account).", secrets: [] });
 
         sessions.saveSession(p1, "main", { state: state(), appUrl: `http://127.0.0.1:${PORT}/`, checkUrl: `http://127.0.0.1:${PORT}/account`, how: "file" });
         const ready = resolveSignIn(db, cfg(), app)!;

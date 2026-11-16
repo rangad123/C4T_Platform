@@ -33,6 +33,8 @@ export function registerIdentityRoutes({ app, p, project }: RouteCtx): void {
         const body = z.object({ roles: z.array(RoleInput).max(MAX_ROLES, `at most ${MAX_ROLES} test accounts`) }).parse(req.body);
         const names = body.roles.map((r) => r.name);
         if (new Set(names).size !== names.length) throw new HttpError(400, "Each test account needs its own name.");
+        // "main" is the project's own account (its sign-in and its saved signed-in session): a test account can't take the name.
+        if (names.includes("main")) throw new HttpError(400, "“main” is the project’s own account (Settings → Sign-in, Main account): choose another name for this test account.");
         const saved = new Map(store.get(id).map((r) => [r.name, r]));
         const next: Role[] = body.roles.map((r) => {
             const old = saved.get(r.name);

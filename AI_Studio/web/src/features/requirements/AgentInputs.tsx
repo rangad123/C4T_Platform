@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, KeyRound, RotateCcw, Save, Trash2 } from "lucide-react";
 import { api } from "../../api";
-import { Badge, Button, Callout, Disclosure } from "../../components/ui";
+import { Badge, Button, Callout } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { plural } from "../../lib/format";
@@ -34,6 +34,13 @@ export interface AgentInputs {
 /** The Requirements tab with this card open and in view: where the pop-up before exploring and a failed API test's advice lead. */
 export const agentInputsHref = (projectId: string): string => `${routes.requirements(projectId)}?inputs=open`;
 
+/** What is saved for the main account, in one sentence (the card links to Settings → Sign-in to change it). */
+export function signInLine(data: AgentInputs): string {
+    const who = data.signIn.username ? `Signs in as ${data.signIn.username}${data.signIn.hasPassword ? "" : " (no password saved yet)"}.` : data.signIn.hasPassword ? "A sign-in is saved." : "No sign-in saved: the agents explore signed out.";
+    const apiWords = data.apiAccess.hasToken ? " An API token is saved." : data.apiAccess.oauth2 ? " OAuth2 client credentials are saved." : "";
+    return who + apiWords;
+}
+
 /** The card's one line while it is closed: what is saved and what is missing (the inputs a chosen agent cannot work without). */
 export function inputsSummary(data: AgentInputs): string {
     const saved = [
@@ -47,7 +54,6 @@ export function inputsSummary(data: AgentInputs): string {
     return missing.length ? `${savedText} Missing: ${missing.join(", ")}.` : `${savedText} Nothing the chosen agents need is missing.`;
 }
 
-type SecretKey = "password" | "totpSecret" | "apiToken" | "clientSecret";
 export interface SecretState {
     value: string;
     replacing: boolean;
@@ -82,17 +88,11 @@ export function AgentInputs({ projectId }: { projectId: string }) {
 function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string; data: AgentInputs; justSaved: boolean; onSaved: () => Promise<void> }) {
     const can = useHere(projectId).may;
     const canEdit = can("ai_studio.project.settings") && data.application !== null;
-    const [username, setUsername] = useState(data.signIn.username ?? "");
-    const [secrets, setSecrets] = useState<Record<SecretKey, SecretState>>({ password: FRESH, totpSecret: FRESH, apiToken: FRESH, clientSecret: FRESH });
-    const o = data.apiAccess.oauth2;
-    const [oauth, setOauth] = useState({ tokenUrl: o?.tokenUrl ?? "", clientId: o?.clientId ?? "", scope: o?.scope ?? "" });
-    const [removeOauth, setRemoveOauth] = useState(false);
     const [openApiUrl, setOpenApiUrl] = useState(data.openApiUrl ?? "");
     const [allowMutating, setAllowMutating] = useState(data.allowMutatingApiTests);
     const [cleanupAfter, setCleanupAfter] = useState(data.cleanupAfter);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-    const setSecret = (k: SecretKey, s: Partial<SecretState>) => setSecrets((all) => ({ ...all, [k]: { ...all[k], ...s } }));
     // Closed to one line, unless something the agents cannot work without is missing, the person came here to add it, or just saved.
     const route = useRoute();
     const cameFor = route.query.get("inputs") === "open";
@@ -110,21 +110,14 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
     async function save() {
         setError("");
         setBusy(true);
-        const clear = [secrets.password.remove && "password", secrets.totpSecret.remove && "totpSecret", secrets.apiToken.remove && "apiToken", removeOauth && "oauth2"].filter(Boolean);
-        const oauthTyped = oauth.tokenUrl.trim() || oauth.clientId.trim();
         try {
             await api(`/projects/${projectId}/agent-inputs`, {
                 method: "PUT",
+                // The sign-in and API access are edited in Settings → Sign-in: left out here, so they stay as they are.
                 body: {
-                    username,
-                    password: secrets.password.value || undefined,
-                    totpSecret: secrets.totpSecret.value.trim() || undefined,
-                    apiToken: secrets.apiToken.value || undefined,
-                    oauth2: !removeOauth && (oauthTyped || o) ? { tokenUrl: oauth.tokenUrl, clientId: oauth.clientId, scope: oauth.scope || undefined, clientSecret: secrets.clientSecret.value || undefined } : undefined,
                     openApiUrl,
                     allowMutatingApiTests: allowMutating,
                     cleanupAfter,
-                    clear: clear.length ? clear : undefined,
                 },
             });
             setBusy(false);
@@ -154,7 +147,7 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                 <div className="stack" id="agent-inputs-body">
                     <div className="stack-sm">
                         <p className="t-secondary">
-                            The sign-in, API access and documents this project’s testing agents use when they explore. Exploring uses what is saved here; nothing needs typing again on the Explore page.
+                            What this project’s testing agents use when they explore: the API document and whether tests may change data, with the main account from Settings → Sign-in. Exploring uses what is saved here; nothing needs typing again on the Explore page.
                             {data.application && (
                                 <>
                                     {" "}
@@ -175,73 +168,12 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                     )}
 
                     <div className="stack" style={{ gap: 0 }}>
-                        <div className="stack-sm opt-group first" style={{ paddingTop: 0 }}>
-                            <div>
-                                <div className="t-card">Sign in</div>
-                                <p className="hint">Optional. Lets the agents test pages behind a login. Use a dedicated test account, never a real one.</p>
-                                <p className="hint" data-testid="agent-inputs-same-sign-in">
-                                    This is the project’s one sign-in, the same as in <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>: a change in either place shows in both.
-                                </p>
-                            </div>
-                            <div className="grid-2">
-                                <div className="field">
-                                    <label htmlFor="ai-user">Username or email</label>
-                                    <input id="ai-user" className="input" autoComplete="off" value={username} disabled={!canEdit} onChange={(e) => setUsername(e.target.value)} />
-                                </div>
-                                <SecretField id="ai-pass" label="Password" saved={data.signIn.hasPassword} state={secrets.password} onChange={(s) => setSecret("password", s)} canEdit={canEdit} />
-                            </div>
-                            <SecretField
-                                id="ai-totp"
-                                label="Authenticator secret (optional)"
-                                saved={data.signIn.hasTotpSecret}
-                                state={secrets.totpSecret}
-                                onChange={(s) => setSecret("totpSecret", s)}
-                                canEdit={canEdit}
-                                hint="Only if the login asks for a one-time code from an authenticator app. Paste the setup key (letters and digits) shown when the test account was enrolled. Codes sent by email or text message can’t be used."
-                            />
-                        </div>
-
-                        <div className="stack-sm opt-group">
-                            <div>
-                                <div className="t-card">API access</div>
-                                <p className="hint">Optional. Needed to test endpoints that require authorization. Use a token or OAuth2 client credentials.</p>
-                            </div>
-                            <SecretField id="ai-token" label="Bearer token" saved={data.apiAccess.hasToken} state={secrets.apiToken} onChange={(s) => setSecret("apiToken", s)} canEdit={canEdit} />
-                            <Disclosure label="Use OAuth2 client credentials instead" defaultOpen={Boolean(o)}>
-                                {removeOauth ? (
-                                    <div className="row">
-                                        <span className="t-secondary">The OAuth2 client credentials are removed when you save.</span>
-                                        <Button size="sm" variant="ghost" icon={RotateCcw} onClick={() => setRemoveOauth(false)}>
-                                            Undo
-                                        </Button>
-                                    </div>
-                                ) : (
-                                    <div className="stack-sm">
-                                        <div className="grid-2">
-                                            <div className="field">
-                                                <label htmlFor="ai-o-url">OAuth2 token URL</label>
-                                                <input id="ai-o-url" className="input" type="url" value={oauth.tokenUrl} disabled={!canEdit} onChange={(e) => setOauth({ ...oauth, tokenUrl: e.target.value })} />
-                                            </div>
-                                            <div className="field">
-                                                <label htmlFor="ai-o-scope">OAuth2 scope</label>
-                                                <input id="ai-o-scope" className="input" value={oauth.scope} disabled={!canEdit} onChange={(e) => setOauth({ ...oauth, scope: e.target.value })} />
-                                            </div>
-                                            <div className="field">
-                                                <label htmlFor="ai-o-id">OAuth2 client ID</label>
-                                                <input id="ai-o-id" className="input" autoComplete="off" value={oauth.clientId} disabled={!canEdit} onChange={(e) => setOauth({ ...oauth, clientId: e.target.value })} />
-                                            </div>
-                                            <SecretField id="ai-o-secret" label="OAuth2 client secret" saved={Boolean(o?.hasClientSecret)} state={secrets.clientSecret} onChange={(s) => setSecret("clientSecret", s)} canEdit={canEdit} removable={false} />
-                                        </div>
-                                        {o && canEdit && (
-                                            <div>
-                                                <Button size="sm" variant="ghost" icon={Trash2} onClick={() => setRemoveOauth(true)}>
-                                                    Remove the OAuth2 client credentials
-                                                </Button>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </Disclosure>
+                        <div className="stack-sm opt-group first" style={{ paddingTop: 0 }} data-testid="agent-inputs-sign-in">
+                            <div className="t-card">Sign-in and API access</div>
+                            <p className="hint">
+                                {signInLine(data)} The agents use the project’s main account; change it, its API access and the other test accounts in{" "}
+                                <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>.
+                            </p>
                         </div>
 
                         <div className="stack-sm opt-group">

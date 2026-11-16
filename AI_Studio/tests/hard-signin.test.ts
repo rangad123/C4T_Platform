@@ -252,13 +252,13 @@ describe("hard sign-ins on a real app", () => {
         const job = await waitJob(run.body.jobId);
         expect(job.status).toBe("FAILED");
         expect(job.error).toMatch(/^The saved sign-in for this project no longer works \(The page asks for a password again|^The saved sign-in for this project no longer works \(The page moved to a sign-in address/);
-        expect(job.error).toContain("Sign in again under Test accounts");
+        expect(job.error).toContain("Sign in again in Settings → Sign-in");
         const after = await testsOf(projectId);
         expect(after.map((t) => [t.id, t.validationStatus])).toEqual(before.map((t) => [t.id, t.validationStatus]));
         expect((await call("GET", `/api/projects/${projectId}/hard-sign-in`)).body.sessions[0]).toMatchObject({ state: "expired", checkOk: false });
     }, 120_000);
 
-    it("the Test accounts page shows saved sign-ins and makes a forwarding address", async () => {
+    it("the Sign-in tab shows each saved sign-in under its account and makes a forwarding address", async () => {
         if (!fs.existsSync(path.join(process.cwd(), "web", "dist", "index.html"))) {
             const b = spawnSync(process.execPath, ["node_modules/vite/bin/vite.js", "build", "web"], { stdio: "ignore" });
             expect(b.status).toBe(0);
@@ -269,9 +269,11 @@ describe("hard sign-ins on a real app", () => {
         const p = await ctx.newPage();
         try {
             await p.goto(`http://127.0.0.1:${UI_PORT}/#/projects/${projectId}/settings?section=accounts`);
-            await p.getByRole("heading", { name: "Saved sign-ins", exact: true }).waitFor();
-            await p.getByText("Signed out", { exact: true }).waitFor();
-            await p.getByRole("button", { name: "Sign in again", exact: true }).waitFor();
+            // Each account's saved sign-in is under that account (Settings → Sign-in), not in a list of its own.
+            const byHand = p.getByTestId("signed-in-by-hand-main");
+            await byHand.getByText("Signed out", { exact: true }).waitFor();
+            await byHand.getByRole("button", { name: "Sign in again", exact: true }).waitFor();
+            expect(await p.getByRole("heading", { name: "Saved sign-ins", exact: true }).count()).toBe(0);
             await p.getByRole("heading", { name: "Test mailbox", exact: true }).waitFor();
             await p.getByRole("button", { name: "Make a new address", exact: true }).click();
             await p.getByText("Your forwarding address (shown once)", { exact: true }).waitFor();

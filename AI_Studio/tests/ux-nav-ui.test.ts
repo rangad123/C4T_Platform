@@ -317,7 +317,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         await pwExpect(page.getByTestId("project-members").getByRole("heading", { name: "Members", exact: true })).toBeVisible();
         // The security module is on by default (round 18), so the project's testing type shows; it moved here from Setup.
         await visit(routes.projectSettings(P()));
-        await pwExpect(page.getByTestId("setting-testing-type").getByRole("heading", { name: "Testing type", exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("setting-testing-type").getByRole("heading", { name: "Functional or security testing", exact: true })).toBeVisible();
     });
 
     it("a section opened by a link stays open on a fresh load, and the crumb and the title name the place", async () => {

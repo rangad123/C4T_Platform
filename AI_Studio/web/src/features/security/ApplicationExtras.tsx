@@ -160,7 +160,7 @@ export function SignInPanel({ projectId, app, onChanged }: { projectId: string; 
                 <Disclosure label="Upload a saved sign-in from a file">
                     <div className="stack-sm">
                         <p className="hint">
-                            For {signInLabel(account).toLowerCase()}: a file a browser saved after you signed in by hand, such as the one Playwright’s --save-storage writes. Its cookies are stored encrypted and never shown again; only those for addresses in scope are used. You can also <a href={routes.library(projectId, "accounts")}>sign in once yourself under Test accounts</a>.
+                            For {signInLabel(account).toLowerCase()}: a file a browser saved after you signed in by hand, such as the one Playwright’s --save-storage writes. Its cookies are stored encrypted and never shown again; only those for addresses in scope are used. You can also <a href={routes.projectSettings(projectId, "signin")}>sign in once yourself in Settings → Sign-in</a>.
                         </p>
                         <div className="field">
                             <label htmlFor="sa-signin-file">Saved sign-in file</label>

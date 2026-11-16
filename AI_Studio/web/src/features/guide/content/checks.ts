@@ -171,7 +171,7 @@ export const checks: Topic[] = [
         what: "Tests of your API, built from its description or from what the platform saw the app send.",
         why: "You cover the API without writing any request.",
         steps: [
-            step("Add the OpenAPI document URL or an API token under What the agents need, on the Requirements tab.", "OpenAPI document URL", "What the agents need", "Requirements"),
+            step("Add the OpenAPI document URL under What the agents need, and an API token in Settings, under Sign-in.", "OpenAPI document URL", "What the agents need", "Sign-in"),
             step("Run the tests, then read the findings: server errors, and access that should have been refused."),
             step("To include tests that create or delete records, switch on Include API tests that change data there.", "Include API tests that change data"),
         ],

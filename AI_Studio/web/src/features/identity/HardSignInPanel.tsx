@@ -46,26 +46,47 @@ interface Overview {
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "");
 const accountWords = (a: string) => (a === "main" ? "Project sign-in" : `Account “${a}”`);
 
+/** The project's saved signed-in sessions, the capture in progress and the mailbox, with the actions on them: one per Sign-in tab. */
+export interface SavedSignIns {
+    projectId: string;
+    data: Overview | undefined;
+    loading: boolean;
+    error: unknown;
+    reload: () => void;
+    busy: string;
+    /** The account the last action was for: its error or note is shown there. */
+    last: string;
+    error2: string;
+    note: string;
+    noSettings: string | undefined;
+    act: (account: string, key: string, fn: () => Promise<unknown>, done?: string) => Promise<void>;
+    fail: (account: string, message: string) => void;
+}
+
 /**
  * Hard sign-ins: a saved signed-in session per account (sign in once yourself, or upload a saved sign-in file), the "Still signed in?"
- * check, and the test mailbox for emailed codes and links. Sessions and the mailbox password are never shown again.
+ * check, and the test mailbox for emailed codes and links. Read once for the whole Sign-in tab; each account shows its own part
+ * (SavedSignInControls) under its user name and password. Sessions and the mailbox password are never shown again.
  */
-export function HardSignInPanel({ projectId }: { projectId: string }) {
+export function useSavedSignIns(projectId: string): SavedSignIns {
     const live = (d?: Overview) => (d?.capture && (d.capture.status === "starting" || d.capture.status === "open") ? 1500 : null);
     const o = useFetch<Overview>(`/projects/${projectId}/hard-sign-in`, live);
     const [busy, setBusy] = useState("");
+    const [last, setLast] = useState("");
     const [error, setError] = useState("");
     const [note, setNote] = useState("");
     // Saving, checking and forgetting a sign-in are project settings (as the server asks): otherwise each account is shown to read.
     const noSettings = useHere(projectId).why("ai_studio.project.settings");
 
-    async function act(key: string, fn: () => Promise<unknown>, done?: string) {
+    async function act(account: string, key: string, fn: () => Promise<unknown>, done?: string) {
         setBusy(key);
+        setLast(account);
         setError("");
         setNote("");
         try {
-            await fn();
-            if (done) setNote(done);
+            const r = await fn();
+            if (typeof r === "string") setNote(r);
+            else if (done) setNote(done);
             await o.reload();
         } catch (e) {
             setError(describeApiError(e));
@@ -73,103 +94,134 @@ export function HardSignInPanel({ projectId }: { projectId: string }) {
             setBusy("");
         }
     }
+    return {
+        projectId,
+        data: o.data,
+        loading: o.loading,
+        error: o.error,
+        reload: () => void o.reload(),
+        busy,
+        last,
+        error2: error,
+        note,
+        noSettings: noSettings || undefined,
+        act,
+        fail: (account, message) => {
+            setLast(account);
+            setNote("");
+            setError(message);
+        },
+    };
+}
 
-    if (o.loading) return <section className="card card-pad" aria-label="Saved sign-ins"><ListSkeleton rows={2} /></section>;
-    if (o.error || !o.data) return <ErrorState error={{ title: "We couldn’t load the saved sign-ins", body: describeApiError(o.error) }} onRetry={() => void o.reload()} />;
-    const d = o.data;
-    const capturing = d.capture && (d.capture.status === "starting" || d.capture.status === "open") ? d.capture : null;
-    const byAccount = new Map(d.sessions.map((s) => [s.account, s]));
-
-    return (
-        <div className="stack">
-            <section className="card card-pad stack-sm" aria-label="Saved sign-ins">
-                <div className="row">
-                    <LogIn size={18} aria-hidden />
-                    <h2 className="t-section">Saved sign-ins</h2>
-                </div>
-                <p className="t-secondary">
-                    For sign-ins we can’t fill in ourselves (single sign-on, Google or Microsoft sign-in, a captcha): sign in once yourself in a browser we open, and tests and
-                    explorations start signed in. Before each run we check you’re still signed in; when you aren’t, the run stops and asks you to sign in again. Tests that type
-                    the password themselves still start signed out.
-                </p>
-                {!d.appUrl && <Callout tone="info">Add the application’s address (or run an exploration) first: a saved sign-in belongs to that site.</Callout>}
-                {capturing && (
-                    <Callout
-                        tone="info"
-                        title={`Sign in as ${accountWords(capturing.account).toLowerCase()} in the browser window`}
-                        actions={
-                            <>
-                                <Button variant="primary" size="sm" loading={busy === "save"} disabled={capturing.status !== "open" || Boolean(busy)} onClick={() => act("save", () => api(`/projects/${projectId}/sessions/capture/save`, { method: "POST" }), "Saved. The next run checks it, then starts signed in.")}>
-                                    I’m signed in, save it
-                                </Button>
-                                <Button size="sm" variant="ghost" disabled={Boolean(busy)} onClick={() => act("cancel", () => api(`/projects/${projectId}/sessions/capture`, { method: "DELETE" }))}>
-                                    Cancel
-                                </Button>
-                            </>
-                        }
-                    >
-                        {capturing.status === "starting" ? "Opening the browser…" : `Now on ${capturing.currentUrl ?? "the sign-in page"}.`}
-                        {capturing.popupOpen ? " A sign-in window is open: finish there, it closes by itself." : ""}
-                        {capturing.captcha ? ` The page shows a captcha (${capturing.captcha}): solve it yourself; we never touch it.` : ""} We only keep the cookies the site sets, never what you type.
-                    </Callout>
-                )}
-                {d.capture && (d.capture.status === "failed" || d.capture.status === "cancelled") && d.capture.error && <Callout tone="warning">{d.capture.error}</Callout>}
-                <ul className="stack-sm" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                    {d.accounts.map((a) => {
-                        const s = byAccount.get(a);
-                        return (
-                            <li key={a} className="card card-pad stack-sm" aria-label={accountWords(a)}>
-                                <div className="row">
-                                    <strong>{accountWords(a)}</strong>
-                                    {s ? s.state === "expired" ? <Badge tone="danger" tip="Its cookies have run out, or the last check found it signed out. Runs stop until you sign in again." tipFocusable>Signed out</Badge> : s.state === "ok" ? <Badge tone="success" tip="Its cookies have not run out and the last check, if any, found it signed in. Each run checks again before it starts." tipFocusable>Signed in</Badge> : <Badge tip="Its cookies have no end date and it has not been checked yet. The next run checks it before it starts." tipFocusable>Saved, not checked yet</Badge> : <Badge tip="Tests and explorations start signed out for this account." tipFocusable>Not saved</Badge>}
-                                </div>
-                                {s && (
-                                    <p className="t-meta">
-                                        Saved {when(s.savedAt)} ({s.how === "file" ? "uploaded file" : "signed in by hand"}), {s.cookies} cookie{s.cookies === 1 ? "" : "s"}
-                                        {s.expiresAt ? `, runs out ${when(s.expiresAt)}` : ", no end date in its cookies"}.
-                                        {s.checkedAt ? ` Last check ${when(s.checkedAt)}: ${s.checkNote ?? ""}` : ""}
-                                    </p>
-                                )}
-                                {s?.state === "expired" && <Callout tone="warning">This sign-in no longer works. Sign in again so runs can start signed in.</Callout>}
-                                {!noSettings && <div className="row wrap">
-                                    <Button
-                                        size="sm"
-                                        variant={s?.state === "expired" ? "primary" : "secondary"}
-                                        icon={LogIn}
-                                        disabled={!d.appUrl || Boolean(capturing) || Boolean(busy) || !d.browser.installed}
-                                        loading={busy === `cap-${a}`}
-                                        onClick={() => act(`cap-${a}`, () => api(`/projects/${projectId}/sessions/${a}/capture`, { method: "POST", body: { headed: d.browser.display } }))}
-                                    >
-                                        {s ? "Sign in again" : "Sign in once yourself"}
-                                    </Button>
-                                    <UploadState projectId={projectId} account={a} disabled={!d.appUrl || Boolean(busy)} onDone={(msg) => act(`up-${a}`, async () => undefined, msg)} onError={setError} />
-                                    {s && (
-                                        <Button size="sm" variant="ghost" icon={RefreshCw} loading={busy === `chk-${a}`} disabled={Boolean(busy)} tip="Opens the application with this saved sign-in to see whether it is still signed in." onClick={() => act(`chk-${a}`, async () => {
-                                            const r = await api<{ signedIn: boolean; reason: string; unreachable?: boolean }>(`/projects/${projectId}/sessions/${a}/check`, { method: "POST" });
-                                            setTimeout(() => setNote(r.unreachable ? `We couldn’t open the app to check: ${r.reason}` : r.signedIn ? `Still signed in. ${r.reason}` : `Signed out. ${r.reason}`), 0);
-                                        })}>
-                                            Check now
-                                        </Button>
-                                    )}
-                                    {s && (
-                                        <Button size="sm" variant="ghost" icon={Trash2} disabled={Boolean(busy)} tip="Deletes this saved sign-in. Runs start signed out again." onClick={() => act(`del-${a}`, () => api(`/projects/${projectId}/sessions/${a}`, { method: "DELETE" }), "Forgotten. Runs start signed out again.")}>
-                                            Forget
-                                        </Button>
-                                    )}
-                                </div>}
-                            </li>
-                        );
-                    })}
-                </ul>
-                {noSettings && <p className="t-meta">{noSettings}</p>}
-                {!d.browser.installed && <p className="t-meta">No browser is installed where the platform runs, so signing in by hand isn’t possible here. Upload a saved sign-in file instead.</p>}
-                {d.browser.installed && !d.browser.display && <p className="t-meta">The platform’s computer has no screen, so the browser opens without a window. Upload a saved sign-in file instead (made with npx playwright codegen --save-storage).</p>}
-            </section>
-            <MailboxCard projectId={projectId} mailbox={d.mailbox} reload={() => void o.reload()} />
-            {error && <Callout tone="danger">{error}</Callout>}
-            {note && <Callout tone="success">{note}</Callout>}
+/**
+ * One account's "Signed in by hand" part, under its user name and password: for sign-ins tests can't type (single sign-on, Google or
+ * Microsoft sign-in, a captcha). Sign in once yourself in a browser we open, or upload a saved sign-in file; runs then start signed in.
+ */
+export function SavedSignInControls({ hs, account }: { hs: SavedSignIns; account: string }) {
+    const { projectId, data: d, busy, act, noSettings } = hs;
+    const title = <div className="t-card">Signed in by hand</div>;
+    if (hs.loading && !d) return <div className="stack-sm" aria-label={`Signed in by hand: ${accountWords(account)}`}>{title}<ListSkeleton rows={1} /></div>;
+    if (!d) return (
+        <div className="stack-sm">
+            {title}
+            <p className="t-meta">We couldn’t load the saved sign-ins: {describeApiError(hs.error)} <Button size="sm" variant="ghost" onClick={hs.reload}>Try again</Button></p>
         </div>
     );
+    const s = d.sessions.find((x) => x.account === account);
+    const capturing = d.capture && (d.capture.status === "starting" || d.capture.status === "open") ? d.capture : null;
+    const mine = capturing?.account === account ? capturing : null;
+    const a = encodeURIComponent(account);
+    return (
+        <div className="stack-sm" role="group" aria-label={`Signed in by hand: ${accountWords(account)}`} data-testid={`signed-in-by-hand-${account}`}>
+            <div className="row">
+                {title}
+                {s ? s.state === "expired" ? <Badge tone="danger" tip="Its cookies have run out, or the last check found it signed out. Runs stop until you sign in again." tipFocusable>Signed out</Badge> : s.state === "ok" ? <Badge tone="success" tip="Its cookies have not run out and the last check, if any, found it signed in. Each run checks again before it starts." tipFocusable>Signed in</Badge> : <Badge tip="Its cookies have no end date and it has not been checked yet. The next run checks it before it starts." tipFocusable>Saved, not checked yet</Badge> : <Badge tip="Tests and explorations type the user name and password above, or start signed out." tipFocusable>Not used</Badge>}
+            </div>
+            <p className="hint">
+                Only for sign-ins tests can’t type: single sign-on, Google or Microsoft sign-in, a captcha. Sign in once yourself and tests and explorations start signed in; each run first checks you still are, and stops if not. Tests that type the password themselves still start signed out.
+            </p>
+            {s && (
+                <p className="t-meta">
+                    Saved {when(s.savedAt)} ({s.how === "file" ? "uploaded file" : "signed in by hand"}), {s.cookies} cookie{s.cookies === 1 ? "" : "s"}
+                    {s.expiresAt ? `, runs out ${when(s.expiresAt)}` : ", no end date in its cookies"}.
+                    {s.checkedAt ? ` Last check ${when(s.checkedAt)}: ${s.checkNote ?? ""}` : ""}
+                </p>
+            )}
+            {s?.state === "expired" && <Callout tone="warning">This sign-in no longer works. Sign in again so runs can start signed in.</Callout>}
+            {mine && (
+                <Callout
+                    tone="info"
+                    title={`Sign in as ${accountWords(account).toLowerCase()} in the browser window`}
+                    actions={
+                        <>
+                            <Button variant="primary" size="sm" loading={busy === "save"} disabled={mine.status !== "open" || Boolean(busy)} onClick={() => act(account, "save", () => api(`/projects/${projectId}/sessions/capture/save`, { method: "POST" }), "Saved. The next run checks it, then starts signed in.")}>
+                                I’m signed in, save it
+                            </Button>
+                            <Button size="sm" variant="ghost" disabled={Boolean(busy)} onClick={() => act(account, "cancel", () => api(`/projects/${projectId}/sessions/capture`, { method: "DELETE" }))}>
+                                Cancel
+                            </Button>
+                        </>
+                    }
+                >
+                    {mine.status === "starting" ? "Opening the browser…" : `Now on ${mine.currentUrl ?? "the sign-in page"}.`}
+                    {mine.popupOpen ? " A sign-in window is open: finish there, it closes by itself." : ""}
+                    {mine.captcha ? ` The page shows a captcha (${mine.captcha}): solve it yourself; we never touch it.` : ""} We only keep the cookies the site sets, never what you type.
+                </Callout>
+            )}
+            {d.capture?.account === account && (d.capture.status === "failed" || d.capture.status === "cancelled") && d.capture.error && <Callout tone="warning">{d.capture.error}</Callout>}
+            {!d.appUrl && <p className="t-meta">Add the application’s address (or run an exploration) first: a saved sign-in belongs to that site.</p>}
+            {!noSettings && (
+                <div className="row wrap">
+                    <Button
+                        size="sm"
+                        variant={s?.state === "expired" ? "primary" : "secondary"}
+                        icon={LogIn}
+                        disabled={!d.appUrl || Boolean(capturing) || Boolean(busy) || !d.browser.installed}
+                        loading={busy === `cap-${account}`}
+                        onClick={() => act(account, `cap-${account}`, () => api(`/projects/${projectId}/sessions/${a}/capture`, { method: "POST", body: { headed: d.browser.display } }))}
+                    >
+                        {s ? "Sign in again" : "Sign in once yourself"}
+                    </Button>
+                    <UploadState projectId={projectId} account={account} disabled={!d.appUrl || Boolean(busy)} onDone={(msg) => act(account, `up-${account}`, async () => undefined, msg)} onError={(m) => hs.fail(account, m)} />
+                    {s && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={RefreshCw}
+                            loading={busy === `chk-${account}`}
+                            disabled={Boolean(busy)}
+                            tip="Opens the application with this saved sign-in to see whether it is still signed in."
+                            onClick={() =>
+                                act(account, `chk-${account}`, async () => {
+                                    const r = await api<{ signedIn: boolean; reason: string; unreachable?: boolean }>(`/projects/${projectId}/sessions/${a}/check`, { method: "POST" });
+                                    return r.unreachable ? `We couldn’t open the app to check: ${r.reason}` : r.signedIn ? `Still signed in. ${r.reason}` : `Signed out. ${r.reason}`;
+                                })
+                            }
+                        >
+                            Check now
+                        </Button>
+                    )}
+                    {s && (
+                        <Button size="sm" variant="ghost" icon={Trash2} disabled={Boolean(busy)} tip="Deletes this saved sign-in. Runs start signed out again." onClick={() => act(account, `del-${account}`, () => api(`/projects/${projectId}/sessions/${a}`, { method: "DELETE" }), "Forgotten. Runs start signed out again.")}>
+                            Forget
+                        </Button>
+                    )}
+                </div>
+            )}
+            {!d.browser.installed && <p className="t-meta">No browser is installed where the platform runs, so signing in by hand isn’t possible here. Upload a saved sign-in file instead.</p>}
+            {d.browser.installed && !d.browser.display && <p className="t-meta">The platform’s computer has no screen, so the browser opens without a window. Upload a saved sign-in file instead (made with npx playwright codegen --save-storage).</p>}
+            {hs.last === account && hs.error2 && <Callout tone="danger">{hs.error2}</Callout>}
+            {hs.last === account && hs.note && <Callout tone="success">{hs.note}</Callout>}
+        </div>
+    );
+}
+
+/** Settings → Sign-in: the test mailbox for emailed codes and links, one per project. */
+export function TestMailboxPanel({ hs }: { hs: SavedSignIns }) {
+    if (hs.loading && !hs.data) return <section className="card card-pad" aria-label="Test mailbox"><ListSkeleton rows={2} /></section>;
+    if (!hs.data) return <ErrorState error={{ title: "We couldn’t load the test mailbox", body: describeApiError(hs.error) }} onRetry={hs.reload} />;
+    return <MailboxCard projectId={hs.projectId} mailbox={hs.data.mailbox} reload={hs.reload} />;
 }
 
 function UploadState({ projectId, account, disabled, onDone, onError }: { projectId: string; account: string; disabled: boolean; onDone: (msg: string) => void; onError: (m: string) => void }) {

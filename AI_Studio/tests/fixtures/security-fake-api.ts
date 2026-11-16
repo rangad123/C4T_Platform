@@ -325,7 +325,7 @@ export class SecurityFake {
             }
             if (what === "sign-ins" && method === "GET") {
                 // As SIGN's route: "main" and the test accounts, each judged (never a value).
-                const list = this.signIns.get(pid) ?? [{ account: "main", label: "the project's own account", state: "missing", message: "No sign-in is saved for the project's own account. Save one in Settings (Test accounts, Saved sign-ins) or upload one here; until then the assessment visits signed out.", savedAt: null, expiresAt: null, site: null }];
+                const list = this.signIns.get(pid) ?? [{ account: "main", label: "the project's own account", state: "missing", message: "No sign-in is saved for the project's own account. Save one in Settings → Sign-in (“Signed in by hand” under the account) or upload one here; until then the assessment visits signed out.", savedAt: null, expiresAt: null, site: null }];
                 return { body: { signIns: list } };
             }
             if (what === "activity" && method === "GET") {

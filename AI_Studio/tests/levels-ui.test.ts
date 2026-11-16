@@ -74,6 +74,18 @@ describe("how much to explore", () => {
         expect(await axeClean(page)).toEqual([]);
     });
 
+    it("a project that tests only a phone app has no level in Settings: phone explorations have their own “How thorough”", async () => {
+        const phone = platform.repo.createProject({ name: "Level phone app", platforms: ["android"], testingModes: ["agent"] }).id as string;
+        await page.goto(`${BASE}/#/projects/${phone}/settings`);
+        await pwExpect(page.getByRole("heading", { name: "Project details" })).toBeVisible();
+        // Everything the tab asks for has answered (the card renders nothing only while the project loads, or for a phone project).
+        await page.waitForLoadState("networkidle");
+        await pwExpect(page.getByTestId("explore-level-setting")).toHaveCount(0);
+        // The web project still has it.
+        await page.goto(`${BASE}/#/projects/${shop}/settings`);
+        await pwExpect(page.getByTestId("explore-level-setting")).toBeVisible();
+    });
+
     it("the Explore page starts from the project's level, and the choice reaches the job", async () => {
         await page.goto(`${BASE}/#/new?project=${shop}`);
         const levels = page.getByTestId("explore-level");

@@ -83,7 +83,7 @@ function statusOf(account: string, session: PublicSession | undefined, unreadabl
     const label = signInLabel(account);
     const base = { account, label, savedAt: session?.savedAt ?? null, expiresAt: session?.expiresAt ?? null, site: session ? originOf(session.appUrl) : null };
     if (unreadable) return { ...base, state: "unreadable", message: `The saved sign-in for ${label} could not be read (the platform's secret key changed). Sign in again in Settings.` };
-    if (!session) return { ...base, state: "missing", message: `No sign-in is saved for ${label}. Save one in Settings (Test accounts, Saved sign-ins) or upload one here; until then the assessment visits signed out.` };
+    if (!session) return { ...base, state: "missing", message: `No sign-in is saved for ${label}. Save one in Settings → Sign-in (“Signed in by hand” under the account) or upload one here; until then the assessment visits signed out.` };
     if (session.state === "expired") return { ...base, state: "expired", message: `The saved sign-in for ${label} has expired. Sign in again in Settings.` };
     if (app && !sessionFits(session, app)) return { ...base, state: "other-site", message: `The saved sign-in for ${label} was saved for ${base.site ?? "another site"}, which is outside this application's scope, so it is not used.` };
     if (session.state === "unknown") return { ...base, state: "not-checked", message: `The assessment loads the saved sign-in for ${label}. It has not been checked yet and its cookies give no end date.` };
@@ -152,7 +152,7 @@ export function resolveSignIn(db: Db, cfg: SecretSource, app: SecurityApplicatio
     const secrets = saved ? secretValuesOf(saved.state) : [];
     const notInspected = (why: string) => ({ account, label, problem: `Signed-in pages were not inspected: ${why}`, secrets });
     if (status.state === "unreadable") return notInspected(`the saved sign-in for ${label} could not be read (the platform's secret key changed). Sign in again in Settings.`);
-    if (!saved || status.state === "missing") return notInspected(`no sign-in is saved for ${label}. Save one in Settings (Test accounts, Saved sign-ins).`);
+    if (!saved || status.state === "missing") return notInspected(`no sign-in is saved for ${label}. Save one in Settings → Sign-in (“Signed in by hand” under the account).`);
     if (status.state === "expired") return notInspected(`the saved sign-in for ${label} has expired. Sign in again in Settings.`);
     if (status.state === "other-site") return notInspected(`the saved sign-in for ${label} belongs to ${status.site ?? "another site"}, outside this application's scope.`);
     const state = limitToScope(saved.state, app);

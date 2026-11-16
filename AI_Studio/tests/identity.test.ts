@@ -134,6 +134,8 @@ describe("test accounts API", () => {
         const put = (roles: unknown[]) => call("PUT", `/api/projects/${id}/roles`, { roles });
         expect((await put([{ name: "Admin!", username: "u", password: "p" }])).status).toBe(400);
         expect((await put([{ name: "a", username: "u", password: "p" }, { name: "a", username: "v", password: "q" }])).body.error).toBe("Each test account needs its own name.");
+        // "main" is the project's own account (its sign-in and its saved session): no test account takes the name.
+        expect((await put([{ name: "main", username: "u", password: "p" }])).body.error).toBe("“main” is the project’s own account (Settings → Sign-in, Main account): choose another name for this test account.");
         expect((await put([{ name: "fresh", username: "u" }])).body.error).toBe("The account “fresh” needs a password.");
         expect((await put([{ name: "a", username: "u", password: "p", totpSecret: "not base32!" }])).status).toBe(400);
         expect((await put(Array.from({ length: 7 }, (_, i) => ({ name: `r${i}`, username: "u", password: "p" })))).status).toBe(400);

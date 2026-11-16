@@ -16,7 +16,7 @@ export const usesEmail = (spec: Pick<TestSpec, "steps">): boolean => spec.steps.
 
 /** Same words as the step's own check in the generator, kept here so the plain-language message is in one place. */
 export const NO_MAILBOX_MESSAGE =
-    "This test waits for an email, but no test mailbox is available to it. Set one up under Test accounts (Test mailbox), and run the test on the platform: runners cannot read the test mailbox.";
+    "This test waits for an email, but no test mailbox is available to it. Set one up in Settings → Sign-in (Test mailbox), and run the test on the platform: runners cannot read the test mailbox.";
 
 export const EMAIL_HELPER_SOURCE = `/** When this test file started: an email only counts if it arrived after this (see the platform's test mailbox). */
 const EMAIL_SINCE = Date.now();

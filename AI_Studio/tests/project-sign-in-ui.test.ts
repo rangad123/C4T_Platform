@@ -3,7 +3,8 @@
  * Environments; an owner saves a user name, password and authenticator secret and reads them back as "Saved" (never the values),
  * replaces the password and removes the secret; a project with no address yet says to add one first; the links to Environments and Test accounts; a project viewer sees it read-only.
  * A test that types {{credentials.username}} in a project with no sign-in says where to add one; with one saved it does not. An agent
- * project's "What the agents need" card says it edits the same sign-in and shows what Settings saved. Axe in light and dark.
+ * project's "What the agents need" card shows what Settings saved and links here; its API access is on the main account. Each account
+ * appears once with its own "Signed in by hand" part, then the test mailbox; a test account can't be named "main". Axe in light and dark.
  * Requires `web/dist` (vite build).
  *
  *   node scripts/with-lock.mjs build,browser -- sh -c "npx vite build web && npx vitest run tests/project-sign-in-ui.test.ts"
@@ -152,7 +153,7 @@ describe("Settings → Sign-in", () => {
         expect(names).not.toContain("Test accounts");
         await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Sign-in" }).click();
         await page.waitForURL((u) => u.hash === `#/projects/${shop}/settings?section=signin`);
-        await pwExpect(card().getByRole("heading", { name: "Sign-in" })).toBeVisible();
+        await pwExpect(card().getByRole("heading", { name: "Main account" })).toBeVisible();
         await pwExpect(card()).toContainText("Tests type these where a step uses {{credentials.username}} and {{credentials.password}}.");
     });
 
@@ -165,6 +166,40 @@ describe("Settings → Sign-in", () => {
         await pwExpect(page.locator("#accounts")).toBeFocused();
         await pwExpect(page.locator("#accounts").getByRole("heading", { name: "Test accounts" })).toBeInViewport();
         await page.goto(`${BASE}/#/projects/${shop}/settings?section=signin`);
+        await pwExpect(card()).toBeVisible();
+    });
+
+    it("shows each account once, each with its own “Signed in by hand” part, then the test mailbox; no separate list of saved sign-ins", async () => {
+        await call("PUT", `/api/projects/${shop}/roles`, { roles: [{ name: "admin", username: "admin@shop.example", password: "SignInUi-admin-pass-3c1d" }] });
+        await page.reload();
+        await pwExpect(card()).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Saved sign-ins" })).toHaveCount(0);
+        // The main account's part is in its own card; the test account's under its row; nothing else lists the accounts again.
+        await pwExpect(card().getByTestId("signed-in-by-hand-main")).toHaveCount(1);
+        await pwExpect(page.locator("#accounts").getByTestId("signed-in-by-hand-admin")).toHaveCount(1);
+        await pwExpect(page.locator("[data-testid^='signed-in-by-hand-']")).toHaveCount(2);
+        await pwExpect(card().getByTestId("signed-in-by-hand-main").getByRole("button", { name: "Sign in once yourself" })).toBeVisible();
+        await pwExpect(card().getByTestId("signed-in-by-hand-main").getByText("Upload a saved sign-in file")).toBeVisible();
+        const mailbox = page.getByRole("heading", { name: "Test mailbox" });
+        await pwExpect(mailbox).toBeVisible();
+        expect(await page.locator("#accounts").evaluate((a) => !!(a.compareDocumentPosition(Array.from(document.querySelectorAll("h2")).find((h) => h.textContent === "Test mailbox")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+        // A project tested by code has no agents' API access: no token field on the main account.
+        await pwExpect(card().getByTestId("sign-in-api-access")).toHaveCount(0);
+        await axeBoth(page);
+        await call("PUT", `/api/projects/${shop}/roles`, { roles: [] });
+        await page.reload();
+        await pwExpect(card()).toBeVisible();
+    });
+
+    it("a test account can't be named “main”: the page says so before saving, and the server refuses it", async () => {
+        await page.locator("#accounts").getByRole("button", { name: "Add an account" }).click();
+        await page.locator("#accounts").getByLabel("Name", { exact: true }).fill("main");
+        await pwExpect(page.locator("#accounts").getByText("“main” is the project’s own account (Main account above): choose another name.")).toBeVisible();
+        await pwExpect(page.locator("#accounts").getByRole("button", { name: "Save accounts" })).toBeDisabled();
+        const r = await server.inject({ method: "PUT", url: `/api/projects/${shop}/roles`, payload: { roles: [{ name: "main", username: "m@shop.example", password: "SignInUi-main-pass-5e2a" }] }, headers: { "x-api-key": KEY, "content-type": "application/json" } });
+        expect(r.statusCode).toBe(400);
+        expect(r.body).toContain("“main” is the project’s own account");
+        await page.reload();
         await pwExpect(card()).toBeVisible();
     });
 
@@ -254,8 +289,10 @@ describe("Settings → Sign-in", () => {
         await pwExpect(card().getByRole("button", { name: "Save sign-in" })).toHaveCount(0);
     });
 
-    it("an agent project's “What the agents need” edits the same sign-in", async () => {
+    it("an agent project's “What the agents need” shows the same sign-in and links here to change it", async () => {
         await page.goto(`${BASE}/#/projects/${agentShop}/settings?section=signin`);
+        // An agent project's main account also has its API access here.
+        await pwExpect(card().getByTestId("sign-in-api-access").getByLabel("Bearer token")).toBeVisible();
         await card().getByLabel("User name or email").fill("agent@agent.example");
         await card().getByLabel("Password").fill(PASSWORD);
         await card().getByRole("button", { name: "Save sign-in" }).click();
@@ -263,9 +300,9 @@ describe("Settings → Sign-in", () => {
 
         await page.goto(`${BASE}/#/projects/${agentShop}/requirements?inputs=open`);
         const agents = page.getByTestId("agent-inputs");
-        await pwExpect(agents.getByLabel("Username or email")).toHaveValue("agent@agent.example");
-        await pwExpect(agents.getByRole("group", { name: "Password" }).getByText("Saved", { exact: true })).toBeVisible();
-        await pwExpect(agents.getByTestId("agent-inputs-same-sign-in").getByRole("link", { name: "Settings → Sign-in" })).toHaveAttribute("href", `#/projects/${agentShop}/settings?section=signin`);
+        await pwExpect(agents.getByTestId("agent-inputs-sign-in")).toContainText("Signs in as agent@agent.example.");
+        await pwExpect(agents.getByLabel("Username or email")).toHaveCount(0);
+        await pwExpect(agents.getByTestId("agent-inputs-sign-in").getByRole("link", { name: "Settings → Sign-in" })).toHaveAttribute("href", `#/projects/${agentShop}/settings?section=signin`);
         await page.context().close();
     });
 });

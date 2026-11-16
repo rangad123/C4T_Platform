@@ -380,9 +380,9 @@ describe("what failed", () => {
         const box = page.getByTestId("failure-summary");
         await pwExpect(box.getByTestId("failure-cause")).toContainText("No API token is saved for this project.");
         await pwExpect(box.getByTestId("failure-step")).toHaveCount(0);
-        // Round 38: the API token is kept on the Requirements tab (What the agents need), not on the Explore page; the card opens on arrival.
-        await pwExpect(box.getByRole("link", { name: "Add an API token" })).toHaveAttribute("href", `#/projects/${shop.projectId}/requirements?inputs=open`);
-        await pwExpect(box.getByTestId("failure-cause")).toContainText("What the agents need, on the Requirements tab");
+        // The API token is kept with the main account in Settings → Sign-in, the one place the sign-in and API access are edited.
+        await pwExpect(box.getByRole("link", { name: "Add an API token" })).toHaveAttribute("href", `#/projects/${shop.projectId}/settings?section=signin`);
+        await pwExpect(box.getByTestId("failure-cause")).toContainText("under “API access” in Settings, Sign-in");
         // A code project has no agents' inputs: its run sends the token of the environment it runs against.
         platform.repo.updateProject(shop.projectId, { testingModes: ["code"] });
         try {

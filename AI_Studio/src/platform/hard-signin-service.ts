@@ -41,7 +41,7 @@ export interface HardSignInOptions {
 /** The words of the message a run stops with when the saved sign-in no longer works. */
 export function signInAgainMessage(account: string, why: string): string {
     const who = account === MAIN_ACCOUNT ? "this project" : `the test account “${account}”`;
-    return `The saved sign-in for ${who} no longer works (${why.replace(/\.$/, "")}). Sign in again under Test accounts, then run again. No test was run, so no result changed.`;
+    return `The saved sign-in for ${who} no longer works (${why.replace(/\.$/, "")}). Sign in again in Settings → Sign-in (“Signed in by hand” under the account), then run again. No test was run, so no result changed.`;
 }
 
 export class HardSignInService {

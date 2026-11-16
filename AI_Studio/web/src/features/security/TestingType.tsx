@@ -137,7 +137,7 @@ export function TestingTypeSetting({ id }: { id: string }) {
     }
     return (
         <div style={{ marginBottom: 16 }} data-tour="testing-type">
-            <CollapsedSetting title="Testing type" summary={`${label}.${info.problem ? ` ${info.problem}` : ""}`} testId="setting-testing-type" extra={includesSecurity(info.type) ? <a className="btn btn-ghost" href={sec.overview(id)}><ShieldCheck size={18} aria-hidden />Open security assessment</a> : info.type === "functional" ? undefined : <a className="btn btn-ghost" href={routes.tests(id)}><FlaskConical size={18} aria-hidden />Open tests</a>}>
+            <CollapsedSetting title="Functional or security testing" summary={`${label}.${info.problem ? ` ${info.problem}` : ""}`} testId="setting-testing-type" extra={includesSecurity(info.type) ? <a className="btn btn-ghost" href={sec.overview(id)}><ShieldCheck size={18} aria-hidden />Open security assessment</a> : info.type === "functional" ? undefined : <a className="btn btn-ghost" href={routes.tests(id)}><FlaskConical size={18} aria-hidden />Open tests</a>}>
                 <div className="stack-sm">
                     <TestingTypeChoice value={current} onChange={setValue} name={`testing-type-${id}`} disabled={!canRun(role)} legend="What is this project for?" />
                     <p className="hint">Changing it never deletes anything: functional tests and security findings are kept and stay apart.{canRun(role) ? "" : " Your role can look but not change this."}</p>

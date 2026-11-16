@@ -245,8 +245,8 @@ export const AUTHORIZATION_STATE: Record<"current" | "stale" | "expired" | "none
 export const SIGN_IN_STATE: Record<"ready" | "not-checked" | "expired" | "missing" | "other-site" | "unreadable", string> = {
     ready: "Saved, its cookies have not run out, and its last check, if any, found it signed in. The assessment loads it.",
     "not-checked": "Saved, but never checked, and its cookies give no end date. The assessment loads it, and its coverage says so if the sign-in did not work.",
-    expired: "Its cookies have run out, or the last check found it signed out. The assessment visits signed out until a new sign-in is saved under Test accounts.",
-    missing: "No sign-in is saved for this account yet. The assessment visits signed out until one is saved under Test accounts or uploaded on the application's page.",
+    expired: "Its cookies have run out, or the last check found it signed out. The assessment visits signed out until a new sign-in is saved in Settings → Sign-in, under the account.",
+    missing: "No sign-in is saved for this account yet. The assessment visits signed out until one is saved in Settings → Sign-in, under the account, or uploaded on the application's page.",
     "other-site": "It was saved for a site outside this application's scope, so it is never used here and the assessment visits signed out.",
     unreadable: "It can no longer be decrypted, because the platform's secret key changed. The assessment visits signed out until someone signs in again.",
 };

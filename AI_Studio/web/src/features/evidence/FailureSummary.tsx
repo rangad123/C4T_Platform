@@ -8,7 +8,6 @@ import { routes } from "../../lib/router";
 import { EditScriptButton } from "../code/TakeOver";
 import type { CustomInfo } from "../code/code";
 import type { TestQuarantine } from "../quarantine/quarantine";
-import { agentInputsHref } from "../requirements/AgentInputs";
 import "./evidence.css";
 
 /** The fields of the test answer this block reads (the platform adds `failure` and each failed step's `expected` / `actual`). */
@@ -86,7 +85,7 @@ export function FailureSummary({ test, last, onRun, running }: { test: FailureIn
                     {tokenPlace === "environment"
                         ? "A run sends the API token of the environment it runs against: add the token to an environment under Settings, Environments, then run the test against that environment."
                         : tokenPlace === "requirements"
-                          ? "Add the token under “API access” in What the agents need, on the Requirements tab, then run the test again."
+                          ? "Add the token under “API access” in Settings, Sign-in, then run the test again."
                           : "Add the token where this project keeps it, then run the test again."}
                 </p>
             ) : (
@@ -154,7 +153,7 @@ export function FailureSummary({ test, last, onRun, running }: { test: FailureIn
                 <h3 className="t-card" style={{ margin: "4px 0 8px" }}>What you can do</h3>
                 <div className="fail-acts">
                     {missingToken && tokenPlace && (
-                        <LinkButton size="sm" variant="primary" href={tokenPlace === "environment" ? routes.projectSettings(test.projectId, "environments") : agentInputsHref(test.projectId)}>
+                        <LinkButton size="sm" variant="primary" href={tokenPlace === "environment" ? routes.projectSettings(test.projectId, "environments") : routes.projectSettings(test.projectId, "signin")}>
                             Add an API token
                         </LinkButton>
                     )}

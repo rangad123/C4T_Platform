@@ -26,9 +26,7 @@ import { ReviewPolicyCard } from "../review/ReviewCards";
 import { ProjectGeneral } from "../workspace/ProjectGeneral";
 import { CleanupCard } from "../cleanup/CleanupCard";
 import { TestDataPanel } from "../environments/TestDataPanel";
-import { HardSignInPanel } from "../identity/HardSignInPanel";
-import { TestAccountsPanel } from "../identity/TestAccountsPanel";
-import { ProjectSignInPanel } from "../identity/ProjectSignIn";
+import { SignInTab } from "../identity/SignInTab";
 import { ResetHookCard } from "../webpages/ResetHookCard";
 import { TestFilesCard } from "../webpages/TestFilesCard";
 import "./setup.css";
@@ -132,16 +130,8 @@ export function SetupPage({ id }: { id: string }) {
         {
             key: "signin",
             label: "Sign-in",
-            hint: "Who your tests sign in as: the main sign-in and other test accounts",
-            render: () => (
-                <div className="stack">
-                    <ProjectSignInPanel projectId={id} />
-                    <Part id="accounts">
-                        <TestAccountsPanel projectId={id} />
-                        <HardSignInPanel projectId={id} />
-                    </Part>
-                </div>
-            ),
+            hint: "Who your tests sign in as: the main account and other test accounts, each with how it signs in, and the test mailbox",
+            render: () => <SignInTab projectId={id} />,
         },
         { key: "environments", label: "Environments", hint: "Staging, production and other addresses to run against, with their values", render: () => <EnvironmentsPanel projectId={id} onStarted={() => undefined} /> },
         {

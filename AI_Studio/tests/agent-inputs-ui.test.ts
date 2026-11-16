@@ -85,7 +85,7 @@ describe("what the agents need", () => {
         await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
         await pwExpect(page.getByText("Advanced options")).toHaveCount(0);
         for (const gone of ["What should we test?", "Username or email", "Bearer token", "OpenAPI document URL", "Requirements document", "Include API tests that change data"]) await pwExpect(page.getByText(gone, { exact: true })).toHaveCount(0);
-        await pwExpect(page.getByTestId("inputs-note")).toContainText("Sign-in details, API access, the OpenAPI document and the requirements the agents use are kept on the project’s Requirements tab");
+        await pwExpect(page.getByTestId("inputs-note")).toContainText("The sign-in and API access the agents use are kept in Settings → Sign-in; the OpenAPI document and the requirements on the project’s Requirements tab");
         // No AI model here: said plainly, and only the API is explored.
         await pwExpect(page.getByText("Exploring the web application needs it, so only the application’s API is explored here.", { exact: false })).toBeVisible();
         expect(await axeClean(page)).toEqual([]);
@@ -113,20 +113,29 @@ describe("what the agents need", () => {
         await pwExpect(card.getByTestId("agent-inputs-missing")).toContainText("The API Testing Agent needs the API documentation");
     });
 
-    it("shows the earlier sign-in as saved, saves a secret and shows it as Saved, and exploring uses what is saved", async () => {
+    it("shows the earlier sign-in as saved and links to Settings for it; the API token is saved there; exploring uses what is saved", async () => {
         const card = page.getByTestId("agent-inputs");
-        await pwExpect(card.getByLabel("Username or email")).toHaveValue("old@shop.example");
-        const password = card.getByRole("group", { name: "Password" });
-        await pwExpect(password.getByText("Saved", { exact: true })).toBeVisible();
-        await pwExpect(password.getByRole("button", { name: "Replace the password" })).toBeVisible();
-        await pwExpect(password.getByRole("button", { name: "Remove the password" })).toBeVisible();
-        await card.getByLabel("Bearer token").fill(TOKEN);
+        // The sign-in and API access are edited in one place, Settings → Sign-in: here they are a sentence and a link.
+        await pwExpect(card.getByTestId("agent-inputs-sign-in")).toContainText("Signs in as old@shop.example.");
+        await pwExpect(card.getByTestId("agent-inputs-sign-in").getByRole("link", { name: "Settings → Sign-in" })).toHaveAttribute("href", `#/projects/${shop}/settings?section=signin`);
+        await pwExpect(card.getByLabel("Username or email")).toHaveCount(0);
+        await pwExpect(card.getByLabel("Bearer token")).toHaveCount(0);
         await card.getByLabel(/^OpenAPI document URL/).fill("https://shop.example/openapi.json");
         await card.getByRole("button", { name: "Save", exact: true }).click();
         await pwExpect(card.getByText("Saved. The next exploration uses these.")).toBeVisible();
-        await pwExpect(card.getByRole("group", { name: "Bearer token" }).getByText("Saved", { exact: true })).toBeVisible();
         await pwExpect(card.getByTestId("agent-inputs-missing")).toHaveCount(0);
-        await pwExpect(card.locator("input#ai-token")).toHaveCount(0); // the secret is never put back in a field
+        expect(await axeClean(page)).toEqual([]);
+
+        await page.goto(`${BASE}/#/projects/${shop}/settings?section=signin`);
+        const main = page.getByTestId("project-sign-in");
+        await pwExpect(main.getByLabel("User name or email")).toHaveValue("old@shop.example");
+        const password = main.getByRole("group", { name: "Password" });
+        await pwExpect(password.getByText("Saved", { exact: true })).toBeVisible();
+        await main.getByLabel("Bearer token").fill(TOKEN);
+        await main.getByRole("button", { name: "Save sign-in" }).click();
+        await pwExpect(main.getByText("Saved. Tests use this sign-in from their next run.")).toBeVisible();
+        await pwExpect(main.getByRole("group", { name: "Bearer token" }).getByText("Saved", { exact: true })).toBeVisible();
+        await pwExpect(main.locator("input#si-token")).toHaveCount(0); // the secret is never put back in a field
         expect(await page.content()).not.toContain(TOKEN);
         expect(await axeClean(page)).toEqual([]);
 
@@ -145,11 +154,11 @@ describe("what the agents need", () => {
         const toggle = page.getByRole("button", { name: "What the agents need" });
         await pwExpect(toggle).toHaveAttribute("aria-expanded", "false");
         await pwExpect(page.getByTestId("agent-inputs-summary")).toHaveText("Saved: sign-in as old@shop.example, API token, OpenAPI document. Nothing the chosen agents need is missing.");
-        await pwExpect(page.getByLabel("Username or email")).toHaveCount(0);
+        await pwExpect(page.getByTestId("agent-inputs-sign-in")).toHaveCount(0);
         if (process.env.UI_REVIEW_SHOTS) await page.screenshot({ path: path.join(process.env.UI_REVIEW_SHOTS, "agent-inputs-closed.png"), fullPage: true });
         await toggle.click();
         await pwExpect(toggle).toHaveAttribute("aria-expanded", "true");
-        await pwExpect(page.getByTestId("agent-inputs").getByLabel("Username or email")).toHaveValue("old@shop.example");
+        await pwExpect(page.getByTestId("agent-inputs-sign-in")).toContainText("Signs in as old@shop.example. An API token is saved.");
         await pwExpect(page.getByTestId("agent-inputs-summary")).toHaveCount(0);
         expect(await axeClean(page)).toEqual([]);
         if (process.env.UI_REVIEW_SHOTS) await page.screenshot({ path: path.join(process.env.UI_REVIEW_SHOTS, "agent-inputs-open.png"), fullPage: true });

@@ -96,7 +96,8 @@ export function registerHardSignInRoutes(ctx: RouteCtx): void {
     };
     const accountsOf = (projectId: string): string[] => {
         try {
-            return [MAIN_ACCOUNT, ...new IdentityStore(p.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).get(projectId).map((r) => r.name)];
+            // A test account saved as "main" before the name was reserved is the project's own account here, listed once.
+            return [MAIN_ACCOUNT, ...new IdentityStore(p.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).get(projectId).map((r) => r.name).filter((n) => n !== MAIN_ACCOUNT)];
         } catch {
             return [MAIN_ACCOUNT];
         }

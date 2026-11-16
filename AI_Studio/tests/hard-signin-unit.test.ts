@@ -276,7 +276,7 @@ describe("starting a run signed in", () => {
         expect(signsInByItself('await page.fill("#p", process.env.TEST_PASSWORD ?? "")')).toBe(true);
         expect(signsInByItself("process.env.TEST_ADMIN_PASSWORD")).toBe(true);
         expect(signsInByItself('await page.goto("/dashboard")')).toBe(false);
-        expect(signInAgainMessage("main", "The page asks for a password again.")).toBe("The saved sign-in for this project no longer works (The page asks for a password again). Sign in again under Test accounts, then run again. No test was run, so no result changed.");
+        expect(signInAgainMessage("main", "The page asks for a password again.")).toBe("The saved sign-in for this project no longer works (The page asks for a password again). Sign in again in Settings → Sign-in (“Signed in by hand” under the account), then run again. No test was run, so no result changed.");
     });
 });
 

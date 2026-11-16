@@ -240,7 +240,7 @@ export function ApplicationForm({ id, app, onDone }: { id: string; app?: AppRow;
                     "Signed-in assessment (optional)",
                     <SignInChoice projectId={id} appId={app?.id} value={d.signInAccount} onChange={(v) => setD({ ...d, signInAccount: v })} />,
                     "The assessment loads a saved sign-in into its browser and also looks at signed-in pages. It never types a password, submits a sign-in form or follows a sign-out link.",
-                    "Sign-ins are saved per project under Test accounts: sign in once yourself, or upload a saved browser state. An expired one is not used: the assessment carries on signed out and its coverage says so.",
+                    "Sign-ins are saved per project in Settings → Sign-in, under each account: sign in once yourself, or upload a saved browser state. An expired one is not used: the assessment carries on signed out and its coverage says so.",
                 )}
                 {field("notes", "Notes (optional)", <textarea id="sa-notes" className="input" rows={2} value={d.notes} onChange={set("notes")} />)}
             </div>

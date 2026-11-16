@@ -1,5 +1,5 @@
 import { KeyRound, Plus, Trash2, UsersRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, api } from "../../api";
 import { SeeHow } from "../guide/SeeHow";
 import { FieldHelp } from "../../components/Tooltip";
@@ -37,11 +37,15 @@ function saveError(e: unknown): string {
     return describeApiError(e);
 }
 
+/** "main" is the project's own account (the Main account card, and its saved sign-in): a test account can't take the name. */
+export const RESERVED_ACCOUNT = "main";
+
 /**
- * Named test accounts (user, admin...) for access-control checks. Shown only on request (Tests → More actions → Test accounts).
- * Passwords and authenticator secrets are write-only: the server never sends them back, only whether one is saved.
+ * Settings → Sign-in: named test accounts (user, admin...) for access-control checks, each with its "Signed in by hand" part
+ * (`byHand`, shown once the account is saved). Passwords and authenticator secrets are write-only: the server never sends them back,
+ * only whether one is saved.
  */
-export function TestAccountsPanel({ projectId, onClose }: { projectId: string; onClose?: () => void }) {
+export function TestAccountsPanel({ projectId, onClose, byHand }: { projectId: string; onClose?: () => void; byHand?: (account: string) => ReactNode }) {
     const saved = useFetch<{ roles: SavedRole[] }>(`/projects/${projectId}/roles`);
     const [rows, setRows] = useState<Row[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -49,6 +53,8 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
     const [error, setError] = useState("");
     const [done, setDone] = useState(false);
     const [next, setNext] = useState(1);
+    // The names saved on the server: only those have a saved sign-in to show.
+    const [savedNames, setSavedNames] = useState<string[]>([]);
     // The accounts are a project setting (PUT /roles): without ai_studio.project.settings here they are shown to read.
     const noSettings = useHere(projectId).why("ai_studio.project.settings");
     // Each control is switched off on its own (not a disabled fieldset), so the "?" help beside a field still opens.
@@ -57,6 +63,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
     useEffect(() => {
         if (!saved.data || loaded) return;
         setRows(saved.data.roles.map((r, i) => ({ ...r, password: "", totpSecret: "", clearTotp: false, apiToken: "", clearApiToken: false, key: i })));
+        setSavedNames(saved.data.roles.map((r) => r.name));
         setNext(saved.data.roles.length);
         setLoaded(true);
     }, [saved.data, loaded]);
@@ -84,6 +91,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                 },
             });
             setRows(res.roles.map((r, i) => ({ ...r, password: "", totpSecret: "", clearTotp: false, apiToken: "", clearApiToken: false, key: i })));
+            setSavedNames(res.roles.map((r) => r.name));
             setNext(res.roles.length);
             setDone(true);
         } catch (e) {
@@ -93,7 +101,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
         }
     }
 
-    const problems = rows.flatMap((r) => [!NAME_OK.test(r.name.trim()) && "A name uses lower-case letters, digits, - or _, and starts with a letter.", !r.username.trim() && "Every account needs a username.", !r.hasPassword && !r.password && `“${r.name || "new account"}” needs a password.`].filter(Boolean) as string[]);
+    const problems = rows.flatMap((r) => [!NAME_OK.test(r.name.trim()) && "A name uses lower-case letters, digits, - or _, and starts with a letter.", r.name.trim() === RESERVED_ACCOUNT && "“main” is the project’s own account (Main account above): choose another name.", !r.username.trim() && "Every account needs a username.", !r.hasPassword && !r.password && `“${r.name || "new account"}” needs a password.`].filter(Boolean) as string[]);
     const unique = [...new Set(problems)];
 
     return (
@@ -105,8 +113,8 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                 {onClose && <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}
             </div>
             <p className="t-secondary">
-                Add accounts with different permissions, such as “user” and “admin”. We sign in as each of them (and as a visitor), note which pages each one can open, and then check that pages only a more
-                privileged account reached can’t be opened by the others. Use dedicated test accounts, never real ones.
+                More accounts besides the main one, with different permissions, such as “user” and “admin”. We sign in as each of them (and as a visitor), note which pages each one can open, and then check
+                that pages only a more privileged account reached can’t be opened by the others. A test can also type one: {"{{credentials.admin.password}}"}. Use dedicated test accounts, never real ones.
             </p>
             {saved.loading ? (
                 <ListSkeleton rows={2} />
@@ -183,6 +191,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                                         Remove
                                     </Button>
                                 </div>
+                                {byHand && savedNames.includes(r.name) && r.name !== RESERVED_ACCOUNT && <div className="stack-sm" style={{ borderTop: "1px solid var(--border-default)", paddingTop: 12 }}>{byHand(r.name)}</div>}
                             </fieldset>
                         ))}
                     </div>
