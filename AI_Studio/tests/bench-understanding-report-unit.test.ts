@@ -9,7 +9,7 @@ import type { UnderstandingScore } from "../src/eval/bench/understanding/score.j
 
 const r = (found: number, total: number) => ({ found, total, value: total ? found / total : null, missed: [] });
 /** A score where every criterion is met, with the given overrides. */
-function score(over: { screens?: number; endpoints?: number; extraDocumented?: number; workflows?: number; anyRules?: number; citing?: number; explicitContradicting?: number; explicitUnreviewed?: number } = {}): UnderstandingScore {
+function score(over: { screens?: number; endpoints?: number; extraDocumented?: number; workflows?: number; precision?: number; awaitingLink?: number; anyRules?: number; citing?: number; explicitContradicting?: number; explicitUnreviewed?: number } = {}): UnderstandingScore {
     const of10 = (v: number | undefined, d: number) => r(Math.round((v ?? d) * 10), 10);
     return {
         app: "x-shop",
@@ -17,6 +17,7 @@ function score(over: { screens?: number; endpoints?: number; extraDocumented?: n
         screens: of10(over.screens, 1),
         endpoints: { ...of10(over.endpoints, 1), documentedNotInDocument: Array.from({ length: over.extraDocumented ?? 0 }, (_, i) => `GET /x${i}`) },
         workflows: { ...of10(over.workflows, 1), needsJudgement: [] },
+        workflowPrecision: { ...of10(over.precision, 1), outsideKey: [], needsJudgement: Array.from({ length: over.awaitingLink ?? 0 }, (_, i) => `wf-${i}`) },
         defectRules: { any: of10(over.anyRules, 1), explicitCiting: of10(over.citing, 1), links: {}, needsJudgement: [] },
         provenance: { ...r(4, 4), confirmedWithoutPerson: [], fromObserved: [] },
         wrongRules: {
@@ -101,6 +102,47 @@ describe("a full series", () => {
     it("a series mixing url and full is refused", () => {
         const trials = [...series([1, 1, 1, 1, 1], [], "full"), trial("baseline", 1, score(), undefined, "url")];
         expect(() => buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials })).toThrow(/url.*full|full.*url/);
+    });
+});
+
+describe("U3 needs recall and precision together", () => {
+    const withPrecision = (recall: number[], precision: number[], base: number[], inputs: "url" | "full" = "url", awaiting = 0) => [
+        ...recall.map((w, i) => trial("candidate", i + 1, score({ workflows: w, precision: precision[i], awaitingLink: awaiting }), undefined, inputs)),
+        ...base.map((w, i) => trial("baseline", i + 1, score({ workflows: w }), undefined, inputs)),
+    ];
+    it("recall 1 above Baseline-U but precision 0.5 in every trial (one workflow per endpoint): U3 fails, and the report shows both", () => {
+        const rep = buildReport({ inputs: "url", repeat: 5, apps: ["x-shop"], trials: withPrecision([1, 1, 1, 1, 1], [0.5, 0.5, 0.5, 0.5, 0.5], [0.3, 0.3, 0.3, 0.3, 0.3]) });
+        expect(criterion(rep, "U3")).toMatchObject({ candidate: { median: 1, min: 1, max: 1 }, verdict: "fail" });
+        expect(criterion(rep, "U3").why).toMatch(/recall pass, precision fail/);
+        expect(criterion(rep, "U3-precision")).toMatchObject({ target: "≥ 0.8", candidate: { median: 0.5, min: 0.5, max: 0.5 }, verdict: "fail" });
+        expect(renderReportMd(rep)).toMatch(/\| U3-precision \| .*\| 0\.5 \(0\.5–0\.5\) \| .* \| fail \|/);
+    });
+    it("a clean split (recall 1, precision 0.9–1): U3 passes; a precision range overlapping 0.8 leaves it inconclusive", () => {
+        const pass = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: withPrecision([1, 1, 1, 1, 1], [0.9, 1, 1, 0.9, 1], [], "full") });
+        expect([criterion(pass, "U3").verdict, criterion(pass, "U3-precision").verdict]).toEqual(["pass", "pass"]);
+        const overlap = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: withPrecision([1, 1, 1, 1, 1], [0.9, 0.7, 1, 0.9, 1], [], "full") });
+        expect([criterion(overlap, "U3").verdict, criterion(overlap, "U3-precision").verdict]).toEqual(["inconclusive", "inconclusive"]);
+    });
+    it("precision passing does not rescue recall: recall below the target fails U3", () => {
+        const rep = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: withPrecision([0.5, 0.5, 0.5, 0.5, 0.5], [1, 1, 1, 1, 1], [], "full") });
+        expect(criterion(rep, "U3")).toMatchObject({ verdict: "fail" });
+        expect(criterion(rep, "U3").why).toMatch(/recall fail, precision pass/);
+    });
+    it("workflows awaiting a recorded link: below 0.8 is inconclusive, not fail; at 0.8 or more it already passes", () => {
+        const low = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: withPrecision([1, 1, 1, 1, 1], [0.7, 0.7, 0.7, 0.7, 0.7], [], "full", 3) });
+        expect(criterion(low, "U3-precision").verdict).toBe("inconclusive");
+        expect(criterion(low, "U3-precision").why).toMatch(/3 workflows with neither page nor endpoint await a recorded workflow link/);
+        const high = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: withPrecision([1, 1, 1, 1, 1], [0.9, 0.9, 0.9, 0.9, 0.9], [], "full", 1) });
+        expect(criterion(high, "U3-precision").verdict).toBe("pass");
+    });
+    it("trials recorded before U3-precision existed: precision is not measured and U3 cannot pass", () => {
+        const old = (): UnderstandingScore => {
+            const { workflowPrecision: _, ...rest } = score();
+            return rest as UnderstandingScore;
+        };
+        const rep = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: [1, 2, 3, 4, 5].map((n) => trial("candidate", n, old(), undefined, "full")) });
+        expect(criterion(rep, "U3-precision").verdict).toBe("inconclusive");
+        expect(criterion(rep, "U3").verdict).toBe("inconclusive");
     });
 });
 

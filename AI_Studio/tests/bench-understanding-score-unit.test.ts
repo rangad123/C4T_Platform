@@ -14,6 +14,7 @@ import {
     provenance,
     scoreUnderstanding,
     screenRecall,
+    workflowPrecision,
     workflowRecall,
     wrongRules,
     type ScoredRule,
@@ -229,6 +230,62 @@ describe("U3 workflow recall", () => {
     });
 });
 
+describe("U3-precision: model workflows wholly inside one answer-key workflow", () => {
+    const step = (endpoint: string, order = 0) => ({ order, action: "Do", endpoint });
+    const byEndpoints = (ws: Array<{ id: string; endpoints: string[] }>) =>
+        AppModelSchema.parse({ workflows: ws.map((w) => ({ id: w.id, name: w.id, sourceType: "inferred", steps: w.endpoints.map((e, i) => step(e, i)) })) });
+    it("one workflow per documented endpoint scores recall 1, but precision counts the ones no key workflow has", () => {
+        // The document describes the 5 endpoints of the key's workflows and 5 more no key workflow uses. One model workflow per endpoint:
+        // browse is composed of the two reads, cart / cart-discount / checkout are each one write → recall 4/4. Genuine: the 5 key-workflow
+        // endpoints; the 5 others touch nothing in the key → precision 5/10.
+        const extra = ["GET /api/health", "GET /api/categories", "DELETE /api/cart", "PUT /api/admin/settings", "GET /api/admin/stats"];
+        const keyed = ["GET /api/products", "GET /api/products/{id}", "POST /api/cart/items", "POST /api/cart/discount", "POST /api/orders"];
+        const perEndpoint = byEndpoints([...keyed, ...extra].map((e, i) => ({ id: `e${i}`, endpoints: [e] })));
+        expect(workflowRecall(perEndpoint, key, ["browse", ...catalogueWorkflows]).value).toBe(1);
+        expect(workflowPrecision(perEndpoint, key)).toEqual({ found: 5, total: 10, value: 0.5, missed: ["e5", "e6", "e7", "e8", "e9"], outsideKey: ["e5", "e6", "e7", "e8", "e9"], needsJudgement: [] });
+    });
+    it("a clean split of the key's features is all genuine; a workflow mixing two features' writes is not, though it touches the key", () => {
+        // list and one only read browse's endpoints → inside browse. add writes only cart's write (its read does not count for a
+        // workflow that writes) → inside cart. code → cart-discount, order → checkout. code-and-order writes both → in neither.
+        const fine = byEndpoints([
+            { id: "list", endpoints: ["GET /api/products"] },
+            { id: "one", endpoints: ["GET /api/products/7"] },
+            { id: "add", endpoints: ["GET /api/products", "POST /api/cart/items"] },
+            { id: "code", endpoints: ["POST /api/cart/discount"] },
+            { id: "order", endpoints: ["POST /api/orders"] },
+        ]);
+        expect(workflowPrecision(fine, key)).toEqual({ found: 5, total: 5, value: 1, missed: [], outsideKey: [], needsJudgement: [] });
+        const mixed = byEndpoints([
+            { id: "code-and-order", endpoints: ["POST /api/cart/discount", "POST /api/orders"] },
+            { id: "read-and-health", endpoints: ["GET /api/products", "GET /api/health"] },
+            { id: "order", endpoints: ["POST /api/orders"] },
+        ]);
+        // read-and-health writes nothing, and GET /api/health is no key workflow's endpoint → not inside any; it still touches browse.
+        expect(workflowPrecision(mixed, key)).toEqual({ found: 1, total: 3, value: 1 / 3, missed: ["code-and-order", "read-and-health"], outsideKey: [], needsJudgement: [] });
+    });
+    it("a workflow without endpoint steps is judged on its pages; a page no key workflow has is outside the key", () => {
+        // look: / and /products/7 are browse's screens → genuine. cart-to-checkout: /cart and /checkout are no single key workflow's
+        // screens → not. about: /account is no key workflow's screen → not, and outside the key.
+        const paged = AppModelSchema.parse({
+            ...model,
+            workflows: [
+                { id: "look", name: "Look", sourceType: "inferred", steps: [{ order: 0, action: "Open", page: "p1" }, { order: 1, action: "Open", page: "/products/7" }] },
+                { id: "cart-to-checkout", name: "Go", sourceType: "inferred", steps: [{ order: 0, action: "Open", page: "p3" }, { order: 1, action: "Open", page: "/checkout" }] },
+                { id: "about", name: "Account", sourceType: "inferred", steps: [{ order: 0, action: "Open", page: "p4" }] },
+            ],
+        });
+        expect(workflowPrecision(paged, key)).toEqual({ found: 1, total: 3, value: 1 / 3, missed: ["about", "cart-to-checkout"], outsideKey: ["about"], needsJudgement: [] });
+    });
+    it("a workflow with neither page nor endpoint waits for a recorded link and counts as not genuine until then", () => {
+        // checkout (no steps) and w3 (page /) in the shared model: w1 inside cart, w3 inside browse; checkout gives nothing to compare.
+        expect(workflowPrecision(model, key)).toEqual({ found: 2, total: 3, value: 2 / 3, missed: ["checkout"], outsideKey: [], needsJudgement: ["checkout"] });
+        const linked = judgements({ workflowLinks: [{ workflowId: "checkout", keyWorkflowId: "checkout", reason: "Places the order." }] });
+        expect(workflowPrecision(model, key, linked)).toMatchObject({ found: 3, value: 1, missed: [], needsJudgement: [] });
+        const none = judgements({ workflowLinks: [{ workflowId: "checkout", keyWorkflowId: null, reason: "Not a workflow of the app." }] });
+        expect(workflowPrecision(model, key, none)).toMatchObject({ found: 2, missed: ["checkout"], needsJudgement: [] });
+    });
+});
+
 describe("U4 defect-rule recall", () => {
     it("deterministic links first; a rule matching several key rules waits for a judgement", () => {
         const r = defectRuleRecall(model, rules, key, { requirementsText });
@@ -340,6 +397,6 @@ describe("the whole score", () => {
         expect(() => scoreUnderstanding({ ...base, judgements: judgements({ app: "y-shop" }) })).toThrow(/y-shop/);
         expect(() => scoreUnderstanding({ ...base, judgements: judgements({ answerKeySha256: "c".repeat(64) }) })).toThrow(/answer key/);
         const s = scoreUnderstanding({ ...base, judgements: judgements() });
-        expect([s.screens.value, s.endpoints.value, s.workflows.value, s.defectRules.any.value]).toEqual([0.75, 0.6, 2 / 3, 2 / 3]);
+        expect([s.screens.value, s.endpoints.value, s.workflows.value, s.workflowPrecision.value, s.defectRules.any.value]).toEqual([0.75, 0.6, 2 / 3, 2 / 3, 2 / 3]);
     });
 });

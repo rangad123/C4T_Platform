@@ -9,6 +9,9 @@
  * inconclusive, never a pass. When some trials measured a criterion and others could not, the measured trials' median and range are
  * shown with "n of N measured", and the criterion stays inconclusive while fewer than MIN_TRIALS trials measured it.
  *
+ * U3 is judged on recall and precision together: the U3 row shows recall's median and range, the U3-precision row precision's, and the
+ * U3 verdict passes only when both pass, fails when either fails, and is inconclusive otherwise.
+ *
  * U8 counts the AI calls of each analysis by purpose: reading the application (the analysis: pages, requirements, documents), planning
  * the exploration, and everything else; the run table keeps each trial's total.
  */
@@ -145,6 +148,16 @@ function criteria(inputs: Inputs): Criterion[] {
                   }
                 : { target: "= 1", judge: atLeast(1) }),
         },
+        {
+            id: "U3-precision",
+            name: "Workflow precision: model workflows wholly inside one answer-key workflow",
+            // Trials recorded before U3-precision existed have no value.
+            value: (s) => s.workflowPrecision?.value ?? null,
+            target: "≥ 0.8",
+            judge: atLeast(0.8),
+            // Workflows awaiting a recorded link count as not genuine: a value already at the target passes, a lower one cannot fail yet.
+            blocker: (s) => (s.workflowPrecision?.needsJudgement.length && (s.workflowPrecision.value ?? 0) < 0.8 ? `${s.workflowPrecision.needsJudgement.length} workflow${s.workflowPrecision.needsJudgement.length === 1 ? "" : "s"} with neither page nor endpoint await${s.workflowPrecision.needsJudgement.length === 1 ? "s" : ""} a recorded workflow link` : null),
+        },
         url
             ? { id: "U4", name: "Defect rules present with evidence", value: (s) => s.defectRules.any.value, target: "reported" }
             : { id: "U4", name: "Defect rules as explicit rules citing the requirement line", value: (s) => s.defectRules.explicitCiting.value, target: "≥ 0.8", judge: atLeast(0.8) },
@@ -222,6 +235,13 @@ export function buildReport(input: { inputs: Inputs; repeat: number; apps: strin
             const judged = c.judge(cand, base);
             return { ...row, ...judged, why: [judged.why, measured].filter(Boolean).join("; ") };
         });
+        // U3 passes only when recall and precision both meet their targets: the U3 row carries the combined verdict.
+        const u3 = rows.find((c) => c.id === "U3");
+        const u3p = rows.find((c) => c.id === "U3-precision");
+        if (u3 && u3p && u3.verdict !== "reported" && u3p.verdict !== "reported") {
+            const both = worst([u3.verdict, u3p.verdict]);
+            Object.assign(u3, { verdict: both, why: [`recall ${u3.verdict}, precision ${u3p.verdict}`, u3.why].filter(Boolean).join("; ") });
+        }
         const runs: RunRow[] = trials
             .filter((t) => t.app === app)
             .sort((a, b) => SIDES.indexOf(a.engine) - SIDES.indexOf(b.engine) || a.trial - b.trial)
