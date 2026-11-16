@@ -938,6 +938,9 @@ export async function runSmoke(opts, deps = {}) {
 
         if (opts.explore) {
             await step("Explore the sample app on the runner (the AI on the platform, a scripted model)", async () => {
+                // A signed-in person's AI work runs on their own chosen key (never the server's), so the owner adds the scripted model as theirs.
+                const k = await api("POST", "/api/me/ai/keys", { label: "Scripted model", provider: "openai-compatible", model: SCRIPTED_MODEL, baseUrl: model.url, apiKey: "smoke-placeholder-not-a-key" });
+                if (k.status !== 201) throw new Error(`Could not add the AI key (${k.status}): ${k.message}`);
                 const p = await api("POST", "/api/projects", { name: `Explore smoke ${target.id}`, platforms: ["web"], testingModes: ["agent"] });
                 if (p.status >= 300 || !p.json?.id) throw new Error(`Could not create the project (${p.status}): ${p.message}`);
                 const exploreProject = p.json.id;
