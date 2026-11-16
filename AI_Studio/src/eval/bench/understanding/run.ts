@@ -14,6 +14,7 @@
  * before the crawl, and name the answer-key screens no crawl can reach. A run with a real model scores only against answer keys the owner approved, uses a free model only (--approved-budget-usd 0, a
  * price of 0 in --prices) and stops at --daily-call-cap. Exit codes: 0 every trial ran, 2 nothing could start, 3 the series is incomplete.
  */
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { REPO_ROOT, type Config } from "../../../config.js";
@@ -26,6 +27,10 @@ import { BENCH_APPS, BenchAppHost, benchApp, type BenchApp } from "../apps.js";
 import { CATALOGUE_FILE, loadCatalogue, type Catalogue } from "../catalogue.js";
 import { loadPrices } from "../cost.js";
 import { MAX_TEXT } from "../../../platform/requirement-store.js";
+import { AppAnalysis, gatherAnalysisInputs, REQUIREMENTS_REF, type AnalysisResult } from "../../../platform/app-analysis.js";
+import type { Platform } from "../../../platform/bootstrap.js";
+import { usageStoreFor } from "../../../platform/usage-store.js";
+import { JobMeter } from "../../../engine/llm/metered.js";
 import { ANSWERS_DIR, INPUTS_DIR, parseAnswerKey, parseJudgements, requireApprovedKey, type AnswerKey, type Judgements } from "./answer-key.js";
 import { buildReport, renderReportMd, type CallsByPurpose, type DocVariant, type Engine, type Inputs, type TrialResult } from "./report.js";
 import { PAID_KEY_ENV, PAID_MODEL, paidKeyFrom, paidLlm, paidPlatformEnv, paidPricesIn, SpendGuard, type PaidPrices } from "./paid.js";
@@ -134,12 +139,12 @@ export function parseUnderstandingArgs(argv: string[]): UnderstandingArgs {
 
 /**
  * Upper bounds of AI calls per analysis, from the engine's limits: the understanding and planning calls of the exploration (about 3), and on
- * the candidate side the page reading and, with `full`, the requirements reading (each at most EXTRACTION_LIMITS.maxCalls). The no-change
- * rerun reads nothing again.
+ * the candidate side the page reading and, with `full`, the requirements reading (each at most EXTRACTION_LIMITS.maxCalls), read once more
+ * after one requirement is edited (U7). The no-change rerun reads nothing again.
  */
 export function understandingEstimate(a: Pick<UnderstandingArgs, "apps" | "engines" | "repeat" | "inputs">): { perTrial: Record<Engine, number>; total: number } {
     const explore = 3;
-    const perTrial: Record<Engine, number> = { baseline: explore, candidate: explore + EXTRACTION_LIMITS.maxCalls * (a.inputs === "full" ? 2 : 1) };
+    const perTrial: Record<Engine, number> = { baseline: explore, candidate: explore + EXTRACTION_LIMITS.maxCalls * (a.inputs === "full" ? 3 : 1) };
     const total = a.repeat * a.apps.length * a.engines.reduce((s, e) => s + perTrial[e], 0);
     return { perTrial, total };
 }
@@ -246,6 +251,43 @@ interface Side {
     engine: Engine;
     client: PlatformClient;
     stop: () => Promise<void>;
+    /** Runs the project's analysis again in this process (analyserOf). */
+    analyse: (projectId: string) => Promise<AnalysisResult>;
+}
+
+/**
+ * The analysis run again for U7, in this process, on the side's own model client (the paid series' guarded client, a test's scripted
+ * model, or the server's own), metered under the project like the analysis the API starts. The API's analysis uses the starter's chosen
+ * key (ai-config.ts), and the benchmark's platforms hold no key in the paid series: started from the API, a rerun could never read with
+ * AI, so a changed source would not be read again and "nothing read" would prove nothing. This runs the same analysis code
+ * (gatherAnalysisInputs, AppAnalysis.run) with a key.
+ */
+function analyserOf(p: Platform): (projectId: string) => Promise<AnalysisResult> {
+    return async (projectId) => {
+        const usable = p.llm.modelName !== "unavailable";
+        const meter = usable ? new JobMeter({ backend: usageStoreFor(p.db, p.config), jobId: `analysis-${randomUUID()}`, projectId }) : undefined;
+        try {
+            const inputs = await gatherAnalysisInputs(p, projectId);
+            return await new AppAnalysis({ sql: p.sql, store: p.store }).run(projectId, inputs, meter ? { llm: meter.wrap(p.llm) } : { noAi: "no AI model is set up for this work." });
+        } finally {
+            meter?.finish();
+        }
+    };
+}
+
+/** The suffix the U7 edit appends to a requirement in the copy of the document. */
+export const EDIT_MARK = " (wording edited)";
+
+/** A copy of the requirements document with its last numbered requirement line edited (EDIT_MARK appended); the ref of that line. */
+export function editedCopy(text: string): { text: string; edited: string } | undefined {
+    const lines = text.split(/(?<=\n)/);
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const m = /^(\s*[-*]\s+(\d{1,3}(?:\.\d{1,3}){1,3})\s+.*?)(\r?\n)?$/.exec(lines[i]!);
+        if (!m) continue;
+        lines[i] = `${m[1]}${EDIT_MARK}${m[3] ?? ""}`;
+        return { text: lines.join(""), edited: m[2]! };
+    }
+    return undefined;
 }
 
 async function aiCallsOf(client: PlatformClient, projectId: string): Promise<{ calls: number; failedCalls: number; byPurpose: CallsByPurpose }> {
@@ -281,10 +323,10 @@ async function callsToday(sides: Side[]): Promise<number> {
 
 async function runTrial(
     side: Side,
-    o: { app: BenchApp; host: BenchAppHost; trial: number; inputs: Inputs; doc: DocVariant; judgements: Judgements[]; seeded: string[]; key: AnswerKey; keySha256: string; catalogueWorkflows: string[]; requirementsText?: string; level?: ExploreLevel; deps: UnderstandingDeps; log: (s: string) => void },
+    o: { app: BenchApp; host: BenchAppHost; trial: number; inputs: Inputs; doc: DocVariant; judgements: Judgements[]; seeded: string[]; key: AnswerKey; keySha256: string; catalogueWorkflows: string[]; requirementsText?: string; level?: ExploreLevel; out: string; deps: UnderstandingDeps; log: (s: string) => void },
 ): Promise<{ result: TrialResult; detail: Record<string, unknown> }> {
     const { client, engine } = side;
-    const call = async (method: "GET" | "POST" | "PUT", url: string, what: string, body?: unknown) => ok(await client.call(method, url, body), what);
+    const call = async (method: "GET" | "POST" | "PUT" | "PATCH", url: string, what: string, body?: unknown) => ok(await client.call(method, url, body), what);
     const base: TrialResult = { app: o.app.id, inputs: o.inputs, engine, trial: o.trial, status: "failed", counts: { aiCalls: 0, failedCalls: 0, pages: 0 } };
     const account = o.app.understanding?.credentials ?? o.app.credentials;
     let projectId: string | undefined;
@@ -334,21 +376,53 @@ async function runTrial(
         const rules = (await call("GET", `/api/projects/${projectId}/intel/rules`, "Reading the rules")).rules as ScoredRule[];
         const usage = await aiCallsOf(client, projectId);
 
-        // The no-change rerun: no new version and no AI call for sources that did not change.
-        const versionsBefore = ((await call("GET", `/api/projects/${projectId}/intel/models`, "Reading the model versions")).versions as unknown[]).length;
-        await call("POST", `/api/projects/${projectId}/intel/analyse`, "Analysing again with nothing changed");
-        for (let i = 0; ; i++) {
-            const s = await call("GET", `/api/projects/${projectId}/intel/sources`, "Reading the analysis state");
-            if (!s.running) {
-                if (s.last?.error) throw new Error(`The rerun failed: ${s.last.error}`);
-                break;
-            }
-            if (i > 3600) throw new Error("The rerun did not finish.");
-            await sleep(o.deps.pollMs ?? 1000);
+        const readRules = async () => (await call("GET", `/api/projects/${projectId}/intel/rules`, "Reading the rules")).rules as Array<ScoredRule & { id: string; fingerprint: string }>;
+        const versionCount = async () => ((await call("GET", `/api/projects/${projectId}/intel/models`, "Reading the model versions")).versions as unknown[]).length;
+        // U7 is measured where a source can change: the candidate side of a full series (the requirements document).
+        const u7 = engine === "candidate" && o.inputs === "full" && Boolean(o.requirementsText);
+
+        // U7 decisions: a person's decision on every stored rule, confirmed and rejected in turn (by ref), before both reruns.
+        let decided: ScoredRule[] = rules;
+        if (u7) {
+            const sorted = [...(await readRules())].sort((a, b) => a.ref.localeCompare(b.ref));
+            for (const [i, r] of sorted.entries()) await call("PUT", `/api/projects/${projectId}/intel/rules/${encodeURIComponent(r.id)}/decision`, "Deciding about a rule", { status: i % 2 ? "rejected" : "confirmed", fingerprint: r.fingerprint });
+            decided = await readRules();
         }
-        const versionsAfter = ((await call("GET", `/api/projects/${projectId}/intel/models`, "Reading the model versions")).versions as unknown[]).length;
-        const rulesAfter = (await call("GET", `/api/projects/${projectId}/intel/rules`, "Reading the rules")).rules as ScoredRule[];
+
+        // The no-change rerun: no new version and no AI call for sources that did not change.
+        const versionsBefore = await versionCount();
+        const same = await side.analyse(projectId);
+        const versionsAfter = await versionCount();
+        const rulesAfter = await readRules();
         const usageAfter = await aiCallsOf(client, projectId);
+
+        // The one-change rerun: one requirement edited in a copy of the document (the original file is never written), that record updated.
+        let oneChanged: { changed: string[]; reprocessed: string[] } | undefined;
+        let changeDetail: Record<string, unknown> | undefined;
+        let rulesChanged = rulesAfter;
+        if (u7) {
+            const copy = editedCopy(o.requirementsText!);
+            if (!copy) throw new Error(`The requirements document of ${o.app.id} has no numbered requirement line to edit.`);
+            fs.mkdirSync(path.join(o.out, "inputs"), { recursive: true });
+            fs.writeFileSync(path.join(o.out, "inputs", `${o.app.id}-requirements-edited.md`), copy.text);
+            const records = (t: string) => (o.doc === "whole" ? [wholeDocumentRequirement(t)] : requirementsOf(t).map((r) => ({ ...r, acceptanceCriteria: "" })));
+            const was = new Map(records(o.requirementsText!).map((r) => [r.ref, r]));
+            const stored = (await call("GET", `/api/projects/${projectId}/requirements`, "Reading the requirements")).requirements as Array<{ id: string; ref: string }>;
+            const edited: string[] = [];
+            for (const r of records(copy.text)) {
+                const before = was.get(r.ref);
+                if (before && before.title === r.title && before.description === r.description && before.acceptanceCriteria === r.acceptanceCriteria) continue;
+                const row = stored.find((x) => x.ref === r.ref);
+                if (!row) throw new Error(`The requirement ${r.ref} of ${o.app.id} was not imported.`);
+                await call("PATCH", `/api/projects/${projectId}/requirements/${encodeURIComponent(row.id)}`, "Editing a requirement", { title: r.title, description: r.description, acceptanceCriteria: r.acceptanceCriteria });
+                edited.push(r.ref);
+            }
+            const changed = await side.analyse(projectId);
+            rulesChanged = await readRules();
+            const usageChanged = await aiCallsOf(client, projectId);
+            oneChanged = { changed: [`requirements ${REQUIREMENTS_REF}`], reprocessed: changed.processed };
+            changeDetail = { edited, processed: changed.processed, failed: changed.failed, aiCalls: usageChanged.calls - usageAfter.calls, newVersion: changed.version, rules: changed.rules };
+        }
 
         const model = version.model as AppModel;
         const judged = judgementFor(o.judgements, { app: o.app.id, engine, trial: o.trial, modelVersion: Number(version.version) });
@@ -362,7 +436,7 @@ async function runTrial(
             ...(o.requirementsText ? { requirementsText: o.requirementsText } : {}),
             ...(judged.judgements ? { judgements: judged.judgements } : {}),
             ...(notReachable.length ? { notReachableScreens: notReachable.map((s) => s.id) } : {}),
-            incremental: { before: rules, after: rulesAfter, noChange: { newVersion: versionsAfter > versionsBefore, aiCallsForUnchangedSources: usageAfter.calls - usage.calls } },
+            incremental: { before: decided, after: rulesChanged, noChange: { newVersion: versionsAfter > versionsBefore, aiCallsForUnchangedSources: usageAfter.calls - usage.calls }, ...(oneChanged ? { oneChanged } : {}) },
         });
         return {
             result: { ...base, status: "completed", score, counts: { aiCalls: usage.calls, failedCalls: usage.failedCalls, pages, byPurpose: usage.byPurpose } },
@@ -378,6 +452,11 @@ async function runTrial(
                 judgements: judged.judgements ? "applied" : (judged.note ?? "none recorded"),
                 rules: rules.length,
                 rerun: { versionsBefore, versionsAfter, aiCalls: usageAfter.calls - usage.calls },
+                incremental: {
+                    decided: decided.filter((r) => r.status !== "unverified").length,
+                    noChange: { newVersion: versionsAfter > versionsBefore, aiCalls: usageAfter.calls - usage.calls, processed: same.processed, failed: same.failed },
+                    ...(changeDetail ? { oneChanged: changeDetail } : {}),
+                },
             },
         };
     } catch (e) {
@@ -472,7 +551,7 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
         try {
             for (const engine of args.engines) {
                 const p = await startPlatform(path.join(dataDir, engine), platformEnv, platformDeps);
-                sides.push({ engine, ...p });
+                sides.push({ engine, client: p.client, stop: p.stop, analyse: analyserOf(p.platform) });
             }
             if (!scripted) {
                 let free: (m: string) => boolean;
@@ -537,6 +616,7 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
                         catalogueWorkflows: [...new Set(catalogue.defects.filter((d) => d.app === app.id).map((d) => d.workflow))],
                         ...(args.inputs === "full" && k.requirementsText ? { requirementsText: k.requirementsText } : {}),
                         ...(args.level ? { level: args.level } : {}),
+                        out: args.out,
                         deps,
                         log,
                     });
@@ -565,8 +645,10 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
                 ...(a.understanding?.notReachableScreens ?? []).map((s) => `${a.id}: the screen ${s.id} is left out of U1: ${s.why}`),
             ]),
             `Recorded judgements: ${args.judgements ? `${judgements.length} trial(s) from ${path.basename(args.judgements)}` : "none"}.`,
-            "U7 here is the no-change rerun only; carrying rule decisions forward and re-processing one changed source are not measured by this command.",
-            ...(guard ? [`Spend: $${guard.spent.toFixed(4)} of the approved $${guard.budget.toFixed(2)} (${guard.calls} paid calls, ${guard.refused} refused before sending; effort low). The analysis run again from the API has no key in this series, so the no-change rerun reads nothing with AI.`] : []),
+            args.inputs === "full" && args.engines.includes("candidate")
+                ? `U7 (candidate side): after the exploration's analysis every stored rule is decided through the API (confirmed and rejected in turn, by ref); the analysis then runs again with nothing changed, and once more after the last numbered requirement was edited in a copy of the document (appended "${EDIT_MARK.trim()}"; the copy is in inputs/). Both reruns run in this process on the side's own model client, so they can read with AI.`
+                : "U7 here is the no-change rerun only (run in this process on the side's own model client); carrying rule decisions forward and re-processing one changed source are measured by a full series' candidate side.",
+            ...(guard ? [`Spend: $${guard.spent.toFixed(4)} of the approved $${guard.budget.toFixed(2)} (${guard.calls} paid calls, ${guard.refused} refused before sending; effort low).`] : []),
             ...(stopped ? [stopped] : []),
             "",
         ];
