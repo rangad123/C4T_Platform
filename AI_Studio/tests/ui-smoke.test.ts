@@ -64,21 +64,26 @@ afterAll(async () => {
 });
 
 describe("UI journey", () => {
-    it("first visit explains the product and offers one obvious action", async () => {
+    it("first visit is the Projects page with one obvious action, which opens Create a project", async () => {
         await page.goto(`http://127.0.0.1:${UI_PORT}/`);
-        await pwExpect(page.getByRole("heading", { name: "Test any web application automatically" })).toBeVisible();
-        // UX-E: three ways to start; the first one explores.
-        await pwExpect(page.getByRole("button", { name: "Explore my app", exact: true })).toBeVisible();
-        await pwExpect(page.getByRole("heading", { name: "Record a test", level: 2 })).toBeVisible();
-        await pwExpect(page.getByRole("heading", { name: "Start from tests I have", level: 2 })).toBeVisible();
-        await pwExpect(page.getByText("How it works", { exact: false }).or(page.getByText("Enter your URL"))).toBeVisible();
+        // No project yet: the Projects page itself, with Create a project (never a separate full-page start screen).
+        const create = page.getByTestId("first-project").getByRole("link", { name: "Create a project", exact: true });
+        await pwExpect(create).toHaveAttribute("href", "#/create");
+        await pwExpect(page.getByText("Test any web application automatically")).toHaveCount(0);
         // the AI chip tells the truth: no model is configured in this test
         await pwExpect(page.getByText("AI not set up")).toBeVisible();
+        await create.click();
+        await pwExpect(page.getByRole("heading", { name: "Create a project", level: 1 })).toBeVisible();
     });
 
-    it("rejects a bad address in plain words, without a server round-trip", async () => {
+    it("an AI agent project's Start exploring rejects a bad address in plain words, without a server round-trip", async () => {
+        // A web AI-agent project with no testing agents saved, so the usual checks run (Create a project itself is tested in
+        // first-project-ui and project-basics-ui; its default agents ask for inputs this journey does not need).
+        const id = platform.repo.createProject({ name: "Smoke shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await page.goto(`http://127.0.0.1:${UI_PORT}/#/projects/${id}`);
+        await page.getByRole("link", { name: "Start exploring", exact: true }).click();
         await page.getByLabel("Application URL").fill("notaurl");
-        await page.getByRole("button", { name: "Explore my app", exact: true }).click();
+        await page.getByRole("button", { name: "Explore again", exact: true }).click();
         await pwExpect(page.getByText("That doesn’t look like a complete address")).toBeVisible();
         await pwExpect(page.getByLabel("Application URL")).toHaveAttribute("aria-invalid", "true");
     });
@@ -87,11 +92,9 @@ describe("UI journey", () => {
         // An address without its scheme. The IP, not "localhost": Playwright's API requests look the name up for IPv6 as well, which
         // takes ten seconds on a machine whose hosts file names only ip6-localhost, the whole timeout of an API step.
         await page.getByLabel("Application URL").fill(`127.0.0.1:${APP_PORT}`);
-        await page.getByRole("button", { name: "Choose what to test first" }).click();
         // No AI model here: the page says so and explores only the API, which needs none.
         await pwExpect(page.getByText("only the application’s API is explored here", { exact: false })).toBeVisible();
-        await page.getByLabel("Project name").fill("Smoke shop"); // round 37: typed, never made from the address
-        await page.getByRole("button", { name: "Start exploring" }).click();
+        await page.getByRole("button", { name: "Explore again", exact: true }).click();
 
         await pwExpect(page.getByRole("heading", { name: /Exploring your application/ })).toBeVisible({ timeout: 15_000 });
         // UX-E: the exploration ends at a plan; the tests are created when the person says so.

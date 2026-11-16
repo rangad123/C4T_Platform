@@ -208,7 +208,7 @@ describe("generated scripts", () => {
         expect(b.filename).toBe(a.filename);
         expect(b.content).not.toMatch(/Checkout\b.*Email field|ref|shared element/i);
         expect(b.content).toContain('page.getByRole("button", { name: "Checkout", exact: true })');
-        expect(b.content).toContain('page.getByLabel("Email")');
+        expect(b.content).toContain('await (await labelledField(page, "Email", false, false)).fill("a@b.c");');
     });
 
     it("are refused, never rendered as something else, when a reference is not resolved", () => {
@@ -231,7 +231,7 @@ describe("generated scripts", () => {
         const text = renderWithAdapter(s, "playwright", ctx).content;
         for (const line of [
             'await page.getByRole("button", { name: "Add", exact: true }).click();',
-            'await page.getByLabel("Name").click();',
+            'await (await labelledField(page, "Name", false, false)).click();',
             'await page.getByText("Hi", { exact: true }).click();',
             'await page.getByPlaceholder("Find").click();',
             'await page.getByTestId("go").click();',

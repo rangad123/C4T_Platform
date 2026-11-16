@@ -53,6 +53,14 @@ export function resolveAlias(parts: string[], query: URLSearchParams): string | 
     // Round 45: the Runners pages are gone; every runner link (the list, one runner, `?add=computer`) lands on Your runner in Settings.
     if (a === "runners") return routes.yourRunner;
     if (a === "settings" && query.get("section") === "runners") return routes.yourRunner;
+    // The New project page of before round 37 (a chooser that made a web AI-agent project): Create a project now asks the platform,
+    // testing mode and agents. `#/new?project=` stays: it is Explore again for an existing project. A testing type and an address
+    // carry over (`?type=security`, `?url=`).
+    if (a === "new" && !query.get("project")) {
+        const keep = new URLSearchParams();
+        for (const k of ["type", "url"]) if (query.get(k)) keep.set(k, query.get(k)!);
+        return withQuery(routes.createProject, keep);
+    }
     if (a !== "projects" || !id || !c) return null;
     // Round 38: the runnable tests are the Test scripts list; the Test cases place holds the written cases. An old link to the tests
     // with a query about running (a status, weak checks, quarantine, a way of starting a test, Git) opens the scripts list with it.

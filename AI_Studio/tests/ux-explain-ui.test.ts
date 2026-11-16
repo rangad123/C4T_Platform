@@ -603,7 +603,7 @@ describe("the decided vocabulary, on the screens a tester reaches", () => {
         ["the shared elements page", () => `#/projects/${shop.projectId}/objects`],
         ["the runners page", () => `#/projects/${shop.projectId}/runners`],
         ["the schedule page", () => `#/projects/${shop.projectId}/schedule`],
-        ["the new project page", () => "#/new"],
+        ["the new project page", () => "#/create"],
         ["explore again", () => `#/new?project=${shop.projectId}`],
     ];
     for (const [name, hash] of screens) {

@@ -80,9 +80,9 @@ describe("API-key protected server", () => {
     it("opens the app with the right key and remembers it", async () => {
         await page.getByLabel("Access key").fill(KEY);
         await page.getByRole("button", { name: "Continue" }).click();
-        await pwExpect(page.getByRole("heading", { name: "Test any web application automatically" })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "No projects yet" })).toBeVisible();
         await page.reload();
-        await pwExpect(page.getByRole("heading", { name: "Test any web application automatically" })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "No projects yet" })).toBeVisible();
         // Settings has no second place to enter the key: the sign-in screen is where it goes.
         await page.getByRole("link", { name: "Settings", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
@@ -394,10 +394,11 @@ describe("project report download", () => {
 
 describe("input handling option", () => {
     it("is no longer a switch on the form: the exploration keeps it on by default (the Test Case Generation Agent runs it)", async () => {
-        const { base } = await start(4200, {}, false);
+        const { platform, base } = await start(4200, {}, false);
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        await page.goto(`${base}/#/new?url=http://example.com`);
-        await pwExpect(page.getByRole("heading", { name: "Create a test project" })).toBeVisible();
+        const made = platform.repo.createProject({ name: "Input shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await page.goto(`${base}/#/new?project=${made}`);
+        await pwExpect(page.getByRole("heading", { name: "Explore again" })).toBeVisible();
         await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
         await pwExpect(page.getByRole("checkbox", { name: /Check how forms handle unusual input/ })).toHaveCount(0);
         await pwExpect(page.locator("summary", { hasText: "Advanced options" })).toHaveCount(0);

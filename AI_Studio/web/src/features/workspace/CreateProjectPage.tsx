@@ -4,10 +4,12 @@ import { ApiError, MODE_WORDS, PLATFORM_WORDS, api, type Platform, type TestingM
 import { usePage } from "../../components/Shell";
 import { Button, Callout, LinkButton, PageHeader } from "../../components/ui";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
-import { go, routes } from "../../lib/router";
+import { go, routes, useRoute } from "../../lib/router";
 import { useAuth } from "../auth/auth";
 import { sideOf, useCan } from "../auth/permissions";
 import { AppDetailsFields, EMPTY_APP_DRAFT, appDraftBody, appDraftProblem, appErrorText, uploadAppFiles, type AppDraft } from "./AppDetailsFields";
+import { SecurityStartGate } from "../security/TestingType";
+import { applyPendingTestingType } from "../security/security";
 import { AgentPicker, defaultAgents, fitsPlatforms, type AgentId, type AgentList } from "../testing-agents/testing-agents";
 
 const PLATFORM_HELP: Record<Platform, string> = { web: "A website or web application, tested in browsers.", android: "An Android app, tested on emulators and phones.", ios: "An iPhone or iPad app, tested on a Mac with Xcode." };
@@ -40,7 +42,9 @@ export function CreateProjectPage() {
     const [description, setDescription] = useState("");
     const [platform, setPlatform] = useState<Platform>("web");
     const [mode, setMode] = useState<TestingMode | null>(null);
-    const [app, setApp] = useState<AppDraft>(EMPTY_APP_DRAFT);
+    // An address handed over by a link (`#/create?url=`, and the old `#/new?url=`) is the web address to start from.
+    const initialUrl = useRoute().query.get("url") ?? "";
+    const [app, setApp] = useState<AppDraft>({ ...EMPTY_APP_DRAFT, webUrl: initialUrl });
     const [organizationId, setOrganizationId] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -74,6 +78,8 @@ export function CreateProjectPage() {
                 method: "POST",
                 body: { name: name.trim(), ...(description.trim() ? { description: description.trim() } : {}), platforms: [platform], testingModes: [mode!], ...(mode === "agent" && agentList.data ? { agents } : {}), ...appDraftBody(platform, app), ...(organizationId ? { organizationId } : {}) },
             });
+            // "Both" chosen above the form (security module on): the project also gets the Security assessment section.
+            await applyPendingTestingType(p.id);
             // The app file goes after the project exists. If it is refused, the project stays and Settings says how to add it.
             try {
                 await uploadAppFiles(p.id, platform, app);
@@ -94,6 +100,8 @@ export function CreateProjectPage() {
     return (
         <>
             <PageHeader title="Create a project" subtitle="One project is one application you test. You can change all of this later in the project’s Settings." />
+            {/* With the security module on, the testing type comes first; Security assessment needs only a name (TestingType.tsx). */}
+            <SecurityStartGate>
             <form
                 className="card card-pad stack"
                 style={{ maxWidth: 720 }}
@@ -169,6 +177,7 @@ export function CreateProjectPage() {
                     <a href={routes.home}>Cancel</a>
                 </div>
             </form>
+            </SecurityStartGate>
         </>
     );
 }

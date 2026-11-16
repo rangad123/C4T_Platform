@@ -299,6 +299,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                     setQuarantineKey((k) => k + 1);
                     void test.reload();
                 }}
+                onRenamed={() => void test.reload()}
             />
             {actionError && (
                 <Callout tone="danger" title="That didn’t work">

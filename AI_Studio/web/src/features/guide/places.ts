@@ -45,8 +45,8 @@ export interface PlaceHelp {
 
 export type PlaceId =
     | "projects"
-    | "welcome"
     | "new-project"
+    | "explore-again"
     | "plan-preview"
     | "overview"
     | "tests"
@@ -110,23 +110,24 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "Open a project, then look at its Dashboard.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Dashboard"] }],
         topic: "places",
     },
-    welcome: {
-        title: "Welcome",
-        what: "You have no project yet. Here you choose how to get your first tests. Nothing runs until you say so.",
+    "new-project": {
+        title: "Create a project",
+        what: "One project is one application you test. Give it a name, choose its platform and how it is tested: by AI agents or with code.",
         canDo: [
-            { text: "Choose Explore my app to let the AI look around your website, API or Android app and suggest tests.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Explore my app"] },
-            { text: "Choose Record a test to click through your application yourself and turn it into a test.", button: "Read how recording works", to: { topic: "record-a-test", search: "record a test" }, ui: ["Record a test"] },
-            { text: "Choose Start from tests I have to bring tests you already have, from a file or a Git repository.", button: "Read how to bring tests", to: { topic: "import-tests", search: "import tests" }, ui: ["Start from tests I have"] },
+            { text: "Set the Platform: a website, an Android app or an iPhone app.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Platform"] },
+            { text: "Set the Testing mode. An AI agent project is explored by the AI; a code project holds test cases and the scripts that run them.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Testing mode"] },
+            { text: "Choose Create project. The project's Dashboard then lists what is still to set up.", button: "Read the 10-minute start", to: { topic: "first-steps" }, ui: ["Create project", "Dashboard"] },
+            { text: "Go back to your list of projects.", button: "Back to projects", to: here("projects") },
         ],
-        words: ["test", "exploration", "plan"],
-        next: [{ text: "After the AI explores, you get a plan to read. Nothing is created until you agree.", button: "Read the 10-minute start", to: { topic: "first-steps" } }],
+        words: ["test", "exploration"],
+        next: [{ text: "On an AI agent project's Dashboard, choose Start exploring.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Start exploring", "Dashboard"] }],
         topic: "first-steps",
     },
-    "new-project": {
-        title: "Start a project",
-        what: "Tell us the address of your application and the AI explores it. You will see a plan before anything is made.",
+    "explore-again": {
+        title: "Explore the application",
+        what: "The AI explores this project's application again and shows a plan before anything is made. Existing tests are kept.",
         canDo: [
-            { text: "Type the address of your application, then choose Start exploring.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Start exploring"] },
+            { text: "Type the address of your application, then choose Explore again.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Explore again"] },
             { text: "Fill in Focus (optional) to tell the AI what matters most. The whole application is still explored.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Focus (optional)"] },
             { text: "Which checks run is set by the project's Testing agents in Settings, then General.", button: "Read about the checks", to: { search: "checks besides clicks" }, ui: ["Testing agents", "Settings", "General"] },
             { text: "Keep the sign-in details on the Requirements tab, under What the agents need, if your application needs a login.", button: "Read about test accounts", to: { topic: "test-accounts", search: "test accounts login" }, ui: ["Requirements", "What the agents need"] },
@@ -849,7 +850,9 @@ export function placeOf(route: RouteLike): PlaceId {
     const [a, b, c, d] = route.parts;
     const q = route.query;
     if (!a) return "projects";
-    if (a === "new" || a === "create") return "new-project";
+    // `#/new?project=` explores an existing project; `#/new` alone is redirected to Create a project (lib/aliases.ts).
+    if (a === "new") return q.get("project") ? "explore-again" : "new-project";
+    if (a === "create") return "new-project";
     if (a === "dashboard") return "dashboard";
     if (a === "develop") return "develop";
     if (a === "runners") return "runners-global";

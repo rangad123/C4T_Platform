@@ -5,7 +5,7 @@
  * use from state each test sets. The screens, their requests and their words are real; what a phone exploration really does is MX-A and MX-B's work and is
  * exercised by tests/phone-ai-real.test.ts (which says why it is skipped while their routes are missing). Nothing here touches an emulator, adb, a model or ./data.
  *
- *   start: Settings, Mobile app (not New test script), the welcome page; no app, iPhone only, no phone or runner, runner offline or out of date, no AI model, refused starts
+ *   start: Settings, Mobile app (not New test script); no app, iPhone only, no phone or runner, runner offline or out of date, no AI model, refused starts
  *   watch: phone-shaped picture, activity line, counters, calm list of what was skipped, Stop exploring, the last picture kept
  *   plan: found sentence, per kind and per idea edits, screens found, create, discard; then the tests as they appear and the Tests page
  *   the bar: keyboard only, 375 px without sideways scroll, 44 px targets, axe in light and dark, no retired word; screenshots in .scratch/phone-ai/shots
@@ -401,73 +401,6 @@ describe("start: the panel", () => {
     });
 });
 
-// ── start: the welcome page ───────────────────────────────────────────────────
-
-describe("start: the welcome page", () => {
-    it("the first card offers a website or API, or an Android app; an app is saved and the panel opens", async () => {
-        fake.projects.clear();
-        await visit("#/");
-        const card = page.getByRole("group", { name: "Ways to start", exact: true }).locator(".welcome-card").nth(0);
-        await pwExpect(card.getByRole("radio", { name: "A website or API" })).toBeChecked();
-        await pwExpect(card.getByLabel("Application URL")).toBeVisible();
-        expect(await page.getByRole("group", { name: "Ways to start", exact: true }).getByRole("heading", { level: 2 }).allTextContents()).toEqual(["Explore my app", "Record a test", "Start from tests I have"]);
-        await card.getByRole("radio", { name: "An Android app" }).check();
-        // Round 37: the project's name is typed (above the cards), never made from the app's package.
-        await page.getByLabel("Project name").fill("Shop app");
-        await pwExpect(card.getByLabel("App package")).toBeVisible();
-        expect(await card.getByLabel("Application URL").count()).toBe(0);
-        await pwExpect(card.getByTestId("ai-note")).toContainText("Android only");
-        await shot("welcome-android-light-1280");
-        // Nothing, then something that is not a package, then a package.
-        await card.getByRole("button", { name: "Explore my app", exact: true }).click();
-        await pwExpect(card).toContainText("Enter the app’s package name, for example com.example.shop.");
-        await card.getByLabel("App package").fill("shop");
-        await card.getByRole("button", { name: "Explore my app", exact: true }).click();
-        await pwExpect(card).toContainText("That doesn’t look like an app package. It has at least two parts joined by dots, for example com.example.shop.");
-        await pwExpect(card.getByLabel("App package")).toHaveAttribute("aria-invalid", "true");
-        expect(fake.called("POST", /^\/projects$/)).toEqual([]);
-        await card.getByLabel("App package").fill(APP);
-        await card.getByRole("button", { name: "Explore my app", exact: true }).click();
-        await pwExpect(page).toHaveURL(/#\/projects\/[^/]+\/settings\?section=mobile&start=phone/);
-        await pwExpect(dialog()).toBeVisible();
-        await pwExpect(dialog()).toContainText(`The AI will open ${APP}`);
-        const made = [...fake.projects.values()].at(-1)!;
-        expect(made.mobile).toMatchObject({ appPackage: APP });
-        expect(fake.called("PUT", /\/mobile-app$/).at(-1)!.body).toEqual({ appPackage: APP, iosBundleId: null });
-        // Nothing was explored yet: the person still has to press Start exploring.
-        expect(post(/test-generation$/)).toEqual([]);
-    });
-
-    it("an .apk file, with the package name, is uploaded before the app is saved", async () => {
-        fake.projects.clear();
-        await visit("#/");
-        const card = page.getByRole("group", { name: "Ways to start", exact: true }).locator(".welcome-card").nth(0);
-        await card.getByRole("radio", { name: "An Android app" }).check();
-        const apk = path.join(tmp, "shop.apk");
-        fs.writeFileSync(apk, "not really an app");
-        await page.getByLabel("Project name").fill("Shop app");
-        await card.getByLabel("App package").fill(APP);
-        await page.locator("#w-apk").setInputFiles(apk);
-        await pwExpect(card).toContainText("shop.apk");
-        await card.getByRole("button", { name: "Explore my app", exact: true }).click();
-        await pwExpect(page).toHaveURL(/section=mobile&start=phone/);
-        const made = [...fake.projects.values()].at(-1)!;
-        expect(made.mobile).toMatchObject({ apk: "shop.apk", appPackage: APP });
-        const seq = fake.requests.map((r) => `${r.method} ${r.path.replace(/\?.*$/, "").replace(/\/projects\/[^/]+/, "/projects/:id")}`);
-        expect(seq.lastIndexOf("POST /projects/:id/mobile-app/apk")).toBeLessThan(seq.lastIndexOf("PUT /projects/:id/mobile-app"));
-    });
-
-    it("without a usable AI key the Android choice says so and links to AI keys", async () => {
-        fake.projects.clear();
-        fake.config.llm = { provider: "anthropic", model: "unavailable", configured: false };
-        await visit("#/");
-        const card = page.getByRole("group", { name: "Ways to start", exact: true }).locator(".welcome-card").nth(0);
-        await card.getByRole("radio", { name: "An Android app" }).check();
-        await pwExpect(card).toContainText("Exploring a phone app uses your AI key.");
-        await pwExpect(card.getByRole("link", { name: "Open AI keys", exact: true })).toHaveAttribute("href", "#/settings#ai-keys");
-    });
-});
-
 // ── watch the phone ───────────────────────────────────────────────────────────
 
 /**
@@ -789,7 +722,7 @@ describe("the bar", () => {
         expect(post(new RegExp(`/projects/${p.id}/test-generation$`))).toHaveLength(1);
     });
 
-    it("every control is at least 44 px tall: the places, the buttons, the welcome choice, the switch and Stop", async () => {
+    it("every control is at least 44 px tall: the places, the buttons, the switch and Stop", async () => {
         const p = fake.addProject("Shop");
         fake.addAgent({ id: "a1", name: "Maya’s laptop" });
         await visit(startHash(p.id));
@@ -797,13 +730,6 @@ describe("the bar", () => {
         await tallEnough(dialog().getByRole("button", { name: "Start exploring", exact: true }), "Start exploring");
         await tallEnough(dialog().getByRole("button", { name: "Cancel", exact: true }), "Cancel");
         await tallEnough(dialog().locator("summary", { hasText: "Advanced options" }), "Advanced options");
-        fake.projects.clear();
-        await visit("#/");
-        const card = page.getByRole("group", { name: "Ways to start", exact: true }).locator(".welcome-card").nth(0);
-        for (const r of await card.locator("label.check").all()) await tallEnough(r, "a welcome choice");
-        await card.getByRole("radio", { name: "An Android app" }).check();
-        await tallEnough(card.getByLabel("App package"), "App package");
-        await tallEnough(card.getByRole("button", { name: "Explore my app", exact: true }), "Explore my app");
         const { p: q } = await exploring("Another");
         await visit(`#/projects/${q.id}`);
         await watchOn(true);
@@ -812,7 +738,7 @@ describe("the bar", () => {
         await tallEnough(panel().getByRole("button", { name: "Stop exploring", exact: true }), "Stop exploring");
     });
 
-    it("axe finds nothing in light or dark: the panel, the welcome choice, the watching page, the plan, the tests", async () => {
+    it("axe finds nothing in light or dark: the panel, the watching page, the plan, the tests", async () => {
         const p = fake.addProject("Shop");
         fake.addAgent({ id: "a1", name: "Maya’s laptop" });
         await axeBoth(async () => {
@@ -826,14 +752,6 @@ describe("the bar", () => {
             await pwExpect(dialog().getByText("No phone or emulator is ready")).toBeVisible();
         });
         fake.config = DEFAULT_CONFIG();
-        fake.projects.clear();
-        await axeBoth(async () => {
-            await visit("#/");
-            await page.getByRole("radio", { name: "An Android app" }).check();
-            await page.getByLabel("App package").fill("shop");
-            await page.getByRole("button", { name: "Explore my app", exact: true }).click();
-            await pwExpect(page.getByText("That doesn’t look like an app package.")).toBeVisible();
-        });
         const { p: w } = await exploring("Watched");
         await axeBoth(async () => {
             await visit(`#/projects/${w.id}`);
@@ -859,7 +777,7 @@ describe("the bar", () => {
         });
     });
 
-    it("at 375 px nothing scrolls sideways: the panel, the welcome choice, the plan, the tests", async () => {
+    it("at 375 px nothing scrolls sideways: the panel, the plan, the tests", async () => {
         const p = fake.addProject("Shop");
         fake.addAgent({ id: "a1", name: "Maya’s laptop with a very long name that goes on" });
         await narrow(async () => {
@@ -870,12 +788,6 @@ describe("the bar", () => {
             await settle("dark");
             await shot("start-dark-375");
             await settle(null);
-            fake.projects.clear();
-            await visit("#/");
-            await page.getByRole("radio", { name: "An Android app" }).check();
-            await pwExpect(page.getByLabel("App package")).toBeVisible();
-            await noOverflow();
-            await shot("welcome-android-light-375");
             const { p: q } = await planReady();
             await visit(`#/projects/${q.id}`);
             await planBox().locator("summary", { hasText: "Edit the plan" }).click();
@@ -917,10 +829,6 @@ describe("the bar", () => {
         await pwExpect(dialog().getByText("No phone or emulator is ready")).toBeVisible();
         await look("start panel, no device", "dialog[open]");
         fake.config = DEFAULT_CONFIG();
-        fake.projects.clear();
-        await visit("#/");
-        await page.getByRole("radio", { name: "An Android app" }).check();
-        await look("welcome, Android", ".content");
         const { p: w } = await exploring("Words");
         await visit(`#/projects/${w.id}`);
         await watchOn(true);

@@ -113,8 +113,8 @@ describe("the switch", () => {
     it("off: no Security nav, no testing-type choice, the section says it is off, Settings and the project tabs are as before", async () => {
         fake.enabled = false;
         const p = fake.addProject("Functional only", "functional");
-        await visit("#/new");
-        await pwExpect(page.getByRole("heading", { name: "Create a test project", exact: true })).toBeVisible();
+        await visit("#/create");
+        await pwExpect(page.getByRole("heading", { name: "Create a project", exact: true })).toBeVisible();
         const sidebar = page.getByRole("complementary", { name: "Main navigation" });
         await pwExpect(sidebar.locator(".nav-label").first()).toHaveText("Workspace");
         expect(await sidebar.getByRole("link", { name: "Security assessment", exact: true }).count()).toBe(0);
@@ -153,13 +153,13 @@ describe("the switch", () => {
 // ── testing type ──────────────────────────────────────────────────────────────
 
 describe("testing type", () => {
-    it("New project, Security assessment: a name, then Register application; the type is stored", async () => {
-        await visit("#/new");
+    it("Create a project, Security assessment: a name, then Register application; the type is stored", async () => {
+        await visit("#/create");
         const choice = page.getByTestId("testing-type");
         await pwExpect(choice.getByRole("radio", { name: /Functional testing/ })).toBeChecked();
         await choice.getByRole("radio", { name: /Security assessment/ }).check();
-        // The ways to start a functional project make room for the security one.
-        expect(await page.getByRole("heading", { name: "Explore my app", exact: true }).count()).toBe(0);
+        // The functional project's form makes room for the security one.
+        expect(await page.getByTestId("create-project").count()).toBe(0);
         await page.getByRole("button", { name: "Create project", exact: true }).click();
         await pwExpect(page.getByText("Enter a name for the project, for example the client’s name.", { exact: true })).toBeVisible();
         await page.getByLabel("Project name", { exact: true }).fill("Globex");
@@ -170,12 +170,20 @@ describe("testing type", () => {
         await pwExpect(page).toHaveURL(new RegExp(`#/projects/${id}/security/applications/new$`));
     });
 
-    it("New project, Both: whichever way the person starts, the new project also gets the security section", async () => {
-        await visit("#/new");
+    it("the old New project link with ?type=security opens Create a project with Security assessment chosen", async () => {
+        await visit("#/new?type=security");
+        await pwExpect(page).toHaveURL(/#\/create\?type=security$/);
+        await pwExpect(page.getByTestId("testing-type").getByRole("radio", { name: /Security assessment/ })).toBeChecked();
+    });
+
+    it("Create a project, Both: the new project also gets the security section", async () => {
+        await visit("#/create");
         await page.getByTestId("testing-type").getByRole("radio", { name: /^Both/ }).check();
-        await pwExpect(page.getByRole("heading", { name: "Start from tests I have", exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("create-project")).toBeVisible();
         await page.getByLabel("Project name", { exact: true }).fill("Initech");
-        await page.getByRole("button", { name: "Write a test by hand", exact: true }).click();
+        await page.getByLabel("Application URL", { exact: true }).fill("https://initech.example");
+        await page.getByRole("radio", { name: /^Code/ }).check();
+        await page.getByRole("button", { name: "Create project", exact: true }).click();
         await pwExpect.poll(() => fake.called("PUT", /testing-type$/).length).toBe(1);
         const id = [...fake.projects.values()].find((x) => x.name === "Initech")!.id;
         expect(fake.called("PUT", /testing-type$/)[0]!.body).toEqual({ testingType: "both" });
@@ -532,7 +540,7 @@ describe("overview, reports and roles", () => {
 
 describe("the bar: keyboard, phone width, targets, contrast", () => {
     it("keyboard only: choose the testing type with arrow keys; start an assessment with Enter", async () => {
-        await visit("#/new");
+        await visit("#/create");
         const functional = page.getByTestId("testing-type").getByRole("radio", { name: /Functional testing/ });
         await functional.focus();
         await page.keyboard.press("ArrowDown");
@@ -563,7 +571,7 @@ describe("the bar: keyboard, phone width, targets, contrast", () => {
                 await page.waitForTimeout(300);
                 await noOverflow();
             }
-            await visit("#/new");
+            await visit("#/create");
             await pwExpect(page.getByTestId("testing-type")).toBeVisible();
             await noOverflow();
             for (const name of [/Functional testing/, /Security assessment/, /^Both/]) await tall(page.getByTestId("testing-type").locator("label.check").filter({ has: page.getByRole("radio", { name }) }), `the ${name} choice`);
@@ -603,7 +611,7 @@ describe("the bar: keyboard, phone width, targets, contrast", () => {
             `#/projects/${p.id}/security/findings/new`,
             `#/projects/${p.id}/security/reports`,
             "#/security",
-            "#/new",
+            "#/create",
             `#/projects/${fn.id}/settings?section=general`,
         ]) {
             await axeBoth(async () => {

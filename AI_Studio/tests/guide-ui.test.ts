@@ -3,7 +3,7 @@
  * the "See how" lines, and the usual bar (keyboard, phone width, touch targets, axe in light and dark).
  *
  * The platform underneath is real (seeded through the repo; the page talks to it over HTTP). The one thing stood in for is the
- * empty projects list, to reach the first-run welcome page and the tour with no project, which a seeded platform cannot show.
+ * empty projects list, to reach the empty Projects page and the tour with no project, which a seeded platform cannot show.
  * Ports: 8799 platform + UI.
  *
  * Requires web/dist (build inside the browser lock):
@@ -170,7 +170,8 @@ async function targets(scope: string, label: string) {
 function everyPlace(): Array<[string, PlaceId]> {
     return [
         [routes.home, "projects"],
-        [routes.newProject(), "new-project"],
+        [routes.createProject, "new-project"],
+        [routes.newProject({ project: P() }), "explore-again"],
         [routes.project(P()), "overview"],
         [routes.cases(P()), "tests"],
         [routes.runs(P(), "runs"), "runs-runs"],
@@ -240,13 +241,14 @@ describe("the Help button and panel", () => {
         }
     }, 240_000);
 
-    it("shows the first-run welcome page's own help, and the plan's, even though their address is the projects list's", async () => {
+    it("the empty Projects page shows the Projects place's help (there is no separate first-run page)", async () => {
         await page.route(PROJECT_LIST, noProjects);
         try {
             await visit(routes.home);
+            await pwExpect(page.getByTestId("first-project")).toBeVisible();
             await openHelp();
-            expect(norm(await panel().innerText())).toContain(norm(PLACES.welcome.what));
-            await shot("welcome-panel");
+            expect(norm(await panel().innerText())).toContain(norm(PLACES.projects.what));
+            await shot("first-project-panel");
         } finally {
             await page.unroute(PROJECT_LIST);
         }
@@ -526,7 +528,7 @@ describe("See how lines", () => {
         await pwExpect(panel()).toHaveCount(0);
     });
 
-    it("the first-run welcome page has one too", async () => {
+    it("the empty Projects page has one too", async () => {
         await page.route(PROJECT_LIST, noProjects);
         try {
             await visit(routes.home);
@@ -624,7 +626,7 @@ describe("the Guide page", () => {
         try {
             await visit(routes.guideTopic("schedules"));
             await pwExpect(page.getByText("you have none yet")).toBeVisible();
-            await pwExpect(page.getByRole("link", { name: "Start a project" })).toBeVisible();
+            await pwExpect(page.getByRole("link", { name: "Create a project" })).toHaveAttribute("href", "#/create");
         } finally {
             await page.unroute(PROJECT_LIST);
         }

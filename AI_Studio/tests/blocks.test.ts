@@ -181,7 +181,7 @@ describe("tests that use a block", () => {
         // the script has the block's steps with the value filled in, and no trace of the block
         const sa = await script("A");
         expect(sa).toContain("Grace");
-        expect(sa).toContain('getByLabel("Nickname")');
+        expect(sa).toContain('labelledField(page, "Nickname", false, false)');
         expect(sa).not.toMatch(/useBlock|reusable/i);
         expect(await script("B")).toContain("Ada");
         // the run's step results follow the steps that ran; the page gets them with the stored step each belongs to

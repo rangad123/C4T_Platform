@@ -1,5 +1,5 @@
 /**
- * UX-E in a real browser: the first run. Three equal ways to start, a plan to read before anything is created, tests appearing
+ * UX-E in a real browser: the first run. The Projects page with Create a project, a plan to read before anything is created, tests appearing
  * as they are made, and a list of next steps that ticks itself, plus the usual bar (keyboard, phone width, touch targets, axe in
  * light and dark).
  *
@@ -204,146 +204,63 @@ const runAnswer = (projectId: string, job: Record<string, unknown>, tests: Array
 // ── the first screen ────────────────────────────────────────────────────────
 
 describe("the first screen", () => {
-    it("a first visit offers three equal ways to start, says what each does, and keeps the short explainer", async () => {
+    it("a first visit is the Projects page with one card: Create a project, which opens the current Create a project page", async () => {
         await visit("");
-        await pwExpect(page.getByRole("heading", { name: "Test any web application automatically", level: 1 })).toBeVisible();
-        const group = page.getByRole("group", { name: "Ways to start", exact: true });
-        const names = await group.getByRole("heading", { level: 2 }).allTextContents();
-        expect(names).toEqual(["Explore my app", "Record a test", "Start from tests I have"]);
-        // Said before anything is done: what it uses, what it needs, and that nothing is created without a yes.
-        await pwExpect(group).toContainText("Nothing is created or run until you say so.");
-        await pwExpect(page.getByTestId("ai-note")).toContainText("Uses your AI key");
-        await pwExpect(group).not.toContainText("isn’t set up");
-        await pwExpect(group.getByText("No AI needed.", { exact: false })).toHaveCount(2);
-        await pwExpect(page.getByText("2. We explore and show a plan")).toBeVisible();
-        // The cards are siblings of equal width, in one row on a wide screen.
-        const boxes = await group.locator(".welcome-card").evaluateAll((els) => els.map((e) => e.getBoundingClientRect()));
-        expect(boxes.length).toBe(3);
-        expect(Math.abs(boxes[0]!.width - boxes[1]!.width)).toBeLessThan(2);
-        expect(Math.abs(boxes[1]!.width - boxes[2]!.width)).toBeLessThan(2);
-        expect(boxes[0]!.top).toBeCloseTo(boxes[2]!.top, 0);
-        await shot("welcome-light-1280");
+        await pwExpect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
+        const first = page.getByTestId("first-project");
+        await pwExpect(first.getByRole("link", { name: "Create a project", exact: true })).toHaveAttribute("href", "#/create");
+        await pwExpect(page.getByText("Test any web application automatically")).toHaveCount(0);
+        await pwExpect(page.getByRole("group", { name: "Ways to start" })).toHaveCount(0);
+        await shot("first-project-light-1280");
+        await first.getByRole("link", { name: "Create a project", exact: true }).click();
+        await pwExpect(page.getByRole("heading", { name: "Create a project", level: 1 })).toBeVisible();
+        await pwExpect(page.getByRole("group", { name: "Testing mode" })).toBeVisible();
     });
 
-    it("without a usable AI key the first card says so plainly and links to AI keys; the other two still work", async () => {
-        await page.route("**/api/me/ai", async (route) => {
-            const real = await (await route.fetch()).json();
-            await route.fulfill({ json: { ...real, openServer: { ...(real.openServer ?? { provider: "anthropic", model: "unavailable" }), configured: false } } });
-        });
+    it("the old New project address opens Create a project, keeping an address it was given; Explore again stays on #/new?project=", async () => {
+        await visit("#/new");
+        await pwExpect(page).toHaveURL(/#\/create$/);
+        await pwExpect(page.getByRole("heading", { name: "Create a project", level: 1 })).toBeVisible();
+        await visit(`#/new?url=${encodeURIComponent(SITE)}`);
+        await pwExpect(page).toHaveURL(/#\/create\?url=/);
+        await pwExpect(page.getByLabel("Application URL")).toHaveValue(SITE);
+        const pid = (await api("POST", "/api/projects", { name: "Explore target", platforms: ["web"], testingModes: ["agent"] })).body.id as string;
+        await visit(`#/new?project=${pid}`);
+        await pwExpect(page).toHaveURL(new RegExp(`#/new\\?project=${pid}$`));
+        await pwExpect(page.getByRole("heading", { name: "Explore again", level: 1 })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "Explore again", exact: true })).toBeVisible();
+    });
+
+    it("the first screen: keyboard reaches Create a project, 375 px, 44 px target, axe in both themes", async () => {
+        // A project made above: the empty Projects page needs none, so the list is answered empty by the test.
+        const PROJECT_LIST = /\/api\/projects(\?[^/]*)?$/;
+        await page.route(PROJECT_LIST, (route) => route.fulfill({ json: new URL(route.request().url()).searchParams.has("limit") ? { projects: [], total: 0, limit: 20, offset: 0 } : [] }));
         try {
             await visit("");
-            const explore = page.getByRole("group", { name: "Ways to start" }).locator(".welcome-card").nth(0);
-            await pwExpect(explore.getByText("You have no usable AI key")).toBeVisible();
-            await pwExpect(explore.getByRole("link", { name: "Open AI keys", exact: true })).toHaveAttribute("href", "#/settings#ai-keys");
-            await pwExpect(page.getByTestId("ai-note")).toHaveCount(0);
-            await pwExpect(page.getByLabel("Address to start from")).toBeEnabled();
-            await pwExpect(page.getByRole("button", { name: "Record a test", exact: true })).toBeEnabled();
-            await pwExpect(page.getByRole("button", { name: "Import tests", exact: true })).toBeEnabled();
-            await shot("welcome-no-ai-light-1280");
+            const create = page.getByTestId("first-project").getByRole("link", { name: "Create a project", exact: true });
+            let reached = false;
+            for (let i = 0; i < 40 && !reached; i++) {
+                await page.keyboard.press("Tab");
+                reached = (await page.evaluate(() => (document.activeElement as HTMLElement | null)?.textContent?.trim())) === "Create a project";
+            }
+            expect(reached).toBe(true);
+            const ring = await create.evaluate((el) => getComputedStyle(el).outlineStyle + "|" + getComputedStyle(el).boxShadow);
+            expect(ring).not.toBe("none|none");
+            await tallEnough(create, "Create a project");
+            await axeBoth(async () => {
+                await visit("");
+            });
+            await page.setViewportSize({ width: 375, height: 800 });
+            try {
+                await visit("");
+                await page.waitForTimeout(300);
+                await noOverflow();
+                await shot("first-project-light-375");
+            } finally {
+                await page.setViewportSize({ width: 1280, height: 900 });
+            }
         } finally {
-            await page.unroute("**/api/me/ai");
-        }
-    });
-
-    it("a bad address is refused in plain words, and Choose what to test first opens the options with a way back", async () => {
-        await visit("");
-        await page.getByLabel("Application URL").fill("notaurl");
-        await page.getByRole("button", { name: "Explore my app", exact: true }).click();
-        await pwExpect(page.getByText("That doesn’t look like a complete address")).toBeVisible();
-        await pwExpect(page.getByLabel("Application URL")).toHaveAttribute("aria-invalid", "true");
-
-        await page.getByLabel("Application URL").fill(SITE);
-        await page.getByRole("button", { name: "Choose what to test first" }).click();
-        await pwExpect(page.getByLabel("Application URL")).toHaveValue(SITE);
-        await pwExpect(page.getByRole("button", { name: "Start exploring", exact: true })).toBeVisible();
-        // Round 38: no Advanced options; Focus is the one optional field, and the agents' inputs are kept on the Requirements tab.
-        await pwExpect(page.locator("summary", { hasText: "Advanced options" })).toHaveCount(0);
-        await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
-        await pwExpect(page.getByRole("group", { name: "Ways to start" })).toHaveCount(0);
-        await page.getByRole("button", { name: "Back", exact: true }).click();
-        await pwExpect(page.getByRole("group", { name: "Ways to start" })).toBeVisible();
-        await pwExpect(page.getByLabel("Application URL")).toHaveValue(SITE);
-    });
-
-    it("Record a test makes a project and opens the recorder with the address ready", async () => {
-        await visit("");
-        await page.getByLabel("Address to start from").fill(`127.0.0.1:${SITE_PORT}`);
-        // Round 37: the project's name is typed, never made from the address.
-        await page.getByRole("button", { name: "Record a test", exact: true }).click();
-        await pwExpect(page.getByText("Give the project a name.")).toBeVisible();
-        await page.getByLabel("Project name").fill("Recorded shop");
-        await page.getByRole("button", { name: "Record a test", exact: true }).click();
-        await page.waitForURL((u) => /^#\/projects\/[^/]+\/record\?url=/.test(u.hash));
-        await pwExpect(page.getByRole("heading", { name: "Record a test", level: 1 })).toBeVisible();
-        await pwExpect(page.getByLabel("Address to start from")).toHaveValue(`${SITE}/`);
-        const projects = (await api("GET", "/api/projects")).body as Array<{ name: string; test_count: number }>;
-        expect(projects.map((p) => p.name)).toEqual(["Recorded shop"]);
-        expect(projects[0]!.test_count).toBe(0);
-    });
-
-    it("on the New project page the same three cards open the import chooser and the Tests page", async () => {
-        await visit("#/new");
-        await pwExpect(page.getByRole("heading", { name: "Create a test project", level: 1 })).toBeVisible();
-        await pwExpect(page.getByRole("group", { name: "Ways to start" })).toBeVisible();
-        await pwExpect(page.getByRole("link", { name: "Cancel", exact: true })).toHaveAttribute("href", "#/");
-
-        await page.getByLabel("Project name").fill("Existing suite");
-        await page.getByRole("button", { name: "Import tests", exact: true }).click();
-        await page.waitForURL((u) => /^#\/projects\/[^/]+\/scripts\?start=import$/.test(u.hash));
-        await pwExpect(page.getByRole("dialog", { name: "Import tests" })).toBeVisible();
-        await pwExpect(page.getByRole("button", { name: "Choose a JSON file" })).toBeVisible();
-        await page.keyboard.press("Escape");
-
-        await visit("#/new");
-        await page.getByLabel("Project name").fill("Written by hand");
-        await page.getByRole("button", { name: "Write a test by hand", exact: true }).click();
-        await page.waitForURL((u) => /^#\/projects\/[^/]+\/scripts$/.test(u.hash));
-        await pwExpect(page.getByRole("heading", { name: "No test scripts yet" })).toBeVisible();
-        await pwExpect(page.getByRole("button", { name: "New test script", exact: true }).first()).toBeVisible();
-        const names = ((await api("GET", "/api/projects")).body as Array<{ name: string }>).map((p) => p.name).sort();
-        expect(names).toEqual(["Recorded shop", "Existing suite", "Written by hand"].sort());
-    });
-
-    it("the first screen: keyboard path, 375 px, 44 px targets, axe in both themes", async () => {
-        // A first visit needs an empty platform: the cards are the same component on the New project page, which is audited here.
-        await visit("#/new");
-        await page.getByLabel("Application URL").focus();
-        const focused = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.textContent?.trim() || (document.activeElement as HTMLInputElement | null)?.id || "");
-        const order: string[] = [];
-        for (let i = 0; i < 8; i++) {
-            await page.keyboard.press("Tab");
-            order.push(await focused());
-        }
-        // The first card is reached first, then the second and third in order: every action is on the keyboard path.
-        expect(order.slice(0, 2)).toEqual(["Explore my app", "Choose what to test first"]);
-        expect(order).toContain("Record a test");
-        expect(order).toContain("Import tests");
-        expect(order.indexOf("Record a test")).toBeLessThan(order.indexOf("Import tests"));
-        // The focus is visible.
-        await page.getByRole("button", { name: "Explore my app" }).focus();
-        const ring = await page.getByRole("button", { name: "Explore my app" }).evaluate((el) => getComputedStyle(el).outlineStyle + "|" + getComputedStyle(el).boxShadow);
-        expect(ring).not.toBe("none|none");
-        for (const [what, loc] of [
-            ["Explore my app", page.getByRole("button", { name: "Explore my app", exact: true })],
-            ["Record a test", page.getByRole("button", { name: "Record a test", exact: true })],
-            ["Import tests", page.getByRole("button", { name: "Import tests", exact: true })],
-            ["Application URL", page.getByLabel("Application URL")],
-        ] as const) await tallEnough(loc, what);
-        await axeBoth(async () => {
-            await visit("#/new");
-        });
-        await page.setViewportSize({ width: 375, height: 800 });
-        try {
-            await visit("#/new");
-            await page.waitForTimeout(300);
-            await noOverflow();
-            await shot("welcome-light-375");
-            await page.emulateMedia({ colorScheme: "dark" });
-            await page.waitForTimeout(400);
-            await shot("welcome-dark-375");
-            await page.emulateMedia({ colorScheme: null });
-        } finally {
-            await page.setViewportSize({ width: 1280, height: 900 });
+            await page.unroute(PROJECT_LIST);
         }
         expect(consoleErrors).toEqual([]);
     });
@@ -356,13 +273,13 @@ describe("explore, then a plan, then the tests (real jobs, scripted model)", () 
     let planJob = "";
     let before: any;
 
-    it("Explore my app: progress in words with Stop, and no run phase listed", async () => {
-        await visit("#/new");
-        await page.getByLabel("Project name").fill("Explored shop");
+    it("Exploring: progress in words with Stop, and no run phase listed", async () => {
+        // Round 37: the project is made on Create a project; exploring is a step on it (Start exploring opens `#/new?project=`).
+        projectId = (await api("POST", "/api/projects", { name: "Explored shop", platforms: ["web"], testingModes: ["agent"] })).body.id as string;
+        await visit(`#/new?project=${projectId}`);
         await page.getByLabel("Application URL").fill(SITE);
-        await page.getByRole("button", { name: "Explore my app", exact: true }).click();
-        await page.waitForURL((u) => /^#\/projects\/[^/]+$/.test(u.hash));
-        projectId = page.url().split("/projects/")[1]!;
+        await page.getByRole("button", { name: "Explore again", exact: true }).click();
+        await page.waitForURL((u) => u.hash === `#/projects/${projectId}`);
         await pwExpect(page.getByRole("heading", { name: "Exploring your application" })).toBeVisible({ timeout: 20_000 });
         // The visible sentence on the page (the job badge's closed tooltip says it too, hidden, and must not count).
         await pwExpect(page.locator("p").filter({ hasText: "Nothing is created yet." })).toBeVisible();

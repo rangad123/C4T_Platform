@@ -62,6 +62,7 @@ import { registerRunnerUpdateRoutes } from "./runner-updates.js";
 import { registerRunRoutes } from "./runs.js";
 import { registerScheduleRoutes } from "./schedules.js";
 import { registerSuiteRoutes } from "./suites.js";
+import { registerTestManageRoutes } from "./test-manage.js";
 import type { RouteCtx } from "./types.js";
 import { registerVariantRoutes } from "./variants.js";
 import { registerWebPageRoutes } from "./web-pages.js";
@@ -136,6 +137,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerRunRoutes(ctx);
     // Test suites a person builds: ordered tests, how they run, runs and schedules (routes/suites.ts).
     registerSuiteRoutes(ctx);
+    // Renaming, deleting and ordering the project's test scripts (routes/test-manage.ts).
+    registerTestManageRoutes(ctx);
     registerAgentRunRoutes(ctx);
     // Review and approval of test versions, the scripts list and the review queue (routes/reviews.ts).
     registerReviewRoutes(ctx);

@@ -55,17 +55,17 @@ afterAll(async () => {
 describe("the new-project form", () => {
     it("has no load check toggle: an exploration never sends load unless asked for through the API, and the job stores it off", async () => {
         const dead = "http://127.0.0.1:5555/";
-        await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
-        await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
-        // Round 37: a new project's name is always typed.
-        await page.getByLabel("Project name").fill("Load project 1");
+        // Round 37: a project is made on Create a project; exploring is a step on an existing project (`#/new?project=`).
+        const made = platform.repo.createProject({ name: "Load project 1", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await page.goto(`${BASE}/#/new?project=${made}`);
+        await page.getByLabel("Application URL").fill(dead);
         await pwExpect(page.getByRole("checkbox", { name: /Load check \(test environments only\)/ })).toHaveCount(0);
         const sent: Array<Record<string, unknown>> = [];
         await page.route("**/api/projects/*/test-generation", (route) => {
             sent.push(route.request().postDataJSON());
             return route.continue();
         });
-        await page.getByRole("button", { name: "Start exploring" }).click();
+        await page.getByRole("button", { name: "Explore again" }).click();
         await page.waitForURL((u) => u.hash.startsWith("#/projects/"));
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]).not.toHaveProperty("loadChecks");

@@ -170,17 +170,17 @@ describe("New project form", () => {
     it("an untouched AI screen review box sends nothing: the level decides, and thorough leaves it off", async () => {
         // A port nothing listens on: the job is accepted (and its options stored) but ends at once.
         const dead = "http://127.0.0.1:5479/";
-        await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
-        await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
-        // Round 37: a new project's name is always typed.
-        await page.getByLabel("Project name").fill("Vision project 1");
+        // Round 37: a project is made on Create a project; exploring is a step on an existing project (`#/new?project=`).
+        const made = platform.repo.createProject({ name: "Vision project 1", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await page.goto(`${BASE}/#/new?project=${made}`);
+        await page.getByLabel("Application URL").fill(dead);
         await pwExpect(page.getByRole("checkbox", { name: /AI screen review/ })).not.toBeChecked();
         const sent: Array<Record<string, unknown>> = [];
         await page.route("**/api/projects/*/test-generation", (route) => {
             sent.push(route.request().postDataJSON());
             return route.continue();
         });
-        await page.getByRole("button", { name: "Start exploring" }).click();
+        await page.getByRole("button", { name: "Explore again" }).click();
         await page.waitForURL((u) => u.hash.startsWith("#/projects/"));
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]!.visionChecks).toBeUndefined();

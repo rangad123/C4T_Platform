@@ -17,7 +17,7 @@ export function whereToHref(where: WhereTo, projectId: string | null | undefined
         case "projects":
             return routes.home;
         case "new-project":
-            return routes.newProject();
+            return routes.createProject;
         case "settings":
             return routes.settings;
     }

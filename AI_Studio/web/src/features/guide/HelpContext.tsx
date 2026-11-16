@@ -73,7 +73,7 @@ export function useHelp(): HelpApi {
     return useContext(Ctx) ?? OFF;
 }
 
-/** A page that is more specific than its address (the first-run welcome, the plan) says so, so Help shows the right text. */
+/** A page that is more specific than its address (the plan) says so, so Help shows the right text. */
 export function useHelpPlace(place: PlaceId): void {
     const { setOverride } = useHelp();
     useEffect(() => {

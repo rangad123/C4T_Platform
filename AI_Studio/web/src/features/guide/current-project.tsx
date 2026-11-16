@@ -72,7 +72,7 @@ export function OpenInApp({ label, to, size = "md" }: { label: string; to: Where
     if (projects.length === 0)
         return (
             <p className="t-secondary">
-                This part of the app is inside a project, and you have none yet. <a href={routes.newProject()}>Start a project</a> first.
+                This part of the app is inside a project, and you have none yet. <a href={routes.createProject}>Create a project</a> first.
             </p>
         );
     const chosen = projects.length === 1 ? projects[0]!.id : picked;

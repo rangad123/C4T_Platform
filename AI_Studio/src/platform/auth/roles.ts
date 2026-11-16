@@ -133,6 +133,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id": "read",
     "POST /api/projects/:id/test-generation": "ai_studio.tests.generate",
     "GET /api/projects/:id/tests": "read",
+    // Ordering the project's scripts (routes/test-manage.ts): the list, review and "run all" follow it.
+    "PUT /api/projects/:id/tests/order": "ai_studio.tests.write",
     "GET /api/projects/:id/suites": "read",
     // Test suites a person builds (routes/suites.ts): reading is access, changing is tests.write, running is tests.run.
     "GET /api/projects/:id/agent-runs": "read",
@@ -428,6 +430,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
 
     // ── one test ──
     "GET /api/tests/:id": "read",
+    "PATCH /api/tests/:id": "ai_studio.tests.write",
+    "DELETE /api/tests/:id": "ai_studio.tests.delete",
     "POST /api/tests/:id/baseline": "ai_studio.tests.write",
     "POST /api/tests/:id/validate": "ai_studio.tests.run",
     "POST /api/tests/:id/variants": "ai_studio.tests.run",

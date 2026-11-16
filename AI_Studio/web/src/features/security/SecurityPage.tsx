@@ -68,7 +68,7 @@ export function SecurityHome() {
         };
     }, [projects.data]);
     const newProject = canRun(role) ? (
-        <LinkButton href={`${routes.newProject()}?type=security`} variant="primary" icon={Plus}>
+        <LinkButton href={`${routes.createProject}?type=security`} variant="primary" icon={Plus}>
             New security project
         </LinkButton>
     ) : null;

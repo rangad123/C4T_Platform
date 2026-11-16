@@ -156,10 +156,10 @@ describe("New project form", () => {
     it("has no check list: the exploration runs the usual checks, page health and basic security among them", async () => {
         // A port nothing listens on: the job is accepted (and its options stored) but ends at once.
         const dead = "http://127.0.0.1:5229/";
-        await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
-        await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
-        // Round 37: a new project's name is always typed (a taken name is refused, so each form gets its own).
-        await page.getByLabel("Project name").fill("Checks project 1");
+        // Round 37: a project is made on Create a project; exploring is a step on an existing project (`#/new?project=`).
+        const made = platform.repo.createProject({ name: "Checks project 1", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await page.goto(`${BASE}/#/new?project=${made}`);
+        await page.getByLabel("Application URL").fill(dead);
         await pwExpect(page.getByRole("checkbox", { name: /Page health checks/ })).toHaveCount(0);
         await pwExpect(page.getByRole("checkbox", { name: /Basic security checks/ })).toHaveCount(0);
         await shot("new-project-options");
@@ -169,7 +169,7 @@ describe("New project form", () => {
             sent.push(route.request().postDataJSON());
             return route.continue();
         });
-        await page.getByRole("button", { name: "Start exploring" }).click();
+        await page.getByRole("button", { name: "Explore again" }).click();
         await page.waitForURL((u) => u.hash.startsWith("#/projects/"));
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]).not.toHaveProperty("healthChecks");

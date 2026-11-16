@@ -120,7 +120,8 @@ describe("place help covers every place in the router", () => {
     const expected: Array<[string, PlaceId]> = [
         [routes.home, "projects"],
         [routes.newProject(), "new-project"],
-        [routes.newProject({ project: "p1" }), "new-project"],
+        [routes.createProject, "new-project"],
+        [routes.newProject({ project: "p1" }), "explore-again"],
         [routes.project("p1"), "overview"],
         // Round 38: the runnable tests are the Test scripts list; Test cases holds the written cases.
         [routes.tests("p1"), "scripts"],
@@ -290,7 +291,7 @@ describe("WhereTo opens the right place", () => {
     const P = "p1";
     const cases: Array<[WhereTo, string | null, string | null]> = [
         [{ place: "projects" }, routes.home, routes.home],
-        [{ place: "new-project" }, routes.newProject(), routes.newProject()],
+        [{ place: "new-project" }, routes.createProject, routes.createProject],
         [{ place: "settings" }, routes.settings, routes.settings],
         [{ place: "overview" }, null, routes.project(P)],
         [{ place: "tests" }, null, routes.tests(P)],

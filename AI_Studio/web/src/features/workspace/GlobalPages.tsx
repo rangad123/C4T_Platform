@@ -72,7 +72,7 @@ export function TestDevelopmentPage() {
                 <ErrorState error={friendlyError(projects.error.message)} onRetry={projects.reload} />
             ) : (projects.data ?? []).length === 0 ? (
                 <div className="card">
-                    <EmptyState icon={FolderKanban} title="No projects yet" actions={can("ai_studio.project.create") ? <LinkButton variant="primary" href={routes.newProject()}>Create a project</LinkButton> : undefined}>
+                    <EmptyState icon={FolderKanban} title="No projects yet" actions={can("ai_studio.project.create") ? <LinkButton variant="primary" href={routes.createProject}>Create a project</LinkButton> : undefined}>
                         Tests belong to a project. {can("ai_studio.project.create") ? "Create one first." : "Ask a Project Admin to add you to one."}
                     </EmptyState>
                 </div>

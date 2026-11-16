@@ -79,7 +79,7 @@ describe("remembered values", () => {
             { action: "assert", check: "text", locator: { by: "testId", value: "line" }, expected: "{{price}}" },
         ]);
         expect(s).toContain('data["price"] = (await page.getByTestId("price").innerText()).replace(/\\s+/g, " ").trim();');
-        expect(s).toContain('data["mail"] = await page.getByLabel("Email").inputValue();');
+        expect(s).toContain('data["mail"] = await (await labelledField(page, "Email", false, false)).inputValue();');
         expect(s).toContain('toHaveText(recalled("price"));');
         expect(s).toContain('await expect.poll(async () => numberIn(await page.getByTestId("total").innerText()), { message: "Verify testId \\"total\\" is greater than the remembered {{price}}" }).toBeGreaterThan(numberIn(recalled("price")));');
         expect(s).toContain('toContainText(`${data["price"] ?? ""}`);');

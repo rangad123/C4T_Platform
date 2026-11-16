@@ -29,10 +29,15 @@ dialog.write-test { width: min(640px, calc(100vw - 32px)); }
 .req-chip:hover { text-decoration: underline; }
 .sr-status { display: grid; gap: 4px; justify-items: start; min-width: 0; }
 .sr-review { font-size: var(--type-caption-size); color: var(--status-warning-fg); }
+/* A person who may change scripts gets Move up, Move down and a menu (Rename, Delete) in place of the arrow at the row's end. */
+.script-head.can-manage, .list-row.script-row.can-manage { grid-template-columns: 44px 88px minmax(0, 1fr) 124px minmax(88px, 150px) minmax(132px, 190px) 112px; }
+.sr-actions { display: inline-flex; gap: 4px; align-items: center; justify-content: flex-end; }
 @media (max-width: 860px) {
     .script-head { display: none; }
     .list-row.script-row { grid-template-columns: 44px minmax(0, 1fr); row-gap: 8px; }
-    .script-row > .sr-id, .script-row > .main, .script-row > .sr-views, .script-row > .sr-reqs, .script-row > .sr-status { grid-column: 2; }
+    .list-row.script-row.can-manage { grid-template-columns: 44px minmax(0, 1fr); }
+    .script-row > .sr-id, .script-row > .main, .script-row > .sr-views, .script-row > .sr-reqs, .script-row > .sr-status, .script-row > .sr-actions { grid-column: 2; }
+    .script-row > .sr-actions { justify-content: flex-start; }
     .script-row > .chev { display: none; }
 }
 

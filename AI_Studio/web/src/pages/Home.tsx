@@ -1,8 +1,8 @@
-import { ChevronLeft, ChevronRight, Folder, LayoutDashboard, List, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Folder, FolderPlus, LayoutDashboard, List, Search } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NewProjectLink } from "../components/NewProjectLink";
 import { PLATFORM_WORDS, projectKind, projectShape, type Platform, type ProjectKind, type ProjectPage, type ProjectRow } from "../api";
-import { Badge, Button, ErrorState, JobBadge, LinkButton, ListSkeleton, PageHeader, Ribbon, jobKey, type Tick } from "../components/ui";
+import { Badge, Button, Callout, ErrorState, JobBadge, LinkButton, ListSkeleton, PageHeader, Ribbon, jobKey, type Tick } from "../components/ui";
 import { BadgeKey } from "../components/Tooltip";
 import { jobHelp } from "../lib/help";
 import { usePage } from "../components/Shell";
@@ -10,7 +10,11 @@ import { hostOf, plural, relativeTime } from "../lib/format";
 import { friendlyError, isActive } from "../lib/labels";
 import { useDocumentTitle, useFetch } from "../lib/hooks";
 import { routes, useRoute } from "../lib/router";
-import { NewProject } from "./NewProject";
+import { useCan } from "../features/auth/permissions";
+import { aiProblemOf, aiReadyOf, useMyAi } from "../features/aiconfig/aiconfig";
+import { useReadiness } from "../features/runners/my-runner";
+import { RunnerNotReady } from "../features/runs/RunnerNotReady";
+import { SeeHow } from "../features/guide/SeeHow";
 import type { FoldersAnswer } from "../features/workspace/FoldersPage";
 import { KIND_HELP, KIND_WORDS, KindTile, PlatformMark, ProjectTags, shortAgentName, type TagAgent } from "../components/ProjectKind";
 import { AgentAvatar, type AgentId, type AgentList } from "../features/testing-agents/testing-agents";
@@ -81,8 +85,8 @@ export function Home() {
     const total = Array.isArray(data) ? data.length : (data?.total ?? 0);
     const filtering = showArchived || q !== "" || folder !== "all";
     if (error && !data) return <ErrorState error={friendlyError(error.message)} onRetry={reload} />;
-    // First visit: the whole page is the one thing to do.
-    if (!loading && data && total === 0 && !filtering && page === 1) return <NewProject welcome />;
+    // No project yet (a first visit, or someone not added to any project): the Projects page itself, with one card that says what to do.
+    const firstRun = !loading && Boolean(data) && total === 0 && !filtering && page === 1;
     const folderList = folders.data?.folders ?? [];
     const pages = all ? 1 : Math.max(1, Math.ceil(total / PROJECTS_PAGE_SIZE));
     const row = (p: ProjectRow) => <ProjectItem key={p.id} p={p} agents={agentsOf.get(p.id)} names={agentNames} />;
@@ -151,9 +155,11 @@ export function Home() {
                 }
                 actions={<NewProjectLink />}
             />
-            {tools}
+            {!firstRun && tools}
             {loading && !data ? (
                 <ListSkeleton rows={3} />
+            ) : firstRun ? (
+                <FirstProject />
             ) : rows.length === 0 ? (
                 <p className="t-secondary card card-pad">{page > 1 && total > 0 ? <>There is no page {page}. <a href={projectsPageHref(1)}>Go to the first page</a>.</> : filtering ? "No projects match. Clear the search or the folder to see every project." : "No projects here."}</p>
             ) : (
@@ -185,6 +191,45 @@ export function Home() {
             )}
             {rows.length > 0 && <Legend agents={(catalogue.data?.agents ?? []).map((a) => ({ id: a.id, name: shortAgentName(a.name), available: a.available }))} />}
         </>
+    );
+}
+
+/**
+ * The Projects page with no project: create one (Create a project asks the platform, testing mode and agents), or ask to be added.
+ * What is still missing before tests can run (an AI key, the person's runner) is said here with where it is fixed.
+ */
+function FirstProject() {
+    const can = useCan();
+    const myAi = useMyAi().data;
+    const ready = useReadiness();
+    const create = can("ai_studio.project.create");
+    return (
+        <div className="stack" data-testid="first-project">
+            <div className="card">
+                {/* EmptyState's markup with an h2: this card sits right under the page's h1. */}
+                <div className="empty">
+                    <div className="icon-wrap">
+                        <FolderPlus size={22} aria-hidden />
+                    </div>
+                    <h2 className="t-section">No projects yet</h2>
+                    <p>{create ? "One project is one application you test: a website, an Android app or an iPhone app, tested by AI agents or with code." : "You have not been added to a project yet. Ask your Crowd4Test administrator, or a Project Admin of an existing project, to add you."}</p>
+                    {create && (
+                        <div className="actions">
+                            <LinkButton variant="primary" icon={FolderPlus} href={routes.createProject}>
+                                Create a project
+                            </LinkButton>
+                        </div>
+                    )}
+                    <SeeHow topic="first-steps" query="start in 10 minutes" />
+                </div>
+            </div>
+            {aiReadyOf(myAi) === false && (
+                <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.aiKeys}>Open AI keys</LinkButton>}>
+                    {aiProblemOf(myAi)} Exploring with AI agents needs it; running test scripts does not.
+                </Callout>
+            )}
+            {!ready.loading && <RunnerNotReady reason={ready.reason} />}
+        </div>
     );
 }
 

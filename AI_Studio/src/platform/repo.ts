@@ -347,6 +347,15 @@ const toTestFields = (r: Row): Omit<TestRow, "spec" | "unreadable"> => ({
     updatedAt: r.updated_at,
 });
 
+/** Where a person put a test in the project's list (Repo.orderTests); a test without one goes after those that have one. */
+const LIST_POSITION = "listPosition";
+const listPositionOf = (meta: Record<string, unknown> | null): number => (typeof meta?.[LIST_POSITION] === "number" ? (meta[LIST_POSITION] as number) : Number.POSITIVE_INFINITY);
+const byListPosition = (a: { generationMeta: Record<string, unknown> | null }, b: { generationMeta: Record<string, unknown> | null }): number => {
+    const pa = listPositionOf(a.generationMeta);
+    const pb = listPositionOf(b.generationMeta);
+    return pa === pb ? 0 : pa < pb ? -1 : 1;
+};
+
 const TEST_SELECT = `SELECT t.*, s.name AS suite_name FROM test_cases t JOIN test_suites s ON s.id = t.suite_id`;
 
 export class Repo {
@@ -867,7 +876,8 @@ export class Repo {
         if (patch.validationStatus) (sets.push("validation_status = ?"), vals.push(patch.validationStatus));
         if (patch.reason !== undefined) (sets.push("validation_reason = ?"), vals.push(patch.reason));
         if (patch.attempts !== undefined) (sets.push("attempts = ?"), vals.push(patch.attempts));
-        if (patch.meta) (sets.push("generation_meta_json = ?"), vals.push(JSON.stringify(patch.meta)));
+        // The place a person gave the test in the list (orderTests) is kept when the engine replaces what it noted about the test.
+        if (patch.meta) (sets.push("generation_meta_json = ?"), vals.push(JSON.stringify(this.keepListPosition(id, patch.meta))));
         this.db.run(`UPDATE test_cases SET ${sets.join(", ")} WHERE id = ?`, ...vals, id);
         if (patch.spec) {
             // Which shared elements the test uses follows its spec; a test that never used any costs one indexed delete.
@@ -893,7 +903,65 @@ export class Repo {
         if (f.validationStatus) (where.push("t.validation_status = ?"), params.push(f.validationStatus));
         if (f.suite) (where.push("s.slug = ?"), params.push(f.suite));
         if (f.q) (where.push(`(${this.db.dialect.likeInsensitive("t.title")} OR ${this.db.dialect.likeInsensitive("t.test_key")})`), params.push(`%${f.q}%`, `%${f.q}%`));
-        return this.db.all(`${TEST_SELECT} WHERE ${where.join(" AND ")} ORDER BY t.test_key`, ...params).map(toTest);
+        // By the order a person gave the project's tests (orderTests), the rest after them by ID: so the list, review and "run all" agree.
+        return this.db.all(`${TEST_SELECT} WHERE ${where.join(" AND ")} ORDER BY t.test_key`, ...params).map(toTest).sort(byListPosition);
+    }
+
+    /**
+     * The project's tests in this order, kept on each test (`listPosition` in its generation meta: no schema change). The list must
+     * name every test of the project once; a test made later has no place yet and goes after them. False when the list does not
+     * match the project's tests.
+     */
+    orderTests(projectId: string, testIds: readonly string[]): boolean {
+        return this.db.tx(() => {
+            const rows = this.db.all<{ id: string; generation_meta_json: string | null }>("SELECT id, generation_meta_json FROM test_cases WHERE project_id = ?", projectId);
+            if (rows.length !== testIds.length || new Set(testIds).size !== testIds.length) return false;
+            const meta = new Map(rows.map((r) => [r.id, readJsonObject(r.generation_meta_json) ?? {}]));
+            if (testIds.some((x) => !meta.has(x))) return false;
+            testIds.forEach((x, i) => {
+                const m = meta.get(x)!;
+                if (m[LIST_POSITION] !== i) this.db.run("UPDATE test_cases SET generation_meta_json = ? WHERE id = ?", JSON.stringify({ ...m, [LIST_POSITION]: i }), x);
+            });
+            return true;
+        });
+    }
+
+    /**
+     * A new name for a test: its row and its stored steps. A name is not a step, so no new version is made: the latest version, when
+     * it holds what the test holds now, gets the name too (review-store.ts compares the stored steps).
+     */
+    renameTest(id: string, title: string): void {
+        this.db.tx(() => {
+            const r = this.db.get<{ spec_json: string }>("SELECT spec_json FROM test_cases WHERE id = ?", id);
+            if (!r) return;
+            const renamed = (json: string): string | null => {
+                const v = readJsonObject(json);
+                return v ? JSON.stringify({ ...v, title }) : null;
+            };
+            const spec = renamed(r.spec_json);
+            this.db.run("UPDATE test_cases SET title = ?, spec_json = COALESCE(?, spec_json), updated_at = ? WHERE id = ?", title, spec, now(), id);
+            const latest = this.db.get<{ id: string; spec_json: string }>("SELECT id, spec_json FROM test_versions WHERE test_case_id = ? ORDER BY version DESC LIMIT 1", id);
+            if (spec && latest && latest.spec_json === r.spec_json) this.db.run("UPDATE test_versions SET spec_json = ? WHERE id = ?", spec, latest.id);
+        });
+    }
+
+    /**
+     * Deletes a test with what is made of it: scripts, runs and their steps, versions, links and its places in suites (their foreign
+     * keys), and the records of its saved files. Returns the store keys of those files, for the caller to remove.
+     */
+    deleteTest(id: string): string[] {
+        return this.db.tx(() => {
+            const files = this.db.all<{ path: string }>("SELECT path FROM artifacts WHERE test_case_id = ?", id).map((r) => r.path);
+            this.db.run("DELETE FROM artifacts WHERE test_case_id = ?", id);
+            this.db.run("DELETE FROM test_cases WHERE id = ?", id);
+            return files;
+        });
+    }
+
+    private keepListPosition(id: string, meta: Record<string, unknown>): Record<string, unknown> {
+        if (LIST_POSITION in meta) return meta;
+        const was = readJsonObject(this.db.get<{ m: string | null }>("SELECT generation_meta_json AS m FROM test_cases WHERE id = ?", id)?.m);
+        return was && typeof was[LIST_POSITION] === "number" ? { ...meta, [LIST_POSITION]: was[LIST_POSITION] } : meta;
     }
 
     listSuites(projectId: string): Row[] {

@@ -72,12 +72,13 @@ function place(id: string, name: string, first: string, section?: string, extra?
 
 export const routes = {
     home: "#/",
+    /** Explore a project (`#/new?project=`); without one, Create a project (`#/new` alone is an old link, redirected there). */
     newProject: (opts?: { project?: string; url?: string }) => {
         const q = new URLSearchParams();
         if (opts?.project) q.set("project", opts.project);
         if (opts?.url) q.set("url", opts.url);
         const s = q.toString();
-        return `#/new${s ? `?${s}` : ""}`;
+        return `${opts?.project ? "#/new" : "#/create"}${s ? `?${s}` : ""}`;
     },
     /** Create a project: details, platforms and testing modes (US-010). Exploring with AI is a step from the new project's dashboard. */
     createProject: "#/create",

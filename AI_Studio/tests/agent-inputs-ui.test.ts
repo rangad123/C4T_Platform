@@ -77,12 +77,15 @@ describe("what the agents need", () => {
         await page.getByLabel("Password").fill("olga's long password");
         await page.getByRole("button", { name: "Sign in" }).click();
         await pwExpect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
-        await page.goto(`${BASE}/#/new?url=${encodeURIComponent(SITE)}`);
+        // Round 37: exploring is a step on an existing project; a project with no agents saved asks for nothing first.
+        const plain = platform.repo.createProject({ name: "Plain shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await page.goto(`${BASE}/#/new?project=${plain}`);
+        await page.getByLabel("Application URL").fill(SITE);
         await pwExpect(page.getByLabel("Application URL")).toHaveValue(SITE);
         await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
         await pwExpect(page.getByText("Advanced options")).toHaveCount(0);
         for (const gone of ["What should we test?", "Username or email", "Bearer token", "OpenAPI document URL", "Requirements document", "Include API tests that change data"]) await pwExpect(page.getByText(gone, { exact: true })).toHaveCount(0);
-        await pwExpect(page.getByTestId("inputs-note")).toContainText("keep its sign-in details, API access, OpenAPI document and requirements on its Requirements tab");
+        await pwExpect(page.getByTestId("inputs-note")).toContainText("Sign-in details, API access, the OpenAPI document and the requirements the agents use are kept on the project’s Requirements tab");
         // No AI model here: said plainly, and only the API is explored.
         await pwExpect(page.getByText("Exploring the web application needs it, so only the application’s API is explored here.", { exact: false })).toBeVisible();
         expect(await axeClean(page)).toEqual([]);

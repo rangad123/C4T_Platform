@@ -181,12 +181,14 @@ export function HelpPanel() {
         return () => shell?.removeAttribute("inert");
     }, [help.open, modal]);
 
-    // Escape closes the panel when the keyboard is in it (and always for the sheet), without stealing Escape from a menu or dialog on the page.
+    // Escape closes the panel when the keyboard is in it or nowhere (on the page body, as while the panel moves focus to new content),
+    // and always for the sheet, without stealing Escape from a menu, dialog or field on the page.
     useEffect(() => {
         if (!help.open) return;
         const esc = (e: KeyboardEvent) => {
             if (e.key !== "Escape" || e.defaultPrevented) return;
-            if (modal || root.current?.contains(document.activeElement)) help.close();
+            const at = document.activeElement;
+            if (modal || !at || at === document.body || root.current?.contains(at)) help.close();
         };
         document.addEventListener("keydown", esc);
         return () => document.removeEventListener("keydown", esc);

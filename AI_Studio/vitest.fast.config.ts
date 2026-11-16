@@ -216,6 +216,7 @@ export default defineConfig({
             "tests/inner-call-auth.test.ts",
             "tests/ai-writing-permissions.test.ts",
             "tests/suites-generate.test.ts",
+            "tests/test-manage.test.ts",
             "tests/runs-off-here.test.ts",
         ],
         testTimeout: 60_000,

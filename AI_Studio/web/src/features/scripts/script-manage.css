@@ -1,0 +1,4 @@
+/* Renaming a script in place (ScriptManage.tsx). Uses the app's design tokens only. */
+.rename-script { display: grid; gap: 4px; min-width: 0; }
+.rename-script .rename-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.rename-script .input { flex: 1 1 200px; min-width: 0; }

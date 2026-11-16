@@ -57,7 +57,7 @@ afterAll(async () => {
 
 describe("Security Assessment through the screens, against the real platform and the fixture application", () => {
     it("project, application, authorization, a real passive assessment, findings, a state change and the report", async () => {
-        await page.goto(`${BASE}/#/new`);
+        await page.goto(`${BASE}/#/create`);
         const sidebar = page.getByRole("complementary", { name: "Main navigation" });
         // Round 37: Security assessment is no longer in the left panel; the module is on, so a project can still include it.
         await pwExpect(page.getByTestId("testing-type")).toBeVisible();

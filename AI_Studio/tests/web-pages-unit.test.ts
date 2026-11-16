@@ -64,7 +64,7 @@ describe("the generator", () => {
                 { action: "assert", check: "title", expected: "Terms", inPopup: true },
             ]),
         );
-        expect(out).toContain('await uploadTestFile(page, page.getByLabel("Avatar"), "photo.png");');
+        expect(out).toContain('await uploadTestFile(page, (await labelledField(page, "Avatar", false, false)), "photo.png");');
         expect(out).toContain("function testFile(name: string)");
         expect(out).toContain('"__baselines__", "upload--" + name');
         expect(out).toContain('await page.getByText("Card 1").dragTo(page.getByTestId("done"));');

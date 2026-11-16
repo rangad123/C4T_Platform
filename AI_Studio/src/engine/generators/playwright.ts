@@ -31,6 +31,8 @@ import {
     expr,
     fileHeader,
     lit,
+    actionLocatorCall,
+    isLabelField,
     locatorCall,
     regexFromText,
     scriptFilename,
@@ -42,6 +44,11 @@ import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, overlayHelperSource, over
 import { renderClock, renderCondition, renderPinnedTime } from "../web/conditions.js";
 import { classPattern, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
 import { jsonExpr, recordExpr } from "./api.js";
+import { LABEL_FIELD_HELPER_SOURCE } from "../web/label-fallback.js";
+
+/** Steps that act on an element (type, click, pick...): a label locator there goes through labelledField (render-utils actionLocatorCall). */
+const ACTS_ON = new Set<Step["action"]>(["click", "upload", "download", "drag", "fill", "select", "check", "press", "hover", "remember"]);
+const usesLabelField = (spec: TestSpec) => spec.steps.some((s) => ACTS_ON.has(s.action) && [("locator" in s ? s.locator : undefined), (s.action === "drag" ? s.target : undefined)].some((l) => l && isLabelField(l)));
 
 const isResponseWait = (s: Step | undefined) => s?.action === "wait" && s.until === "response";
 /** The final outcome checks of a test (the asserts after its last other step) that run as soft assertions: every one is tried, the first failure is reported. */
@@ -54,36 +61,37 @@ function softOutcomeChecks(steps: readonly Step[]): Set<number> {
 
 function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: string): string {
     const L = (l: Parameters<typeof locatorCall>[1]) => locatorCall("page", l);
+    const A = (l: Parameters<typeof locatorCall>[1]) => actionLocatorCall("page", l);
     switch (step.action) {
         case "navigate":
             return `await page.goto(await allowedAddress(${expr(step.url)}, BASE_URL));`;
         case "click":
             // A click that opens a popup or a new tab: wait for it while clicking, then later "in the popup" steps work in it.
             return step.opensPopup
-                ? `const popupOpened = page.waitForEvent("popup");\n        await ${L(step.locator)}.click();\n        popup = await popupOpened;\n        await popup.waitForLoadState("domcontentloaded");`
-                : `await ${L(step.locator)}.click();`;
+                ? `const popupOpened = page.waitForEvent("popup");\n        await ${A(step.locator)}.click();\n        popup = await popupOpened;\n        await popup.waitForLoadState("domcontentloaded");`
+                : `await ${A(step.locator)}.click();`;
         case "upload":
-            return `await uploadTestFile(page, ${L(step.locator)}, ${lit(step.file)}${step.drop ? ", true" : ""});`;
+            return `await uploadTestFile(page, ${A(step.locator)}, ${lit(step.file)}${step.drop ? ", true" : ""});`;
         case "dialog":
             // Armed before the step that opens the dialog; that step checks it appeared (see dialogCheck in render()).
             return `dialogPending = armDialog(page, ${lit(step.response)}${step.promptText !== undefined ? `, ${expr(step.promptText)}` : ""});\n        dialogExpected = ${step.message !== undefined ? expr(step.message) : '""'};`;
         case "download":
-            return `await downloadChecked(page, ${L(step.locator)}, ${step.filename !== undefined ? expr(step.filename) : '""'});`;
+            return `await downloadChecked(page, ${A(step.locator)}, ${step.filename !== undefined ? expr(step.filename) : '""'});`;
         case "drag":
             // dragTo moves the pointer the way a person does, which fires the HTML5 drag events (dragstart, dragover, drop).
-            return `await ${L(step.locator)}.dragTo(${L(step.target)});`;
+            return `await ${A(step.locator)}.dragTo(${A(step.target)});`;
         case "fill":
-            return `await ${L(step.locator)}.fill(${expr(step.value)});`;
+            return `await ${A(step.locator)}.fill(${expr(step.value)});`;
         case "select":
-            return `await ${L(step.locator)}.selectOption(${expr(step.value)});`;
+            return `await ${A(step.locator)}.selectOption(${expr(step.value)});`;
         case "check":
-            return `await ${L(step.locator)}.setChecked(${step.checked});`;
+            return `await ${A(step.locator)}.setChecked(${step.checked});`;
         case "press":
             return step.locator
-                ? `await ${L(step.locator)}.press(${lit(step.key)});`
+                ? `await ${A(step.locator)}.press(${lit(step.key)});`
                 : `await page.keyboard.press(${lit(step.key)});`;
         case "hover":
-            return `await ${L(step.locator)}.hover();`;
+            return `await ${A(step.locator)}.hover();`;
         case "wait":
             if (step.until === "url") return `await page.waitForURL(${regexFromText(step.value ?? "")});`;
             // Listened for from the step before (see render()), so a response that came while that step ran is not missed.
@@ -95,7 +103,7 @@ function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: s
             }
             return `await page.waitForTimeout(${step.ms});`;
         case "remember":
-            return `data[${lit(step.name)}] = ${step.from === "value" ? `await ${L(step.locator)}.inputValue()` : `(await ${L(step.locator)}.innerText()).replace(/\\s+/g, " ").trim()`};`;
+            return `data[${lit(step.name)}] = ${step.from === "value" ? `await ${A(step.locator)}.inputValue()` : `(await ${A(step.locator)}.innerText()).replace(/\\s+/g, " ").trim()`};`;
         case "assert":
             return renderAssert(step, snapshotName, softMessage);
         case "request": {
@@ -393,7 +401,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }, testInfo) => {
     await evidenceAttach(page, testInfo);
 });
-${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${interruptions}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
+${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ page }) => {
 ${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
 });

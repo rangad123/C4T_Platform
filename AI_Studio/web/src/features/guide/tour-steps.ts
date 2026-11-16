@@ -162,7 +162,7 @@ export const TOUR_STEPS: TourStep[] = [
 ];
 
 /** Shown instead of the steps that need a project, when there is none yet. */
-export const NO_PROJECT_STEP: TourStep = { id: "no-project", chapter: "around", page: any, title: "The rest needs a project", text: "You have no project yet. Start one from the welcome page, then take the tour again from Help to see the tabs, New test and Run." };
+export const NO_PROJECT_STEP: TourStep = { id: "no-project", chapter: "around", page: any, title: "The rest needs a project", text: "You have no project yet. Create one from the Projects page, then take the tour again from Help to see the tabs, New test and Run." };
 
 /** What the tour found when it started. Every field is read with GET requests only. */
 export interface TourHave {

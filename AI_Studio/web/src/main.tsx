@@ -38,7 +38,8 @@ function Pages() {
     const { parts, query } = useRoute();
     const [a, b, c, d] = parts;
     if (!a) return <Home />;
-    if (a === "new") return <NewProject projectId={query.get("project") ?? undefined} initialUrl={query.get("url") ?? undefined} />;
+    // Explore an existing project; `#/new` without one is redirected to Create a project (lib/aliases.ts).
+    if (a === "new" && query.get("project")) return <NewProject projectId={query.get("project")!} key={query.get("project")!} />;
     // The global places (docs/product-restructure/INFORMATION_ARCHITECTURE.md). `#/` stays the project list.
     if (a === "dashboard") return <DashboardPage />;
     if (a === "create") return <CreateProjectPage />;

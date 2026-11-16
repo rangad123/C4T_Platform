@@ -150,6 +150,24 @@ export function locatorCall(root: string, l: Locator): string {
     return l.nth !== undefined ? `${out}${filter}.nth(${l.nth})` : `${out}${filter}`;
 }
 
+/**
+ * The element a web step acts on (types into, clicks, picks from). A label locator on its own (no filter, no nth) goes through the
+ * script's labelledField (../web/label-fallback.ts): a page whose fields have only a placeholder still finds the one matching field, and
+ * several matching fields fail at once with what the page has. Checks keep Playwright's own getByLabel: a field that must be absent
+ * stays absent. Every other locator renders as locatorCall does.
+ */
+export function actionLocatorCall(root: string, l: Locator): string {
+    if (!isLabelField(l)) return locatorCall(root, l);
+    if (l.frame?.length) root = l.frame.reduce((r, f) => `${r}.frameLocator(${lit(frameSelector(f))})`, root);
+    const scope = l.within ? plainCall(root, l.within, true) : root;
+    return `(await labelledField(${scope}, ${expr(l.value ?? "")}, ${l.exact === true}, ${l.within ? "true" : "false"}))`;
+}
+
+/** A label locator a step acts on through labelledField (see actionLocatorCall). */
+export function isLabelField(l: Locator): boolean {
+    return !isLocatorRef(l) && l.by === "label" && !l.filter && l.nth === undefined;
+}
+
 /** One strategy's call on `root`, with its own `nth` (a container or a filter's inner locator, or the element itself without its filter). */
 function plainCall(root: string, l: PlainLocator, withNth = false): string {
     const exact = l.exact ? ", exact: true" : "";

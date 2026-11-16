@@ -311,18 +311,6 @@ pre.raw { margin: 0; padding: 12px 16px; border-radius: var(--radius-sm); backgr
 .log { max-height: 280px; overflow: auto; font: 500 12.5px/1.6 var(--font-mono); display: grid; gap: 2px; }
 .log .warn { color: var(--status-warning-fg); } .log .error { color: var(--status-error-fg); } .log time { color: var(--text-muted); margin-right: 8px; }
 
-/* ───────────────────────── Welcome: the one dark hero ───────────────────────── */
-.hero { display: grid; gap: 16px; justify-items: start; align-content: end; padding: 64px 56px 56px; border-radius: var(--radius-panel); width: 100%; }
-.hero .eyebrow { color: var(--accent-300); }
-.hero h1 { font-size: var(--type-display-xl-size); line-height: var(--type-display-xl-line); font-weight: var(--fw-semibold); letter-spacing: var(--type-display-xl-tracking); max-width: 16ch; color: var(--text-inverse); }
-.hero p { max-width: 52ch; color: var(--text-inverse-muted); font-size: var(--type-body-lg-size); line-height: var(--type-body-lg-line); }
-.how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-.how .item { display: grid; gap: 8px; padding: var(--space-card-padding); align-content: start; }
-.how .num { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 10px; border-radius: var(--radius-sm); background: var(--surface-brand-subtle); color: var(--text-brand); }
-@media (max-width: 900px) { .hero { padding: 48px 32px 40px; } .hero h1 { font-size: 44px; line-height: 48px; letter-spacing: -1.4px; } }
-@media (max-width: 720px) { .how { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 520px) { .hero { padding: 40px 24px 32px; } .hero h1 { font-size: 36px; line-height: 40px; letter-spacing: -1.1px; } .hero p { font-size: var(--type-body-md-size); line-height: var(--type-body-md-line); } }
-
 .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-muted); font-size: var(--type-caption-size); }
 .flow .on { color: var(--text-brand); font-weight: var(--fw-semibold); }
 .flow .done { color: var(--status-success-fg); font-weight: var(--fw-medium); }

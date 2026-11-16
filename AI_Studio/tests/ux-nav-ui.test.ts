@@ -419,9 +419,9 @@ describe("sidebar and the Projects page", () => {
         await pwExpect(page.getByRole("heading", { name: "Mobile testing", exact: true })).toHaveCount(0);
     });
 
-    it("the Projects page still offers New project with only one project, and the empty welcome page is the new-project page", async () => {
+    it("the Projects page still offers New project with only one project, and the old new-project address opens Create a project", async () => {
         await visit("#/new");
-        await pwExpect(page.locator("h1").first()).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Create a project", level: 1 })).toBeVisible();
         await pwExpect(page.getByRole("complementary", { name: "Main navigation" }).getByRole("link", { name: "Projects" })).toBeVisible();
     });
 });

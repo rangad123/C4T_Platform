@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Clock, Download, FileJson, FileText, FileUp, FileX, MonitorSmartphone, MoreHorizontal, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock, Download, FileJson, FileText, FileUp, FileX, MonitorSmartphone, MoreHorizontal, Pencil, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { RunsOnLine } from "../features/agents/RunsOnLine";
 import { FrameworksLine } from "../features/frameworks/FrameworksLine";
@@ -28,6 +28,7 @@ import { SelectToggle, SelectionBar, useTestSelection, type TestSelection } from
 import { SuiteFromSelection } from "../features/suites/SuiteFromSelection";
 import { EXPLORING_OFF_HERE, useExecutionMode, useRunsHere } from "../features/runs/runs-here";
 import { versionHref, type ScriptRow } from "../features/review/review";
+import { DeleteScriptDialog, RenameScript, RowIconButton, RowMenu } from "../features/scripts/ScriptManage";
 import "../features/authoring/authoring.css";
 
 /** Tests rendered per area before "Show more": keeps big suites fast and scannable. */
@@ -73,6 +74,12 @@ export function ProjectTests({ id }: { id: string }) {
     const writeWhy = here.why("ai_studio.tests.write");
     const runWhy = here.why("ai_studio.tests.run");
     const exportWhy = here.why("ai_studio.reports.export");
+    // Renaming and ordering need tests.write, deleting tests.delete: a person without them sees none of those buttons.
+    const canEdit = !writeWhy;
+    const canDelete = !here.why("ai_studio.tests.delete");
+    const [deleting, setDeleting] = useState<TestSummary | null>(null);
+    /** Said to a screen reader after a move: where the script went. */
+    const [moved, setMoved] = useState("");
     const name = project.data?.name;
     useOnFinish(isActive(project.data?.latestJob?.status), () => {
         void tests.reload();
@@ -142,6 +149,30 @@ export function ProjectTests({ id }: { id: string }) {
     const runnersOnly = useExecutionMode() === "runners";
     const reloadAll = () => void Promise.all([tests.reload(), project.reload(), reviews.reload()]);
 
+    /**
+     * Moves a script one place up or down among the scripts shown in its group: the whole project's order is sent (the server keeps
+     * it, and the list, review and "run all" follow it). The focus stays on the same button, or on the other one at the end of the list.
+     */
+    async function move(t: TestSummary, items: TestSummary[], dir: "up" | "down") {
+        const at = items.findIndex((x) => x.id === t.id);
+        const other = items[dir === "up" ? at - 1 : at + 1];
+        if (!other) return;
+        const order = all.map((x) => x.id).filter((x) => x !== t.id);
+        order.splice(order.indexOf(other.id) + (dir === "up" ? 0 : 1), 0, t.id);
+        try {
+            await api(`/projects/${id}/tests/order`, { method: "PUT", body: { testIds: order } });
+            await tests.reload();
+            setMoved(`Moved “${t.title}” ${dir}, to place ${dir === "up" ? at : at + 2} of ${items.length}.`);
+            requestAnimationFrame(() => {
+                const want = (d: string) => document.querySelector<HTMLButtonElement>(`[data-move="${t.id}:${d}"]:not([disabled])`);
+                (want(dir) ?? want(dir === "up" ? "down" : "up"))?.focus();
+            });
+        } catch (e) {
+            setNotice({ tone: "danger", text: `The order was not changed: ${describeApiError(e)}` });
+            void tests.reload();
+        }
+    }
+
     async function fetchFile(path: string, filename: string) {
         try {
             await downloadFrom(path, filename);
@@ -206,6 +237,9 @@ export function ProjectTests({ id }: { id: string }) {
                 <RunsOnLine projectId={id} />
                 <FrameworksLine projectId={id} />
                 {notice && <Callout tone={notice.tone}>{notice.text}</Callout>}
+                <span className="sr-only" aria-live="polite" data-testid="move-said">
+                    {moved}
+                </span>
                 {showWrite && <WriteTestDialog projectId={id} busy={isActive(job?.status)} onClose={() => setShowWrite(false)} onStarted={() => void project.reload()} onDone={reloadAll} />}
                 {showBuild && <BuildTestDialog projectId={id} onClose={() => setShowBuild(false)} />}
                 {showMaestro && <MaestroImportPanel projectId={id} busy={isActive(job?.status)} onClose={() => setShowMaestro(false)} onImported={reloadAll} />}
@@ -213,6 +247,20 @@ export function ProjectTests({ id }: { id: string }) {
                 {showImport && !writeWhy && <ImportDialog onClose={() => setShowImport(false)} disabled={isActive(job?.status)} onJsonFile={(file) => void importSpecs(file)} onMaestro={() => setShowMaestro(true)} onGit={() => setShowGit(true)} />}
                 {showVariants && <CheckVariantsPanel projectId={id} onStarted={() => void project.reload()} onClose={() => setShowVariants(false)} />}
                 {showExport && <ExportDialog onClose={() => setShowExport(false)} items={exportItems} />}
+                {deleting && (
+                    <DeleteScriptDialog
+                        testId={deleting.id}
+                        title={deleting.title}
+                        onClose={() => setDeleting(null)}
+                        onDeleted={() => {
+                            setNotice({ tone: "success", text: `Deleted “${deleting.title}”.` });
+                            setDeleting(null);
+                            selection.set([...selection.picked].filter((x) => x !== deleting.id));
+                            reloadAll();
+                            void reqLinks.reload();
+                        }}
+                    />
+                )}
                 <RunStrip projectId={id} />
                 {isActive(job?.status) && (job?.mode === "generate" || job?.mode === "plain" || job?.mode === undefined) && (
                     <Callout tone="info" title="Tests are still being created" actions={<a className="btn btn-sm" href={routes.project(id)}>View progress</a>}>
@@ -340,11 +388,27 @@ export function ProjectTests({ id }: { id: string }) {
                                             </button>
                                             {open && (
                                                 <>
-                                                    <ScriptHead suite={suite} ids={items.slice(0, limits[suite] ?? PAGE_SIZE).map((t) => t.id)} selection={selection} />
+                                                    <ScriptHead suite={suite} ids={items.slice(0, limits[suite] ?? PAGE_SIZE).map((t) => t.id)} selection={selection} manage={canEdit || canDelete} />
                                                     <ul className="list divided" aria-label={`Test scripts in ${suite}`}>
-                                                        {items.slice(0, limits[suite] ?? PAGE_SIZE).map((t) => (
+                                                        {items.slice(0, limits[suite] ?? PAGE_SIZE).map((t, i) => (
                                                             <li key={t.id}>
-                                                                <ScriptRowView t={t} projectId={id} app={project.data?.mobile?.appPackage ?? undefined} reqs={reqsOf.get(t.id) ?? []} review={reviewOf.get(t.id)} selection={selection} />
+                                                                <ScriptRowView
+                                                                    t={t}
+                                                                    projectId={id}
+                                                                    app={project.data?.mobile?.appPackage ?? undefined}
+                                                                    reqs={reqsOf.get(t.id) ?? []}
+                                                                    review={reviewOf.get(t.id)}
+                                                                    selection={selection}
+                                                                    manage={{
+                                                                        canEdit,
+                                                                        canDelete,
+                                                                        first: i === 0,
+                                                                        last: i === items.length - 1,
+                                                                        onMove: (dir) => void move(t, items, dir),
+                                                                        onRenamed: () => void Promise.all([tests.reload(), reviews.reload()]),
+                                                                        onDelete: () => setDeleting(t),
+                                                                    }}
+                                                                />
                                                             </li>
                                                         ))}
                                                     </ul>
@@ -374,10 +438,10 @@ export function ProjectTests({ id }: { id: string }) {
 }
 
 /** The column names above a group's rows, with a box that chooses every row shown in the group. */
-function ScriptHead({ suite, ids, selection }: { suite: string; ids: string[]; selection: TestSelection }) {
+function ScriptHead({ suite, ids, selection, manage }: { suite: string; ids: string[]; selection: TestSelection; manage: boolean }) {
     const all = ids.length > 0 && ids.every((x) => selection.picked.has(x));
     return (
-        <div className="script-head">
+        <div className={`script-head${manage ? " can-manage" : ""}`}>
             <label className="run-pick sr-check">
                 <input
                     type="checkbox"
@@ -394,7 +458,7 @@ function ScriptHead({ suite, ids, selection }: { suite: string; ids: string[]; s
             <span>Script</span>
             <span>Requirement</span>
             <span>Status</span>
-            <span />
+            {manage ? <span className="sr-only">Actions</span> : <span />}
         </div>
     );
 }
@@ -415,16 +479,30 @@ function reviewWord(projectId: string, r: ScriptRow | undefined): { text: string
  * One script: ID, title (the link to its workbench), the DSL | Code pair that opens it on that tab, the requirements it covers, its
  * status. A click anywhere else on the row opens the script too.
  */
-function ScriptRowView({ t, projectId, app, reqs, review, selection }: { t: TestSummary; projectId: string; /** The project’s Android app: shown after Phone on a phone test. */ app?: string; reqs: RequirementLink[]; review: ScriptRow | undefined; selection: TestSelection }) {
+/** What a person may do to a row, and how: rename and order need tests.write, delete tests.delete (neither: no buttons at all). */
+interface RowManage {
+    canEdit: boolean;
+    canDelete: boolean;
+    /** The first or last row shown in its group: it cannot move further that way. */
+    first: boolean;
+    last: boolean;
+    onMove: (dir: "up" | "down") => void;
+    onRenamed: () => void;
+    onDelete: () => void;
+}
+
+function ScriptRowView({ t, projectId, app, reqs, review, selection, manage }: { t: TestSummary; projectId: string; /** The project’s Android app: shown after Phone on a phone test. */ app?: string; reqs: RequirementLink[]; review: ScriptRow | undefined; selection: TestSelection; manage: RowManage }) {
+    const [renaming, setRenaming] = useState(false);
+    const managed = manage.canEdit || manage.canDelete;
     const tone = { VALIDATED: "var(--status-success-fg)", NEEDS_REVIEW: "var(--status-warning-fg)", FAILED_VALIDATION: "var(--status-error-fg)", PENDING: "var(--text-muted)", VALIDATING: "var(--status-info-fg)" }[t.validationStatus];
     const word = reviewWord(projectId, review);
     const shownReqs = reqs.slice(0, 2);
     return (
         <div
-            className="list-row script-row"
+            className={`list-row script-row${managed ? " can-manage" : ""}`}
             data-testid="script-row"
             onClick={(e) => {
-                if ((e.target as HTMLElement).closest("a, button, input, label")) return;
+                if (renaming || (e.target as HTMLElement).closest("a, button, input, label, form, .menu")) return;
                 go(scriptHref(t));
             }}
         >
@@ -441,9 +519,21 @@ function ScriptRowView({ t, projectId, app, reqs, review, selection }: { t: Test
             </label>
             <span className="sr-id mono">{t.testId}</span>
             <span className="main">
-                <a className="title sr-title" href={scriptHref(t)}>
-                    {t.title}
-                </a>
+                {renaming ? (
+                    <RenameScript
+                        testId={t.id}
+                        title={t.title}
+                        onCancel={() => setRenaming(false)}
+                        onDone={() => {
+                            setRenaming(false);
+                            manage.onRenamed();
+                        }}
+                    />
+                ) : (
+                    <a className="title sr-title" href={scriptHref(t)}>
+                        {t.title}
+                    </a>
+                )}
                 <span className="meta">
                     {typeLabel(t.type)}
                     <span className="dot-sep" />
@@ -489,7 +579,34 @@ function ScriptRowView({ t, projectId, app, reqs, review, selection }: { t: Test
                     </a>
                 )}
             </span>
-            <ChevronRight size={18} className="chev" aria-hidden />
+            {managed ? (
+                <span className="sr-actions" role="group" aria-label={`Change ${t.title}`}>
+                    {manage.canEdit && (
+                        <>
+                            <RowIconButton icon={ArrowUp} name={`Move ${t.title} up`} tip="Move up" disabled={manage.first} data-move={`${t.id}:up`} onClick={() => manage.onMove("up")} />
+                            <RowIconButton icon={ArrowDown} name={`Move ${t.title} down`} tip="Move down" disabled={manage.last} data-move={`${t.id}:down`} onClick={() => manage.onMove("down")} />
+                        </>
+                    )}
+                    <RowMenu name={`Actions for ${t.title}`} tip="Script actions" icon={MoreHorizontal}>
+                        {(close) => (
+                            <>
+                                {manage.canEdit && (
+                                    <MenuItem icon={Pencil} onClick={() => (close(), setRenaming(true))}>
+                                        Rename
+                                    </MenuItem>
+                                )}
+                                {manage.canDelete && (
+                                    <MenuItem icon={Trash2} onClick={() => (close(), manage.onDelete())}>
+                                        Delete…
+                                    </MenuItem>
+                                )}
+                            </>
+                        )}
+                    </RowMenu>
+                </span>
+            ) : (
+                <ChevronRight size={18} className="chev" aria-hidden />
+            )}
         </div>
     );
 }

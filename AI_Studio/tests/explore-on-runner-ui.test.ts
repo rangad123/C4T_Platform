@@ -168,18 +168,6 @@ describe("before the click", () => {
         expect(starts).toEqual([]);
     }, 120_000);
 
-    it("the first card of New project says the same and does not start", async () => {
-        fake.mine = OFF;
-        await visit("#/new");
-        await pwExpect(page.getByTestId("explore-runner-problem")).toContainText(RUNNER_OFFLINE);
-        await pwExpect(page.getByRole("button", { name: "Explore my app" })).toBeDisabled();
-        fake.mine = MINE;
-        await visit("#/new");
-        await pwExpect(page.getByTestId("explore-on-hint")).toHaveText(exploresOnRunner("Office laptop"));
-        await pwExpect(page.getByRole("button", { name: "Explore my app" })).toBeEnabled();
-        expect(starts).toEqual([]);
-    }, 120_000);
-
     it("names the runner when it is online, and starts", async () => {
         fake.mine = MINE;
         await exploreAgain();

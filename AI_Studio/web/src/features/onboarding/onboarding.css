@@ -1,12 +1,6 @@
-/* First run: the three ways to start, the plan before anything is created, tests as they appear, next steps. Design tokens only. */
+/* First run: the plan before anything is created, tests as they appear, next steps. Design tokens only. */
 
-/* ── Welcome: three equal cards ── */
-.welcome-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: stretch; width: 100%; }
-.welcome-card { align-content: start; min-width: 0; }
-.welcome-card .row { flex-wrap: wrap; }
-.welcome-problem { grid-column: 1 / -1; }
 .icon-tile { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--radius-sm); background: var(--surface-brand-subtle); color: var(--text-brand); }
-@media (max-width: 1040px) { .welcome-cards { grid-template-columns: minmax(0, 1fr); } }
 
 /* ── the plan ── */
 .plan-create { font-weight: var(--fw-semibold); }
