@@ -43,6 +43,13 @@ describe("provenance: where a test came from", () => {
         expect(o.why[1]!.text).toBe("Functional test, high priority.");
     });
 
+    it("leaves the requirements out of “Why this test?”: they are their own line under the header", () => {
+        const o = originOf(base({ spec: { description: "Pays", source: { origin: "browser-agent", requirements: ["REQ-1", "REQ-2"] } }, generationMeta: { scenario: { description: "A shopper pays by card" } } }));
+        expect(o.why.map((w) => w.label)).toEqual(["The idea behind it", "How it is rated"]);
+        // requirements alone give no "Why this test?" at all
+        expect(originOf(base({ spec: { description: "Pays", source: { origin: "openapi", requirements: ["REQ-1"] } } })).why).toEqual([]);
+    });
+
     it("covers written, recorded, imported, built and code tests", () => {
         expect(originOf(base({ spec: { source: { origin: "plain-english" } }, generationMeta: { plain: { description: "Add a mug to the cart" }, model: "m1" } })).parts).toEqual(["Written from your description", "model m1"]);
         expect(originOf(base({ spec: { source: { origin: "plain-english" } }, generationMeta: { plain: { description: "Add a mug to the cart" } } })).why[0]).toEqual({ label: "You asked for", text: "Add a mug to the cart" });

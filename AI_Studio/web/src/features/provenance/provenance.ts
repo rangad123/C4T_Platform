@@ -110,7 +110,7 @@ export function originOf(t: OriginInput): Origin {
     const scenario = meta.scenario?.description;
     if (scenario && scenario !== t.spec.description) why.push({ label: "The idea behind it", text: scenario });
     if (meta.explanation && origin !== "plain-english" && meta.authoring !== "complete" && meta.authoring !== "blocked") why.push({ label: "What the AI noted", text: meta.explanation });
-    if (t.spec.source?.requirements?.length) why.push({ label: "Covers requirements", text: t.spec.source.requirements.join(", ") });
+    // The requirements it covers are their own line under the header (TestHeader), not a row here.
     if (why.length > 0) {
         const prio = meta.scenario?.priority && meta.scenario.priority in PRIORITY_LABEL ? PRIORITY_LABEL[meta.scenario.priority as keyof typeof PRIORITY_LABEL] : PRIORITY_LABEL[t.priority];
         why.push({ label: "How it is rated", text: `${typeLabel(t.type)} test, ${prio.toLowerCase()}.` });

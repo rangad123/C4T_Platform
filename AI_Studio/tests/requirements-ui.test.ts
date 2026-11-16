@@ -137,6 +137,17 @@ describe("requirements in the browser", () => {
         await pwExpect(page.getByRole("heading", { name: "REQ-1 A shopper can pay by card" })).toBeVisible();
     });
 
+    it("names the requirements a test covers in one line under its header, each a link", async () => {
+        await open(`${BASE}/#/tests/${shop.tests.get("pay")}`);
+        const line = page.getByTestId("header-requirements");
+        await pwExpect(line).toHaveCount(1);
+        await pwExpect(line).toContainText("Covers REQ-1 A shopper can pay by card");
+        // "Why this test?" no longer repeats them
+        await pwExpect(page.getByTestId("origin-strip")).not.toContainText("Covers requirements");
+        await line.getByRole("link", { name: /REQ-1/ }).click();
+        await pwExpect(page.getByRole("heading", { name: "REQ-1 A shopper can pay by card" })).toBeVisible();
+    });
+
     it("has no accessibility violations on the list, the import preview and a requirement", async () => {
         const check = async (what: string) => {
             await page.waitForTimeout(400);

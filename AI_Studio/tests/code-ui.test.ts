@@ -462,7 +462,14 @@ describe("A hand-written test", () => {
         fake.custom = makeCustom("taken-over");
         await visit(testHash());
         await pwExpect(page.getByText("Code test", { exact: true }).first()).toBeVisible();
-        await pwExpect(page.getByText("Switched to code", { exact: true }).first()).toBeVisible();
+        // said once in the header: the "Code test" badge; the origin line (not a second badge) says how it became code
+        await pwExpect(page.getByTestId("origin-line")).toContainText("Switched to code");
+        await pwExpect(page.locator(".badge", { hasText: "Switched to code" })).toHaveCount(0);
+        await pwExpect(page.locator(".badge", { hasText: "Code test" })).toHaveCount(1);
+        await page.getByRole("button", { name: "More actions" }).click();
+        await pwExpect(page.getByRole("menuitem", { name: /Quarantine/ })).toBeVisible();
+        await pwExpect(page.getByRole("menuitem", { name: /Download script/ })).toHaveCount(0);
+        await page.keyboard.press("Escape");
         // one line on the Code tab: no second "this is a code test", no link to the tab it is on, no second list of versions
         const callout = page.getByTestId("custom-line");
         await pwExpect(callout.getByRole("button", { name: "Go back to the generated version", exact: true })).toBeVisible();
@@ -495,7 +502,8 @@ describe("A hand-written test", () => {
         resetFake();
         fake.custom = makeCustom("git", { canRestoreGenerated: false, git: { host: "github.com", path: "acme/tests", ref: "main", commit: "abc1234def5678", importedAt: iso(3_600_000) } });
         await visit(testHash());
-        await pwExpect(page.getByText("From Git", { exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("origin-line")).toContainText("Imported from Git (github.com/acme/tests, main)");
+        await pwExpect(page.locator(".badge", { hasText: "From Git" })).toHaveCount(0);
         await pwExpect(page.getByRole("button", { name: "Go back to the generated version" })).toHaveCount(0);
         await pwExpect(page.getByTestId("git-line")).toHaveText("From github.com/acme/tests, main, commit abc1234");
         expect(await page.getByTestId("git-line").textContent()).not.toContain("·");

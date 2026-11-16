@@ -291,7 +291,7 @@ describe("runners mode, runner not set up or offline", () => {
         expect(meCalls).not.toContain("runner-choices");
     }, 120_000);
 
-    it("an offline runner says how to go on, and the test page's Run again waits too", async () => {
+    it("an offline runner says how to go on, and the test page's Run waits too", async () => {
         setMine(OFF);
         await scripts();
         await pwExpect(page.getByTestId("runs-on")).toContainText(RUNNER_OFFLINE.replace(/\.$/, ""));
@@ -300,7 +300,8 @@ describe("runners mode, runner not set up or offline", () => {
         await pwExpect(panel().getByText(RUNNER_OFFLINE)).toHaveCount(1);
         await page.keyboard.press("Escape");
         await visit(`#/tests/${idOf["Home answers"]}`);
-        const again = page.getByRole("button", { name: "Run again", exact: true });
+        // "Home answers" has never run (runs are only recorded here), so the button says Run, not "Run again"
+        const again = page.locator(".page-head").getByRole("button", { name: "Run", exact: true });
         await pwExpect(again).toBeVisible();
         await pwExpect(again).toBeDisabled();
         expect(runStarts).toEqual([]);
@@ -335,11 +336,12 @@ describe("runners mode, runner online", () => {
         await page.keyboard.press("Escape");
     }, 120_000);
 
-    it("the test page's Run again starts at once, without a runnerId", async () => {
+    it("the test page's Run starts at once, without a runnerId", async () => {
         setMine(MINE);
         runStarts.length = 0;
         await visit(`#/tests/${idOf["Home answers"]}`);
-        const again = page.getByRole("button", { name: "Run again", exact: true });
+        // "Home answers" has never run (runs are only recorded here), so the button says Run, not "Run again"
+        const again = page.locator(".page-head").getByRole("button", { name: "Run", exact: true });
         await pwExpect(again).toBeEnabled();
         await again.click();
         await pwExpect.poll(() => runStarts.length).toBe(1);

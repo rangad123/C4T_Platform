@@ -182,6 +182,8 @@ describe("one page per test", () => {
         await pwExpect(page.getByTestId("test-meta")).toContainText("Web");
         // the header says the verdict in the decided words
         await pwExpect(page.locator(".page-head").getByText("Passing", { exact: true })).toBeVisible();
+        // it has run, so the run control offers to run it again
+        await pwExpect(page.locator(".page-head").getByRole("button", { name: "Run again", exact: true })).toBeVisible();
         // the steps, each with the mark the last run left
         expect(await headTexts()).toEqual([expect.stringContaining("Step 1 Open /products"), expect.stringContaining("Step 2 Type"), expect.stringContaining("Step 3 Click"), expect.stringContaining("Step 4")]);
         await pwExpect(page.getByTestId("step-mark")).toHaveCount(4);
@@ -350,6 +352,9 @@ describe("the Text tab", () => {
         await visit(`#/tests/${stuckId}/text`);
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
         expect(await textNow()).toContain("# not expressible: step 2");
+        // this test has never run: the run control says Run, not "Run again"
+        await pwExpect(page.locator(".page-head").getByRole("button", { name: "Run", exact: true })).toBeVisible();
+        await pwExpect(page.locator(".page-head").getByRole("button", { name: "Run again", exact: true })).toHaveCount(0);
         await pwExpect(page.getByText("Part of this test has no text form.", { exact: false })).toBeVisible();
         await pwExpect(page.getByRole("list", { name: "What has no text form" })).toContainText("Step 2");
         await pwExpect(page.getByText("Read-only", { exact: true })).toBeVisible();

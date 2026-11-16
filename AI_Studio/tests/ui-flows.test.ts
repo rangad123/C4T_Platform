@@ -270,8 +270,11 @@ describe("mobile testing", () => {
             await page.goto(`${base}/#/projects/${project.id}/scripts`);
             await page.locator("a.sr-title", { hasText: "Network settings are listed" }).click();
             await pwExpect(page.getByText("This mobile test hasn’t been run yet.")).toBeVisible();
-            await pwExpect(page.getByRole("button", { name: "Run again" })).toBeVisible();
-            await page.getByRole("button", { name: "Run again" }).click();
+            // never run, so the control says Run (not "Run again")
+            const run = page.locator(".page-head").getByRole("button", { name: "Run", exact: true });
+            await pwExpect(run).toBeVisible();
+            await pwExpect(page.getByRole("button", { name: "Run again" })).toHaveCount(0);
+            await run.click();
             // no emulator here: the server says why instead of pretending
             await pwExpect(page.getByText(/taqwright install/)).toBeVisible();
             await page.close();

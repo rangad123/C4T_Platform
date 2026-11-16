@@ -27,7 +27,8 @@ export interface RunMenuProps {
     /** scope "project": the tests ticked in the list. */
     selectedIds?: string[];
     /** scope "test". */
-    test?: { id: string; kind: string; framework?: string; custom?: unknown };
+    /** `ran`: the test has run before, so its Run button says "Run again". */
+    test?: { id: string; kind: string; framework?: string; custom?: unknown; ran?: boolean };
     /** scope "fixed": what is run, said in words ("the 4 failing tests of this run"), and which tests. */
     fixed?: { ids: string[]; description: string; environment?: string };
     label?: string;
@@ -251,7 +252,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
         }
     }
 
-    const main = label ?? (scope === "test" ? "Run again" : "Run");
+    const main = label ?? (scope === "test" && test?.ran ? "Run again" : "Run");
     const radio = (key: What, text: string, n: number | null, extra?: React.ReactNode, disabled?: boolean) => (
         <label className={`run-opt${disabled ? " is-off" : ""}`}>
             <input type="radio" name={`${panelId}-what`} checked={what === key} disabled={disabled} onChange={() => setWhat(key)} />
