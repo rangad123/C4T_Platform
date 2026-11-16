@@ -9,6 +9,9 @@ import { fragmentFromExploration } from "../src/engine/intel/from-exploration.js
 import { ModelFragmentSchema } from "../src/engine/intel/fragment.js";
 import type { Reach } from "../src/engine/identity/access.js";
 import type { AppModel as UnderstandingModel, PageModel } from "../src/engine/understanding/app-model.js";
+import { analyzeApplication } from "../src/engine/understanding/analyzer.js";
+import type { EngineContext } from "../src/engine/context.js";
+import type { LlmClient } from "../src/engine/llm/provider.js";
 
 const NOW = "2026-11-16T10:00:00.000Z";
 
@@ -196,6 +199,36 @@ describe("converting an exploration's understanding model", () => {
         ]);
     });
 
+    it("takes the page and request the analysis named for a step when the model lists them, and nothing it did not list", () => {
+        const m = currentModel();
+        m.pages.push(page("/cart", { discovery: 2 }));
+        m.apis.push(
+            { method: "PATCH", path: "/api/cart/items/{productId}", origin: "http://shop.test", statuses: [], queryParams: [], source: "openapi", usedIn: [] },
+            { method: "GET", path: "/api/cart", origin: "http://shop.test", statuses: [200], queryParams: [], source: "network", usedIn: ["/cart"] },
+        );
+        m.journeys = [
+            {
+                name: "Change a quantity in the cart",
+                description: "",
+                steps: ["Open the cart", "Change the quantity and press Update", "Press Remove", "Read the order"],
+                // A documented request the crawl never sent, written with a :param; one the model does not list; a page the crawl never saw.
+                stepLinks: [{ page: "/cart", endpoint: "GET /api/cart" }, { endpoint: "patch /api/cart/items/:productId" }, { page: "/cart", endpoint: "DELETE /api/cart/items/{productId}" }, { page: "/nowhere", endpoint: "GET /api/orders/ord-7" }],
+                priority: "high",
+                pages: ["/cart"],
+                requiresAuth: true,
+            },
+        ];
+        const f = fragmentFromExploration({ model: m, ref: "x", now: NOW });
+        const cart = f.model.pages.find((p) => p.path === "/cart")!.id;
+        expect(f.model.workflows[0]!.steps).toEqual([
+            { order: 0, action: "Open the cart", page: cart, endpoint: "GET /api/cart" },
+            { order: 1, action: "Change the quantity and press Update", page: cart, endpoint: "PATCH /api/cart/items/{productId}" },
+            { order: 2, action: "Press Remove", page: cart },
+            // A concrete address of a listed template is that template.
+            { order: 3, action: "Read the order", page: cart, endpoint: "GET /api/orders/{id}" },
+        ]);
+    });
+
     it("leaves a step without a page when its journey names no page the crawl saw", () => {
         const m = currentModel();
         m.journeys = [{ name: "Elsewhere", description: "", steps: ["Do a thing"], priority: "low", pages: ["/never-seen"], requiresAuth: false }];
@@ -209,5 +242,48 @@ describe("converting an exploration's understanding model", () => {
         const changed = currentModel();
         changed.pages[0]!.dialogs = ["Something else"];
         expect(fragmentFromExploration({ model: changed, ref: "x", now: NOW, reach, roleDifferences: differences }).source.fingerprint).not.toBe(a.source.fingerprint);
+    });
+});
+
+describe("the analysis names each journey step's page and request", () => {
+    const answer = {
+        siteType: "ecommerce",
+        purpose: "Sells",
+        features: [],
+        pagePurposes: [],
+        journeys: [
+            {
+                name: "Apply a discount code",
+                description: "",
+                steps: [{ action: "Open the cart", page: "/cart", endpoint: "GET /api/cart" }, { action: "Enter a code and press Apply", page: "/cart", endpoint: "POST /api/cart/discount" }, { action: "Read the new total", page: "/cart", endpoint: "" }],
+                priority: "high",
+                pages: ["/cart"],
+                requiresAuth: true,
+            },
+        ],
+        authenticationMechanisms: [],
+    };
+    const run = async (opts: { linkSteps?: boolean }) => {
+        const asked: Array<{ system: string; schema: { safeParse: (v: unknown) => { success: boolean } } }> = [];
+        const llm = { modelName: "scripted", usage: { inputTokens: 0, outputTokens: 0 }, text: async () => "", object: async (a: (typeof asked)[number]) => (asked.push(a), answer) } as unknown as LlmClient;
+        const ctx = { config: {}, llm, emit: () => undefined } as unknown as EngineContext;
+        const { siteType: _s, purpose: _p, features: _f, journeys: _j, ...base } = { ...phaseOneModel(), pages: [page("/cart")] };
+        return { model: await analyzeApplication(ctx, base, opts), asked: asked[0]! };
+    };
+
+    it("asks for one feature per journey and the page and request of every step, and keeps them beside the steps", async () => {
+        const { model, asked } = await run({});
+        expect(asked.system).toMatch(/one feature/i);
+        expect(asked.system).toMatch(/endpoint/i);
+        expect(asked.schema.safeParse(answer).success).toBe(true);
+        expect(model.journeys[0]!.steps).toEqual(["Open the cart", "Enter a code and press Apply", "Read the new total"]);
+        expect(model.journeys[0]!.stepLinks).toEqual([{ page: "/cart", endpoint: "GET /api/cart" }, { page: "/cart", endpoint: "POST /api/cart/discount" }, { page: "/cart" }]);
+    });
+
+    it("an older runner's analysis (no page understanding) asks as before: plain steps, no links", async () => {
+        const { model, asked } = await run({ linkSteps: false });
+        expect(asked.system).not.toMatch(/one feature/i);
+        expect(asked.schema.safeParse(answer).success).toBe(false);
+        expect(model.journeys[0]!).not.toHaveProperty("stepLinks");
     });
 });

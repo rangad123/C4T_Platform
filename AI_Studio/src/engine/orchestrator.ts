@@ -515,7 +515,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const reuse = explorationReuseOn(ctx.config) && !req.fullExploration ? memory.reusable(model) : undefined;
                 if (req.fullExploration && memory.hasPrevious) ctx.emit({ stage: "analysis", kind: "full_exploration", message: "Exploring every page again, as asked: nothing is reused from the last exploration." });
                 if (reuse?.pages.size) ctx.emit({ stage: "analysis", kind: EVENT_PAGES_REUSED, message: reuseMessage(reuse, model.pages.length), data: { pages: reuse.pages.size, of: model.pages.length } });
-                model = await analyzeApplication(ctx, base, { memory: memory.context("understanding"), notes: req.siteNotes, digestElementsPerPage: levelSettings(req).digestElementsPerPage, ...(reuse?.pages.size ? { reuse } : {}) });
+                model = await analyzeApplication(ctx, base, { memory: memory.context("understanding"), notes: req.siteNotes, digestElementsPerPage: levelSettings(req).digestElementsPerPage, ...(reuse?.pages.size ? { reuse } : {}), ...(req.pageUnderstanding === false ? { linkSteps: false } : {}) });
                 memory.analysed(model);
                 analysed = true;
                 summary.model = model;
