@@ -17,7 +17,8 @@
  *   its endpoints, is the key workflow's), together cover all it needs: a key workflow names a feature ("Pay or cancel an order"), and an
  *   analysis that lists each of its actions as its own workflow has identified it (U3 asks whether the workflow is identified, PHASE 2
  *   spec 8.2, not at which granularity). A model workflow that mixes in another feature's writes never contributes, and nothing is
- *   composed from pages.
+ *   composed from pages. Only screen journeys compose (owner decision): a part needs a step on a page the crawl saw, so a list of one
+ *   workflow per endpoint cannot add up to a key workflow.
  * - U3-precision: model workflows that lie wholly inside one key workflow / model workflows (workflowPrecision below). U3 passes only
  *   when recall and precision both meet their targets: recall alone does not count workflows that lie outside the key or mix features.
  * - U4 defect rules: defect rules stated by at least one model rule that carries evidence or a source reference / defect rules. A model
@@ -195,7 +196,9 @@ function assignWorkflows(model: AppModel, key: AnswerKey, judgements?: Judgement
 /**
  * Key workflows identified by several model workflows together: each part lies wholly inside the key workflow (all its writes are the
  * key workflow's writes; for a key workflow without writes, all its endpoints are the key workflow's endpoints), and the parts together
- * cover every one of them. Endpoints only, never pages.
+ * cover every one of them. Matched on endpoints, never pages; but a part must be a screen journey: at least one of its steps names a page
+ * the crawl saw (a page of the model, by id or path). A list of endpoints with no page never composes; it can still identify a key
+ * workflow one-to-one.
  */
 function composedWorkflows(model: AppModel, key: AnswerKey): Set<string> {
     const isWrite = (e: string) => {
@@ -203,7 +206,8 @@ function composedWorkflows(model: AppModel, key: AnswerKey): Set<string> {
         return m !== null && m !== "GET";
     };
     const out = new Set<string>();
-    const stepsOf = model.workflows.map((w) => [...new Set(w.steps.flatMap((s) => (s.endpoint ? [s.endpoint] : [])))]);
+    const seen = (page: string) => model.pages.some((p) => p.id === page || matchesPath(p.path, page));
+    const stepsOf = model.workflows.map((w) => (w.steps.some((s) => s.page && seen(s.page)) ? [...new Set(w.steps.flatMap((s) => (s.endpoint ? [s.endpoint] : [])))] : []));
     for (const kw of key.workflows) {
         const writes = kw.endpoints.filter(isWrite);
         const need = writes.length > 0 ? writes : kw.endpoints;

@@ -3,9 +3,12 @@
  * rules, an answer key, recorded judgements and run counters. Every expected number below is worked out by hand from the criterion's
  * definition (comments show the count), never taken from a run of the scorer.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AppModelSchema, type Rule } from "../src/engine/intel/model.js";
-import { AnswerKeySchema, type Judgements } from "../src/eval/bench/understanding/answer-key.js";
+import { loadCatalogue } from "../src/eval/bench/catalogue.js";
+import { ANSWERS_DIR, AnswerKeySchema, parseAnswerKey, type Judgements } from "../src/eval/bench/understanding/answer-key.js";
 import {
     defectRuleRecall,
     endpointRecall,
@@ -190,14 +193,15 @@ describe("U3 workflow recall", () => {
     it("a key workflow is identified by several model workflows that each lie wholly inside it and together cover it", () => {
         // order-lifecycle needs {pay, cancel}; "pay" opens the order (a read) and pays, "cancel" cancels: each writes only what the key
         // workflow writes, and together they cover both → identified. browse needs both reads; "list" and "one" read one each → identified.
+        // Every piece goes through a screen the crawl saw (page pg, /checkout): a part must be a screen journey.
         const lifecycle = AnswerKeySchema.parse({
             ...key,
             endpoints: [...key.endpoints, { method: "POST", path: "/api/orders/:id/pay", documented: true }, { method: "POST", path: "/api/orders/:id/cancel", documented: true }],
             workflows: [...key.workflows, { id: "order-lifecycle", name: "Pay or cancel an order", screens: ["checkout"], endpoints: ["POST /api/orders/:id/pay", "POST /api/orders/:id/cancel"] }],
         });
-        const step = (endpoint: string, order = 0) => ({ order, action: "Do", endpoint });
-        const pieces = (extra: Array<{ id: string; endpoints: string[] }>) =>
-            AppModelSchema.parse({ workflows: extra.map((w) => ({ id: w.id, name: w.id, sourceType: "inferred", steps: w.endpoints.map((e, i) => step(e, i)) })) });
+        const step = (endpoint: string, order = 0, page?: string) => ({ order, action: "Do", endpoint, ...(page ? { page } : {}) });
+        const pieces = (extra: Array<{ id: string; endpoints: string[] }>, page: string | undefined = "pg") =>
+            AppModelSchema.parse({ pages: [{ id: "pg", path: "/checkout" }], workflows: extra.map((w) => ({ id: w.id, name: w.id, sourceType: "inferred", steps: w.endpoints.map((e, i) => step(e, i, page)) })) });
         const fine = pieces([
             { id: "pay", endpoints: ["GET /api/orders/{id}", "POST /api/orders/{id}/pay"] },
             { id: "cancel", endpoints: ["POST /api/orders/{id}/cancel"] },
@@ -215,6 +219,48 @@ describe("U3 workflow recall", () => {
         expect(workflowRecall(mixed, lifecycle, ["order-lifecycle", "browse"])).toEqual({ found: 0, total: 2, value: 0, missed: ["browse", "order-lifecycle"], needsJudgement: [] });
         // Half of it is not it.
         expect(workflowRecall(pieces([{ id: "pay", endpoints: ["POST /api/orders/{id}/pay"] }]), lifecycle, ["order-lifecycle"]).found).toBe(0);
+    });
+    it("only screen journeys compose: pieces with no page the crawl saw never add up to a key workflow", () => {
+        const lifecycle = AnswerKeySchema.parse({
+            ...key,
+            endpoints: [...key.endpoints, { method: "POST", path: "/api/orders/:id/pay", documented: true }, { method: "POST", path: "/api/orders/:id/cancel", documented: true }],
+            workflows: [...key.workflows, { id: "order-lifecycle", name: "Pay or cancel an order", screens: ["checkout"], endpoints: ["POST /api/orders/:id/pay", "POST /api/orders/:id/cancel"] }],
+        });
+        const split = [
+            { id: "pay", endpoints: ["POST /api/orders/{id}/pay"] },
+            { id: "cancel", endpoints: ["POST /api/orders/{id}/cancel"] },
+            { id: "list", endpoints: ["GET /api/products"] },
+            { id: "one", endpoints: ["GET /api/products/{id}"] },
+        ];
+        const build = (page?: string) =>
+            AppModelSchema.parse({ pages: [{ id: "pg", path: "/checkout" }], workflows: split.map((w) => ({ id: w.id, name: w.id, sourceType: "inferred", steps: w.endpoints.map((endpoint, order) => ({ order, action: "Do", endpoint, ...(page ? { page } : {}) })) })) });
+        // Through the crawled page (by id, or by its path): both composed.
+        expect(workflowRecall(build("pg"), lifecycle, ["order-lifecycle", "browse"]).value).toBe(1);
+        expect(workflowRecall(build("/checkout"), lifecycle, ["order-lifecycle", "browse"]).value).toBe(1);
+        // Endpoint lists with no page, or a page the crawl never saw: nothing composed.
+        expect(workflowRecall(build(), lifecycle, ["order-lifecycle", "browse"])).toEqual({ found: 0, total: 2, value: 0, missed: ["browse", "order-lifecycle"], needsJudgement: [] });
+        expect(workflowRecall(build("/nowhere"), lifecycle, ["order-lifecycle", "browse"]).found).toBe(0);
+    });
+    it("a workflow with no page still identifies a key workflow one-to-one", () => {
+        // "order" posts the order with no page: checkout needs only that write → identified by the single-workflow rule.
+        const apiOnly = AppModelSchema.parse({ workflows: [{ id: "order", name: "order", sourceType: "inferred", steps: [{ order: 0, action: "Do", endpoint: "POST /api/orders" }] }] });
+        expect(workflowRecall(apiOnly, key, ["checkout"]).value).toBe(1);
+    });
+    it("the real answer keys: one workflow per documented endpoint, with no page, is far from 80% recall", () => {
+        // Only key workflows with a single need are identified, one-to-one.
+        // bench-shop (9): registration, cart-discount, account-profile, cart-shipping (GET /api/cart alone) → 4/9. cart, cart-quantity,
+        // checkout, order-lifecycle (two writes each) and order-history (two reads) would need composing.
+        // bench-rbac (8): registration, notes-create, notes-edit, admin-people, admin-roles → 5/8. session, notes-share (two writes) and
+        // notes-read (two reads) would need composing.
+        const catalogue = loadCatalogue();
+        const want = { "bench-shop": 4 / 9, "bench-rbac": 5 / 8 };
+        for (const [app, recall] of Object.entries(want)) {
+            const real = parseAnswerKey(fs.readFileSync(path.join(ANSWERS_DIR, `${app}.json`), "utf8"), `${app}.json`).key;
+            const docs = real.endpoints.filter((e) => e.documented).map((e) => `${e.method} ${e.path}`);
+            const perEndpoint = AppModelSchema.parse({ workflows: docs.map((e, i) => ({ id: `e${i}`, name: e, sourceType: "inferred", steps: [{ order: 0, action: "Do", endpoint: e }] })) });
+            const wanted = [...new Set(catalogue.defects.filter((d) => d.app === app).map((d) => d.workflow))];
+            expect(workflowRecall(perEndpoint, real, wanted).value, app).toBeCloseTo(recall, 10);
+        }
     });
     it("a model workflow without endpoint steps is matched on its step pages to a key workflow's screens", () => {
         // w-look opens / and /products/7: browse's screens are products (/) and product (/products/:id), both covered, 2 of 2 pages → browse.
@@ -234,14 +280,14 @@ describe("U3-precision: model workflows wholly inside one answer-key workflow", 
     const step = (endpoint: string, order = 0) => ({ order, action: "Do", endpoint });
     const byEndpoints = (ws: Array<{ id: string; endpoints: string[] }>) =>
         AppModelSchema.parse({ workflows: ws.map((w) => ({ id: w.id, name: w.id, sourceType: "inferred", steps: w.endpoints.map((e, i) => step(e, i)) })) });
-    it("one workflow per documented endpoint scores recall 1, but precision counts the ones no key workflow has", () => {
-        // The document describes the 5 endpoints of the key's workflows and 5 more no key workflow uses. One model workflow per endpoint:
-        // browse is composed of the two reads, cart / cart-discount / checkout are each one write → recall 4/4. Genuine: the 5 key-workflow
-        // endpoints; the 5 others touch nothing in the key → precision 5/10.
+    it("one workflow per documented endpoint: browse is not composed from page-less pieces, and precision counts the ones outside the key", () => {
+        // The document describes the 5 endpoints of the key's workflows and 5 more no key workflow uses. One model workflow per endpoint,
+        // no page: cart / cart-discount / checkout are each one write (one-to-one); browse needs both reads, and page-less pieces do not
+        // compose → recall 3/4. Genuine: the 5 key-workflow endpoints; the 5 others touch nothing in the key → precision 5/10.
         const extra = ["GET /api/health", "GET /api/categories", "DELETE /api/cart", "PUT /api/admin/settings", "GET /api/admin/stats"];
         const keyed = ["GET /api/products", "GET /api/products/{id}", "POST /api/cart/items", "POST /api/cart/discount", "POST /api/orders"];
         const perEndpoint = byEndpoints([...keyed, ...extra].map((e, i) => ({ id: `e${i}`, endpoints: [e] })));
-        expect(workflowRecall(perEndpoint, key, ["browse", ...catalogueWorkflows]).value).toBe(1);
+        expect(workflowRecall(perEndpoint, key, ["browse", ...catalogueWorkflows])).toMatchObject({ found: 3, total: 4, missed: ["browse"] });
         expect(workflowPrecision(perEndpoint, key)).toEqual({ found: 5, total: 10, value: 0.5, missed: ["e5", "e6", "e7", "e8", "e9"], outsideKey: ["e5", "e6", "e7", "e8", "e9"], needsJudgement: [] });
     });
     it("a clean split of the key's features is all genuine; a workflow mixing two features' writes is not, though it touches the key", () => {
