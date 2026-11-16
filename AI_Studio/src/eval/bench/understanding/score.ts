@@ -18,6 +18,8 @@
  *   analysis that lists each of its actions as its own workflow has identified it (U3 asks whether the workflow is identified, PHASE 2
  *   spec 8.2, not at which granularity). A model workflow that mixes in another feature's writes never contributes, and nothing is
  *   composed from pages.
+ * - U3-precision: model workflows that lie wholly inside one key workflow / model workflows (workflowPrecision below). U3 passes only
+ *   when recall and precision both meet their targets: recall alone does not count workflows that lie outside the key or mix features.
  * - U4 defect rules: defect rules stated by at least one model rule that carries evidence or a source reference / defect rules. A model
  *   rule is linked first to the key rules whose requirement it cites (an evidence item naming the requirement id, e.g. "4.9#L1", or
  *   quoting its line) AND whose wording it shares: the rule's description and expectation share at least two content words with the key
@@ -210,6 +212,52 @@ function composedWorkflows(model: AppModel, key: AnswerKey): Set<string> {
         if (need.every((n) => parts.some((have) => have.some((h) => endpointMatches(n, h))))) out.add(kw.id);
     }
     return out;
+}
+
+/**
+ * U3-precision: model workflows that are genuine / model workflows. A model workflow is genuine when it lies wholly inside one answer-key
+ * workflow, by the test the composition rule uses: every write it sends is that key workflow's write; a workflow that writes nothing,
+ * every endpoint it uses is that key workflow's endpoint. So it mixes in no other feature's writes. A model workflow whose steps name no
+ * endpoint is judged on its step pages, as the one-to-one rule does: every page is a screen of that key workflow. A model workflow that
+ * touches nothing any key workflow has (none of its endpoints, or with no endpoint none of its pages) is not genuine: the answer key lists
+ * the app's workflows, so it is not one of them; it is listed in `outsideKey` too. A model workflow whose steps name neither a page nor
+ * an endpoint gives nothing to compare: a recorded workflow link decides (a key workflow: genuine; null: not), and without one it is
+ * listed in `needsJudgement` and counted as not genuine, so `value` is the lowest the precision can be.
+ */
+export function workflowPrecision(model: AppModel, key: AnswerKey, judgements?: Judgements): Ratio & { outsideKey: string[]; needsJudgement: string[] } {
+    const isWrite = (e: string) => {
+        const m = parseEndpoint(e).method;
+        return m !== null && m !== "GET";
+    };
+    const pagePath = new Map(model.pages.map((p) => [p.id, p.path]));
+    const screenPath = new Map(key.screens.map((s) => [s.id, s.path]));
+    const keyScreens = key.workflows.map((kw) => kw.screens.map((id) => screenPath.get(id) ?? "").filter(Boolean));
+    const within = (have: string[], allowed: string[], match: (n: string, h: string) => boolean) => have.length > 0 && have.every((h) => allowed.some((n) => match(n, h)));
+    const genuine: string[] = [];
+    const notGenuine: string[] = [];
+    const outsideKey: string[] = [];
+    const needsJudgement: string[] = [];
+    const linked = new Map((judgements?.workflowLinks ?? []).map((l) => [l.workflowId, l.keyWorkflowId]));
+    for (const w of model.workflows) {
+        const endpoints = [...new Set(w.steps.flatMap((s) => (s.endpoint ? [s.endpoint] : [])))];
+        const writes = endpoints.filter(isWrite);
+        const pages = [...new Set(w.steps.flatMap((s) => (s.page ? [pagePath.get(s.page) ?? s.page] : [])))];
+        let inside: boolean;
+        let touches = true;
+        if (endpoints.length === 0 && pages.length === 0) {
+            inside = Boolean(linked.get(w.id));
+            if (!linked.has(w.id)) needsJudgement.push(w.id);
+        } else if (endpoints.length > 0) {
+            inside = key.workflows.some((kw) => (writes.length > 0 ? within(writes, kw.endpoints.filter(isWrite), endpointMatches) : within(endpoints, kw.endpoints, endpointMatches)));
+            touches = endpoints.some((h) => key.workflows.some((kw) => kw.endpoints.some((n) => endpointMatches(n, h))));
+        } else {
+            inside = keyScreens.some((screens) => within(pages, screens, matchesPath));
+            touches = pages.some((h) => keyScreens.some((screens) => screens.some((n) => matchesPath(n, h))));
+        }
+        (inside ? genuine : notGenuine).push(w.id);
+        if (!touches) outsideKey.push(w.id);
+    }
+    return { ...ratio(genuine.length, model.workflows.length, notGenuine), outsideKey: outsideKey.sort(), needsJudgement: needsJudgement.sort() };
 }
 
 export function workflowRecall(model: AppModel, key: AnswerKey, catalogueWorkflows: string[], judgements?: Judgements): Ratio & { needsJudgement: string[] } {
@@ -407,6 +455,7 @@ export interface UnderstandingScore {
     screens: ReturnType<typeof screenRecall>;
     endpoints: ReturnType<typeof endpointRecall>;
     workflows: ReturnType<typeof workflowRecall>;
+    workflowPrecision: ReturnType<typeof workflowPrecision>;
     defectRules: ReturnType<typeof defectRuleRecall>;
     provenance: ReturnType<typeof provenance>;
     wrongRules: ReturnType<typeof wrongRules>;
@@ -423,6 +472,7 @@ export function scoreUnderstanding(input: UnderstandingInput): UnderstandingScor
         screens: screenRecall(model, key, input.notReachableScreens),
         endpoints: endpointRecall(model, key),
         workflows: workflowRecall(model, key, input.catalogueWorkflows, judgements),
+        workflowPrecision: workflowPrecision(model, key, judgements),
         defectRules: defectRuleRecall(model, rules, key, { requirementsText: input.requirementsText, judgements }),
         provenance: provenance(rules),
         wrongRules: wrongRules(rules, judgements),
