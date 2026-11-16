@@ -1,7 +1,7 @@
 {
     "app": "bench-rbac",
     "version": "1",
-    "review": "awaiting-owner",
+    "review": "approved",
     "catalogueVersion": "2026-11-14.1",
     "requirementsDocument": "bench-rbac-requirements.md",
     "screens": [
