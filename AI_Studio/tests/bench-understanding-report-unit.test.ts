@@ -25,7 +25,7 @@ function score(over: { screens?: number; endpoints?: number; extraDocumented?: n
         },
     };
 }
-const trial = (engine: "baseline" | "candidate", n: number, s: UnderstandingScore | undefined, counts = { aiCalls: 10, failedCalls: 0, pages: 8 }, inputs: "url" | "full" = "url"): TrialResult => ({
+const trial = (engine: "baseline" | "candidate", n: number, s: UnderstandingScore | undefined, counts: TrialResult["counts"] = { aiCalls: 10, failedCalls: 0, pages: 8 }, inputs: "url" | "full" = "url"): TrialResult => ({
     app: "x-shop",
     inputs,
     engine,
@@ -142,6 +142,49 @@ describe("too few trials or nothing to measure", () => {
         expect(rep(inc({}))).toBe("pass");
         expect(rep(inc({ oneChanged: undefined }))).toBe("inconclusive");
         expect(rep(inc({ decisions: { found: 0, total: 0, value: null, missed: [] } }))).toBe("inconclusive");
+    });
+});
+
+describe("criteria some trials could not measure", () => {
+    const noRules = (): UnderstandingScore => ({ ...score(), provenance: { found: 0, total: 0, value: null, missed: [], confirmedWithoutPerson: [], fromObserved: [] } });
+    it("shows the measured trials' median and range with how many of the series were measured, and stays inconclusive", () => {
+        // U5 is 1 in trials 1, 3 and 5; trials 2 and 4 stored no rules (nothing to measure).
+        const rep = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: [1, 2, 3, 4, 5].map((n) => trial("candidate", n, n % 2 ? score() : noRules(), undefined, "full")) });
+        const u5 = criterion(rep, "U5");
+        expect(u5).toMatchObject({ candidate: { n: 3, median: 1, min: 1, max: 1 }, verdict: "inconclusive" });
+        expect(u5.why).toMatch(/3 of 5 measured/);
+        expect(renderReportMd(rep)).toMatch(/\| U5 .*\| 1 \(1–1\) \| – \| inconclusive \| 3 of 5 measured/);
+    });
+    it("with every trial measured nothing changes: the verdict is judged", () => {
+        const rep = buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials: [1, 2, 3, 4, 5].map((n) => trial("candidate", n, score(), undefined, "full")) });
+        expect(criterion(rep, "U5")).toMatchObject({ candidate: { n: 5 }, verdict: "pass", why: "" });
+    });
+});
+
+describe("AI calls by purpose (U8)", () => {
+    it("median and range per purpose: analysis reading, exploration planning, everything else", () => {
+        const byPurpose = [
+            { analysis: 3, planning: 5, other: 0 },
+            { analysis: 3, planning: 8, other: 1 },
+            { analysis: 2, planning: 6, other: 0 },
+            { analysis: 3, planning: 7, other: 0 },
+            { analysis: 4, planning: 5, other: 2 },
+        ];
+        const trials = byPurpose.map((p, i) => trial("candidate", i + 1, score(), { aiCalls: p.analysis + p.planning + p.other, failedCalls: 0, pages: 8, byPurpose: p }));
+        const rep = buildReport({ inputs: "url", repeat: 5, apps: ["x-shop"], trials });
+        expect(criterion(rep, "U8-analysis")).toMatchObject({ candidate: { n: 5, median: 3, min: 2, max: 4 }, verdict: "reported" });
+        expect(criterion(rep, "U8-planning")).toMatchObject({ candidate: { n: 5, median: 6, min: 5, max: 8 }, verdict: "reported" });
+        expect(criterion(rep, "U8-other")).toMatchObject({ candidate: { n: 5, median: 0, min: 0, max: 2 }, verdict: "reported" });
+        expect(renderReportMd(rep)).toMatch(/\| U8-analysis \| AI calls per analysis: reading the application \|/);
+    });
+});
+
+describe("the requirements input variant", () => {
+    it("a full series says whether the requirements were imported one record per requirement or uploaded whole", () => {
+        const trials = [1, 2, 3, 4, 5].map((n) => trial("candidate", n, score(), undefined, "full"));
+        expect(buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials, doc: "whole" }).doc).toBe("whole");
+        expect(renderReportMd(buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials, doc: "whole" }))).toMatch(/Requirements document: uploaded whole, as one document/);
+        expect(renderReportMd(buildReport({ inputs: "full", repeat: 5, apps: ["x-shop"], trials }))).toMatch(/Requirements document: imported one record per numbered requirement/);
     });
 });
 

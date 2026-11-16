@@ -20,6 +20,18 @@ export interface BenchApp {
     credentials?: { username: string; password: string };
     /** Areas of the app by address prefix (a test reaches an area when it opens or calls an address under one of them). */
     workflows: Array<{ name: string; paths: string[] }>;
+    /** Settings of the understanding benchmark only (the detection benchmark keeps `credentials` and the app's own data). */
+    understanding?: UnderstandingSetup;
+}
+
+/** How the understanding benchmark lets a crawl reach what the app's answer key lists. */
+export interface UnderstandingSetup {
+    /** The seeded account its crawl signs in with, instead of `credentials`. */
+    credentials?: { username: string; password: string };
+    /** JSON requests sent as that account (signed in through POST /api/login) after the app starts and before the crawl. */
+    seed?: Array<{ method: "POST" | "PUT"; path: string; body: Record<string, unknown> }>;
+    /** Answer-key screens no crawl can reach, left out of U1, each with the reason. */
+    notReachableScreens?: Array<{ id: string; why: string }>;
 }
 
 export const BENCH_APPS: BenchApp[] = [
@@ -36,6 +48,11 @@ export const BENCH_APPS: BenchApp[] = [
             { name: "Orders", paths: ["/orders", "/api/orders"] },
             { name: "Account", paths: ["/account", "/api/profile"] },
         ],
+        understanding: {
+            // The cart page shows "Check out" only with a line in the cart, and the seeded cart is empty.
+            seed: [{ method: "POST", path: "/api/cart/items", body: { productId: "p1", quantity: 1 } }],
+            notReachableScreens: [{ id: "checkout-review", why: "No page links to it: it opens only after the delivery-address form is sent, and a crawl sends no form." }],
+        },
     },
     {
         id: "bench-rbac",
@@ -48,6 +65,9 @@ export const BENCH_APPS: BenchApp[] = [
             { name: "Administration", paths: ["/admin", "/api/admin"] },
             { name: "Account", paths: ["/account", "/api/me"] },
         ],
+        // Every signed-in screen of the answer key lists the admin role, and People (/admin/users) lists only admin: an admin crawl can
+        // reach all of them, the user account all but People. The detection benchmark keeps the user account its seeded defects need.
+        understanding: { credentials: { username: "ada@example.test", password: "Password1!" } },
     },
 ];
 

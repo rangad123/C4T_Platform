@@ -8,7 +8,10 @@
  * Sides: "baseline" (Baseline-U) explores the way an older runner does and analyses without AI, from the URL and sign-in only, whatever
  * the input configuration; "candidate" is the current engine with the configuration's inputs. Sides alternate within every trial.
  * Configurations: "url" (URL and sign-in) and "full" (also the app's /openapi.json and its requirements document). A series never mixes
- * them. A run with a real model scores only against answer keys the owner approved, uses a free model only (--approved-budget-usd 0, a
+ * them. With full, the requirements document is imported one record per numbered requirement (the default, --doc records) or uploaded whole
+ * as one record (--doc whole); the report says which. Recorded judgements (--judgements, one trial's or a list) are applied to the trial
+ * they were recorded for. The understanding settings of a benchmark app (apps.ts) give its crawl another account, seed data the pages need
+ * before the crawl, and name the answer-key screens no crawl can reach. A run with a real model scores only against answer keys the owner approved, uses a free model only (--approved-budget-usd 0, a
  * price of 0 in --prices) and stops at --daily-call-cap. Exit codes: 0 every trial ran, 2 nothing could start, 3 the series is incomplete.
  */
 import fs from "node:fs";
@@ -22,14 +25,18 @@ import { ok, type PlatformClient } from "../../client.js";
 import { BENCH_APPS, BenchAppHost, benchApp, type BenchApp } from "../apps.js";
 import { CATALOGUE_FILE, loadCatalogue, type Catalogue } from "../catalogue.js";
 import { loadPrices } from "../cost.js";
-import { ANSWERS_DIR, INPUTS_DIR, parseAnswerKey, requireApprovedKey, type AnswerKey } from "./answer-key.js";
-import { buildReport, renderReportMd, type Engine, type Inputs, type TrialResult } from "./report.js";
+import { MAX_TEXT } from "../../../platform/requirement-store.js";
+import { ANSWERS_DIR, INPUTS_DIR, parseAnswerKey, parseJudgements, requireApprovedKey, type AnswerKey, type Judgements } from "./answer-key.js";
+import { buildReport, renderReportMd, type CallsByPurpose, type DocVariant, type Engine, type Inputs, type TrialResult } from "./report.js";
 import { PAID_KEY_ENV, PAID_MODEL, paidKeyFrom, paidLlm, paidPlatformEnv, paidPricesIn, SpendGuard, type PaidPrices } from "./paid.js";
 import { scoreUnderstanding, type ScoredRule } from "./score.js";
 
 export const UNDERSTANDING_USAGE = `Usage: node scripts/eval.mjs bench --mode understanding [options]
   --apps <id,id>             benchmark apps (default: ${BENCH_APPS.map((a) => a.id).join(", ")})
   --inputs <c>               url (URL and sign-in, the default) or full (also the app's OpenAPI document and requirements document)
+  --doc <d>                  with full: records (one requirement record per numbered line, the default) or whole (the whole document
+                             as one record, headings and context kept)
+  --judgements <file>        recorded judgements (one trial's, or a list) applied to the trials they were recorded for
   --engine <e>               baseline, candidate or both (default both, alternating within every trial)
   --repeat <n>               analyses per side and app, 1 to 20 (default 5)
   --level <l>                exploration level: ${LEVELS.join(", ")} (default: the platform's default)
@@ -47,6 +54,10 @@ export const UNDERSTANDING_USAGE = `Usage: node scripts/eval.mjs bench --mode un
 export interface UnderstandingArgs {
     apps: string[];
     inputs: Inputs;
+    /** How a full series gives the requirements document. */
+    doc: DocVariant;
+    /** A file of recorded judgements. */
+    judgements?: string;
     engines: Engine[];
     repeat: number;
     level?: ExploreLevel;
@@ -64,7 +75,8 @@ export interface UnderstandingArgs {
 }
 
 export function parseUnderstandingArgs(argv: string[]): UnderstandingArgs {
-    const a: UnderstandingArgs = { apps: BENCH_APPS.map((x) => x.id), inputs: "url", engines: ["baseline", "candidate"], repeat: 5, portBase: 5291, estimateOnly: false, singleModel: false, out: "", yes: false, help: false };
+    const a: UnderstandingArgs = { apps: BENCH_APPS.map((x) => x.id), inputs: "url", doc: "records", engines: ["baseline", "candidate"], repeat: 5, portBase: 5291, estimateOnly: false, singleModel: false, out: "", yes: false, help: false };
+    let docGiven = false;
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         const value = () => {
@@ -84,7 +96,13 @@ export function parseUnderstandingArgs(argv: string[]): UnderstandingArgs {
             const v = value();
             if (v !== "url" && v !== "full") throw new Error("--inputs is url or full");
             a.inputs = v;
-        } else if (k === "--engine") {
+        } else if (k === "--doc") {
+            const v = value();
+            if (v !== "records" && v !== "whole") throw new Error("--doc is records or whole");
+            a.doc = v;
+            docGiven = true;
+        } else if (k === "--judgements") a.judgements = path.resolve(value());
+        else if (k === "--engine") {
             const v = value();
             if (v !== "baseline" && v !== "candidate" && v !== "both") throw new Error("--engine is baseline, candidate or both");
             a.engines = v === "both" ? ["baseline", "candidate"] : [v];
@@ -108,6 +126,7 @@ export function parseUnderstandingArgs(argv: string[]): UnderstandingArgs {
         else if (k === "--help" || k === "-h") a.help = true;
         else throw new Error(`Unknown option ${k}`);
     }
+    if (docGiven && a.inputs !== "full") throw new Error("--doc needs --inputs full (only a full series gives the requirements document)");
     if (a.dataDir && path.resolve(a.dataDir) === path.resolve(REPO_ROOT, "data")) throw new Error("--data-dir must not be the platform's own ./data folder");
     if (!a.out) a.out = path.join(REPO_ROOT, "eval/results", `understanding-${a.inputs}`);
     return a;
@@ -151,6 +170,61 @@ export function requirementsOf(text: string): Array<{ ref: string; title: string
     });
 }
 
+/**
+ * The whole requirements document as one requirement record: titled by its first line (a heading's "#" dropped), every later line kept in
+ * order. A record's description holds at most `limit` characters, so whole lines past it continue in its acceptance criteria (the
+ * analysis reads both as one document); a document longer than both is refused.
+ */
+export function wholeDocumentRequirement(text: string, limit = MAX_TEXT): { ref: string; title: string; description: string; acceptanceCriteria: string } {
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+    const title = (lines.shift() ?? "").replace(/^#+\s*/, "").trim().slice(0, 200) || "Requirements";
+    while (lines.length && !lines[0]!.trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1]!.trim()) lines.pop();
+    let n = 0;
+    while (n < lines.length && lines.slice(0, n + 1).join("\n").length <= limit) n++;
+    const description = lines.slice(0, n).join("\n");
+    const acceptanceCriteria = lines.slice(n).join("\n");
+    if ((n === 0 && lines.length > 0) || acceptanceCriteria.length > limit) throw new Error(`The requirements document is too long to upload whole (at most ${limit * 2} characters in whole lines).`);
+    return { ref: "requirements", title, description, acceptanceCriteria };
+}
+
+/** A judgements file: one trial's judgements or a list. Each must name an app of the run, its answer key as scored, and this configuration. */
+export function loadJudgements(file: string, o: { inputs: Inputs; keys: Map<string, string> }): Judgements[] {
+    let raw: unknown;
+    try {
+        raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (e) {
+        throw new Error(`The judgements file ${path.basename(file)} could not be read: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const list = (Array.isArray(raw) ? raw : [raw]).map((x) => parseJudgements(JSON.stringify(x)));
+    const seen = new Set<string>();
+    for (const j of list) {
+        const sha = o.keys.get(j.app);
+        if (sha === undefined) throw new Error(`The judgements file has judgements for ${j.app}, which this run does not analyse.`);
+        if (j.answerKeySha256 !== sha) throw new Error(`The judgements for ${j.app} trial ${j.trial} were recorded against another version of the answer key.`);
+        if (j.inputs !== o.inputs) throw new Error(`The judgements for ${j.app} trial ${j.trial} were recorded for a ${j.inputs} series; this series is ${o.inputs}.`);
+        const id = `${j.app} ${j.engine} trial ${j.trial}`;
+        if (seen.has(id)) throw new Error(`The judgements file has ${id} twice.`);
+        seen.add(id);
+    }
+    return list;
+}
+
+/** The judgements recorded for one trial, applied only to the model version they were recorded for. */
+export function judgementFor(list: Judgements[], t: { app: string; engine: Engine; trial: number; modelVersion: number }): { judgements?: Judgements; note?: string } {
+    const j = list.find((x) => x.app === t.app && x.engine === t.engine && x.trial === t.trial);
+    if (!j) return {};
+    if (j.modelVersion !== t.modelVersion) return { note: `The judgements for this trial were recorded for model version ${j.modelVersion}, not ${t.modelVersion}: not applied.` };
+    return { judgements: j };
+}
+
+/** AI calls by purpose (the usage groups by purpose): analysis is reading the application, planning is the exploration's planning. */
+export function callsByPurpose(groups: Array<{ key: string; calls: number }>): CallsByPurpose {
+    const out: CallsByPurpose = { analysis: 0, planning: 0, other: 0 };
+    for (const g of groups) out[g.key === "analysis" || g.key === "planning" ? g.key : "other"] += Number(g.calls ?? 0);
+    return out;
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const JOB_DONE = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -174,10 +248,25 @@ interface Side {
     stop: () => Promise<void>;
 }
 
-async function aiCallsOf(client: PlatformClient, projectId: string): Promise<{ calls: number; failedCalls: number }> {
+async function aiCallsOf(client: PlatformClient, projectId: string): Promise<{ calls: number; failedCalls: number; byPurpose: CallsByPurpose }> {
     const d = today();
-    const u = ok(await client.call("GET", `/api/usage?from=${d}&to=${d}&projectId=${encodeURIComponent(projectId)}`), "Reading the AI usage");
-    return { calls: Number(u?.totals?.calls ?? 0), failedCalls: Number(u?.totals?.failedCalls ?? 0) };
+    const u = ok(await client.call("GET", `/api/usage?from=${d}&to=${d}&projectId=${encodeURIComponent(projectId)}&groupBy=purpose`), "Reading the AI usage");
+    return { calls: Number(u?.totals?.calls ?? 0), failedCalls: Number(u?.totals?.failedCalls ?? 0), byPurpose: callsByPurpose(Array.isArray(u?.groups) ? u.groups : []) };
+}
+
+/** Sends the app's understanding seed requests as the crawl's account (signed in through the app's JSON sign-in). */
+async function seedApp(url: string, account: { username: string; password: string } | undefined, seed: NonNullable<BenchApp["understanding"]>["seed"] = []): Promise<void> {
+    if (!seed.length) return;
+    if (!account) throw new Error("The app's seed data needs a sign-in, and the app has none.");
+    const send = (method: string, p: string, body: unknown, cookie?: string) =>
+        fetch(`${url}${p}`, { method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+    const login = await send("POST", "/api/login", { email: account.username, password: account.password });
+    const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+    if (!login.ok || !cookie) throw new Error(`Signing in to seed the app's data failed (HTTP ${login.status}).`);
+    for (const s of seed) {
+        const r = await send(s.method, s.path, s.body, cookie);
+        if (!r.ok) throw new Error(`Seeding the app's data failed: ${s.method} ${s.path} answered HTTP ${r.status}.`);
+    }
 }
 
 async function callsToday(sides: Side[]): Promise<number> {
@@ -192,14 +281,16 @@ async function callsToday(sides: Side[]): Promise<number> {
 
 async function runTrial(
     side: Side,
-    o: { app: BenchApp; host: BenchAppHost; trial: number; inputs: Inputs; seeded: string[]; key: AnswerKey; keySha256: string; catalogueWorkflows: string[]; requirementsText?: string; level?: ExploreLevel; deps: UnderstandingDeps; log: (s: string) => void },
+    o: { app: BenchApp; host: BenchAppHost; trial: number; inputs: Inputs; doc: DocVariant; judgements: Judgements[]; seeded: string[]; key: AnswerKey; keySha256: string; catalogueWorkflows: string[]; requirementsText?: string; level?: ExploreLevel; deps: UnderstandingDeps; log: (s: string) => void },
 ): Promise<{ result: TrialResult; detail: Record<string, unknown> }> {
     const { client, engine } = side;
     const call = async (method: "GET" | "POST" | "PUT", url: string, what: string, body?: unknown) => ok(await client.call(method, url, body), what);
     const base: TrialResult = { app: o.app.id, inputs: o.inputs, engine, trial: o.trial, status: "failed", counts: { aiCalls: 0, failedCalls: 0, pages: 0 } };
+    const account = o.app.understanding?.credentials ?? o.app.credentials;
     let projectId: string | undefined;
     try {
         await o.host.start(o.seeded);
+        await seedApp(o.host.url, account, o.app.understanding?.seed);
         const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
         const project = await call("POST", "/api/projects", "Creating the project", { name: `Understanding: ${o.app.id} ${engine} ${o.trial} (${stamp})`.slice(0, 120) });
         projectId = String(project.id);
@@ -207,8 +298,8 @@ async function runTrial(
         if (engine === "candidate" && o.inputs === "full") {
             await call("PUT", `/api/projects/${projectId}/app-details`, "Setting the application address", { webUrl: o.host.url });
             await call("PUT", `/api/projects/${projectId}/agent-inputs`, "Setting the API description", { openApiUrl: `${o.host.url}/openapi.json` });
-            const requirements = requirementsOf(o.requirementsText ?? "");
-            if (!requirements.length) throw new Error(`The requirements document of ${o.app.id} has no numbered requirement lines.`);
+            const requirements = o.doc === "whole" ? [wholeDocumentRequirement(o.requirementsText ?? "")] : requirementsOf(o.requirementsText ?? "");
+            if (o.doc === "records" && !requirements.length) throw new Error(`The requirements document of ${o.app.id} has no numbered requirement lines.`);
             await call("POST", `/api/projects/${projectId}/requirements/import`, "Importing the requirements", { requirements });
         }
         const exploration = {
@@ -216,7 +307,7 @@ async function runTrial(
             targets: ["web", "api"],
             plan: true,
             ...(o.level ? { level: o.level } : {}),
-            ...(o.app.credentials ? { credentials: { username: o.app.credentials.username, password: o.app.credentials.password } } : {}),
+            ...(account ? { credentials: { username: account.username, password: account.password } } : {}),
             ...(engine === "baseline" ? { understandingBaseline: true } : {}),
             ...(o.deps.exploration ?? {}),
         };
@@ -260,6 +351,8 @@ async function runTrial(
         const usageAfter = await aiCallsOf(client, projectId);
 
         const model = version.model as AppModel;
+        const judged = judgementFor(o.judgements, { app: o.app.id, engine, trial: o.trial, modelVersion: Number(version.version) });
+        const notReachable = o.app.understanding?.notReachableScreens ?? [];
         const score = scoreUnderstanding({
             model,
             rules,
@@ -267,11 +360,25 @@ async function runTrial(
             keySha256: o.keySha256,
             catalogueWorkflows: o.catalogueWorkflows,
             ...(o.requirementsText ? { requirementsText: o.requirementsText } : {}),
+            ...(judged.judgements ? { judgements: judged.judgements } : {}),
+            ...(notReachable.length ? { notReachableScreens: notReachable.map((s) => s.id) } : {}),
             incremental: { before: rules, after: rulesAfter, noChange: { newVersion: versionsAfter > versionsBefore, aiCallsForUnchangedSources: usageAfter.calls - usage.calls } },
         });
         return {
-            result: { ...base, status: "completed", score, counts: { aiCalls: usage.calls, failedCalls: usage.failedCalls, pages } },
-            detail: { projectId, jobId, modelVersion: version.version, sources: model.sources, discovery: discoveryOf(model), rules: rules.length, rerun: { versionsBefore, versionsAfter, aiCalls: usageAfter.calls - usage.calls } },
+            result: { ...base, status: "completed", score, counts: { aiCalls: usage.calls, failedCalls: usage.failedCalls, pages, byPurpose: usage.byPurpose } },
+            detail: {
+                projectId,
+                jobId,
+                modelVersion: version.version,
+                sources: model.sources,
+                discovery: discoveryOf(model),
+                pagePaths: [...new Set(model.pages.map((p) => p.path))].sort(),
+                account: account?.username ?? null,
+                ...(engine === "candidate" && o.inputs === "full" ? { requirementsImport: o.doc } : {}),
+                judgements: judged.judgements ? "applied" : (judged.note ?? "none recorded"),
+                rules: rules.length,
+                rerun: { versionsBefore, versionsAfter, aiCalls: usageAfter.calls - usage.calls },
+            },
         };
     } catch (e) {
         const counts = projectId ? await aiCallsOf(client, projectId).catch(() => ({ calls: 0, failedCalls: 0 })) : { calls: 0, failedCalls: 0 };
@@ -287,6 +394,7 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
     let apps: BenchApp[];
     let catalogue: Catalogue;
     const keys = new Map<string, { key: AnswerKey; sha256: string; file: string; requirementsText?: string }>();
+    let judgements: Judgements[] = [];
     let paid: PaidPrices | undefined;
     let paidKey: string | undefined;
     try {
@@ -313,6 +421,7 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
             if (args.inputs === "full" && requirementsText === undefined) throw new Error(`The requirements document ${key.requirementsDocument} of ${app.id} is missing.`);
             keys.set(app.id, { key, sha256, file: path.basename(file), ...(requirementsText !== undefined ? { requirementsText } : {}) });
         }
+        if (args.judgements) judgements = loadJudgements(args.judgements, { inputs: args.inputs, keys: new Map([...keys].map(([app, k]) => [app, k.sha256])) });
         const est = understandingEstimate(args);
         log(`Configuration: ${args.inputs}; sides: ${args.engines.join(", ")}; ${args.repeat} analyses per side and app; apps: ${apps.map((a) => a.id).join(", ")}.`);
         log(`Estimate: at most ${est.total.toLocaleString("en-US")} AI calls (${args.engines.map((e) => `${e} up to ${est.perTrial[e]} per analysis`).join(", ")}).`);
@@ -420,6 +529,8 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
                         host: hosts[i]!,
                         trial: n,
                         inputs: args.inputs,
+                        doc: args.doc,
+                        judgements,
                         seeded: catalogue.defects.filter((d) => d.app === app.id).map((d) => d.id),
                         key: k.key,
                         keySha256: k.sha256,
@@ -442,12 +553,18 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
         }
         if (stopped) log(stopped);
 
-        const report = buildReport({ inputs: args.inputs, repeat: args.repeat, apps: apps.map((a) => a.id), trials, engines: args.engines });
+        const report = buildReport({ inputs: args.inputs, repeat: args.repeat, apps: apps.map((a) => a.id), trials, engines: args.engines, ...(args.inputs === "full" ? { doc: args.doc } : {}) });
         const head = [
             `Model: ${model}`,
             `Catalogue: ${catalogue.version} (${catalogue.sha256.slice(0, 12)})`,
             ...[...keys.values()].map((k) => `Answer key ${k.file}: version ${k.key.version}, ${k.key.review}, sha256 ${k.sha256.slice(0, 12)}`),
             "Baseline-U explores as an older runner does and analyses without AI, from the URL and sign-in only.",
+            ...apps.flatMap((a) => [
+                ...(a.understanding?.credentials ? [`${a.id}: the crawl signs in as ${a.understanding.credentials.username}, not the detection benchmark's account.`] : []),
+                ...(a.understanding?.seed?.length ? [`${a.id}: seeded before the crawl: ${a.understanding.seed.map((s) => `${s.method} ${s.path}`).join(", ")}.`] : []),
+                ...(a.understanding?.notReachableScreens ?? []).map((s) => `${a.id}: the screen ${s.id} is left out of U1: ${s.why}`),
+            ]),
+            `Recorded judgements: ${args.judgements ? `${judgements.length} trial(s) from ${path.basename(args.judgements)}` : "none"}.`,
             "U7 here is the no-change rerun only; carrying rule decisions forward and re-processing one changed source are not measured by this command.",
             ...(guard ? [`Spend: $${guard.spent.toFixed(4)} of the approved $${guard.budget.toFixed(2)} (${guard.calls} paid calls, ${guard.refused} refused before sending; effort low). The analysis run again from the API has no key in this series, so the no-change rerun reads nothing with AI.`] : []),
             ...(stopped ? [stopped] : []),

@@ -4,17 +4,26 @@
  * decides. There is no AI judge.
  *
  * Definitions:
- * - U1 screens: answer-key screens with at least one model page whose path matches / answer-key screens.
+ * - U1 screens: answer-key screens with at least one model page whose path matches / answer-key screens; screens the harness marks as
+ *   not reachable by any crawl are left out of both and listed.
  * - U2 endpoints: answer-key endpoints marked documented that the model holds as documented / answer-key documented endpoints; and the
  *   model's documented endpoints the document does not describe.
  * - U3 workflows: catalogue workflows identified / catalogue workflows of the app. Each model workflow identifies at most one key
  *   workflow: by id or name; else by best overlap, where its steps cover every write (non-GET) endpoint of the key workflow (every endpoint
- *   when it has none, every screen when it has no endpoint) and more than half of its own steps of that kind belong to it; a tie
- *   for the best waits for a recorded workflow link (listed in needsJudgement). A key workflow is credited at most once.
+ *   when it has none, every screen when it has no endpoint; every screen, too, when the model workflow's steps name pages but no
+ *   endpoint) and more than half of its own steps of that kind belong to it; a tie for the best waits for a recorded workflow link (listed
+ *   in needsJudgement). A key workflow is credited at most once.
  * - U4 defect rules: defect rules stated by at least one model rule that carries evidence or a source reference / defect rules. A model
- *   rule is linked to the key rules it shares endpoints with; failing that, workflows; failing that, entities. One candidate links; several
- *   (or none) wait for a recorded judgement, which never overrides a deterministic link. "Explicit citing" also needs the rule explicit and
- *   one evidence item quoting the cited requirement line or naming its id.
+ *   rule is linked first to the key rules whose requirement it cites (an evidence item naming the requirement id, e.g. "4.9#L1", or
+ *   quoting its line) AND whose wording it shares: the rule's description and expectation share at least two content words with the key
+ *   statement, and at least half of the smaller of the two word sets (key statements often add detail from neighbouring lines, so half of
+ *   the key's words alone would refuse a correct short rule). Content words: the text lower-cased and split on anything but letters and
+ *   digits; one-letter words and the function words of STOP_WORDS dropped; a final "s" dropped from words of four letters or more
+ *   ("totals" = "total"). The wording check keeps a different rule from the same requirement line from being linked by its citation
+ *   alone. Failing that, a rule is linked to the key
+ *   rules it shares endpoints with; failing that, workflows; failing that, entities. One candidate links; several (or none) wait for a
+ *   recorded judgement, which never overrides a deterministic link. "Explicit citing" also needs the rule explicit and one evidence item
+ *   quoting the cited requirement line or naming its id.
  * - U5 provenance: rules with evidence or a source reference, explicitness matching the source type and a source other than "observed" /
  *   rules; plus rules confirmed without a person and rules sourced from observed behaviour.
  * - U6 wrong rules: recorded "contradicts" verdicts / reviewed rules, explicit and inferred apart; unreviewed rules listed.
@@ -74,9 +83,12 @@ const endpointMatches = (keyRef: string, modelRef: string) => {
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-export function screenRecall(model: AppModel, key: AnswerKey): Ratio {
-    const missed = key.screens.filter((s) => !model.pages.some((p) => matchesPath(s.path, p.path))).map((s) => s.id);
-    return ratio(key.screens.length - missed.length, key.screens.length, missed);
+/** U1. Screens the harness marks as not reachable by any crawl (`notReachable`, answer-key screen ids) are left out and listed. */
+export function screenRecall(model: AppModel, key: AnswerKey, notReachable: string[] = []): Ratio & { notReachable?: string[] } {
+    const screens = key.screens.filter((s) => !notReachable.includes(s.id));
+    const missed = screens.filter((s) => !model.pages.some((p) => matchesPath(s.path, p.path))).map((s) => s.id);
+    const left = key.screens.filter((s) => notReachable.includes(s.id)).map((s) => s.id).sort();
+    return { ...ratio(screens.length - missed.length, screens.length, missed), ...(left.length ? { notReachable: left } : {}) };
 }
 
 export function endpointRecall(model: AppModel, key: AnswerKey): Ratio & { documentedNotInDocument: string[] } {
@@ -134,6 +146,12 @@ function assignWorkflows(model: AppModel, key: AnswerKey, judgements?: Judgement
             have = w.steps.flatMap((s) => (s.page ? [pagePath.get(s.page) ?? s.page] : []));
             match = matchesPath;
         }
+        // A model workflow whose steps name pages but no endpoint is matched on the key workflow's screens.
+        if (endpoints.length === 0) {
+            need = kw.screens.map((id) => screenPath.get(id) ?? "");
+            have = w.steps.flatMap((s) => (s.page ? [pagePath.get(s.page) ?? s.page] : []));
+            match = matchesPath;
+        }
         have = [...new Set(have)];
         if (need.length === 0 || have.length === 0) return null;
         if (!need.every((n) => have.some((h) => match(n, h)))) return null;
@@ -184,6 +202,28 @@ function citesLine(r: Rule, requirement: { id: string; line: number }, lines: st
     });
 }
 
+/** Function words left out of the wording check (U4). */
+const STOP_WORDS = new Set(
+    "an the and or but nor of to in on at by for from with without into than then that this these those is are was were be been being has have had do does did it its as if so not no any all each every both either can cannot may must should will would only also more most less very same other such their there they them we you your our".split(" "),
+);
+/** The content words of a text, as the file header defines them. */
+export function contentWords(text: string): Set<string> {
+    return new Set(
+        text
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter((w) => w.length > 1 && !STOP_WORDS.has(w))
+            .map((w) => (w.length >= 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w)),
+    );
+}
+/** The rule's description and expectation share at least two content words with the key statement, and at least half of the smaller set. */
+function sharesWording(r: Rule, statement: string): boolean {
+    const key = contentWords(statement);
+    const rule = contentWords(`${r.description} ${r.expected}`);
+    const shared = [...key].filter((w) => rule.has(w)).length;
+    return shared >= 2 && shared * 2 >= Math.min(key.size, rule.size);
+}
+
 export function defectRuleRecall(
     model: AppModel,
     rules: ScoredRule[],
@@ -198,6 +238,7 @@ export function defectRuleRecall(
         return key.entities.filter((e) => names.includes(e.id) || names.includes(slug(e.name))).map((e) => e.id);
     };
     const judged = new Map((opts.judgements?.links ?? []).map((l) => [l.ruleRef, l.defectId]));
+    const lines = (opts.requirementsText ?? "").split(/\r?\n/);
     const links: Record<string, string> = {};
     const needsJudgement: string[] = [];
     for (const r of rules) {
@@ -205,6 +246,7 @@ export function defectRuleRecall(
         const keyWorkflows = new Set(r.workflows.flatMap((w) => (modelWorkflows.has(w) ? (assigned.has(w) ? [assigned.get(w)!] : []) : [slug(w)])));
         const keyEntities = new Set(r.entities.flatMap(keyEntity));
         const tiers: Array<(k: AnswerKey["rules"][number]) => boolean> = [
+            (k) => citesLine(r, k.requirement, lines) && sharesWording(r, k.statement),
             (k) => k.endpoints.some((ke) => r.endpoints.some((me) => endpointMatches(ke, me))),
             (k) => k.workflows.some((w) => keyWorkflows.has(w)),
             (k) => k.entities.some((e) => keyEntities.has(e)),
@@ -221,7 +263,6 @@ export function defectRuleRecall(
         else if (!decided && ambiguous) needsJudgement.push(r.ref);
         if (decided) links[r.ref] = decided;
     }
-    const lines = (opts.requirementsText ?? "").split(/\r?\n/);
     const any: string[] = [];
     const citing: string[] = [];
     for (const k of key.rules) {
@@ -303,13 +344,15 @@ export interface UnderstandingInput {
     catalogueWorkflows: string[];
     requirementsText?: string;
     judgements?: Judgements;
+    /** Answer-key screen ids no crawl can reach (the benchmark app's harness settings): left out of U1. */
+    notReachableScreens?: string[];
     incremental?: IncrementalInput;
 }
 
 export interface UnderstandingScore {
     app: string;
     answerKeySha256: string;
-    screens: Ratio;
+    screens: ReturnType<typeof screenRecall>;
     endpoints: ReturnType<typeof endpointRecall>;
     workflows: ReturnType<typeof workflowRecall>;
     defectRules: ReturnType<typeof defectRuleRecall>;
@@ -325,7 +368,7 @@ export function scoreUnderstanding(input: UnderstandingInput): UnderstandingScor
     return {
         app: key.app,
         answerKeySha256: input.keySha256,
-        screens: screenRecall(model, key),
+        screens: screenRecall(model, key, input.notReachableScreens),
         endpoints: endpointRecall(model, key),
         workflows: workflowRecall(model, key, input.catalogueWorkflows, judgements),
         defectRules: defectRuleRecall(model, rules, key, { requirementsText: input.requirementsText, judgements }),

@@ -60,13 +60,15 @@ describe("rules from existing tests", () => {
         expect(f.rules[0]).toMatchObject({ sourceType: "existing_test", explicitness: "explicit", sourceRef: "manual-case:TC-002", evidence: [{ kind: "quote", ref: "manual-case:TC-002#L3" }] });
     });
 
-    it("a rule citing the wrong test, or no test when several were sent, is dropped", async () => {
+    it("a rule citing the wrong test is dropped; one citing no test is attributed to the one test where its quote is at the cited lines", async () => {
         const quoteOf2 = { kind: "constraint", description: "d", expected: "Quantities above 10 are refused", lines: [3], quote: "The page refuses quantities above 10", confidence: 0.8 };
-        // Without a doc, even a quote that is in the first test at the cited line is not attributed to it.
         const noDoc = { kind: "workflow", description: "d", expected: "A shipped order can be opened", lines: [2], quote: "Open a shipped order", confidence: 0.8 };
         const f = await extractFromTests(scripted([{ ...empty, rules: [{ ...quoteOf2, doc: "manual-case:TC-001" }, quoteOf2, noDoc] }]), TESTS, { now: NOW });
-        expect(f.rules).toEqual([]);
-        expect(f.notes.join(" ")).toMatch(/3 items were dropped/);
+        expect(f.rules.map((r) => [r.expected, r.sourceRef])).toEqual([
+            ["Quantities above 10 are refused", "manual-case:TC-002"],
+            ["A shipped order can be opened", "manual-case:TC-001"],
+        ]);
+        expect(f.notes.join(" ")).toMatch(/1 item was dropped: 1 quote is not in the text at the lines cited/);
     });
 
     it("workflows from tests carry the test as their source", async () => {

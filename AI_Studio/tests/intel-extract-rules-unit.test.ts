@@ -242,6 +242,109 @@ describe("rule extraction from a document", () => {
         });
     });
 
+    describe("which document an item comes from, why items were dropped, and the per-answer caps", () => {
+        // One requirement record per document, as the analysis passes requirements.
+        const records: ExtractionDocument[] = [
+            { ref: "4.9", lines: ["4.9: Cart quantity", "Quantity per item is between 1 and 10."] },
+            { ref: "5.1", lines: ["5.1: Refunds", "Only an admin can refund a paid order."] },
+            { ref: "5.2", lines: ["5.2: Refunds again", "Only an admin can refund a paid order."] },
+        ];
+        const input = (documents: ExtractionDocument[]) => ({ source: { kind: "requirements" as const, ref: "Requirements" }, sourceType: "requirement" as const, documents, now: NOW });
+
+        it("an item whose doc names no document is kept when its quote is at the cited lines of exactly one document, and attributed there", async () => {
+            const llm = scripted([
+                {
+                    ...empty,
+                    rules: [rule({ doc: "Quantity per item is between 1 and 10.", lines: [2] }), rule({ doc: undefined, lines: [2] })],
+                    roles: [{ name: "customer", doc: "Not signed in.", lines: [2], quote: "Quantity per item is between" }],
+                },
+            ]);
+            const f = await extractRules(llm, input(records));
+            expect(f.rules).toHaveLength(1);
+            expect(f.rules[0]).toMatchObject({ sourceRef: "4.9", evidence: [{ ref: "4.9#L2" }] });
+            expect(f.model.roles).toEqual([expect.objectContaining({ name: "customer", evidence: [expect.objectContaining({ ref: "4.9#L2" })] })]);
+        });
+
+        it("an item whose doc names no document and whose quote is in two documents is dropped, counted as an unknown document", async () => {
+            const refund = rule({ doc: "Refunds", expected: "Only an admin can refund a paid order", lines: [2], quote: "Only an admin can refund a paid order" });
+            const f = await extractRules(scripted([{ ...empty, rules: [refund] }]), input(records));
+            expect(f.rules).toEqual([]);
+            expect(f.notes.join(" ")).toMatch(/1 item was dropped: 1 named no document it could be found in/);
+        });
+
+        it("a doc that names a document is still used as given, even when the quote is also in another document", async () => {
+            const refund = rule({ doc: "5.2", expected: "Only an admin can refund a paid order", lines: [2], quote: "Only an admin can refund a paid order" });
+            const f = await extractRules(scripted([{ ...empty, rules: [refund] }]), input(records));
+            expect(f.rules.map((r) => r.sourceRef)).toEqual(["5.2"]);
+        });
+
+        it("counts dropped items by reason, so a wrong document, a missing quote, a short quote and unsupported words can be told apart", async () => {
+            const llm = scripted([
+                {
+                    ...empty,
+                    rules: [
+                        rule({ doc: "9.9", lines: [2], quote: "Nowhere in any requirement at all" }),
+                        rule({ doc: "4.9", lines: [2], quote: "Quantity per item is up to 99" }),
+                        rule({ doc: "4.9", lines: [2], quote: "Quantity per" }),
+                        rule({ doc: "4.9", lines: [2], description: "Admins delete orders", expected: "Delete succeeds without approval" }),
+                        rule({ doc: "4.9", lines: [2] }),
+                    ],
+                },
+            ]);
+            const f = await extractRules(llm, input(records));
+            expect(f.rules).toHaveLength(1);
+            const note = f.notes.find((n) => /dropped/.test(n) && !/link/.test(n)) ?? "";
+            expect(note).toMatch(/^4 items were dropped: /);
+            expect(note).toMatch(/1 named no document it could be found in/);
+            expect(note).toMatch(/1 quote is not in the text at the lines cited/);
+            expect(note).toMatch(/1 quote is too short/);
+            expect(note).toMatch(/1 rule is not supported by the words of the lines cited/);
+        });
+
+        it("the prompt says doc is exactly the ref of the document", async () => {
+            const llm = scripted([empty]);
+            await extractRules(llm, input(records));
+            expect(llm.calls[0]!.system).toMatch(/"doc" is exactly the ref attribute of the document/);
+        });
+
+        it("many records are read in parts of at most 40, so no answer needs more than the 50 rules one answer may hold", async () => {
+            const many: ExtractionDocument[] = Array.from({ length: 100 }, (_, i) => ({ ref: `R${i + 1}`, lines: [`R${i + 1}: Rule ${i + 1}`, `A customer can do thing number ${i + 1} at most once.`] }));
+            const llm = scripted([empty]);
+            const f = await extractRules(llm, input(many));
+            expect(f.source.status).toBe("processed");
+            expect(llm.calls).toHaveLength(3);
+            for (const c of llm.calls) expect(c.prompt.match(/<document ref=/g)!.length).toBeLessThanOrEqual(40);
+        });
+
+        it("one long document is read in parts of at most 80 lines", async () => {
+            const long: ExtractionDocument = { ref: "doc:long", lines: Array.from({ length: 200 }, (_, i) => `Line ${i + 1} says a customer can do thing ${i + 1}.`) };
+            const llm = scripted([empty]);
+            await extractRules(llm, input([long]));
+            expect(llm.calls).toHaveLength(3);
+            for (const c of llm.calls) expect(c.prompt.match(/^\d+\| /gm)!.length).toBeLessThanOrEqual(80);
+        });
+
+        it("an answer that reaches the 50-rule cap is said in a note", async () => {
+            const many: ExtractionDocument[] = Array.from({ length: 30 }, (_, i) => ({ ref: `R${i + 1}`, lines: [`A customer can do thing number ${i + 1} at most once.`] }));
+            const full = Array.from({ length: 50 }, (_, i) => rule({ doc: `R${(i % 30) + 1}`, lines: [1], quote: `A customer can do thing number ${(i % 30) + 1}`, expected: `Thing ${(i % 30) + 1} customer once`, description: `x${i}` }));
+            const f = await extractRules(scripted([{ ...empty, rules: full }]), input(many));
+            expect(f.notes.join(" ")).toMatch(/50 rules, the most one answer may hold/);
+        });
+
+        it("a first answer that needed the re-ask is counted in a note", async () => {
+            const llm = scripted([{ ...empty, rules: [rule({ doc: "4.9", lines: [2] })] }]);
+            const object = llm.object.bind(llm);
+            llm.object = (async (args: never) => {
+                // What the real client does when the first answer is not in the expected form and the re-ask is used.
+                llm.usage.repairs = (llm.usage.repairs ?? 0) + 1;
+                return object(args);
+            }) as never;
+            const f = await extractRules(llm, input(records));
+            expect(f.rules).toHaveLength(1);
+            expect(f.notes.join(" ")).toMatch(/1 answer was not in the expected form at first and was asked for again/);
+        });
+    });
+
     describe("hardening", () => {
         const input = (documents: ExtractionDocument[], extra: Record<string, unknown> = {}) => ({ source: { kind: "requirements" as const, ref: "d" }, sourceType: "requirement" as const, documents, now: NOW, ...extra });
 

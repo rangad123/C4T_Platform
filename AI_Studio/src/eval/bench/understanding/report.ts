@@ -6,7 +6,11 @@
  * a value is missing, or the series is incomplete; "reported" for a criterion with no target in this configuration. A series is complete
  * only when every expected trial of every side ran to completion; otherwise no criterion passes. Fewer than MIN_TRIALS trials per side is a
  * smoke series: allowed, said first, and no criterion passes or fails. A criterion with nothing to measure (no rules, a rerun not done) is
- * inconclusive, never a pass.
+ * inconclusive, never a pass. When some trials measured a criterion and others could not, the measured trials' median and range are
+ * shown with "n of N measured", and the criterion stays inconclusive while fewer than MIN_TRIALS trials measured it.
+ *
+ * U8 counts the AI calls of each analysis by purpose: reading the application (the analysis: pages, requirements, documents), planning
+ * the exploration, and everything else; the run table keeps each trial's total.
  */
 import type { UnderstandingScore } from "./score.js";
 
@@ -25,8 +29,15 @@ export interface TrialResult {
     status: "completed" | "failed";
     error?: string;
     score?: UnderstandingScore;
-    /** Work and errors of the analysis: AI calls made, AI calls that failed, pages visited. */
-    counts: { aiCalls: number; failedCalls: number; pages: number };
+    /** Work and errors of the analysis: AI calls made (and by purpose, when the run recorded it), AI calls that failed, pages visited. */
+    counts: { aiCalls: number; failedCalls: number; pages: number; byPurpose?: CallsByPurpose };
+}
+
+/** AI calls of one analysis by purpose: reading the application, planning the exploration, everything else. */
+export interface CallsByPurpose {
+    analysis: number;
+    planning: number;
+    other: number;
 }
 
 export interface Stat {
@@ -82,8 +93,13 @@ export interface RunRow {
     error?: string;
 }
 
+/** How a full series gave the requirements document: one record per numbered requirement (the default), or the whole document as one. */
+export type DocVariant = "records" | "whole";
+
 export interface UnderstandingReport {
     inputs: Inputs;
+    /** Only for a full series. */
+    doc?: DocVariant;
     repeat: number;
     engines: Engine[];
     complete: boolean;
@@ -162,7 +178,7 @@ function criteria(inputs: Inputs): Criterion[] {
 
 const SIDES: Engine[] = ["baseline", "candidate"];
 
-export function buildReport(input: { inputs: Inputs; repeat: number; apps: string[]; trials: TrialResult[]; engines?: Engine[] }): UnderstandingReport {
+export function buildReport(input: { inputs: Inputs; repeat: number; apps: string[]; trials: TrialResult[]; engines?: Engine[]; doc?: DocVariant }): UnderstandingReport {
     const { inputs, repeat, trials } = input;
     const mixed = trials.filter((t) => t.inputs !== inputs);
     if (mixed.length) throw new Error(`This is a ${inputs} report, but ${mixed.length} trial(s) used ${mixed[0].inputs}: url and full series are never mixed.`);
@@ -184,18 +200,25 @@ export function buildReport(input: { inputs: Inputs; repeat: number; apps: strin
         const rows: CriterionRow[] = criteria(inputs).map((c) => {
             const side = (engine: Engine) => {
                 if (!engines.includes(engine)) return null;
-                const values = scores(engine).map((x) => c.value(x.score));
-                return values.length && values.every((v): v is number => v !== null) ? values : null;
+                // The trials that measured it; null when none did.
+                const values = scores(engine).flatMap((x) => {
+                    const v = c.value(x.score);
+                    return v === null ? [] : [v];
+                });
+                return values.length ? values : null;
             };
             const cand = side("candidate");
             const base = side("baseline");
+            const partial = (vs: number[] | null, engine: Engine) => (vs && vs.length < scores(engine).length ? `${engine === "baseline" ? "Baseline-U " : ""}${vs.length} of ${repeat} measured` : "");
+            const measured = [partial(cand, "candidate"), partial(base, "baseline")].filter(Boolean).join("; ");
             const row = { id: c.id, name: c.name, target: c.target, candidate: cand && stat(cand), baseline: base && stat(base) };
-            if (!c.judge || !engines.includes("candidate")) return { ...row, verdict: "reported" as Verdict, why: "" };
+            if (!c.judge || !engines.includes("candidate")) return { ...row, verdict: "reported" as Verdict, why: measured };
             if (!cand) return { ...row, verdict: "inconclusive" as Verdict, why: "not measured, or nothing to measure, in every trial" };
+            if (measured && cand.length < MIN_TRIALS) return { ...row, verdict: "inconclusive" as Verdict, why: measured };
             const blocked = c.blocker ? scores("candidate").flatMap((x) => (c.blocker!(x.score) ? [`trial ${x.trial}: ${c.blocker!(x.score)}`] : [])) : [];
             if (blocked.length) return { ...row, verdict: "inconclusive" as Verdict, why: blocked.join("; ") };
             const judged = c.judge(cand, base);
-            return { ...row, ...judged };
+            return { ...row, ...judged, why: [judged.why, measured].filter(Boolean).join("; ") };
         });
         const runs: RunRow[] = trials
             .filter((t) => t.app === app)
@@ -205,7 +228,19 @@ export function buildReport(input: { inputs: Inputs; repeat: number; apps: strin
             const ts = of(engine);
             return engines.includes(engine) && ts.length ? stat(ts.map((t) => t.counts.aiCalls)) : null;
         };
-        rows.push({ id: "U8", name: "AI calls per analysis", target: "reported", candidate: u8("candidate"), baseline: u8("baseline"), verdict: "reported", why: "" });
+        rows.push({ id: "U8", name: "AI calls per analysis, all purposes", target: "reported", candidate: u8("candidate"), baseline: u8("baseline"), verdict: "reported", why: "" });
+        const PURPOSES: Array<[keyof CallsByPurpose, string]> = [
+            ["analysis", "reading the application"],
+            ["planning", "planning the exploration"],
+            ["other", "everything else"],
+        ];
+        for (const [purpose, name] of PURPOSES) {
+            const by = (engine: Engine) => {
+                const vs = of(engine).flatMap((t) => (t.counts.byPurpose ? [t.counts.byPurpose[purpose]] : []));
+                return engines.includes(engine) && vs.length ? stat(vs) : null;
+            };
+            rows.push({ id: `U8-${purpose}`, name: `AI calls per analysis: ${name}`, target: "reported", candidate: by("candidate"), baseline: by("baseline"), verdict: "reported", why: "" });
+        }
         return { app, criteria: rows, runs };
     });
     const complete = problems.length === 0;
@@ -214,7 +249,7 @@ export function buildReport(input: { inputs: Inputs; repeat: number; apps: strin
     if (!complete) for (const a of apps) for (const c of a.criteria) if (c.verdict === "pass" || c.verdict === "fail") Object.assign(c, { verdict: "inconclusive", why: "the series is incomplete" });
     const trialsExpected = repeat * engines.length * input.apps.length;
     const trialsRan = trials.filter((t) => input.apps.includes(t.app) && engines.includes(t.engine) && t.status === "completed" && t.score).length;
-    return { inputs, repeat, engines, complete, smoke, problems, trialsExpected, trialsRan, apps };
+    return { inputs, ...(inputs === "full" ? { doc: input.doc ?? "records" } : {}), repeat, engines, complete, smoke, problems, trialsExpected, trialsRan, apps };
 }
 
 const num = (v: number) => String(Math.round(v * 1000) / 1000);
@@ -225,7 +260,7 @@ export function renderReportMd(r: UnderstandingReport): string {
     const out: string[] = ["# Understanding benchmark", ""];
     if (r.smoke) out.push(`**Smoke series: fewer than ${MIN_TRIALS} trials per side (${r.repeat}); no criterion can pass or fail.**`, "");
     if (!r.complete) out.push(`**Incomplete series: no criterion can pass.** ${r.problems.map(esc).join(" ")}`, "");
-    out.push(`Input configuration: ${r.inputs}`, `Sides: ${r.engines.join(", ")}`, `Trials: ${r.repeat} per side, ${r.trialsRan} of ${r.trialsExpected} ran`, "");
+    out.push(`Input configuration: ${r.inputs}`, ...(r.doc ? [`Requirements document: ${r.doc === "whole" ? "uploaded whole, as one document" : "imported one record per numbered requirement"}`] : []), `Sides: ${r.engines.join(", ")}`, `Trials: ${r.repeat} per side, ${r.trialsRan} of ${r.trialsExpected} ran`, "");
     out.push("A verdict is inconclusive when the range of the trials overlaps the target. Values are median (range).", "");
     for (const a of r.apps) {
         out.push(`## ${a.app}`, "", "| Criterion | Name | Target | Candidate | Baseline-U | Verdict | Note |", "|---|---|---|---|---|---|---|");

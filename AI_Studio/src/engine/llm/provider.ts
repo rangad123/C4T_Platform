@@ -61,6 +61,8 @@ export interface Usage {
     cacheReadTokens?: number;
     /** Of the input: written to the provider's prompt cache. */
     cacheWriteTokens?: number;
+    /** Structured answers that were not in the requested form at first and needed the one repair re-ask. */
+    repairs?: number;
 }
 
 export interface LlmClient {
@@ -383,6 +385,7 @@ export function llmClientFromModel(model: LanguageModel, modelName: string): Llm
         } catch (err) {
             if (!isBadOutput(err)) throw err;
             track((err as { usage?: { inputTokens?: number; outputTokens?: number } }).usage);
+            usage.repairs = (usage.repairs ?? 0) + 1;
             const problem = describeBadOutput(err);
             try {
                 return await once(problem);

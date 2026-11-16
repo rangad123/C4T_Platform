@@ -169,6 +169,39 @@ describe("converting an exploration's understanding model", () => {
         expect(f.rules).toEqual([]);
     });
 
+    it("gives each journey step the page it happens on and, where the crawl saw one, the request it sends", () => {
+        const m = currentModel();
+        m.pages.push(
+            page("/products/p1", { discovery: 2, components: [{ role: "button", name: "Add to cart", locatorHint: "" }] }),
+            page("/cart", { discovery: 2, components: [{ role: "button", name: "Check out", locatorHint: "" }], interactions: [{ control: "Check out", method: "GET", path: "/api/checkout/summary" }] }),
+        );
+        m.apis.push({ method: "POST", path: "/api/cart/items", origin: "http://shop.test", statuses: [201], queryParams: [], source: "network", usedIn: ["/products/p1"] });
+        m.journeys = [
+            {
+                name: "Browse products and add to cart",
+                description: "",
+                steps: ["Open the home page", "Open a product", "Press Add to cart", "Open the cart and press Check out"],
+                priority: "critical",
+                pages: ["/", "/products/p1", "/cart"],
+                requiresAuth: false,
+            },
+        ];
+        const f = fragmentFromExploration({ model: m, ref: "x", now: NOW });
+        const id = (path: string) => f.model.pages.find((p) => p.path === path)!.id;
+        expect(f.model.workflows[0]!.steps).toEqual([
+            { order: 0, action: "Open the home page", page: id("/") },
+            { order: 1, action: "Open a product", page: id("/products/p1") },
+            { order: 2, action: "Press Add to cart", page: id("/products/p1"), endpoint: "POST /api/cart/items" },
+            { order: 3, action: "Open the cart and press Check out", page: id("/cart"), endpoint: "GET /api/checkout/summary" },
+        ]);
+    });
+
+    it("leaves a step without a page when its journey names no page the crawl saw", () => {
+        const m = currentModel();
+        m.journeys = [{ name: "Elsewhere", description: "", steps: ["Do a thing"], priority: "low", pages: ["/never-seen"], requiresAuth: false }];
+        expect(fragmentFromExploration({ model: m, ref: "x", now: NOW }).model.workflows[0]!.steps).toEqual([{ order: 0, action: "Do a thing" }]);
+    });
+
     it("gives the same fragment for the same model", () => {
         const a = fragmentFromExploration({ model: currentModel(), ref: "x", now: NOW, reach, roleDifferences: differences });
         const b = fragmentFromExploration({ model: currentModel(), ref: "x", now: NOW, reach, roleDifferences: differences });

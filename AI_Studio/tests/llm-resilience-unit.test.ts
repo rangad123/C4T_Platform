@@ -381,6 +381,16 @@ describe("structured answers: one repair re-ask", () => {
         expect(await client.object({ system: "s", prompt: "make a test", schema })).toEqual({ title: "t", steps: ["a"] });
         expect(prompts[1]).toMatch(/steps: .*(at least|>=|too small)/i);
     });
+
+    it("counts every answer that needed the re-ask, so a caller can say how often the first answer was unusable", async () => {
+        const answers = [JSON.stringify({ title: "t", steps: [] }), JSON.stringify({ title: "t", steps: ["a"] }), JSON.stringify({ title: "t", steps: ["b"] })];
+        const m = new MockLanguageModelV3({ doGenerate: async () => reply(answers.shift()!) });
+        const client = llmClientFromModel(new ResilientModel([{ name: "m", provider: "x", breakerKey: "x", model: m as unknown as ModelV3 }], { policy: fast }), "m");
+        await client.object({ system: "s", prompt: "p", schema });
+        expect(client.usage.repairs).toBe(1);
+        await client.object({ system: "s", prompt: "p", schema });
+        expect(client.usage.repairs).toBe(1);
+    });
 });
 
 describe("usage per model with a fallback", () => {

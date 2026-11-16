@@ -6,9 +6,13 @@
  *   - the report states its configuration (url or full) and never mixes them; every trial is confirmed; the estimate starts nothing;
  *   - a run with a real model refuses keys the owner has not approved, and any budget but 0;
  *   - the exploration API takes `understandingBaseline: true` only, and an exploration without it is unchanged.
- * Ports 9731–9732 (the apps). Run under the browser lock:
+ *   - each app's understanding settings apply: bench-rbac's crawl signs in as its admin and reaches People, bench-shop's cart is seeded so
+ *     the crawl reaches the checkout; AI calls are counted by purpose; recorded judgements are loaded and applied to their trial; a full
+ *     series can upload the requirements document whole, and the report says which variant it used.
+ * Ports 9880–9881 (the apps). Run under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/bench-understanding-run.test.ts
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -24,7 +28,7 @@ import { benchMain } from "../src/eval/bench/cli.js";
 import { understandingMain } from "../src/eval/bench/understanding/run.js";
 import { PAID_KEY_ENV } from "../src/eval/bench/understanding/paid.js";
 
-const PORT = 9731;
+const PORT = 9880;
 const KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "LLM_MODEL_FAST", "CONCURRENCY"];
 const saved: Record<string, string | undefined> = {};
 let tmp = "";
@@ -120,6 +124,18 @@ describe("before anything starts", () => {
         const { makeLlm: _m, ...real } = deps();
         expect(await understandingMain(["--mode", "understanding", "--apps", "bench-shop", "--approved-budget-usd", "5", "--daily-call-cap", "950", "--out", path.join(tmp, "real2")], { ...real, answersDir: approved })).toBe(2);
         expect(lines.join("\n")).toMatch(/free model only/);
+    });
+});
+
+describe("recorded judgements", () => {
+    it("a judgements file recorded against another version of the answer key is refused before anything starts", async () => {
+        lines.length = 0;
+        const file = path.join(tmp, "judgements-other-key.json");
+        fs.writeFileSync(file, JSON.stringify({ app: "bench-shop", inputs: "url", engine: "candidate", trial: 1, modelVersion: 1, answerKeySha256: "c".repeat(64), recordedBy: "lead", ownerReviewed: false, recordedAt: "2026-11-16T10:00:00.000Z" }));
+        const out = path.join(tmp, "judgements-refused");
+        expect(await understandingMain(["--mode", "understanding", "--apps", "bench-shop", "--judgements", file, "--out", out, "--yes"], deps())).toBe(2);
+        expect(lines.join("\n")).toMatch(/another version of the answer key/);
+        expect(fs.existsSync(out)).toBe(false);
     });
 });
 
@@ -281,6 +297,23 @@ describe("a url series, both sides, both apps", () => {
 
         expect(candidateNewFields).toBeGreaterThan(0);
 
+        // The understanding settings: rbac's crawl is the admin's and reaches People; shop's seeded cart line opens the checkout.
+        for (const engine of ["baseline", "candidate"]) {
+            const rbac = json.details.find((d: { app: string; engine: string }) => d.app === "bench-rbac" && d.engine === engine);
+            const shop = json.details.find((d: { app: string; engine: string }) => d.app === "bench-shop" && d.engine === engine);
+            expect(rbac.account, engine).toBe("ada@example.test");
+            expect(rbac.pagePaths, engine).toContain("/admin/users");
+            expect(shop.account, engine).toBe("alice@example.test");
+            expect(shop.pagePaths, engine).toContain("/checkout");
+        }
+        expect(md).toMatch(/bench-shop: the screen checkout-review is left out of U1/);
+        // AI calls by purpose, adding up to the total.
+        for (const t of json.trials as Array<{ counts: { aiCalls: number; byPurpose: { analysis: number; planning: number; other: number } } }>) {
+            const p = t.counts.byPurpose;
+            expect(p.analysis + p.planning + p.other).toBe(t.counts.aiCalls);
+        }
+        expect(md).toMatch(/\| U8-analysis \| AI calls per analysis: reading the application \|/);
+
         expect(md).toMatch(/Input configuration: url/);
         expect(md).not.toMatch(/Input configuration: full/);
         expect(md).toMatch(/Trials: 1 per side, 4 of 4 ran/);
@@ -302,7 +335,25 @@ describe("a full series", () => {
         // The key's one documented endpoint is in the model as documented.
         expect(json.trials[0].score.endpoints).toMatchObject({ found: 1, total: 1 });
         expect(md).toMatch(/Input configuration: full/);
+        expect(md).toMatch(/Requirements document: imported one record per numbered requirement/);
         expect(md).not.toMatch(/Input configuration: url/);
+    }, 600_000);
+    it("--doc whole uploads the document as one requirement, and recorded judgements are applied to their trial", async () => {
+        lines.length = 0;
+        const out = path.join(tmp, "full-whole");
+        const sha = crypto.createHash("sha256").update(fs.readFileSync(path.join(answersDir, "bench-shop.json"))).digest("hex");
+        const file = path.join(tmp, "judgements-whole.json");
+        fs.writeFileSync(file, JSON.stringify([{ app: "bench-shop", inputs: "full", engine: "candidate", trial: 1, modelVersion: 1, answerKeySha256: sha, recordedBy: "lead", ownerReviewed: false, recordedAt: "2026-11-16T10:00:00.000Z" }]));
+        const code = await understandingMain(["--mode", "understanding", "--inputs", "full", "--doc", "whole", "--judgements", file, "--engine", "candidate", "--apps", "bench-shop", "--repeat", "1", "--port-base", String(PORT), "--out", out, "--data-dir", path.join(tmp, "data-full-whole"), "--yes"], deps());
+        expect(code, lines.join("\n")).toBe(0);
+        const { json, md } = readResult(out);
+        const d = json.details[0];
+        expect(d.requirementsImport).toBe("whole");
+        expect(d.judgements).toBe("applied");
+        expect((d.sources as Array<{ kind: string; status: string }>).map((s) => `${s.kind}:${s.status}`)).toContain("requirements:processed");
+        expect(json.report.doc).toBe("whole");
+        expect(md).toMatch(/Requirements document: uploaded whole, as one document/);
+        expect(md).toMatch(/Recorded judgements: 1 trial\(s\) from judgements-whole\.json/);
     }, 600_000);
 });
 

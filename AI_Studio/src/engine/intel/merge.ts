@@ -13,6 +13,7 @@
  * Fragments are the whole input: every connected source's fragment is passed in (a source not re-processed passes its last fragment).
  * `previous` only decides `changed`. The application version is set by the caller.
  */
+import { HIDDEN } from "../../shared/redact-text.js";
 import type { ModelFragment } from "./fragment.js";
 import { missingContext, type MissingContextOptions } from "./missing-context.js";
 import { AppModelSchema, CONTEXT_SOURCES, endpointKey, ruleFingerprint, SOURCE_KINDS, STATING_SOURCES, type AppModel, type Endpoint, type Evidence, type MissingContext, type Rule } from "./model.js";
@@ -106,8 +107,9 @@ export function merge(previous: AppModel | undefined, fragments: readonly ModelF
         return { ...ordered[0]!, method: ordered[0]!.method.toUpperCase(), evidence: evidence(ordered.map((e) => e.evidence)) };
     });
 
-    // Workflows: one per id; one a source states wins over one inferred or observed.
-    const workflows = group(all("workflows"), (w) => w.id).map((g) => {
+    // Workflows: one per id; one a source states wins over one inferred or observed. An id that was hidden names nothing: such a
+    // workflow is one per content, never folded into another whose id was hidden too.
+    const workflows = group(all("workflows"), (w) => (w.id.includes(HIDDEN) ? stable(w) : w.id)).map((g) => {
         const kept = g.find((w) => STATING_SOURCES.has(w.sourceType)) ?? g[0]!;
         return { ...kept, steps: kept.steps.map((s) => (s.page ? { ...s, page: page(s.page) } : s)), evidence: evidence(g.map((w) => w.evidence)) };
     });

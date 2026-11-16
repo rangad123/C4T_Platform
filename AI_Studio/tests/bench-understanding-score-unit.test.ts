@@ -186,6 +186,18 @@ describe("U3 workflow recall", () => {
         const j = judgements({ workflowLinks: [{ workflowId: "w1", keyWorkflowId: "cart", reason: "Adds items to the cart." }] });
         expect(workflowRecall(model, tied, catalogueWorkflows, j)).toEqual({ found: 2, total: 3, value: 2 / 3, missed: ["cart-discount"], needsJudgement: [] });
     });
+    it("a model workflow without endpoint steps is matched on its step pages to a key workflow's screens", () => {
+        // w-look opens / and /products/7: browse's screens are products (/) and product (/products/:id), both covered, 2 of 2 pages → browse.
+        const looking = AppModelSchema.parse({ ...model, workflows: [{ id: "w-look", name: "Look at products", sourceType: "inferred", steps: [{ order: 0, action: "Open", page: "p1" }, { order: 1, action: "Open", page: "/products/7" }] }] });
+        expect(workflowRecall(looking, key, ["browse"])).toEqual({ found: 1, total: 1, value: 1, missed: [], needsJudgement: [] });
+    });
+    it("screens follow the one-to-one rule: a tie on screens waits for a recorded workflow link", () => {
+        // w-cart opens only /cart: cart and cart-discount both have the one screen cart → tie, nothing credited until a link is recorded.
+        const onCart = AppModelSchema.parse({ ...model, workflows: [{ id: "w-cart", name: "Cart page", sourceType: "inferred", steps: [{ order: 0, action: "Open", page: "p3" }] }] });
+        expect(workflowRecall(onCart, key, catalogueWorkflows)).toEqual({ found: 0, total: 3, value: 0, missed: ["cart", "cart-discount", "checkout"], needsJudgement: ["w-cart"] });
+        const j = judgements({ workflowLinks: [{ workflowId: "w-cart", keyWorkflowId: "cart-discount", reason: "Applies a code on the cart page." }] });
+        expect(workflowRecall(onCart, key, catalogueWorkflows, j)).toEqual({ found: 1, total: 3, value: 1 / 3, missed: ["cart", "checkout"], needsJudgement: [] });
+    });
 });
 
 describe("U4 defect-rule recall", () => {
@@ -202,6 +214,27 @@ describe("U4 defect-rule recall", () => {
     it("an explicit rule citing the requirement by its id counts as citing", () => {
         const byId = [rule({ ref: "R-9", sourceType: "requirement", explicitness: "explicit", evidence: [{ kind: "quote", ref: "requirements 1.2" }], endpoints: ["POST /api/orders"] })];
         expect(defectRuleRecall(model, byId, key, { requirementsText }).explicitCiting.found).toBe(1);
+    });
+    it("first by the requirement the rule cites, when its wording matches the key rule: no endpoint needed", () => {
+        // R-20 cites 1.3 by its line id and states SAVE10 off the subtotal; its entity (Cart) alone would be ambiguous (XS-01, XS-03).
+        // Key words of XS-03: save10, take, 10, off; all 4 are in the rule → linked to XS-03.
+        const cited = [rule({ ref: "R-20", sourceType: "requirement", explicitness: "explicit", description: "SAVE10 takes 10% off the cart subtotal", evidence: [{ kind: "quote", ref: "1.3#L1", excerpt: "Code SAVE10 takes 10% off the subtotal." }], entities: ["e-cart"] })];
+        const r = defectRuleRecall(model, cited, key, { requirementsText });
+        expect(r.links).toEqual({ "R-20": "XS-03" });
+        expect(r.needsJudgement).toEqual([]);
+        expect(r.explicitCiting).toEqual({ found: 1, total: 3, value: 1 / 3, missed: ["XS-01", "XS-02"] });
+    });
+    it("the cited requirement comes before a shared endpoint", () => {
+        // R-21 quotes line 3 (1.1) and states the subtotal rule, but names the order endpoint of XS-02: the citation wins → XS-01.
+        const cited = [rule({ ref: "R-21", sourceType: "requirement", explicitness: "explicit", description: "The subtotal is the sum of every line", evidence: [{ kind: "quote", ref: "requirements", excerpt: "The cart subtotal is the sum of every line total." }], endpoints: ["POST /api/orders"] })];
+        expect(defectRuleRecall(model, cited, key, { requirementsText }).links).toEqual({ "R-21": "XS-01" });
+    });
+    it("a rule citing the requirement in other words is not linked by the citation", () => {
+        // R-22 cites 1.3 but says something else: key words found 1 of 4 (save10) → below half; the entity tier is ambiguous → judgement.
+        const other = [rule({ ref: "R-22", sourceType: "requirement", explicitness: "explicit", description: "Discount codes ignore letter case", expected: "save10 and Save10 both work", evidence: [{ kind: "quote", ref: "1.3#L1" }], entities: ["e-cart"] })];
+        const r = defectRuleRecall(model, other, key, { requirementsText });
+        expect(r.links).toEqual({});
+        expect(r.needsJudgement).toEqual(["R-22"]);
     });
     it("a recorded judgement settles an ambiguous rule, but never overrides a deterministic link", () => {
         const j = judgements({ links: [ { ruleRef: "R-3", defectId: "XS-03", reason: "Discount on the cart." }, { ruleRef: "R-1", defectId: "XS-02", reason: "wrong" } ] });

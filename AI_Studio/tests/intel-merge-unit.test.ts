@@ -131,6 +131,12 @@ describe("merge", () => {
         expect(() => AppModelSchema.parse(model)).not.toThrow();
     });
 
+    it("never folds two different workflows into one because their ids were hidden", () => {
+        const wf = (name: string) => ({ id: "[hidden]", name, steps: [{ order: 0, action: name }], sourceType: "inferred", evidence: [{ kind: "page", ref: "/" }] });
+        const f = fragment({ source: processed("exploration", "x"), model: { workflows: [wf("Browse"), wf("Cancel"), wf("Browse")] } });
+        expect(merge(undefined, [f]).model.workflows.map((w) => w.name)).toEqual(["Browse", "Cancel"]);
+    });
+
     it("reports changed only when the merged model differs from the previous one", () => {
         const first = merge(undefined, [exploration, apiDoc, requirements]);
         expect(first.changed).toBe(true);

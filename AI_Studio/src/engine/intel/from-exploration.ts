@@ -15,6 +15,7 @@ import { ModelFragmentSchema, type ModelFragment } from "./fragment.js";
 import { missingContext } from "./missing-context.js";
 import type { AppModel, Endpoint, Evidence } from "./model.js";
 import { fingerprintJson } from "./sources/fingerprint.js";
+import { hideSecrets } from "./sources/hide-secrets.js";
 
 export interface ExplorationSource {
     /** The exploration's stored understanding model. */
@@ -72,6 +73,33 @@ function structures(p: PageModel): AppModel["pages"][number]["structures"] {
         ...(p.menus ?? []).map((m) => ({ kind: "menu" as const, name: cut(m.name, 200) })),
         ...(p.tables ?? []).map((t) => ({ kind: "table" as const, name: cut(t.name, 200), headers: t.headers.slice(0, 50).map((h) => cut(h, 200)) })),
     ].slice(0, 100);
+}
+
+/** Content words of a text, compared by their first four letters (product ~ products); path parameters and "api" are not words. */
+const wordsOf = (s: string) => new Set((s.toLowerCase().replace(/\{[^}]*\}|:[a-z_]+/g, " ").match(/[a-z]{4,}/g) ?? []).map((w) => w.slice(0, 4)));
+const shares = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));
+
+/**
+ * The page each journey step happens on and, where the crawl saw it, the request it sends. The journey's pages are in order: a step is on
+ * the first page from the current one that the step names (a control of that page, or a word of its path), otherwise on the page as far
+ * along the journey as the step is. Its request is the one a control the step names caused there, otherwise a write seen on that page
+ * whose path shares a word with the step. Nothing is guessed beyond what the crawl recorded.
+ */
+function stepLinks(steps: string[], journeyPages: string[], pages: AppModel["pages"], apis: UnderstandingModel["apis"], idOf: (path: string) => string | undefined): Array<{ page?: string; endpoint?: string }> {
+    const route = journeyPages.map((p) => pages.find((x) => x.id === idOf(p))).filter((p): p is AppModel["pages"][number] => !!p).filter((p, i, xs) => i === 0 || xs[i - 1] !== p);
+    if (!route.length) return steps.map(() => ({}));
+    const named = (step: string, control: string) => control.trim().length > 1 && step.toLowerCase().includes(control.trim().toLowerCase());
+    let at = 0;
+    return steps.map((step, i) => {
+        const words = wordsOf(step);
+        const hit = route.findIndex((p, k) => k >= at && (p.elements.some((e) => named(step, e.name)) || p.interactions.some((x) => named(step, x.control)) || shares(words, wordsOf(p.path))));
+        at = hit >= 0 ? hit : Math.max(at, Math.floor((i * route.length) / steps.length));
+        const p = route[at]!;
+        const caused = p.interactions.find((x) => named(step, x.control));
+        const write = caused ? undefined : apis.find((a) => a.source === "network" && a.method.toUpperCase() !== "GET" && a.usedIn.includes(p.path) && shares(words, wordsOf(a.path)));
+        const endpoint = caused ? `${caused.method.toUpperCase()} ${caused.path}` : write ? `${write.method.toUpperCase()} ${write.path}` : undefined;
+        return { page: p.id, ...(endpoint ? { endpoint: cut(endpoint, 300) } : {}) };
+    });
 }
 
 export function fragmentFromExploration(src: ExplorationSource): ModelFragment {
@@ -156,10 +184,12 @@ export function fragmentFromExploration(src: ExplorationSource): ModelFragment {
 
     const workflows: AppModel["workflows"] = m.journeys.slice(0, 500).map((j, n) => {
         const evidence: Evidence[] = j.pages.length ? j.pages.slice(0, 20).map((p) => ({ kind: "page", ref: cut(p, 500) })) : [{ kind: "page", ref: cut(m.url, 500) }];
+        const where = stepLinks(j.steps.slice(0, 100), j.pages, pages, m.apis, idOfPattern);
         return {
-            id: cut(`journey-${n + 1}-${j.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`, 100),
+            // Made from the name after secret hiding: the id is kept as it is when the fragment is redacted (platform/app-analysis.ts).
+            id: cut(`journey-${n + 1}-${hideSecrets(j.name, { max: 200 }).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`, 100),
             name: cut(j.name, 200),
-            steps: j.steps.slice(0, 100).map((action, order) => ({ order, action: cut(action, 500) })),
+            steps: j.steps.slice(0, 100).map((action, order) => ({ order, action: cut(action, 500), ...where[order] })),
             preconditions: j.requiresAuth ? ["Signed in"] : [],
             postconditions: [],
             roles: [],

@@ -9,7 +9,10 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import type { AppModel as UnderstandingModel, PageModel } from "../src/engine/understanding/app-model.js";
-import { AppAnalysis, type AnalysisInputs } from "../src/platform/app-analysis.js";
+import { AppAnalysis, redactFragment, type AnalysisInputs } from "../src/platform/app-analysis.js";
+import { merge } from "../src/engine/intel/merge.js";
+import { AppModelSchema } from "../src/engine/intel/model.js";
+import { fragmentFromExploration } from "../src/engine/intel/from-exploration.js";
 import { AppIntelStore } from "../src/platform/app-intel-store.js";
 import { Db } from "../src/platform/db.js";
 import { createObjectStore, type ObjectStore } from "../src/platform/object-store.js";
@@ -249,6 +252,36 @@ describe("stored fragments", () => {
         for (const key of await fragmentKeys()) expect((await objects.getBytes(key)).toString("utf8"), key).not.toContain(SECRET);
         expect(JSON.stringify((await intel.latest(PID))!.model)).not.toContain(SECRET);
         expect(JSON.stringify((await intel.latest(PID))!.model)).toContain(`"name":"Copy [hidden]"`);
+    });
+
+    it("keep the ids of the workflows the exploration found, however long, so merging keeps every journey and links to it", () => {
+        const wf = (id: string, name: string) => ({ id, name, steps: [{ order: 0, action: name }], sourceType: "inferred", evidence: [{ kind: "page", ref: "/" }] });
+        const ids = ["journey-1-sign-in-to-the-shop", "journey-2-browse-products-and-add-to-cart", "journey-5-cancel-an-unshipped-order-now", "journey-7-track-order-history-and-reorder-items"];
+        const f = {
+            source: { kind: "exploration", ref: "http://127.0.0.1:1", fingerprint: "f", status: "processed", processedAt: at },
+            model: AppModelSchema.parse({ workflows: ids.map((id, i) => wf(id, `Journey ${i}`)) }),
+            rules: [{ ref: "R-1", kind: "constraint", description: "d", expected: "Cart keeps items", sourceType: "inferred", sourceRef: "x", evidence: [{ kind: "page", ref: "/" }], explicitness: "inferred", confidence: 0.5, workflows: [ids[1]!] }],
+            notes: [],
+        };
+        const red = redactFragment(f as never, ["Password1!"]);
+        expect(red.model.workflows.map((w) => w.id)).toEqual(ids);
+        expect(red.rules[0]!.workflows).toEqual([ids[1]]);
+        expect(merge(undefined, [red]).model.workflows).toHaveLength(4);
+    });
+
+    it("still hide a project secret, and a secret-shaped value, that a journey's name brings into its id", () => {
+        const model = { url: "http://shop.test/", origin: "http://shop.test", siteType: "", purpose: "", features: [], pages: [], navigation: [], apis: [], authentication: { required: false, mechanisms: [], loggedIn: false }, externalDependencies: [], documentedTestCases: [], stats: { pagesVisited: 0, pagesSkipped: 0, apisFound: 0, durationMs: 0 } };
+        const journeys = [
+            { name: `Sign in with ${SECRET}`, description: "", steps: ["a"], priority: "high", pages: [], requiresAuth: false },
+            { name: "Reset with token 9f8e7d6c5b4a39281706f5e4d3c2b1a0ffeeddcc", description: "", steps: ["b"], priority: "high", pages: [], requiresAuth: false },
+            { name: "Log in as Hunter2-Pass", description: "", steps: ["c"], priority: "high", pages: [], requiresAuth: false },
+        ];
+        const red = redactFragment(fragmentFromExploration({ model: { ...model, journeys } as never, ref: "x", now: at }), [SECRET, "Hunter2-Pass"]);
+        const text = JSON.stringify(red.model.workflows).toLowerCase();
+        expect(text).not.toContain(SECRET);
+        expect(text).not.toContain("9f8e7d6c5b4a39281706f5e4d3c2b1a0ffeeddcc");
+        expect(text).not.toContain("hunter2");
+        expect(new Set(red.model.workflows.map((w) => w.id)).size).toBe(3);
     });
 
     it("go with their source and with their project", async () => {

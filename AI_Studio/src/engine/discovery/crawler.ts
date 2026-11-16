@@ -955,3 +955,51 @@ export async function sitemapUrls(session: BrowserSession, origin: string, cap: 
     }
     return out;
 }
+
+/** Pages the signed-out pass may visit at most (within the crawl's own cap). */
+export const SIGNED_OUT_PAGES = 8;
+
+/**
+ * After a signed-in crawl: one short pass signed out, in a fresh browser session with no sign-in, so the model also has the sign-in page
+ * the crawl signed in on (with its form) and the public pages the signed-in navigation hides (welcome, sign-in, create account). It starts
+ * on the sign-in page, goes one link deep, and uses the crawl's own rules (nothing dangerous is followed, no form is sent; only the
+ * validation probe types, with the network shut). A page whose address pattern the crawl already has is not added again. Together the
+ * pages stay within `maxPages`. Returns how many pages were added; a pass that fails adds nothing and says so.
+ */
+export async function addSignedOutPages(
+    result: CrawlResult,
+    ctx: EngineContext,
+    o: { launch: () => Promise<BrowserSession>; startUrl: string; signInPath?: string; maxPages: number; maxPerPattern: number; includePaths?: string[]; refuse?: Refuse; pageUnderstanding?: boolean },
+): Promise<number> {
+    const room = Math.min(SIGNED_OUT_PAGES, o.maxPages - result.pages.length);
+    if (room <= 0) return 0;
+    const signIn = o.signInPath ? normalizeUrl(o.signInPath, o.startUrl) : null;
+    const known = new Set(result.pages.map((p) => urlPattern(p.url)));
+    let session: BrowserSession | undefined;
+    try {
+        session = await o.launch();
+        const extra = await crawl(session, ctx, {
+            startUrl: signIn ?? o.startUrl,
+            seedUrls: signIn ? [o.startUrl] : undefined,
+            maxPages: room + Math.min(known.size, SIGNED_OUT_PAGES),
+            maxDepth: 1,
+            maxPerPattern: o.maxPerPattern,
+            ...(o.includePaths ? { includePaths: o.includePaths } : {}),
+            ...(o.refuse ? { refuse: o.refuse } : {}),
+            ...(o.pageUnderstanding === false ? { pageUnderstanding: false } : {}),
+        });
+        const fresh = extra.pages.filter((p) => !known.has(urlPattern(p.url))).slice(0, room);
+        result.pages.push(...fresh);
+        const paths = new Set(result.pages.map((p) => p.path));
+        const edge = new Set(result.navigation.map((n) => `${n.from}\n${n.to}\n${n.label}`));
+        for (const n of extra.navigation) if (paths.has(n.from) && paths.has(n.to) && !edge.has(`${n.from}\n${n.to}\n${n.label}`)) result.navigation.push(n);
+        for (const t of extra.transitions) if (result.transitions.length < MAX_TRANSITIONS) result.transitions.push(t);
+        if (fresh.length) ctx.emit({ stage: "discovery", kind: "signed_out_pages", message: `Found ${fresh.length} ${fresh.length === 1 ? "page" : "pages"} signed out (${fresh.map((p) => p.path).slice(0, 5).join(", ")})` });
+        return fresh.length;
+    } catch (e) {
+        ctx.emit({ stage: "discovery", kind: "signed_out_pass_failed", level: "warn", message: `The signed-out pages could not be read: ${redactText(e instanceof Error ? e.message.split("\n")[0] : String(e), 200)}` });
+        return 0;
+    } finally {
+        await session?.close().catch(() => undefined);
+    }
+}

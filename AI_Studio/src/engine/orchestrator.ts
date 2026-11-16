@@ -15,7 +15,7 @@ import { isBudgetExceeded } from "./llm/usage.js";
 import { LlmNotConfiguredError } from "./llm/provider.js";
 import { login, type Credentials } from "./discovery/auth.js";
 import { BrowserSession, launchChromium, settle } from "./discovery/browser.js";
-import { crawl } from "./discovery/crawler.js";
+import { addSignedOutPages, crawl } from "./discovery/crawler.js";
 import { documentedApiModels, scrapeDocumentationPages } from "./discovery/docs.js";
 import type { Framework, RenderedScript } from "./generators/index.js";
 import { renderWithAdapter } from "./frameworks/index.js";
@@ -334,6 +334,19 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
                         ...(req.pageUnderstanding === false ? { pageUnderstanding: false } : {}),
                     });
+                    // Signed in: the sign-in page and the public pages are read in one short pass signed out, within the same page cap.
+                    if (authState.loggedIn) {
+                        await addSignedOutPages(result, ctx, {
+                            launch: () => BrowserSession.launch(browser, { startUrl: req.url, ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}), secrets: authoringSecretsOf(req) }),
+                            startUrl: req.url,
+                            ...(authState.loginPath ? { signInPath: authState.loginPath } : {}),
+                            maxPages: req.maxPages,
+                            maxPerPattern: levelSettings(req).perPattern,
+                            ...(req.includePaths ? { includePaths: req.includePaths } : {}),
+                            ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
+                            ...(req.pageUnderstanding === false ? { pageUnderstanding: false } : {}),
+                        });
+                    }
                     pages = result.pages;
                     navigation = result.navigation;
                     crawlTransitions = result.transitions;

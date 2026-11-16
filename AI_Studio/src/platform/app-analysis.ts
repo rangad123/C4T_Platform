@@ -97,6 +97,14 @@ const KEPT_AS_IS = new Set(["fingerprint", "processedAt", "analysedAt", "at"]);
 /** Names, addresses and references: the project's secrets and the shared redaction only (the password-shape rule would eat `file.md@c1#L2`). */
 const REFERENCES = new Set(["id", "ref", "sourceRef", "path", "from", "to", "page", "entity", "endpoint", "endpoints", "entities", "workflows", "reaches", "screenId", "method", "requestSchema", "responseSchema", "status", "kind", "origin", "sourceType", "explicitness", "type", "in"]);
 const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * A workflow id this analysis generates (an exploration's journey, a workflow read from a document): its own secrets are hidden, but the
+ * secret-shape rule is not applied, because a long journey id looks like a token and hiding it would fold every such journey into one.
+ * The journey's name went through secret hiding before its id was made from it (from-exploration.ts).
+ */
+const GENERATED_ID = /^(?:journey-\d+-[a-z0-9-]*|wf-[0-9a-f]{16})$/;
+const ID_KEYS = new Set(["id", "workflows"]);
+const slugOf = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 /**
  * Every text in a fragment through secret hiding before it is kept or merged: the project's own secrets everywhere, then, for prose (page
@@ -105,9 +113,12 @@ const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  */
 export function redactFragment(f: ModelFragment, secrets: readonly string[] = []): ModelFragment {
     const own = secrets.filter((x) => x && x.length >= 4).map((x) => new RegExp(escapeRe(x), "g"));
+    // A generated id is a slug of a name: the project's secrets as they appear in a slug.
+    const ownSlugs = secrets.map((x) => slugOf(x ?? "")).filter((x) => x.length >= 4);
     const walk = (v: unknown, key: string): unknown => {
         if (typeof v === "string") {
             if (KEPT_AS_IS.has(key)) return v;
+            if (ID_KEYS.has(key) && GENERATED_ID.test(v)) return ownSlugs.reduce((t, x) => t.split(x).join("hidden"), v);
             const max = Math.max(v.length, 1000);
             if (REFERENCES.has(key)) return redactText(own.reduce((t, re) => t.replace(re, HIDDEN), v), max);
             return hideSecrets(v, { secrets, max });
