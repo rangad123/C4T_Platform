@@ -228,6 +228,8 @@ describe("schema file -> model fragment", () => {
         expect(f.model.entities.map((e) => e.name)).toEqual(["users", "orders", "order_items"]);
         const users = f.model.entities[0]!;
         expect(users.evidence).toEqual([{ kind: "file", ref: "db/schema.sql:4" }]);
+        // A table is an entity the schema states.
+        for (const e of f.model.entities) expect(e, e.name).toMatchObject({ sourceType: "db_schema", explicitness: "explicit" });
         expect(users.fields.find((x) => x.name === "email")).toEqual({ name: "email", type: "VARCHAR(255)", constraints: ["not null", "unique"] });
         expect(users.fields.find((x) => x.name === "id")!.constraints).toEqual(["primary key", "not null"]);
         const orders = f.model.entities[1]!;

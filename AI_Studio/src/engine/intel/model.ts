@@ -185,14 +185,31 @@ export const WorkflowSchema = z
     })
     .strict();
 
+/**
+ * A kind of record the application keeps. Like a rule, it says where it comes from: `sourceType` is the source that names it (a document,
+ * a schema, a table) or "inferred" (worked out, e.g. from an API path), and `explicitness` follows from it. Both are absent on entities
+ * stored before they were recorded; once a source is named, the entity needs evidence.
+ */
 export const EntitySchema = z
     .object({
         id: Id,
         name: Text(100),
         fields: z.array(z.object({ name: Text(100), type: Text(50).optional(), constraints: z.array(Text(200)).max(20).default([]) }).strict()).max(100).default([]),
+        sourceType: SourceTypeSchema.optional(),
+        explicitness: z.enum(["explicit", "inferred"]).optional(),
         evidence: z.array(EvidenceSchema).max(20).default([]),
     })
-    .strict();
+    .strict()
+    .superRefine((e, ctx) => {
+        if (!e.sourceType) {
+            if (e.explicitness) ctx.addIssue({ code: "custom", path: ["explicitness"], message: "An entity's explicitness follows from its source type, and it has none." });
+            return;
+        }
+        const explicit = STATING_SOURCES.has(e.sourceType);
+        if (e.explicitness !== (explicit ? "explicit" : "inferred")) ctx.addIssue({ code: "custom", path: ["explicitness"], message: `An entity from "${e.sourceType}" is ${explicit ? "explicit" : "inferred"}.` });
+        if (e.evidence.length === 0) ctx.addIssue({ code: "custom", path: ["evidence"], message: "An entity with a source needs evidence from it." });
+    });
+export type Entity = z.infer<typeof EntitySchema>;
 
 export const RelationshipSchema = z
     .object({

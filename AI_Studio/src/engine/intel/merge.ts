@@ -6,7 +6,8 @@
  * - An endpoint an OpenAPI document describes takes the document's record; traffic that showed it stays as evidence. An endpoint seen
  *   only in traffic stays "observed". Only endpoints a fragment lists are recorded: a request named elsewhere (a control, a rule, a
  *   workflow step) never becomes one.
- * - Rules are one per fingerprint; a rule a source states wins over a guessed one.
+ * - Rules are one per fingerprint; a rule a source states wins over a guessed one. An entity takes the source type of a source that
+ *   names it over one that only infers it.
  * - The result does not depend on the order of the fragments: they are put in one fixed order first.
  * - Whatever a limit cuts off is listed as missing context, never dropped silently.
  *
@@ -97,7 +98,10 @@ export function merge(previous: AppModel | undefined, fragments: readonly ModelF
             type: first(fg.map((f) => f.type)),
             constraints: cap(union(...fg.map((f) => f.constraints)), 20, "Field constraints", "field"),
         }));
-        return { ...kept, fields: cap(fields, 100, "Entity fields", "entity"), evidence: evidence(g.map((e) => e.evidence)) };
+        // A source that names the entity wins over one that only infers it (as for workflows and rules); the id stays the first one's.
+        const named = g.find((e) => e.sourceType && STATING_SOURCES.has(e.sourceType)) ?? g.find((e) => e.sourceType);
+        const provenance = named ? { sourceType: named.sourceType, explicitness: named.explicitness } : {};
+        return { ...kept, ...provenance, fields: cap(fields, 100, "Entity fields", "entity"), evidence: evidence(g.map((e) => e.evidence)) };
     });
     const entity = (id: string) => entityId.get(id) ?? id;
 

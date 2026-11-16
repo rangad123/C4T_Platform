@@ -450,3 +450,69 @@ describe("the anchor of a rule read from a document", () => {
         expect(failed.read ?? []).toEqual([]);
     });
 });
+
+describe("entities read from a document", () => {
+    const ORDERS: ExtractionDocument = {
+        ref: "doc:shop",
+        lines: [
+            "# Shop",
+            "Each customer has one cart; a cart line holds a product, its unit price and a quantity.",
+            "An order stores the cart's lines, the subtotal, the shipping and the delivery address.",
+            "Orders have one of four states and start as Placed.",
+        ],
+    };
+    const read = (entities: unknown[], sourceType: "requirement" | "inferred" = "requirement") =>
+        extractRules(scripted([{ ...empty, entities }]), { source: { kind: "requirements", ref: "doc:shop" }, sourceType, documents: [ORDERS], now: NOW });
+
+    it("keeps an entity the cited lines name, with the fields they name, the quote as evidence and explicit from a document", async () => {
+        const f = await read([{ name: "Order", fields: ["lines", "subtotal", "shipping", "delivery address"], lines: [3, 4], quote: "An order stores the cart's lines" }]);
+        expect(() => ModelFragmentSchema.parse(f)).not.toThrow();
+        expect(f.model.entities).toEqual([
+            {
+                id: "order",
+                name: "Order",
+                fields: ["lines", "subtotal", "shipping", "delivery address"].map((name) => ({ name, constraints: [] })),
+                sourceType: "requirement",
+                explicitness: "explicit",
+                evidence: [{ kind: "quote", ref: "doc:shop#L3-L4", excerpt: "An order stores the cart's lines" }],
+            },
+        ]);
+        expect(f.rules).toEqual([]);
+    });
+
+    it("never invents: an entity the cited lines do not name, or a quote not at them, is dropped and counted; a field they do not name is dropped", async () => {
+        const f = await read([
+            { name: "Invoice", fields: [], lines: [3], quote: "An order stores the cart's lines" },
+            { name: "Cart line", fields: ["quantity", "unit price", "discount"], lines: [2], quote: "a cart line holds a product" },
+            { name: "Product", fields: [], lines: [4], quote: "a cart line holds a product" },
+        ]);
+        expect(f.model.entities.map((e) => e.name)).toEqual(["Cart line"]);
+        expect(f.model.entities[0]!.fields.map((x) => x.name)).toEqual(["quantity", "unit price"]);
+        const notes = f.notes.join(" ");
+        expect(notes).toMatch(/2 items were dropped: .*1 quote is not in the text at the lines cited.*1 entity is not named in the lines cited/);
+        expect(notes).toMatch(/1 entity field was dropped: not named in the lines cited/);
+    });
+
+    it("the same entity read twice is one, with the fields and evidence of both", async () => {
+        const f = await read([
+            { name: "Order", fields: ["subtotal"], lines: [3], quote: "An order stores the cart's lines" },
+            { name: "order", fields: [], lines: [4], quote: "Orders have one of four states" },
+        ]);
+        expect(f.model.entities).toHaveLength(1);
+        expect(f.model.entities[0]!.evidence.map((e) => e.ref)).toEqual(["doc:shop#L3", "doc:shop#L4"]);
+        expect(f.model.entities[0]!.fields.map((x) => x.name)).toEqual(["subtotal"]);
+    });
+
+    it("from an inferred source (pages) an entity is inferred", async () => {
+        const f = await read([{ name: "Cart", fields: [], lines: [2], quote: "Each customer has one cart" }], "inferred");
+        expect(f.model.entities[0]).toMatchObject({ sourceType: "inferred", explicitness: "inferred" });
+    });
+
+    it("an answer without entities still reads, and the instructions ask for them", async () => {
+        const llm = scripted([empty]);
+        const f = await extractRules(llm, { source: { kind: "requirements", ref: "doc:shop" }, sourceType: "requirement", documents: [ORDERS], now: NOW });
+        expect(f.source.status).toBe("processed");
+        expect(f.model.entities).toEqual([]);
+        expect(llm.calls[0]!.system).toMatch(/- entities: /);
+    });
+});

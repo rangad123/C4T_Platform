@@ -141,6 +141,32 @@ describe("OpenAPI document -> model fragment", () => {
         expect(line.fields.find((x) => x.name === "qty")!.constraints).toEqual(["minimum 1", "maximum 10"]);
     });
 
+    it("component schemas are entities the document states", () => {
+        const f = openApiFragment(SHOP, { ref: "shop-openapi.json" });
+        for (const e of f.model.entities) expect(e, e.name).toMatchObject({ sourceType: "openapi", explicitness: "explicit" });
+    });
+
+    it("without component schemas, a collection addressed by id is an entity inferred from its path, with the fields its request bodies name", () => {
+        const f = openApiFragment(benchShopOpenApi(), { ref: "shop.json" });
+        expect(() => ModelFragmentSchema.parse(f)).not.toThrow();
+        // /api/products/{id}, /api/cart/items/{productId} (under /api/cart, itself documented) and /api/orders/{id}; nothing from
+        // /api/register, /api/login, /api/profile or /api/cart, which address no collection by id.
+        expect(f.model.entities.map((e) => e.name).sort()).toEqual(["cart item", "order", "product"]);
+        for (const e of f.model.entities) expect(e, e.name).toMatchObject({ sourceType: "inferred", explicitness: "inferred" });
+        const item = f.model.entities.find((e) => e.name === "cart item")!;
+        expect(item.evidence.map((x) => x.ref)).toEqual(["shop.json#/paths/~1api~1cart~1items~1{productId}", "shop.json#/paths/~1api~1cart~1items/post/requestBody"]);
+        expect(item.fields).toEqual([
+            { name: "productId", type: "string", constraints: ["required"] },
+            { name: "quantity", type: "integer", constraints: ["minimum 1", "maximum 10"] },
+        ]);
+        expect(f.model.entities.find((e) => e.name === "product")!.fields).toEqual([]);
+    });
+
+    it("a request body that is not a collection's (a sign-up, a sign-in) makes no entity", () => {
+        const doc = { openapi: "3.0.3", info: { title: "T", version: "1" }, paths: { "/api/register": { post: { requestBody: { content: { "application/json": { schema: { type: "object", properties: { email: { type: "string" } } } } } }, responses: { 201: { description: "ok" } } } }, "/api/status/{id}": { get: { responses: { 200: { description: "ok" } } } } } };
+        expect(openApiFragment(doc, { ref: "t.json" }).model.entities).toEqual([]);
+    });
+
     it("records relationships only where a $ref states them", () => {
         const f = openApiFragment(SHOP, { ref: "shop-openapi.json" });
         const rels = f.model.relationships.map((r) => `${r.from} ${r.kind} ${r.to} @ ${r.evidence[0]!.ref}`).sort();

@@ -210,3 +210,22 @@ describe("the fragment a source returns", () => {
         expect(ModelFragmentSchema.safeParse({ source, model: {}, rules: [{ ...rule(), status: "confirmed" }] }).success).toBe(false);
     });
 });
+
+describe("entities", () => {
+    const entity = (over: Record<string, unknown> = {}) => ({ id: "order", name: "Order", evidence: [{ kind: "quote", ref: "requirements.md#L4" }], ...over });
+
+    it("say where they come from, and whether a source states them, as rules do", () => {
+        const m = AppModelSchema.parse({ entities: [entity({ sourceType: "requirement", explicitness: "explicit" }), entity({ id: "item", name: "Item", sourceType: "inferred", explicitness: "inferred" })] });
+        expect(m.entities.map((e) => `${e.name} ${e.sourceType} ${e.explicitness}`)).toEqual(["Order requirement explicit", "Item inferred inferred"]);
+    });
+
+    it("refuse an explicitness that does not follow from the source type", () => {
+        expect(() => AppModelSchema.parse({ entities: [entity({ sourceType: "requirement", explicitness: "inferred" })] })).toThrow(/explicit/);
+        expect(() => AppModelSchema.parse({ entities: [entity({ sourceType: "inferred", explicitness: "explicit" })] })).toThrow(/inferred/);
+        expect(() => AppModelSchema.parse({ entities: [entity({ explicitness: "explicit" })] })).toThrow(/source type/);
+    });
+
+    it("need evidence once they name a source", () => {
+        expect(() => AppModelSchema.parse({ entities: [entity({ sourceType: "requirement", explicitness: "explicit", evidence: [] })] })).toThrow(/evidence/);
+    });
+});

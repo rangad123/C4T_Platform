@@ -579,6 +579,8 @@ export function schemaFragment(text: string, opts: { ref: string; now?: string }
             id: t.name.slice(0, 100),
             name: t.name.slice(0, 100),
             fields: t.columns.slice(0, 100).map((c) => ({ name: c.name.slice(0, 100), type: c.type.slice(0, 50), constraints: columnConstraints(c, t, enums) })),
+            sourceType: "db_schema",
+            explicitness: "explicit",
             evidence: [at(t.line)],
         });
         for (const fk of t.foreignKeys) {

@@ -297,7 +297,7 @@ async function aiCallsOf(client: PlatformClient, projectId: string): Promise<{ c
 }
 
 /** Sends the app's understanding seed requests as the crawl's account (signed in through the app's JSON sign-in). */
-async function seedApp(url: string, account: { username: string; password: string } | undefined, seed: NonNullable<BenchApp["understanding"]>["seed"] = []): Promise<void> {
+export async function seedApp(url: string, account: { username: string; password: string } | undefined, seed: NonNullable<BenchApp["understanding"]>["seed"] = []): Promise<void> {
     if (!seed.length) return;
     if (!account) throw new Error("The app's seed data needs a sign-in, and the app has none.");
     const send = (method: string, p: string, body: unknown, cookie?: string) =>
