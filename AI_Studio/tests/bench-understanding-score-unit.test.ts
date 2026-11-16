@@ -4,7 +4,7 @@
  * definition (comments show the count), never taken from a run of the scorer.
  */
 import { describe, expect, it } from "vitest";
-import { AppModelSchema, ruleFingerprint, type Rule } from "../src/engine/intel/model.js";
+import { AppModelSchema, type Rule } from "../src/engine/intel/model.js";
 import { AnswerKeySchema, type Judgements } from "../src/eval/bench/understanding/answer-key.js";
 import {
     defectRuleRecall,
@@ -310,14 +310,23 @@ describe("U6 wrong rules", () => {
 
 describe("U7 incremental", () => {
     const before = [rule({ ref: "R-1", status: "confirmed", decidedBy: "p" }), rule({ ref: "R-2", status: "rejected", decidedBy: "p" }), rule({ ref: "R-3" })];
-    it("decisions carried forward by fingerprint; a rerun with no change makes no version and no AI call; only the changed source is re-processed", () => {
-        // R-1 keeps its expectation and status (new ref, same fingerprint); R-2 comes back unverified: 1 of 2 decisions carried.
-        const after = [rule({ ref: "R-10", expected: "expected of R-1", status: "confirmed", decidedBy: "p" }), rule({ ref: "R-2" }), rule({ ref: "R-3" })];
-        expect(ruleFingerprint(after[0])).toBe(ruleFingerprint(before[0]));
+    it("decisions count as carried only when found again with their rule; a rerun with no change makes no version and no AI call; only the changed source is re-processed", () => {
+        // R-1 was found again (same stored rule, same status, no mark); R-2 kept its decision only on the stored rule, marked "evidence
+        // gone" (the analysis did not recognise it): kept, but not carried.
+        const after = [rule({ ref: "R-1", expected: "R-1 reworded", status: "confirmed", decidedBy: "p" }), { ...rule({ ref: "R-2", status: "rejected", decidedBy: "p" }), evidenceGone: { version: 2, at: "t" } }, rule({ ref: "R-3" }), rule({ ref: "R-4" })];
         const r = incremental({ before, after, noChange: { newVersion: false, aiCallsForUnchangedSources: 0 }, oneChanged: { changed: ["openapi"], reprocessed: ["openapi", "requirements"] } });
         expect(r.decisions).toEqual({ found: 1, total: 2, value: 0.5, missed: ["R-2"] });
+        expect(r.kept).toEqual({ found: 2, total: 2, value: 1, missed: [] });
+        expect(r.changedText).toEqual({ decided: 0, carried: [] });
         expect(r.noChange).toEqual({ newVersion: false, aiCallsForUnchangedSources: 0, ok: true });
         expect(r.oneChanged).toEqual({ extra: ["requirements"], missing: [], ok: false });
+    });
+    it("a decision on a rule whose source was edited is left out of the share, and listed when it followed anyway", () => {
+        const edited = [rule({ ref: "R-1", status: "confirmed", decidedBy: "p", sourceRef: "1.1" }), rule({ ref: "R-2", status: "rejected", decidedBy: "p", sourceRef: "9.3" })];
+        const gone = incremental({ before: edited, after: [edited[0]!, { ...edited[1]!, evidenceGone: { version: 2, at: "t" } }], changedSourceRefs: ["9.3"] });
+        expect(gone.decisions).toEqual({ found: 1, total: 1, value: 1, missed: [] });
+        expect(gone.changedText).toEqual({ decided: 1, carried: [] });
+        expect(incremental({ before: edited, after: edited, changedSourceRefs: ["9.3"] }).changedText).toEqual({ decided: 1, carried: ["R-2"] });
     });
     it("a rerun with no change that made a version or an AI call is not ok", () => {
         expect(incremental({ before, after: before, noChange: { newVersion: true, aiCallsForUnchangedSources: 0 } }).noChange?.ok).toBe(false);

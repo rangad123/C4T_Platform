@@ -400,6 +400,7 @@ async function runTrial(
         let oneChanged: { changed: string[]; reprocessed: string[] } | undefined;
         let changeDetail: Record<string, unknown> | undefined;
         let rulesChanged = rulesAfter;
+        const edited: string[] = [];
         if (u7) {
             const copy = editedCopy(o.requirementsText!);
             if (!copy) throw new Error(`The requirements document of ${o.app.id} has no numbered requirement line to edit.`);
@@ -408,7 +409,6 @@ async function runTrial(
             const records = (t: string) => (o.doc === "whole" ? [wholeDocumentRequirement(t)] : requirementsOf(t).map((r) => ({ ...r, acceptanceCriteria: "" })));
             const was = new Map(records(o.requirementsText!).map((r) => [r.ref, r]));
             const stored = (await call("GET", `/api/projects/${projectId}/requirements`, "Reading the requirements")).requirements as Array<{ id: string; ref: string }>;
-            const edited: string[] = [];
             for (const r of records(copy.text)) {
                 const before = was.get(r.ref);
                 if (before && before.title === r.title && before.description === r.description && before.acceptanceCriteria === r.acceptanceCriteria) continue;
@@ -436,7 +436,7 @@ async function runTrial(
             ...(o.requirementsText ? { requirementsText: o.requirementsText } : {}),
             ...(judged.judgements ? { judgements: judged.judgements } : {}),
             ...(notReachable.length ? { notReachableScreens: notReachable.map((s) => s.id) } : {}),
-            incremental: { before: decided, after: rulesChanged, noChange: { newVersion: versionsAfter > versionsBefore, aiCallsForUnchangedSources: usageAfter.calls - usage.calls }, ...(oneChanged ? { oneChanged } : {}) },
+            incremental: { before: decided, after: rulesChanged, changedSourceRefs: edited, noChange: { newVersion: versionsAfter > versionsBefore, aiCallsForUnchangedSources: usageAfter.calls - usage.calls }, ...(oneChanged ? { oneChanged } : {}) },
         });
         return {
             result: { ...base, status: "completed", score, counts: { aiCalls: usage.calls, failedCalls: usage.failedCalls, pages, byPurpose: usage.byPurpose } },

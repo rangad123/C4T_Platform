@@ -32,10 +32,15 @@
  * - U5 provenance: rules with evidence or a source reference, explicitness matching the source type and a source other than "observed" /
  *   rules; plus rules confirmed without a person and rules sourced from observed behaviour.
  * - U6 wrong rules: recorded "contradicts" verdicts / reviewed rules, explicit and inferred apart; unreviewed rules listed.
- * - U7 incremental: decisions (confirmed, rejected) carried forward by rule fingerprint / decisions before; a rerun with no change makes no
+ * - U7 incremental: decisions (confirmed, rejected) on rules read from text that did not change, found again with their rule / those
+ *   decisions; a decision on a rule whose source the rerun changed must not follow (listed when it did); a rerun with no change makes no
  *   version and no AI call for unchanged sources; a rerun with one changed source re-processes exactly that source.
+ *   "Found again" means the analysis matched the stored rule to a rule it read (same ref, same status, no "evidence gone" mark). A
+ *   decision merely kept on the stored rule is reported apart ("kept") and does not count: a rule the analysis no longer recognises
+ *   keeps its decision with "evidence gone", so "kept" is 1 whatever the matching does, while the rule read again arrives as a new
+ *   unverified rule the person must decide about once more.
  */
-import { explicitnessOf, ruleFingerprint, type AppModel, type Rule, type RuleStatus } from "../../../engine/intel/model.js";
+import { explicitnessOf, type AppModel, type Rule, type RuleStatus } from "../../../engine/intel/model.js";
 import { endpointRef, type AnswerKey, type Judgements } from "./answer-key.js";
 
 export interface Ratio {
@@ -48,7 +53,7 @@ export interface Ratio {
 }
 
 /** A stored rule as the scorer sees it. */
-export type ScoredRule = Rule & { status: RuleStatus; decidedBy: string | null };
+export type ScoredRule = Rule & { status: RuleStatus; decidedBy: string | null; evidenceGone?: unknown };
 
 const ratio = (found: number, total: number, missed: string[]): Ratio => ({ found, total, value: total === 0 ? null : found / total, missed: [...missed].sort() });
 
@@ -337,6 +342,8 @@ export function wrongRules(rules: ScoredRule[], judgements?: Judgements): { expl
 export interface IncrementalInput {
     before: ScoredRule[];
     after: ScoredRule[];
+    /** The source refs (requirement records) the one-change rerun edited: decisions on their rules must not follow. */
+    changedSourceRefs?: string[];
     /** A rerun with no source changed. */
     noChange?: { newVersion: boolean; aiCallsForUnchangedSources: number };
     /** A rerun with one source changed: which changed, which were re-processed (source kinds or refs). */
@@ -344,14 +351,32 @@ export interface IncrementalInput {
 }
 
 export function incremental(input: IncrementalInput): {
+    /** Decisions on rules from unchanged text found again with their rule. */
     decisions: Ratio;
+    /** Decisions still on the stored rule, found again or not (reported, not judged). */
+    kept: Ratio;
+    /** Decisions on rules whose source changed, and those that followed anyway (should be none). */
+    changedText: { decided: number; carried: string[] };
     noChange?: { newVersion: boolean; aiCallsForUnchangedSources: number; ok: boolean };
     oneChanged?: { extra: string[]; missing: string[]; ok: boolean };
 } {
-    const afterStatus = new Map(input.after.map((r) => [ruleFingerprint(r), r.status]));
+    // A stored rule keeps its ref across analyses (carry-forward.ts), so the same ref is the same stored rule.
+    const after = new Map(input.after.map((r) => [r.ref, r]));
+    const changed = new Set(input.changedSourceRefs ?? []);
     const decided = input.before.filter((r) => r.status !== "unverified");
-    const missed = decided.filter((r) => afterStatus.get(ruleFingerprint(r)) !== r.status).map((r) => r.ref);
-    const out: ReturnType<typeof incremental> = { decisions: ratio(decided.length - missed.length, decided.length, missed) };
+    const followed = (r: ScoredRule) => {
+        const a = after.get(r.ref);
+        return Boolean(a && a.status === r.status && !a.evidenceGone);
+    };
+    const same = decided.filter((r) => !changed.has(r.sourceRef));
+    const missed = same.filter((r) => !followed(r)).map((r) => r.ref);
+    const lost = decided.filter((r) => after.get(r.ref)?.status !== r.status).map((r) => r.ref);
+    const moved = decided.filter((r) => changed.has(r.sourceRef));
+    const out: ReturnType<typeof incremental> = {
+        decisions: ratio(same.length - missed.length, same.length, missed),
+        kept: ratio(decided.length - lost.length, decided.length, lost),
+        changedText: { decided: moved.length, carried: moved.filter(followed).map((r) => r.ref).sort() },
+    };
     if (input.noChange) out.noChange = { ...input.noChange, ok: !input.noChange.newVersion && input.noChange.aiCallsForUnchangedSources === 0 };
     if (input.oneChanged) {
         const { changed, reprocessed } = input.oneChanged;

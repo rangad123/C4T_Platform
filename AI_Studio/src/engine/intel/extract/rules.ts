@@ -247,6 +247,8 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
     if (repairs > 0) notes.push(`${repairs} ${repairs === 1 ? "answer was" : "answers were"} not in the expected form at first and ${repairs === 1 ? "was" : "were"} asked for again.`);
 
     const byRef = new Map(documents.map((d) => [d.ref, d.lines]));
+    /** What each piece of evidence was read from (Rule.anchor): the whole document it cites and the lines it cites, as fingerprints. */
+    const anchors = new WeakMap<Evidence, NonNullable<Rule["anchor"]>>();
     /**
      * Evidence for an item when its quote is inside one run of adjacent cited lines of its document (and, for a rule, those lines support
      * what it expects); otherwise why not. The document is the one `doc` names; when it names none, the one document where the item
@@ -261,7 +263,9 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
         if (!norm(text).includes(norm(item.quote))) return "quote";
         if (rule && !supports(text, rule)) return "support";
         const at = cited.length === 1 ? `L${cited[0]}` : `L${cited[0]}-L${cited[cited.length - 1]}`;
-        return { kind: "quote", ref: `${ref}#${at}`.slice(0, 500), excerpt: hideSecrets(item.quote, hide) };
+        const ev: Evidence = { kind: "quote", ref: `${ref}#${at}`.slice(0, 500), excerpt: hideSecrets(item.quote, hide) };
+        anchors.set(ev, { text: fingerprintText(`${ref}\n${lines.join("\n")}`), lines: fingerprintText(`${ref}\n${cited.map((n) => lines[n - 1]!).join("\n")}`) });
+        return ev;
     };
     const evidenceOf = (item: { doc?: string; lines: number[]; quote: string }, rule?: { expected: string; description: string }): Evidence | Why => {
         // A rule needs a real quote (20 characters or more).
@@ -329,6 +333,7 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
                 entities: r.entities,
                 workflows,
                 endpoints: r.endpoints,
+                ...(anchors.has(ev) ? { anchor: anchors.get(ev)! } : {}),
             });
         }
         for (const r of a.roles) {

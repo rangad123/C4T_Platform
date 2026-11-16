@@ -54,8 +54,8 @@ CREATE INDEX idx_app_rules_status ON app_rules(project_id, status);
 /**
  * Slot 64: where knowledge came from and which build it describes. One row per connected source (kind and reference unique in a project)
  * with its fingerprint, status, when it was processed, why it failed and the version it went into; each model version records the
- * application version and the source fingerprints it was built from; each rule its fingerprint (kind, expected, links), so a decision can
- * follow the same rule into a later analysis. Additive only: rules stored before have no fingerprint and get one worked out when read.
+ * application version and the source fingerprints it was built from; each rule its fingerprint (kind, expected, links) and, for a rule
+ * read from a document, its anchor (kept in links_json), so a decision can follow the same rule into a later analysis. Additive only: rules stored before have no fingerprint and get one worked out when read.
  */
 export const APP_INTEL_V2_MIGRATION = `
 CREATE TABLE app_sources (
@@ -234,16 +234,17 @@ const toSource = (r: SourceDbRow): SourceRow => ({
     modelVersionId: r.model_version_id,
 });
 
-type Links = { entities?: string[]; workflows?: string[]; endpoints?: string[]; evidenceGone?: EvidenceGone; reworded?: { description: string; expected: string } };
+type Links = { entities?: string[]; workflows?: string[]; endpoints?: string[]; anchor?: Rule["anchor"]; evidenceGone?: EvidenceGone; reworded?: { description: string; expected: string } };
 
 /**
- * The wording a rule is stored with. A decided rule keeps the text the person decided about when an analysis finds the same rule (same
- * fingerprint) worded differently; the new wording is kept beside it as "reworded". Anything else takes the new wording.
+ * The wording a rule is stored with. A decided rule keeps the text the person decided about when an analysis finds the same rule (`same`:
+ * the same fingerprint, or the same source text as carry-forward.ts matched it) worded differently; the new wording is kept beside it as
+ * "reworded". Anything else takes the new wording.
  */
-function wordingOf(stored: { status: string; description: string; expected: string; fingerprint: string } | undefined, rule: { description: string; expected: string }, fingerprint: string): { description: string; expected: string; reworded?: { description: string; expected: string } } {
-    if (!stored || stored.status === "unverified" || stored.fingerprint !== fingerprint) return { description: rule.description, expected: rule.expected };
-    const same = stored.description === rule.description && stored.expected === rule.expected;
-    return { description: stored.description, expected: stored.expected, ...(same ? {} : { reworded: { description: rule.description, expected: rule.expected } }) };
+function wordingOf(stored: { status: string; description: string; expected: string } | undefined, rule: { description: string; expected: string }, same: boolean): { description: string; expected: string; reworded?: { description: string; expected: string } } {
+    if (!stored || stored.status === "unverified" || !same) return { description: rule.description, expected: rule.expected };
+    const unchanged = stored.description === rule.description && stored.expected === rule.expected;
+    return { description: stored.description, expected: stored.expected, ...(unchanged ? {} : { reworded: { description: rule.description, expected: rule.expected } }) };
 }
 
 const toRule = (r: RuleRow): RuleRecord => {
@@ -265,6 +266,7 @@ const toRule = (r: RuleRow): RuleRecord => {
         entities: links.entities ?? [],
         workflows: links.workflows ?? [],
         endpoints: links.endpoints ?? [],
+        ...(links.anchor ? { anchor: links.anchor } : {}),
         status: r.status as RuleStatus,
         decidedBy: r.decided_by,
         decidedAt: r.decided_at,
@@ -467,11 +469,11 @@ export class AppIntelStore {
             const versionId = await this.ownVersion(t, projectId, o.modelVersionId);
             const existing = await t.get<RuleRow>("SELECT * FROM app_rules WHERE project_id = ? AND ref = ?", projectId, rule.ref);
             const at = this.now();
-            const links = JSON.stringify({ entities: rule.entities, workflows: rule.workflows, endpoints: rule.endpoints });
+            const links = JSON.stringify({ entities: rule.entities, workflows: rule.workflows, endpoints: rule.endpoints, ...(rule.anchor ? { anchor: rule.anchor } : {}) });
             if (existing) {
                 const before = toRule(existing);
                 const changed = before.fingerprint !== fingerprint;
-                const w = wordingOf(before, rule, fingerprint);
+                const w = wordingOf(before, rule, !changed);
                 await t.run(
                     "UPDATE app_rules SET model_version_id = COALESCE(?, model_version_id), kind = ?, description = ?, expected = ?, source_type = ?, source_ref = ?, evidence_json = ?, explicitness = ?, confidence = ?, links_json = ?, status = ?, decided_by = ?, decided_at = ?, updated_at = ?, fingerprint = ? WHERE id = ?",
                     versionId,
@@ -542,9 +544,12 @@ export class AppIntelStore {
 
     /**
      * Saves the rules of an analysis after decisions were carried forward (engine/intel/carry-forward.ts), in one transaction. A rule with an
-     * `id` updates that stored rule's text, source, evidence and "evidence gone" mark and keeps its status and decision; so does a rule whose
-     * fingerprint a stored rule already has. Any other rule is new and stored unverified, whatever status it carries, under its ref or, when
-     * that ref is taken by a different rule, a longer one. Rules over the project's cap are counted in `leftOut`, never dropped silently.
+     * `id` updates that stored rule's text, source, evidence and "evidence gone" mark; so does a rule without one whose fingerprint a stored
+     * rule no other carried rule names already has. The stored decision is kept when the fingerprint is the same, or when carry-forward
+     * matched the rule by its source text (it names the stored id and the stored fingerprint): a decided rule then keeps the wording and
+     * fingerprint the person decided about, the new wording shown beside it. Any other rule is new and stored unverified, whatever status
+     * it carries, under its ref or, when that ref is taken by a different rule, a longer one. Rules over the project's cap are counted in
+     * `leftOut`, never dropped silently.
      */
     async saveCarried(projectId: string, carried: readonly CarriedRule[], o: { modelVersionId?: string | null; tx?: Sql } = {}): Promise<{ saved: number; leftOut: number }> {
         return this.inTx(o.tx, async (t) => {
@@ -552,21 +557,24 @@ export class AppIntelStore {
             const rows = (await t.all<RuleRow>("SELECT * FROM app_rules WHERE project_id = ?", projectId)).map(toRule);
             const byId = new Map(rows.map((r) => [r.id, r]));
             const byFp = new Map<string, RuleRecord>();
-            for (const r of rows) if (!byFp.has(r.fingerprint)) byFp.set(r.fingerprint, r);
+            // A stored rule another carried rule names is that rule's: a rule worded like it (say, from changed text) is not it.
+            const named = new Set(carried.flatMap((c) => (c.id ? [c.id] : [])));
+            for (const r of rows) if (!byFp.has(r.fingerprint) && !named.has(r.id)) byFp.set(r.fingerprint, r);
             const refs = new Set(rows.map((r) => r.ref));
             let count = rows.length;
             let saved = 0;
             let leftOut = 0;
             const at = this.now();
             for (const c of carried) {
-                const rule = RuleSchema.parse({ ref: c.ref, kind: c.kind, description: c.description, expected: c.expected, sourceType: c.sourceType, sourceRef: c.sourceRef, evidence: c.evidence, explicitness: c.explicitness, confidence: c.confidence, entities: c.entities, workflows: c.workflows, endpoints: c.endpoints });
+                const rule = RuleSchema.parse({ ref: c.ref, kind: c.kind, description: c.description, expected: c.expected, sourceType: c.sourceType, sourceRef: c.sourceRef, evidence: c.evidence, explicitness: c.explicitness, confidence: c.confidence, entities: c.entities, workflows: c.workflows, endpoints: c.endpoints, ...(c.anchor ? { anchor: c.anchor } : {}) });
                 const fingerprint = ruleFingerprint(rule);
                 const stored = (c.id ? byId.get(c.id) : undefined) ?? byFp.get(fingerprint);
-                const w = wordingOf(stored, rule, fingerprint);
-                const links = JSON.stringify({ entities: rule.entities, workflows: rule.workflows, endpoints: rule.endpoints, ...(c.evidenceGone ? { evidenceGone: c.evidenceGone } : {}), ...(w.reworded ? { reworded: w.reworded } : {}) });
+                // The decision belongs to the stored rule: the same fingerprint, or the same source text as carry-forward matched it.
+                const same = Boolean(stored && (stored.fingerprint === fingerprint || (c.id === stored.id && c.fingerprint === stored.fingerprint)));
+                const w = wordingOf(stored, rule, same);
+                const links = JSON.stringify({ entities: rule.entities, workflows: rule.workflows, endpoints: rule.endpoints, ...(rule.anchor ? { anchor: rule.anchor } : {}), ...(c.evidenceGone ? { evidenceGone: c.evidenceGone } : {}), ...(w.reworded ? { reworded: w.reworded } : {}) });
                 if (stored) {
-                    // The decision belongs to the stored rule's fingerprint: if this one differs, the person has not decided about it.
-                    const same = stored.fingerprint === fingerprint;
+                    const decided = same && stored.status !== "unverified";
                     await t.run(
                         "UPDATE app_rules SET model_version_id = COALESCE(?, model_version_id), kind = ?, description = ?, expected = ?, source_type = ?, source_ref = ?, evidence_json = ?, explicitness = ?, confidence = ?, links_json = ?, fingerprint = ?, status = ?, decided_by = ?, decided_at = ?, updated_at = ? WHERE project_id = ? AND id = ?",
                         versionId,
@@ -579,7 +587,7 @@ export class AppIntelStore {
                         rule.explicitness,
                         rule.confidence,
                         links,
-                        fingerprint,
+                        decided ? stored.fingerprint : fingerprint,
                         same ? stored.status : "unverified",
                         same ? stored.decidedBy : null,
                         same ? stored.decidedAt : null,
