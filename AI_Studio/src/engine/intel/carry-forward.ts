@@ -14,6 +14,8 @@ import { ruleFingerprint, type Rule, type RuleStatus } from "./model.js";
 export interface EvidenceGone {
     version: number;
     at: string;
+    /** Why, when it was not a later analysis: the requirement the rule came from was retired or deleted. */
+    reason?: "requirement_retired";
 }
 
 export interface PreviousRule extends Rule {

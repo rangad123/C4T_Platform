@@ -6,7 +6,7 @@ import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { useHere } from "../auth/project-access";
-import { EVIDENCE_GONE, isStated, RULE_SOURCE_WORDS, rewordedLine, UNCONFIRMED_WORKFLOW, useLatestModel, workflowUsable, type Evidence, type Rule, type RuleStatus, type Workflow } from "./understanding";
+import { EVIDENCE_GONE, isStated, REQUIREMENT_RETIRED, UNTIL_CONFIRMED_AGAIN, RULE_SOURCE_WORDS, rewordedLine, UNCONFIRMED_WORKFLOW, useLatestModel, workflowUsable, type Evidence, type Rule, type RuleStatus, type Workflow } from "./understanding";
 import "./understanding.css";
 
 const DECIDED: Record<Exclude<RuleStatus, "unverified">, string> = { confirmed: "Confirmed", rejected: "Rejected" };
@@ -98,9 +98,14 @@ function useDecision(url: string, fingerprint: string | undefined, onDecided: ()
     return { busy, error, decide };
 }
 
-function Decide({ status, busy, decide }: { status: RuleStatus; busy: boolean; decide: (s: RuleStatus) => Promise<void> }) {
+function Decide({ status, busy, decide, again }: { status: RuleStatus; busy: boolean; decide: (s: RuleStatus) => Promise<void>; /** A confirmed rule a person has to look at again. */ again?: boolean }) {
     return (
         <div className="rule-actions">
+            {again && status === "confirmed" && (
+                <Button size="sm" variant="primary" icon={Check} loading={busy} onClick={() => void decide("confirmed")}>
+                    Confirm again
+                </Button>
+            )}
             {status === "unverified" ? (
                 <>
                     <Button size="sm" variant="primary" icon={Check} loading={busy} onClick={() => void decide("confirmed")}>
@@ -163,7 +168,8 @@ function RuleRow({ projectId, rule: r, workflows, canWrite, onDecided }: { proje
             )}
             {r.evidenceGone && (
                 <p className="t-secondary" data-testid="evidence-gone">
-                    {EVIDENCE_GONE}
+                    {r.evidenceGone.reason === "requirement_retired" ? REQUIREMENT_RETIRED : EVIDENCE_GONE}
+                    {r.status === "confirmed" && ` ${UNTIL_CONFIRMED_AGAIN}`}
                 </p>
             )}
             <EvidenceList evidence={r.evidence} />
@@ -190,7 +196,7 @@ function RuleRow({ projectId, rule: r, workflows, canWrite, onDecided }: { proje
                     <span data-testid="rule-error">{error}</span>
                 </Callout>
             )}
-            {canWrite && <Decide status={r.status} busy={busy} decide={decide} />}
+            {canWrite && <Decide status={r.status} busy={busy} decide={decide} again={Boolean(r.evidenceGone)} />}
         </article>
     );
 }

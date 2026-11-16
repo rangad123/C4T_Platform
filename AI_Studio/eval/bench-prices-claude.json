@@ -1,0 +1,9 @@
+{
+    "provider": "anthropic",
+    "model": "claude-haiku-5-5",
+    "tiers": [
+        { "upToInputTokens": 100000, "inputPerMTok": 0.1, "outputPerMTok": 0.5 },
+        { "inputPerMTok": 0.5, "outputPerMTok": 2.5 }
+    ],
+    "note": "US dollars per million tokens; a call whose prompt is longer than 100,000 tokens is charged at the second tier as a whole"
+}

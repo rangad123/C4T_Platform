@@ -295,6 +295,6 @@ describe("nothing in test generation reads it yet", () => {
         walk(root);
         // The intelligence engine's own files and the understanding benchmark read it; test generation does not.
         const outside = users.filter((u) => !u.startsWith("engine/intel/") && !u.startsWith("eval/bench/understanding/"));
-        expect(outside.sort()).toEqual(["engine/planning/planner.ts", "eval/quality/score.ts", "platform/app-analysis.ts", "platform/app-intel-store.ts", "platform/db.ts", "platform/job-runner.ts", "platform/routes/app-intel.ts", "platform/routes/index.ts"].sort());
+        expect(outside.sort()).toEqual(["engine/planning/planner.ts", "eval/quality/score.ts", "platform/app-analysis.ts", "platform/app-intel-store.ts", "platform/db.ts", "platform/job-runner.ts", "platform/routes/app-intel.ts", "platform/routes/index.ts", "platform/routes/requirements.ts"].sort());
     });
 });

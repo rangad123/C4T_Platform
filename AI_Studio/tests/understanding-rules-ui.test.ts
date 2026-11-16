@@ -26,6 +26,7 @@ const PORT = 9751;
 const BASE = `http://127.0.0.1:${PORT}`;
 const KEY = "understanding-rules-ui-key-8c02";
 const EVIDENCE_GONE = "A later reading no longer found what this rule was based on. Check that it still holds.";
+const UNTIL_CONFIRMED_AGAIN = "Tests do not use this rule until a person confirms it again.";
 const UNCONFIRMED_WORKFLOW = "Tests use this rule once this workflow is confirmed.";
 const STEPS = [{ order: 0, action: "Open the home page" }, { order: 1, action: "Open a product" }];
 /** The shop's model with the inferred workflow as given (a later reading). */
@@ -76,6 +77,10 @@ beforeAll(async () => {
     await add("R-3", { description: "Guests cannot check out", expected: "Checkout asks a guest to sign in", sourceType: "requirement", sourceRef: "Requirements line 9", explicitness: "explicit" });
     await intel.decide(shop, ids["R-3"]!, "confirmed", "someone");
     await intel.markEvidenceGone(shop, ids["R-3"]!, 2);
+    // A confirmed rule whose requirement was then retired.
+    await add("R-5", { description: "Orders ship within two days", expected: "The order page shows a delivery date at most two days away", sourceType: "requirement", sourceRef: "REQ-9", explicitness: "explicit" });
+    await intel.decide(shop, ids["R-5"]!, "confirmed", "someone");
+    await intel.markRequirementGone(shop, "REQ-9");
     await add("R-4", { description: "Prices are never negative", expected: "No price below zero", sourceType: "inferred", explicitness: "inferred" });
 
     const users = accessControlOf(server).users;
@@ -120,7 +125,7 @@ describe("rules to confirm and inputs for the analysis", () => {
         page = await signIn("olga@example.com", "olga's long password");
         await page.goto(`${BASE}/#/projects/${shop}/requirements`);
         await pwExpect(page.getByRole("heading", { name: "Rules to confirm" })).toBeVisible();
-        await pwExpect(list().getByRole("article")).toHaveCount(4);
+        await pwExpect(list().getByRole("article")).toHaveCount(5);
         const cart = rule("A cart holds at most 50 items");
         await pwExpect(cart).toContainText("Stated by a source");
         await pwExpect(cart).toContainText("Expected: Adding a 51st item is refused with a message");
@@ -134,7 +139,8 @@ describe("rules to confirm and inputs for the analysis", () => {
         const gone = rule("Guests cannot check out");
         await pwExpect(gone).toContainText("Evidence gone");
         await pwExpect(gone).toContainText("Confirmed");
-        await pwExpect(gone.getByTestId("evidence-gone")).toHaveText(EVIDENCE_GONE);
+        await pwExpect(gone.getByTestId("evidence-gone")).toHaveText(`${EVIDENCE_GONE} ${UNTIL_CONFIRMED_AGAIN}`);
+        await pwExpect(gone.getByRole("button", { name: "Confirm again" })).toBeVisible();
         await pwExpect(gone.getByRole("button", { name: "Undo the decision" })).toBeVisible();
         const text = (await page.getByTestId("rules-to-confirm").textContent()) ?? "";
         for (const internal of ["R-1", "unverified", "user_confirmed", "inferred,", ids["R-1"]!]) expect(text).not.toContain(internal);
@@ -152,6 +158,17 @@ describe("rules to confirm and inputs for the analysis", () => {
         await page.emulateMedia({ colorScheme: "dark" });
         expect(await axeClean(page)).toEqual([]);
         await page.emulateMedia({ colorScheme: "light" });
+    });
+
+    it("says when a confirmed rule's requirement was retired, and Confirm again puts it back in use", async () => {
+        const shipping = rule("Orders ship within two days");
+        await pwExpect(shipping).toContainText("Evidence gone");
+        await pwExpect(shipping.getByTestId("evidence-gone")).toHaveText(`Its requirement was retired. ${UNTIL_CONFIRMED_AGAIN}`);
+        await shipping.getByRole("button", { name: "Confirm again" }).click();
+        await pwExpect(shipping).toHaveCount(0);
+        const stored = (await intel.rule(shop, ids["R-5"]!))!;
+        expect(stored.status).toBe("confirmed");
+        expect(stored.evidenceGone).toBeUndefined();
     });
 
     it("confirms one rule and rejects another, and the server keeps both decisions", async () => {
@@ -258,7 +275,7 @@ describe("rules to confirm and inputs for the analysis", () => {
         await vic.goto(`${BASE}/#/projects/${shop}/requirements`);
         await pwExpect(vic.getByRole("article", { name: "Prices are never negative" })).toBeVisible();
         await pwExpect(vic.getByRole("article", { name: "Browse the shop" })).toBeVisible();
-        for (const name of ["Confirm", "Reject", "Undo the decision", "Confirm the workflow", "Add schema file", "Save label", "Choose a schema file"]) await pwExpect(vic.getByRole("button", { name })).toHaveCount(0);
+        for (const name of ["Confirm", "Reject", "Undo the decision", "Confirm again", "Confirm the workflow", "Add schema file", "Save label", "Choose a schema file"]) await pwExpect(vic.getByRole("button", { name })).toHaveCount(0);
         await pwExpect(vic.getByTestId("source-inputs")).toContainText("The latest reading describes version 3.0.0.");
     });
 });

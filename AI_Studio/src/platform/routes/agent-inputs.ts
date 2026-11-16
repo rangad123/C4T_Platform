@@ -6,8 +6,8 @@
  *   PUT /api/projects/:id/agent-inputs   { username?, password?, totpSecret?, apiToken?, oauth2?, openApiUrl?, allowMutatingApiTests?,
  *                                          cleanupAfter?, clear?: ["password" | "totpSecret" | "apiToken" | "oauth2"] } → the same answer
  *
- * Storage: the project's own row (agent-inputs-store.ts), written only here, with the site it was saved for; an exploration reads it and
- * never writes it. Saving also makes a new application row with the latest one's address, settings and mobile app plus these inputs,
+ * Storage: the project's own row (agent-inputs-store.ts), with the site it was saved for; an exploration that brings a sign-in of its own
+ * makes it the saved sign-in (Settings wins: runs use only the saved one), and changes nothing else saved here. Saving also makes a new application row with the latest one's address, settings and mobile app plus these inputs,
  * because runs read the latest application: the next run signs in with what was just saved. The cleanup choice is the project's
  * cleanup switch (cleanup-store.ts). Secrets are write-only: the answer says only whether one is saved. In PUT a secret left out or
  * empty keeps the saved one, and `clear` removes it. A custom API header (`apiAuthHeader`, from explorations made before this tab)
@@ -21,9 +21,9 @@
  * brings a document: the Requirements tab's own Import keeps documents, so none is stored here a second time.
  */
 import { z } from "zod";
-import { isAppUri } from "../../engine/desktop/target.js";
 import { REQUIREMENTS_MAX_CHARS } from "../../engine/requirements/extract.js";
-import { AgentInputsStore, type SavedAgentInputs } from "../agent-inputs-store.js";
+import { AgentInputsStore, sameSite, type SavedAgentInputs } from "../agent-inputs-store.js";
+export { sameSite };
 import { secretBoxOf } from "../ai-config.js";
 import { CleanupStore } from "../cleanup-store.js";
 import type { Row } from "../db.js";
@@ -100,16 +100,6 @@ async function chosenAgents(p: Platform, row: Row): Promise<AgentId[] | undefine
 export async function missingForExploration(p: Platform, row: Row, have: { openApiUrl?: string }, targets: readonly string[] | undefined): Promise<MissingInput[]> {
     const chosen = await chosenAgents(p, row);
     return chosen ? missingInputs(chosen, have, targets) : [];
-}
-
-/** Whether two application addresses are the same site (saved sign-in details are used only there). */
-export function sameSite(a: string, b: string): boolean {
-    if (isAppUri(a) || isAppUri(b) || !/^https?:/i.test(a) || !/^https?:/i.test(b)) return a === b;
-    try {
-        return new URL(a).origin === new URL(b).origin;
-    } catch {
-        return false;
-    }
 }
 
 export const agentInputsStoreOf = (p: Pick<Platform, "db" | "config">): AgentInputsStore => new AgentInputsStore(p.db, secretBoxOf(p.config));

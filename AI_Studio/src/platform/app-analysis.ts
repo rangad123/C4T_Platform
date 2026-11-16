@@ -546,6 +546,7 @@ export function projectSecrets(p: Pick<Platform, "db" | "repo" | "config">, proj
         }
     };
     quietly(() => add(applicationId ? (p.repo.getApplication(applicationId)?.credentials as never) : undefined));
+    quietly(() => add(applicationId ? (p.repo.applicationRowCredentials(applicationId) as never) : undefined)); // the row's own, also when Settings replaced it
     quietly(() => add(saved as never));
     quietly(() => add(undefined, new IdentityStore(p.db, box).get(projectId)));
     quietly(() => {

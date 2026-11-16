@@ -51,7 +51,7 @@ export interface PlanOptions {
 }
 
 /** A rule as the engine receives it: what it expects, whether a source states it, and what people decided about it. */
-export type KnowledgeRule = Pick<Rule, "ref" | "kind" | "description" | "expected" | "explicitness" | "workflows"> & { status: RuleStatus };
+export type KnowledgeRule = Pick<Rule, "ref" | "kind" | "description" | "expected" | "explicitness" | "workflows"> & { status: RuleStatus; evidenceGone?: { version: number; at: string; reason?: "requirement_retired" } };
 export type KnowledgeWorkflow = Pick<z.infer<typeof WorkflowSchema>, "id" | "name" | "preconditions" | "postconditions" | "sourceType"> & { steps: Array<{ order: number; action: string }> };
 
 /** The project's application knowledge for one exploration: the model version it comes from, its rules and workflows. */
@@ -61,9 +61,13 @@ export interface AppKnowledge {
     workflows: KnowledgeWorkflow[];
 }
 
-/** Rules a prompt may carry as expected behaviour: stated by a source or confirmed by a person, never rejected. A guess nobody confirmed is left out. */
-export const usableRules = <R extends Pick<KnowledgeRule, "explicitness" | "status">>(rules: readonly R[]): R[] =>
-    rules.filter((r) => r.status !== "rejected" && (r.status === "confirmed" || r.explicitness === "explicit"));
+/**
+ * Rules a prompt may carry as expected behaviour: stated by a source or confirmed by a person, never rejected. A guess nobody confirmed is
+ * left out, and so is a rule marked "evidence gone" (its requirement was retired, or a later analysis no longer found it) until a person
+ * confirms it again.
+ */
+export const usableRules = <R extends Pick<KnowledgeRule, "explicitness" | "status" | "evidenceGone">>(rules: readonly R[]): R[] =>
+    rules.filter((r) => !r.evidenceGone && r.status !== "rejected" && (r.status === "confirmed" || r.explicitness === "explicit"));
 
 /** The usable rules of the workflow a scenario's journey names (the planner sets the journey to a workflow's name, see `knowledgeBlock`). */
 export function rulesForScenario(scenario: { journey?: string }, k: AppKnowledge | undefined): KnowledgeRule[] {

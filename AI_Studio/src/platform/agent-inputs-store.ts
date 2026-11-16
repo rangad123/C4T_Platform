@@ -1,12 +1,15 @@
 /**
  * What a project's testing agents need, as saved on its Requirements tab (routes/agent-inputs.ts): the sign-in, the API access, the
- * OpenAPI document address and whether API tests may change data. One row per project, written ONLY by PUT /agent-inputs; an
- * exploration reads it and never writes it, so a person who may explore but may not change settings cannot replace what is saved.
+ * OpenAPI document address and whether API tests may change data. One row per project. Its sign-in (user name, password, authenticator
+ * secret) is the project's one sign-in: Project settings → Sign-in shows it and every run on its site signs in with it (Repo.getApplication
+ * puts it on the application a run reads). Settings writes it, and so does any path that brings a sign-in of its own (an exploration, an
+ * import, a CI run), with the same write (routes/project-sign-in.ts saveSignIn), never as a separate copy. Only Settings writes the rest.
  *
  * The row names the site it was saved for (`site`): its secrets are only ever used for that site (and the addresses saved with them).
  * Secrets are encrypted with the platform's SecretBox, like the application rows' credentials, and are write-only: the API only says
  * whether one is saved. An unreadable blob (the encryption key changed) counts as nothing saved.
  */
+import { isAppUri } from "../engine/desktop/target.js";
 import type { Db } from "./db.js";
 import type { Credentials } from "./repo.js";
 import type { SecretBox } from "./secrets.js";
@@ -29,6 +32,29 @@ INSERT INTO project_agent_inputs (project_id, site, credentials_enc, settings_js
 SELECT a.project_id, a.url, a.credentials_enc, a.config_json, a.created_at FROM applications a
 WHERE a.id = (SELECT b.id FROM applications b WHERE b.project_id = a.project_id ORDER BY b.created_at DESC, ${d.insertionOrder("b")} DESC LIMIT 1);
 `;
+
+/** Whether two application addresses are the same site (saved sign-in details are used only there): the same origin, or the same app. */
+export function sameSite(a: string, b: string): boolean {
+    if (isAppUri(a) || isAppUri(b) || !/^https?:/i.test(a) || !/^https?:/i.test(b)) return a === b;
+    try {
+        return new URL(a).origin === new URL(b).origin;
+    } catch {
+        return false;
+    }
+}
+
+/** The sign-in fields of credentials (Project settings → Sign-in). */
+export const SIGN_IN_KEYS = ["username", "password", "totpSecret"] as const;
+
+/** `credentials` with exactly `signIn`'s sign-in (a field it lacks is removed); everything else stays. Nothing left: undefined. */
+export function withSignIn(credentials: Credentials | undefined, signIn: Credentials | undefined): Credentials | undefined {
+    const out: Credentials = { ...(credentials ?? {}) };
+    for (const k of SIGN_IN_KEYS) {
+        if (signIn?.[k]) out[k] = signIn[k];
+        else delete out[k];
+    }
+    return Object.values(out).some(Boolean) ? out : undefined;
+}
 
 export interface SavedAgentInputs {
     /** The application address they were saved for. */
@@ -69,7 +95,7 @@ export class AgentInputsStore {
         };
     }
 
-    /** Replaces what the project has saved (only PUT /agent-inputs calls this). */
+    /** Replaces what the project has saved (PUT /agent-inputs, and saveSignIn for the sign-in). */
     save(projectId: string, v: { site: string; credentials?: Credentials; openApiUrl?: string; allowMutatingApiTests?: boolean }): void {
         const has = v.credentials && Object.values(v.credentials).some(Boolean);
         const settings = JSON.stringify({ ...(v.openApiUrl ? { openApiUrl: v.openApiUrl } : {}), ...(v.allowMutatingApiTests !== undefined ? { allowMutatingApiTests: v.allowMutatingApiTests } : {}) });

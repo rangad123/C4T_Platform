@@ -10,6 +10,7 @@ import { readStoredSpec } from "./stored-spec.js";
 import type { AppModel } from "../engine/understanding/app-model.js";
 import { Db, type Row } from "./db.js";
 import { SecretBox } from "./secrets.js";
+import { AgentInputsStore, sameSite, withSignIn } from "./agent-inputs-store.js";
 import { retryOnUniqueViolation } from "./sql-dialect.js";
 import { eventBus } from "./event-bus.js";
 import { codeEnginesFor, DEFAULT_PLATFORMS, DEFAULT_TESTING_MODES, type ProjectPlatform, type TestingMode } from "./project-setup.js";
@@ -478,9 +479,24 @@ export class Repo {
             url: r.url,
             origin: r.origin,
             config: JSON.parse(r.config_json),
-            credentials: r.credentials_enc ? this.secrets.decrypt<Credentials>(r.credentials_enc) : undefined,
+            credentials: this.withSavedSignIn(r.project_id, r.url, r.credentials_enc ? this.secrets.decrypt<Credentials>(r.credentials_enc) : undefined),
             model: r.app_model_json ? JSON.parse(r.app_model_json) : null,
         };
+    }
+
+    /** The credentials stored on the application row itself, before the saved sign-in replaces them (for masking every stored secret). */
+    applicationRowCredentials(id: string): Credentials | undefined {
+        const r = this.db.get<{ credentials_enc: string | null }>("SELECT credentials_enc FROM applications WHERE id = ?", id);
+        return r?.credentials_enc ? this.secrets.decrypt<Credentials>(r.credentials_enc) : undefined;
+    }
+
+    /**
+     * The project's saved sign-in (Project settings → Sign-in, agent-inputs-store.ts) replaces the row's own on the site it was saved
+     * for, so every run signs in with what Settings shows, whatever row it was queued with. Another site keeps the row's own.
+     */
+    private withSavedSignIn(projectId: string, url: string, credentials: Credentials | undefined): Credentials | undefined {
+        const saved = new AgentInputsStore(this.db, this.secrets).get(projectId);
+        return saved && sameSite(saved.site, url) ? withSignIn(credentials, saved.credentials) : credentials;
     }
 
     /** Latest application of a project, never including credentials. */

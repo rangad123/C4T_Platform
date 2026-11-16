@@ -16,6 +16,7 @@ import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { agentInputsStoreOf } from "../src/platform/routes/agent-inputs.js";
+import { SIGN_IN_NEEDS_SETTINGS } from "../src/platform/routes/project-sign-in.js";
 import { buildServer } from "../src/platform/server.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;
@@ -30,8 +31,8 @@ const me = (id: string, permissions: readonly string[], organisationId: string) 
 });
 const ACCOUNTS: Record<string, unknown> = {
     "t-cora": me("cora", PERMISSIONS, "org-a"),
-    // Writes and runs tests, but may not change the project's settings.
-    "t-tess": me("tess", ["ai_studio.access", "ai_studio.tests.write", "ai_studio.tests.run"], "org-a"),
+    // Writes, generates and runs tests, but may not change the project's settings.
+    "t-tess": me("tess", ["ai_studio.access", "ai_studio.tests.write", "ai_studio.tests.generate", "ai_studio.tests.run"], "org-a"),
     "t-bob": me("bob", PERMISSIONS, "org-b"),
 };
 
@@ -137,6 +138,56 @@ describe("the project's sign-in", () => {
         expect((await as("t-cora", "PUT", `/api/projects/${id}/sign-in`, { username: "new@shop.example" })).body).toEqual({ username: "new@shop.example", hasPassword: true, hasTotp: false, site: SITE });
         expect(runCredentials(id)).toEqual({ username: "new@shop.example", password: S.password });
         expect(agentInputsStoreOf(platform).get(id)?.credentials).toEqual({ username: "new@shop.example", password: S.password });
+    });
+
+    it("Settings wins: a sign-in brought with an import or an exploration becomes the saved one, and a later save is what runs use", async () => {
+        const spec = { testId: "WEB-001", title: "Home shows the shop", kind: "web", category: "Imported", steps: [{ action: "navigate", url: "/" }] };
+        // An import that brings a sign-in.
+        const id = await newProject("Import sign-in", ["code"]);
+        expect((await as("t-cora", "PUT", `/api/projects/${id}/sign-in`, { username: "before@shop.example", password: S.password, totpSecret: S.totp })).status).toBe(200);
+        const imported = await as("t-cora", "POST", `/api/projects/${id}/specs`, { baseUrl: SITE, validate: false, credentials: { username: "import@shop.example", password: S.newPassword }, specs: [spec] });
+        expect(imported.status, JSON.stringify(imported.body)).toBeLessThan(300);
+        expect((await as("t-cora", "GET", `/api/projects/${id}/sign-in`)).body).toEqual({ username: "import@shop.example", hasPassword: true, hasTotp: false, site: SITE });
+        expect(runCredentials(id)).toEqual({ username: "import@shop.example", password: S.newPassword });
+        // A later save in Settings: the import's application row (the latest) gives runs the new value, not its own copy.
+        expect((await as("t-cora", "PUT", `/api/projects/${id}/sign-in`, { username: "after@shop.example", password: S.password })).status).toBe(200);
+        expect(runCredentials(id)).toEqual({ username: "after@shop.example", password: S.password });
+
+        // An exploration that brings a sign-in.
+        const agent = await newProject("Explore sign-in", ["agent"]);
+        expect((await as("t-cora", "PUT", `/api/projects/${agent}/sign-in`, { username: "before@shop.example", password: S.password })).status).toBe(200);
+        expect((await as("t-cora", "POST", `/api/projects/${agent}/test-generation`, { url: SITE, plan: true, credentials: { username: "explore@shop.example", password: S.newPassword } })).status).toBe(202);
+        expect((await as("t-cora", "GET", `/api/projects/${agent}/sign-in`)).body).toEqual({ username: "explore@shop.example", hasPassword: true, hasTotp: false, site: SITE });
+        const explored = platform.repo.listJobs(agent)[0]!.applicationId;
+        expect(platform.repo.getApplication(explored)!.credentials).toEqual({ username: "explore@shop.example", password: S.newPassword });
+        expect((await as("t-cora", "PUT", `/api/projects/${agent}/sign-in`, { username: "after@shop.example" })).status).toBe(200);
+        expect(platform.repo.getApplication(explored)!.credentials).toEqual({ username: "after@shop.example", password: S.newPassword });
+    });
+
+    it("a sign-in brought by someone who may not change settings is refused, and nothing is saved, queued or used; with the permission it is saved", async () => {
+        const spec = { testId: "WEB-001", title: "Home shows the shop", kind: "web", category: "Imported", steps: [{ action: "navigate", url: "/" }] };
+        const id = await newProject("Sign-in permission", ["agent"]);
+        expect((await as("t-cora", "PUT", `/api/projects/${id}/sign-in`, { username: "qa@shop.example", password: S.password })).status).toBe(200);
+        expect((await as("t-cora", "POST", `/api/projects/${id}/specs`, { baseUrl: SITE, validate: false, specs: [spec] })).status).toBeLessThan(300);
+        const tess = (await as("t-tess", "GET", "/api/auth/state")).body.me.id as string;
+        accessControlOf(app).projects.store.addMember(id, tess, { role: "editor", projectAdmin: false, source: "added", addedBy: "test" });
+        const rows = () => Number(platform.db.get<{ c: number }>("SELECT COUNT(*) AS c FROM applications WHERE project_id = ?", id)!.c);
+        const before = { rows: rows(), jobs: platform.repo.listJobs(id).length, tests: platform.repo.listTests(id).length };
+        const mallory = { username: "mallory@shop.example", password: S.newPassword };
+        const refused = { status: 403, body: { error: SIGN_IN_NEEDS_SETTINGS } };
+        expect(await as("t-tess", "POST", `/api/projects/${id}/specs`, { baseUrl: SITE, validate: false, credentials: mallory, specs: [{ ...spec, testId: "WEB-002" }] })).toMatchObject(refused);
+        expect(await as("t-tess", "POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true, credentials: mallory })).toMatchObject(refused);
+        expect(await as("t-tess", "POST", `/api/projects/${id}/validation`, { credentials: mallory })).toMatchObject(refused);
+        expect({ rows: rows(), jobs: platform.repo.listJobs(id).length, tests: platform.repo.listTests(id).length }).toEqual(before);
+        expect((await as("t-cora", "GET", `/api/projects/${id}/sign-in`)).body).toMatchObject({ username: "qa@shop.example" });
+        expect(runCredentials(id)).toEqual({ username: "qa@shop.example", password: S.password });
+        // Without a sign-in of their own, the same person may still start them.
+        expect((await as("t-tess", "POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true })).status).toBe(202);
+        platform.db.run("UPDATE generation_jobs SET status = 'FAILED' WHERE project_id = ?", id);
+        // A CI run with the permission saves its sign-in (Settings wins), and runs use it.
+        expect((await as("t-cora", "POST", `/api/projects/${id}/validation`, { credentials: { username: "ci@shop.example", password: S.newPassword } })).status).toBe(202);
+        expect((await as("t-cora", "GET", `/api/projects/${id}/sign-in`)).body).toEqual({ username: "ci@shop.example", hasPassword: true, hasTotp: false, site: SITE });
+        expect(runCredentials(id)).toEqual({ username: "ci@shop.example", password: S.newPassword });
     });
 
     it("refuses in plain sentences", async () => {

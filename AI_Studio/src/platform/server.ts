@@ -47,6 +47,7 @@ import { isLoadSpec, LOAD_MAX_ENDPOINTS, LOAD_MAX_REQUESTS } from "../engine/per
 import { registerFeatureRoutes } from "./routes/index.js";
 import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
 import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
+import { adoptSignIn, assertMaySaveSignIn } from "./routes/project-sign-in.js";
 import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
 import { dataDrivenSpecIssues, dataSetsFor, EnvironmentChoice, startEnvironmentRun, testEnvironmentInfo } from "./routes/environments.js";
 import { exportObjectsUsedBy, importObjectsFor, objectsFor } from "./routes/locators.js";
@@ -425,6 +426,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const { id } = req.params as { id: string };
         project(id);
         const body0 = GenerateSchema.parse(req.body);
+        assertMaySaveSignIn(app, req, id, body0.credentials); // its sign-in would become the saved one: that needs the project-settings permission
         refuseUnlessRunsStart(p, EXPLORING_OFF_MESSAGE); // tests switched off on this server: said before anything is saved or queued
         // The AI explores the project's Android app on a phone or emulator: checked now, in plain words, before a job is queued.
         const wantsPhone = body0.targets?.includes("mobile") === true;
@@ -433,7 +435,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const phoneUrl = phoneOnly ? `android-app://${latestMobile(id)!.appPackage}` : undefined;
         if (!body0.url && !phoneUrl) throw new HttpError(400, "Give the address of the website or API to test");
         // What the request leaves out comes from the inputs saved on the Requirements tab (routes/agent-inputs.ts), on the same site only;
-        // saved credentials never go to an API address or OpenAPI document nobody saved them for (409). Exploring never changes them.
+        // saved credentials never go to an API address or OpenAPI document nobody saved them for (409). A sign-in the request brings
+        // becomes the project's saved sign-in below (Settings wins); nothing else saved changes.
         const saved = savedInputsForExploration(p, id, (body0.url ?? phoneUrl)!, body0);
         const body = { ...body0, url: (body0.url ?? phoneUrl)!, credentials: body0.credentials ?? saved.credentials, openApiUrl: body0.openApiUrl ?? saved.openApiUrl, allowMutatingApiTests: body0.allowMutatingApiTests ?? saved.allowMutatingApiTests };
         if (!phoneOnly) await assertAllowedTarget(body.url);
@@ -479,6 +482,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         // The application keeps the generation settings, minus the (possibly large) requirements text.
         const { requirementsText: _text, ...appConfig } = options;
         const keptMobile = latestMobile(id);
+        adoptSignIn(p, id, body.url, body0.credentials);
         const appId = repo.createApplication(id, body.url, keptMobile ? { ...appConfig, mobile: keptMobile } : appConfig, body.credentials);
         // The choice made when generating also becomes the project's switch for every later run (see routes/cleanup.ts).
         if (body.cleanupAfter !== undefined) new CleanupStore(repo.db).setEnabled(id, body.cleanupAfter);
@@ -516,6 +520,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (!baseUrl && !credentials && !mobile && latest) return { id: latest.id as string, url };
         // Keep the project's earlier settings (apiBaseUrl, mobile app) on the new application row.
         const kept = { ...DEFAULT_JOB_OPTIONS, ...(latest?.config?.apiBaseUrl ? { apiBaseUrl: latest.config.apiBaseUrl } : {}), ...(target ? { mobile: target } : {}), ...keptLevel(latest?.config) };
+        adoptSignIn(p, projectId, url, credentials); // a sign-in brought with an import is the project's saved one (Settings wins)
         return { id: repo.createApplication(projectId, url, kept, credentials), url };
     };
 
@@ -545,6 +550,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const { id } = req.params as { id: string };
         project(id);
         const body = ImportSchema.parse(req.body);
+        assertMaySaveSignIn(app, req, id, body.credentials); // its sign-in would become the saved one: that needs the project-settings permission
         // Shared elements the specs refer to: those already in the project plus the ones the export brings along.
         const importObjects = importObjectsFor(repo, id, body.objects);
         // Reusable steps a spec uses must be in the project already or come with this import; the checks below look at the steps the spec really has.

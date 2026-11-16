@@ -10,6 +10,7 @@ import { ManualCaseStore } from "../manual-case-store.js";
 import { projectSetupOf } from "../project-setup.js";
 import { extractDocumentText, REQUIREMENTS_MAX_CHARS, RequirementsDocumentError } from "../../engine/requirements/extract.js";
 import { HttpError } from "../http-error.js";
+import { AppIntelStore } from "../app-intel-store.js";
 import {
     candidatesFromText,
     candidatesWithAi,
@@ -259,10 +260,13 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
     app.patch("/api/projects/:id/requirements/:rid", async (req) => {
         const pid = projectId(req);
         const { rid } = req.params as { rid: string };
-        await requirement(pid, rid);
+        const before = await requirement(pid, rid);
         const patch = Patch.parse(req.body);
         try {
-            return await store.update(pid, rid, patch);
+            const updated = await store.update(pid, rid, patch);
+            // Retired: the rules it is the evidence of are marked "evidence gone" and left out of planning until a person confirms them again.
+            if (patch.status === "retired" && before.status !== "retired") await new AppIntelStore(p.sql).markRequirementGone(pid, before.ref);
+            return updated;
         } catch (e) {
             return refusal(e);
         }
@@ -278,6 +282,7 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
             throw new HttpError(409, `${r.ref} is covered by ${linked} test${linked === 1 ? "" : "s"}. Deleting it removes those links; the tests stay. Confirm to delete it.`, { linked });
         }
         await store.remove(pid, rid);
+        await new AppIntelStore(p.sql).markRequirementGone(pid, r.ref); // its rules lose their evidence, as when it is retired
         return reply.code(204).send();
     });
 

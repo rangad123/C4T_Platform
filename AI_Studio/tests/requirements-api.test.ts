@@ -2,7 +2,8 @@
  * Requirements as records through a real platform (Fastify inject, a real database, no model, no browser): the store's slot,
  * create, change and delete (refused while tests link to it, done when confirmed), links to automated tests and manual cases,
  * the coverage rules (not covered, covered, passing, failing; retired left out), import from text and from a file with a preview,
- * the AI refinement refused plainly without a model, links made by generation, cross-project ids answering 404, and the
+ * the AI refinement refused plainly without a model, links made by generation, a retired or deleted requirement's rules marked
+ * "evidence gone" and left out of planning until confirmed again, cross-project ids answering 404, and the
  * permission refusals (read with ai_studio.access, write with ai_studio.tests.write).
  */
 import fs from "node:fs";
@@ -17,6 +18,9 @@ import { RepoSink } from "../src/platform/repo-sink.js";
 import { automatedResult, candidateOf, candidatesFromText, candidatesWithAi, coverageOf, manualResult } from "../src/platform/requirement-store.js";
 import { buildServer } from "../src/platform/server.js";
 import { addTest, seedProject, type Seed } from "./fixtures/dashboard-seed.js";
+import { AppIntelStore } from "../src/platform/app-intel-store.js";
+import { appKnowledgeOf } from "../src/platform/job-runner.js";
+import { rulesForScenario, usableRules } from "../src/engine/planning/planner.js";
 
 const KEY = "req-owner-key-5c1d2e3f";
 let platform: Platform;
@@ -206,6 +210,49 @@ describe("requirements", () => {
         // Nothing links to REQ-7: it goes at once.
         const basket = (await call("GET", reqs(A))).body.requirements.find((r: any) => r.ref === "REQ-7");
         expect((await call("DELETE", `${reqs(A)}/${basket.id}`)).status).toBe(204);
+    });
+});
+
+describe("a retired or deleted requirement's rules", () => {
+    it("are marked evidence gone with their status kept, left out of planning and authoring, and back once a person confirms them again", async () => {
+        const S = seedProject(platform, "Rules shop", "https://rules.example.test");
+        const pid = S.projectId;
+        const intel = new AppIntelStore(platform.sql);
+        await intel.addVersion({ projectId: pid, model: {} });
+        await add(S, { ref: "REQ-PAY", title: "Paying", description: "Paying empties the cart." });
+        await add(S, { ref: "REQ-KEEP", title: "Search", description: "Search finds products." });
+        const gone = await add(S, { ref: "REQ-DEL", title: "Coupons", description: "A coupon applies once." });
+        const rule = (ref: string, from: string, expected: string, workflows: string[] = []) =>
+            intel.addRule(pid, { ref, kind: "constraint", description: `Rule ${ref}`, expected, sourceType: "requirement", sourceRef: from, evidence: [{ kind: "quote", ref: `${from}#L1`, excerpt: expected }], explicitness: "explicit", confidence: 0.9, workflows });
+        const pay = await rule("R-pay", "REQ-PAY", "Paying empties the cart.");
+        await intel.decide(pid, pay.id, "confirmed", "person-1", pay.fingerprint);
+        await rule("R-keep", "REQ-KEEP", "Search finds products.");
+        await rule("R-del", "REQ-DEL", "A coupon applies once.");
+        const usable = async () => ((await appKnowledgeOf(platform.repo, pid)).appKnowledge?.rules ?? []).map((r) => r.ref).sort();
+        expect(await usable()).toEqual(["R-del", "R-keep", "R-pay"]);
+
+        const paying = (await call("GET", reqs(S))).body.requirements.find((r: { ref: string }) => r.ref === "REQ-PAY");
+        expect((await call("PATCH", `${reqs(S)}/${paying.id}`, { status: "retired" })).status).toBe(200);
+        const marked = (await intel.rules(pid)).find((r) => r.ref === "R-pay")!;
+        expect(marked.evidenceGone).toMatchObject({ version: 1, reason: "requirement_retired" });
+        expect(marked.status).toBe("confirmed");
+        expect((await intel.rules(pid)).find((r) => r.ref === "R-keep")!.evidenceGone).toBeUndefined();
+        // Left out of planning and authoring: the planner's and the test writer's filter both drop it.
+        expect(await usable()).toEqual(["R-del", "R-keep"]);
+        expect(usableRules([{ ...marked }]).length).toBe(0);
+        expect(rulesForScenario({ journey: "Checkout" }, { modelVersionId: "mv", rules: [{ ...marked, workflows: ["wf-1"] }], workflows: [{ id: "wf-1", name: "Checkout", steps: [], preconditions: [], postconditions: [], sourceType: "requirement" }] })).toEqual([]);
+
+        // Deleted: the same.
+        expect((await call("DELETE", `${reqs(S)}/${gone.id}`)).status).toBe(204);
+        expect((await intel.rules(pid)).find((r) => r.ref === "R-del")!.evidenceGone).toBeDefined();
+        expect(await usable()).toEqual(["R-keep"]);
+
+        // A person confirms it again: the mark is cleared and the rule is used again. Undoing first keeps the mark.
+        await intel.decide(pid, marked.id, "unverified", "person-1");
+        expect((await intel.rule(pid, marked.id))!.evidenceGone).toBeDefined();
+        const again = await intel.decide(pid, marked.id, "confirmed", "person-1", marked.fingerprint);
+        expect(again!.evidenceGone).toBeUndefined();
+        expect(await usable()).toEqual(["R-keep", "R-pay"]);
     });
 });
 

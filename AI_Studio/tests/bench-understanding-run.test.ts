@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadConfig, type Config } from "../src/config.js";
+import { loadConfig, REPO_ROOT, type Config } from "../src/config.js";
 import { ExtractionAnswerSchema } from "../src/engine/intel/extract/rules.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -22,6 +22,7 @@ import { buildServer } from "../src/platform/server.js";
 import { loadCatalogue } from "../src/eval/bench/catalogue.js";
 import { benchMain } from "../src/eval/bench/cli.js";
 import { understandingMain } from "../src/eval/bench/understanding/run.js";
+import { PAID_KEY_ENV } from "../src/eval/bench/understanding/paid.js";
 
 const PORT = 9731;
 const KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "LLM_MODEL_FAST", "CONCURRENCY"];
@@ -159,6 +160,93 @@ describe("free model only: every model the run would use", () => {
         expect(lines.join("\n")).not.toMatch(/paid-model/);
         expect(code, lines.join("\n")).toBe(3); // started; the stand-in app script does not exist, so the trial failed
     }, 120_000);
+});
+
+describe("the paid series (a stand-in provider, no real call)", () => {
+    const KEY_VALUE = "sk-ant-test-NEVER-SHOWN-7f3a91";
+    const PRICES_FILE = path.join(REPO_ROOT, "eval/bench-prices-claude.json");
+    const requests: Array<{ apiKey: string | null; effort: unknown }> = [];
+    /** Answers like the provider: the analyser and the planner get minimal answers, everything else an empty one. */
+    const provider = (outputTokens: number): typeof fetch => async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { system?: Array<{ text: string }> | string; output_config?: { effort?: unknown }; max_tokens?: number };
+        requests.push({ apiKey: new Headers(init?.headers as HeadersInit).get("x-api-key"), effort: body.output_config?.effort });
+        const system = Array.isArray(body.system) ? body.system.map((s) => s.text).join("\n") : String(body.system ?? "");
+        const answer = /analysing a web application/.test(system)
+            ? { siteType: "ecommerce", purpose: "A small web application", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] }
+            : /list what they state about its intended behaviour/.test(system)
+              ? { rules: [], workflows: [], roles: [], transitions: [] }
+              : { scenarios: [] };
+        return new Response(JSON.stringify({ id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [{ type: "text", text: JSON.stringify(answer) }], stop_reason: "end_turn", usage: { input_tokens: 1000, output_tokens: Math.min(outputTokens, body.max_tokens ?? outputTokens) } }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const approvedDir = () => {
+        const dir = path.join(tmp, `paid-answers-${Math.random().toString(36).slice(2)}`);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "bench-shop.json"), JSON.stringify(smallKey("bench-shop", loadCatalogue().version, "approved")));
+        return dir;
+    };
+    const argv = (name: string, extra: string[]) => ["--mode", "understanding", "--apps", "bench-shop", "--engine", "candidate", "--repeat", "1", "--daily-call-cap", "950", "--port-base", String(PORT), "--out", path.join(tmp, name, "out"), "--data-dir", path.join(tmp, name, "data"), "--yes", ...extra];
+    const paidDeps = (outputTokens = 200) => ({ log, env: { ...process.env, [PAID_KEY_ENV]: KEY_VALUE }, answersDir: approvedDir(), anthropicFetch: provider(outputTokens), pollMs: 200 });
+    /** Every byte the runs wrote (results, platform data) and said. */
+    const everything = (name: string) => {
+        const out: string[] = [lines.join("\n")];
+        const walk = (d: string) => {
+            for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+                const f = path.join(d, e.name);
+                if (e.isDirectory()) walk(f);
+                else out.push(fs.readFileSync(f).toString("latin1"));
+            }
+        };
+        walk(path.join(tmp, name));
+        return out.join("\n");
+    };
+
+    it("is refused without the paid price table, with a budget of 0, without --single-model, or without the key", async () => {
+        const cases: Array<[string[], object, RegExp]> = [
+            [["--approved-budget-usd", "5", "--single-model"], {}, /free model only/],
+            [["--approved-budget-usd", "0", "--prices", PRICES_FILE, "--single-model"], {}, /needs --approved-budget-usd above 0/],
+            [["--approved-budget-usd", "1", "--prices", PRICES_FILE], {}, /give --single-model/],
+            [["--approved-budget-usd", "1", "--prices", PRICES_FILE, "--single-model"], { env: { ...process.env } }, /BENCH_ANTHROPIC_API_KEY, which is not set/],
+        ];
+        for (const [extra, over, why] of cases) {
+            lines.length = 0;
+            expect(await understandingMain(argv("paid-refused", extra), { ...paidDeps(), ...over }), lines.join("\n")).toBe(2);
+            expect(lines.join("\n")).toMatch(why);
+        }
+        expect(fs.existsSync(path.join(tmp, "paid-refused", "out"))).toBe(false);
+    });
+
+    it("sends every call at low effort with the key, prints the spend, and the key appears nowhere", async () => {
+        lines.length = 0;
+        requests.length = 0;
+        const code = await understandingMain(argv("paid-run", ["--approved-budget-usd", "1", "--prices", PRICES_FILE, "--single-model"]), paidDeps());
+        expect(code, lines.join("\n")).toBe(0);
+        expect(requests.length).toBeGreaterThan(0);
+        expect(requests.every((r) => r.apiKey === KEY_VALUE && r.effort === "low")).toBe(true);
+        const { json, md } = readResult(path.join(tmp, "paid-run", "out"));
+        // Each answer: 1,000 in × $0.10 + 200 out × $0.50, per million = $0.0002.
+        expect(json.spend.calls).toBe(requests.length);
+        expect(json.spend.usd).toBeCloseTo(requests.length * 0.0002, 10);
+        expect(md).toMatch(/Model: claude-haiku-5-5/);
+        expect(md).toMatch(/Spend: \$0\.\d{4} of the approved \$1\.00/);
+        expect(everything("paid-run")).not.toContain(KEY_VALUE);
+        expect(JSON.stringify(process.env)).not.toContain(KEY_VALUE);
+    }, 600_000);
+
+    it("stops before a call that could pass the budget: the series is incomplete and the spend stays under it", async () => {
+        lines.length = 0;
+        requests.length = 0;
+        // Each answer uses its whole max_tokens (up to 20,000 out, about $0.01 each); a request's worst case is its max_tokens of output,
+        // so a budget of $0.01 runs out within the first trial (the two trials above needed about $0.03).
+        const code = await understandingMain(argv("paid-stop", ["--approved-budget-usd", "0.01", "--prices", PRICES_FILE, "--single-model", "--repeat", "2"]), paidDeps(20_000));
+        expect(code, lines.join("\n")).toBe(3);
+        const { json, md } = readResult(path.join(tmp, "paid-stop", "out"));
+        expect(json.spend.refused).toBeGreaterThanOrEqual(1);
+        expect(json.spend.usd).toBeLessThanOrEqual(0.01);
+        expect(json.report.complete).toBe(false);
+        expect(json.trials.filter((t: { status: string }) => t.status === "completed")).toEqual([]);
+        expect(md).toMatch(/Stopped before a call that could take the spend past the approved \$0\.01/);
+        expect(everything("paid-stop")).not.toContain(KEY_VALUE);
+    }, 600_000);
 });
 
 describe("a url series, both sides, both apps", () => {

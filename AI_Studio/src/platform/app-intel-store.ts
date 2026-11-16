@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { AppModelSchema, AppVersionSchema, diffModels, RuleSchema, ruleFingerprint, workflowFingerprint, SourceRecordSchema, type AppModel, type AppVersion, type ModelDiff, type Rule, type RuleStatus, type SourceKind, type SourceStatus } from "../engine/intel/model.js";
-import type { CarriedRule } from "../engine/intel/carry-forward.js";
+import type { CarriedRule, EvidenceGone } from "../engine/intel/carry-forward.js";
 import { HttpError } from "./http-error.js";
 import type { Sql } from "./sql.js";
 
@@ -163,7 +163,7 @@ export interface RuleRecord extends Rule {
     /** Matches the same rule across analyses (engine/intel/model.ts ruleFingerprint). */
     fingerprint: string;
     /** Set when a later analysis no longer found the rule's evidence: for a person to look at; the rule and its decision stay. */
-    evidenceGone?: { version: number; at: string };
+    evidenceGone?: EvidenceGone;
     /**
      * A later analysis worded the same rule (same fingerprint) differently after a person confirmed or rejected it. The rule keeps the
      * wording the person decided about (that is what reaches prompts); the new wording is shown here until they decide again or undo.
@@ -234,7 +234,7 @@ const toSource = (r: SourceDbRow): SourceRow => ({
     modelVersionId: r.model_version_id,
 });
 
-type Links = { entities?: string[]; workflows?: string[]; endpoints?: string[]; evidenceGone?: { version: number; at: string }; reworded?: { description: string; expected: string } };
+type Links = { entities?: string[]; workflows?: string[]; endpoints?: string[]; evidenceGone?: EvidenceGone; reworded?: { description: string; expected: string } };
 
 /**
  * The wording a rule is stored with. A decided rule keeps the text the person decided about when an analysis finds the same rule (same
@@ -643,6 +643,32 @@ export class AppIntelStore {
     }
 
     /**
+     * A requirement was retired or deleted: every rule that cites it (its source reference, or evidence in it) gets the "evidence gone"
+     * mark of the latest analysis, with its status and decision kept. Planning and authoring leave a marked rule out (usableRules) until a
+     * person confirms it again or a later analysis finds it again. Returns how many rules were marked.
+     */
+    async markRequirementGone(projectId: string, requirementRef: string): Promise<number> {
+        const key = requirementRef.trim().toUpperCase();
+        const cites = (ref: string) => {
+            const k = ref.trim().toUpperCase();
+            return k === key || k.startsWith(`${key}#`);
+        };
+        return this.sql.tx(async (t) => {
+            const version = Number((await t.get<{ v: number | null }>("SELECT MAX(version) AS v FROM app_model_versions WHERE project_id = ?", projectId))?.v ?? 0);
+            const at = this.now();
+            let marked = 0;
+            for (const r of await t.all<RuleRow>("SELECT * FROM app_rules WHERE project_id = ?", projectId)) {
+                const rule = toRule(r);
+                if (rule.evidenceGone || !(cites(rule.sourceRef) || rule.evidence.some((e) => cites(e.ref)))) continue;
+                const links = { ...(JSON.parse(r.links_json || "{}") as object), evidenceGone: { version, at, reason: "requirement_retired" } };
+                await t.run("UPDATE app_rules SET links_json = ?, updated_at = ? WHERE project_id = ? AND id = ?", JSON.stringify(links), at, projectId, r.id);
+                marked++;
+            }
+            return marked;
+        });
+    }
+
+    /**
      * A person confirms or rejects a rule (or puts it back to unverified). The only way a rule's status changes to confirmed. `fingerprint`
      * names the version of the rule the person read: when the rule's fingerprint is another one now, nothing changes (409).
      */
@@ -655,7 +681,10 @@ export class AppIntelStore {
             const at = this.now();
             const decided = status === "unverified" ? [null, null] : [personId, at];
             // Undone: no decision holds the old wording any more, so the newest wording becomes the rule's.
-            const { reworded, ...links } = JSON.parse(row.links_json || "{}") as Links;
+            // A new confirmation clears the "evidence gone" mark: the person checked that the rule still holds.
+            const { reworded, ...kept } = JSON.parse(row.links_json || "{}") as Links;
+            const { evidenceGone: _gone, ...unmarked } = kept;
+            const links = status === "confirmed" ? unmarked : kept;
             const text = status === "unverified" && reworded ? reworded : { description: row.description, expected: row.expected };
             await t.run(
                 "UPDATE app_rules SET status = ?, decided_by = ?, decided_at = ?, description = ?, expected = ?, links_json = ?, updated_at = ? WHERE project_id = ? AND id = ?",

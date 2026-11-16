@@ -1,7 +1,7 @@
 /**
  * What a project's testing agents need (routes/agent-inputs.ts), against a stand-in Crowd4Test sign-in (port 7820): saving and
- * reading back with no secret ever in an answer, keeping and removing secrets, exploring with the saved inputs (and keeping the
- * sign-in on the next exploration), the project's own requirements planned for when no document is given, the refusal of an
+ * reading back with no secret ever in an answer, keeping and removing secrets, exploring with the saved inputs (an exploration's own
+ * sign-in becomes the saved one), the project's own requirements planned for when no document is given, the refusal of an
  * exploration whose chosen agents miss a mandatory input, none for a project without a saved choice, and who may read and change them.
  */
 import fs from "node:fs";
@@ -22,6 +22,7 @@ import { createDatabaseAtVersion, Db, knownSchemaVersion } from "../src/platform
 import { startHeartbeat, writeHeartbeat } from "../src/platform/ops/heartbeat.js";
 let stopBeat: (() => void) | undefined;
 import { agentInputsStoreOf, savedCredentialsElsewhere } from "../src/platform/routes/agent-inputs.js";
+import { SIGN_IN_NEEDS_SETTINGS } from "../src/platform/routes/project-sign-in.js";
 import { SecretBox } from "../src/platform/secrets.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;
@@ -339,28 +340,38 @@ describe("saved inputs stay where they were saved, and go only where they may", 
         expect(latest.config.apiBaseUrl).toBeUndefined();
     });
 
-    it("an exploration never changes what is saved: not the sign-in, the OpenAPI document or tests that change data", async () => {
+    it("an exploration's own sign-in becomes the saved one (Settings wins); the OpenAPI document and tests that change data stay", async () => {
         const id = await agentProject("Rewrite shop", ["test-generation"]);
         const saved = await as("t-cora", "PUT", `/api/projects/${id}/agent-inputs`, { username: "qa@shop.example", password: S.password, openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: false });
         expect(saved.status).toBe(200);
         await addTess(id);
-        // Tess explores with her own sign-in, her own OpenAPI document and data-changing tests on.
-        expect((await as("t-tess", "POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true, credentials: { username: "tess@shop.example", password: "x" }, openApiUrl: "https://shop.example/v2/openapi.json", allowMutatingApiTests: true })).status).toBe(202);
+        // Tess may not change settings: her own sign-in would become the saved one, so the exploration is refused and nothing is saved.
+        const tessTry = await as("t-tess", "POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true, credentials: { username: "tess@shop.example", password: "x" } });
+        expect(tessTry).toMatchObject({ status: 403, body: { error: SIGN_IN_NEEDS_SETTINGS } });
+        expect(platform.repo.listJobs(id)).toHaveLength(0);
+        // Cora explores with another sign-in, her own OpenAPI document and data-changing tests on.
+        expect((await as("t-cora", "POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true, credentials: { username: "tess@shop.example", password: "x" }, openApiUrl: "https://shop.example/v2/openapi.json", allowMutatingApiTests: true })).status).toBe(202);
         expect(applicationOf(id).credentials).toEqual({ username: "tess@shop.example", password: "x" });
+        const tessRow = latestJob(id).applicationId;
         finishJobs(id);
-        // What the Requirements tab shows is still what Cora saved.
-        expect((await as("t-cora", "GET", `/api/projects/${id}/agent-inputs`)).body).toEqual(saved.body);
-        // And the next exploration that brings nothing uses what is saved, not what Tess sent.
+        // That sign-in is now the saved one, so Settings shows what runs use; the OpenAPI document and the data-changing choice stay as saved.
+        const after = (await as("t-cora", "GET", `/api/projects/${id}/agent-inputs`)).body;
+        expect(after).toEqual({ ...saved.body, signIn: { ...saved.body.signIn, username: "tess@shop.example" } });
+        expect((await as("t-cora", "GET", `/api/projects/${id}/sign-in`)).body).toMatchObject({ username: "tess@shop.example", hasPassword: true });
+        // The next exploration that brings nothing uses the saved sign-in and the saved document.
         expect((await as("t-cora", "POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true })).status).toBe(202);
-        expect(applicationOf(id).credentials).toEqual({ username: "qa@shop.example", password: S.password });
+        expect(applicationOf(id).credentials).toEqual({ username: "tess@shop.example", password: "x" });
         expect(latestJob(id).options.openApiUrl).toBe("https://shop.example/openapi.json");
         expect(latestJob(id).options.allowMutatingApiTests).not.toBe(true);
         finishJobs(id);
+        // A later save in Settings is what runs on that exploration's application use: that row's own sign-in is not a second copy.
+        expect((await as("t-cora", "PUT", `/api/projects/${id}/sign-in`, { username: "qa2@shop.example", password: S.newPassword })).status).toBe(200);
+        expect(platform.repo.getApplication(tessRow)!.credentials).toEqual({ username: "qa2@shop.example", password: S.newPassword });
         // Saved for this site: exploring another site neither uses nor removes them.
         expect((await as("t-tess", "POST", `/api/projects/${id}/test-generation`, { url: "https://elsewhere.example/", plan: true })).status).toBe(202);
         expect(applicationOf(id).credentials).toBeUndefined();
         finishJobs(id);
-        expect(agentInputsStoreOf(platform).get(id)).toMatchObject({ site: SITE, credentials: { username: "qa@shop.example", password: S.password }, openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: false });
+        expect(agentInputsStoreOf(platform).get(id)).toMatchObject({ site: SITE, credentials: { username: "qa2@shop.example", password: S.newPassword }, openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: false });
     });
 
     it("refuses an address with a user name or password in it", async () => {

@@ -12,6 +12,7 @@ import { fillPath as fillApiPath, generateApiSpecs, type DraftSpec } from "./api
 import { probeOpenApi } from "./api/openapi.js";
 import { mapLimit, throwIfAborted, type EngineContext } from "./context.js";
 import { isBudgetExceeded } from "./llm/usage.js";
+import { LlmNotConfiguredError } from "./llm/provider.js";
 import { login, type Credentials } from "./discovery/auth.js";
 import { BrowserSession, launchChromium, settle } from "./discovery/browser.js";
 import { crawl } from "./discovery/crawler.js";
@@ -476,6 +477,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         let analysed = Boolean(req.plan?.analysed);
         /** Why planning failed, when it did after the understanding step answered. */
         let planningFailed: string | undefined;
+        /** Why the AI could not read the application, when an AI model is set up but the understanding call failed. */
+        let readingFailed: string | undefined;
         if (req.plan) {
             // The test ideas were planned and shown earlier; the person may have left some out.
             const left = new Set(req.excludeIdeas ?? []);
@@ -553,6 +556,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const msg = err instanceof Error ? err.message : String(err);
                 // A reached AI limit is reported in its own plain words (see engine/llm/usage.ts), not as a failure of the analysis.
                 if (analysed) planningFailed = msg;
+                // No AI model or key on purpose keeps today's way (checks only); a model that is set up but failed to read the app fails the job.
+                else if (!(err instanceof LlmNotConfiguredError || (err instanceof Error && err.name === "LlmNotConfiguredError"))) readingFailed = msg;
                 summary.errors.push(isBudgetExceeded(err) ? msg : `Web analysis/planning failed: ${msg}`);
                 ctx.emit({ stage: "analysis", kind: "stage_failed", level: isBudgetExceeded(err) ? "warn" : "error", message: msg });
                 await sink.phase("ANALYZING", "understanding", "failed");
@@ -563,6 +568,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             await sink.phase("PLANNING", "planning", "skipped");
         }
         throwIfAborted(ctx.signal);
+        // An AI model is set up but reading the application failed: the job fails and says why, rather than ending with only its checks.
+        if (readingFailed) throw new Error(`The application could not be read with AI: ${readingFailed.trim().replace(/\.+$/, "")}.`);
         // Functional test cases were wanted, planning failed and nothing was planned: the job fails and says why, rather than ending
         // with only its checks. An empty plan on purpose (functional test cases off) or one where nothing failed goes on as before.
         if (planningFailed && !scenarios.length && req.functionalTests !== false) {

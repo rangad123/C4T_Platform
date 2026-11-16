@@ -24,6 +24,7 @@ import { CATALOGUE_FILE, loadCatalogue, type Catalogue } from "../catalogue.js";
 import { loadPrices } from "../cost.js";
 import { ANSWERS_DIR, INPUTS_DIR, parseAnswerKey, requireApprovedKey, type AnswerKey } from "./answer-key.js";
 import { buildReport, renderReportMd, type Engine, type Inputs, type TrialResult } from "./report.js";
+import { PAID_KEY_ENV, PAID_MODEL, paidKeyFrom, paidLlm, paidPlatformEnv, paidPricesIn, SpendGuard, type PaidPrices } from "./paid.js";
 import { scoreUnderstanding, type ScoredRule } from "./score.js";
 
 export const UNDERSTANDING_USAGE = `Usage: node scripts/eval.mjs bench --mode understanding [options]
@@ -33,8 +34,9 @@ export const UNDERSTANDING_USAGE = `Usage: node scripts/eval.mjs bench --mode un
   --repeat <n>               analyses per side and app, 1 to 20 (default 5)
   --level <l>                exploration level: ${LEVELS.join(", ")} (default: the platform's default)
   --port-base <n>            first port for the apps (default 5291)
-  --prices <file>            price table (as for the detection benchmark); the model must be priced 0
-  --approved-budget-usd <n>  must be 0: understanding runs use a free model only
+  --prices <file>            price table: the free model's rows (as for the detection benchmark, priced 0), or the paid table
+                             eval/bench-prices-claude.json (claude-haiku-5-5 on both sides, low effort, key from BENCH_ANTHROPIC_API_KEY)
+  --approved-budget-usd <n>  0 with the free model; above 0 only with the paid table: the run stops before a call could pass it
   --daily-call-cap <n>       stop before a trial when the platforms have made this many AI calls today (UTC); required with a real model
   --single-model             switch the fast and planning models off on the benchmark's platforms (the main model does everything)
   --estimate-only            print the estimate and stop (starts nothing)
@@ -137,6 +139,8 @@ export interface UnderstandingDeps {
     /** Tests only: more exploration options. */
     exploration?: Record<string, unknown>;
     jobTimeoutMs?: number;
+    /** Tests only: what the paid series' model client sends its requests to, instead of the provider. */
+    anthropicFetch?: typeof fetch;
 }
 
 /** The numbered requirement lines of a requirements document ("- 4.9 text") as requirements to import. */
@@ -283,6 +287,8 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
     let apps: BenchApp[];
     let catalogue: Catalogue;
     const keys = new Map<string, { key: AnswerKey; sha256: string; file: string; requirementsText?: string }>();
+    let paid: PaidPrices | undefined;
+    let paidKey: string | undefined;
     try {
         args = parseUnderstandingArgs(argv);
         if (args.help) {
@@ -313,15 +319,36 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
         if (args.dailyCallCap !== undefined && est.total > args.dailyCallCap) log(`That is more than the daily cap of ${args.dailyCallCap}: the run stops at the cap and the series is reported incomplete.`);
         if (args.estimateOnly) return 0;
         if (!scripted) {
-            // A measured run: approved keys, a free model, a daily cap.
+            // A measured run: approved keys, a daily cap, and either a free model (budget 0) or the paid table with a budget above 0.
             for (const [, k] of keys) requireApprovedKey(k.key, k.file);
-            if (args.budget !== 0) throw new Error("Understanding runs use a free model only: give --approved-budget-usd 0.");
+            paid = args.prices ? paidPricesIn(args.prices) : undefined;
+            if (paid) {
+                if (!(args.budget !== undefined && args.budget > 0)) throw new Error(`A paid run (${path.basename(args.prices!)}) needs --approved-budget-usd above 0.`);
+                if (!args.singleModel) throw new Error("A paid run uses one model only: give --single-model.");
+                paidKey = paidKeyFrom(env);
+                if (!paidKey) throw new Error(`A paid run reads its key from ${PAID_KEY_ENV}, which is not set.`);
+            } else if (args.budget !== 0) throw new Error("Understanding runs use a free model only (--approved-budget-usd 0), or the paid price table eval/bench-prices-claude.json with a budget above 0.");
             if (args.dailyCallCap === undefined) throw new Error("Give --daily-call-cap: the free model's daily calls are shared with other runs.");
             if (!args.prices) throw new Error("Give --prices with a row for the model at 0 and 0.");
         }
     } catch (e) {
         log(`${e instanceof Error ? e.message : String(e)}\n\n${UNDERSTANDING_USAGE}`);
         return 2;
+    }
+
+    // The paid series: the key goes only into the guarded model client; the platforms, and this process while the run lasts, hold no key.
+    const guard = paid ? new SpendGuard(args.budget!, paid) : undefined;
+    const platformEnv = paid ? paidPlatformEnv(env) : env;
+    const platformDeps = paid ? { ...deps, makeLlm: paidLlm(paidKey!, guard!, deps.anthropicFetch) } : deps;
+    paidKey = undefined;
+    const hidden: Record<string, string | undefined> = {};
+    if (paid) {
+        for (const k of Object.keys(process.env)) {
+            if (/_API_KEY$|^LLM_/.test(k) || k === PAID_KEY_ENV) {
+                hidden[k] = process.env[k];
+                delete process.env[k];
+            }
+        }
     }
 
     const startedAt = new Date().toISOString();
@@ -335,16 +362,22 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
     try {
         try {
             for (const engine of args.engines) {
-                const p = await startPlatform(path.join(dataDir, engine), env, deps);
+                const p = await startPlatform(path.join(dataDir, engine), platformEnv, platformDeps);
                 sides.push({ engine, ...p });
             }
             if (!scripted) {
-                const cfg = ok(await sides[0]!.client.call("GET", "/api/config"), "Reading the platform's settings");
-                if (!cfg?.llm?.configured) throw new Error("The benchmark needs an AI model. Set one up first (LLM_PROVIDER and its key in .env).");
-                model = String(cfg.llm.model ?? "unknown");
-                const prices = loadPrices(args.prices!);
-                const free = (m: string) => prices.some((p) => p.model === m && p.inputPerMTok === 0 && p.outputPerMTok === 0);
-                if (!free(model)) throw new Error(`The model ${model} is not priced 0 in ${path.basename(args.prices!)}: understanding runs use a free model only.`);
+                let free: (m: string) => boolean;
+                if (paid) {
+                    model = PAID_MODEL;
+                    free = (m) => m === PAID_MODEL;
+                } else {
+                    const cfg = ok(await sides[0]!.client.call("GET", "/api/config"), "Reading the platform's settings");
+                    if (!cfg?.llm?.configured) throw new Error("The benchmark needs an AI model. Set one up first (LLM_PROVIDER and its key in .env).");
+                    model = String(cfg.llm.model ?? "unknown");
+                    const prices = loadPrices(args.prices!);
+                    free = (m: string) => prices.some((p) => p.model === m && p.inputPerMTok === 0 && p.outputPerMTok === 0);
+                    if (!free(model)) throw new Error(`The model ${model} is not priced 0 in ${path.basename(args.prices!)}: understanding runs use a free model only.`);
+                }
                 // Every model the run would use, on every side: with --single-model the fast and planning models are switched off first.
                 for (const side of sides) {
                     if (args.singleModel) {
@@ -352,6 +385,7 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
                         ok(await side.client.call("PUT", "/api/llm/planning-model", { model: "" }), "Turning the planning model off");
                     }
                     const routing = ok(await side.client.call("GET", "/api/llm/fast-model"), "Reading which models are in use");
+                    if (paid && routing?.mainModel !== PAID_MODEL) throw new Error(`The ${side.engine} platform's model is ${String(routing?.mainModel)}, not ${PAID_MODEL}.`);
                     const others = [routing?.active ? String(routing.entry || routing.model || "") : "", routing?.planning?.active ? String(routing.planning.entry || "") : ""].filter(Boolean);
                     for (const m of others) {
                         if (m !== model || !free(m)) throw new Error(`The ${side.engine} platform would also use the model ${m}, which is not the free model ${model}: understanding runs use a free model only. Give --single-model, or remove that model.`);
@@ -371,6 +405,10 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
         for (let n = 1; n <= args.repeat && !stopped; n++) {
             for (const [i, app] of apps.entries()) {
                 for (const side of sides) {
+                    if (guard?.stopped) {
+                        stopped = guard.stopped;
+                        break;
+                    }
                     if (args.dailyCallCap !== undefined && (await callsToday(sides)) >= args.dailyCallCap) {
                         stopped = `The daily call cap of ${args.dailyCallCap} was reached before ${app.id} ${side.engine} trial ${n}.`;
                         break;
@@ -391,6 +429,8 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
                         deps,
                         log,
                     });
+                    // A trial during which the budget stopped a call did not do all its work: it does not count.
+                    if (guard?.stopped && result.status === "completed") Object.assign(result, { status: "failed", error: guard.stopped, score: undefined });
                     trials.push(result);
                     details.push({ app: app.id, engine: side.engine, trial: n, ...detail });
                     log(result.status === "completed" ? `  ${result.counts.aiCalls} AI calls, ${result.counts.pages} pages.` : `  failed: ${result.error}`);
@@ -409,18 +449,20 @@ export async function understandingMain(argv: string[], deps: UnderstandingDeps 
             ...[...keys.values()].map((k) => `Answer key ${k.file}: version ${k.key.version}, ${k.key.review}, sha256 ${k.sha256.slice(0, 12)}`),
             "Baseline-U explores as an older runner does and analyses without AI, from the URL and sign-in only.",
             "U7 here is the no-change rerun only; carrying rule decisions forward and re-processing one changed source are not measured by this command.",
+            ...(guard ? [`Spend: $${guard.spent.toFixed(4)} of the approved $${guard.budget.toFixed(2)} (${guard.calls} paid calls, ${guard.refused} refused before sending; effort low). The analysis run again from the API has no key in this series, so the no-change rerun reads nothing with AI.`] : []),
             ...(stopped ? [stopped] : []),
             "",
         ];
         const md = renderReportMd(report).replace(/\n\n/, `\n\n${head.join("\n")}\n`);
         fs.mkdirSync(args.out, { recursive: true });
         const stem = path.join(args.out, `${startedAt.slice(0, 16).replace("T", "-").replace(":", "")}-understanding-${args.inputs}${report.complete ? "" : "-partial"}`);
-        fs.writeFileSync(`${stem}.json`, JSON.stringify({ format: 1, startedAt, finishedAt: new Date().toISOString(), model, options: { ...args, out: undefined, dataDir: undefined }, report, trials, details }, null, 2));
+        fs.writeFileSync(`${stem}.json`, JSON.stringify({ format: 1, startedAt, finishedAt: new Date().toISOString(), model, ...(guard ? { spend: { usd: guard.spent, budgetUsd: guard.budget, calls: guard.calls, refused: guard.refused } } : {}), options: { ...args, out: undefined, dataDir: undefined }, report, trials, details }, null, 2));
         fs.writeFileSync(`${stem}.md`, md);
         log(`Results: ${stem}.json`);
         return report.complete ? 0 : 3;
     } finally {
         for (const h of hosts) await h.stop?.().catch(() => undefined);
         for (const s of sides) await s.stop().catch(() => undefined);
+        for (const [k, v] of Object.entries(hidden)) if (v !== undefined) process.env[k] = v;
     }
 }

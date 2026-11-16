@@ -88,7 +88,8 @@ export interface Rule {
     /** A later analysis's wording of a decided rule; the rule keeps the wording the person decided about. */
     rewordedDescription?: string;
     rewordedExpected?: string;
-    evidenceGone?: { version: number; at: string };
+    /** Set when what the rule rests on is gone: a later reading no longer found it, or its requirement was retired or deleted. */
+    evidenceGone?: { version: number; at: string; reason?: "requirement_retired" };
 }
 
 /**
@@ -128,6 +129,8 @@ const STATING: ReadonlySet<SourceType> = new Set(["requirement", "prd", "openapi
 export const isStated = (t: SourceType): boolean => STATING.has(t);
 
 export const EVIDENCE_GONE = "A later reading no longer found what this rule was based on. Check that it still holds.";
+export const REQUIREMENT_RETIRED = "Its requirement was retired.";
+export const UNTIL_CONFIRMED_AGAIN = "Tests do not use this rule until a person confirms it again.";
 export const UNCONFIRMED_WORKFLOW = "Tests use this rule once this workflow is confirmed.";
 
 /** Tests use a workflow when a source states it or a person confirmed it. */

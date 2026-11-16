@@ -15,6 +15,7 @@ import { SecretBox } from "../secrets.js";
 import { sharedOrigin, sharedRowMessage } from "../shared-integrations.js";
 import { EnvironmentChoice, startEnvironmentRun } from "./environments.js";
 import { NEW_SECRET_NEEDED } from "./shared-integrations.js";
+import { adoptSignIn, assertMaySaveSignIn } from "./project-sign-in.js";
 import type { RouteCtx } from "./types.js";
 
 /**
@@ -201,6 +202,7 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
         const { id } = req.params as { id: string };
         ctx.project(id);
         const body = z.object({ baseUrl: z.string().url().optional(), apiBaseUrl: z.string().url().optional(), credentials: CiCredentials, ...EnvironmentChoice.shape }).parse(req.body ?? {});
+        assertMaySaveSignIn(ctx.app, req, id, body.credentials); // its sign-in would become the saved one: that needs the project-settings permission
         const tests = repo.listTests(id).filter((t) => t.kind !== "mobile" && t.kind !== "desktop" && defaultAdapterFor(t.spec.kind).executable);
         if (tests.length === 0) throw new HttpError(422, "This project has no tests that can be run yet.");
         // Against a named environment (staging, production...): its own address, credentials and variables; results are stored for it.
@@ -219,6 +221,7 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
             if (body.apiBaseUrl) await assertAllowedTarget(body.apiBaseUrl);
             const apiBaseUrl = body.apiBaseUrl ?? latest?.config?.apiBaseUrl;
             const kept = { ...DEFAULT_JOB_OPTIONS, ...(apiBaseUrl ? { apiBaseUrl } : {}) };
+            if (hasCredentials) adoptSignIn(ctx.p, id, url, body.credentials); // a CI run's sign-in is the project's saved one (Settings wins)
             application = { id: repo.createApplication(id, url, kept, hasCredentials ? body.credentials : undefined), url };
         } else {
             application = await ctx.applicationFor(id, body.baseUrl);
