@@ -179,8 +179,10 @@ export class RepoSink implements GenerationSink {
         return slug;
     }
 
-    // A person's draft code stays what the test holds when a run used the approved steps instead: the script of that run is only its record.
-    saveScript: GenerationSink["saveScript"] = (h, script, executable) => storeScript(this.repo, this.store, this.job.projectId, h.id, this.suiteSlug(h.id), script, executable, !(this.keepSteps.has(h.id) && new CustomScriptStore(this.repo.db).isCustom(h.id)));
+    // A run of the approved version while a newer draft waits: the script it made is only that run's record. What the test holds (the
+    // draft's steps and the script made from them, or a person's draft code) stays current, so the Code tab, the download and a later
+    // switch to code keep following the saved steps.
+    saveScript: GenerationSink["saveScript"] = (h, script, executable) => storeScript(this.repo, this.store, this.job.projectId, h.id, this.suiteSlug(h.id), script, executable, !this.keepSteps.has(h.id));
 
     recordExecution: GenerationSink["recordExecution"] = async (h: TestHandle, scriptId: string | null, attempt: number, run: ScriptRun, startedAt: string) => {
         const executionId = this.repo.addExecution({

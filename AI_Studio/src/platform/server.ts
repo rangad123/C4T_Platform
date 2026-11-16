@@ -29,6 +29,7 @@ import { desktopSpecIssues } from "../engine/desktop/spec.js";
 import { complianceReport, FRAMEWORKS, mapControls, type Framework as ComplianceFramework } from "../engine/compliance/map.js";
 import { hasScreenshotStep } from "../engine/visual/baseline.js";
 import { storeScript } from "./repo-sink.js";
+import { ReviewStore } from "./review-store.js";
 import { quarantineGate } from "./quarantine-store.js";
 import type { QuarantineGate } from "../engine/quarantine/rules.js";
 import { DEFAULT_JOB_OPTIONS, unreadableTestSentence, type JobRow, type JobOptions } from "./repo.js";
@@ -943,7 +944,15 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             ...(failure ? { failure } : {}),
             ...testCompatibility(repo, t),
             ...testEnvironmentInfo(repo, t),
+            ...reviewNoticeOf(t.id),
         };
+    };
+    /** While the newest version waits for review, the test page says which version runs (drafts never run: review-store.ts). */
+    const reviewNoticeOf = (testId: string) => {
+        const store = new ReviewStore(repo.db);
+        const latest = store.latest(testId);
+        if (!latest || (latest.state !== "draft" && latest.state !== "in_review")) return {};
+        return { review: { version: latest.version, state: latest.state, runsVersion: store.approved(testId)?.version ?? null } };
     };
     app.get("/api/tests/:id", async (req) => testDetail((req.params as { id: string }).id));
     app.get("/api/tests/:id/executions", async (req) => repo.listExecutions((req.params as { id: string }).id));

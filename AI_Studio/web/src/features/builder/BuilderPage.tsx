@@ -467,9 +467,9 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
                     <section className="card" aria-labelledby="bld-steps-title">
                         <div className="card-head wrap">
                             <h2 className="t-section" id="bld-steps-title">
-                                Steps
+                                {data.custom ? "Steps before the switch to code" : "Steps"}
                             </h2>
-                            <span className="t-meta">{items.length} in all</span>
+                            <span className="t-meta">{data.custom ? `${items.length} in all, no longer run: the code is what runs` : `${items.length} in all`}</span>
                         </div>
                         <ol className="bld-steps" aria-label="Steps of this test">
                             {items.map((it, i) => (

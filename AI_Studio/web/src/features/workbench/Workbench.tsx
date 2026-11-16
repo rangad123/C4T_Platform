@@ -18,6 +18,7 @@ import { TestHeader } from "./TestHeader";
 import { SavedBar } from "./UnsavedBar";
 import { TAB_LABEL, TABS, lastEditBeforeFailure, marksCurrent, stepMarks, testTabHref, type Detail, type SpecVersionRow, type Tab } from "./test-model";
 import { restoreSpecVersion } from "./restore";
+import { versionHref } from "../review/review";
 import { MissingSignInHint, usesCredentials } from "../identity/ProjectSignIn";
 import "./workbench.css";
 
@@ -304,6 +305,22 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
             {actionError && (
                 <Callout tone="danger" title="That didn’t work">
                     {actionError}
+                </Callout>
+            )}
+
+            {t.review && (
+                <Callout
+                    tone="warning"
+                    title={`Version ${t.review.version} is ${t.review.state === "in_review" ? "in review" : "a draft"}: runs do not use it yet`}
+                    actions={
+                        <LinkButton size="sm" href={versionHref(t.projectId, t.id, t.review.version)}>
+                            Open the review
+                        </LinkButton>
+                    }
+                >
+                    {t.review.runsVersion !== null
+                        ? `The steps and the code here are version ${t.review.version}. Runs use approved version ${t.review.runsVersion} until a Project Admin approves version ${t.review.version}, so a run's result is about version ${t.review.runsVersion}.`
+                        : `The steps and the code here are version ${t.review.version}. This test has no approved version yet, so runs leave it out until a Project Admin approves it.`}
                 </Callout>
             )}
 

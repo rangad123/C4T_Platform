@@ -39,6 +39,8 @@ export interface Detail extends TestSummary, Partial<CompatDetail>, EnvironmentD
     executions: Execution[];
     /** What the latest failure comes down to, when the platform can say (a failing test or a finding). */
     failure?: { kind: "mismatch" | "missing-api-token"; step?: { index: number; title: string }; expected?: string; actual?: string };
+    /** Only while the newest version waits for review: runs use the approved version (`runsVersion`, null when there is none) until it is approved. */
+    review?: { version: number; state: "draft" | "in_review"; runsVersion: number | null };
 }
 
 /** `#/tests/:id/<tab>`; the bare route opens Steps. */
