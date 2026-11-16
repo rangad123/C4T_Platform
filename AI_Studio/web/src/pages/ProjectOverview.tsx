@@ -47,7 +47,7 @@ const attentionRank = (t: TestSummary) => (t.severity ? SEV_RANK[t.severity.seve
  * Dashboard, Requirements, Test cases, Test scripts, Test suites, Runs, Settings. Agent runs has no tab; its pages still open from
  * a link, and so does any place whose tab a project's kind does not show (no tab is the open one then).
  */
-export type PlaceKey = "overview" | "requirements" | "tests" | "suites" | "scripts" | "agent" | "runs" | "settings";
+export type PlaceKey = "overview" | "requirements" | "tests" | "suites" | "scripts" | "agent" | "runs" | "security" | "settings";
 
 export function ProjectTabs({
     id,
@@ -107,7 +107,7 @@ export function ProjectTabs({
             )}
             {kind && (
                 <>
-                    <SecurityProjectTab id={id} />
+                    <SecurityProjectTab id={id} current={active === "security"} />
                     {tab(routes.projectSettings(id), "Settings", "settings", undefined, "tab-settings")}
                 </>
             )}

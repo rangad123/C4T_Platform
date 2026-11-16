@@ -185,7 +185,7 @@ export function NewAssessmentPage({ id }: { id: string }) {
         );
     };
     return (
-        <SecurityLayout id={id} active="new" title={retestOf ? "Retest" : "New assessment"} subtitle="A passive, read-only look at an authorized application.">
+        <SecurityLayout id={id} active="assessments" title={retestOf ? "Retest" : "New assessment"} subtitle="A passive, read-only look at an authorized application.">
             {content()}
         </SecurityLayout>
     );
@@ -199,11 +199,20 @@ export function AssessmentsPage({ id }: { id: string }) {
     const apps = useApps(id);
     const appName = (a: AssessmentRow) => a.applicationName ?? apps.list.find((x) => x.id === a.applicationId)?.name ?? "Application";
     const rows = [...list.list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    // Starting one is an action of this page, not a section of its own. With none yet, the empty state offers it instead.
+    const start = (
+        <span data-tour="sec-new" style={{ display: "inline-flex" }}>
+            <LinkButton href={sec.newAssessment(id)} variant="primary" icon={Play}>
+                New assessment
+            </LinkButton>
+        </span>
+    );
     return (
         <SecurityLayout
             id={id}
             active="assessments"
             title="Assessments"
+            actions={canRun(role) && rows.length > 0 ? start : null}
             subtitle={
                 <>
                     Every assessment of this project, newest first. <BadgeKey label="the assessment states" entries={stateKey(rows.map((a) => a.state))} />
@@ -216,7 +225,7 @@ export function AssessmentsPage({ id }: { id: string }) {
                 <ErrorState error={friendlyError(list.error.message)} onRetry={list.reload} />
             ) : rows.length === 0 ? (
                 <div className="card">
-                    <EmptyState icon={ShieldCheck} title="No assessments yet" actions={canRun(role) ? <LinkButton href={sec.newAssessment(id)} variant="primary" icon={Play}>New assessment</LinkButton> : null}>
+                    <EmptyState icon={ShieldCheck} title="No assessments yet" actions={canRun(role) ? start : null}>
                         No assessments yet. Add an application and run your first passive assessment.
                     </EmptyState>
                 </div>

@@ -311,6 +311,32 @@ describe("applications and the authorization", () => {
 // ── assessments ───────────────────────────────────────────────────────────────
 
 describe("assessments", () => {
+    it("the project's tabs stay above the security tabs; New assessment is an action of Assessments, not a tab, and its old link still opens the form", async () => {
+        const { p, app } = seeded("both");
+        await visit(`#/projects/${p.id}/security/assessments`);
+        const places = page.getByRole("navigation", { name: "Project sections" });
+        await pwExpect(places.locator('[aria-current="page"]')).toHaveText("Security assessment");
+        await pwExpect(places.getByRole("link", { name: "Settings", exact: true })).toHaveAttribute("href", `#/projects/${p.id}/settings`);
+        const sections = page.getByRole("navigation", { name: "Security assessment sections" });
+        // The project's tab bar comes first, then the security section's own row under it.
+        expect(await page.evaluate(() => { const [a, b] = [document.querySelector('[aria-label="Project sections"]'), document.querySelector('[aria-label="Security assessment sections"]')]; return Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
+        await pwExpect(sections.getByRole("link")).toHaveText(["Overview", "Applications", "Assessments", "Findings", "Reports", "Activity", "Notifications"]);
+        await pwExpect(sections.locator('[aria-current="page"]')).toHaveText("Assessments");
+        await page.locator(".page-head").getByRole("link", { name: "New assessment", exact: true }).click();
+        await pwExpect(page).toHaveURL(new RegExp(`#/projects/${p.id}/security/new$`));
+        await pwExpect(page.getByRole("heading", { name: "New assessment", exact: true, level: 1 })).toBeVisible();
+        await pwExpect(sections.locator('[aria-current="page"]')).toHaveText("Assessments");
+        await pwExpect(places.locator('[aria-current="page"]')).toHaveText("Security assessment");
+        // The old address (and every New assessment link elsewhere) still opens the form.
+        await visit(`#/projects/${p.id}/security/new?app=${app.id}`);
+        await pwExpect(page.getByRole("heading", { name: "What the passive assessment does", exact: true })).toBeVisible();
+        // A viewer cannot start one, so the page offers no button for it.
+        fake.role = "viewer";
+        await visit(`#/projects/${p.id}/security/assessments`);
+        await pwExpect(page.getByTestId("sec-assessments")).toBeVisible();
+        expect(await page.locator(".page-head").getByRole("link", { name: "New assessment", exact: true }).count()).toBe(0);
+    });
+
     it("New assessment says what it does and does not do, with the limits; it will not start without a current authorization", async () => {
         const p = fake.addProject("Stale", "security");
         const app = fake.addApp(p.id);

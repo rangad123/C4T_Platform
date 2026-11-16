@@ -1,6 +1,6 @@
 import { OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, type ProjectDetail } from "../../api";
+import { api, projectShape, type ProjectDetail } from "../../api";
 import { Modal } from "../../components/Modal";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, EmptyState, LinkButton, PageHeader, Skeleton, toneIcon } from "../../components/ui";
@@ -8,17 +8,17 @@ import { keyEntries } from "../../components/Tooltip";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { help } from "../../lib/help";
 import { routes } from "../../lib/router";
+import { ProjectTabs } from "../../pages/ProjectOverview";
 import { useAuth } from "../auth/auth";
 import { AUTH_WORDS, CATEGORY_WORDS, SEC, SEVERITY_WORDS, STATE_WORDS, VALIDATION_WORDS, includesSecurity, saveTestingType, sec, useSecurityStatus, useTestingType, type AssessmentState, type AuthorizationState, type FindingCategory, type Severity, type ValidationState } from "./security";
 import "./security.css";
 import { describeApiError } from "../../lib/labels";
 
-export type SecurityTab = "overview" | "applications" | "new" | "assessments" | "findings" | "reports" | "activity" | "notifications";
+export type SecurityTab = "overview" | "applications" | "assessments" | "findings" | "reports" | "activity" | "notifications";
 
 const TABS: Array<{ key: SecurityTab; label: string; href: (id: string) => string }> = [
     { key: "overview", label: "Overview", href: sec.overview },
     { key: "applications", label: "Applications", href: sec.applications },
-    { key: "new", label: "New assessment", href: (id) => sec.newAssessment(id) },
     { key: "assessments", label: "Assessments", href: sec.assessments },
     { key: "findings", label: "Findings", href: (id) => sec.findings(id) },
     { key: "reports", label: "Reports", href: (id) => sec.reports(id) },
@@ -32,9 +32,9 @@ export function SecurityTabs({ id, active }: { id: string; active: SecurityTab }
         nav.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ inline: "center", block: "nearest" });
     }, [active]);
     return (
-        <nav className="tabs" aria-label="Security assessment sections" ref={nav}>
+        <nav className="subtabs" aria-label="Security assessment sections" ref={nav}>
             {TABS.map((t) => (
-                <a key={t.key} className="tab" href={t.href(id)} aria-current={t.key === active ? "page" : undefined} data-tour={`sec-${t.key}`}>
+                <a key={t.key} className="subtab" href={t.href(id)} aria-current={t.key === active ? "page" : undefined} data-tour={`sec-${t.key}`}>
                     {t.label}
                 </a>
             ))}
@@ -50,7 +50,8 @@ export const canRun = (r: string) => r === "owner" || r === "editor";
 export const canApprove = (r: string) => r === "owner";
 
 /**
- * Every page of a project's security section: breadcrumbs, title, the section tabs, and the two gates (the module switched off on
+ * Every page of a project's security section: breadcrumbs, the project's tab bar (Security assessment open), title, the section's
+ * own tabs under it, and the two gates (the module switched off on
  * the server; security not turned on for this project, with the way to turn it on).
  */
 export function SecurityLayout({ id, active, title, subtitle, actions, crumb, children }: { id: string; active: SecurityTab; title: string; subtitle?: ReactNode; actions?: ReactNode; crumb?: Array<{ label: string; href?: string }>; children: ReactNode }) {
@@ -65,25 +66,34 @@ export function SecurityLayout({ id, active, title, subtitle, actions, crumb, ch
         nav: "security",
     });
 
+    // The project's places stay on top, so the security tabs read as one place's sections, not a different app.
+    const places = <ProjectTabs id={id} active="security" count={project.data?.test_count} caseCount={project.data?.case_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />;
     if (!status || !type) {
         return (
-            <div className="stack" aria-busy="true" aria-label="Loading">
-                <Skeleton w={260} h={28} />
-                <Skeleton h={120} style={{ borderRadius: 12 }} />
-            </div>
+            <>
+                {places}
+                <div className="stack" aria-busy="true" aria-label="Loading">
+                    <Skeleton w={260} h={28} />
+                    <Skeleton h={120} style={{ borderRadius: 12 }} />
+                </div>
+            </>
         );
     }
     if (!status.enabled) {
         return (
+            <>
+            {places}
             <div className="card">
                 <EmptyState icon={ShieldOff} title="Security assessment is turned off on this server" actions={<LinkButton href={routes.project(id)}>Open the project</LinkButton>}>
                     The person who runs this platform can turn it on with the SECURITY_ASSESSMENT setting. Functional testing works as usual.
                 </EmptyState>
             </div>
+            </>
         );
     }
     return (
         <>
+            {places}
             <PageHeader
                 title={title}
                 subtitle={subtitle}

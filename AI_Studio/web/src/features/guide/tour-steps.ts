@@ -49,7 +49,7 @@ export type TourPage =
     | { kind: "runners" }
     | { kind: "settings"; section: SettingsSection }
     | { kind: "security-home" }
-    | { kind: "security"; section: "overview" | "applications" | "findings" | "reports" }
+    | { kind: "security"; section: "overview" | "applications" | "assessments" | "findings" | "reports" }
     | { kind: "guide" };
 
 /**
@@ -146,7 +146,7 @@ export const TOUR_STEPS: TourStep[] = [
     { id: "sec-home", chapter: "security", target: "sec-projects", page: { kind: "security-home" }, needs: ["project", "module", "security"], title: "Security home", text: "Every project that includes security assessment. Open one to see its own pages." },
     { id: "sec-tabs", chapter: "security", target: "sec-overview", page: { kind: "security", section: "overview" }, needs: ["project", "module", "security"], title: "A project’s security work", text: "Its own tabs, apart from the tests. Overview counts the open findings and what awaits review." },
     { id: "sec-apps", chapter: "security", target: "sec-applications", page: { kind: "security", section: "applications" }, needs: ["project", "module", "security"], title: "Applications and authorization", text: "Register what may be assessed, then record the client’s authorization. Nothing is sent to the application before that." },
-    { id: "sec-new", chapter: "security", target: "sec-new", page: { kind: "security", section: "overview" }, needs: ["project", "module", "security"], title: "New assessment", text: "A passive, read-only look at one authorized application. It makes only the requests a visitor’s browser makes." },
+    { id: "sec-new", chapter: "security", target: "sec-new", page: { kind: "security", section: "assessments" }, needs: ["project", "module", "security"], title: "New assessment", text: "A passive, read-only look at one authorized application. It makes only the requests a visitor’s browser makes." },
     { id: "sec-assessments", chapter: "security", target: "sec-assessments", page: { kind: "security", section: "overview" }, needs: ["project", "module", "security"], title: "Assessment progress", text: "Assessments lists every one. Open one to follow its progress while it runs, and its coverage and limits after." },
     { id: "sec-stop", chapter: "security", target: "sec-stop", page: { kind: "security", section: "overview" }, needs: ["project", "module", "security"], title: "Emergency stop", text: "Stops every running assessment of this project within seconds. You confirm first, and what they found is kept." },
     { id: "sec-findings", chapter: "security", target: "sec-findings", page: { kind: "security", section: "findings" }, needs: ["project", "module", "security"], title: "Findings and their states", text: "Each finding has a state: Needs a look, Probable, Confirmed, Risk accepted, Not a problem or Fixed. Change it as you check them." },

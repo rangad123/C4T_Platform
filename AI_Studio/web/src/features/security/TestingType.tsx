@@ -159,11 +159,11 @@ export function TestingTypeSetting({ id }: { id: string }) {
 }
 
 /** The project's tab bar: a Security assessment tab after Setup when the project includes it. */
-export function SecurityProjectTab({ id }: { id: string }) {
+export function SecurityProjectTab({ id, current }: { id: string; /** The security section is the open place. */ current?: boolean }) {
     const info = useTestingType(id);
     if (!info?.available || !includesSecurity(info.type)) return null;
     return (
-        <a className="tab tab-sec" href={sec.overview(id)}>
+        <a className="tab tab-sec" href={sec.overview(id)} aria-current={current ? "page" : undefined}>
             <ShieldCheck size={16} aria-hidden />
             Security assessment
         </a>
