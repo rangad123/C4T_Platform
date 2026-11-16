@@ -1,12 +1,11 @@
 /**
- * "Generate from test cases" on Test scripts in a real browser against a real platform (port 8521, the local fake AI provider on 8522,
- * never a real model, nothing runs): the New test script menu offers it, the dialog lists the written test cases with the Test cases
- * list's checkboxes (Manual cases and cases with a script cannot be chosen, and say why), and for an Android project the AI's phone
- * script is saved as a draft that the list behind the dialog shows at once, saying it needs checking on the device. A project the AI
- * cannot write for (iOS only, Android without its app) is told so in the menu, before the click. Requires `web/dist` (vite build).
+ * Generating test scripts from test cases in a real browser against a real platform (port 8521, the local fake AI provider on 8522,
+ * never a real model, nothing runs). It lives on Test cases only (the card under the list): the New test script menu on Test scripts
+ * does not repeat it. The card works on the cases chosen in the list; for an Android project the AI's phone script is saved as a
+ * draft that Test scripts shows, saying it needs checking on the device. A project the AI cannot write for (iOS only, Android without
+ * its app, web without its address) is told so on the card, before the click. Requires `web/dist` (vite build).
  *
- *   TAQWRIGHT_HOME=/nonexistent-taqwright node scripts/with-lock.mjs browser -- npx vitest run tests/generate-scripts-ui.test.ts
- */
+ *   TAQWRIGHT_HOME=/nonexistent-taqwright node scripts/with-lock.mjs browser -- npx vitest run tests/generate-scripts-ui.test.ts */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +26,7 @@ import { ReviewStore } from "../src/platform/review-store.js";
 import { IOS_PROJECT, NO_ADDRESS_FOR_SCRIPTS, NO_APP_FOR_SCRIPTS } from "../src/platform/routes/generate-scripts.js";
 import { buildServer } from "../src/platform/server.js";
 import { NO_PERMISSION_HERE } from "../web/src/features/auth/project-access-rules.js";
+import { givePersonalKeys } from "./fixtures/ai-key.js";
 import { startFakeProvider, type FakeProvider } from "./fixtures/fake-llm-provider.js";
 
 const PORT = 8521;
@@ -75,6 +75,8 @@ beforeAll(async () => {
     iphone = repo.createProject({ name: "iPhone shop", platforms: ["ios"], testingModes: ["code"] }).id as string;
     noApp = repo.createProject({ name: "Phone shop without its app", platforms: ["android"], testingModes: ["code"] }).id as string;
     noAddress = repo.createProject({ name: "Web shop without its address", platforms: ["web"], testingModes: ["code"] }).id as string;
+    // The card shows under a list that has cases.
+    for (const pid of [iphone, noApp, noAddress]) store.createCase(pid, ManualCaseInputSchema.parse({ title: "Verify sign in", automation: "automated", area: "Accounts", steps: [{ action: "Sign in", expected: "Welcome is shown" }] }));
     const users = accessControlOf(server).users;
     // Pat may write tests on this platform, but is only a viewer of the phone project (the permissions that count there).
     const pat = users.create({ email: "pat@example.com", name: "Pat Viewer", role: "editor" });
@@ -84,6 +86,8 @@ beforeAll(async () => {
     scope.addMember(phone, pat.id, { role: "viewer", projectAdmin: false, source: "added", addedBy: "test" });
     const olga = users.create({ email: "olga@example.com", name: "Olga Owner", role: "owner" });
     users.setPassword(olga.id, await hashPassword("olga's long password"));
+    // Olga's AI work uses her own key on the stand-in provider (round 57: never the server's key).
+    await givePersonalKeys(platform, [olga.id], { baseUrl: `${fake.url}/openai/v1`, model: MODEL });
     browser = await chromium.launch();
     page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
     await page.goto(BASE);
@@ -102,46 +106,38 @@ afterAll(async () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-describe("Generate from test cases, on Test scripts", () => {
-    it("lists the test cases to choose from, Manual ones not choosable, and writes a phone script for the chosen one as a draft", async () => {
+describe("Generate test scripts, on Test cases", () => {
+    it("is not repeated in the New test script menu on Test scripts", async () => {
         await page.goto(`${BASE}/#/projects/${phone}/scripts`);
         await pwExpect(page.getByRole("heading", { name: "Test scripts", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "New test script", exact: true }).click();
-        const entry = page.getByRole("menuitem", { name: /Generate from test cases/ });
-        await pwExpect(entry).toBeEnabled();
-        await pwExpect(entry).toContainText("The AI writes a script for each Automated test case you choose. Uses the AI model.");
-        await entry.click();
+        await pwExpect(page.getByRole("menuitem", { name: "Build steps by hand", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("menuitem", { name: /Generate from test cases/ })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+    });
 
-        const dialog = page.getByRole("dialog", { name: "Generate test scripts from test cases" });
-        await pwExpect(dialog).toBeVisible();
-        await pwExpect(dialog).toContainText("This project tests an Android app, so the AI writes phone test scripts.");
-        const rows = dialog.getByTestId("gen-case-row");
-        await pwExpect(rows).toHaveCount(3);
-        await pwExpect(rows.filter({ hasText: "Verify sign in on the phone" })).toContainText("REQ-01");
-        await pwExpect(dialog.getByLabel(`Choose ${cases.splash!.ref}`)).toBeDisabled();
-        await pwExpect(rows.filter({ hasText: "Verify the splash screen" })).toContainText("Manual: a person does it");
-        const go = dialog.getByRole("button", { name: /^Generate/ });
-        await pwExpect(go).toBeDisabled();
-        await dialog.getByLabel(`Choose ${cases.signIn!.ref}`).check();
-        await pwExpect(dialog.getByRole("button", { name: "Generate 1 test script", exact: true })).toBeEnabled();
-        if (shots) await page.screenshot({ path: path.join(shots, "generate-from-cases-dialog.png") });
-        const axe = await new AxeBuilder({ page }).include("dialog").analyze();
+    it("writes a phone script for the chosen Automated case as a draft, which Test scripts shows", async () => {
+        await page.goto(`${BASE}/#/projects/${phone}/tests`);
+        await pwExpect(page.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible();
+        const card = page.getByTestId("generate-scripts");
+        await pwExpect(card).toContainText("This project tests an Android app, so the AI writes phone test scripts.");
+        await page.getByLabel(`Choose ${cases.signIn!.ref}`, { exact: true }).check();
+        await card.getByRole("button", { name: "Generate test scripts", exact: true }).click();
+        await pwExpect(card.getByText("Generate 1 phone test script?")).toBeVisible();
+        if (shots) await page.screenshot({ path: path.join(shots, "generate-scripts-confirm.png") });
+        const axe = await new AxeBuilder({ page }).include("[data-testid=generate-scripts]").analyze();
         expect(axe.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
 
         fake.reset();
         fake.queue(MODEL, { text: PHONE_ANSWER });
-        await dialog.getByRole("button", { name: "Generate 1 test script", exact: true }).click();
-        await pwExpect(dialog.getByText("Test scripts generated")).toBeVisible();
-        await pwExpect(dialog).toContainText("1 phone test script has been created from your test cases. The AI wrote it without seeing the app: check it on the device, then approve it to run it.");
-        // The case got its script, so it cannot be chosen again.
-        await pwExpect(dialog.getByLabel(`Choose ${cases.signIn!.ref}`)).toBeDisabled();
-        await pwExpect(rows.filter({ hasText: "Verify sign in on the phone" })).toContainText("Has its script");
+        await card.getByRole("button", { name: "Generate 1 script", exact: true }).click();
+        await pwExpect(card.getByText("Test scripts generated")).toBeVisible();
+        await pwExpect(card).toContainText("1 phone test script has been created from your test cases. The AI wrote it without seeing the app: check it on the device, then approve it to run it.");
         expect(fake.seen).toHaveLength(1);
-        if (shots) await page.screenshot({ path: path.join(shots, "generate-from-cases-done.png") });
-        await dialog.getByRole("button", { name: "Close", exact: true }).click();
-        await pwExpect(dialog).toHaveCount(0);
+        if (shots) await page.screenshot({ path: path.join(shots, "generate-scripts-done.png") });
 
-        // The list behind the dialog shows the new script at once, as a draft waiting for review, linked to the case's requirement.
+        // The card leads to Test scripts, where the new script is a draft waiting for review, linked to the case's requirement.
+        await card.getByRole("link", { name: "View test scripts", exact: true }).click();
         const row = page.getByTestId("script-row").filter({ hasText: "Verify sign in on the phone" });
         await pwExpect(row).toBeVisible();
         await pwExpect(row.getByTestId("script-review-link")).toHaveText("Draft, waiting for review");
@@ -159,16 +155,14 @@ describe("Generate from test cases, on Test scripts", () => {
             // A web project without its address is told before the dry run, not after it (review R5, L6b).
             [noAddress, NO_ADDRESS_FOR_SCRIPTS],
         ] as const) {
-            await page.goto(`${BASE}/#/projects/${pid}/scripts`);
-            await page.getByRole("button", { name: "New test script", exact: true }).click();
-            const entry = page.getByRole("menuitem", { name: /Generate from test cases/ });
-            await pwExpect(entry).toBeDisabled();
-            await pwExpect(entry).toContainText(why);
-            await page.keyboard.press("Escape");
+            await page.goto(`${BASE}/#/projects/${pid}/tests`);
+            const card = page.getByTestId("generate-scripts");
+            await pwExpect(card.getByTestId("generate-scripts-why")).toHaveText(why);
+            await pwExpect(card.getByRole("button", { name: "Generate test scripts", exact: true })).toBeDisabled();
         }
     });
 
-    it("follows the person's permissions in this project, not the platform's: a project viewer sees it disabled, with why (review R5, L6a)", async () => {
+    it("follows the person's permissions in this project, not the platform's: a project viewer is not offered it (review R5, L6a)", async () => {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
         const p2 = await ctx.newPage();
         try {
@@ -183,9 +177,7 @@ describe("Generate from test cases, on Test scripts", () => {
             await pwExpect(menu).toHaveAttribute("aria-disabled", "true");
             await menu.hover();
             await pwExpect(p2.locator(".tt:not([hidden])").filter({ hasText: NO_PERMISSION_HERE["ai_studio.tests.write"]! })).toBeVisible();
-            await menu.click({ force: true });
-            await pwExpect(p2.getByRole("menuitem", { name: /Generate from test cases/ })).toHaveCount(0);
-            // The card under the Test cases list is not offered either.
+            // The card under the Test cases list is not offered.
             await p2.goto(`${BASE}/#/projects/${phone}/tests`);
             await pwExpect(p2.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible();
             await pwExpect(p2.getByRole("link", { name: "Verify search finds boots" })).toBeVisible();

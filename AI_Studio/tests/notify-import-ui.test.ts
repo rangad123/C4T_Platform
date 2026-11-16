@@ -170,8 +170,7 @@ describe("Alerts: Teams and email", () => {
 describe("Import Maestro flows", () => {
     it("shows what each file becomes and why one is left out, then imports", async () => {
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
-        await page.getByRole("button", { name: "New test script", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
+        await page.locator(".sec-head").getByRole("button", { name: "Import", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import Maestro flows", exact: true }).click();
         const panel = page.getByRole("region", { name: "Import Maestro flows" });
         await pwExpect(panel).toBeVisible();

@@ -90,7 +90,7 @@ describe("findings in the UI", () => {
 
     it("lists the checks in their own areas with their findings flagged", async () => {
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         const health = page.locator("section.group", { hasText: "Health checks" });
         const security = page.locator("section.group", { hasText: "Security checks" });
         await pwExpect(health.locator(".script-row")).toHaveCount(1);

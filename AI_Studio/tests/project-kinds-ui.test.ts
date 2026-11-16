@@ -20,6 +20,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { routes } from "../web/src/lib/router.js";
 import { addTest, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
@@ -36,6 +37,9 @@ let agent = "";
 let code = "";
 let ran = "";
 let mixed = "";
+/** A code project whose first scripts are being written (a job is queued, no scripts yet). */
+let writing = "";
+let writingJob = "";
 const consoleErrors: string[] = [];
 
 const api = async (method: string, url: string, payload?: unknown) => {
@@ -62,6 +66,8 @@ beforeAll(async () => {
     const seed: Seed = { projectId: ran, appId: repo.createApplication(ran, "http://127.0.0.1:7808", {}), tests: new Map(), scripts: new Map() };
     for (const k of ["alpha", "beta"]) addTest(platform, seed, k);
     await seedRun(platform, seed, { alpha: "pass", beta: "fail" }, { daysAgo: 1 });
+    writing = repo.createProject({ name: "Pika code", platforms: ["web"], testingModes: ["code"] }).id as string;
+    writingJob = (await repo.createJob(writing, repo.createApplication(writing, "http://127.0.0.1:7806", {}), { ...DEFAULT_JOB_OPTIONS, mode: "plain" })).id as string;
     mixed = repo.createProject({ name: "Newt mixed", platforms: ["ios"], testingModes: ["agent", "code"] }).id as string;
     // The widest row: an agent project with agent tiles, tests and a run. Its name must still show in full.
     const osprey = repo.createProject({ name: "Osprey agents", platforms: ["web"], testingModes: ["agent"] }).id as string;
@@ -349,6 +355,22 @@ describe("the dashboard follows the project's kind", () => {
         await pwExpect(page.getByTestId("code-empty")).toHaveCount(0);
         const text = (await page.locator(".content").textContent()) ?? "";
         expect(text).not.toMatch(/Explore again|Not explored yet|Start exploring|Last explored/);
+    });
+
+    it("a code project's Test scripts never say it is exploring: the empty list points to Test cases, the creating state to its run", async () => {
+        await visit(routes.scripts(code));
+        const empty = page.locator(".empty");
+        await pwExpect(empty).toContainText("No test scripts yet");
+        await pwExpect(empty).toContainText("on Test cases");
+        await pwExpect(page.getByRole("link", { name: "Start exploring" })).toHaveCount(0);
+
+        await visit(routes.scripts(writing));
+        await pwExpect(page.getByText("Your test scripts are on their way")).toBeVisible();
+        await pwExpect(page.getByText("Your test scripts are being written.", { exact: false })).toBeVisible();
+        const creating = page.locator(".callout", { hasText: "Test scripts are being written" });
+        await pwExpect(creating.getByRole("link", { name: "View progress" })).toHaveAttribute("href", routes.run(writing, writingJob));
+        expect((await page.locator(".content").textContent()) ?? "").not.toMatch(/exploring/i);
+        await axe();
     });
 
     it("a mixed project keeps exploring as before", async () => {

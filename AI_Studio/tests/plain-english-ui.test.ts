@@ -112,7 +112,7 @@ const SENTENCE = "Add the Blue Mug to the cart and check the total shows $12.00"
 describe("Write a test in the UI", () => {
     it("opens a dialog with the cursor in the text box, examples as hints, and a button that waits for words", async () => {
         await page.goto(`${base}/#/projects/${projectId}/scripts`);
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         await openDescribe();
         await pwExpect(dialog()).toBeVisible();
         await pwExpect(box()).toBeFocused();

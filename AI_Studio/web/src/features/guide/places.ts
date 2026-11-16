@@ -760,7 +760,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "What actually runs: every test script of this project, each with a DSL view and a Code view, grouped by area.",
         canDo: [
             { text: "Choose Run to run one test, a group or everything, and pick where it runs.", button: "Read how to run tests", to: { topic: "run-panel", search: "run tests now" }, ui: ["Run"] },
-            { text: "Choose New test script to describe a test, build its steps, write it as text or code, or import scripts.", button: "Read about making tests", to: { search: "make a new test" }, ui: ["New test script"] },
+            { text: "Choose New test script to describe a test, build its steps, or write it as text or code.", button: "Read about making tests", to: { search: "make a new test" }, ui: ["New test script"] },
             { text: "Choose Import to bring scripts from a JSON file, Maestro flows or a Git repository.", button: "Read how to bring tests", to: { topic: "import-tests", search: "import tests" }, ui: ["Import"] },
             { text: "Choose Select scripts to tick the scripts you want, then run only those.", button: "Read how to run only some", to: { topic: "run-panel", search: "run only some tests" }, ui: ["Select scripts"] },
             { text: "Use Search scripts and Filters to find one script or the ones that fail.", button: "Read about finding tests", to: { topic: "run-panel", search: "find a test" }, ui: ["Search scripts", "Filters"] },

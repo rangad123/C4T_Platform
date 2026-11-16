@@ -108,7 +108,7 @@ describe("UI journey", () => {
 
     it("lists tests grouped by area with human status wording, and opens one", async () => {
         await page.getByRole("link", { name: "View tests" }).click();
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         await pwExpect(page.getByText("Passing", { exact: true }).first()).toBeVisible();
         await page.getByPlaceholder("Search scripts").fill("products/{id}");
         await pwExpect(page.locator(".script-row").first()).toBeVisible();
@@ -137,7 +137,7 @@ describe("UI journey", () => {
 
     it("imports a script with the Import button and validates it", async () => {
         await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "More actions" }).click();
         await pwExpect(page.getByRole("menuitem", { name: "Export…", exact: true })).toBeVisible();
         await page.keyboard.press("Escape");

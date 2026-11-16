@@ -156,7 +156,7 @@ describe("test data cleanup in the UI", () => {
 
     it("switching cleanup off warns that records will stay, and a run then leaves them in place", async () => {
         await page.goto(`${base}/#/projects/${projectId}/scripts`);
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         // Test data moved from the Library to the project's Settings (round 25).
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
         await page.getByRole("link", { name: "Test data", exact: true }).click();

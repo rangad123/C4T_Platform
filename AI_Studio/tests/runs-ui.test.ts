@@ -533,6 +533,8 @@ describe("choosing tests in the list", () => {
         await page.getByRole("checkbox", { name: "Select Fast one" }).check();
         await page.getByRole("checkbox", { name: "Select Fast two" }).check();
         await pwExpect(bar).toContainText("2 scripts selected");
+        // One Run while scripts are chosen: the bar's Run selected; the header's Run comes back with Done.
+        await pwExpect(page.getByRole("button", { name: "Run", exact: true })).toHaveCount(0);
         await shot("selection-light-1280");
 
         await bar.getByRole("button", { name: "Run selected" }).click();
@@ -554,6 +556,7 @@ describe("choosing tests in the list", () => {
         await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toHaveCount(0);
         await pwExpect(page.getByRole("checkbox", { name: "Select Fast one" })).not.toBeChecked();
         await pwExpect(page.getByRole("button", { name: "Select scripts" })).toHaveAttribute("aria-pressed", "false");
+        await pwExpect(page.getByRole("button", { name: "Run", exact: true })).toBeVisible();
     });
 
     it("every checkbox has a 44 px target, the bar is audited in both schemes and nothing scrolls sideways on a phone", async () => {

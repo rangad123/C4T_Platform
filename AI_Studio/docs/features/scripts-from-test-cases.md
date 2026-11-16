@@ -4,22 +4,17 @@ In a code-based project the flow is Requirements, then test cases, then test scr
 follows and what should happen at each one, typed **Automated** (a tool can do it) or **Manual** (a person does it). A **test script**
 is the runnable test. Each Automated test case gets at most one script, linked to the case and to the case's requirement.
 
-The AI writes the scripts from the cases. It needs an AI model: without one, both entry points say so before the click ("The AI model
+The AI writes the scripts from the cases. It needs an AI model: without one, the card says so before the click ("The AI model
 isn’t set up for this project…"), and the person can add their own key under Settings, AI keys, or ask an admin to assign one. Writing scripts needs the
 permissions to add tests and to use the AI to write tests in that project (a project viewer does not have them, whatever their
-role elsewhere): without them the card is not shown and the menu entry says so.
+role elsewhere): without them the card is not shown.
 
 ## Where
 
 * **Test cases**: the **Generate test scripts using AI** card under the list. It works on the cases chosen in the list, or on all of
-  them when none is chosen.
-* **Test scripts**: **New test script**, then **Generate from test cases**. A dialog lists the project's test cases with checkboxes
-  (ID, title, requirement, type, script). Manual cases and cases that already have their script cannot be chosen, and the row says
-  why. **Generate N test scripts** writes them, shows how far it got, then how many were made; the scripts list behind the dialog
-  shows them at once.
+  them when none is chosen. This is the only place it is offered; the New test script menu on Test scripts does not repeat it.
 
-The card says first how many scripts will be written and that Manual cases are skipped; the dialog counts the chosen cases on its
-button. At most 20 scripts are written per request; the
+The card says first how many scripts will be written and that Manual cases are skipped. At most 20 scripts are written per request; the
 page sends the rest in further requests. Every script is the AI's **draft**: it is not run, and it runs only once someone approves it
 (Test scripts, Review).
 

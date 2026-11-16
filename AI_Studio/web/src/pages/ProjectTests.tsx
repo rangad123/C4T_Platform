@@ -14,7 +14,7 @@ import { HandWrittenBadge } from "../features/code/TakeOver";
 import { CompatBadge } from "../features/variants/CompatBadge";
 import { api, downloadFrom, projectKind, type ProjectDetail, type TestSummary, type ValidationStatus } from "../api";
 import { usePage } from "../components/Shell";
-import { Button, Callout, EmptyState, ErrorState, ListSkeleton, Menu, MenuItem, PageHeader, SeverityBadge, StatusBadge, Badge, severityKey, statusKey } from "../components/ui";
+import { Button, Callout, EmptyState, ErrorState, ListSkeleton, Menu, MenuItem, SeverityBadge, StatusBadge, Badge, severityKey, statusKey } from "../components/ui";
 import { BadgeKey, Tooltip } from "../components/Tooltip";
 import { help } from "../lib/help";
 import { plural } from "../lib/format";
@@ -205,17 +205,17 @@ export function ProjectTests({ id }: { id: string }) {
 
     return (
         <>
-            <PageHeader
-                title="Scripts"
-                subtitle={all.length ? `${plural(all.length, "test script")}, ${counts.validated} passing${counts.review + counts.failed ? `, ${counts.review + counts.failed} not passing` : ""}` : name}
-                actions={
-                    <>
-                        <Button icon={FileUp} disabled={Boolean(writeWhy) || isActive(job?.status)} tip={writeWhy ?? (isActive(job?.status) ? "Wait until the job that is running has finished." : "Bring scripts from a JSON file, Maestro flows or a Git repository.")} onClick={() => setShowImport(true)}>
+            {/* The hub above already says "Test scripts" and the sub-tab "Scripts": this row keeps only the counts and the actions. */}
+            <header className="sec-head">
+                <div className="titles">{all.length > 0 && <div className="sub" data-testid="scripts-counts">{`${plural(all.length, "test script")}, ${counts.validated} passing${counts.review + counts.failed ? `, ${counts.review + counts.failed} not passing` : ""}`}</div>}</div>
+                <div className="actions">
+                        <Button icon={FileUp} data-tour="import-scripts" disabled={Boolean(writeWhy) || isActive(job?.status)} tip={writeWhy ?? (isActive(job?.status) ? "Wait until the job that is running has finished." : "Bring scripts from a JSON file, Maestro flows or a Git repository.")} onClick={() => setShowImport(true)}>
                             Import
                         </Button>
-                        {/* Choosing where tests run and which ones is one control (UX-A); making a script is another. */}
-                        <RunMenu projectId={id} tests={all} selectedIds={[...selection.picked]} />
-                        <NewTestMenu projectId={id} onDescribe={() => setShowWrite(true)} onImport={() => setShowImport(true)} onMade={() => void Promise.all([tests.reload(), reqLinks.reload(), reviews.reload()])} />
+                        {/* Choosing where tests run and which ones is one control (UX-A); making a script is another. While scripts are
+                            being selected, the selection bar's Run selected is the one Run. */}
+                        {!selection.selecting && <RunMenu projectId={id} tests={all} />}
+                        <NewTestMenu projectId={id} onDescribe={() => setShowWrite(true)} />
                         <Menu label="More actions" icon={MoreHorizontal} iconOnly>
                             {(close) => (
                                 <>
@@ -228,9 +228,8 @@ export function ProjectTests({ id }: { id: string }) {
                                 </>
                             )}
                         </Menu>
-                    </>
-                }
-            />
+                </div>
+            </header>
             <ProjectTabs id={id} active="scripts" count={all.length} />
 
             <div className="stack">
@@ -263,8 +262,8 @@ export function ProjectTests({ id }: { id: string }) {
                 )}
                 <RunStrip projectId={id} />
                 {isActive(job?.status) && (job?.mode === "generate" || job?.mode === "plain" || job?.mode === undefined) && (
-                    <Callout tone="info" title="Tests are still being created" actions={<a className="btn btn-sm" href={routes.project(id)}>View progress</a>}>
-                        New tests appear here as soon as they’re ready.
+                    <Callout tone="info" title={explores ? "Tests are still being created" : "Test scripts are being written"} actions={<a className="btn btn-sm" href={explores ? routes.project(id) : routes.run(id, job!.jobId)}>View progress</a>}>
+                        {explores ? "New tests appear here as soon as they’re ready." : "New test scripts appear here as soon as they’re ready."}
                     </Callout>
                 )}
 
@@ -275,7 +274,7 @@ export function ProjectTests({ id }: { id: string }) {
                 ) : all.length === 0 ? (
                     <div className="card">
                         {isActive(job?.status) ? (
-                            <EmptyState icon={Clock} title="Your test scripts are on their way">We’re still exploring the application. They’ll show up here as they’re created.</EmptyState>
+                            <EmptyState icon={Clock} title="Your test scripts are on their way">{explores ? "We’re still exploring the application." : "Your test scripts are being written."} They’ll show up here as they’re created.</EmptyState>
                         ) : (
                             <EmptyState
                                 icon={FileX}
@@ -290,7 +289,7 @@ export function ProjectTests({ id }: { id: string }) {
                                     ) : undefined
                                 }
                             >
-                                {explores ? "Make your first test script with New test script, bring scripts you already have with Import, or explore the application and the AI writes tests for it." : "Make your first test script with New test script, generate them from your test cases, or bring scripts you already have with Import."}
+                                {explores ? "Make your first test script with New test script, bring scripts you already have with Import, or explore the application and the AI writes tests for it." : "Make your first test script with New test script, have the AI write them from your test cases on Test cases, or bring scripts you already have with Import."}
                                 {explores && !runnersOnly && !runsHere ? ` ${EXPLORING_OFF_HERE}` : ""}
                             </EmptyState>
                         )}

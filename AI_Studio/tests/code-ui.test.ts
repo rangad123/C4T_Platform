@@ -917,8 +917,7 @@ describe("Shared helpers", () => {
 describe("Import from Git", () => {
     const openDialog = async () => {
         await visit(`#/projects/${projectId}/scripts`);
-        await page.getByRole("button", { name: "New test script", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
+        await page.locator(".sec-head").getByRole("button", { name: "Import", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import from Git", exact: true }).click();
         await pwExpect(page.getByRole("dialog", { name: "Import from Git" })).toBeVisible();
         return page.getByRole("dialog", { name: "Import from Git" });
@@ -1044,8 +1043,7 @@ describe("Import from Git: files edited here (AZ2, L1)", () => {
         resetFake();
         fake.editedHere = true;
         await visit(`#/projects/${projectId}/scripts`);
-        await page.getByRole("button", { name: "New test script", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
+        await page.locator(".sec-head").getByRole("button", { name: "Import", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import from Git", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Import from Git" });
         const repo = dialog.getByTestId("repos").locator('[data-repo="gr-1"]');
@@ -1081,7 +1079,7 @@ describe("Loading and layout", () => {
         await visit(`#/tests/${testId}/steps`);
         await pwExpect(page.getByText("A code test has no list of steps")).toBeVisible();
         await visit(`#/projects/${projectId}/scripts`);
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         await visit(`#/projects/${projectId}/helpers`);
         await pwExpect(page.getByRole("heading", { name: "Shared helpers", exact: true })).toBeVisible();
         expect(requested.filter((p) => p.includes("CodeEditor-"))).toEqual([]);
@@ -1120,8 +1118,7 @@ describe("Loading and layout", () => {
             await noOverflow();
         }
         await visit(`#/projects/${projectId}/scripts`);
-        await page.getByRole("button", { name: "New test script", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
+        await page.locator(".sec-head").getByRole("button", { name: "Import", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import from Git", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Import from Git" });
         await dialog.getByLabel("Repository address").fill("https://github.com/your-team/your-tests");

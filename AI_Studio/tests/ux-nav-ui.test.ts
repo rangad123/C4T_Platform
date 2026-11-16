@@ -444,7 +444,8 @@ describe("Test scripts > Scripts (the old Tests page)", () => {
         // The place has its title under the tab bar (round 38); the section's own header row holds the count and the actions.
         await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Test scripts");
         const head = page.locator(".sec-head");
-        await pwExpect(head.locator("h2")).toHaveText("Scripts");
+        // The hub title and the sub-tab already say it: no third "Scripts" heading, the counts stay.
+        await pwExpect(head.locator("h2")).toHaveCount(0);
         await pwExpect(head.locator(".sub")).toHaveText("3 test scripts, 2 passing, 1 not passing");
         await pwExpect(head.getByRole("button", { name: "Run", exact: true })).toBeVisible();
         await pwExpect(head.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
@@ -461,24 +462,22 @@ describe("Test scripts > Scripts (the old Tests page)", () => {
         await visit(routes.tests(P()));
         await page.getByRole("button", { name: "New test script", exact: true }).click();
         const items = page.getByRole("menuitem");
-        expect(await items.evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? e.textContent))).toEqual(["Describe it", "Generate from test cases", "Build steps by hand", "Write it as text", "Write code", "Import scripts…"]);
+        expect(await items.evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? e.textContent))).toEqual(["Describe it", "Build steps by hand", "Write it as text", "Write code"]);
+        // Importing is the header's Import button, and the AI writes scripts from test cases on Test cases: neither is repeated here.
         // Each entry's name is its title; the explanation is its description.
         for (const [name, words] of [
             // Round 38: recording and exploring a phone app are no longer entries of this menu.
             ["Describe it", /AI writes the steps/],
-            // Round 41: scripts from the project's written test cases (it says what it needs where it cannot write).
-            ["Generate from test cases", /Automated test case you choose|AI key|permission|code-based|Android|application address/],
             ["Build steps by hand", /one by one/],
             ["Write it as text", /^The DSL: one line per step.*No AI needed/],
             ["Write code", /Runs only where code tests are allowed/],
-            ["Import scripts…", /JSON file, Maestro flows or a Git repository/],
         ] as const) {
             const item = page.getByRole("menuitem", { name, exact: true });
             await pwExpect(item).toBeVisible();
             const desc = await item.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
             expect(desc, name).toMatch(words);
         }
-        await pwExpect(page.locator(".menu-label")).toHaveText(["With help", "By hand", "From elsewhere"]);
+        await pwExpect(page.locator(".menu-label")).toHaveText(["With help", "By hand"]);
         await shot("tests-new-test-menu-light-1280");
     });
 
@@ -498,10 +497,9 @@ describe("Test scripts > Scripts (the old Tests page)", () => {
         await pwExpect(page.getByRole("dialog", { name: "Write a test in code", exact: true })).toBeVisible();
     });
 
-    it("Import scripts… offers JSON, Maestro and Git; Maestro and Git open their own panels; a JSON file really imports", async () => {
+    it("Import offers JSON, Maestro and Git; Maestro and Git open their own panels; a JSON file really imports", async () => {
         await visit(routes.tests(P()));
-        await page.getByRole("button", { name: "New test script", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
+        await page.locator(".sec-head").getByRole("button", { name: "Import", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Import tests", exact: true });
         await pwExpect(dialog.getByRole("button", { name: "Choose a JSON file", exact: true })).toBeVisible();
         await dialog.getByRole("button", { name: "Import Maestro flows", exact: true }).click();

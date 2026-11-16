@@ -96,7 +96,7 @@ describe("the UI's browser names match the server's", () => {
 describe("cross-browser check in the UI", () => {
     it("runs a check from the Tests tab and flags the test that breaks on Firefox", async () => {
         await page.goto(`${base}/#/projects/${projectId}/scripts`);
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         await pwExpect(page.locator(".script-row", { hasText: "A special offer can be claimed" }).getByText("Passing", { exact: true })).toBeVisible();
         // Nothing has been checked yet: no badge, no filter chip.
         await pwExpect(page.getByText(/^Fails on/)).toHaveCount(0);

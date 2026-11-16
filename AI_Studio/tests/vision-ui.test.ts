@@ -122,7 +122,7 @@ describe("AI judgement results in the UI", () => {
 
     it("shows a finding in plain words with its severity, the steps and the screenshot the AI looked at", async () => {
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         await page.locator("a.sr-title", { hasText: "Cart looks right on the overlapped page" }).click();
         // Round 38: a script's title opens its DSL tab; the steps with their marks are on the Steps tab.
         await pwExpect(page.getByRole("tab", { name: "DSL", exact: true })).toHaveAttribute("aria-selected", "true");

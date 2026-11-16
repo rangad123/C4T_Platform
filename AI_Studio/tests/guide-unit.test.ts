@@ -374,8 +374,9 @@ describe("the tour", () => {
         const of = (c: string) => TOUR_STEPS.filter((s) => s.chapter === c).map((s) => s.target ?? s.id);
         expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-develop", "nav-libraries", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-runs", "tab-settings"]));
         expect(of("making")).toEqual(expect.arrayContaining(["new-test", "wb-steps", "wb-text", "wb-code", "wb-history", "wb-edit", "scripts-steps", "scripts-elements", "settings-data"]));
-        // Round 38: the New test script menu no longer records, so its tour has one card fewer (the menu, describe, build, code, import).
-        expect(TOUR_STEPS.filter((s) => s.target === "new-test").length).toBeGreaterThanOrEqual(5);
+        // The New test script menu has a card each (the menu, describe, build, code); importing is the list's own Import button.
+        expect(TOUR_STEPS.filter((s) => s.target === "new-test").length).toBeGreaterThanOrEqual(4);
+        expect(TOUR_STEPS.find((s) => s.id === "new-import")?.target).toBe("import-scripts");
         expect(of("running")).toEqual(expect.arrayContaining(["run", "run-strip", "runs-runs", "run-tests", "last-run", "runs-schedules", "runs-trends"]));
         expect(of("release")).toEqual(expect.arrayContaining(["runs-releases", "release-signoff", "tests-manual", "runs-compliance", "your-runner", "settings-environments", "settings-alerts", "settings-issues", "mobile-app", "settings-storage", "testing-type"]));
         expect(of("phones")).toEqual(expect.arrayContaining(["settings-mobile", "explore-phone", "explorer-view"]));

@@ -98,7 +98,9 @@ describe("the Test scripts list", () => {
     it("shows each script with its ID, DSL | Code, requirement and status, under Import, Run, New test script and more", async () => {
         await page.goto(`${BASE}/#/projects/${code}/scripts`);
         await pwExpect(page.getByRole("heading", { name: "Test scripts", exact: true })).toBeVisible();
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        // The hub says "Test scripts" and the sub-tab "Scripts": the section has no third heading with its name, only the counts.
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toHaveCount(0);
+        await pwExpect(page.getByTestId("scripts-counts")).toHaveText(/^3 test scripts, \d+ passing/);
         for (const name of ["Import", "New test script", "More actions"]) await pwExpect(page.getByRole("button", { name, exact: true })).toBeVisible();
         await pwExpect(page.getByRole("button", { name: /^Run/ }).first()).toBeVisible();
         const head = page.locator(".script-head").first();
@@ -123,18 +125,28 @@ describe("the Test scripts list", () => {
         expect(axe.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
     });
 
-    it("chooses scripts with the row checkboxes, and the Run control counts them", async () => {
+    it("chooses scripts with the row checkboxes, and one Run control takes them while they are chosen", async () => {
+        const headerRun = page.locator("header.sec-head").getByRole("button", { name: /^Run/ });
+        await pwExpect(headerRun).toHaveCount(1);
         await page.getByLabel("Select Home page opens").check();
-        await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toContainText("1 script selected");
+        const bar = page.getByRole("region", { name: "Selected scripts" });
+        await pwExpect(bar).toContainText("1 script selected");
         await page.getByLabel("Select every script in Shop").check();
-        await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toContainText("3 scripts selected");
+        await pwExpect(bar).toContainText("3 scripts selected");
+        // While scripts are chosen the selection bar's Run selected is the one Run: the header's steps aside until Done.
+        await pwExpect(headerRun).toHaveCount(0);
+        await pwExpect(bar.getByRole("button", { name: /^Run selected/ })).toBeVisible();
         await page.getByRole("button", { name: "Done", exact: true }).click();
         await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toHaveCount(0);
+        await pwExpect(headerRun).toHaveCount(1);
     });
 
-    it("offers the ways to make a script: no recording, no phone exploring", async () => {
+    it("offers the ways to write a script: no recording, no phone exploring, no second Import or Generate", async () => {
         await page.getByRole("button", { name: "New test script", exact: true }).click();
-        for (const name of ["Describe it", "Build steps by hand", "Write it as text", "Write code", "Import scripts…"]) await pwExpect(page.getByRole("menuitem", { name, exact: true })).toBeVisible();
+        for (const name of ["Describe it", "Build steps by hand", "Write it as text", "Write code"]) await pwExpect(page.getByRole("menuitem", { name, exact: true })).toBeVisible();
+        // Import is the list's own button, and the AI writes scripts from test cases on Test cases.
+        await pwExpect(page.getByRole("menuitem", { name: /Import/ })).toHaveCount(0);
+        await pwExpect(page.getByRole("menuitem", { name: /Generate from test cases/ })).toHaveCount(0);
         await pwExpect(page.getByRole("menuitem", { name: "Record it in a browser" })).toHaveCount(0);
         await pwExpect(page.getByRole("menuitem", { name: /phone app/ })).toHaveCount(0);
         if (shots) await page.screenshot({ path: path.join(shots, "new-test-script-menu.png") });
@@ -228,7 +240,7 @@ describe("Generate test cases without an AI key", () => {
 });
 
 describe("a phone project", () => {
-    it("says Describe it and Write it as text are for web and API, and Generate from test cases and the Generate card that the app comes first", async () => {
+    it("says Describe it and Write it as text are for web and API, and the Generate card that the app comes first", async () => {
         await page.goto(`${BASE}/#/projects/${phone}/scripts`);
         await page.getByRole("button", { name: "New test script", exact: true }).click();
         for (const name of [/Describe it/, /Write it as text/]) {
@@ -237,12 +249,9 @@ describe("a phone project", () => {
             await pwExpect(item).toContainText("Web and API only: this project tests a phone app.");
         }
         await pwExpect(page.getByRole("menuitem", { name: /Build steps by hand/ })).toBeEnabled();
-        // Round 41: the AI writes phone scripts from test cases, for the project's Android app (this project has none yet).
-        const fromCases = page.getByRole("menuitem", { name: /Generate from test cases/ });
-        await pwExpect(fromCases).toBeDisabled();
-        await pwExpect(fromCases).toContainText(NO_APP_FOR_SCRIPTS);
         if (process.env.UI_REVIEW_SHOTS) await page.screenshot({ path: path.join(process.env.UI_REVIEW_SHOTS, "phone-new-test-menu.png") });
         await page.keyboard.press("Escape");
+        // Round 41: the AI writes phone scripts from test cases, for the project's Android app (this project has none yet).
         await page.goto(`${BASE}/#/projects/${phone}/tests`);
         const card = page.getByTestId("generate-scripts");
         await pwExpect(card.getByTestId("generate-scripts-why")).toHaveText(NO_APP_FOR_SCRIPTS);
@@ -267,12 +276,10 @@ describe("Generate test scripts using AI", () => {
         if (shots) await card.screenshot({ path: path.join(shots, "generate-scripts-card.png") });
     });
 
-    it("is in the New test script menu on Test scripts too, saying it needs an AI key here", async () => {
+    it("is offered only on Test cases: the New test script menu does not repeat it", async () => {
         await page.goto(`${BASE}/#/projects/${code}/scripts`);
         await page.getByRole("button", { name: "New test script", exact: true }).click();
-        const fromCases = page.getByRole("menuitem", { name: /Generate from test cases/ });
-        await pwExpect(fromCases).toBeDisabled();
-        await pwExpect(fromCases).toContainText(NO_AI_KEY);
+        await pwExpect(page.getByRole("menuitem", { name: /Generate from test cases/ })).toHaveCount(0);
         await page.keyboard.press("Escape");
     });
 });

@@ -103,7 +103,7 @@ You never need to leave the platform to find out how something works.
 | Build a test step by step | Build steps by hand | [Build steps by hand](#build-steps-by-hand) |
 | Write a test as lines of text | Write it as text | [Write a test as text](#write-a-test-as-text) |
 | Write code for a test | Write code | [Write code and switch to code](#write-code-and-switch-to-code) |
-| Bring in tests I already have | Import scripts… | [Import tests](#import-tests) |
+| Bring in tests I already have | Import (Test scripts) | [Import tests](#import-tests) |
 | Reuse the same steps in many tests | Reusable steps | [Reusable steps](#reusable-steps) |
 | Fix one renamed button for all tests | Shared elements | [Shared elements](#shared-elements) |
 | Run a test many times with different values | Test data | [Test data and test accounts](#test-data-and-test-accounts) |
@@ -221,7 +221,7 @@ You never need to leave the platform to find out how something works.
 *Bring in tests you already have.*
 
 - **Why you'd use it:** You can move tests from another project, from Maestro (a phone testing tool) or from a Git repository (the folder where developers keep their code).
-- **How:** On Test scripts choose **Import** (or **New test script**, then **Import scripts…**). Pick a JSON file (the platform's own test file format), Maestro flows, or a Git repository. A preview shows what will be created and what is left out and why, before anything is stored.
+- **How:** On Test scripts choose **Import**. Pick a JSON file (the platform's own test file format), Maestro flows, or a Git repository. A preview shows what will be created and what is left out and why, before anything is stored.
 - **Good to know:** **Export…** gives you the JSON file back, so you can copy tests between projects. Imported phone tests run on an emulator. The file format is in the [admin guide](ADMIN_GUIDE.md#14-test-file-format-json-import). More: [notifications-and-import.md](features/notifications-and-import.md).
 
 #### Import from Git
@@ -664,7 +664,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *A report for people who will never open the platform.*
 
 - **Why you'd use it:** You send results to a manager, a client or an auditor.
-- **How:** Open **Test scripts**, then **More actions**, then **Export…**. The dialog offers **Download PDF**, a web page version, **Download tests** (the passing tests as a zip you can run in your own pipeline), **Export as JSON** (every test, in the format **Import scripts…** understands) and **Download results** (a results file in the standard JUnit format that other tools read).
+- **How:** Open **Test scripts**, then **More actions**, then **Export…**. The dialog offers **Download PDF**, a web page version, **Download tests** (the passing tests as a zip you can run in your own pipeline), **Export as JSON** (every test, in the format **Import** understands) and **Download results** (a results file in the standard JUnit format that other tools read).
 - **Good to know:** The report has a plain headline, the most serious findings (screenshots stay in AI Studio; the report only says one exists), coverage by area, security-control coverage, browser differences, slowest pages, weak tests and the full test list. Text from your application is made safe, and credentials are never included. More: [reports.md](features/reports.md).
 
 #### Run downloaded tests on your own computer

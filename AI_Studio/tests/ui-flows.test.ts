@@ -131,7 +131,7 @@ describe("visual change review in the UI", () => {
         // start from an empty project: create it via the API, then import through the UI
         const project = (await (await fetch(`${base}/api/projects`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Visual UI" }) })).json()) as { id: string };
         await page.goto(`${base}/?x=1#/projects/${project.id}/scripts`);
-        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         const res = await fetch(`${base}/api/projects/${project.id}/specs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ specs: [spec], baseUrl: `http://127.0.0.1:${FIXTURE_PORT}` }) });
         expect(res.status).toBe(202);
         await page.reload();
