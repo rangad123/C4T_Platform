@@ -123,6 +123,8 @@ export function redactFragment(f: ModelFragment, secrets: readonly string[] = []
             if (REFERENCES.has(key)) return redactText(own.reduce((t, re) => t.replace(re, HIDDEN), v), max);
             return hideSecrets(v, { secrets, max });
         }
+        // A rule's anchor is two sha256 fingerprints (model.ts), not text; hiding them as token-shaped would make every anchor the same.
+        if (key === "anchor" && v && typeof v === "object") return v;
         if (Array.isArray(v)) return v.map((x) => walk(x, key));
         if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));
         return v;

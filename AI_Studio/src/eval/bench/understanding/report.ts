@@ -168,11 +168,13 @@ function criteria(inputs: Inputs): Criterion[] {
                 // All three parts measured, or nothing to judge: decisions carried, the no-change rerun, the one-change rerun.
                 const inc = s.incremental;
                 if (!inc || inc.decisions.value === null || !inc.noChange || !inc.oneChanged) return null;
-                return inc.decisions.value === 1 && inc.noChange.ok && inc.oneChanged.ok ? 1 : 0;
+                return inc.decisions.value === 1 && (inc.changedText?.carried.length ?? 0) === 0 && inc.noChange.ok && inc.oneChanged.ok ? 1 : 0;
             },
             target: "= 1",
             judge: atLeast(1),
         },
+        // The carry part of U7 as a share: decisions on rules from unchanged text that were found again with their rule (score.ts).
+        { id: "U7-carried", name: "Incremental: decisions found again with their rule (unchanged text)", value: (s) => s.incremental?.decisions.value ?? null, target: "reported" },
     ];
 }
 

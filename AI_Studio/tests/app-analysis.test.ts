@@ -163,6 +163,35 @@ describe("analysing again", () => {
         expect(rules.find((x) => x.expected === "A cart must hold at most 60 lines.")!.status).toBe("unverified");
     });
 
+    it("a requirement the model reads again and words differently keeps its decision; the edited one does not", async () => {
+        // The requirements are one source: editing REQ-1 re-reads REQ-2 too, and the model words REQ-2's rule another way this time.
+        const two = (one: string) => [
+            { ref: "REQ-1", title: "Cart size", description: one, acceptanceCriteria: "" },
+            { ref: "REQ-2", title: "Pay", description: "Checkout must take a card or a voucher.", acceptanceCriteria: "" },
+        ];
+        await analysis.run(PID, inputs({ requirements: two("A cart must hold at most 50 lines.") }), { llm: scripted() });
+        const pay = (await intel.rules(PID)).find((x) => x.expected.includes("card"))!;
+        const size = (await intel.rules(PID)).find((x) => x.expected.includes("50 lines"))!;
+        await intel.decide(PID, pay.id, "confirmed", "u-1");
+        await intel.decide(PID, size.id, "rejected", "u-1");
+        const base = scripted();
+        const rewording = {
+            ...base,
+            object: (async (args: { prompt: string; schema: z.ZodTypeAny }) => {
+                const a = (await base.object(args as never)) as { rules: Array<{ kind: string; expected: string; description: string }> };
+                return { ...a, rules: a.rules.map((r) => (r.expected.includes("card") ? { ...r, kind: "workflow", description: "Paying", expected: "At checkout the customer must pay with a card or a voucher." } : r)) };
+            }) as LlmClient["object"],
+        } as LlmClient;
+        await analysis.run(PID, inputs({ requirements: two("A cart must hold at most 50 lines (wording edited).") }), { llm: rewording });
+        const rules = await intel.rules(PID);
+        // REQ-2 did not change: the same rule, still confirmed, found again (no "evidence gone"); the new wording is shown beside it.
+        expect(rules.find((x) => x.id === pay.id)).toMatchObject({ status: "confirmed", decidedBy: "u-1", rewordedExpected: "At checkout the customer must pay with a card or a voucher." });
+        expect(rules.find((x) => x.id === pay.id)!.evidenceGone).toBeUndefined();
+        // REQ-1 changed: its old rule keeps the decision with its evidence gone; what was read from the edited text is a new unverified rule.
+        expect(rules.find((x) => x.id === size.id)).toMatchObject({ status: "rejected", evidenceGone: { version: 2, at } });
+        expect(rules.filter((x) => x.expected.includes("wording edited")).map((x) => x.status)).toEqual(["unverified"]);
+    });
+
     it("sends only the pages that changed, and keeps the rules of the pages that did not", async () => {
         await analysis.run(PID, inputs(), { llm: scripted() });
         const llm = scripted();

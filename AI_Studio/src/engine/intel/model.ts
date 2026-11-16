@@ -12,6 +12,7 @@ import { z } from "zod";
 const Id = z.string().min(1).max(100);
 const Text = (n: number) => z.string().max(n);
 const Ids = z.array(Id).max(200);
+const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 
 /** Where a piece of knowledge, or an expected behaviour, comes from. */
 export const SOURCE_TYPES = ["requirement", "prd", "openapi", "source_code", "db_schema", "existing_test", "user_confirmed", "inferred", "observed"] as const;
@@ -51,6 +52,13 @@ export const RuleSchema = z
         entities: Ids.default([]),
         workflows: Ids.default([]),
         endpoints: z.array(Text(300)).max(100).default([]),
+        /**
+         * What the rule was read from, for a rule read from a document (extract/rules.ts): `text` is a fingerprint of the whole document it
+         * cites (one requirement record), `lines` of the lines it cites. A later reading of the same text finds the same rule by these, not
+         * by the model's wording, which changes from one reading to the next (carry-forward.ts). Absent for other rules. Only sha256 hex:
+         * never text, so redaction passes it as it is (app-analysis.ts redactFragment).
+         */
+        anchor: z.object({ text: Sha256, lines: Sha256 }).strict().optional(),
     })
     .strict()
     .superRefine((r, ctx) => {

@@ -137,11 +137,16 @@ describe("too few trials or nothing to measure", () => {
         for (const id of ["U5", "U5-confirmed", "U5-observed", "U6"]) expect(criterion(rep, id), id).toMatchObject({ verdict: "inconclusive" });
     });
     it("U7 passes only when decisions, the no-change rerun and the one-change rerun were all measured", () => {
-        const inc = (over: object) => ({ ...score(), incremental: { decisions: { found: 2, total: 2, value: 1, missed: [] }, noChange: { newVersion: false, aiCallsForUnchangedSources: 0, ok: true }, oneChanged: { extra: [], missing: [], ok: true }, ...over } });
+        const inc = (over: object) => ({ ...score(), incremental: { decisions: { found: 2, total: 2, value: 1, missed: [] }, kept: { found: 2, total: 2, value: 1, missed: [] }, changedText: { decided: 1, carried: [] }, noChange: { newVersion: false, aiCallsForUnchangedSources: 0, ok: true }, oneChanged: { extra: [], missing: [], ok: true }, ...over } });
         const rep = (s: UnderstandingScore) => criterion(buildReport({ inputs: "url", repeat: 5, apps: ["x-shop"], trials: [1, 2, 3, 4, 5].map((n) => trial("candidate", n, s)) }), "U7").verdict;
         expect(rep(inc({}))).toBe("pass");
         expect(rep(inc({ oneChanged: undefined }))).toBe("inconclusive");
         expect(rep(inc({ decisions: { found: 0, total: 0, value: null, missed: [] } }))).toBe("inconclusive");
+        // A decision that followed a rule whose source text changed fails U7, whatever the share.
+        expect(rep(inc({ changedText: { decided: 1, carried: ["R-9"] } }))).toBe("fail");
+        // The carry share is reported beside U7.
+        const share = criterion(buildReport({ inputs: "url", repeat: 5, apps: ["x-shop"], trials: [1, 2, 3, 4, 5].map((n) => trial("candidate", n, inc({ decisions: { found: n, total: 10, value: n / 10, missed: [] } }))) }), "U7-carried");
+        expect(share.candidate).toEqual({ n: 5, median: 0.3, min: 0.1, max: 0.5 });
     });
 });
 

@@ -2,6 +2,7 @@
  * Application intelligence (testing-engine Phase 1): the versioned model, business rules with their source, the person-only decision,
  * the read routes, and that nothing in test generation reads it (no browser, no model: fast tier).
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -260,6 +261,35 @@ describe("rules across analyses", () => {
         const undone = (await store.decide(projectId, r.id, "unverified", "person-1"))!;
         expect(undone).toMatchObject({ status: "unverified", description: "Guests and orders" });
         expect(undone.rewordedDescription).toBeUndefined();
+    });
+
+    it("re-read from unchanged text and reworded keep their decision; worded the same from changed text, they do not take it", async () => {
+        // Through the analysis path: carry-forward matches by the anchor (the text the rule was read from), the store keeps what it matched.
+        const { carryForward } = await import("../src/engine/intel/carry-forward.js");
+        const h = (s: string) => createHash("sha256").update(s).digest("hex");
+        const anchor = { text: h("doc 2.9"), lines: h("lines 2.9") };
+        const first = RuleSchema.parse(rule({ ref: "R-anc-1", kind: "workflow", description: "Sign-out", expected: "After sign-out the person is a visitor.", anchor }));
+        await store.saveCarried(projectId, [{ ...first, fingerprint: ruleFingerprint(first), status: "unverified" }]);
+        const r = (await store.rules(projectId)).find((x) => x.ref === "R-anc-1")!;
+        expect(r.anchor).toEqual(anchor);
+        await store.decide(projectId, r.id, "confirmed", "person-1", r.fingerprint);
+
+        const reworded = RuleSchema.parse(rule({ ref: "R-anc-2", kind: "transition", description: "Signing out", expected: "Once signed out, the person is a visitor again.", anchor }));
+        const before = (await store.rules(projectId)).filter((x) => x.id === r.id);
+        await store.saveCarried(projectId, carryForward(before, [reworded], { version: 2, at }).rules);
+        const kept = (await store.rule(projectId, r.id))!;
+        expect(kept).toMatchObject({ status: "confirmed", decidedBy: "person-1", expected: "After sign-out the person is a visitor.", rewordedExpected: "Once signed out, the person is a visitor again." });
+        expect(kept.evidenceGone).toBeUndefined();
+        // The decision still names what the person read.
+        expect(kept.fingerprint).toBe(r.fingerprint);
+
+        // The requirement was edited; the model words the rule exactly as the person confirmed it.
+        const edited = RuleSchema.parse(rule({ ref: "R-anc-3", kind: "workflow", description: "Sign-out", expected: "After sign-out the person is a visitor.", anchor: { text: h("doc 2.9 edited"), lines: h("lines 2.9 edited") } }));
+        await store.saveCarried(projectId, carryForward([kept], [edited], { version: 3, at }).rules);
+        const old = (await store.rule(projectId, r.id))!;
+        expect(old).toMatchObject({ status: "confirmed", evidenceGone: { version: 3, at } });
+        const fresh = (await store.rules(projectId)).filter((x) => x.anchor?.text === h("doc 2.9 edited"));
+        expect(fresh.map((x) => [x.status, x.decidedBy])).toEqual([["unverified", null]]);
     });
 
     it("of another project are never read or written by id", async () => {

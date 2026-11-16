@@ -412,3 +412,31 @@ describe("rule extraction from a document", () => {
     });
 });
 
+
+/**
+ * A rule's anchor (model.ts Rule.anchor) names the text it was read from, so a later reading of the same text is recognised however the
+ * model words the rule (carry-forward.ts). Expected values come from the rule identity brief: the same document and lines give the same
+ * anchor whatever the wording or kind; an edited line gives another.
+ */
+describe("the anchor of a rule read from a document", () => {
+    const read = async (doc: ExtractionDocument, over: Record<string, unknown>) =>
+        (await extractRules(scripted([{ ...empty, rules: [rule(over)] }]), { source: { kind: "requirements", ref: "r" }, sourceType: "requirement", documents: [doc], now: NOW })).rules[0]!;
+
+    it("is the same for two readings of unchanged text worded differently, and changes with the cited line", async () => {
+        const a = await read(DOC, {});
+        const b = await read(DOC, { kind: "invariant", description: "Item quantity", expected: "Quantity per item stays between 1 and 10" });
+        expect(a.anchor).toBeDefined();
+        expect(b.expected).not.toBe(a.expected);
+        expect(b.anchor).toEqual(a.anchor);
+        // Another line edited: the document changed, the cited line did not.
+        const otherEdited = { ...DOC, lines: DOC.lines.map((l, i) => (i === 1 ? `${l} (wording edited)` : l)) };
+        const c = await read(otherEdited, {});
+        expect(c.anchor!.lines).toBe(a.anchor!.lines);
+        expect(c.anchor!.text).not.toBe(a.anchor!.text);
+        // The cited line edited: neither is the same.
+        const citedEdited = { ...DOC, lines: DOC.lines.map((l, i) => (i === 3 ? `${l} (wording edited)` : l)) };
+        const d = await read(citedEdited, {});
+        expect(d.anchor!.lines).not.toBe(a.anchor!.lines);
+        expect(d.anchor!.text).not.toBe(a.anchor!.text);
+    });
+});
