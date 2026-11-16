@@ -12,7 +12,12 @@
  *   workflow: by id or name; else by best overlap, where its steps cover every write (non-GET) endpoint of the key workflow (every endpoint
  *   when it has none, every screen when it has no endpoint; every screen, too, when the model workflow's steps name pages but no
  *   endpoint) and more than half of its own steps of that kind belong to it; a tie for the best waits for a recorded workflow link (listed
- *   in needsJudgement). A key workflow is credited at most once.
+ *   in needsJudgement). A key workflow is credited at most once. A key workflow no single model workflow identifies is still identified
+ *   when several model workflows, each lying wholly inside it (every one of its writes, or for a key workflow without writes every one of
+ *   its endpoints, is the key workflow's), together cover all it needs: a key workflow names a feature ("Pay or cancel an order"), and an
+ *   analysis that lists each of its actions as its own workflow has identified it (U3 asks whether the workflow is identified, PHASE 2
+ *   spec 8.2, not at which granularity). A model workflow that mixes in another feature's writes never contributes, and nothing is
+ *   composed from pages.
  * - U4 defect rules: defect rules stated by at least one model rule that carries evidence or a source reference / defect rules. A model
  *   rule is linked first to the key rules whose requirement it cites (an evidence item naming the requirement id, e.g. "4.9#L1", or
  *   quoting its line) AND whose wording it shares: the rule's description and expectation share at least two content words with the key
@@ -180,9 +185,31 @@ function assignWorkflows(model: AppModel, key: AnswerKey, judgements?: Judgement
     return { assigned, needsJudgement: needsJudgement.filter((w) => !assigned.has(w)).sort() };
 }
 
+/**
+ * Key workflows identified by several model workflows together: each part lies wholly inside the key workflow (all its writes are the
+ * key workflow's writes; for a key workflow without writes, all its endpoints are the key workflow's endpoints), and the parts together
+ * cover every one of them. Endpoints only, never pages.
+ */
+function composedWorkflows(model: AppModel, key: AnswerKey): Set<string> {
+    const isWrite = (e: string) => {
+        const m = parseEndpoint(e).method;
+        return m !== null && m !== "GET";
+    };
+    const out = new Set<string>();
+    const stepsOf = model.workflows.map((w) => [...new Set(w.steps.flatMap((s) => (s.endpoint ? [s.endpoint] : [])))]);
+    for (const kw of key.workflows) {
+        const writes = kw.endpoints.filter(isWrite);
+        const need = writes.length > 0 ? writes : kw.endpoints;
+        if (need.length < 2) continue;
+        const parts = stepsOf.map((eps) => (writes.length > 0 ? eps.filter(isWrite) : eps)).filter((have) => have.length > 0 && have.every((h) => need.some((n) => endpointMatches(n, h))));
+        if (need.every((n) => parts.some((have) => have.some((h) => endpointMatches(n, h))))) out.add(kw.id);
+    }
+    return out;
+}
+
 export function workflowRecall(model: AppModel, key: AnswerKey, catalogueWorkflows: string[], judgements?: Judgements): Ratio & { needsJudgement: string[] } {
     const { assigned, needsJudgement } = assignWorkflows(model, key, judgements);
-    const found = new Set(assigned.values());
+    const found = new Set([...assigned.values(), ...composedWorkflows(model, key)]);
     const wanted = [...new Set(catalogueWorkflows)];
     const missed = wanted.filter((w) => !found.has(w));
     return { ...ratio(wanted.length - missed.length, wanted.length, missed), needsJudgement };

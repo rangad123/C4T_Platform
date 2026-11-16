@@ -186,6 +186,35 @@ describe("U3 workflow recall", () => {
         const j = judgements({ workflowLinks: [{ workflowId: "w1", keyWorkflowId: "cart", reason: "Adds items to the cart." }] });
         expect(workflowRecall(model, tied, catalogueWorkflows, j)).toEqual({ found: 2, total: 3, value: 2 / 3, missed: ["cart-discount"], needsJudgement: [] });
     });
+    it("a key workflow is identified by several model workflows that each lie wholly inside it and together cover it", () => {
+        // order-lifecycle needs {pay, cancel}; "pay" opens the order (a read) and pays, "cancel" cancels: each writes only what the key
+        // workflow writes, and together they cover both → identified. browse needs both reads; "list" and "one" read one each → identified.
+        const lifecycle = AnswerKeySchema.parse({
+            ...key,
+            endpoints: [...key.endpoints, { method: "POST", path: "/api/orders/:id/pay", documented: true }, { method: "POST", path: "/api/orders/:id/cancel", documented: true }],
+            workflows: [...key.workflows, { id: "order-lifecycle", name: "Pay or cancel an order", screens: ["checkout"], endpoints: ["POST /api/orders/:id/pay", "POST /api/orders/:id/cancel"] }],
+        });
+        const step = (endpoint: string, order = 0) => ({ order, action: "Do", endpoint });
+        const pieces = (extra: Array<{ id: string; endpoints: string[] }>) =>
+            AppModelSchema.parse({ workflows: extra.map((w) => ({ id: w.id, name: w.id, sourceType: "inferred", steps: w.endpoints.map((e, i) => step(e, i)) })) });
+        const fine = pieces([
+            { id: "pay", endpoints: ["GET /api/orders/{id}", "POST /api/orders/{id}/pay"] },
+            { id: "cancel", endpoints: ["POST /api/orders/{id}/cancel"] },
+            { id: "list", endpoints: ["GET /api/products"] },
+            { id: "one", endpoints: ["GET /api/products/{id}"] },
+        ]);
+        expect(workflowRecall(fine, lifecycle, ["order-lifecycle", "browse"])).toEqual({ found: 2, total: 2, value: 1, missed: [], needsJudgement: [] });
+        // A piece that also writes outside the key workflow (cancel + place an order; a read + adding to the cart) is not part of it.
+        const mixed = pieces([
+            { id: "pay", endpoints: ["POST /api/orders/{id}/pay"] },
+            { id: "cancel-and-reorder", endpoints: ["POST /api/orders/{id}/cancel", "POST /api/orders"] },
+            { id: "list", endpoints: ["GET /api/products"] },
+            { id: "one-and-add", endpoints: ["GET /api/products/{id}", "POST /api/cart/items"] },
+        ]);
+        expect(workflowRecall(mixed, lifecycle, ["order-lifecycle", "browse"])).toEqual({ found: 0, total: 2, value: 0, missed: ["browse", "order-lifecycle"], needsJudgement: [] });
+        // Half of it is not it.
+        expect(workflowRecall(pieces([{ id: "pay", endpoints: ["POST /api/orders/{id}/pay"] }]), lifecycle, ["order-lifecycle"]).found).toBe(0);
+    });
     it("a model workflow without endpoint steps is matched on its step pages to a key workflow's screens", () => {
         // w-look opens / and /products/7: browse's screens are products (/) and product (/products/:id), both covered, 2 of 2 pages → browse.
         const looking = AppModelSchema.parse({ ...model, workflows: [{ id: "w-look", name: "Look at products", sourceType: "inferred", steps: [{ order: 0, action: "Open", page: "p1" }, { order: 1, action: "Open", page: "/products/7" }] }] });
