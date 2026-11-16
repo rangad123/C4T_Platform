@@ -15,6 +15,7 @@ import path from "node:path";
 import { REPO_ROOT, type Config } from "../../config.js";
 import { LEVEL_SETTINGS, LEVELS, type ExploreLevel } from "../../engine/levels.js";
 import type { LlmClient } from "../../engine/llm/provider.js";
+import type { Platform } from "../../platform/bootstrap.js";
 import { inProcessClient, ok, remoteClient, type PlatformClient } from "../client.js";
 import type { EntryResult } from "../run.js";
 import { appVersion, BENCH_APPS, benchApp, type BenchApp } from "./apps.js";
@@ -481,7 +482,7 @@ export function previousCalibration(dir: string): ReturnType<typeof calibrationO
     return undefined;
 }
 
-export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, deps: BenchDeps): Promise<{ client: PlatformClient; stop: () => Promise<void> }> {
+export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, deps: BenchDeps): Promise<{ client: PlatformClient; platform: Platform; stop: () => Promise<void> }> {
     const { loadConfig } = await import("../../config.js");
     const { bootstrap } = await import("../../platform/bootstrap.js");
     const { buildServer } = await import("../../platform/server.js");
@@ -497,6 +498,7 @@ export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, dep
     worker.start();
     return {
         client: inProcessClient(server, config.API_KEY),
+        platform,
         stop: async () => {
             await worker.stop();
             await server.close();

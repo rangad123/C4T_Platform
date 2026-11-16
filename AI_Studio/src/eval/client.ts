@@ -11,7 +11,7 @@ export interface Answer {
 
 export interface PlatformClient {
     readonly mode: "in-process" | "remote";
-    call(method: "GET" | "POST" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Answer>;
+    call(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<Answer>;
     /** An .apk upload (raw bytes). */
     upload(url: string, data: Buffer): Promise<Answer>;
 }
@@ -58,7 +58,7 @@ export function remoteClient(baseUrl: string, apiKey?: string): PlatformClient {
 
 /** `apiKey`: the platform's own key when its configuration has one (the routes check it in this process too). */
 export function inProcessClient(server: FastifyInstance, apiKey?: string): PlatformClient {
-    const send = async (method: "GET" | "POST" | "PUT" | "DELETE", url: string, payload: unknown, type?: string): Promise<Answer> => {
+    const send = async (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, payload: unknown, type?: string): Promise<Answer> => {
         const res = await server.inject({ method, url, payload: payload as never, headers: { ...(type ? { "content-type": type } : {}), ...(apiKey ? { "x-api-key": apiKey } : {}) } });
         return { status: res.statusCode, body: parse(res.body) };
     };

@@ -81,7 +81,7 @@ export interface AnalysisResult {
 /** Lines of a repository document longer than this are cut before redaction (redaction time grows with line length). */
 const MAX_DOC_LINE = 1000;
 const MAX_DOC_LINES = 5000;
-const REQUIREMENTS_REF = "Requirements";
+export const REQUIREMENTS_REF = "Requirements";
 export const ANALYSIS_STOPPED = "The reading was stopped before it finished. Nothing of it was kept.";
 export const ANALYSIS_OVER_TIME = "The time limit was reached while the application understanding was being updated, so that update stopped and nothing of it was kept. The exploration finished in time and its results stand.";
 export const ANALYSIS_RUNNING = "The application is already being read. Wait for it to finish, or stop it first.";

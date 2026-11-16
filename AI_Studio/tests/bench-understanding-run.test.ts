@@ -357,6 +357,56 @@ describe("a full series", () => {
     }, 600_000);
 });
 
+describe("U7 in a full series: decisions carried, a no-change rerun and a rerun with one source changed", () => {
+    /** The scripted model, plus one rule stated by requirement 1.1 whenever a reading is given that requirement. */
+    const extractions: string[] = [];
+    const withRule = (config: Config): LlmClient => {
+        const base = scriptedFor(config);
+        return {
+            ...base,
+            object: (async (args: { system: string; prompt?: string; schema: unknown }) => {
+                const answer = await (base.object as (a: unknown) => Promise<unknown>)(args);
+                if (args.schema !== ExtractionAnswerSchema) return answer;
+                const prompt = String(args.prompt ?? "");
+                extractions.push(prompt);
+                if (!/1\.1: A person signs in with an email address and a password/.test(prompt)) return answer;
+                return { rules: [{ kind: "workflow", description: "A person signs in with an email address and a password.", expected: "Signing in takes an email address and a password.", doc: "1.1", lines: [1], quote: "A person signs in with an email address and a password", confidence: 0.9, entities: [], endpoints: [], workflows: [] }], workflows: [], roles: [], transitions: [] };
+            }) as LlmClient["object"],
+        };
+    };
+
+    it("every decision survives both reruns; the no-change rerun reads nothing; the edited copy re-reads only the requirements, with AI", async () => {
+        lines.length = 0;
+        extractions.length = 0;
+        const doc = path.join(inputsDir, "bench-shop-requirements.md");
+        const original = fs.readFileSync(doc, "utf8");
+        const out = path.join(tmp, "full-u7");
+        const code = await understandingMain(["--mode", "understanding", "--inputs", "full", "--engine", "candidate", "--apps", "bench-shop", "--repeat", "1", "--port-base", String(PORT), "--out", out, "--data-dir", path.join(tmp, "data-full-u7"), "--yes"], { ...deps(), makeLlm: withRule });
+        expect(code, lines.join("\n")).toBe(0);
+        const { json, md } = readResult(out);
+        const d = json.details[0].incremental;
+        // A person's decision on every rule the analysis stored.
+        expect(d.decided).toBeGreaterThanOrEqual(1);
+        // Nothing changed: no version, no AI call, nothing processed.
+        expect(d.noChange).toMatchObject({ newVersion: false, aiCalls: 0, processed: [] });
+        // The edited copy changed requirement 1.2 only; the original document is untouched.
+        expect(d.oneChanged.edited).toEqual(["1.2"]);
+        expect(fs.readFileSync(doc, "utf8")).toBe(original);
+        // Exactly the requirements were read again, and read with AI (the edited line reached the model).
+        expect(d.oneChanged.processed).toEqual(["requirements Requirements"]);
+        expect(d.oneChanged.aiCalls).toBeGreaterThanOrEqual(1);
+        expect(extractions.some((p) => /1\.2: .*\(wording edited\)/.test(p))).toBe(true);
+        // The decided rule was found again by its fingerprint, not only kept with its evidence gone.
+        expect(d.oneChanged.rules).toMatchObject({ carried: d.decided, evidenceGone: 0 });
+        const inc = json.trials[0].score.incremental;
+        expect(inc.decisions.value).toBe(1);
+        expect(inc.noChange.ok).toBe(true);
+        expect(inc.oneChanged.ok).toBe(true);
+        expect(md).not.toMatch(/U7 here is the no-change rerun only/);
+        expect(md).not.toMatch(/has no key in this series/);
+    }, 600_000);
+});
+
 describe("the exploration API's baseline flag", () => {
     const KEY = "understanding-run-key-7d2f";
     let dataDir = "";
