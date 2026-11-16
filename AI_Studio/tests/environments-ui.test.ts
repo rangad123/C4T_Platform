@@ -114,6 +114,10 @@ describe("environments in the UI", () => {
         await pwExpect(panel.getByText(/The address should be just the site/)).toBeVisible();
         await pwExpect(save).toBeDisabled();
         await panel.getByLabel("Address", { exact: true }).fill(STAGING);
+        // The environment's own sign-in is folded away: it uses the project's sign-in unless it is given its own.
+        await pwExpect(panel.getByTestId("env-sign-in-rule")).toContainText("uses the project’s sign-in, but only at exactly the project’s address");
+        await pwExpect(panel.getByLabel("API token")).toBeHidden();
+        await panel.getByText("Use a different sign-in for this environment").click();
         await panel.getByLabel("API token").fill(STAGING_TOKEN);
         await pwExpect(save).toBeEnabled();
         await save.click();
@@ -125,18 +129,24 @@ describe("environments in the UI", () => {
         await panel.getByRole("button", { name: "Add an environment" }).click();
         await panel.getByLabel("Environment name").fill("production");
         await panel.getByLabel("Address", { exact: true }).fill(PROD);
+        await pwExpect(panel.getByLabel("API token")).toBeHidden();
         await panel.getByRole("checkbox", { name: /This is a production environment/ }).check();
         await pwExpect(panel.getByText(/Production is read-only here/).first()).toBeVisible();
+        // Production never gets the project's sign-in: it says so and shows its own sign-in fields at once.
+        await pwExpect(panel.getByTestId("env-sign-in-rule")).toHaveText("A production environment needs its own sign-in: the project’s sign-in is never sent there.");
+        await pwExpect(panel.getByLabel("API token")).toBeVisible();
         await panel.getByRole("button", { name: "Save environment" }).click();
         const production = list.getByRole("listitem").filter({ hasText: "production" });
         await pwExpect(production).toContainText("Production · read-only");
         await pwExpect(production).not.toContainText("Default");
+        await pwExpect(production).toContainText("Needs its own sign-in");
         await pwExpect(production.getByRole("button", { name: "Run all tests on production" })).toBeDisabled();
         await production.getByRole("checkbox", { name: /Yes, run on production/ }).check();
         await pwExpect(production.getByRole("button", { name: "Run all tests on production" })).toBeEnabled();
 
         // The token is never shown again: the field only says one is saved, and the page text has no trace of it.
         await list.getByRole("listitem").filter({ hasText: "staging" }).getByRole("button", { name: "Edit staging" }).click();
+        // It has its own sign-in saved, so its fields are open.
         await pwExpect(panel.getByLabel("API token")).toHaveAttribute("placeholder", "Saved — leave empty to keep");
         await pwExpect(panel.getByLabel("API token")).toHaveValue("");
         expect(await page.content()).not.toContain(STAGING_TOKEN);

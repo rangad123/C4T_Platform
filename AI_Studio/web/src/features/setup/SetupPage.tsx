@@ -1,4 +1,5 @@
-import type { Job, ProjectDetail } from "../../api";
+import type { ReactNode } from "react";
+import { projectShape, type Job, type ProjectDetail } from "../../api";
 import { CollapsedSetting, ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { MobileAppPanel } from "../../components/MobileAppPanel";
 import { formatBytes } from "../../lib/format";
@@ -75,7 +76,14 @@ function StorageSetting({ id }: { id: string }) {
     );
 }
 
-/** The project's details, what it tests and how, and its organisation (features/workspace/ProjectGeneral.tsx). */
+/** One part of a tab that a link can open (`routes.projectSettings(id, "frameworks")`; ProjectHub scrolls to it and focuses it). */
+const Part = ({ id, tour, children }: { id: string; /** The guided tour's mark, where a step points at this part. */ tour?: string; children: ReactNode }) => (
+    <div id={id} tabIndex={-1} className="stack" data-tour={tour}>
+        {children}
+    </div>
+);
+
+/** The project's details, what it tests and how, its organisation, and the one-time setup: frameworks, storage and backup. */
 function GeneralSetting({ id }: { id: string }) {
     return (
         <div className="stack">
@@ -86,20 +94,29 @@ function GeneralSetting({ id }: { id: string }) {
             <ExploreLevelSetting id={id} />
             {/* Hints people write for the AI, by page; "never ..." notes are rules (features/notes/NotesCard.tsx). */}
             <NotesCard projectId={id} />
+            <Part id="frameworks">
+                <FrameworksSetting id={id} />
+            </Part>
+            <Part id="storage" tour="settings-storage">
+                <StorageSetting id={id} />
+            </Part>
         </div>
     );
 }
 
 /**
- * The project's Settings place (it used to be called Setup). General and members first, then what tests use (the sign-in, environments,
- * test data, accounts, AI), how they run (frameworks, the mobile app), who is told (alerts, issue tracker) and storage. Runners are
- * per person: each person sets up their own runner in Settings (round 45).
+ * The project's Settings place (it used to be called Setup): General (with frameworks and storage), Members, Sign-in (the project's
+ * sign-in and the other test accounts), Environments, Test data, Connections (alerts and the issue tracker), and Mobile app for a
+ * project that tests a phone app. Runners are per person: each person sets up their own runner in Settings (round 45).
  * Settings that rarely change sit behind a titled row with "Change".
  */
 export function SetupPage({ id }: { id: string }) {
     const section = (useRoute().query.get("section") as SettingsSection | null) ?? "general";
+    const project = useFetch<ProjectDetail>(`/projects/${id}`);
+    // Mobile app only for a project that tests a phone app (or already has one saved); shown while the project loads.
+    const phone = !project.data || projectShape(project.data).platforms.some((p) => p !== "web") || !!project.data.mobile;
     const sections: HubSection[] = [
-        { key: "general", label: "General", hint: "The project, its platform, testing mode and app", render: () => <GeneralSetting id={id} /> },
+        { key: "general", label: "General", hint: "The project, its platform and testing mode, frameworks, storage and backup", render: () => <GeneralSetting id={id} /> },
         {
             key: "members",
             label: "Members",
@@ -112,8 +129,21 @@ export function SetupPage({ id }: { id: string }) {
                 </div>
             ),
         },
-        { key: "signin", label: "Sign-in", hint: "The user name and password your tests sign in with", render: () => <ProjectSignInPanel projectId={id} /> },
-        { key: "environments", label: "Environments", hint: "Staging, production and other addresses to run against", render: () => <EnvironmentsPanel projectId={id} onStarted={() => undefined} /> },
+        {
+            key: "signin",
+            label: "Sign-in",
+            hint: "Who your tests sign in as: the main sign-in and other test accounts",
+            render: () => (
+                <div className="stack">
+                    <ProjectSignInPanel projectId={id} />
+                    <Part id="accounts">
+                        <TestAccountsPanel projectId={id} />
+                        <HardSignInPanel projectId={id} />
+                    </Part>
+                </div>
+            ),
+        },
+        { key: "environments", label: "Environments", hint: "Staging, production and other addresses to run against, with their values", render: () => <EnvironmentsPanel projectId={id} onStarted={() => undefined} /> },
         {
             key: "data",
             label: "Test data",
@@ -128,21 +158,21 @@ export function SetupPage({ id }: { id: string }) {
             ),
         },
         {
-            key: "accounts",
-            label: "Test accounts",
-            hint: "More logins, to check what each kind of user can see and do",
+            key: "connections",
+            label: "Connections",
+            hint: "Who is told when a run finds something, and the issue tracker problems are filed in",
             render: () => (
                 <div className="stack">
-                    <TestAccountsPanel projectId={id} />
-                    <HardSignInPanel projectId={id} />
+                    <Part id="alerts" tour="settings-alerts">
+                        <AlertsPanel projectId={id} reloadKey={0} />
+                    </Part>
+                    <Part id="issues" tour="settings-issues">
+                        <IssueTrackerPanel projectId={id} />
+                    </Part>
                 </div>
             ),
         },
-        { key: "frameworks", label: "Frameworks", hint: "Which test technologies run and their limits", render: () => <FrameworksSetting id={id} /> },
-        { key: "mobile", label: "Mobile app", hint: "The app your phone tests run against", render: () => <MobileSetting id={id} /> },
-        { key: "alerts", label: "Alerts", hint: "Who is told when a run finds something", render: () => <AlertsPanel projectId={id} reloadKey={0} /> },
-        { key: "issues", label: "Issue tracker", hint: "GitHub, Jira or Notion, to file problems from a test", render: () => <IssueTrackerPanel projectId={id} /> },
-        { key: "storage", label: "Storage and backup", hint: "What the files use, how long they are kept, backups", render: () => <StorageSetting id={id} /> },
+        ...(phone ? [{ key: "mobile", label: "Mobile app", hint: "The app your phone tests run against", render: () => <MobileSetting id={id} /> }] : []),
     ];
     return <ProjectHub id={id} place="settings" title="Settings" subtitle="The project, who works on it, what tests use, how they run, and who is told." sections={sections} current={section} hrefOf={(k) => routes.projectSettings(id, k as SettingsSection)} />;
 }

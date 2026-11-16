@@ -96,7 +96,7 @@ describe("issue tracker journey", () => {
     it("connects GitHub, tests the connection, creates an issue from a finding, and shows the link", async () => {
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
-        await page.getByRole("link", { name: "Issue tracker", exact: true }).click();
+        await page.getByRole("link", { name: "Connections", exact: true }).click();
 
         const panel = page.getByRole("region", { name: "Issue tracker" });
         await pwExpect(panel.getByRole("heading", { name: "Issue tracker" })).toBeVisible();
@@ -154,7 +154,7 @@ describe("issue tracker journey", () => {
     it("removes the connection but keeps the record of issues already created", async () => {
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
-        await page.getByRole("link", { name: "Issue tracker", exact: true }).click();
+        await page.getByRole("link", { name: "Connections", exact: true }).click();
         const panel = page.getByRole("region", { name: "Issue tracker" });
         await panel.getByRole("button", { name: "Remove GitHub acme/shop" }).click();
         await pwExpect(panel.getByText("Issues already created stay where they are")).toBeVisible();
@@ -171,7 +171,7 @@ describe("issue tracker journey", () => {
         await page.setViewportSize({ width: 390, height: 800 });
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
-        await page.getByRole("link", { name: "Issue tracker", exact: true }).click();
+        await page.getByRole("link", { name: "Connections", exact: true }).click();
         await pwExpect(page.getByRole("region", { name: "Issue tracker" })).toBeVisible();
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
         expect(overflow).toBeLessThanOrEqual(1);

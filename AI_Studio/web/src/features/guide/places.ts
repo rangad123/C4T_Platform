@@ -421,8 +421,8 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         topic: "phones-and-emulators",
     },
     "setup-alerts": {
-        title: "Alerts",
-        what: "Who is told when a run finds something: a chat channel, email or another program.",
+        title: "Connections",
+        what: "Who is told when a run finds something (a chat channel, email or another program), and the issue tracker a problem becomes a ticket in.",
         canDo: [
             { text: "Choose Add a channel to be told in chat or by email.", button: "Read about alerts", to: { topic: "alerts", search: "alerts told when tests fail" }, ui: ["Add a channel"] },
             { text: "Pick which results raise an alert.", button: "Read about what triggers one", to: { topic: "alerts", search: "alert rules" } },
@@ -808,7 +808,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     "settings-general": {
         title: "Project settings",
-        what: "The project, its one platform and testing mode, its app, who works on it, what tests use, and who is told.",
+        what: "The project, its one platform and testing mode, the frameworks tests use, and its storage and backup.",
         canDo: [
             { text: "Set the addresses tests run against.", button: "Open environments", to: here("setup", "environments") },
             { text: "Set up your runner, the program on your computer that runs your tests.", button: "Open Your runner", to: here("setup", "runners") },
@@ -881,7 +881,9 @@ export function placeOf(route: RouteLike): PlaceId {
         if (c === "settings") {
             const s = pick(SETTINGS_SECTIONS, q.get("section"));
             if (s === "general" || s === "members") return `settings-${s}` as PlaceId;
-            if (s === "data" || s === "accounts") return `library-${s}` as PlaceId;
+            if (s === "data") return "library-data";
+            // Connections is Alerts and Issue tracker on one page: its help is the Alerts help, which links to the issue tracker.
+            if (s === "connections") return "setup-alerts";
             return `setup-${s}` as PlaceId;
         }
         if (c === "runs") {

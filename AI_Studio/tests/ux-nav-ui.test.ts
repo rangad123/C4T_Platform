@@ -154,8 +154,9 @@ const CASES = ["all", "automated", "manual"] as const;
 // Round 37: Reusable libraries (the organisation's shared code) is the last section of Test scripts. Round 38: Review follows Scripts.
 const SCRIPTS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 const RUNS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
-// Round 37: runners are machine-level, on the Runners page, not a project setting.
-const SETTINGS = ["general", "members", "signin", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+// Round 37: runners are machine-level, on the Runners page, not a project setting. 2026-11: seven tabs; Mobile app only for a
+// project that tests a phone app (this one is web only).
+const SETTINGS = ["general", "members", "signin", "environments", "data", "connections"] as const;
 const PLACES: Array<{ tab: string; h: () => string; title: string; sections: string[]; at: (i: number) => string }> = [
     { tab: "Test scripts", h: () => routes.scripts(P()), title: "Test scripts", sections: ["Scripts", "Review", "Reusable steps", "Shared elements", "Helpers (code)", "Reusable libraries"], at: (i) => routes.scripts(P(), SCRIPTS[i]) },
     { tab: "Runs", h: () => routes.runs(P()), title: "Runs", sections: ["All runs", "Schedules", "After a deploy", "Trends", "Releases", "Compliance"], at: (i) => routes.runs(P(), RUNS[i]) },
@@ -163,7 +164,7 @@ const PLACES: Array<{ tab: string; h: () => string; title: string; sections: str
         tab: "Settings",
         h: () => routes.projectSettings(P()),
         title: "Settings",
-        sections: ["General", "Members", "Sign-in", "Environments", "Test data", "Test accounts", "Frameworks", "Mobile app", "Alerts", "Issue tracker", "Storage and backup"],
+        sections: ["General", "Members", "Sign-in", "Environments", "Test data", "Connections"],
         at: (i) => routes.projectSettings(P(), SETTINGS[i]),
     },
 ];
@@ -176,7 +177,15 @@ const SINGLE: Array<{ tab: string; h: () => string; title: string }> = [
 ];
 
 // The name of each section in its row (old section keys kept their names when they moved).
-const SECTION_NAME: Record<string, string> = { steps: "Reusable steps", elements: "Shared elements", helpers: "Helpers (code)", data: "Test data", accounts: "Test accounts", signin: "Sign-in", runners: "Runners", environments: "Environments", frameworks: "Frameworks", mobile: "Mobile app", alerts: "Alerts", issues: "Issue tracker", storage: "Storage and backup" };
+const SECTION_NAME: Record<string, string> = { steps: "Reusable steps", elements: "Shared elements", helpers: "Helpers (code)", data: "Test data", signin: "Sign-in", runners: "Runners", environments: "Environments" };
+// 2026-11: the Settings tabs that became a part of another tab: [the new link, the tab then open]. The part is focused (its id is the key).
+const MOVED: Record<"accounts" | "frameworks" | "storage" | "alerts" | "issues", [string, string]> = {
+    accounts: ["settings?section=signin#accounts", "Sign-in"],
+    frameworks: ["settings#frameworks", "General"],
+    storage: ["settings#storage", "General"],
+    alerts: ["settings?section=connections#alerts", "Connections"],
+    issues: ["settings?section=connections#issues", "Connections"],
+};
 
 // ── the project's places ────────────────────────────────────────────────────
 
@@ -313,7 +322,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
 
     it("a section opened by a link stays open on a fresh load, and the crumb and the title name the place", async () => {
         await visit(routes.projectSettings(P(), "alerts"));
-        await pwExpect(page.getByRole("navigation", { name: "Settings sections" }).locator('[aria-current="page"]')).toHaveText("Alerts");
+        await pwExpect(page.getByRole("navigation", { name: "Settings sections" }).locator('[aria-current="page"]')).toHaveText("Connections");
         expect(await page.title()).toBe("Settings · Atlas shop · AI Studio");
         await pwExpect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Atlas shop");
         await pwExpect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Settings");
@@ -329,8 +338,9 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         await shot("overview-light-1280");
     });
 
-    it("Settings > Storage and backup, Frameworks and Mobile app are a titled row with a summary and Change; the form opens on request", async () => {
-        for (const [section, title] of [["storage", "Storage and backup"], ["frameworks", "Frameworks"], ["mobile", "Mobile app"]] as const) {
+    // This project is web only, so it has no Mobile app tab: project-kinds-ui.test.ts checks the Mobile app row on a phone project.
+    it("Settings > Storage and backup and Frameworks are a titled row with a summary and Change; the form opens on request", async () => {
+        for (const [section, title] of [["storage", "Storage and backup"], ["frameworks", "Frameworks"]] as const) {
             await visit(routes.projectSettings(P(), section));
             const row = page.getByTestId(`setting-${section}`);
             await pwExpect(row.getByRole("heading", { name: title, exact: true })).toBeVisible();
@@ -565,12 +575,18 @@ describe("old links keep working", () => {
         ["setup", at("setup"), at("settings"), "General"],
         ["setup > runners", at("setup?section=runners"), () => "#/settings#runner"],
         ["settings > runners", at("settings?section=runners"), () => "#/settings#runner"],
-        ...(["environments", "frameworks", "mobile", "alerts", "issues", "storage"] as const).map((k): [string, () => string, () => string, string?] => [`setup > ${k}`, at(`setup?section=${k}`), at(`settings?section=${k}`), SECTION_NAME[k]]),
+        ["setup > environments", at("setup?section=environments"), at("settings?section=environments"), "Environments"],
+        // A web-only project has no Mobile app tab: the link opens General.
+        ["setup > mobile", at("setup?section=mobile"), at("settings?section=mobile"), "General"],
+        ...(["frameworks", "alerts", "issues", "storage"] as const).map((k): [string, () => string, () => string, string?] => [`setup > ${k}`, at(`setup?section=${k}`), at(MOVED[k][0]), MOVED[k][1]]),
+        // 2026-11: the old Settings tabs that became parts of another tab.
+        ...(Object.keys(MOVED) as (keyof typeof MOVED)[]).map((k): [string, () => string, () => string, string?] => [`settings > ${k}`, at(`settings?section=${k}`), at(MOVED[k][0]), MOVED[k][1]]),
         ["setup with an unknown section", at("setup?section=nothing"), at("settings"), "General"],
-        ["setup keeps another query (the welcome page's start=phone)", at("setup?section=mobile&start=phone"), at("settings?section=mobile&start=phone"), "Mobile app"],
+        ["setup keeps another query (the welcome page's start=phone)", at("setup?section=mobile&start=phone"), at("settings?section=mobile&start=phone"), "General"],
         ["library", at("library"), at("scripts?section=steps"), "Reusable steps"],
         ...(["steps", "elements", "helpers"] as const).map((k): [string, () => string, () => string, string?] => [`library > ${k}`, at(`library?section=${k}`), at(`scripts?section=${k}`), SECTION_NAME[k]]),
-        ...(["data", "accounts"] as const).map((k): [string, () => string, () => string, string?] => [`library > ${k}`, at(`library?section=${k}`), at(`settings?section=${k}`), SECTION_NAME[k]]),
+        ["library > data", at("library?section=data"), at("settings?section=data"), "Test data"],
+        ["library > accounts", at("library?section=accounts"), at(MOVED.accounts[0]), MOVED.accounts[1]],
         ["release", at("release"), at("runs?section=releases"), "Releases"],
         ["release > releases", at("release?section=releases"), at("runs?section=releases"), "Releases"],
         ["release > compliance", at("release?section=compliance"), at("runs?section=compliance"), "Compliance"],
@@ -585,6 +601,12 @@ describe("old links keep working", () => {
             // Test cases has no section row (round 38): its type filter shows the section that is open.
             if (section && to().includes("/tests")) await pwExpect(page.getByRole("group", { name: "Filter by type" }).getByRole("button", { name: new RegExp(`^${section}`) })).toHaveAttribute("aria-pressed", "true");
             else if (section) await pwExpect(page.locator('.subtabs [aria-current="page"]')).toHaveText(section);
+            // A link to a part of a tab brings that part into view with the focus on it.
+            const part = to().startsWith("#/projects/") ? to().split("#")[2] : undefined;
+            if (part) {
+                await pwExpect(page.locator(`#${part}`)).toBeFocused();
+                await pwExpect(page.locator(`#${part}`)).toBeInViewport();
+            }
             await pwExpect(page.locator('.content [role="alert"]')).toHaveCount(0);
         });
     }
@@ -592,12 +614,12 @@ describe("old links keep working", () => {
     it("the old route helpers return the new homes directly, not an old link that redirects again", () => {
         const p = "p1";
         expect(routes.setup(p)).toBe("#/projects/p1/settings");
-        for (const k of SETUP_SECTIONS) expect(routes.setup(p, k), k).toBe(k === "runners" ? "#/settings#runner" : `#/projects/p1/settings?section=${k}`);
+        for (const k of SETUP_SECTIONS) expect(routes.setup(p, k), k).toBe(k === "runners" ? "#/settings#runner" : k in MOVED ? `#/projects/p1/${MOVED[k as keyof typeof MOVED][0]}` : `#/projects/p1/settings?section=${k}`);
         expect(routes.library(p)).toBe("#/projects/p1/scripts?section=steps");
         expect(routes.library(p, "elements")).toBe("#/projects/p1/scripts?section=elements");
         expect(routes.library(p, "helpers")).toBe("#/projects/p1/scripts?section=helpers");
         expect(routes.library(p, "data")).toBe("#/projects/p1/settings?section=data");
-        expect(routes.library(p, "accounts")).toBe("#/projects/p1/settings?section=accounts");
+        expect(routes.library(p, "accounts")).toBe("#/projects/p1/settings?section=signin#accounts");
         expect(routes.objects(p)).toBe("#/projects/p1/scripts?section=elements");
         expect(routes.blocks(p, "Sign in")).toBe("#/projects/p1/scripts?section=steps&edit=Sign+in");
         expect(routes.helpers(p)).toBe("#/projects/p1/scripts?section=helpers");
@@ -631,7 +653,7 @@ describe("old links keep working", () => {
             for (const k of [undefined, ...list]) {
                 const to = resolveAlias(["projects", "p1", place], new URLSearchParams(k ? { section: k } : {}));
                 // Round 45: the old Setup > Runners lands on Your runner in Settings.
-                expect(to, `${place} ${k}`).toMatch(place === "setup" && k === "runners" ? /^#\/settings#runner$/ : /^#\/projects\/p1\/(tests|scripts|runs|settings)(\?|$)/);
+                expect(to, `${place} ${k}`).toMatch(place === "setup" && k === "runners" ? /^#\/settings#runner$/ : /^#\/projects\/p1\/(tests|scripts|runs|settings)(\?|#|$)/);
                 const [path, qs] = to!.replace(/^#\//, "").split("#")[0]!.split("?");
                 expect(resolveAlias(path!.split("/"), new URLSearchParams(qs ?? "")), `${place} ${k} must not redirect again`).toBeNull();
             }
@@ -673,7 +695,7 @@ describe("every route builder opens a page without an error", () => {
             scripts: [...SCRIPTS.map((k) => routes.scripts(P(), k)), routes.scripts(P(), "steps", "Sign in")],
             agentRuns: [routes.agentRuns(P())],
             agentRun: [routes.agentRun(P(), agentRunId)],
-            projectSettings: SETTINGS.map((k) => routes.projectSettings(P(), k)),
+            projectSettings: [...SETTINGS, ...(Object.keys(MOVED) as (keyof typeof MOVED)[])].map((k) => routes.projectSettings(P(), k)),
             setup: [routes.setup(P()), routes.setup(P(), "environments"), routes.setup(P(), "alerts"), routes.setup(P(), "issues")],
             library: [routes.library(P()), routes.library(P(), "data"), routes.library(P(), "accounts")],
             objects: [routes.objects(P())],
@@ -760,13 +782,13 @@ describe("keyboard", () => {
     });
 
     it("the Change row of a setting opens with Enter and shows a visible focus ring", async () => {
-        await visit(routes.projectSettings(P(), "mobile"));
-        const change = page.getByRole("button", { name: "Change mobile app", exact: true });
+        await visit(routes.projectSettings(P(), "frameworks"));
+        const change = page.getByRole("button", { name: "Change frameworks", exact: true });
         await change.focus();
         const ring = await change.evaluate((el) => getComputedStyle(el).outlineStyle + "|" + getComputedStyle(el).boxShadow);
         expect(ring).not.toBe("none|none");
         await page.keyboard.press("Enter");
-        await pwExpect(page.getByTestId("setting-mobile").locator(".setting-body")).toBeVisible();
+        await pwExpect(page.getByTestId("setting-frameworks").locator(".setting-body")).toBeVisible();
     });
 });
 
@@ -799,7 +821,7 @@ describe("phone and touch targets", () => {
                     .map((el) => ({ n: el.textContent?.trim().slice(0, 30), h: Math.round(el.getBoundingClientRect().height) }))
                     .filter((x) => x.h < 44),
             );
-        for (const h of [routes.tests(P()), routes.scripts(P(), "steps"), routes.projectSettings(P(), "mobile")]) {
+        for (const h of [routes.tests(P()), routes.scripts(P(), "steps"), routes.projectSettings(P(), "frameworks")]) {
             await visit(h);
             expect(await small(), h).toEqual([]);
         }
@@ -822,6 +844,13 @@ describe("accessibility and words", () => {
             await page.getByRole("button", { name: "Change storage and backup", exact: true }).click();
         });
         await axeBoth(routes.projectSettings(P(), "data"));
+        // 2026-11: the tabs that now hold more than one part.
+        await axeBoth(routes.projectSettings(P(), "signin"));
+        await axeBoth(routes.projectSettings(P(), "connections"));
+        await axeBoth(routes.projectSettings(P(), "environments"), async () => {
+            await page.getByRole("button", { name: "Add an environment" }).click();
+            await page.getByText("Use a different sign-in for this environment").click();
+        });
         await axeBoth(routes.scripts(P(), "steps"));
         await axeBoth(routes.yourRunner);
         await axeBoth(routes.runs(P(), "schedules"));

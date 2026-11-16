@@ -140,27 +140,31 @@ describe("Settings → Sign-in", () => {
     /** The PUT bodies the page sent, to check what Replace and Remove ask for. */
     const sent: unknown[] = [];
 
-    it("is a section of Settings, first of the sign-in, environments, test data and accounts sections", async () => {
+    it("is a tab of Settings, before Environments and Test data", async () => {
         page = await signIn("olga@example.com", "olga's long password");
         page.on("request", (r) => {
             if (r.method() === "PUT" && r.url().endsWith(`/api/projects/${shop}/sign-in`)) sent.push(r.postDataJSON());
         });
         await page.goto(`${BASE}/#/projects/${shop}/settings`);
         const names = (await page.getByRole("navigation", { name: "Settings sections" }).locator("a").allTextContents()).map((t) => t.trim());
-        expect(names.slice(names.indexOf("Sign-in"), names.indexOf("Sign-in") + 4)).toEqual(["Sign-in", "Environments", "Test data", "Test accounts"]);
+        expect(names.slice(names.indexOf("Sign-in"), names.indexOf("Sign-in") + 3)).toEqual(["Sign-in", "Environments", "Test data"]);
+        // Test accounts is no tab of its own any more: it is on the Sign-in tab.
+        expect(names).not.toContain("Test accounts");
         await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Sign-in" }).click();
         await page.waitForURL((u) => u.hash === `#/projects/${shop}/settings?section=signin`);
         await pwExpect(card().getByRole("heading", { name: "Sign-in" })).toBeVisible();
         await pwExpect(card()).toContainText("Tests type these where a step uses {{credentials.username}} and {{credentials.password}}.");
     });
 
-    it("links to Environments and Test accounts", async () => {
-        const links = card().getByTestId("sign-in-elsewhere");
-        await pwExpect(links.getByRole("link", { name: "Environments" })).toHaveAttribute("href", `#/projects/${shop}/settings?section=environments`);
-        await pwExpect(links.getByRole("link", { name: "Test accounts" })).toHaveAttribute("href", `#/projects/${shop}/settings?section=accounts`);
-        await links.getByRole("link", { name: "Test accounts" }).click();
+    it("has the other test accounts below it on the same tab, and an old Test accounts link opens them there", async () => {
         await pwExpect(page.getByRole("heading", { name: "Test accounts" })).toBeVisible();
-        await page.goBack();
+        // The sign-in card comes first, the accounts after it.
+        expect(await card().evaluate((c) => !!(c.compareDocumentPosition(document.getElementById("accounts")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+        await page.goto(`${BASE}/#/projects/${shop}/settings?section=accounts`);
+        await page.waitForURL((u) => u.hash === `#/projects/${shop}/settings?section=signin#accounts`);
+        await pwExpect(page.locator("#accounts")).toBeFocused();
+        await pwExpect(page.locator("#accounts").getByRole("heading", { name: "Test accounts" })).toBeInViewport();
+        await page.goto(`${BASE}/#/projects/${shop}/settings?section=signin`);
         await pwExpect(card()).toBeVisible();
     });
 

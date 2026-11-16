@@ -113,7 +113,7 @@ afterAll(async () => {
 const openPanel = async () => {
     await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
     await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
-    await page.getByRole("link", { name: "Issue tracker", exact: true }).click();
+    await page.getByRole("link", { name: "Connections", exact: true }).click();
     return page.getByRole("region", { name: "Issue tracker" });
 };
 

@@ -314,10 +314,12 @@ describe("WhereTo opens the right place", () => {
 
     it("opens a place's first section for an unknown one, and the sections the router lists", () => {
         expect(whereToHref({ place: "setup", section: "nope" }, P)).toBe(routes.setup(P));
-        for (const s of SETUP_SECTIONS) expect(placeOf(route(whereToHref({ place: "setup", section: s }, P)!))).toBe(s === "runners" ? "settings" : `setup-${s}`);
+        // 2026-11: Frameworks and Storage are parts of General, Alerts and Issue tracker of Connections (its help is the Alerts help).
+        const tabHelp: Record<string, string> = { runners: "settings", frameworks: "settings-general", storage: "settings-general", alerts: "setup-alerts", issues: "setup-alerts" };
+        for (const s of SETUP_SECTIONS) expect(placeOf(route(whereToHref({ place: "setup", section: s }, P)!))).toBe(tabHelp[s] ?? `setup-${s}`);
         // Releases and compliance moved from the Release place into Runs (round 25); they keep the help they had there.
         for (const s of RUNS_SECTIONS) expect(placeOf(route(whereToHref({ place: "runs", section: s }, P)!))).toBe(s === "releases" || s === "compliance" ? `release-${s}` : `runs-${s}`);
-        for (const s of LIBRARY_SECTIONS) expect(placeOf(route(whereToHref({ place: "library", section: s }, P)!))).toBe(`library-${s}`);
+        for (const s of LIBRARY_SECTIONS) expect(placeOf(route(whereToHref({ place: "library", section: s }, P)!))).toBe(s === "accounts" ? "setup-signin" : `library-${s}`);
         for (const s of RELEASE_SECTIONS) expect(placeOf(route(whereToHref({ place: "release", section: s }, P)!))).toBe(`release-${s}`);
     });
 

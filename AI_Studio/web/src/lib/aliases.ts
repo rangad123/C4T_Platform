@@ -1,4 +1,4 @@
-import { LIBRARY_SECTIONS, RELEASE_SECTIONS, SETUP_SECTIONS, routes } from "./router.js";
+import { LIBRARY_SECTIONS, RELEASE_SECTIONS, SETTINGS_MOVED, SETUP_SECTIONS, routes } from "./router.js";
 
 /**
  * Links that were written for earlier versions of the project's places (the six places of round 16, and before them single pages):
@@ -67,6 +67,9 @@ export function resolveAlias(parts: string[], query: URLSearchParams): string | 
     if (c === "tests" && !d && RUNNABLE_QUERY.some((k) => query.has(k))) return withQuery(routes.tests(id), query);
     // Round 37 moved a project's runners to the Runners page; round 45 to Your runner in Settings.
     if (c === "settings" && query.get("section") === "runners") return routes.yourRunner;
+    // 2026-11: Test accounts, Frameworks, Storage and backup, Alerts and Issue tracker became parts of the Sign-in, General and Connections tabs.
+    const moved = sectionOf(query, Object.keys(SETTINGS_MOVED) as (keyof typeof SETTINGS_MOVED)[]);
+    if (c === "settings" && moved) return routes.projectSettings(id, moved);
     // Round 25 replaced three places: Setup became Settings, and the sections of Library and Release moved to Test scripts,
     // Settings, Test cases and Runs. The old route helpers already point at the new homes (lib/router.ts). Any other query (the
     // welcome page's `start=phone`) is kept.
@@ -74,8 +77,9 @@ export function resolveAlias(parts: string[], query: URLSearchParams): string | 
         const to = c === "setup" ? routes.setup(id, sectionOf(query, SETUP_SECTIONS)) : c === "library" ? routes.library(id, sectionOf(query, LIBRARY_SECTIONS)) : routes.releaseHub(id, sectionOf(query, RELEASE_SECTIONS));
         const rest = new URLSearchParams(query);
         rest.delete("section");
-        const extra = rest.toString();
-        return extra ? `${to}${to.includes("?") ? "&" : "?"}${extra}` : to;
+        // The query goes before a part's `#name` (routes.projectSettings).
+        const [path, part] = to.split(/(?=#[a-z]+$)/);
+        return `${withQuery(path!, rest)}${part ?? ""}`;
     }
     const row = ROUTE_ALIASES.find((r) => r.old === c);
     return row ? row.to(id, row.extra ? d : undefined, query) : null;

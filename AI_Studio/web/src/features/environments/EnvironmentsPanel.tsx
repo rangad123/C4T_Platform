@@ -1,4 +1,4 @@
-import { Layers, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Layers, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ApiError, api } from "../../api";
 import { Badge, Button, Callout, ListSkeleton } from "../../components/ui";
@@ -7,6 +7,7 @@ import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
+import { routes } from "../../lib/router";
 import { PRODUCTION_WARNING, shortAddress, type Environment } from "./environments";
 import "./environments.css";
 
@@ -182,7 +183,7 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                 {onClose &&<Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}
             </div>
             <p className="t-secondary">
-                Run the same tests against more than one place, such as staging and production, each with its own address, sign-in and values. Each place keeps its own results; your tests’ main results don’t change.
+                Run the same tests against more than one place, such as staging and production, each with its own address and values. Each place keeps its own results; your tests’ main results don’t change.
             </p>
 
             {list.loading ? (
@@ -204,7 +205,7 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                                 <p className="t-meta">
                                     {Object.keys(e.variables).length ? `${plural(Object.keys(e.variables).length, "value")}` : "No values"}
                                     {" · "}
-                                    {e.hasPassword || e.hasApiToken || e.hasApiAuthHeader || e.hasTotp ? "Sign-in saved" : "No sign-in saved"}
+                                    {e.hasPassword || e.hasApiToken || e.hasApiAuthHeader || e.hasTotp ? "Sign-in saved" : e.production ? "Needs its own sign-in" : "No sign-in saved"}
                                     {e.useProjectAccounts ? " · uses the project’s test accounts" : ""}
                                 </p>
                                 {e.production && (
@@ -256,16 +257,14 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                             <label className="check">
                                 <input type="checkbox" checked={form.useProjectAccounts} onChange={(e) => patch({ useProjectAccounts: e.target.checked })} />
                                 <span>
-                                    <span className="title">Use the project’s test accounts here</span>
-                                    <span className="hint">
-                                        For access-control checks that sign in as different accounts. Also uses the project’s sign-in when this environment has none of its own and is at exactly the project’s address (never for production). Turn off if the accounts don’t exist here.
-                                    </span>
+                                    <span className="title">Use the project’s sign-in and test accounts here</span>
+                                    <span className="hint">Turn off if those accounts don’t exist here.</span>
                                 </span>
                             </label>
 
                             <div className="stack-sm">
                                 <h3 className="t-card">Values for this environment</h3>
-                                <p className="t-meta">Tests can use them as {"{{env.NAME}}"}. They are not secret; keep passwords in the sign-in section below.</p>
+                                <p className="t-meta">Tests can use them as {"{{env.NAME}}"}. They are not secret, so keep passwords out of them.</p>
                                 {form.vars.map((v) => (
                                     <div className="env-var-row" key={v.key}>
                                         <input className="input" aria-label={`Value name ${v.key + 1}`} placeholder="NAME" value={v.name} onChange={(e) => patch({ vars: form.vars.map((x) => (x.key === v.key ? { ...x, name: e.target.value } : x)) })} />
@@ -280,8 +279,24 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                                 </div>
                             </div>
 
-                            <div className="stack-sm">
-                                <h3 className="t-card">Sign-in for this environment (optional)</h3>
+                            <p className="t-meta" data-testid="env-sign-in-rule">
+                                {form.production ? (
+                                    "A production environment needs its own sign-in: the project’s sign-in is never sent there."
+                                ) : !form.useProjectAccounts ? (
+                                    "With the box above off, this environment uses only its own sign-in."
+                                ) : (
+                                    <>
+                                        Without its own sign-in, this environment uses the project’s <a href={routes.projectSettings(projectId, "signin")}>sign-in</a>, but only at exactly the project’s address.
+                                    </>
+                                )}
+                            </p>
+                            {/* Collapsed unless it is production or already has its own sign-in; `open` follows those, a click opens it too. */}
+                            <details className="disclosure" open={form.production || form.saved.hasPassword || form.saved.hasApiToken || form.saved.hasApiAuthHeader || form.saved.hasTotp}>
+                                <summary>
+                                    <ChevronRight size={16} className="chev" aria-hidden />
+                                    Use a different sign-in for this environment
+                                </summary>
+                                <div className="inner stack-sm">
                                 <p className="t-meta">Saved encrypted and never shown again. Leave a field empty to keep what is saved.</p>
                                 <div className="grid-2">
                                     <div className="field">
@@ -312,7 +327,8 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                                         </Button>
                                     </div>
                                 )}
-                            </div>
+                                </div>
+                            </details>
 
                             {problems.length > 0 && <Callout tone="warning">{problems.join(" ")}</Callout>}
                             <div className="row">

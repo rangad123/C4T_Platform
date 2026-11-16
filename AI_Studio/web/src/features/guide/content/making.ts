@@ -330,7 +330,7 @@ export const making: Topic[] = [
         what: "More named sign-ins, such as user and admin, for checking what each kind of user can see.",
         why: "You test as different kinds of user.",
         steps: [
-            step("Open Settings, then Test accounts.", "Settings", "Test accounts"),
+            step("Open Settings, then Sign-in, and find Test accounts.", "Settings", "Sign-in", "Test accounts"),
             step("Add an account with a name, for example user or admin."),
             step("Enter its password. It is stored encrypted and never shown again."),
             step("If sign-in asks for an authenticator-app code, paste the setup key as the Authenticator secret.", "Authenticator secret"),
@@ -349,7 +349,7 @@ export const making: Topic[] = [
         what: "Save a signed-in session for sign-ins tests cannot fill in, and use emailed codes and links.",
         why: "Single sign-on and captchas need a person; emailed codes need a mailbox.",
         steps: [
-            step("Open Settings, then Test accounts.", "Settings", "Test accounts"),
+            step("Open Settings, then Sign-in, and find Test accounts.", "Settings", "Sign-in", "Test accounts"),
             step("Choose Sign in once yourself and sign in in the browser that opens.", "Sign in once yourself"),
             step("Choose I’m signed in, save it. Runs then start signed in.", "I’m signed in, save it"),
             step("For emailed codes, set up the Test mailbox and add the step Use an emailed code or link.", "Test mailbox"),

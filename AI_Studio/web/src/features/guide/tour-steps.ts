@@ -96,7 +96,7 @@ export const TOUR_STEPS: TourStep[] = [
     { id: "tab-scripts", chapter: "around", target: "tab-scripts", page: project, needs: P, title: "Test scripts: what runs", text: "Code projects: every runnable test script, in the DSL and as code. Run them, make new ones, review their versions, and share steps, elements and helpers." },
     { id: "tab-suites", chapter: "around", target: "tab-suites", page: project, needs: P, title: "Test suites", text: "Code projects: groups of test cases that run together." },
     { id: "runs", chapter: "around", target: "tab-runs", page: project, needs: P, title: "Runs: what happened", text: "Every exploration and every run of tests is kept here, with schedules and trends." },
-    { id: "tab-settings", chapter: "around", target: "tab-settings", page: project, needs: P, title: "Settings: the project's setup", text: "Members, the app, environments, test data and accounts, alerts, the issue tracker and storage. Most of it is set once." },
+    { id: "tab-settings", chapter: "around", target: "tab-settings", page: project, needs: P, title: "Settings: the project's setup", text: "The project, members, sign-in and test accounts, environments, test data, and connections such as alerts. Most of it is set once." },
 
     // ── Making tests ──
     { id: "new-test", chapter: "making", target: "new-test", page: tests, needs: P, title: "Make a test script", text: "New test script lists every way to make one. Each way says in a line what it does and what it needs." },
@@ -132,7 +132,7 @@ export const TOUR_STEPS: TourStep[] = [
     { id: "environments", chapter: "release", target: "settings-environments", page: { kind: "setup", section: "environments" }, needs: P, title: "Environments", text: "Staging, production and other addresses to run against. Production is read-only: nothing risky runs there without asking." },
     { id: "alerts", chapter: "release", target: "settings-alerts", page: { kind: "setup", section: "alerts" }, needs: P, title: "Alerts", text: "Who is told when a run finds something: Slack, Teams, email or a webhook." },
     { id: "issues", chapter: "release", target: "settings-issues", page: { kind: "setup", section: "issues" }, needs: P, title: "Issue tracker", text: "Connect GitHub, Jira or Notion to file a problem straight from a failing test." },
-    { id: "device-farms", chapter: "release", target: "mobile-app", page: { kind: "setup", section: "mobile" }, needs: P, title: "Device farms", text: "Under Mobile app, a device farm runs phone tests on real phones in the cloud instead of a phone on this computer." },
+    { id: "device-farms", chapter: "release", target: "mobile-app", page: { kind: "setup", section: "mobile" }, needs: [...P, "phone"], title: "Device farms", text: "Under Mobile app, a device farm runs phone tests on real phones in the cloud instead of a phone on this computer." },
     { id: "storage", chapter: "release", target: "settings-storage", page: { kind: "setup", section: "storage" }, needs: P, title: "Storage and backup", text: "What the files use, how long they are kept, and a backup of the project to download or restore." },
     { id: "testing-type", chapter: "release", target: "testing-type", page: { kind: "settings", section: "general" }, needs: ["project", "module"], title: "Testing type", text: "Functional testing, security assessment, or both. Changing it never deletes anything." },
 

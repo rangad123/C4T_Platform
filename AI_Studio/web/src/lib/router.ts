@@ -41,11 +41,13 @@ export const CASES_SECTIONS = ["all", "automated", "manual"] as const;
 export const SCRIPTS_SECTIONS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 export const RUNS_SECTIONS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
 // Runners are not a project setting: each person sets up their own runner once in Settings (round 45).
-export const SETTINGS_SECTIONS = ["general", "members", "signin", "environments", "data", "accounts", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+export const SETTINGS_SECTIONS = ["general", "members", "signin", "environments", "data", "connections", "mobile"] as const;
+/** Settings tabs that became a part of another tab: their links open that tab at the part (`#…/settings?section=signin#accounts`). */
+export const SETTINGS_MOVED = { accounts: "signin", frameworks: "general", storage: "general", alerts: "connections", issues: "connections" } as const;
 export type CasesSection = (typeof CASES_SECTIONS)[number];
 export type ScriptsSection = (typeof SCRIPTS_SECTIONS)[number];
 export type RunsSection = (typeof RUNS_SECTIONS)[number];
-export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number] | keyof typeof SETTINGS_MOVED;
 
 /** The sections the old places had: their links still work and land where each section lives now (lib/aliases.ts). */
 export const LIBRARY_SECTIONS = ["steps", "elements", "helpers", "data", "accounts"] as const;
@@ -57,7 +59,7 @@ export type ReleaseSection = (typeof RELEASE_SECTIONS)[number];
 
 /** Where an old Library section lives now: shared building blocks under Test scripts, data and accounts under Settings. */
 const libraryHome = (id: string, section: LibrarySection = "steps", extra?: Record<string, string | undefined>) =>
-    section === "data" || section === "accounts" ? place(id, "settings", "general", section) : place(id, "scripts", "scripts", section, extra);
+    section === "data" || section === "accounts" ? routes.projectSettings(id, section) : place(id, "scripts", "scripts", section, extra);
 /** Where an old Release section lives now: manual checks with the test cases, releases and compliance with the runs. */
 const releaseHome = (id: string, section: ReleaseSection = "releases") => (section === "manual" ? place(id, "tests", "all", "manual") : place(id, "runs", "runs", section));
 
@@ -111,10 +113,13 @@ export const routes = {
     agentRuns: (id: string) => `#/projects/${id}/agent`,
     /** One agent run: live while it goes, then its result. */
     agentRun: (id: string, runId: string) => `#/projects/${id}/agent/${runId}`,
-    /** The project's settings, one section open. */
-    projectSettings: (id: string, section?: SettingsSection) => place(id, "settings", "general", section),
-    /** The old Setup place: each section is a Settings section of the same name; its Runners section is Your runner in Settings. */
-    setup: (id: string, section?: SetupSection) => (section === "runners" ? RUNNER_SETTINGS : place(id, "settings", "general", section)),
+    /** The project's settings, one tab open; a part of a tab (`SETTINGS_MOVED`) is the tab with the part's name after `#`. */
+    projectSettings: (id: string, section?: SettingsSection): string => {
+        const tab = section && section in SETTINGS_MOVED ? SETTINGS_MOVED[section as keyof typeof SETTINGS_MOVED] : section;
+        return `${place(id, "settings", "general", tab)}${tab === section ? "" : `#${section}`}`;
+    },
+    /** The old Setup place: each section is the Settings part of the same name; its Runners section is Your runner in Settings. */
+    setup: (id: string, section?: SetupSection) => (section === "runners" ? RUNNER_SETTINGS : routes.projectSettings(id, section)),
     /** The old Library place: each section moved (`libraryHome`). */
     library: (id: string, section?: LibrarySection) => libraryHome(id, section),
     objects: (id: string) => libraryHome(id, "elements"),

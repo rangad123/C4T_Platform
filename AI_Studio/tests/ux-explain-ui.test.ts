@@ -510,7 +510,7 @@ describe("less noise", () => {
         const line = page.getByTestId("issue-empty");
         await pwExpect(line).toContainText("No issue tracker is connected");
         await pwExpect(line.getByRole("link")).toHaveCount(1);
-        await pwExpect(line.getByRole("link", { name: "Open Settings, Issue tracker" })).toHaveAttribute("href", `#/projects/${shop.projectId}/settings?section=issues`);
+        await pwExpect(line.getByRole("link", { name: "Open Settings, Issue tracker" })).toHaveAttribute("href", `#/projects/${shop.projectId}/settings?section=connections#issues`);
         await pwExpect(page.getByRole("heading", { name: "Issue tracker" })).toHaveCount(0);
         await pwExpect(page.getByText(/Want this in your issue tracker/)).toHaveCount(0);
     });

@@ -42,7 +42,7 @@ export const glossaryEntries: GlossaryEntry[] = [
     { id: "site-memory", term: "Site memory", meaning: "The platform's notes about the structure of your site, kept between explorations." },
     { id: "journey", term: "Journey", meaning: "A path a real person takes through your app, such as searching and then buying." },
     { id: "plug-in", term: "Plug-in", meaning: "An extra piece of code an owner adds to teach the platform a new testing technology.", alsoCalled: ["adapter"] },
-    { id: "frameworks", term: "Frameworks", meaning: "The different technologies tests are written in, such as web, API, Android or Windows desktop. Settings, then Frameworks, holds their settings." },
+    { id: "frameworks", term: "Frameworks", meaning: "The different technologies tests are written in, such as web, API, Android or Windows desktop. Settings, then General, then Frameworks, holds their settings." },
     { id: "emulator", term: "Emulator", meaning: "A phone imitation that runs on a computer, like a flight simulator but for phones." },
     { id: "git-repository", term: "Git repository", meaning: "A project folder kept in Git, where developers store their code and its history." },
     { id: "library", term: "Library", meaning: "The pieces tests share. Reusable steps, shared elements and helpers are under Test scripts; test data and test accounts are under Settings." },

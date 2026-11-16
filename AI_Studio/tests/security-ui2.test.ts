@@ -171,7 +171,7 @@ describe("notification settings", () => {
         await visit(`#/projects/${p.id}/security/notifications`);
         await pwExpect(page.getByText("No alert channels yet", { exact: true })).toBeVisible();
         // Alerts are a section of the project's Settings (round 25; the place was called Settings, as the link's words still say).
-        await pwExpect(page.getByRole("link", { name: "Open Settings, Alerts", exact: true })).toHaveAttribute("href", `#/projects/${p.id}/settings?section=alerts`);
+        await pwExpect(page.getByRole("link", { name: "Open Settings, Alerts", exact: true })).toHaveAttribute("href", `#/projects/${p.id}/settings?section=connections#alerts`);
         await pwExpect(page.getByRole("checkbox", { name: /New critical or high findings/ })).toBeChecked();
         await pwExpect(page.getByRole("checkbox", { name: /An assessment fails/ })).toBeChecked();
         await pwExpect(page.getByRole("checkbox", { name: /Every assessment that ends/ })).not.toBeChecked();
@@ -237,7 +237,7 @@ describe("the application form: saved sign-in and sensitive workflows", () => {
         await pwExpect(signIn.locator("option")).toHaveText(["No sign-in: visit as an anonymous visitor", "The project’s own sign-in, saved sign-in ready", "Test account “admin”, no saved sign-in yet"]);
         await signIn.selectOption("admin");
         await pwExpect(page.getByTestId("sa-signin-warning")).toContainText(MISSING_ADMIN.message);
-        await pwExpect(page.getByTestId("sa-signin-warning").getByRole("link", { name: "Open Test accounts" })).toHaveAttribute("href", `#/projects/${p.id}/settings?section=accounts`);
+        await pwExpect(page.getByTestId("sa-signin-warning").getByRole("link", { name: "Open Test accounts" })).toHaveAttribute("href", `#/projects/${p.id}/settings?section=signin#accounts`);
         await signIn.selectOption("main");
         await pwExpect(page.getByTestId("sa-signin-warning")).toHaveCount(0);
         await pwExpect(page.getByTestId("sa-signin-state")).toHaveText(READY_MAIN.message);

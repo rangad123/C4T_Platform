@@ -246,6 +246,25 @@ describe("the tabs follow the project's kind", () => {
         await pwExpect(page.getByRole("heading", { name: "Test scripts", level: 2 })).toBeVisible();
         await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(0);
     });
+
+    it("Settings has a Mobile app tab only for a project that tests a phone app", async () => {
+        const settingsTabs = () => page.getByRole("navigation", { name: "Settings sections" }).locator("a.subtab");
+        for (const [id, phone] of [[agent, false], [ran, false], [code, true], [mixed, true]] as const) {
+            await visit(routes.projectSettings(id, "mobile"));
+            const want = ["General", "Members", "Sign-in", "Environments", "Test data", "Connections", ...(phone ? ["Mobile app"] : [])];
+            await pwExpect(settingsTabs()).toHaveText(want);
+            // An old Mobile app link on a web project opens General instead.
+            await pwExpect(page.getByRole("navigation", { name: "Settings sections" }).locator('[aria-current="page"]')).toHaveText(phone ? "Mobile app" : "General");
+        }
+        // On a phone project Mobile app is a titled row with a summary and Change; the form opens on request.
+        await visit(routes.projectSettings(code, "mobile"));
+        const row = page.getByTestId("setting-mobile");
+        await pwExpect(row.getByRole("heading", { name: "Mobile app", exact: true })).toBeVisible();
+        await pwExpect(row.locator(".setting-text .t-secondary")).not.toHaveText("");
+        await pwExpect(row.locator(".setting-body")).toHaveCount(0);
+        await row.getByRole("button", { name: "Change mobile app", exact: true }).click();
+        await pwExpect(row.locator(".setting-body")).toBeVisible();
+    });
 });
 
 describe("the project header sits above the tabs on every place", () => {

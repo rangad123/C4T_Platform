@@ -76,7 +76,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
                     { key: "token", label: "API token", secret: true, hint: TOKEN_HINT },
                     { key: "issueType", label: "Issue type", initial: "Bug" },
                 ],
-                where: { label: "Issues", section: "issues" },
+                where: { label: "Connections", section: "issues" },
             },
             {
                 kind: "github",
@@ -89,7 +89,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
                     { key: "token", label: "Access token", secret: true, hint: `${TOKEN_HINT} It needs to create issues in this repository.` },
                     { key: "apiUrl", label: "GitHub Enterprise API address", optional: true, hint: "Only for GitHub Enterprise. Leave empty for github.com." },
                 ],
-                where: { label: "Issues", section: "issues" },
+                where: { label: "Connections", section: "issues" },
             },
             {
                 kind: "notion",
@@ -101,7 +101,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
                     { key: "titleProperty", label: "Title property", initial: "Name" },
                     { key: "token", label: "Integration token", secret: true, hint: TOKEN_HINT },
                 ],
-                where: { label: "Issues", section: "issues" },
+                where: { label: "Connections", section: "issues" },
             },
         ],
     },
@@ -120,7 +120,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
                     { key: "project", label: "Project", placeholder: "shop-web" },
                     { key: "token", label: "Token", secret: true, hint: `${TOKEN_HINT} It only needs to read issues and projects.` },
                 ],
-                where: { label: "Issues", section: "issues" },
+                where: { label: "Connections", section: "issues" },
             },
         ],
     },
@@ -134,7 +134,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
                 icon: MessageSquare,
                 what: "Post to a Slack channel when a run fails, a test breaks again, or tests recover.",
                 fields: [{ key: "url", label: "Incoming webhook address", secret: true, placeholder: "https://hooks.slack.com/services/…", hint: "Anyone with this address can post to the channel, so it is stored encrypted and only its host is shown." }],
-                where: { label: "Alerts", section: "alerts" },
+                where: { label: "Connections", section: "alerts" },
             },
             {
                 kind: "teams",
@@ -142,7 +142,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
                 icon: Users,
                 what: "Post a card to a Teams channel through a Workflows webhook.",
                 fields: [{ key: "url", label: "Workflows webhook address", secret: true, hint: "Stored encrypted; only its host is shown." }],
-                where: { label: "Alerts", section: "alerts" },
+                where: { label: "Connections", section: "alerts" },
             },
             {
                 kind: "webhook",
@@ -150,9 +150,9 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
                 icon: Webhook,
                 what: "Send each alert as JSON to an address of yours.",
                 fields: [{ key: "url", label: "Address", secret: true, placeholder: "https://example.com/hooks/ai-studio", hint: "Stored encrypted; only its host is shown." }],
-                where: { label: "Alerts", section: "alerts" },
+                where: { label: "Connections", section: "alerts" },
             },
-            { kind: "email", name: "Email", icon: Mail, what: "Email the alerts to the people you choose. The recipients belong to each project, so it is set up there.", where: { label: "Alerts", section: "alerts" } },
+            { kind: "email", name: "Email", icon: Mail, what: "Email the alerts to the people you choose. The recipients belong to each project, so it is set up there.", where: { label: "Connections", section: "alerts" } },
         ],
     },
     {
@@ -161,7 +161,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
         entries: [
             { kind: "git", name: "Git import", icon: GitBranch, what: "Import Playwright tests from a GitHub, GitLab or other Git repository. The access token is used for that download and never stored, so there is nothing to share.", where: { label: "Test scripts", scripts: true } },
             { kind: "device_farm", name: "Device farms", icon: Smartphone, what: "Run phone tests on BrowserStack, Sauce Labs or LambdaTest devices. Each project chooses its own devices, so it is set up there.", where: { label: "Mobile", section: "mobile" } },
-            { kind: "mailbox", name: "Test mailbox", icon: Inbox, what: "Read the one-time codes and links a sign-in sends by email. Each project has its own mailbox, so it is set up there.", where: { label: "Test accounts", section: "accounts" } },
+            { kind: "mailbox", name: "Test mailbox", icon: Inbox, what: "Read the one-time codes and links a sign-in sends by email. Each project has its own mailbox, so it is set up there.", where: { label: "Sign-in", section: "accounts" } },
         ],
     },
 ];

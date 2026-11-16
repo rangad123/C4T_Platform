@@ -110,14 +110,6 @@ function SignInCard({ projectId, data, justSaved, onSaved }: { projectId: string
                         </>
                     )}
                 </p>
-                <ul className="bullets t-secondary" data-testid="sign-in-elsewhere">
-                    <li>
-                        An environment can have its own sign-in, used when a run uses that environment: <a href={routes.projectSettings(projectId, "environments")}>Environments</a>.
-                    </li>
-                    <li>
-                        To check what different users can see and do, add them under <a href={routes.projectSettings(projectId, "accounts")}>Test accounts</a>.
-                    </li>
-                </ul>
             </div>
 
             {data.site === null && (

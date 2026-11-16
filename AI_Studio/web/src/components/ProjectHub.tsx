@@ -37,6 +37,27 @@ export function ProjectHub({ id, place, title, subtitle, sections, current, href
     useEffect(() => {
         nav.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ inline: "center", block: "nearest" });
     }, [active.key]);
+    // A link to one part of a section (`…?section=signin#accounts`, lib/router.ts) brings that part into view and moves focus to it.
+    const part = location.hash.split("#")[2];
+    useEffect(() => {
+        const el = part ? document.getElementById(part) : null;
+        if (!el) return;
+        el.focus({ preventScroll: true });
+        // The cards above it load after this and push it down: keep it in view until the person scrolls, or for 3 s.
+        const keep = () => el.scrollIntoView?.({ block: "start" });
+        keep();
+        const watch = new ResizeObserver(keep);
+        watch.observe(document.body);
+        const stop = () => watch.disconnect();
+        const timer = setTimeout(stop, 3000);
+        const events = ["wheel", "touchmove", "keydown", "mousedown"] as const;
+        for (const e of events) addEventListener(e, stop, { once: true });
+        return () => {
+            stop();
+            clearTimeout(timer);
+            for (const e of events) removeEventListener(e, stop);
+        };
+    }, [active.key, part]);
     return (
         <ProjectAccessProvider projectId={id} project={project.data}>
             <ProjectHead project={project.data} failed={project.error ? title : undefined} />

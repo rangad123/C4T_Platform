@@ -90,8 +90,8 @@ export const platform: Topic[] = [
         what: "See how much disk the files use, remove old files, and back up a project.",
         why: "You keep the disk from filling up, and you keep a copy.",
         steps: [
-            step("Open Settings, then Storage and backup.", "Settings", "Storage and backup"),
-            step("Check the number of days old files are kept, and change it if you need to."),
+            step("Open Settings, then Storage and backup under General.", "Settings", "Storage and backup", "General"),
+            step("Check how many days old files are kept, and change it if needed."),
             step("Read the preview of what would go, then confirm."),
             step("Choose Download backup to save the project as a zip file.", "Download backup"),
         ],
@@ -222,7 +222,7 @@ export const platform: Topic[] = [
         what: "The few settings that change how web, API, Android and Windows tests run.",
         why: "You raise a time limit for a slow app, or turn a kind of test off.",
         steps: [
-            step("Open Settings, then Frameworks, then Change.", "Settings", "Frameworks", "Change"),
+            step("Open Settings, then General, then Change under Frameworks.", "Settings", "General", "Change", "Frameworks"),
             step("Find the kind of test. It shows where it can run."),
             step("Change its on and off switch, or a setting such as the test time limit."),
             step("Save your change."),

@@ -294,6 +294,11 @@ export class SecurityFake {
             if (method === "GET" && rest === "notes") return { body: { notes: [], max: 50 } };
             if (method === "GET" && rest === "app-details") return { body: { webUrl: null, android: { apk: null, appPackage: null, playStoreUrl: null }, ios: { ipa: null, bundleId: null, appStoreUrl: null } } };
             if (method === "GET" && rest === "schedules") return { body: { serverTime: new Date().toISOString(), timezone: { name: "UTC", utcOffsetMinutes: 0 }, schedulerEnabled: false, schedules: [] } };
+            // Frameworks is a part of Settings > General (shown as its summary row): the platform's standard settings.
+            if (method === "GET" && rest === "framework-settings") {
+                const settings = { enabled: {}, web: { headless: true, workers: null, testTimeoutSeconds: 30 }, api: { testTimeoutSeconds: 30 }, android: { keepEmulator: false, defaultAvd: "", testTimeoutSeconds: 120 }, windows: { testTimeoutSeconds: 120, startTimeoutSeconds: 30 }, ios: { keepSimulator: false, defaultSimulator: "", testTimeoutSeconds: 120 } };
+                return { body: { settings, defaults: settings } };
+            }
             if (method === "GET" && rest === "storage") return { body: { project: { id: proj.id, name: proj.name }, generatedAt: new Date().toISOString(), truncated: false, usage: { bytes: 0, text: "0 B" }, removed: { files: 0, bytes: 0, text: "" }, retention: { enabled: false, source: "default" }, needsSecrets: [] } };
             return undefined;
         }

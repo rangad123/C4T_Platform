@@ -227,7 +227,7 @@ export const checks: Topic[] = [
         what: "Checks that pages meant for admins cannot be opened by other people.",
         why: "You catch anyone can open the admin page mistakes.",
         steps: [
-            step("Open Settings, then Test accounts, and add named accounts such as user and admin.", "Settings", "Test accounts"),
+            step("Open Settings, then Sign-in, and under Test accounts add named accounts such as user and admin.", "Settings", "Sign-in", "Test accounts"),
             step("Explore your app. The platform signs in as each account and as a visitor."),
             step("Read any finding that says possible broken access control."),
         ],

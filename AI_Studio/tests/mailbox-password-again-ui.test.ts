@@ -50,13 +50,15 @@ describe("the test mailbox form", () => {
         const page = await (await browser.newContext()).newPage();
         await page.goto(`${BASE}/#/projects/${projectId}/settings?section=accounts`);
         await pwExpect(page.getByRole("heading", { name: "Test mailbox", exact: true })).toBeVisible();
-        const save = page.getByRole("button", { name: "Save the mailbox" });
-        const pass = page.getByLabel("Password", { exact: true });
+        // The mailbox is on the Sign-in tab, under the project's own sign-in (which has a Password field too).
+        const mailbox = page.getByRole("region", { name: "Test mailbox", exact: true });
+        const save = mailbox.getByRole("button", { name: "Save the mailbox" });
+        const pass = mailbox.getByLabel("Password", { exact: true });
         const again = "Enter the password again: the saved one is only sent to the server it was entered for.";
         await pwExpect(pass).toHaveAttribute("placeholder", "Saved — leave empty to keep");
         await pwExpect(save).toBeEnabled();
 
-        await page.getByLabel("Server").fill("imap.elsewhere.example");
+        await mailbox.getByLabel("Server").fill("imap.elsewhere.example");
         await pwExpect(page.getByText(again)).toBeVisible();
         await pwExpect(pass).toHaveAccessibleDescription(again);
         await pwExpect(save).toBeDisabled();
@@ -65,9 +67,9 @@ describe("the test mailbox form", () => {
         await pass.fill("");
 
         // Back to the saved server, with TLS turned off: still a different place to send the password.
-        await page.getByLabel("Server").fill("imap.example.com");
+        await mailbox.getByLabel("Server").fill("imap.example.com");
         await pwExpect(page.getByText(again)).toHaveCount(0);
-        await page.getByLabel(/Use TLS/).uncheck();
+        await mailbox.getByLabel(/Use TLS/).uncheck();
         await pwExpect(page.getByText(again)).toBeVisible();
         await pwExpect(save).toBeDisabled();
         await page.context().close();

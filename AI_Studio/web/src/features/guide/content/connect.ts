@@ -10,7 +10,7 @@ export const connect: Topic[] = [
         what: "Turn a problem a test found into an issue in GitHub, Jira or Notion.",
         why: "You hand a problem to the people who fix it, with the evidence.",
         steps: [
-            step("Open Settings, then Issue tracker.", "Settings", "Issue tracker"),
+            step("Open Settings, then Connections, and find Issue tracker.", "Settings", "Connections", "Issue tracker"),
             step("Connect GitHub, Jira or Notion. Each asks for an address and a secret code from that tool."),
             step("Wait while the platform tests the connection before saving it."),
             step("Open a failing test and choose Create issue.", "Create issue"),
@@ -32,7 +32,7 @@ export const connect: Topic[] = [
         what: "Shows errors from your live app that might relate to a failed test.",
         why: "A failure may already be known to your error tracker.",
         steps: [
-            step("Open Settings, then Issue tracker.", "Settings", "Issue tracker"),
+            step("Open Settings, then Connections, and find Issue tracker.", "Settings", "Connections", "Issue tracker"),
             step("Connect Sentry with your organisation, project and Sentry auth token.", "Sentry auth token"),
             step("Open a failed test and look for Related errors in Sentry.", "Related errors in Sentry"),
         ],
