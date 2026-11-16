@@ -337,6 +337,15 @@ const norm = (t: string) => t.replace(/\s+/g, " ").trim();
  * The key a rule is matched by across analyses: sha256 of its kind, what it expects and what it is linked to, ignoring only spacing and
  * the order of links, so a person's decision follows exactly the text they read. Its wording, ref, source and confidence are not part of it.
  */
+/**
+ * The key a workflow is matched by across analyses: sha256 of its steps in order (each step's action, page and endpoint), ignoring only
+ * spacing. Its name is not part of it, so a renamed workflow keeps a person's decision (the new name is shown beside the decided one).
+ */
+export function workflowFingerprint(w: { steps: ReadonlyArray<{ order?: number; action: string; page?: string; endpoint?: string }> }): string {
+    const key = [...w.steps].map((s) => [norm(s.action), norm(s.page ?? ""), norm(s.endpoint ?? "")]);
+    return createHash("sha256").update(JSON.stringify(["workflow", key])).digest("hex");
+}
+
 export function ruleFingerprint(rule: Pick<Rule, "kind" | "expected" | "entities" | "workflows" | "endpoints">): string {
     const links = (xs: string[]) => [...new Set(xs.map(norm))].sort();
     const key = [rule.kind, norm(rule.expected), links(rule.entities), links(rule.workflows), links(rule.endpoints)];

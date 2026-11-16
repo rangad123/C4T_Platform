@@ -38,6 +38,14 @@ export interface Workflow {
     id: string;
     name: string;
     sourceType: SourceType;
+    steps?: Array<{ order: number; action: string }>;
+    evidence?: Evidence[];
+    /** Which version of the workflow a person decides about; sent back with a decision. */
+    fingerprint?: string;
+    /** A person's decision about an inferred workflow, kept across readings. */
+    decision?: { status: "confirmed" | "rejected"; decidedBy: string | null; decidedAt: string } | null;
+    /** A later reading's name for a decided workflow; it keeps the name the person decided about. */
+    rewordedName?: string;
 }
 
 export interface AppVersion {
@@ -120,7 +128,10 @@ const STATING: ReadonlySet<SourceType> = new Set(["requirement", "prd", "openapi
 export const isStated = (t: SourceType): boolean => STATING.has(t);
 
 export const EVIDENCE_GONE = "A later reading no longer found what this rule was based on. Check that it still holds.";
-export const INFERRED_WORKFLOW = "Tests use this rule once the workflow is stated in a requirements document.";
+export const UNCONFIRMED_WORKFLOW = "Tests use this rule once this workflow is confirmed.";
+
+/** Tests use a workflow when a source states it or a person confirmed it. */
+export const workflowUsable = (w: Workflow): boolean => isStated(w.sourceType) || w.decision?.status === "confirmed";
 
 /** The new wording of a decided rule, as one line; empty when it was not reworded. */
 export function rewordedLine(r: Pick<Rule, "rewordedDescription" | "rewordedExpected">): string {

@@ -10,10 +10,10 @@ import { loadConfig } from "../src/config.js";
 import { analyseAfterExploration, analysisState, ANALYSIS_RUNNING, ANALYSIS_STOPPED, AppAnalysis, schemaKey, startAnalysis } from "../src/platform/app-analysis.js";
 import { AgentInputsStore } from "../src/platform/agent-inputs-store.js";
 import { secretBoxOf } from "../src/platform/ai-config.js";
-import { AppIntelStore } from "../src/platform/app-intel-store.js";
+import { AppIntelStore, WORKFLOW_CHANGED } from "../src/platform/app-intel-store.js";
 import { permissionRuleFor } from "../src/platform/auth/roles.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
-import { AGENT_PROJECTS_ONLY, ONLY_A_PERSON_LABELS, RULE_CHANGED, SAY_WHICH_RULE } from "../src/platform/routes/app-intel.js";
+import { AGENT_PROJECTS_ONLY, ONLY_A_PERSON_LABELS, ONLY_A_PERSON_WORKFLOWS, RULE_CHANGED, SAY_WHICH_RULE, SAY_WHICH_WORKFLOW } from "../src/platform/routes/app-intel.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { MAX_SCHEMA_INPUT } from "../src/engine/intel/sources/db-schema.js";
@@ -232,5 +232,78 @@ describe("starting an analysis", () => {
         const r = await hook;
         expect(r.result?.version ?? null).toBeNull();
         expect(analysisState(platform.db, pid).running).toBeNull();
+    });
+});
+
+describe("a person's decision about a workflow", () => {
+    let pid: string;
+    let wf: { id: string; fingerprint: string };
+    const STEPS = [{ order: 0, action: "Open the cart", page: "page:/cart" }, { order: 1, action: "Pay" }];
+    const version = (name: string) =>
+        intel.addVersion({ projectId: pid, model: { workflows: [{ id: "journey-1-checkout", name, steps: STEPS, sourceType: "inferred", evidence: [{ kind: "page", ref: "/cart" }] }] } });
+    const url = () => `/api/projects/${pid}/intel/workflows/${wf.id}/decision`;
+    const latestWorkflow = async () => (await app.inject({ method: "GET", url: `/api/projects/${pid}/intel/models/latest`, headers })).json().model.workflows[0];
+
+    beforeAll(async () => {
+        pid = ((await app.inject({ method: "POST", url: "/api/projects", headers, payload: { name: "Intel API workflows", platforms: ["web"], testingModes: ["agent"] } })).json() as { id: string }).id;
+        await version("Checkout");
+        wf = await latestWorkflow();
+    });
+
+    it("is shown with each workflow: its fingerprint, and no decision yet", async () => {
+        expect(wf).toMatchObject({ id: "journey-1-checkout", sourceType: "inferred", decision: null, fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    });
+
+    it("needs a person, the fingerprint of what they read, and a workflow of this project", async () => {
+        expect(permissionRuleFor("PUT", "/api/projects/:id/intel/workflows/:workflowId/decision")).toBe("ai_studio.tests.write");
+        const key = await app.inject({ method: "PUT", url: url(), headers, payload: { status: "confirmed", fingerprint: wf.fingerprint } });
+        expect(key.statusCode).toBe(403);
+        expect(key.json().error).toBe(ONLY_A_PERSON_WORKFLOWS);
+        const as = personHeaders();
+        const missing = await app.inject({ method: "PUT", url: url(), headers: as, payload: { status: "confirmed" } });
+        expect([missing.statusCode, missing.json().error]).toEqual([400, SAY_WHICH_WORKFLOW]);
+        const stale = await app.inject({ method: "PUT", url: url(), headers: as, payload: { status: "confirmed", fingerprint: "0".repeat(64) } });
+        expect([stale.statusCode, stale.json().error]).toEqual([409, WORKFLOW_CHANGED]);
+        expect((await app.inject({ method: "PUT", url: `/api/projects/${otherId}/intel/workflows/${wf.id}/decision`, headers: as, payload: { status: "confirmed", fingerprint: wf.fingerprint } })).statusCode).toBe(404);
+        const code = ((await app.inject({ method: "POST", url: "/api/projects", headers, payload: { name: "Intel API workflows code", platforms: ["web"], testingModes: ["code"] } })).json() as { id: string }).id;
+        expect((await app.inject({ method: "PUT", url: `/api/projects/${code}/intel/workflows/${wf.id}/decision`, headers: as, payload: { status: "confirmed", fingerprint: wf.fingerprint } })).statusCode).toBe(409);
+        expect((await latestWorkflow()).decision).toBeNull();
+    });
+
+    it("confirmed, follows the same steps into a later analysis, keeps the decided name and shows the new one beside it", async () => {
+        const as = personHeaders();
+        const res = await app.inject({ method: "PUT", url: url(), headers: as, payload: { status: "confirmed", fingerprint: wf.fingerprint } });
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toMatchObject({ sourceType: "inferred", decision: { status: "confirmed", decidedBy: expect.any(String) } });
+        await version("Buy things");
+        expect(await latestWorkflow()).toMatchObject({ name: "Checkout", rewordedName: "Buy things", sourceType: "inferred", fingerprint: wf.fingerprint, decision: { status: "confirmed" } });
+    });
+
+    it("confirmed, gives the test writer the confirmed rule of that workflow; rejected, neither the workflow nor its rules", async () => {
+        const { appKnowledgeOf } = await import("../src/platform/job-runner.js");
+        const { rulesForScenario } = await import("../src/engine/planning/planner.js");
+        const r = await intel.addRule(pid, { ref: "R-wf", kind: "constraint", description: "Paying", expected: "Paying empties the cart.", sourceType: "inferred", sourceRef: "", explicitness: "inferred", confidence: 0.6, workflows: ["journey-1-checkout"] });
+        await intel.decide(pid, r.id, "confirmed", "person-1", r.fingerprint);
+        const k = (await appKnowledgeOf(platform.repo, pid)).appKnowledge!;
+        expect(k.workflows.map((w) => [w.name, w.sourceType])).toEqual([["Checkout", "user_confirmed"]]);
+        expect(rulesForScenario({ journey: "Checkout" }, k).map((x) => x.ref)).toEqual(["R-wf"]);
+        const as = personHeaders();
+        expect((await app.inject({ method: "PUT", url: url(), headers: as, payload: { status: "rejected", fingerprint: wf.fingerprint } })).json().decision.status).toBe("rejected");
+        const rejected = (await appKnowledgeOf(platform.repo, pid)).appKnowledge!;
+        expect(rejected.workflows).toEqual([]);
+        expect(rulesForScenario({ journey: "Checkout" }, rejected)).toEqual([]);
+        // Undone: no decision, and a guessed workflow is again not given to the writer.
+        expect((await app.inject({ method: "PUT", url: url(), headers: as, payload: { status: "unverified", fingerprint: wf.fingerprint } })).json().decision).toBeNull();
+        expect((await appKnowledgeOf(platform.repo, pid)).appKnowledge!.workflows).toEqual([]);
+    });
+
+    it("rejected, leaves out even a workflow a document states", async () => {
+        const { appKnowledgeOf } = await import("../src/platform/job-runner.js");
+        await intel.addVersion({ projectId: pid, model: { workflows: [{ id: "wf-refund", name: "Refund", steps: [{ order: 0, action: "Ask for a refund" }], sourceType: "requirement", evidence: [{ kind: "quote", ref: "req.md#L3" }] }] } });
+        expect((await appKnowledgeOf(platform.repo, pid)).appKnowledge!.workflows.map((w) => w.name)).toEqual(["Refund"]);
+        const stated = await latestWorkflow();
+        const res = await app.inject({ method: "PUT", url: `/api/projects/${pid}/intel/workflows/wf-refund/decision`, headers: personHeaders(), payload: { status: "rejected", fingerprint: stated.fingerprint } });
+        expect(res.statusCode).toBe(200);
+        expect((await appKnowledgeOf(platform.repo, pid)).appKnowledge!.workflows).toEqual([]);
     });
 });

@@ -6,16 +6,17 @@ import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { useHere } from "../auth/project-access";
-import { EVIDENCE_GONE, INFERRED_WORKFLOW, isStated, RULE_SOURCE_WORDS, rewordedLine, useLatestModel, type Rule, type RuleStatus, type Workflow } from "./understanding";
+import { EVIDENCE_GONE, isStated, RULE_SOURCE_WORDS, rewordedLine, UNCONFIRMED_WORKFLOW, useLatestModel, workflowUsable, type Evidence, type Rule, type RuleStatus, type Workflow } from "./understanding";
 import "./understanding.css";
 
 const DECIDED: Record<Exclude<RuleStatus, "unverified">, string> = { confirmed: "Confirmed", rejected: "Rejected" };
+const workflowAnchor = (id: string) => `workflow-${id.replace(/[^\w-]/g, "_")}`;
 
 /**
- * "Rules to confirm" on the Requirements tab of a project tested by the AI agent: the business rules the analysis found that no person
- * has confirmed yet, each with where it came from, how sure the analysis is and the lines it rests on, plus any rule whose evidence a
- * later analysis no longer found. Tests treat a rule as expected behaviour only once it is stated by a source or confirmed here. People
- * who may only look see the rules without the buttons.
+ * "Rules to confirm" on the Requirements tab of a project tested by the AI agent: the business rules found that no person has confirmed
+ * yet, each with where it came from, how sure we are and the lines it rests on, plus any rule whose evidence a later reading no longer
+ * found; and the workflows that were only inferred, which tests follow once a person confirms them. People who may only look see both
+ * without the buttons.
  */
 export function RulesToConfirm({ projectId }: { projectId: string }) {
     const rules = useFetch<{ rules: Rule[] }>(`/projects/${projectId}/intel/rules`);
@@ -24,10 +25,13 @@ export function RulesToConfirm({ projectId }: { projectId: string }) {
     const all = rules.data?.rules ?? [];
     // Waiting rules, and decided ones a person should look at again: evidence gone, or reworded since the decision.
     const shown = all.filter((r) => r.status === "unverified" || r.evidenceGone || rewordedLine(r));
-    const workflows = new Map((latest.data?.model.workflows ?? []).map((w) => [w.id, w]));
+    const allWorkflows = latest.data?.model.workflows ?? [];
+    const workflows = new Map(allWorkflows.map((w) => [w.id, w]));
+    // Inferred workflows nobody decided yet, and decided ones renamed since.
+    const toConfirm = allWorkflows.filter((w) => !isStated(w.sourceType) && (!w.decision || w.rewordedName));
 
-    if (rules.loading) return <ListSkeleton rows={2} />;
-    if (!rules.error && all.length === 0) return null;
+    if (rules.loading || latest.loading) return <ListSkeleton rows={2} />;
+    if (!rules.error && all.length === 0 && toConfirm.length === 0) return null;
     return (
         <section aria-labelledby="rules-to-confirm-title" className="stack-sm" data-testid="rules-to-confirm">
             <div className="section-head">
@@ -52,29 +56,92 @@ export function RulesToConfirm({ projectId }: { projectId: string }) {
                     ))}
                 </ul>
             )}
+            {toConfirm.length > 0 && (
+                <div className="understanding-group" data-testid="workflows-to-confirm">
+                    <h3 className="t-card" id="workflows-to-confirm-title">
+                        Workflows to confirm
+                    </h3>
+                    <p className="t-secondary">Ways through the application we worked out ourselves. Tests follow a workflow once a person confirms it.</p>
+                    <ul className="card list divided" aria-labelledby="workflows-to-confirm-title">
+                        {toConfirm.map((w) => (
+                            <li key={w.id} className="card-pad">
+                                <WorkflowRow projectId={projectId} workflow={w} canWrite={canWrite} onDecided={latest.reload} />
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
         </section>
     );
 }
 
-function RuleRow({ projectId, rule: r, workflows, canWrite, onDecided }: { projectId: string; rule: Rule; workflows: Map<string, Workflow>; canWrite: boolean; onDecided: () => Promise<void> }) {
+/**
+ * A decision about a rule or a workflow: the version read is sent along (a rule's undo needs none, a workflow's always does); when it
+ * changed meanwhile, the sentence is shown and the list read again.
+ */
+function useDecision(url: string, fingerprint: string | undefined, onDecided: () => Promise<void>, undoNeedsFingerprint = false) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-    const linked = r.workflows.map((id) => workflows.get(id)).filter((w): w is Workflow => Boolean(w));
-
     async function decide(status: RuleStatus) {
         setError("");
         setBusy(true);
         try {
-            await api(`/projects/${projectId}/intel/rules/${encodeURIComponent(r.id)}/decision`, { method: "PUT", body: status === "unverified" ? { status } : { status, fingerprint: r.fingerprint } });
+            await api(url, { method: "PUT", body: status === "unverified" && !undoNeedsFingerprint ? { status } : { status, fingerprint } });
             await onDecided();
         } catch (e) {
             setError(describeApiError(e));
-            // The rule changed since it was read: show it as it is now, with the sentence saying why nothing was decided.
             if (e instanceof ApiError && e.status === 409) await onDecided();
         } finally {
             setBusy(false);
         }
     }
+    return { busy, error, decide };
+}
+
+function Decide({ status, busy, decide }: { status: RuleStatus; busy: boolean; decide: (s: RuleStatus) => Promise<void> }) {
+    return (
+        <div className="rule-actions">
+            {status === "unverified" ? (
+                <>
+                    <Button size="sm" variant="primary" icon={Check} loading={busy} onClick={() => void decide("confirmed")}>
+                        Confirm
+                    </Button>
+                    <Button size="sm" icon={X} disabled={busy} onClick={() => void decide("rejected")}>
+                        Reject
+                    </Button>
+                </>
+            ) : (
+                <Button size="sm" icon={Undo2} loading={busy} onClick={() => void decide("unverified")}>
+                    Undo the decision
+                </Button>
+            )}
+        </div>
+    );
+}
+
+function EvidenceList({ evidence }: { evidence: Evidence[] }) {
+    if (evidence.length === 0) return null;
+    return (
+        <ul className="understanding-list" aria-label="Evidence">
+            {evidence.map((e, i) => (
+                <li key={`${e.ref}-${i}`}>
+                    <span className="t-meta">{e.ref}</span>
+                    {e.excerpt && <blockquote>{e.excerpt}</blockquote>}
+                </li>
+            ))}
+        </ul>
+    );
+}
+
+function RuleRow({ projectId, rule: r, workflows, canWrite, onDecided }: { projectId: string; rule: Rule; workflows: Map<string, Workflow>; canWrite: boolean; onDecided: () => Promise<void> }) {
+    const { busy, error, decide } = useDecision(`/projects/${projectId}/intel/rules/${encodeURIComponent(r.id)}/decision`, r.fingerprint, onDecided);
+    const linked = r.workflows.map((id) => workflows.get(id)).filter((w): w is Workflow => Boolean(w));
+    // The workflow is further down the same section: bring it into view and put the keyboard on it.
+    const goTo = (w: Workflow) => {
+        const el = document.getElementById(workflowAnchor(w.id));
+        el?.scrollIntoView({ block: "center" });
+        el?.focus({ preventScroll: true });
+    };
 
     return (
         <article className="understanding-rule" aria-label={r.description} data-testid="rule">
@@ -99,44 +166,66 @@ function RuleRow({ projectId, rule: r, workflows, canWrite, onDecided }: { proje
                     {EVIDENCE_GONE}
                 </p>
             )}
-            {r.evidence.length > 0 && (
-                <ul className="understanding-list" aria-label="Evidence">
-                    {r.evidence.map((e, i) => (
-                        <li key={`${e.ref}-${i}`}>
-                            <span className="t-meta">{e.ref}</span>
-                            {e.excerpt && <blockquote>{e.excerpt}</blockquote>}
-                        </li>
-                    ))}
-                </ul>
-            )}
-            {linked.map((w) => (
-                <p key={w.id} className="t-secondary" data-testid="rule-workflow">
-                    Workflow: {w.name}.{!isStated(w.sourceType) && ` ${INFERRED_WORKFLOW}`}
-                </p>
-            ))}
+            <EvidenceList evidence={r.evidence} />
+            {linked.map((w) => {
+                const waiting = !workflowUsable(w) && w.decision?.status !== "rejected";
+                return (
+                    <p key={w.id} className="t-secondary" data-testid="rule-workflow">
+                        Workflow: {w.name}
+                        {w.decision?.status === "rejected" ? " (rejected)." : "."}
+                        {waiting && ` ${UNCONFIRMED_WORKFLOW}`}
+                        {waiting && canWrite && (
+                            <>
+                                {" "}
+                                <button type="button" className="btn-link" onClick={() => goTo(w)}>
+                                    Confirm the workflow
+                                </button>
+                            </>
+                        )}
+                    </p>
+                );
+            })}
             {error && (
                 <Callout tone="warning">
                     <span data-testid="rule-error">{error}</span>
                 </Callout>
             )}
-            {canWrite && (
-                <div className="rule-actions">
-                    {r.status === "unverified" ? (
-                        <>
-                            <Button size="sm" variant="primary" icon={Check} loading={busy} onClick={() => void decide("confirmed")}>
-                                Confirm
-                            </Button>
-                            <Button size="sm" icon={X} disabled={busy} onClick={() => void decide("rejected")}>
-                                Reject
-                            </Button>
-                        </>
-                    ) : (
-                        <Button size="sm" icon={Undo2} loading={busy} onClick={() => void decide("unverified")}>
-                            Undo the decision
-                        </Button>
-                    )}
-                </div>
+            {canWrite && <Decide status={r.status} busy={busy} decide={decide} />}
+        </article>
+    );
+}
+
+function WorkflowRow({ projectId, workflow: w, canWrite, onDecided }: { projectId: string; workflow: Workflow; canWrite: boolean; onDecided: () => Promise<void> }) {
+    const { busy, error, decide } = useDecision(`/projects/${projectId}/intel/workflows/${encodeURIComponent(w.id)}/decision`, w.fingerprint, onDecided, true);
+    const status: RuleStatus = w.decision?.status ?? "unverified";
+    const steps = [...(w.steps ?? [])].sort((a, b) => a.order - b.order);
+    return (
+        <article className="understanding-rule" aria-label={w.name} data-testid="workflow" id={workflowAnchor(w.id)} tabIndex={-1}>
+            <div className="rule-head">
+                <span className="t-card">{w.name}</span>
+                <Badge tone="neutral">Inferred</Badge>
+                {w.decision && <Badge tone={w.decision.status === "confirmed" ? "success" : "neutral"}>{DECIDED[w.decision.status]}</Badge>}
+            </div>
+            <p className="t-meta">From: {RULE_SOURCE_WORDS[w.sourceType] ?? "Another source"}</p>
+            {w.decision && w.rewordedName && (
+                <p className="t-secondary" data-testid="workflow-reworded">
+                    Reworded since you decided: {w.rewordedName}
+                </p>
             )}
+            {steps.length > 0 && (
+                <ol className="understanding-steps" aria-label="Steps">
+                    {steps.map((s) => (
+                        <li key={s.order}>{s.action}</li>
+                    ))}
+                </ol>
+            )}
+            <EvidenceList evidence={w.evidence ?? []} />
+            {error && (
+                <Callout tone="warning">
+                    <span data-testid="workflow-error">{error}</span>
+                </Callout>
+            )}
+            {canWrite && <Decide status={status} busy={busy} decide={decide} />}
         </article>
     );
 }

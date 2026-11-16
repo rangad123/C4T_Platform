@@ -12,6 +12,8 @@
  *   DELETE /api/projects/:id/intel/analyse                → { stopped: true } (404 when none runs)
  *   POST /api/projects/:id/intel/sources/schema?name=     the schema file's bytes (SQL or Prisma, at most 1 MB) → the source, 201
  *   DELETE /api/projects/:id/intel/sources/schema/:sourceId → { removed }
+ *   PUT /api/projects/:id/intel/workflows/:workflowId/decision { status: confirmed | rejected | unverified, fingerprint } → the workflow
+ *                                                          with its decision (409 when its steps are no longer the ones decided about)
  *   PUT /api/projects/:id/intel/app-version               { label } → the latest version, labelled by a person
  */
 import { z } from "zod";
@@ -20,7 +22,7 @@ import { MAX_SCHEMA_INPUT } from "../../engine/intel/sources/db-schema.js";
 import { aiOwnerOfActor } from "../ai-config.js";
 import { analysisState, AppAnalysis, startAnalysis, stopAnalysis } from "../app-analysis.js";
 import { ownerIdOfActor } from "../agent-store.js";
-import { AppIntelStore } from "../app-intel-store.js";
+import { AppIntelStore, withWorkflowDecisions } from "../app-intel-store.js";
 import { actorOf, assertHoldsHere } from "../auth/access.js";
 import { projectSetupOf } from "../project-setup.js";
 import { currentActor } from "../auth/actor.js";
@@ -33,6 +35,9 @@ const RuleFilter = z.object({ status: z.enum(RULE_STATUSES).optional(), explicit
 export const ONLY_A_PERSON = "Only a person can confirm or reject a rule. Sign in with your own account.";
 export const ONLY_A_PERSON_LABELS = "Only a person can name the application version. Sign in with your own account.";
 export const SAY_WHICH_RULE = "Say which version of the rule you decide about: send the fingerprint of the rule as you read it.";
+export const ONLY_A_PERSON_WORKFLOWS = "Only a person can confirm or reject a workflow. Sign in with your own account.";
+export const SAY_WHICH_WORKFLOW = "Say which version of the workflow you decide about: send the fingerprint of the workflow as you read it.";
+const WorkflowDecision = z.object({ status: z.enum(["confirmed", "rejected", "unverified"]), fingerprint: z.string().regex(/^[0-9a-f]{64}$/, "A workflow's fingerprint is 64 hexadecimal characters.").optional() }).strict();
 export const AGENT_PROJECTS_ONLY = "Application understanding is part of AI agent projects. Turn on the AI agent testing mode for this project to use it.";
 export const RULE_CHANGED = "This rule changed since you read it. Read it again, then confirm or reject it.";
 const SchemaName = z.object({ name: z.string().trim().regex(/^[\w][\w .()-]{0,199}$/, "Give the schema file a plain name (letters, digits, spaces, dots, dashes), without folders.") }).strict();
@@ -61,7 +66,20 @@ export function registerAppIntelRoutes(ctx: RouteCtx): void {
         const { version } = req.params as { version: string };
         const v = version === "latest" ? await store.latest(pid) : /^\d{1,9}$/.test(version) ? await store.version(pid, Number(version)) : undefined;
         if (!v) throw new HttpError(404, "Application model not found");
-        return v;
+        // Each workflow with its fingerprint and what a person decided about it (decisions follow the steps across analyses).
+        return { ...v, model: { ...v.model, workflows: withWorkflowDecisions(v.model.workflows, await store.workflowDecisions(pid)) } };
+    });
+
+    app.put("/api/projects/:id/intel/workflows/:workflowId/decision", async (req) => {
+        const pid = agentProject(req);
+        const { workflowId } = req.params as { workflowId: string };
+        const person = ownerIdOfActor(actorOf(req) ?? currentActor());
+        if (!person) throw new HttpError(403, ONLY_A_PERSON_WORKFLOWS);
+        const body = parsePlain(WorkflowDecision, req.body);
+        if (!body.fingerprint) throw new HttpError(400, SAY_WHICH_WORKFLOW);
+        const w = await store.decideWorkflow(pid, workflowId, body.status, person, body.fingerprint);
+        if (!w) throw new HttpError(404, "There is no workflow with that id in the latest reading of this application.");
+        return w;
     });
 
     app.get("/api/projects/:id/intel/rules", async (req) => {

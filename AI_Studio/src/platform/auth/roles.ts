@@ -197,6 +197,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/intel/models/:version": "read",
     "GET /api/projects/:id/intel/rules": "read",
     "PUT /api/projects/:id/intel/rules/:ruleId/decision": "ai_studio.tests.write",
+    "PUT /api/projects/:id/intel/workflows/:workflowId/decision": "ai_studio.tests.write",
     // Its sources and analyses (testing-engine Phase 2): anyone on the project sees the sources; adding a schema file, naming the version
     // and starting an analysis need permission to write tests.
     "GET /api/projects/:id/intel/sources": "read",

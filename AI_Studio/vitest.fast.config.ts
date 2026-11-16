@@ -240,6 +240,7 @@ export default defineConfig({
             "tests/app-analysis-job.test.ts",
             "tests/crawler-probe-guard-unit.test.ts",
             "tests/intel-hide-secrets-unit.test.ts",
+            "tests/app-intel-migration-65.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

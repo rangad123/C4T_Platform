@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-64 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 64;
+-- Equal to SQLite migration slots 1-65 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 65;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -1851,3 +1851,14 @@ CREATE TABLE app_sources (
     model_version_id TEXT REFERENCES app_model_versions(id) ON DELETE SET NULL
 );
 CREATE UNIQUE INDEX idx_app_sources_ref ON app_sources (project_id, kind, ref);
+
+CREATE TABLE app_workflow_decisions (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL,
+    decided_name TEXT NOT NULL,
+    decided_steps_json TEXT NOT NULL DEFAULT '[]',
+    decided_by TEXT NOT NULL,
+    decided_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, fingerprint)
+);

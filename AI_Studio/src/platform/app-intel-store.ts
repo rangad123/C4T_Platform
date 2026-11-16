@@ -7,7 +7,7 @@
  * guess never becomes a verified rule by itself. Nothing in test generation reads this yet.
  */
 import { randomUUID } from "node:crypto";
-import { AppModelSchema, AppVersionSchema, diffModels, RuleSchema, ruleFingerprint, SourceRecordSchema, type AppModel, type AppVersion, type ModelDiff, type Rule, type RuleStatus, type SourceKind, type SourceStatus } from "../engine/intel/model.js";
+import { AppModelSchema, AppVersionSchema, diffModels, RuleSchema, ruleFingerprint, workflowFingerprint, SourceRecordSchema, type AppModel, type AppVersion, type ModelDiff, type Rule, type RuleStatus, type SourceKind, type SourceStatus } from "../engine/intel/model.js";
 import type { CarriedRule } from "../engine/intel/carry-forward.js";
 import { HttpError } from "./http-error.js";
 import type { Sql } from "./sql.js";
@@ -75,6 +75,50 @@ ALTER TABLE app_model_versions ADD COLUMN source_fingerprints_json TEXT NOT NULL
 ALTER TABLE app_rules ADD COLUMN fingerprint TEXT;
 CREATE INDEX idx_app_rules_fingerprint ON app_rules(project_id, fingerprint);
 `;
+
+/**
+ * Slot 65: what people decided about workflows. One row per project and workflow fingerprint (its steps), so a decision follows the same
+ * workflow into later analyses; the name and steps the person decided about are kept with it.
+ */
+export const APP_WORKFLOW_DECISIONS_MIGRATION = `
+CREATE TABLE app_workflow_decisions (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,            -- engine/intel/model.ts workflowFingerprint
+    status TEXT NOT NULL,                 -- confirmed rejected
+    decided_name TEXT NOT NULL,
+    decided_steps_json TEXT NOT NULL DEFAULT '[]',
+    decided_by TEXT NOT NULL,
+    decided_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, fingerprint)
+);
+`;
+
+export const WORKFLOW_CHANGED = "This workflow changed since you read it. Read it again, then confirm or reject it.";
+
+type Workflow = AppModel["workflows"][number];
+/** A person's decision about a workflow, as the API shows it. */
+export interface WorkflowDecision {
+    status: "confirmed" | "rejected";
+    decidedBy: string;
+    decidedAt: string;
+}
+/**
+ * A workflow with its fingerprint and what a person decided about it. A decided workflow keeps the name the person decided about; a later
+ * analysis's other name for the same steps is shown as `rewordedName`.
+ */
+export type DecidedWorkflow = Workflow & { fingerprint: string; decision: WorkflowDecision | null; rewordedName?: string };
+type WorkflowDecisionRow = { project_id: string; fingerprint: string; status: string; decided_name: string; decided_steps_json: string; decided_by: string; decided_at: string };
+
+/** The workflows of a model with the decisions people made about them (matched by fingerprint, so they follow across analyses). */
+export function withWorkflowDecisions(workflows: readonly Workflow[], decisions: ReadonlyMap<string, WorkflowDecisionRow>): DecidedWorkflow[] {
+    return workflows.map((w) => {
+        const fingerprint = workflowFingerprint(w);
+        const d = decisions.get(fingerprint);
+        if (!d) return { ...w, fingerprint, decision: null };
+        const decision: WorkflowDecision = { status: d.status as WorkflowDecision["status"], decidedBy: d.decided_by, decidedAt: d.decided_at };
+        return { ...w, name: d.decided_name, fingerprint, decision, ...(d.decided_name !== w.name ? { rewordedName: w.name } : {}) };
+    });
+}
 
 export const MAX_RULES_PER_PROJECT = 2000;
 export const MAX_MODEL_BYTES = 4_000_000;
@@ -304,6 +348,46 @@ export class AppIntelStore {
             diff: r.diff_json ? (JSON.parse(r.diff_json) as ModelDiff) : null,
             appVersion: r.app_version_json ? (JSON.parse(r.app_version_json) as AppVersion) : { source: "unversioned", label: "", analysedAt: r.created_at },
         }));
+    }
+
+    /** The project's workflow decisions by fingerprint. */
+    async workflowDecisions(projectId: string): Promise<Map<string, WorkflowDecisionRow>> {
+        return new Map((await this.sql.all<WorkflowDecisionRow>("SELECT * FROM app_workflow_decisions WHERE project_id = ?", projectId)).map((r) => [r.fingerprint, r]));
+    }
+
+    /** The latest model's workflows with the decisions people made about them. */
+    async decidedWorkflows(projectId: string): Promise<{ modelVersionId: string; workflows: DecidedWorkflow[] } | undefined> {
+        const latest = await this.latest(projectId);
+        return latest ? { modelVersionId: latest.id, workflows: withWorkflowDecisions(latest.model.workflows, await this.workflowDecisions(projectId)) } : undefined;
+    }
+
+    /**
+     * A person confirms or rejects a workflow of the latest analysis (or undoes the decision). `fingerprint` names the steps they read: when
+     * the workflow's steps are other ones now, nothing changes (409). Undefined when the latest analysis has no workflow with that id.
+     */
+    async decideWorkflow(projectId: string, workflowId: string, status: "confirmed" | "rejected" | "unverified", personId: string, fingerprint: string): Promise<DecidedWorkflow | undefined> {
+        if (!personId) throw new Error("Only a person can confirm or reject a workflow.");
+        return this.sql.tx(async (t) => {
+            const latest = await t.get<VersionRow>("SELECT * FROM app_model_versions WHERE project_id = ? ORDER BY version DESC LIMIT 1", projectId);
+            const w = latest ? AppModelSchema.parse(JSON.parse(latest.model_json)).workflows.find((x) => x.id === workflowId) : undefined;
+            if (!w) return undefined;
+            const fp = workflowFingerprint(w);
+            if (fp !== fingerprint) throw new HttpError(409, WORKFLOW_CHANGED);
+            if (status === "unverified") await t.run("DELETE FROM app_workflow_decisions WHERE project_id = ? AND fingerprint = ?", projectId, fp);
+            else
+                await t.run(
+                    "INSERT INTO app_workflow_decisions (project_id, fingerprint, status, decided_name, decided_steps_json, decided_by, decided_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT (project_id, fingerprint) DO UPDATE SET status = excluded.status, decided_name = excluded.decided_name, decided_steps_json = excluded.decided_steps_json, decided_by = excluded.decided_by, decided_at = excluded.decided_at",
+                    projectId,
+                    fp,
+                    status,
+                    w.name,
+                    JSON.stringify(w.steps),
+                    personId,
+                    this.now(),
+                );
+            const rows = await t.all<WorkflowDecisionRow>("SELECT * FROM app_workflow_decisions WHERE project_id = ? AND fingerprint = ?", projectId, fp);
+            return withWorkflowDecisions([w], new Map(rows.map((r) => [r.fingerprint, r])))[0];
+        });
     }
 
     /** A person names the build the latest analysis describes. Undefined when the project has no analysis yet. */

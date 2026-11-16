@@ -60,7 +60,19 @@ a schema or an existing test states it, and **inferred** otherwise.
 - When a later analysis no longer finds what a rule rests on, the rule is kept with its decision and marked "Evidence gone", so a person
   can check that it still holds. It is never deleted.
 - A rule linked to a workflow shows the workflow's name. When that workflow is only inferred, the rule says that its tests use it once
-  the workflow is stated in a requirements document. Workflows themselves cannot be confirmed on the page yet.
+  the workflow is confirmed, with a "Confirm the workflow" link to it.
+
+## Workflows to confirm
+
+A workflow a source states (a requirements document, an existing test) is used by tests as it is. One the AI worked out itself is listed
+under "Workflows to confirm", with its steps and the pages or lines it was built from, and tests follow it only once a person confirms
+it; a rejected one is left out.
+
+- Confirm, Reject and "Undo the decision" work as for rules, for people who may change tests.
+- A decision is about the workflow's steps as the person read them. When a later reading changed a step in the meantime, nothing is
+  decided: the page says "This workflow changed since you read it. Read it again, then confirm or reject it." and shows it as it is now.
+- A decision follows the same steps into later readings. When a later reading names the workflow differently, the decided name stays
+  and the page says "Reworded since you decided: …"; "Undo the decision" takes the new name.
 - "Undo the decision" puts a confirmed or rejected rule back to waiting.
 - A decision is about the rule as the person read it. When a later analysis changed the rule in the meantime, nothing is decided: the
   page says "This rule changed since you read it. Read it again, then confirm or reject it." and shows the rule as it is now.
@@ -86,6 +98,7 @@ All under `/api/projects/:id/intel`; reading needs access to the project, everyt
 |---|---|
 | `GET /models`, `GET /models/latest` (or a version number) | the versions; one version with its model (404 before the first analysis) |
 | `GET /rules?status=&explicitness=` | `{ rules }` |
+| `PUT /workflows/:workflowId/decision` `{ status, fingerprint }` | the workflow (always with the fingerprint read; 409 when its steps changed since; a signed-in person only) |
 | `PUT /rules/:ruleId/decision` `{ status, fingerprint }` | the rule (`confirmed` or `rejected` with the fingerprint read, 409 when the rule changed since; `unverified` needs none; a signed-in person only) |
 | `GET /sources` | `{ sources, running, last }` |
 | `POST /analyse`, `DELETE /analyse` | 202 started (409 while one runs); stopped (404 when none runs) |

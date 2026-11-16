@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { SourceRecordSchema, ModelFragmentSchema } from "../src/engine/intel/fragment.js";
-import { AppModelSchema, AppVersionSchema, diffModels, EndpointSchema, RuleSchema, ruleFingerprint, TransitionSchema } from "../src/engine/intel/model.js";
+import { AppModelSchema, AppVersionSchema, diffModels, EndpointSchema, RuleSchema, ruleFingerprint, TransitionSchema, workflowFingerprint } from "../src/engine/intel/model.js";
 
 /** A model exactly as the first version stored it: none of the new fields. */
 const PHASE_1_STORED = JSON.parse(
@@ -124,6 +124,24 @@ describe("the new parts of a model", () => {
         expect(AppVersionSchema.safeParse({ source: "person", label: "", analysedAt: "2026-11-16T00:00:00.000Z" }).success).toBe(false);
         expect(AppVersionSchema.safeParse({ source: "repository", label: "9f2c1ab", analysedAt: "2026-11-16T00:00:00.000Z" }).success).toBe(true);
         expect(AppVersionSchema.safeParse({ source: "page", label: "v3", analysedAt: "2026-11-16T00:00:00.000Z" }).success).toBe(false);
+    });
+});
+
+describe("the workflow fingerprint", () => {
+    const steps = [{ order: 0, action: "Open the cart", page: "page:/cart" }, { order: 1, action: "Pay", endpoint: "POST /api/orders" }];
+    it("covers the steps in order, ignoring only spacing, and not the name", () => {
+        const a = workflowFingerprint({ steps });
+        expect(a).toMatch(/^[0-9a-f]{64}$/);
+        expect(workflowFingerprint({ steps: [{ order: 0, action: "  Open the   cart", page: "page:/cart" }, { order: 1, action: "Pay ", endpoint: "POST /api/orders" }] })).toBe(a);
+    });
+
+    it("changes with a step's words, case, page, endpoint or order", () => {
+        const a = workflowFingerprint({ steps });
+        expect(workflowFingerprint({ steps: [{ ...steps[0]!, action: "Open the basket" }, steps[1]!] })).not.toBe(a);
+        expect(workflowFingerprint({ steps: [{ ...steps[0]!, action: "open the cart" }, steps[1]!] })).not.toBe(a);
+        expect(workflowFingerprint({ steps: [{ ...steps[0]!, page: "page:/basket" }, steps[1]!] })).not.toBe(a);
+        expect(workflowFingerprint({ steps: [steps[0]!, { ...steps[1]!, endpoint: "PUT /api/orders" }] })).not.toBe(a);
+        expect(workflowFingerprint({ steps: [steps[1]!, steps[0]!] })).not.toBe(a);
     });
 });
 

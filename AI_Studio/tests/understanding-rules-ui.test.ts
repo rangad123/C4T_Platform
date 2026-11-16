@@ -1,5 +1,5 @@
 /**
- * Rules to confirm and the analysis inputs on the Requirements tab of an AI agent project, in a real browser against a real platform
+ * Rules and workflows to confirm and the inputs for application understanding on the Requirements tab of an AI agent project, in a real browser against a real platform
  * (port 9751, no AI): each waiting rule with its source, how sure the analysis is, its evidence and its workflow (with a short line when
  * that workflow is only inferred); a rule whose evidence is gone; confirming and rejecting; a refusal shown as its sentence; adding a
  * database schema file and a version label, with the server's refusals shown as sentences; and a person who may only look sees no
@@ -15,7 +15,7 @@ import { expect as pwExpect } from "@playwright/test";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
-import { AppIntelStore } from "../src/platform/app-intel-store.js";
+import { AppIntelStore, WORKFLOW_CHANGED } from "../src/platform/app-intel-store.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { hashPassword } from "../src/platform/auth/password.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -26,7 +26,16 @@ const PORT = 9751;
 const BASE = `http://127.0.0.1:${PORT}`;
 const KEY = "understanding-rules-ui-key-8c02";
 const EVIDENCE_GONE = "A later reading no longer found what this rule was based on. Check that it still holds.";
-const INFERRED_WORKFLOW = "Tests use this rule once the workflow is stated in a requirements document.";
+const UNCONFIRMED_WORKFLOW = "Tests use this rule once this workflow is confirmed.";
+const STEPS = [{ order: 0, action: "Open the home page" }, { order: 1, action: "Open a product" }];
+/** The shop's model with the inferred workflow as given (a later reading). */
+const shopModel = (browse: object) => ({
+    pages: [{ id: "cart", path: "/cart" }],
+    workflows: [
+        { id: "checkout", name: "Check out a cart", sourceType: "requirement", evidence: [{ kind: "quote", ref: "Requirements line 4" }] },
+        { id: "browse", name: "Browse the catalogue", sourceType: "inferred", steps: STEPS, evidence: [{ kind: "page", ref: "/" }], ...browse },
+    ],
+});
 let browser: Browser;
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
@@ -50,13 +59,7 @@ beforeAll(async () => {
     intel = new AppIntelStore(platform.sql);
     const v = await intel.addVersion({
         projectId: shop,
-        model: {
-            pages: [{ id: "cart", path: "/cart" }],
-            workflows: [
-                { id: "checkout", name: "Check out a cart", sourceType: "requirement", evidence: [{ kind: "quote", ref: "Requirements line 4" }] },
-                { id: "browse", name: "Browse the catalogue", sourceType: "inferred", evidence: [{ kind: "page", ref: "/" }] },
-            ],
-        },
+        model: shopModel({}),
     });
     const add = async (ref: string, extra: object) =>
         (ids[ref] = (await intel.addRule(shop, { ref, kind: "constraint", confidence: 0.8, ...extra }, { modelVersionId: v.id })).id);
@@ -123,7 +126,7 @@ describe("rules to confirm and inputs for the analysis", () => {
         await pwExpect(cart).toContainText("Expected: Adding a 51st item is refused with a message");
         await pwExpect(cart).toContainText("From: Requirements (Requirements line 7) · How sure: 80%");
         await pwExpect(cart.getByRole("list", { name: "Evidence" })).toContainText("A cart holds at most 50 items.");
-        await pwExpect(cart.getByTestId("rule-workflow")).toHaveText(`Workflow: Browse the catalogue. ${INFERRED_WORKFLOW}`);
+        await pwExpect(cart.getByTestId("rule-workflow")).toHaveText(`Workflow: Browse the catalogue. ${UNCONFIRMED_WORKFLOW} Confirm the workflow`);
         const tax = rule("Totals include tax");
         await pwExpect(tax).toContainText("Inferred");
         await pwExpect(tax).toContainText("From: Worked out by the AI · How sure: 55%");
@@ -135,11 +138,24 @@ describe("rules to confirm and inputs for the analysis", () => {
         await pwExpect(gone.getByRole("button", { name: "Undo the decision" })).toBeVisible();
         const text = (await page.getByTestId("rules-to-confirm").textContent()) ?? "";
         for (const internal of ["R-1", "unverified", "user_confirmed", "inferred,", ids["R-1"]!]) expect(text).not.toContain(internal);
+        // The inferred workflow waits for a person; the one a requirements document states does not.
+        const flows = page.getByTestId("workflows-to-confirm");
+        await pwExpect(flows.getByRole("article")).toHaveCount(1);
+        const browse = page.getByRole("article", { name: "Browse the catalogue" });
+        await pwExpect(browse).toContainText("Inferred");
+        await pwExpect(browse).toContainText("From: Worked out by the AI");
+        await pwExpect(browse.getByRole("list", { name: "Steps" }).getByRole("listitem")).toHaveText(["Open the home page", "Open a product"]);
+        await pwExpect(browse.getByRole("list", { name: "Evidence" })).toContainText("/");
+        await cart.getByRole("button", { name: "Confirm the workflow" }).click();
+        await pwExpect(browse).toBeFocused();
         expect(await axeClean(page)).toEqual([]);
+        await page.emulateMedia({ colorScheme: "dark" });
+        expect(await axeClean(page)).toEqual([]);
+        await page.emulateMedia({ colorScheme: "light" });
     });
 
     it("confirms one rule and rejects another, and the server keeps both decisions", async () => {
-        await rule("A cart holds at most 50 items").getByRole("button", { name: "Confirm" }).click();
+        await rule("A cart holds at most 50 items").getByRole("button", { name: "Confirm", exact: true }).click();
         await pwExpect(rule("A cart holds at most 50 items")).toHaveCount(0);
         expect((await intel.rule(shop, ids["R-1"]!))!.status).toBe("confirmed");
         await rule("Totals include tax").getByRole("button", { name: "Reject" }).click();
@@ -155,14 +171,14 @@ describe("rules to confirm and inputs for the analysis", () => {
         await pwExpect(decided).toContainText("Confirmed");
         await pwExpect(decided.getByTestId("rule-reworded")).toHaveText("Reworded since you decided: A cart takes no more than 50 items");
         await decided.getByRole("button", { name: "Undo the decision" }).click();
-        await pwExpect(rule("A cart takes no more than 50 items").getByRole("button", { name: "Confirm" })).toBeVisible();
+        await pwExpect(rule("A cart takes no more than 50 items").getByRole("button", { name: "Confirm", exact: true })).toBeVisible();
         await pwExpect(page.getByTestId("rule-reworded")).toHaveCount(0);
         expect((await intel.rule(shop, ids["R-1"]!))!).toMatchObject({ status: "unverified", description: "A cart takes no more than 50 items" });
     });
 
     it("shows a refused decision as its sentence", async () => {
         await page.route(`**/api/projects/${shop}/intel/rules/*/decision`, (route) => route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: ONLY_A_PERSON }) }));
-        await rule("Prices are never negative").getByRole("button", { name: "Confirm" }).click();
+        await rule("Prices are never negative").getByRole("button", { name: "Confirm", exact: true }).click();
         await pwExpect(rule("Prices are never negative").getByTestId("rule-error")).toHaveText(ONLY_A_PERSON);
         await page.unrouteAll();
         expect((await intel.rule(shop, ids["R-4"]!))!.status).toBe("unverified");
@@ -173,10 +189,38 @@ describe("rules to confirm and inputs for the analysis", () => {
         await intel.addRule(shop, { ref: "R-4", kind: "constraint", confidence: 0.8, description: "Prices are never negative", expected: "Every price is zero or more", sourceType: "inferred", explicitness: "inferred" });
         const prices = rule("Prices are never negative");
         await pwExpect(prices).toContainText("Expected: No price below zero");
-        await prices.getByRole("button", { name: "Confirm" }).click();
+        await prices.getByRole("button", { name: "Confirm", exact: true }).click();
         await pwExpect(prices.getByTestId("rule-error")).toHaveText(RULE_CHANGED);
         await pwExpect(prices).toContainText("Expected: Every price is zero or more");
         expect((await intel.rule(shop, ids["R-4"]!))!.status).toBe("unverified");
+    });
+
+    it("confirms an inferred workflow: a changed one is refused with its sentence, a renamed one says so, and Undo takes the new name", async () => {
+        const browse = () => page.getByRole("article", { name: "Browse the catalogue" });
+        const latestWorkflow = async () => {
+            const r = await server.inject({ method: "GET", url: `/api/projects/${shop}/intel/models/latest`, headers: { "x-api-key": KEY } });
+            return (r.json().model.workflows as Array<{ id: string; name: string; decision: { status: string } | null }>).find((w) => w.id === "browse")!;
+        };
+        // A later reading changed a step after the page was loaded: nothing is decided, and the workflow shows as it is now.
+        await intel.addVersion({ projectId: shop, model: shopModel({ steps: [...STEPS, { order: 2, action: "Add it to the cart" }] }) });
+        await browse().getByRole("button", { name: "Confirm", exact: true }).click();
+        await pwExpect(browse().getByTestId("workflow-error")).toHaveText(WORKFLOW_CHANGED);
+        await pwExpect(browse().getByRole("list", { name: "Steps" }).getByRole("listitem")).toHaveCount(3);
+        expect((await latestWorkflow()).decision).toBeNull();
+
+        await browse().getByRole("button", { name: "Confirm", exact: true }).click();
+        await pwExpect(browse()).toHaveCount(0);
+        expect((await latestWorkflow()).decision).toMatchObject({ status: "confirmed" });
+        await pwExpect(rule("A cart takes no more than 50 items").getByTestId("rule-workflow")).toHaveText("Workflow: Browse the catalogue.");
+
+        // A later reading names it differently (same steps): the name decided about stays, the new one is said, Undo takes it.
+        await intel.addVersion({ projectId: shop, model: shopModel({ name: "Browse the shop", steps: [...STEPS, { order: 2, action: "Add it to the cart" }] }) });
+        await page.reload();
+        await pwExpect(browse()).toContainText("Confirmed");
+        await pwExpect(browse().getByTestId("workflow-reworded")).toHaveText("Reworded since you decided: Browse the shop");
+        await browse().getByRole("button", { name: "Undo the decision" }).click();
+        await pwExpect(page.getByRole("article", { name: "Browse the shop" }).getByRole("button", { name: "Confirm", exact: true })).toBeVisible();
+        expect(await latestWorkflow()).toMatchObject({ name: "Browse the shop", decision: null });
     });
 
     it("adds a database schema file, says why one is refused, and removes it", async () => {
@@ -213,7 +257,8 @@ describe("rules to confirm and inputs for the analysis", () => {
         const vic = await signIn("vic@example.com", "vic's long password");
         await vic.goto(`${BASE}/#/projects/${shop}/requirements`);
         await pwExpect(vic.getByRole("article", { name: "Prices are never negative" })).toBeVisible();
-        for (const name of ["Confirm", "Reject", "Undo the decision", "Add schema file", "Save label", "Choose a schema file"]) await pwExpect(vic.getByRole("button", { name })).toHaveCount(0);
+        await pwExpect(vic.getByRole("article", { name: "Browse the shop" })).toBeVisible();
+        for (const name of ["Confirm", "Reject", "Undo the decision", "Confirm the workflow", "Add schema file", "Save label", "Choose a schema file"]) await pwExpect(vic.getByRole("button", { name })).toHaveCount(0);
         await pwExpect(vic.getByTestId("source-inputs")).toContainText("The latest reading describes version 3.0.0.");
     });
 });

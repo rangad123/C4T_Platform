@@ -135,13 +135,15 @@ async function siteNotesOf(repo: Repo, projectId: string): Promise<{ siteNotes?:
  * What is known about the application, read as it is now (app-intel-store.ts): the latest model version, the rules a source states or a
  * person confirmed, and the workflows a source states. Never part of the job's stored options. None until the application was analysed.
  */
-async function appKnowledgeOf(repo: Repo, projectId: string): Promise<{ appKnowledge?: AppKnowledge }> {
+export async function appKnowledgeOf(repo: Repo, projectId: string): Promise<{ appKnowledge?: AppKnowledge }> {
     const intel = new AppIntelStore(repo.db.sql);
-    const latest = await intel.latest(projectId);
+    const latest = await intel.decidedWorkflows(projectId);
     if (!latest) return {};
     const rules = usableRules(await intel.rules(projectId)).map((r) => ({ ref: r.ref, kind: r.kind, description: r.description, expected: r.expected, explicitness: r.explicitness, workflows: r.workflows, status: r.status }));
-    const workflows = usableWorkflows(latest.model.workflows).map((w) => ({ id: w.id, name: w.name, steps: w.steps.map((x) => ({ order: x.order, action: x.action })), preconditions: w.preconditions, postconditions: w.postconditions, sourceType: w.sourceType }));
-    return { appKnowledge: { modelVersionId: latest.id, rules, workflows } };
+    // A workflow a person rejected is left out; one they confirmed counts as confirmed by a person, whatever source guessed it.
+    const decided = latest.workflows.filter((w) => w.decision?.status !== "rejected").map((w) => (w.decision?.status === "confirmed" ? { ...w, sourceType: "user_confirmed" as const } : w));
+    const workflows = usableWorkflows(decided).map((w) => ({ id: w.id, name: w.name, steps: w.steps.map((x) => ({ order: x.order, action: x.action })), preconditions: w.preconditions, postconditions: w.postconditions, sourceType: w.sourceType }));
+    return { appKnowledge: { modelVersionId: latest.modelVersionId, rules, workflows } };
 }
 
 export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeFastLlm">;
