@@ -1,7 +1,7 @@
 /**
- * Test development in a real browser against a real platform (port 7901): a launcher, not a place of its own. For a project a person
- * picks it opens each way of writing a test (the AI exploring, a description in words, the recorder, the step builder), and below that
- * sits the review queue of drafts across projects. A person who may only read sees no tool they could not use. Requires `web/dist`.
+ * Test development in a real browser against a real platform (port 7901): a launcher, not a place of its own. Each project row opens
+ * its test scripts (whose New test script menu has every way to write one); an AI agent project also offers exploring and recording,
+ * a code project offers neither. Below sits the review queue of drafts across projects. A person who may only read sees no tool they could not use. Requires `web/dist`.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -70,9 +70,11 @@ const open = async () => {
 };
 
 describe("Test development", () => {
-    it("lists the project with every authoring tool, and the review queue below", async () => {
+    it("lists an AI agent project with exploring, recording and its test scripts, and the review queue below", async () => {
         await open();
-        for (const tool of ["Explore with AI", "Describe in words", "Record", "Build steps", "Test scripts"]) await pwExpect(row().getByRole("link", { name: tool, exact: true })).toBeVisible();
+        for (const tool of ["Explore with AI", "Record", "Open test scripts"]) await pwExpect(row().getByRole("link", { name: tool, exact: true })).toBeVisible();
+        // describing a test and building steps are offered once, in the project's New test script menu, not repeated on the row
+        for (const gone of ["Describe in words", "Build steps"]) await pwExpect(row().getByRole("link", { name: gone, exact: true })).toHaveCount(0);
         await pwExpect(page.getByRole("region", { name: "Drafts waiting for review" }).getByRole("link", { name: /WEB-001 A draft to review/ })).toBeVisible();
         expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
     });
@@ -84,14 +86,6 @@ describe("Test development", () => {
         await pwExpect(page.getByRole("heading", { level: 1 })).toBeVisible();
     });
 
-    it("opens the description dialog on that project's test scripts", async () => {
-        await open();
-        await row().getByRole("link", { name: "Describe in words", exact: true }).click();
-        await pwExpect(page.getByRole("dialog")).toBeVisible();
-        await pwExpect(page.getByRole("dialog").getByRole("heading", { level: 2 }).first()).toContainText(/describe|write/i);
-        expect(page.url()).toContain(`#/projects/${projectId}/scripts`);
-    });
-
     it("opens the recorder", async () => {
         await open();
         await row().getByRole("link", { name: "Record", exact: true }).click();
@@ -99,14 +93,13 @@ describe("Test development", () => {
         await pwExpect(page.getByRole("heading", { level: 1 })).toBeVisible();
     });
 
-    it("opens the step builder, which leads to a new test", async () => {
+    it("opens the project's test scripts, where New test script offers describing a test and building steps", async () => {
         await open();
-        await row().getByRole("link", { name: "Build steps", exact: true }).click();
-        const dialog = page.getByRole("dialog");
-        await pwExpect(dialog).toBeVisible();
-        await dialog.getByLabel(/name|title/i).first().fill("Built by hand");
-        await dialog.getByRole("button", { name: /start|create|build/i }).first().click();
-        await pwExpect(page).toHaveURL(/#\/tests\/[^/]+\/steps/);
+        await row().getByRole("link", { name: "Open test scripts", exact: true }).click();
+        await pwExpect(page).toHaveURL(new RegExp(`#/projects/${projectId}/scripts`));
+        await page.getByRole("button", { name: "New test script", exact: true }).first().click();
+        await pwExpect(page.getByRole("menuitem", { name: "Build steps by hand", exact: true })).toBeVisible();
+        await page.keyboard.press("Escape");
     });
 
     it("offers a person who may only read no tool they cannot use, and keeps the way to the test scripts", async () => {
@@ -114,17 +107,18 @@ describe("Test development", () => {
         await signIn(viewer, "vera@example.com", "Vera Viewer's long password");
         await viewer.goto(`${BASE}/#/develop`);
         const list = viewer.getByRole("list", { name: "Your projects" });
-        await pwExpect(list.getByRole("link", { name: "Test scripts", exact: true })).toBeVisible();
-        for (const tool of ["Explore with AI", "Describe in words", "Record", "Build steps"]) await pwExpect(list.getByRole("link", { name: tool, exact: true })).toHaveCount(0);
+        await pwExpect(list.getByRole("link", { name: "Open test scripts", exact: true })).toBeVisible();
+        for (const tool of ["Explore with AI", "Record"]) await pwExpect(list.getByRole("link", { name: tool, exact: true })).toHaveCount(0);
         await viewer.close();
     });
 
-    it("never offers exploring for a code project", async () => {
+    it("offers a code project only its test scripts: no exploring and no recording", async () => {
         platform.repo.createProject({ name: "Code only shop", testingModes: ["code"] });
         await open();
         const code = page.getByRole("list", { name: "Your projects" }).getByRole("listitem").filter({ hasText: "Code only shop" });
-        await pwExpect(code.getByRole("link", { name: "Build steps", exact: true })).toBeVisible();
-        await pwExpect(code.getByRole("link", { name: "Explore with AI", exact: true })).toHaveCount(0);
+        await pwExpect(code.getByRole("link", { name: "Open test scripts", exact: true })).toBeVisible();
+        await pwExpect(code.getByRole("link")).toHaveCount(1);
         await pwExpect(row().getByRole("link", { name: "Explore with AI", exact: true })).toBeVisible();
+        await pwExpect(row().getByRole("link", { name: "Record", exact: true })).toBeVisible();
     });
 });

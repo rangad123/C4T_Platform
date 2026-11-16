@@ -60,12 +60,12 @@ export function DashboardPage() {
     );
 }
 
-/** Test development: a launcher that opens each way of writing tests in any of your projects, and the review queue of drafts across them. */
+/** Test development: a launcher to each project's test scripts (plus exploring and recording for AI agent projects), and the review queue of drafts across them. */
 export function TestDevelopmentPage() {
     const projects = useFetch<ProjectRow[]>("/projects");
     const can = useCan();
     return (
-        <GlobalPage title="Test development" nav="develop" subtitle="Pick a project and write tests: with the AI, in your own words, by recording, or step by step. Drafts wait below for review.">
+        <GlobalPage title="Test development" nav="develop" subtitle="Pick a project and open its test scripts, where New test script offers every way to write one. Drafts wait below for review.">
             {projects.loading ? (
                 <ListSkeleton rows={3} />
             ) : projects.error ? (
@@ -85,29 +85,20 @@ export function TestDevelopmentPage() {
                                 <span className="meta">{p.test_count === 1 ? "1 test" : `${p.test_count} tests`}</span>
                             </span>
                             <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                                {/* Exploring is for agent and mixed projects only (a code project never offers it). */}
+                                {/* Exploring and recording are AI agent ways of testing: a code project never offers them (audit Q3). Describing
+                                    a test and building steps live in the project's New test script menu, so the row links there once. */}
                                 {can("ai_studio.tests.generate") && projectKind(p) !== "code" && (
                                     <LinkButton size="sm" icon={Sparkles} href={routes.newProject({ project: p.id })} tip="The AI explores the application and writes tests for it.">
                                         Explore with AI
                                     </LinkButton>
                                 )}
-                                {can("ai_studio.tests.generate") && (
-                                    <LinkButton size="sm" href={routes.newTest(p.id, "describe")} tip="Say what to test in your own words. The AI writes the steps.">
-                                        Describe in words
-                                    </LinkButton>
-                                )}
-                                {can("ai_studio.tests.write") && (
+                                {can("ai_studio.tests.write") && projectKind(p) !== "code" && (
                                     <LinkButton size="sm" href={routes.record(p.id)} tip="Use the application while the platform writes down each step.">
                                         Record
                                     </LinkButton>
                                 )}
-                                {can("ai_studio.tests.write") && (
-                                    <LinkButton size="sm" href={routes.newTest(p.id, "build")} tip="Add the steps one by one. The script is made for you.">
-                                        Build steps
-                                    </LinkButton>
-                                )}
                                 <LinkButton size="sm" variant="ghost" href={routes.tests(p.id)} tip="The project's test scripts, with every way to add one (New test script).">
-                                    Test scripts
+                                    Open test scripts
                                 </LinkButton>
                             </span>
                         </li>
