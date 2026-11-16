@@ -310,7 +310,7 @@ export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, te
 
 export interface VariantsJobRequest {
     url: string;
-    credentials?: { username?: string; password?: string };
+    credentials?: { username?: string; password?: string; totpSecret?: string };
     /** Named test accounts, for tests that sign in as one of them (signed-in speed checks). */
     roles?: RunEnv["roles"];
     /** The project's test data sets, for tests that name one (rendered once per row). */
@@ -328,7 +328,8 @@ export async function runVariantsJob(ctx: EngineContext, req: VariantsJobRequest
     for (const [status, phase] of [["DISCOVERING", "discovery"], ["ANALYZING", "understanding"], ["PLANNING", "planning"], ["GENERATING", "generation"]] as const) await sink.phase(status, phase, "skipped");
     await sink.phase("VALIDATING", "validation", "running");
     const origin = new URL(req.url).origin;
-    const creds = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password } : undefined;
+    // The authenticator secret too: a test that types {{credentials.totp}} needs it on every browser, as in its main run.
+    const creds = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password, ...(req.credentials.totpSecret ? { totpSecret: req.credentials.totpSecret } : {}) } : undefined;
     const result = await runVariantChecks(
         ctx,
         { scratchDir: ctx.config.scratchDir, env: { baseUrl: origin, credentials: creds, roles: req.roles, headless: ctx.config.HEADLESS }, render: { baseUrl: origin, ...(req.dataSets ? { dataSets: req.dataSets } : {}) }, workers: ctx.config.CONCURRENCY, detect, sink, ...(req.helpers?.length ? { helpers: req.helpers } : {}) },

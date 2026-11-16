@@ -204,3 +204,40 @@ function problemOf(text: string): string | null {
     const r = parseDsl(text);
     return r.spec ? null : problemsOf(r) || "The text could not be read as a test.";
 }
+
+/** A sign-in the project has saved, with the placeholder it is typed with ("credentials" for the project's, "credentials.admin" for a named account). */
+export interface SavedAccount {
+    placeholder: string;
+    username?: string;
+    password?: string;
+    totpSecret?: string;
+}
+
+/** A value shorter than this is never taken for a saved sign-in (it would match ordinary words). */
+const MIN_ACCOUNT_VALUE = 3;
+/** A text as the step language writes it in double quotes (\" and \\ escaped, like the parser reads it). */
+const quoted = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+/**
+ * The script with every typed value that IS one of the project's saved sign-ins (the whole value, in a "Type ... into ..." step) written
+ * as its placeholder: a case often spells the account out, the model copies it, and the script would then keep a copy of the secret and
+ * type the old account after the sign-in changes. The project's own sign-in wins over a named account with the same value.
+ */
+export function withSignInPlaceholders(text: string, accounts: readonly SavedAccount[]): string {
+    const swaps: Array<[string, string]> = [];
+    for (const a of accounts)
+        for (const field of ["password", "totpSecret", "username"] as const) {
+            const v = a[field];
+            if (v && v.length >= MIN_ACCOUNT_VALUE && !swaps.some(([q]) => q === quoted(v))) swaps.push([quoted(v), `"{{${a.placeholder}.${field === "totpSecret" ? "totp" : field}}}"`]);
+        }
+    if (!swaps.length) return text;
+    return text
+        .split("\n")
+        .map((line) => {
+            if (readStepLine(line.trim())?.phraseId !== "fill") return line;
+            let out = line;
+            for (const [from, to] of swaps) if (out.includes(from)) out = out.split(from).join(to);
+            return out;
+        })
+        .join("\n");
+}

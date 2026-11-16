@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { CHECK_ON_DEVICE, writePhoneCaseScript } from "../../engine/authoring/case-phone-script.js";
-import { MAX_SCRIPTS_PER_CALL, NO_MODEL_FOR_SCRIPTS, pageFactsOf, scriptTitleOf, writeCaseScript, type CaseForScript } from "../../engine/authoring/case-script.js";
+import { MAX_SCRIPTS_PER_CALL, NO_MODEL_FOR_SCRIPTS, pageFactsOf, scriptTitleOf, withSignInPlaceholders, writeCaseScript, type CaseForScript, type SavedAccount } from "../../engine/authoring/case-script.js";
 import { AppIntelStore } from "../app-intel-store.js";
 import { JobMeter } from "../../engine/llm/metered.js";
 import { aiOwnerOfActor, personLlm } from "../ai-config.js";
@@ -14,6 +14,9 @@ import { currentActor } from "../auth/actor.js";
 import { DslRefusal, DslService } from "../dsl-service.js";
 import { FrameworkSettingsStore, turnedOffForSpecs } from "../framework-settings-store.js";
 import { HttpError } from "../http-error.js";
+import { IdentityStore } from "../identity-store.js";
+import { SecretBox } from "../secrets.js";
+import { latestApplicationOf } from "./project-sign-in.js";
 import type { ManualCase } from "../../engine/manual/cases.js";
 import { ManualCaseStore } from "../manual-case-store.js";
 import { projectSetupOf } from "../project-setup.js";
@@ -163,6 +166,11 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
 
         // What the project's application knowledge says about its pages (forms, fields, buttons), once for every case; none yet, none sent.
         const pages = target.form === "text" ? pageFactsOf((await new AppIntelStore(p.sql).latest(pid))?.model) : "";
+        // The project's saved sign-in and named accounts: a value of theirs the AI copied from a case is written as its placeholder.
+        const accounts: SavedAccount[] = [
+            { placeholder: "credentials", ...(latestApplicationOf(repo, pid)?.credentials ?? {}) },
+            ...new IdentityStore(p.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).get(pid).map((r) => ({ placeholder: `credentials.${r.name}`, username: r.username, password: r.password, ...(r.totpSecret ? { totpSecret: r.totpSecret } : {}) })),
+        ];
         const created: Array<{ caseId: string; testId: string; key: string }> = [];
         const one = async (caseId: string) => {
             const c = byId.get(caseId)!;
@@ -176,7 +184,7 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
             // The AI's work for this case: a text script (web) or a phone test spec (Android).
             let written: { text: string } | { spec: TestSpec };
             try {
-                written = target.form === "phone" ? { spec: (await writePhoneCaseScript(model, input, { appPackage: target.appPackage })).spec } : { text: (await writeCaseScript(model, input, { address: target.address, ...(pages ? { pages } : {}) })).text };
+                written = target.form === "phone" ? { spec: (await writePhoneCaseScript(model, input, { appPackage: target.appPackage })).spec } : { text: withSignInPlaceholders((await writeCaseScript(model, input, { address: target.address, ...(pages ? { pages } : {}) })).text, accounts) };
             } catch (e) {
                 skipped.push({ caseId, reason: "ai-failed", detail: e instanceof Error ? e.message : "The AI did not write a script." });
                 return;

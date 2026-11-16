@@ -17,6 +17,9 @@ import { NO_ADDRESS_FOR_SCRIPTS, SCRIPTS_BEING_WRITTEN } from "../src/platform/r
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
+import { IdentityStore } from "../src/platform/identity-store.js";
+import { saveSignIn } from "../src/platform/routes/project-sign-in.js";
+import { SecretBox } from "../src/platform/secrets.js";
 import { ReviewStore } from "../src/platform/review-store.js";
 import { buildServer } from "../src/platform/server.js";
 import { startFakeProvider, type FakeProvider } from "./fixtures/fake-llm-provider.js";
@@ -252,5 +255,25 @@ describe("before and while the AI writes", () => {
         expect(r.body.created.map((x: any) => x.caseId)).toEqual([cs[1]!.id, cs[2]!.id]);
         expect(r.body.skipped).toEqual([{ caseId: cs[0]!.id, reason: "refused", detail: "The test script could not be saved because of a problem on the server. Try this test case again." }]);
         expect(fake.seen).toHaveLength(3);
+    });
+    it("a sign-in the case spells out is written as the placeholders: the script types the saved sign-in, never a copy of it", async () => {
+        const pid = platform.repo.createProject({ name: "Spelled-out sign-in", platforms: ["web"], testingModes: ["code"] }).id as string;
+        platform.repo.createApplication(pid, "http://127.0.0.1:7863", { ...DEFAULT_JOB_OPTIONS });
+        const signIn = { username: "user@practice.test", password: "Practice#123" };
+        saveSignIn(platform, pid, "http://127.0.0.1:7863", signIn);
+        new IdentityStore(platform.db, new SecretBox(platform.config.dataDir, platform.config.SECRET_KEY)).set(pid, [{ name: "admin", username: "admin@practice.test", password: "AdminPractice#9" }]);
+        const c = await addCase(pid, "Sign in with the practice account", "automated", { steps: [{ action: "Type user@practice.test and Practice#123, then sign in; then as admin@practice.test / AdminPractice#9", expected: "Welcome" }] });
+        fake.reset();
+        // What a model does with a case that spells the account out: it copies it (into a field the secret rules do not know, too).
+        fake.queue(MODEL, {
+            text: 'Test: Sign in with the practice account\nCategory: Sign in\n\nGo to /login\nType "user@practice.test" into the "Email" field\nType "Practice#123" into the "Your key" field\nClick the "Log in" button\nType "admin@practice.test" into the "Email" field\nType "AdminPractice#9" into the "Your key" field\nExpect the page to contain the text "Welcome"\n',
+        });
+        const r = await gen(pid, { caseIds: [c.id] });
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        expect(r.body.created, JSON.stringify(r.body)).toHaveLength(1);
+        const t = platform.repo.getTest(r.body.created[0].testId)!;
+        const stored = JSON.stringify(t.spec) + JSON.stringify(platform.repo.getCurrentScript(t.id) ?? {});
+        for (const secret of ["Practice#123", "AdminPractice#9", "user@practice.test", "admin@practice.test"]) expect(stored, secret).not.toContain(secret);
+        expect(t.spec.steps.filter((s: any) => s.action === "fill").map((s: any) => s.value)).toEqual(["{{credentials.username}}", "{{credentials.password}}", "{{credentials.admin.username}}", "{{credentials.admin.password}}"]);
     });
 });

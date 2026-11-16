@@ -173,7 +173,7 @@ function verdicts(db: Db, job: JobRow, tests: TestRow[]): Map<string, Verdict> {
 function notRunReasons(db: Db, job: JobRow, tests: TestRow[]): Map<string, string> {
     const out = new Map<string, string>();
     const events = db.all<Row>(
-        "SELECT message FROM agent_events WHERE job_id = ? AND kind IN ('validation_not_executed','test_unrunnable','load_skipped','custom_skipped','plugin_skipped','test_missing') ORDER BY id LIMIT 500",
+        "SELECT message FROM agent_events WHERE job_id = ? AND kind IN ('validation_not_executed','test_unrunnable','load_skipped','custom_skipped','plugin_skipped','test_missing','sign_in_missing') ORDER BY id LIMIT 500",
         job.id,
     );
     for (const t of tests) {
