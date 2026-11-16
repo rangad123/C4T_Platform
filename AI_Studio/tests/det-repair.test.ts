@@ -5,6 +5,7 @@
  *     is NOT called; the job log says which way fixed it;
  *   - when no plain fix exists, or the one found does not make the test pass, the model is asked as before;
  *   - with the switch off the model is asked even where a plain fix exists.
+ * A model that blames the application never makes a missing element a finding: such a test is reported as one to fix.
  * Port 7350. Runs a browser: node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/det-repair.test.ts
  */
 import http from "node:http";
@@ -156,7 +157,8 @@ describe("repair without AI first", () => {
         const stillFails = spec("Sign in and see something else", { by: "role", role: "button", value: "Sign In", exact: true }, "Welcome back");
         const r = await validate([nothing, stillFails]);
         expect(r.calls.map((c) => c.purpose)).toEqual(["repair", "repair"]);
-        for (const s of [nothing, stillFails]) expect(byId(r.outcomes, s.testId).status).toBe("NEEDS_REVIEW");
+        // The model blames the application, but a click whose button is not there is the test's to fix (validation/test-fault.ts).
+        for (const s of [nothing, stillFails]) expect(byId(r.outcomes, s.testId)).toMatchObject({ status: "FAILED_VALIDATION", reason: expect.stringMatching(/^The test needs fixing, not your application: Step 2 /) });
         expect(r.events.some((e) => e.kind === "repaired_without_ai")).toBe(false);
         expect(r.events.find((e) => e.kind === "repair_without_ai_tried")?.message).toBe(`${stillFails.testId}: tried the “Sign in” button (found by the same role and name); the test still did not pass with it`);
         // The model saw the original failure, not the plain fix's.
@@ -167,7 +169,7 @@ describe("repair without AI first", () => {
         const roleName = spec("Sign in (switch off)", { by: "role", role: "button", value: "Sign In", exact: true }, "Clicked: sign-in");
         const r = await validate([roleName], { LLM_DETERMINISTIC_REPAIR: "false" });
         expect(r.calls.map((c) => c.purpose)).toEqual(["repair"]);
-        expect(byId(r.outcomes, roleName.testId).status).toBe("NEEDS_REVIEW");
+        expect(byId(r.outcomes, roleName.testId).status).toBe("FAILED_VALIDATION");
         expect(r.events.some((e) => e.kind === "repaired_without_ai" || e.kind === "repair_without_ai_tried")).toBe(false);
     }, 240_000);
 });

@@ -13,6 +13,7 @@
 import type { Browser, Page } from "playwright";
 import { BrowserSession, settle } from "../discovery/browser.js";
 import { executeStep, locate, runtimeData, type RuntimeData } from "../web/interpreter.js";
+import { nearbyTargets } from "../web/label-fallback.js";
 import type { Locator, Step, TestSpec } from "../spec/schema.js";
 import type { ScriptRun } from "../validation/runner.js";
 import { COLLECT_SOURCE, MARKER, type Candidate } from "./candidates.js";
@@ -103,7 +104,7 @@ async function heal(input: HealInput): Promise<HealResult> {
         for (const prior of spec.steps.slice(0, stepIndex)) {
             if (!REPLAYED.has(prior.action)) continue;
             try {
-                await executeStep(page, prior, data, input.baseUrl, STEP_TIMEOUT);
+                await executeStep(page, prior, data, input.baseUrl, STEP_TIMEOUT, { near: nearbyTargets(spec.steps, spec.steps.indexOf(prior)) });
             } catch {
                 return none("the steps before the failing one could not be repeated, so the page could not be examined");
             }

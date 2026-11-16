@@ -48,8 +48,15 @@ function Verdict({ t, isMobile }: { t: Detail; isMobile: boolean }) {
                             {SEVERITY[sev.severity as Severity].label} severity: {sev.basis}.
                         </span>
                     )}
+                    {/* Only a scored finding is about the application; a captcha that stopped the run has no severity and is neither. */}
                     <span style={{ display: "block", marginTop: 6 }}>
-                        This is a <Term word="finding">finding</Term> about your application, not a broken test.
+                        {sev ? (
+                            <>
+                                This is a <Term word="finding">finding</Term> about your application, not a broken test.
+                            </>
+                        ) : (
+                            "The page stopped the run before the test could check anything, so this is neither a defect in your application nor a broken test."
+                        )}
                     </span>
                 </Callout>
             );

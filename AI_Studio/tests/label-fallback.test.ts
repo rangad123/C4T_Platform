@@ -3,7 +3,9 @@
  * and shop sites (a login form and a signup form side by side, each with an "Email Address" placeholder, plus a newsletter field).
  * Without a match the step used to wait out the 10 s action timeout on getByLabel. Now (web/label-fallback.ts): the one field whose
  * placeholder starts with the label is used; two such fields fail at once with a sentence naming what the page has; a real label still
- * wins. The rendered script and the live interpreter behave the same, and the saved sign-in is what gets typed.
+ * wins. Two such fields in two forms: the one in the form that also holds the test's next steps (its "Password" field, its "Login" button)
+ * is used; with no such clue, or clues pointing at both forms, the step still fails with the sentence. The rendered script and the live
+ * interpreter behave the same, and the saved sign-in is what gets typed.
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -14,8 +16,9 @@ import { renderWithAdapter } from "../src/engine/frameworks/index.js";
 import { TestSpecSchema, type TestSpec } from "../src/engine/spec/schema.js";
 import { runScripts, type RunEnv, type ScriptInput } from "../src/engine/validation/runner.js";
 import { executeStep, runtimeData } from "../src/engine/web/interpreter.js";
+import { nearbyTargets } from "../src/engine/web/label-fallback.js";
 
-const PORT = 9810;
+const PORT = 9840;
 const BASE = `http://127.0.0.1:${PORT}`;
 const SAVED = { username: "ada@shop.example", password: "Saved-Pw-41c9" };
 
@@ -31,6 +34,7 @@ const LOGIN_PAGE = `<!doctype html><html lang="en"><head><title>Login</title></h
 <input type="text" data-qa="signup-name" placeholder="Name" name="name" required />
 <input type="email" data-qa="signup-email" placeholder="Email Address" name="email" required />
 <button type="submit" data-qa="signup-button">Signup</button></form></div>
+<iframe title="ad" srcdoc="<input placeholder='Email Address'>"></iframe>
 <footer><form class="searchform" method="POST"><input type="email" id="susbscribe_email" placeholder="Your email address" /></form></footer>
 </body></html>`;
 // A field with a real label next to a decoy whose placeholder starts with the same word: the label wins.
@@ -40,11 +44,11 @@ const LABELLED_PAGE = `<!doctype html><html lang="en"><head><title>Labelled</tit
 const received: Array<Record<string, string>> = [];
 const server = http.createServer((req, res) => {
     const u = new URL(req.url ?? "/", BASE);
-    if (req.method === "POST" && u.pathname === "/login") {
+    if (req.method === "POST" && (u.pathname === "/login" || u.pathname === "/signup")) {
         let b = "";
         req.on("data", (d) => (b += d));
         req.on("end", () => {
-            received.push(Object.fromEntries(new URLSearchParams(b)));
+            received.push({ form: u.pathname, ...Object.fromEntries(new URLSearchParams(b)) });
             res.writeHead(200, { "content-type": "text/html" });
             res.end(`<!doctype html><html lang="en"><head><title>Account</title></head><body><p id="who">Logged in</p></body></html>`);
         });
@@ -87,7 +91,7 @@ async function live(t: TestSpec): Promise<string | undefined> {
     const p = await browser.newPage();
     try {
         const data = runtimeData({}, SAVED);
-        for (const step of t.steps) await executeStep(p, step, data, BASE, 6_000);
+        for (const [i, step] of t.steps.entries()) await executeStep(p, step, data, BASE, 6_000, { near: nearbyTargets(t.steps, i) });
         return undefined;
     } catch (e) {
         return (e as Error).message;
@@ -97,8 +101,26 @@ async function live(t: TestSpec): Promise<string | undefined> {
 }
 
 describe("a label step on a page whose fields have only placeholders", () => {
-    it("two fields start with the label: the step fails at once with what the page has, and nothing is typed or sent", async () => {
+    it("two fields start with the label: the one in the form that holds the next steps' Password field and Login button gets the saved sign-in", async () => {
         const t = spec("WEB-001", [fill({ by: "label", value: "Email" }, "{{credentials.username}}"), ...signIn]);
+        const sent = received.length;
+        const [run] = await runScripts(scratch, [script(t)], env, { workers: 1 });
+        expect(run!.status, run!.error).toBe("passed");
+        expect(received.slice(sent)).toEqual([{ form: "/login", csrf: "x", email: SAVED.username, password: SAVED.password }]);
+        expect(await live(t)).toBeUndefined();
+        expect(received.slice(sent + 1)).toEqual([{ form: "/login", csrf: "x", email: SAVED.username, password: SAVED.password }]);
+    }, 120_000);
+
+    it("the same field next to the Name field and the Signup button goes into the signup form", async () => {
+        const t = spec("WEB-006", [fill({ by: "label", value: "Name" }, "Ada"), fill({ by: "label", value: "Email" }, "new@shop.example"), { action: "click", locator: { by: "role", role: "button", value: "Signup" } }]);
+        const sent = received.length;
+        const [run] = await runScripts(scratch, [script(t)], env, { workers: 1 });
+        expect(run!.status, run!.error).toBe("passed");
+        expect(received.slice(sent)).toEqual([{ form: "/signup", name: "Ada", email: "new@shop.example" }]);
+    }, 120_000);
+
+    it("no neighbouring clue: the step fails at once with what the page has, and nothing is typed or sent", async () => {
+        const t = spec("WEB-005", [fill({ by: "label", value: "Email" }, "{{credentials.username}}"), { action: "assert", check: "visible", locator: { by: "text", value: "Login to your account" } }]);
         const sent = received.length;
         const [run] = await runScripts(scratch, [script(t)], env, { workers: 1 });
         expect(run!.status).toBe("failed");
@@ -109,6 +131,14 @@ describe("a label step on a page whose fields have only placeholders", () => {
         expect(run!.steps.find((s) => s.index === 1)!.durationMs!).toBeLessThan(5_000);
         expect(await live(t)).toBe(AMBIGUOUS);
         expect(received.length).toBe(sent);
+    }, 120_000);
+
+    it("clues that point at both forms (the signup Name field and the Login button): still no guess", async () => {
+        const t = spec("WEB-007", [fill({ by: "label", value: "Email" }, "{{credentials.username}}"), fill({ by: "label", value: "Name" }, "Ada"), { action: "click", locator: { by: "role", role: "button", value: "Login" } }]);
+        const [run] = await runScripts(scratch, [script(t)], env, { workers: 1 });
+        expect(run!.status).toBe("failed");
+        expect(run!.error).toContain(AMBIGUOUS);
+        expect(await live(t)).toBe(AMBIGUOUS);
     }, 120_000);
 
     it("no field matches at all: the sentence lists the fields", async () => {
@@ -125,9 +155,9 @@ describe("a label step on a page whose fields have only placeholders", () => {
         const sent = received.length;
         const [run] = await runScripts(scratch, [script(t)], env, { workers: 1 });
         expect(run!.status, run!.error).toBe("passed");
-        expect(received.slice(sent)).toEqual([{ csrf: "x", email: SAVED.username, password: SAVED.password }]);
+        expect(received.slice(sent)).toEqual([{ form: "/login", csrf: "x", email: SAVED.username, password: SAVED.password }]);
         expect(await live(t)).toBeUndefined();
-        expect(received.slice(sent + 1)).toEqual([{ csrf: "x", email: SAVED.username, password: SAVED.password }]);
+        expect(received.slice(sent + 1)).toEqual([{ form: "/login", csrf: "x", email: SAVED.username, password: SAVED.password }]);
     }, 120_000);
 
     it("a real label wins over a placeholder that starts with the same word", async () => {

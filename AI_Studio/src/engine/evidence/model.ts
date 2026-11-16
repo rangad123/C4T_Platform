@@ -86,6 +86,16 @@ const EvidenceSchema = z.object({
     requests: z.array(z.unknown()).max(5000),
     console: z.array(z.unknown()).max(5000),
     footprint: FootprintSchema.optional(),
+    captcha: z.unknown().optional(),
+});
+/** A captcha a person could see when the test failed (auth/captcha.ts CAPTCHA_PROBE_SOURCE). */
+const CaptchaSchema = z.object({
+    kind: z.enum(["reCAPTCHA", "hCaptcha", "Turnstile"]),
+    w: z.number().int().min(0).max(100_000),
+    h: z.number().int().min(0).max(100_000),
+    inForm: z.boolean(),
+    form: z.string().max(80).optional(),
+    path: z.string().max(260),
 });
 
 export type EvidenceRequest = z.infer<typeof RequestSchema>;
@@ -100,6 +110,8 @@ export interface Evidence {
     console: EvidenceConsoleLine[];
     /** Present on a passing run's record (requests and console are then empty). */
     footprint?: EvidenceFootprint;
+    /** A failed run: the captcha widget a person could see on the page when it failed. */
+    captcha?: z.infer<typeof CaptchaSchema>;
 }
 
 /**
@@ -170,6 +182,8 @@ export function sanitizeEvidence(raw: unknown, secrets: string[] = []): Evidence
         requests: keptRequests,
         console: keptLines,
     };
+    const captcha = CaptchaSchema.safeParse(top.data.captcha);
+    if (captcha.success) out.captcha = { ...captcha.data, path: cleanPath(captcha.data.path).split("?")[0]!.slice(0, 200), ...(captcha.data.form ? { form: mask(captcha.data.form, 60) } : {}) };
     if (top.data.footprint) {
         const fp = top.data.footprint;
         // An entry that does not fit the schema or the caps is left out, and then the footprint is no longer the whole story.

@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { CHECK_ON_DEVICE, writePhoneCaseScript } from "../../engine/authoring/case-phone-script.js";
-import { MAX_SCRIPTS_PER_CALL, NO_MODEL_FOR_SCRIPTS, scriptTitleOf, writeCaseScript, type CaseForScript } from "../../engine/authoring/case-script.js";
+import { MAX_SCRIPTS_PER_CALL, NO_MODEL_FOR_SCRIPTS, pageFactsOf, scriptTitleOf, writeCaseScript, type CaseForScript } from "../../engine/authoring/case-script.js";
+import { AppIntelStore } from "../app-intel-store.js";
 import { JobMeter } from "../../engine/llm/metered.js";
 import { aiOwnerOfActor, personLlm } from "../ai-config.js";
 import { isAppUri } from "../../engine/desktop/target.js";
@@ -160,6 +161,8 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
         const actor = currentActor();
         const starter = actor.kind === "user" || actor.kind === "key" || actor.kind === "open" ? { kind: actor.kind, ...(actor.id ? { id: actor.id } : {}) } : undefined;
 
+        // What the project's application knowledge says about its pages (forms, fields, buttons), once for every case; none yet, none sent.
+        const pages = target.form === "text" ? pageFactsOf((await new AppIntelStore(p.sql).latest(pid))?.model) : "";
         const created: Array<{ caseId: string; testId: string; key: string }> = [];
         const one = async (caseId: string) => {
             const c = byId.get(caseId)!;
@@ -173,7 +176,7 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
             // The AI's work for this case: a text script (web) or a phone test spec (Android).
             let written: { text: string } | { spec: TestSpec };
             try {
-                written = target.form === "phone" ? { spec: (await writePhoneCaseScript(model, input, { appPackage: target.appPackage })).spec } : { text: (await writeCaseScript(model, input, { address: target.address })).text };
+                written = target.form === "phone" ? { spec: (await writePhoneCaseScript(model, input, { appPackage: target.appPackage })).spec } : { text: (await writeCaseScript(model, input, { address: target.address, ...(pages ? { pages } : {}) })).text };
             } catch (e) {
                 skipped.push({ caseId, reason: "ai-failed", detail: e instanceof Error ? e.message : "The AI did not write a script." });
                 return;

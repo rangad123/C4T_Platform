@@ -338,8 +338,9 @@ export function buildDashboard(db: Db, opts: DashboardFilter & { now?: number } 
             const findings: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0 };
             for (const r of reviews.get(p.id) ?? []) {
                 if (gate.has(r.id)) continue;
-                const sev = assessSeverity(JSON.parse(r.spec_json), "NEEDS_REVIEW", r.validation_reason)?.severity ?? "low";
-                findings[sev]++;
+                // A review with no severity (a captcha, a blocker) is something to look at, not a finding about the application.
+                const sev = assessSeverity(JSON.parse(r.spec_json), "NEEDS_REVIEW", r.validation_reason)?.severity;
+                if (sev) findings[sev]++;
             }
 
             const newest = latestJob.get(p.id)?.[0];

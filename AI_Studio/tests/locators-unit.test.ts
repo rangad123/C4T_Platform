@@ -231,7 +231,8 @@ describe("generated scripts", () => {
         const text = renderWithAdapter(s, "playwright", ctx).content;
         for (const line of [
             'await page.getByRole("button", { name: "Add", exact: true }).click();',
-            'await (await labelledField(page, "Name", false, false)).click();',
+            // The click after it is a clue for the field (web/label-fallback.ts nearbyTargets).
+            'await (await labelledField(page, "Name", false, false, [{"by":"text","value":"Hi","exact":true}])).click();',
             'await page.getByText("Hi", { exact: true }).click();',
             'await page.getByPlaceholder("Find").click();',
             'await page.getByTestId("go").click();',

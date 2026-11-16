@@ -44,7 +44,7 @@ import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, overlayHelperSource, over
 import { renderClock, renderCondition, renderPinnedTime } from "../web/conditions.js";
 import { classPattern, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
 import { jsonExpr, recordExpr } from "./api.js";
-import { LABEL_FIELD_HELPER_SOURCE } from "../web/label-fallback.js";
+import { LABEL_FIELD_HELPER_SOURCE, nearbyTargets, type FieldClue } from "../web/label-fallback.js";
 
 /** Steps that act on an element (type, click, pick...): a label locator there goes through labelledField (render-utils actionLocatorCall). */
 const ACTS_ON = new Set<Step["action"]>(["click", "upload", "download", "drag", "fill", "select", "check", "press", "hover", "remember"]);
@@ -59,9 +59,9 @@ function softOutcomeChecks(steps: readonly Step[]): Set<number> {
     return new Set(soft.length >= 2 ? soft : []);
 }
 
-function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: string): string {
+function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: string, near: readonly FieldClue[] = []): string {
     const L = (l: Parameters<typeof locatorCall>[1]) => locatorCall("page", l);
-    const A = (l: Parameters<typeof locatorCall>[1]) => actionLocatorCall("page", l);
+    const A = (l: Parameters<typeof locatorCall>[1]) => actionLocatorCall("page", l, near);
     switch (step.action) {
         case "navigate":
             return `await page.goto(await allowedAddress(${expr(step.url)}, BASE_URL));`;
@@ -361,7 +361,7 @@ export const playwrightGenerator: ScriptGenerator = {
         const steps = spec.steps
             .map((step, i) => {
                 const title = `${i + 1}. ${describeStep(step)}`;
-                const body = `async () => {\n        ${inPopup(step)}${originCheck(step)}${listen(i)}${renderStep(step, snapshotName(spec.testId, i), i, soft.has(i) ? title : undefined)}${dialogCheck(i)}\n    }`;
+                const body = `async () => {\n        ${inPopup(step)}${originCheck(step)}${listen(i)}${renderStep(step, snapshotName(spec.testId, i), i, soft.has(i) ? title : undefined, nearbyTargets(spec.steps, i))}${dialogCheck(i)}\n    }`;
                 // The evidence recorder labels what happens from here on with this step's number.
                 return isHealth(step)
                     ? `    evidenceStep(page, ${i + 1});\n    await test.step(${lit(title)}, ${body}).catch((e) => healthFailures.push(e));`

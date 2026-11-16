@@ -15,7 +15,7 @@ import { runPageSpeed } from "../performance/checks.js";
 import { checkedAddress } from "../spec/run-address.js";
 import { armDialog } from "../discovery/browser.js";
 import { dialogProblem, downloadProblem, generatedSample } from "./interruptions.js";
-import { labelledField, LABEL_WAIT_MS } from "./label-fallback.js";
+import { labelledField, LABEL_WAIT_MS, type FieldClue } from "./label-fallback.js";
 import { applyClock, applyCondition } from "./conditions.js";
 import { interpolate, type Locator, type PlainLocator, type Step } from "../spec/schema.js";
 import { ARIA_TEMPLATE_MAX, classPattern, ariaTemplate, numberIn, urlPatternRegex, WEB_REQUEST_RULE, WEB_RESPONSE_CHECKS } from "./checks.js";
@@ -59,11 +59,11 @@ export function locate(top: Page, l: Locator, data: RuntimeData): PwLocator {
  * The element a step acts on: a label locator on its own goes through labelledField (./label-fallback.ts), as in the rendered script
  * (../generators/render-utils.ts actionLocatorCall). Checks use locate().
  */
-async function actOn(top: Page, l: Locator, data: RuntimeData, timeout: number): Promise<PwLocator> {
+async function actOn(top: Page, l: Locator, data: RuntimeData, timeout: number, near: readonly FieldClue[] = []): Promise<PwLocator> {
     if (l.by !== "label" || l.filter || l.nth !== undefined) return locate(top, l, data);
     const scope: Page | FrameLocator = (l.frame ?? []).reduce<Page | FrameLocator>((r, f) => r.frameLocator(frameSelector(f)), top);
     const root = l.within ? locatePlain(scope, l.within, data, true) : scope;
-    return labelledField(root, interpolate(l.value ?? "", data), l.exact === true, !!l.within, Math.min(timeout, LABEL_WAIT_MS));
+    return labelledField(root, interpolate(l.value ?? "", data), l.exact === true, !!l.within, Math.min(timeout, LABEL_WAIT_MS), [...near]);
 }
 
 function locatePlain(page: Page | FrameLocator | PwLocator, l: PlainLocator, data: RuntimeData, withNth: boolean): PwLocator {
@@ -114,6 +114,8 @@ const popups = new WeakMap<Page, Page>();
 /** Where an upload step finds a test file on this machine; without one, upload steps are refused (the interpreter never guesses a path). */
 export interface StepOptions {
     testFile?: (name: string) => string | undefined;
+    /** What the test's neighbouring steps act on (nearbyTargets in ./label-fallback.ts), as the rendered script gets them. */
+    near?: readonly FieldClue[];
 }
 
 /** A popup the authoring session saw a click open (the click is then recorded with opensPopup): later "in the popup" steps work in it. */
@@ -158,19 +160,19 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
         case "click":
             if (step.opensPopup) {
                 const opened = page.waitForEvent("popup", { timeout: Math.max(timeout, 10_000) });
-                await (await actOn(page, step.locator, data, timeout)).click(opt);
+                await (await actOn(page, step.locator, data, timeout, options.near)).click(opt);
                 const p = await opened;
                 await p.waitForLoadState("domcontentloaded").catch(() => undefined);
                 popups.set(top, p);
                 return;
             }
-            await (await actOn(page, step.locator, data, timeout)).click(opt);
+            await (await actOn(page, step.locator, data, timeout, options.near)).click(opt);
             return;
         case "upload": {
             // A generated sample (./interruptions.ts) is made here; any other name is one of the project's test files.
             const file = generatedSample(step.file) ?? options.testFile?.(step.file);
             if (!file) throw new Error(`The test file "${step.file}" is not available here. Upload steps run in test runs, with the project's test files.`);
-            const target = await actOn(page, step.locator, data, timeout);
+            const target = await actOn(page, step.locator, data, timeout, options.near);
             if (step.drop) {
                 await target.drop({ files: file }, opt);
                 return;
@@ -192,29 +194,29 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
         }
         case "download": {
             const started = page.waitForEvent("download", { timeout: Math.max(timeout, 10_000) });
-            await (await actOn(page, step.locator, data, timeout)).click(opt);
+            await (await actOn(page, step.locator, data, timeout, options.near)).click(opt);
             const problem = await downloadProblem(await started, step.filename !== undefined ? interpolate(step.filename, data) : undefined);
             if (problem) throw new Error(problem);
             return;
         }
         case "drag":
-            await (await actOn(page, step.locator, data, timeout)).dragTo(await actOn(page, step.target, data, timeout), opt);
+            await (await actOn(page, step.locator, data, timeout, options.near)).dragTo(await actOn(page, step.target, data, timeout, options.near), opt);
             return;
         case "fill":
-            await (await actOn(page, step.locator, data, timeout)).fill(interpolate(step.value, data), opt);
+            await (await actOn(page, step.locator, data, timeout, options.near)).fill(interpolate(step.value, data), opt);
             return;
         case "select":
-            await (await actOn(page, step.locator, data, timeout)).selectOption(interpolate(step.value, data), opt);
+            await (await actOn(page, step.locator, data, timeout, options.near)).selectOption(interpolate(step.value, data), opt);
             return;
         case "check":
-            await (await actOn(page, step.locator, data, timeout)).setChecked(step.checked, opt);
+            await (await actOn(page, step.locator, data, timeout, options.near)).setChecked(step.checked, opt);
             return;
         case "press":
-            if (step.locator) await (await actOn(page, step.locator, data, timeout)).press(step.key, opt);
+            if (step.locator) await (await actOn(page, step.locator, data, timeout, options.near)).press(step.key, opt);
             else await page.keyboard.press(step.key);
             return;
         case "hover":
-            await (await actOn(page, step.locator, data, timeout)).hover(opt);
+            await (await actOn(page, step.locator, data, timeout, options.near)).hover(opt);
             return;
         case "wait": {
             const value = interpolate(step.value ?? "", data);
@@ -235,7 +237,7 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
             return;
         }
         case "remember": {
-            const target = await actOn(page, step.locator, data, timeout);
+            const target = await actOn(page, step.locator, data, timeout, options.near);
             data[step.name] = step.from === "value" ? await target.inputValue(opt) : (await target.innerText(opt)).replace(/\s+/g, " ").trim();
             return;
         }

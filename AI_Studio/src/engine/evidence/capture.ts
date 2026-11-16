@@ -26,6 +26,8 @@
  * Keep the source free of backticks and "${": it lives in a template literal and is evaluated with `new Function`.
  */
 
+import { CAPTCHA_PROBE_SOURCE } from "../auth/captcha.js";
+
 export const EVIDENCE_MAX_REQUESTS = 300;
 export const EVIDENCE_MAX_CONSOLE = 200;
 export const EVIDENCE_MAX_TEXT = 2048;
@@ -64,6 +66,7 @@ const EVIDENCE_STATIC_TYPES = ["stylesheet", "image", "media", "font", "script",
 // Resource types the footprint records as typed endpoints (a beacon is "ping" in Chromium).
 const EVIDENCE_TYPED = { eventsource: "eventsource", websocket: "websocket", ping: "beacon", beacon: "beacon" };
 const EVIDENCE_STACK_FRAMES = 8;
+${CAPTCHA_PROBE_SOURCE}
 
 /** Values of the run's credentials: from the environment variables a script is given, plus any the caller adds. Shortest 4 characters. */
 function evidenceSecrets(extra) {
@@ -462,6 +465,7 @@ function evidenceSerialize(rec, secrets) {
         requests: requests,
         console: logs,
         footprint: evidenceFootprint(rec, secrets).footprint,
+        ...(rec.captcha ? { captcha: rec.captcha } : {}),
     };
 }
 
@@ -500,6 +504,12 @@ async function evidenceAttach(page, testInfo) {
     if (passed && process.env.AITP_EVIDENCE === "failures") return;
     const rec = EVIDENCE_RECORDERS.get(page);
     if (!rec) return;
+    // A failed test notes a captcha a person could see on the page at that moment (the platform reports that instead of the failure).
+    if (!passed && page && typeof page.evaluate === "function") {
+        try {
+            rec.captcha = await Promise.race([page.evaluate(captchaProbe), new Promise((done) => setTimeout(() => done(null), 2000))]) || undefined;
+        } catch (e) { /* a closed page shows nothing */ }
+    }
     try {
         const secrets = evidenceSecrets();
         const body = JSON.stringify(passed ? evidenceFootprint(rec, secrets) : evidenceSerialize(rec, secrets));

@@ -1,6 +1,7 @@
 import { isLocatorRef, type Locator, type PlainLocator, type TestSpec } from "../spec/schema.js";
 import { DATA_SET_KEY, dataSetNameOf, resolveRows, type DataSet } from "../testdata/dataset.js";
 import { frameSelector } from "../web/pages.js";
+import type { FieldClue } from "../web/label-fallback.js";
 
 /** JS string literal (JSON is a strict subset of JS string syntax, so this is injection-safe). */
 export function lit(value: string): string {
@@ -156,11 +157,12 @@ export function locatorCall(root: string, l: Locator): string {
  * several matching fields fail at once with what the page has. Checks keep Playwright's own getByLabel: a field that must be absent
  * stays absent. Every other locator renders as locatorCall does.
  */
-export function actionLocatorCall(root: string, l: Locator): string {
+export function actionLocatorCall(root: string, l: Locator, near: readonly FieldClue[] = []): string {
     if (!isLabelField(l)) return locatorCall(root, l);
     if (l.frame?.length) root = l.frame.reduce((r, f) => `${r}.frameLocator(${lit(frameSelector(f))})`, root);
     const scope = l.within ? plainCall(root, l.within, true) : root;
-    return `(await labelledField(${scope}, ${expr(l.value ?? "")}, ${l.exact === true}, ${l.within ? "true" : "false"}))`;
+    // The neighbouring steps' elements (nearbyTargets) pick between several fields with the same placeholder; none, none written.
+    return `(await labelledField(${scope}, ${expr(l.value ?? "")}, ${l.exact === true}, ${l.within ? "true" : "false"}${near.length ? `, ${JSON.stringify(near)}` : ""}))`;
 }
 
 /** A label locator a step acts on through labelledField (see actionLocatorCall). */

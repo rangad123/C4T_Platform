@@ -29,6 +29,7 @@ import { CONDITION_HELP } from "./conditions.js";
 import { REMEMBER_COMPARE, REMEMBER_NAME, WAIT_UNTIL, type ASSERT_CHECKS } from "../spec/schema.js";
 import { NEEDS_EXPECTED, NEEDS_LOCATOR } from "./checks.js";
 import { captureAriaTemplate } from "./interpreter.js";
+import { nearbyTargets } from "./label-fallback.js";
 import { describeStep, LocatorSchema, type Locator, type Scenario, type Step, type TestSpec } from "../spec/schema.js";
 import type { AppModel, PageModel } from "../understanding/app-model.js";
 import { makeLookAtScreen, VISION_AUTHORING_NOTE } from "../vision/look.js";
@@ -718,9 +719,9 @@ export async function pruneByReplay(
     let dropped = 0;
     let assertFailed = false;
     try {
-        for (const step of steps) {
+        for (const [i, step] of steps.entries()) {
             try {
-                await executeStep(session.page, step, data, baseUrl, 5_000);
+                await executeStep(session.page, step, data, baseUrl, 5_000, { near: nearbyTargets(steps, i) });
                 await settle(session.page, 1_500);
                 kept.push(step);
             } catch {

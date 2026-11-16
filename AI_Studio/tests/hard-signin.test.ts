@@ -4,7 +4,7 @@
  * platform opened (following the popup), saves the session, and then:
  *  - a run starts signed in (the dashboard opens without a sign-in) and the session's cookie appears in no answer and not in the database;
  *  - email steps get an emailed code and a magic link from mail forwarded to the platform's inbound address;
- *  - a page with a captcha is reported with the captcha sentence, and the sign-in says so too;
+ *  - a page that shows a captcha widget (sized as the real widget draws it) is reported with the captcha sentence, and the sign-in says so too;
  *  - when the app forgets the session, the next run stops before any test with "Sign in again", and no result changes;
  *  - the Test accounts page shows the panel and makes a forwarding address.
  * Run under the shared browser lock.
@@ -89,8 +89,8 @@ const app = http.createServer(async (req, res) => {
         return html(page("Sent", "<h1>Link sent</h1>"));
     }
     if (u.pathname === "/magic") return html(page("Welcome", magic.has(u.searchParams.get("t") ?? "") ? "<h1>Welcome back</h1>" : "<h1>Link expired</h1>"));
-    if (u.pathname === "/captcha") return html(page("Contact", `<h1>Contact us</h1><div class="g-recaptcha" data-sitekey="test"></div><script src="/recaptcha/api.js"></script>`));
-    if (u.pathname === "/captcha-login") return html(page("Sign in", `<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><div class="h-captcha" data-sitekey="x"></div><button>Sign in</button></form>`));
+    if (u.pathname === "/captcha") return html(page("Contact", `<h1>Contact us</h1><div class="g-recaptcha" data-sitekey="test" style="width:304px;height:78px"></div><script src="/recaptcha/api.js"></script>`));
+    if (u.pathname === "/captcha-login") return html(page("Sign in", `<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><div class="h-captcha" data-sitekey="x" style="width:303px;height:78px"></div><button>Sign in</button></form>`));
     if (u.pathname === "/recaptcha/api.js") {
         res.writeHead(200, { "content-type": "text/javascript" });
         return res.end("/* a local stand-in: no request leaves this computer */");
@@ -227,7 +227,7 @@ describe("hard sign-ins on a real app", () => {
         expect(by("Dashboard opens").validationStatus).toBe("VALIDATED");
         expect(by("Sign up with an emailed code")).toMatchObject({ validationStatus: "VALIDATED" });
         expect(by("Sign in with a magic link")).toMatchObject({ validationStatus: "VALIDATED" });
-        expect(by("Contact form")).toMatchObject({ validationStatus: "NEEDS_REVIEW", validationReason: expect.stringMatching(/^This page has a captcha \(reCAPTCHA\); use a saved session or ask the site to turn it off for tests\./) });
+        expect(by("Contact form")).toMatchObject({ validationStatus: "NEEDS_REVIEW", validationReason: "This page has a captcha (reCAPTCHA) at /captcha; use a saved session or ask the site to turn it off for tests. Seen: a visible reCAPTCHA widget (304×78) on the page." });
         expect(job.status).not.toBe("FAILED");
         const events = JSON.stringify((await call("GET", `/api/test-generation/${run.body.jobId}/events`)).body);
         expect(events).toContain("start signed in with the saved sign-in");

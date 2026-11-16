@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { captchaFromRequests, captchaMessage, CAPTCHA_FINDING_START } from "../src/engine/auth/captcha.js";
+import { captchaMessage, CAPTCHA_FINDING_START } from "../src/engine/auth/captcha.js";
 import { captchaFinding } from "../src/engine/auth/captcha-run.js";
 import { EMAIL_HELPER_SOURCE, NO_MAILBOX_MESSAGE } from "../src/engine/auth/email-step.js";
 import { answerFrom, extractCode, extractLink, mailFromFields, parseRawMail, type MailMessage } from "../src/engine/auth/mail.js";
@@ -282,22 +282,20 @@ describe("starting a run signed in", () => {
 
 // ── captchas ────────────────────────────────────────────────────────────────
 describe("captchas", () => {
-    it("are recognised from the requests a page made, and reported in one plain sentence", () => {
-        expect(captchaFromRequests([{ host: "www.google.com", path: "/recaptcha/api2/anchor?k=1" }])).toBe("reCAPTCHA");
-        expect(captchaFromRequests([{ path: "/recaptcha/api.js" }])).toBe("reCAPTCHA");
-        expect(captchaFromRequests([{ host: "js.hcaptcha.com", path: "/1/api.js" }])).toBe("hCaptcha");
-        expect(captchaFromRequests([{ host: "challenges.cloudflare.com", path: "/turnstile/v0/api.js" }])).toBe("Turnstile");
-        expect(captchaFromRequests([{ host: "www.google.com", path: "/search" }, { path: "/app.js" }])).toBeUndefined();
+    it("are reported in one plain sentence", () => {
         expect(captchaMessage("hCaptcha", "/login")).toBe(`${CAPTCHA_FINDING_START} (hCaptcha) at /login; use a saved session or ask the site to turn it off for tests.`);
     });
 
     it("turn a failed web run into the captcha sentence when its evidence shows one", () => {
         const ev = path.join(tmp, "ev.json");
-        fs.writeFileSync(ev, JSON.stringify({ v: 1, requests: [{ t: 1, step: 1, method: "GET", type: "script", path: "/recaptcha/api.js" }] }));
-        expect(captchaFinding({ kind: "web" }, { status: "failed", artifacts: [{ kind: "evidence", path: ev }] })).toMatch(/^This page has a captcha \(reCAPTCHA\)/);
+        fs.writeFileSync(ev, JSON.stringify({ v: 1, requests: [], captcha: { kind: "reCAPTCHA", w: 304, h: 78, inForm: false, path: "/contact" } }));
+        expect(captchaFinding({ kind: "web" }, { status: "failed", artifacts: [{ kind: "evidence", path: ev }] })).toMatch(/^This page has a captcha \(reCAPTCHA\) at \/contact;.* Seen: a visible reCAPTCHA widget \(304×78\) on the page\.$/);
         expect(captchaFinding({ kind: "web" }, { status: "passed", artifacts: [{ kind: "evidence", path: ev }] })).toBeUndefined();
         expect(captchaFinding({ kind: "api" }, { status: "failed", artifacts: [{ kind: "evidence", path: ev }] })).toBeUndefined();
         expect(captchaFinding({ kind: "web" }, { status: "failed", artifacts: [] })).toBeUndefined();
+        // Loading the captcha script, or the hidden frame an ad script loads, is not a captcha on the page.
+        fs.writeFileSync(ev, JSON.stringify({ v: 1, requests: [{ t: 1, step: 1, method: "GET", type: "script", path: "/recaptcha/api.js" }, { t: 2, step: 1, method: "GET", type: "document", host: "www.google.com", path: "/recaptcha/api2/aframe" }] }));
+        expect(captchaFinding({ kind: "web" }, { status: "failed", artifacts: [{ kind: "evidence", path: ev }] })).toBeUndefined();
     });
 });
 

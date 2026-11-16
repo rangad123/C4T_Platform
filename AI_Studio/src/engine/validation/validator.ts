@@ -38,6 +38,7 @@ import { phoneQualityFinding } from "../mobile/quality/findings.js";
 import { repairApi, repairWeb } from "./repair.js";
 import type { KnowledgeRule } from "../planning/planner.js";
 import { repairWithoutAi } from "./det-repair.js";
+import { testStepFault } from "./test-fault.js";
 import { deterministicRepairOn } from "../llm/without-ai.js";
 import type { MobileRunEnv } from "./mobile-runner.js";
 import type { IosRunEnv } from "../mobile/ios-runner.js";
@@ -264,7 +265,7 @@ export async function validateBatch(
         while (run.status !== "passed" && !outcome) {
             // A hand-written test is never repaired: nothing here may rewrite the person's code. It fails as it is, with the real reason.
             if (t.custom) {
-                outcome = { status: "FAILED_VALIDATION", reason: summarise(run), spec: t.spec, script, attempts: attempt, lastRun: run };
+                outcome = { status: "FAILED_VALIDATION", reason: testStepFault(run) ?? summarise(run), spec: t.spec, script, attempts: attempt, lastRun: run };
                 break;
             }
             // What the run proves comes first, whatever is left of the repair budget or whether a cancel has arrived: facts beat models,
@@ -349,7 +350,11 @@ export async function validateBatch(
             }
 
             if (repair.verdict === "app_defect") {
-                outcome = { status: "NEEDS_REVIEW", reason: repair.reason, spec: t.spec, script, attempts: attempt, lastRun: run };
+                // A step that could not find or pick its element is the test's to fix, whatever the analysis says (test-fault.ts).
+                const fault = testStepFault(run, run.failedStepIndex >= 0 ? t.spec.steps[run.failedStepIndex] : undefined);
+                outcome = fault
+                    ? { status: "FAILED_VALIDATION", reason: fault, spec: t.spec, script, attempts: attempt, lastRun: run }
+                    : { status: "NEEDS_REVIEW", reason: repair.reason, spec: t.spec, script, attempts: attempt, lastRun: run };
                 break;
             }
             if (repair.verdict !== "fixed" || !repair.spec) {

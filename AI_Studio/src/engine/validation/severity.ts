@@ -7,8 +7,10 @@
  * Written independently: autonomous-qa-agent has a severity scorer, but that repository has no
  * license, so none of it was used.
  *
- * FAILED_VALIDATION is a broken *test*, not an application defect, and gets no severity.
+ * FAILED_VALIDATION is a broken *test*, not an application defect, and gets no severity. Neither does a captcha that stopped the run:
+ * it needs a person (a saved session, or the site turning it off for tests) but says nothing about the application's behaviour.
  */
+import { CAPTCHA_FINDING_START } from "../auth/captcha.js";
 import type { Priority, TestSpec } from "../spec/schema.js";
 import { HEALTH_BASIS } from "../health/checks.js";
 import { parseHealthReason } from "../health/specs.js";
@@ -45,6 +47,7 @@ function raise(s: Severity): Severity {
 export function assessSeverity(spec: TestSpec, validationStatus: string, reason: string | null | undefined): SeverityAssessment | undefined {
     if (validationStatus !== "NEEDS_REVIEW") return undefined;
     const r = reason ?? "";
+    if (r.startsWith(CAPTCHA_FINDING_START)) return undefined;
 
     // Deterministic passive-security and page-health checks tag every problem with its own severity
     // ("- [high] ..."), so the finding is as severe as its worst problem.

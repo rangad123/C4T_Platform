@@ -18,6 +18,7 @@
 import type { Browser, Page } from "playwright";
 import { BrowserSession, settle } from "../discovery/browser.js";
 import { executeStep, locate, runtimeData, type RuntimeData } from "../web/interpreter.js";
+import { nearbyTargets } from "../web/label-fallback.js";
 import type { Locator, Step, TestSpec } from "../spec/schema.js";
 import type { ScriptRun } from "../validation/runner.js";
 import { sameLocator } from "./apply.js";
@@ -161,7 +162,7 @@ async function find(input: DetRepairInput): Promise<DetFindResult> {
         for (const prior of input.spec.steps.slice(0, stepIndex)) {
             if (!REPLAYED.has(prior.action)) continue;
             try {
-                await executeStep(page, prior, data, input.baseUrl, STEP_TIMEOUT);
+                await executeStep(page, prior, data, input.baseUrl, STEP_TIMEOUT, { near: nearbyTargets(input.spec.steps, input.spec.steps.indexOf(prior)) });
             } catch {
                 return none("the steps before the failing one could not be repeated");
             }

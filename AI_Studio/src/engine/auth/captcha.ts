@@ -3,9 +3,10 @@
  *
  * A captcha exists to stop automated browsers, so the honest thing for a tester is to say "this page has one" and stop that path,
  * instead of reporting a confusing failure (or worse, trying to get past it). Three common kinds are recognised: Google reCAPTCHA,
- * hCaptcha and Cloudflare Turnstile, by the frames they load, the elements their snippets put in the page, or the requests they make.
- * Exploration stops following links from such a page, the sign-in step says so, and a failed run whose page loaded one is reported with
- * the same plain sentence (see `captchaFromRequests`, used by the validator on the run's failure evidence).
+ * hCaptcha and Cloudflare Turnstile, by a widget a person can see (never by a script or hidden frame that merely loaded: ad and
+ * analytics scripts load reCAPTCHA frames on pages with no captcha). Exploration stops following links from such a page, the sign-in step
+ * says so, and a failed run whose page showed one is reported with the same plain sentence (the evidence of a failed run records what
+ * `CAPTCHA_PROBE_SOURCE` saw; see captcha-run.ts).
  */
 import type { Page } from "playwright";
 
@@ -19,37 +20,67 @@ export function captchaMessage(kind?: CaptchaKind, where?: string): string {
     return `${CAPTCHA_FINDING_START}${kind ? ` (${kind})` : ""}${where ? ` at ${where}` : ""}; use a saved session or ask the site to turn it off for tests.`;
 }
 
-/** Elements each widget's snippet puts in the page, and the frames it loads (matched on the frame's title or address). */
-const MARKERS: ReadonlyArray<{ kind: CaptchaKind; selector: string; frame: RegExp }> = [
-    { kind: "reCAPTCHA", selector: '.g-recaptcha, iframe[title*="recaptcha" i], iframe[src*="/recaptcha/"]', frame: /\/recaptcha\/(api|enterprise)/i },
-    { kind: "hCaptcha", selector: '.h-captcha, iframe[title*="hcaptcha" i], iframe[src*="hcaptcha.com"]', frame: /(^|\.)hcaptcha\.com\//i },
-    { kind: "Turnstile", selector: '.cf-turnstile, iframe[title*="cloudflare security challenge" i], iframe[src*="challenges.cloudflare.com"]', frame: /challenges\.cloudflare\.com\/|\/cdn-cgi\/challenge-platform\//i },
+/**
+ * The captcha a person can see on the page now, or null. Plain JavaScript run inside the page (by `detectCaptcha`, and by the evidence
+ * helper every web script carries when a test fails), so both judge the same way. Only a widget that is really shown counts: a visible
+ * `.g-recaptcha` / `.h-captcha` / `.cf-turnstile` box or a widget or challenge frame of real size. A frame an ad or analytics script
+ * loads (reCAPTCHA's hidden 0x0 "aframe", an off-screen challenge frame) is not a captcha on the page. No backticks or dollar-brace:
+ * the evidence helper is a template literal.
+ */
+export const CAPTCHA_PROBE_SOURCE = String.raw`function captchaProbe() {
+    var kinds = [
+        ["reCAPTCHA", ".g-recaptcha, iframe[src*='/recaptcha/api2/anchor'], iframe[src*='/recaptcha/enterprise/anchor'], iframe[src*='/recaptcha/api2/bframe'], iframe[src*='/recaptcha/enterprise/bframe']"],
+        ["hCaptcha", ".h-captcha, iframe[src*='hcaptcha.com/captcha'], iframe[src*='newassets.hcaptcha.com']"],
+        ["Turnstile", ".cf-turnstile, iframe[src*='challenges.cloudflare.com']"]
+    ];
+    for (var k = 0; k < kinds.length; k++) {
+        var els = document.querySelectorAll(kinds[k][1]);
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            var r = el.getBoundingClientRect();
+            if (r.width < 30 || r.height < 30 || r.right <= 0 || r.bottom <= 0) continue;
+            if (el.checkVisibility ? !el.checkVisibility({ opacityProperty: true, visibilityProperty: true }) : getComputedStyle(el).visibility === "hidden") continue;
+            var form = el.closest("form");
+            var name = form ? (form.getAttribute("name") || form.id || form.getAttribute("action") || "") : "";
+            return { kind: kinds[k][0], w: Math.round(r.width), h: Math.round(r.height), inForm: !!form, form: String(name).slice(0, 60), path: String(location.pathname).slice(0, 200) };
+        }
+    }
+    return null;
+}`;
+
+/** What the probe reports. */
+export interface CaptchaSeen {
+    kind: CaptchaKind;
+    w: number;
+    h: number;
+    inForm: boolean;
+    form?: string;
+    path: string;
+}
+
+/** Frames a widget loads: such a frame counts only when its element is shown at a real size (a frame inside another page's shadow root). */
+const FRAMES: ReadonlyArray<{ kind: CaptchaKind; frame: RegExp }> = [
+    { kind: "reCAPTCHA", frame: /\/recaptcha\/(api2|enterprise)\/(anchor|bframe)/i },
+    { kind: "hCaptcha", frame: /(^|\.)hcaptcha\.com\/captcha/i },
+    { kind: "Turnstile", frame: /challenges\.cloudflare\.com\//i },
 ];
 
 /** Which captcha (if any) the page shows now. Reads the page only; never clicks anything. */
 export async function detectCaptcha(page: Page): Promise<CaptchaKind | undefined> {
-    for (const m of MARKERS) {
-        if ((await page.locator(m.selector).count().catch(() => 0)) > 0) return m.kind;
-    }
+    const seen = (await page.evaluate(`(${CAPTCHA_PROBE_SOURCE})()`).catch(() => null)) as CaptchaSeen | null;
+    if (seen) return seen.kind;
     for (const f of page.frames()) {
-        const url = f.url();
-        const hit = MARKERS.find((m) => m.frame.test(url.replace(/^https?:\/\//, "")));
-        if (hit) return hit.kind;
+        const hit = FRAMES.find((m) => m.frame.test(f.url().replace(/^https?:\/\//, "")));
+        if (!hit) continue;
+        const el = await f.frameElement().catch(() => null);
+        const box = el && (await el.isVisible().catch(() => false)) ? await el.boundingBox().catch(() => null) : null;
+        if (box && box.width >= 30 && box.height >= 30) return hit.kind;
     }
     return undefined;
 }
 
-/**
- * Which captcha a page loaded, judged from the requests a run made (host is absent for the application's own address). Used on the
- * failure evidence of a run: a test that failed on a page that loaded a captcha is reported as such.
- */
-export function captchaFromRequests(requests: ReadonlyArray<{ host?: string; path: string }>): CaptchaKind | undefined {
-    for (const r of requests) {
-        const host = (r.host ?? "").toLowerCase();
-        const p = r.path.toLowerCase();
-        if (/^\/recaptcha\/(api|api2|enterprise)/.test(p) && (host === "" || /(^|\.)google\.com$|(^|\.)recaptcha\.net$|(^|\.)gstatic\.com$/.test(host))) return "reCAPTCHA";
-        if (/(^|\.)hcaptcha\.com$/.test(host)) return "hCaptcha";
-        if (host === "challenges.cloudflare.com" || p.startsWith("/cdn-cgi/challenge-platform/")) return "Turnstile";
-    }
-    return undefined;
+/** The captcha sentence for what the probe saw: the kind, the page, and where on it (so a person can check). */
+export function captchaSeenMessage(seen: CaptchaSeen): string {
+    const where = seen.inForm ? `inside ${seen.form ? `the form "${seen.form}"` : "a form"}` : "on the page";
+    return `${captchaMessage(seen.kind, seen.path)} Seen: a visible ${seen.kind} widget (${seen.w}×${seen.h}) ${where}.`;
 }
