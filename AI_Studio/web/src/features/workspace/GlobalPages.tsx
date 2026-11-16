@@ -52,7 +52,7 @@ export function DashboardPage() {
                     <h2 className="t-section">AI usage</h2>
                     <p className="t-secondary">Usage and the estimated cost of every project, by model, by month and by which kind of key paid (organisational or personal), with the limits that stop a run.</p>
                     <div>
-                        <LinkButton href={routes.settings}>Open AI usage</LinkButton>
+                        <LinkButton href={routes.settingsSection("usage")}>Open AI usage</LinkButton>
                     </div>
                 </section>
             )}

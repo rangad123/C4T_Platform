@@ -111,7 +111,7 @@ describe("benchmark runs in Settings, Quality", () => {
     it.skipIf(!hasUi)("shows the headline, the defects and findings with links to their tests; accessible in both themes and on a phone", async () => {
         browser = await chromium.launch();
         page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=usage`);
         const panel = page.getByTestId("quality-panel");
         const rows = panel.getByTestId("eval-run");
         await pwExpect(rows).toHaveCount(2);

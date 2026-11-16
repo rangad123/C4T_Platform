@@ -2,7 +2,7 @@ import { Copy, KeyRound, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, setKey } from "../../api";
 import { Badge, Button, Callout, Disclosure, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
-import { describeActivity, ROLE_HELP, ROLE_WORDS, useAuth, type ActivityRow, type Person, type Role, type TokenInfo } from "./auth";
+import { describeActivity, ROLE_HELP, ROLE_WORDS, useAuth, type ActivityRow, type AuthState, type Person, type Role, type TokenInfo } from "./auth";
 import { BadgeKey, FieldHelp } from "../../components/Tooltip";
 import { PROJECT_ACCESS } from "../../lib/help";
 import type { ProjectRow } from "../../api";
@@ -59,10 +59,17 @@ function RoleSelect({ id, value, onChange, max = "owner", label }: { id: string;
 }
 
 /** Settings: People, your account, Activity and single sign-on. What shows depends on who is looking. */
+/** Whether PeopleSettings shows anything for this person (Settings hides its "People and access" section otherwise). */
+export function showsPeopleSettings(state: AuthState | null): boolean {
+    const me = state?.me;
+    if (!state || !me) return false;
+    return state.hasPeople ? me.role === "owner" && state.projectAccess !== "only" : me.kind === "key" || me.kind === "open";
+}
+
 export function PeopleSettings() {
     const { state, refresh } = useAuth();
     const me = state?.me;
-    if (!state || !me) return null;
+    if (!state || !me || !showsPeopleSettings(state)) return null;
     // People, Activity and single sign-on are platform-wide: an owner limited to some projects does not manage them.
     const owner = me.role === "owner" && state.projectAccess !== "only";
     return (

@@ -53,10 +53,11 @@ afterAll(async () => {
 
 const setting = () => page.getByTestId("prompt-cache-setting");
 const usage = () => page.getByTestId("usage-panel");
-const openSettings = async () => {
-    await page.goto(`${base}/#/settings`);
+/** The switch lives in Settings, AI keys (How the AI works here); the usage figures in Settings, Usage and quality. */
+const openSettings = async (section: "ai-keys" | "usage" = "ai-keys") => {
+    await page.goto(`${base}/#/settings?section=${section}`);
     await page.reload();
-    await pwExpect(setting()).toBeVisible();
+    await pwExpect(section === "usage" ? usage() : setting()).toBeVisible();
 };
 
 describe("prompt caching in Settings", () => {
@@ -83,7 +84,7 @@ describe("prompt caching in Settings", () => {
     }, 60_000);
 
     it("AI usage shows the part of the input that came from the cache, and a cached-input price is used for the cost", async () => {
-        await openSettings();
+        await openSettings("usage");
         // 8,000 plain + 100,000 x 0.1 + 12,000 x 1.25 + 6,000 out = 39,000 toward the limits
         await pwExpect(usage().getByTestId("usage-month-tokens")).toHaveText("39,000 tokens");
         await pwExpect(usage().getByTestId("usage-month-detail")).toContainText("120,000 in, 6,000 out, 12 calls");
@@ -105,14 +106,17 @@ describe("prompt caching in Settings", () => {
     }, 60_000);
 
     it("has no serious accessibility problems in light or dark, and fits a phone", async () => {
-        await openSettings();
-        for (const scheme of ["light", "dark"] as const) {
-            await page.emulateMedia({ colorScheme: scheme });
-            await page.waitForTimeout(400); // colours ease over 140ms when the scheme flips; audit the settled state
-            const result = await new AxeBuilder({ page }).include('[data-testid="prompt-cache-setting"]').include('[data-testid="usage-panel"]').analyze();
-            expect(result.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.help} (${v.nodes[0]?.html.slice(0, 120)})`), scheme).toEqual([]);
+        // The switch and the usage figures are in two sections of Settings: audit each.
+        for (const [section, testId] of [["usage", "usage-panel"], ["ai-keys", "prompt-cache-setting"]] as const) {
+            await openSettings(section);
+            for (const scheme of ["light", "dark"] as const) {
+                await page.emulateMedia({ colorScheme: scheme });
+                await page.waitForTimeout(400); // colours ease over 140ms when the scheme flips; audit the settled state
+                const result = await new AxeBuilder({ page }).include(`[data-testid="${testId}"]`).analyze();
+                expect(result.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.help} (${v.nodes[0]?.html.slice(0, 120)})`), `${section} ${scheme}`).toEqual([]);
+            }
+            await page.emulateMedia({ colorScheme: "light" });
         }
-        await page.emulateMedia({ colorScheme: "light" });
         // The switch's label row is a comfortable target.
         const row = await setting().locator("label.check").boundingBox();
         expect(row!.height).toBeGreaterThanOrEqual(44);

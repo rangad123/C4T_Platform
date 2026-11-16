@@ -76,6 +76,7 @@ describe("per-project access in the web app", () => {
         owner = await (await browser.newContext()).newPage();
         await signIn(owner, "olga@example.com", "olga's long password");
         await owner.getByRole("link", { name: "Settings", exact: true }).click();
+        await owner.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "People and access" }).click();
         const people = owner.getByRole("region", { name: "People" });
         await pwExpect(people.getByText("All projects", { exact: true }).first()).toBeVisible();
         await people.locator("summary", { hasText: "Projects Cleo Client can see" }).click();
@@ -130,6 +131,12 @@ describe("per-project access in the web app", () => {
         await pwExpect(cleo.locator("h1")).toHaveText("Settings");
         await pwExpect(cleo.getByRole("region", { name: "People" })).toHaveCount(0);
         await pwExpect(cleo.getByRole("heading", { name: "Storage", exact: true })).toHaveCount(0);
+        // Nor are their sections: the platform-wide People and access, and Usage and quality, even when asked for by link.
+        await pwExpect(cleo.getByRole("link", { name: "People and access" })).toHaveCount(0);
+        await pwExpect(cleo.getByRole("link", { name: "Usage and quality" })).toHaveCount(0);
+        await cleo.goto(`${BASE}/#/settings?section=usage`);
+        await pwExpect(cleo.locator("h1")).toHaveText("Settings");
+        await pwExpect(cleo.getByTestId("usage-panel")).toHaveCount(0);
         await cleo.goto(`${BASE}/#/profile`);
         await pwExpect(cleo.getByText("You see only the projects an owner chose for you", { exact: false })).toBeVisible();
         await ctx.close();

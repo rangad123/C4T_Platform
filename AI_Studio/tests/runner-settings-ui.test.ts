@@ -444,6 +444,12 @@ describe("the rest of Settings for someone who may run tests but not change the 
         await pwExpect(page.getByRole("heading", { name: "Your runner", exact: true })).toBeVisible();
         await pwExpect(page.getByTestId("ai-keys")).toHaveCount(0);
         await pwExpect(page.getByTestId("ai-behaviour")).toHaveCount(0);
+        // One section at a time: Your runner opens first, Test formats is under Platform, and Usage and quality is not theirs.
+        const tabs = page.getByRole("navigation", { name: "Settings sections" });
+        await pwExpect(tabs.locator('[aria-current="page"]')).toHaveText("Your runner");
+        await pwExpect(tabs.getByRole("link", { name: "Usage and quality" })).toHaveCount(0);
+        await pwExpect(page.getByRole("heading", { name: "Test formats", exact: true })).toHaveCount(0);
+        await tabs.getByRole("link", { name: "Platform" }).click();
         await pwExpect(page.getByRole("heading", { name: "Test formats", exact: true })).toBeVisible();
         await pwExpect(page.getByTestId("mobile-tooling")).toHaveCount(0);
         await pwExpect(page.locator("aside.sidebar a.nav-item", { hasText: /^Settings$/ })).toBeVisible();

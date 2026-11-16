@@ -170,7 +170,7 @@ afterAll(async () => {
 
 const panel = () => page.getByTestId("usage-panel");
 const openSettings = async () => {
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?section=usage`);
     await page.reload();
     await pwExpect(panel().getByRole("heading", { name: "AI usage", exact: true })).toBeVisible();
 };

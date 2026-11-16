@@ -55,6 +55,8 @@ describe("people and access in the web app", () => {
         await owner.getByLabel("Access key").fill(KEY);
         await owner.getByRole("button", { name: "Continue" }).click();
         await owner.getByRole("link", { name: "Settings", exact: true }).click();
+        // Settings opens one section at a time: People and access is its own.
+        await owner.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "People and access" }).click();
         const people = owner.getByRole("region", { name: "People" });
         await pwExpect(people.getByText("Nobody has an account yet.", { exact: false })).toBeVisible();
         await owner.getByLabel("Your name").fill("Olga Owner");
@@ -69,17 +71,17 @@ describe("people and access in the web app", () => {
         await owner.goto(`${BASE}/#/profile`);
         await pwExpect(owner.getByRole("heading", { name: "Profile", level: 1 })).toBeVisible();
         await pwExpect(owner.getByRole("region", { name: "Your account" })).toBeVisible();
-        await owner.goto(`${BASE}/#/settings`);
+        await owner.goto(`${BASE}/#/settings?section=people`);
         await pwExpect(owner.getByRole("region", { name: "People" })).toBeVisible();
     });
 
     it("a signed-in person reaches Profile from the sidebar's account area", async () => {
-        await owner.goto(`${BASE}/#/settings`);
+        await owner.goto(`${BASE}/#/settings?section=people`);
         await owner.getByRole("complementary", { name: "Main navigation" }).getByRole("link", { name: /Profile|Olga Owner/ }).first().click();
         await pwExpect(owner).toHaveURL(/#\/profile$/);
         await pwExpect(owner.getByRole("region", { name: "Your account" })).toBeVisible();
         // The journeys below go on from Settings.
-        await owner.goto(`${BASE}/#/settings`);
+        await owner.goto(`${BASE}/#/settings?section=people`);
         await pwExpect(owner.getByRole("region", { name: "People" })).toBeVisible();
     });
 

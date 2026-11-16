@@ -234,7 +234,7 @@ describe("mobile testing", () => {
             const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
             // Settings explains what is missing and how to fix it (round 45: the emulator panel is back in Settings, the Runners page is gone)
-            await page.goto(`${base}/#/settings`);
+            await page.goto(`${base}/#/settings?section=platform`);
             await pwExpect(page.getByTestId("mobile-tooling").getByRole("heading", { name: "Mobile tooling on this computer" })).toBeVisible();
             // A one-step setup download for each kind of computer, with the command line as the alternative.
             const setup = page.getByTestId("emulator-setup");

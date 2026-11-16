@@ -26,6 +26,12 @@ export function useRoute(): Route {
 /** "Your runner" in Settings: one runner per person, set up once (features/runners/YourRunner.tsx). */
 const RUNNER_SETTINGS = "#/settings#runner";
 const AI_KEY_SETTINGS = "#/settings#ai-keys";
+/**
+ * The sections of workspace Settings (pages/Settings.tsx), one open at a time: `#/settings?section=<key>`. A bare `#/settings`
+ * opens the first one the person has; a place link (`#/settings#runner`, `#/settings#ai-keys`) opens the section of that name.
+ */
+export const WORKSPACE_SETTINGS_SECTIONS = ["runner", "ai-keys", "people", "platform", "usage"] as const;
+export type WorkspaceSettingsSection = (typeof WORKSPACE_SETTINGS_SECTIONS)[number];
 
 export const go = (href: string) => {
     location.hash = href.replace(/^#/, "");
@@ -175,6 +181,8 @@ export const routes = {
     agent: (id: string) => `#/agents/${encodeURIComponent(id)}`,
     profile: "#/profile",
     settings: "#/settings",
+    /** One section of workspace Settings (`WORKSPACE_SETTINGS_SECTIONS`). */
+    settingsSection: (section: WorkspaceSettingsSection) => `#/settings?section=${section}`,
     /** The in-app guide: the "I want to…" chooser, one topic, and the words page. */
     guide: "#/guide",
     guideTopic: (topicId: string) => `#/guide/${encodeURIComponent(topicId)}`,

@@ -88,7 +88,7 @@ describe("the switch's routes", () => {
 
 const setting = () => page.getByTestId("compact-snapshots-setting");
 const openSettings = async () => {
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?section=ai-keys`);
     await page.reload();
     await pwExpect(setting()).toBeVisible();
 };

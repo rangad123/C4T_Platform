@@ -227,7 +227,7 @@ export function friendlyError(message: string | null | undefined): FriendlyError
         return {
             title: "AI limit reached",
             body: `${m.replace(/^.*?(The AI token limit for this (?:job|project|month) was reached).*$/i, "$1")}. Raise the limit in Settings, or wait until next month. Tests that were already created are kept.`,
-            fix: { label: "Open settings", href: "#/settings" },
+            fix: { label: "Open settings", href: "#/settings?section=usage" },
         };
     }
     if (/Cannot connect to API|openrouter|anthropic|rate.?limit|429|overloaded/i.test(m)) {

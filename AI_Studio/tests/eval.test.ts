@@ -249,7 +249,7 @@ describe("the evaluation command on the two local fixtures", () => {
         it.skipIf(!hasUi)("shows the kept runs in Settings, Quality, with the comparison; accessible in both themes and on a phone", async () => {
             browser = await chromium.launch();
             page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-            await page.goto(`${BASE}/#/settings`);
+            await page.goto(`${BASE}/#/settings?section=usage`);
             const panel = page.getByTestId("quality-panel");
             await pwExpect(panel.getByRole("heading", { name: "Quality of the AI tester", exact: true })).toBeVisible();
             const rows = panel.getByTestId("eval-run");

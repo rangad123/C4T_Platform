@@ -18,6 +18,11 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { RUNNER_SETTINGS_LINK } from "../src/platform/runner-only.js";
+import { resolveAlias } from "../web/src/lib/aliases.js";
+import { friendlyError } from "../web/src/lib/labels.js";
+import { routes, WORKSPACE_SETTINGS_SECTIONS, type WorkspaceSettingsSection } from "../web/src/lib/router.js";
+import { whereToHref } from "../web/src/features/guide/where.js";
 
 const PORT = 9450;
 const C4T_PORT = 9451;
@@ -192,7 +197,7 @@ describe("Settings, AI keys (stand-ins)", () => {
         const f: Fake = { chosen: "k-mine", personal: [key({ id: "k-mine", kind: "personal", label: "Mine" })], organisational: [key({ id: "k-org", kind: "organisational", label: "Crowd4Test main", keyHint: "5678" })], problem: null, admin: false };
         const calls: Array<{ method: string; path: string; body: unknown }> = [];
         await stand(page, f, calls);
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=ai-keys`);
         const sec = page.getByTestId("ai-keys");
         const org = sec.locator('[data-testid="ai-key"][data-key="k-org"]');
         await pwExpect(org.getByText("Organisational", { exact: true })).toBeVisible();
@@ -215,7 +220,7 @@ describe("Settings, AI keys (stand-ins)", () => {
         const page = await pageFor("t-cora");
         const f: Fake = { chosen: "k-x", personal: [key({ id: "k-x", kind: "personal", label: "Flaky key", status: "failed", statusNote: "Provider busy. Try again later." })], organisational: [], problem: null, admin: false };
         await stand(page, f, []);
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=ai-keys`);
         const sec = page.getByTestId("ai-keys");
         await pwExpect(sec).toHaveAttribute("data-state", "ready");
         await pwExpect(sec.getByTestId("ai-chosen-warning")).toContainText("AI work still starts with it.");
@@ -225,7 +230,7 @@ describe("Settings, AI keys (stand-ins)", () => {
     it("an account the server does not answer for (403): no AI keys section, and the side bar says AI not set up, never Checking AI", async () => {
         const page = await pageFor("t-cora");
         await page.route("**/api/me/ai", (r) => r.fulfill({ status: 403, json: { error: "You don't have permission to use the AI to write tests." } }));
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=ai-keys`);
         await pwExpect(page.getByRole("heading", { name: "Settings" }).first()).toBeVisible();
         await pwExpect(page.getByTestId("ai-chip")).toHaveText(/AI not set up/);
         await pwExpect(page.getByTestId("ai-keys")).toHaveCount(0);
@@ -236,7 +241,7 @@ describe("Settings, AI keys (stand-ins)", () => {
         const said = "Your chosen key did not work the last time it was used. Test it, or choose another key.";
         const f: Fake = { chosen: "k-x", personal: [key({ id: "k-x", kind: "personal", label: "Old key", status: "failed", statusNote: "Key refused. Check the key." })], organisational: [], problem: said, admin: false };
         await stand(page, f, []);
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=ai-keys`);
         await pwExpect(page.getByTestId("ai-problem")).toHaveText(said);
         await pwExpect(page.getByTestId("ai-key").getByText("Not working", { exact: true })).toBeVisible();
     }, 60_000);
@@ -246,7 +251,7 @@ describe("Settings, AI keys (stand-ins)", () => {
         const f: Fake = { chosen: null, personal: [], organisational: [key({ id: "k-org", kind: "organisational", label: "Crowd4Test main", keyHint: "5678" })], problem: null, admin: true };
         const calls: Array<{ method: string; path: string; body: unknown }> = [];
         await stand(page, f, calls);
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=ai-keys`);
         const card = page.getByTestId("org-keys");
         await pwExpect(card.getByTestId("org-key-assignees")).toHaveText("Assigned to 1 person: Sam Person");
         await card.getByRole("button", { name: "Choose who may use Crowd4Test main" }).click();
@@ -264,7 +269,7 @@ describe("Settings, AI keys (stand-ins)", () => {
         const page = await pageFor("t-ada", { width: 375, height: 800 });
         const f: Fake = { chosen: "k-org", personal: [key({ id: "k-mine", kind: "personal", label: "A rather long personal key name for a phone" })], organisational: [key({ id: "k-org", kind: "organisational", label: "Crowd4Test main" })], problem: null, admin: true };
         await stand(page, f, []);
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=ai-keys`);
         await pwExpect(page.getByTestId("org-keys")).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     }, 60_000);
@@ -313,7 +318,7 @@ const fill = async (page: Page, prefix: string, label: string, apiKey: string) =
 describe("against the real routes", () => {
     it("a customer adds a personal key, tests it, and it becomes their chosen key; a bad key says plainly it did not work", async () => {
         const page = await pageFor("t-cora");
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=ai-keys`);
         const sec = page.getByTestId("ai-keys");
         await pwExpect(sec).toHaveAttribute("data-state", "no-key");
         await sec.getByRole("button", { name: "Add your own key" }).click();
@@ -336,7 +341,7 @@ describe("against the real routes", () => {
 
     it("an admin adds an organisational key and assigns it to the sub-admin, who then sees and chooses it; others never see it", async () => {
         const ada = await pageFor("t-ada");
-        await ada.goto(`${BASE}/#/settings`);
+        await ada.goto(`${BASE}/#/settings?section=ai-keys`);
         const card = ada.getByTestId("org-keys");
         await card.getByRole("button", { name: "Add an organisational key" }).click();
         await fill(ada, "org-key-new", "Crowd4Test main", ORG);
@@ -354,7 +359,7 @@ describe("against the real routes", () => {
         await axe(ada);
 
         const sam = await pageFor("t-sam");
-        await sam.goto(`${BASE}/#/settings`);
+        await sam.goto(`${BASE}/#/settings?section=ai-keys`);
         const mine = sam.getByTestId("ai-keys").getByTestId("ai-key").filter({ hasText: "Crowd4Test main" });
         await pwExpect(mine).toHaveAttribute("data-kind", "organisational");
         await mine.getByRole("button", { name: "Use Crowd4Test main for my AI work" }).click();
@@ -363,10 +368,70 @@ describe("against the real routes", () => {
 
         for (const t of ["t-cora", "t-tim"]) {
             const other = await pageFor(t);
-            await other.goto(`${BASE}/#/settings`);
+            await other.goto(`${BASE}/#/settings?section=ai-keys`);
             await pwExpect(other.getByTestId("ai-keys")).toBeVisible();
             await pwExpect(other.getByText("Crowd4Test main")).toHaveCount(0);
         }
         expect(await ada.content()).not.toContain(ORG);
     }, 150_000);
+});
+
+// ── part 3: Settings opens one section at a time, and every link into it lands on the right one ──
+
+/** The sub-tab of each section, and a card only that section shows. */
+const SECTION: Record<WorkspaceSettingsSection, { tab: string; card: (p: Page) => ReturnType<Page["getByTestId"]> }> = {
+    runner: { tab: "Your runner", card: (p) => p.getByTestId("your-runner") },
+    "ai-keys": { tab: "AI keys", card: (p) => p.getByTestId("ai-keys") },
+    people: { tab: "People and access", card: (p) => p.getByRole("region", { name: "People" }) },
+    platform: { tab: "Platform", card: (p) => p.getByRole("heading", { name: "Test formats", exact: true }) },
+    usage: { tab: "Usage and quality", card: (p) => p.getByTestId("usage-panel") },
+};
+const tabs = (p: Page) => p.getByRole("navigation", { name: "Settings sections" });
+/** The page shows `want`'s sub-tab as current, its card, and no card of another section. */
+const onSection = async (p: Page, want: WorkspaceSettingsSection, why: string) => {
+    await pwExpect(tabs(p).locator('[aria-current="page"]'), why).toHaveText(SECTION[want].tab);
+    await pwExpect(SECTION[want].card(p), why).toBeVisible();
+    for (const [k, s] of Object.entries(SECTION)) if (k !== want) await pwExpect(s.card(p), `${why}: no ${k}`).toHaveCount(0);
+};
+const q = (s = "") => new URLSearchParams(s);
+
+describe("Settings sections, and every link into them", () => {
+    it("each link that points into Settings opens its section, with only that section's cards", async () => {
+        const page = await pageFor("t-ada");
+        const links: Array<[string, string, WorkspaceSettingsSection]> = [
+            ["Settings in the sidebar (bare)", routes.settings, "runner"],
+            ["guide: where 'settings' is", whereToHref({ place: "settings" }, null)!, "runner"],
+            ["Your runner (routes.yourRunner)", routes.yourRunner, "runner"],
+            ["the server's runner refusal link", RUNNER_SETTINGS_LINK, "runner"],
+            ["the old Setup > Runners", routes.setup("p1", "runners"), "runner"],
+            ["an old project Settings > Runners link", resolveAlias(["projects", "p1", "settings"], q("section=runners"))!, "runner"],
+            ["an old Runners page link", resolveAlias(["runners"], q("add=computer"))!, "runner"],
+            ["AI keys (routes.aiKeys)", routes.aiKeys, "ai-keys"],
+            ["the no-AI-key error's fix", friendlyError('No credentials for LLM provider "anthropic"').fix!.href, "ai-keys"],
+            ["the AI-limit error's fix", friendlyError("The AI token limit for this month was reached.").fix!.href, "usage"],
+            ...WORKSPACE_SETTINGS_SECTIONS.filter((k) => k !== "people").map((k): [string, string, WorkspaceSettingsSection] => [`routes.settingsSection(${k})`, routes.settingsSection(k), k]),
+        ];
+        for (const [why, href, want] of links) {
+            await page.goto(`${BASE}/${href}`);
+            await onSection(page, want, `${why} (${href})`);
+        }
+        // The sidebar's AI chip and the Dashboard's "Open AI usage" are links too.
+        await page.goto(`${BASE}/#/dashboard`);
+        await page.getByTestId("dashboard-ai").getByRole("link", { name: "Open AI usage" }).click();
+        await onSection(page, "usage", "Dashboard > Open AI usage");
+        await page.getByTestId("ai-chip").click();
+        await onSection(page, "ai-keys", "the sidebar AI chip");
+        // A sub-tab moves to its section, and the address says which.
+        await tabs(page).getByRole("link", { name: "Platform" }).click();
+        await pwExpect(page).toHaveURL(/#\/settings\?section=platform$/);
+        await onSection(page, "platform", "the Platform sub-tab");
+        await axe(page);
+    }, 120_000);
+
+    it("a person sees only the sections they have; a link to another one opens their first", async () => {
+        const page = await pageFor("t-tim");
+        await page.goto(`${BASE}/#/settings?section=usage`);
+        await pwExpect(tabs(page).getByRole("link")).toHaveText(["Your runner", "AI keys", "Platform"]);
+        await onSection(page, "runner", "a tester asking for Usage and quality");
+    }, 60_000);
 });

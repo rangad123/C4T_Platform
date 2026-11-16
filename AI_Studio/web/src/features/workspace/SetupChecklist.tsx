@@ -17,7 +17,7 @@ const FIX: Record<string, (id: string) => { href: string; label: string }> = {
     // Round 45: each person's runner is set up once in Settings.
     "ios-runner": () => ({ href: routes.yourRunner, label: "Open Your runner" }),
     runner: () => ({ href: routes.yourRunner, label: "Open Your runner" }),
-    "ai-model": () => ({ href: routes.settings, label: "Open Settings" }),
+    "ai-model": () => ({ href: routes.aiKeys, label: "Open Settings" }),
 };
 
 /**

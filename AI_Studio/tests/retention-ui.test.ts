@@ -67,7 +67,7 @@ const card = () => page.getByRole("region", { name: "Storage and backup", exact:
 
 describe("storage, retention and backup in the UI", () => {
     it("Settings shows what the platform uses, by kind of file and by project", async () => {
-        await page.goto(`${BASE}/#/settings`);
+        await page.goto(`${BASE}/#/settings?section=platform`);
         const section = page.getByRole("region", { name: "Storage", exact: true });
         await pwExpect(section.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
         await pwExpect(section.getByText("Test files use", { exact: false })).toBeVisible();
@@ -227,7 +227,7 @@ describe("storage, retention and backup in the UI", () => {
         await pwExpect(card()).toBeVisible();
         const scan = await new AxeBuilder({ page }).include("[aria-label='Storage and backup']").analyze();
         expect(scan.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
-        for (const route of [`#/projects/${seed.projectId}`, `#/projects/${seed.projectId}/settings?section=storage`, "#/settings"]) {
+        for (const route of [`#/projects/${seed.projectId}`, `#/projects/${seed.projectId}/settings?section=storage`, "#/settings?section=platform"]) {
             await page.setViewportSize({ width: 375, height: 800 });
             await page.goto(`${BASE}/${route}`);
             await page.waitForTimeout(300);

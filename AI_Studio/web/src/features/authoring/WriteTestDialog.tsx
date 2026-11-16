@@ -123,7 +123,7 @@ export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, 
                         Uses your AI key. It decides each step from what it sees on the page, then saves the test and runs it. You can edit or delete the test afterwards.
                     </p>
                     {modelMissing && (
-                        <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.settings}>Open settings</LinkButton>}>
+                        <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.aiKeys}>Open settings</LinkButton>}>
                             Writing a test from a sentence uses your AI key. {noAi}
                         </Callout>
                     )}
