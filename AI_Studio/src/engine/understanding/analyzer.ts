@@ -15,6 +15,7 @@ const withNotes = (notes: SiteNote[] | undefined, pages: Array<{ path: string }>
 };
 import {
     AnalysisSchema,
+    LinkedAnalysisSchema,
     type ApiEndpointModel,
     type AppModel,
     type PageModel,
@@ -28,6 +29,13 @@ Rules:
 - A journey is a goal-directed sequence a real user performs (e.g. "Search for a product and add it to the cart"), not a single click.
 - Prefer a focused set of 4-12 journeys ordered by business importance. Authentication, core content/search, and any transaction/CRUD flows are usually critical.
 - "pages" must use the exact paths from the crawl.`;
+
+/** The page understanding additions: single-goal journeys whose steps name their page and request (an older runner's analysis asks SYSTEM alone). */
+export const LINKED_RULES = `
+- Each journey is one feature of the application. Give separate actions separate journeys (for example changing a quantity and applying a code are two journeys), but keep an action together with its reverse or alternative on the same thing in one journey (log in and log out, follow and unfollow, add and remove an item, approve or reject a request). Journeys may share pages. Up to 20 journeys.
+- Cover every action that changes data: each form and each button that saves, adds, removes, pays or cancels belongs to a journey.
+- Viewing a list or the records a page shows is a journey of its own, and so is checking figures a page works out (totals, charges, limits).
+- For every step give "page", the exact crawl path it happens on, and "endpoint", the request from the listed API calls that the step sends (the data a page loads when opened, or the write a form or button sends), copied exactly as listed ("METHOD /path"). Leave endpoint empty when no listed request fits; never invent one.`;
 
 /** Said once above the pages when some of them are given as one line (exploration reuse). */
 export const REUSE_NOTE = `Pages marked "unchanged" were understood in an earlier exploration and have not changed since; their snapshot is not repeated. You may leave them out of pagePurposes (their earlier purpose is kept).`;
@@ -77,15 +85,18 @@ export async function analyzeApplication(
         reuse?: ReusePlan;
         /** Controls per page shown to the AI (the exploration level's digestElementsPerPage). Default 14. */
         digestElementsPerPage?: number;
+        /** Ask for single-goal journeys whose steps name their page and request (the page understanding additions). Default true; false asks as an older runner does. */
+        linkSteps?: boolean;
     } = {},
 ): Promise<AppModel> {
     const apiText = base.apis.length
         ? base.apis.slice(0, 40).map((a: ApiEndpointModel) => `${a.method} ${a.path} → ${a.statuses.join("/") || "?"} (${a.source})`).join("\n")
         : "none observed";
 
+    const linked = opts.linkSteps !== false;
     const analysis = await ctx.llm.object({
-        system: SYSTEM,
-        schema: AnalysisSchema,
+        system: linked ? SYSTEM + LINKED_RULES : SYSTEM,
+        schema: linked ? LinkedAnalysisSchema : AnalysisSchema,
         // One purpose line per page: a larger exploration needs room for all of them.
         maxOutputTokens: Math.min(16_000, 6_000 + 40 * base.pages.length),
         purpose: "analysis",
@@ -126,7 +137,15 @@ ${opts.reuse?.pages.size ? `${REUSE_NOTE}\n` : ""}${summarisePages(base.pages, u
         siteType: analysis.siteType,
         purpose: analysis.purpose,
         features: analysis.features,
-        journeys: analysis.journeys.map((j) => ({ ...j, pages: j.pages.filter((p) => known.has(p.split("?")[0])) })),
+        journeys: analysis.journeys.map((j) => {
+            const steps = j.steps.map((x) => (typeof x === "string" ? { action: x } : x));
+            return {
+                ...j,
+                steps: steps.map((x) => x.action),
+                pages: j.pages.filter((p) => known.has(p.split("?")[0])),
+                ...(linked ? { stepLinks: steps.map((x) => ({ ...("page" in x && x.page?.trim() ? { page: x.page.trim() } : {}), ...("endpoint" in x && x.endpoint?.trim() ? { endpoint: x.endpoint.trim() } : {}) })) } : {}),
+            };
+        }),
         authentication: {
             ...base.authentication,
             mechanisms: [...new Set([...base.authentication.mechanisms, ...analysis.authenticationMechanisms])],

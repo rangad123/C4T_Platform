@@ -142,6 +142,11 @@ export interface JourneyModel {
     priority: "critical" | "high" | "medium" | "low";
     pages: string[];
     requiresAuth: boolean;
+    /**
+     * Per step (same order as `steps`), the page it happens on and the API request it sends, as the analysis named them from the crawl's
+     * pages and the listed requests. Absent when the analysis was not asked for them (an older runner) or on models stored before it.
+     */
+    stepLinks?: Array<{ page?: string; endpoint?: string }>;
 }
 
 export interface NavigationEdge {
@@ -205,3 +210,21 @@ export const AnalysisSchema = z.object({
     authenticationMechanisms: z.array(z.string()).default([]),
 });
 export type Analysis = z.infer<typeof AnalysisSchema>;
+
+/** A journey step as the linked analysis gives it; a plain sentence is still taken (no page or request named). */
+const LinkedStepSchema = z.union([
+    z.object({
+        action: z.string(),
+        page: z.string().describe("Exact crawl path of the page the step happens on; empty when unsure"),
+        endpoint: z.string().describe('The request the step sends, exactly as listed ("METHOD /path"); empty when it sends none of them'),
+    }),
+    z.string(),
+]);
+
+/** AnalysisSchema with each journey step naming its page and request (the page understanding additions; an older runner asks AnalysisSchema). */
+export const LinkedAnalysisSchema = AnalysisSchema.extend({
+    journeys: z
+        .array(AnalysisSchema.shape.journeys.element.extend({ steps: z.array(LinkedStepSchema).min(1) }))
+        .describe("Important user journeys, one feature each"),
+});
+export type LinkedAnalysis = z.infer<typeof LinkedAnalysisSchema>;

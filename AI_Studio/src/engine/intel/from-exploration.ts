@@ -84,8 +84,51 @@ const shares = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));
  * the first page from the current one that the step names (a control of that page, or a word of its path), otherwise on the page as far
  * along the journey as the step is. Its request is the one a control the step names caused there, otherwise a write seen on that page
  * whose path shares a word with the step. Nothing is guessed beyond what the crawl recorded.
+ *
+ * Where the analysis named a step's page or request (`named`, the linked analysis), that is used instead, but only a page the crawl saw
+ * and a request the model lists (observed or documented); a concrete address of a listed template counts as that template.
  */
-function stepLinks(steps: string[], journeyPages: string[], pages: AppModel["pages"], apis: UnderstandingModel["apis"], idOf: (path: string) => string | undefined): Array<{ page?: string; endpoint?: string }> {
+function stepLinks(
+    steps: string[],
+    journeyPages: string[],
+    pages: AppModel["pages"],
+    apis: UnderstandingModel["apis"],
+    idOf: (path: string) => string | undefined,
+    named: Array<{ page?: string; endpoint?: string }> = [],
+): Array<{ page?: string; endpoint?: string }> {
+    const found = crawlLinks(steps, journeyPages, pages, apis, idOf);
+    return found.map((link, i) => {
+        const n = named[i];
+        const page = n?.page ? pages.find((p) => p.id === idOf(n.page!))?.id : undefined;
+        const endpoint = n?.endpoint ? listedEndpoint(n.endpoint, apis) : undefined;
+        return { ...link, ...(page ? { page } : {}), ...(endpoint ? { endpoint: cut(endpoint, 300) } : {}) };
+    });
+}
+
+const pathSegments = (p: string) => p.split(/[?#]/)[0]!.split("/").filter(Boolean);
+const isParam = (x: string) => /^(\{[^}]*\}|:\w+)$/.test(x);
+
+/** "METHOD /path" as the model lists it, when the text names a listed request (its template, or a concrete address of it). */
+function listedEndpoint(text: string, apis: UnderstandingModel["apis"]): string | undefined {
+    const m = /^\s*([A-Za-z]+)\s+(\S+)\s*$/.exec(text);
+    if (!m) return undefined;
+    const method = m[1]!.toUpperCase();
+    let path = m[2]!;
+    try {
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) path = new URL(path).pathname;
+    } catch {
+        return undefined;
+    }
+    const want = pathSegments(path);
+    const fits = (a: UnderstandingModel["apis"][number], loose: boolean) => {
+        const have = pathSegments(a.path);
+        return a.method.toUpperCase() === method && have.length === want.length && have.every((h, k) => (isParam(h) ? loose || isParam(want[k]!) : h === want[k]));
+    };
+    const hit = apis.find((a) => fits(a, false)) ?? apis.find((a) => fits(a, true));
+    return hit ? `${hit.method.toUpperCase()} ${hit.path}` : undefined;
+}
+
+function crawlLinks(steps: string[], journeyPages: string[], pages: AppModel["pages"], apis: UnderstandingModel["apis"], idOf: (path: string) => string | undefined): Array<{ page?: string; endpoint?: string }> {
     const route = journeyPages.map((p) => pages.find((x) => x.id === idOf(p))).filter((p): p is AppModel["pages"][number] => !!p).filter((p, i, xs) => i === 0 || xs[i - 1] !== p);
     if (!route.length) return steps.map(() => ({}));
     const named = (step: string, control: string) => control.trim().length > 1 && step.toLowerCase().includes(control.trim().toLowerCase());
@@ -184,7 +227,7 @@ export function fragmentFromExploration(src: ExplorationSource): ModelFragment {
 
     const workflows: AppModel["workflows"] = m.journeys.slice(0, 500).map((j, n) => {
         const evidence: Evidence[] = j.pages.length ? j.pages.slice(0, 20).map((p) => ({ kind: "page", ref: cut(p, 500) })) : [{ kind: "page", ref: cut(m.url, 500) }];
-        const where = stepLinks(j.steps.slice(0, 100), j.pages, pages, m.apis, idOfPattern);
+        const where = stepLinks(j.steps.slice(0, 100), j.pages, pages, m.apis, idOfPattern, j.stepLinks);
         return {
             // Made from the name after secret hiding: the id is kept as it is when the fragment is redacted (platform/app-analysis.ts).
             id: cut(`journey-${n + 1}-${hideSecrets(j.name, { max: 200 }).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`, 100),
