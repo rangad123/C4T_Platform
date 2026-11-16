@@ -9,6 +9,8 @@
  * side (other sources, rules stored before anchors existed) are matched by fingerprint (kind, what it expects, what it is linked to).
  *
  * - A matched rule keeps its stored id, ref and status, and takes the new analysis's wording, source and evidence.
+ * - A stored rule the new analysis did not state again, but whose document it read again unchanged (`stated`), still has its evidence:
+ *   it is kept as it was, with its status, and not marked (a re-reading that leaves a rule out is not a change in the text).
  * - A stored rule the new analysis no longer finds is kept with its status and marked "evidence gone" for a person; it is never deleted.
  * - A new rule is always unverified, whatever the extraction said: only a person confirms or rejects a rule.
  *
@@ -81,7 +83,7 @@ function alike(a: Rule, b: Rule): number {
     return (all ? shared / all : 0) + (a.kind === b.kind ? 0.1 : 0);
 }
 
-export function carryForward(previous: readonly PreviousRule[], next: readonly Rule[], mark: EvidenceGone): CarryForwardResult {
+export function carryForward(previous: readonly PreviousRule[], next: readonly Rule[], mark: EvidenceGone, o: { stated?: ReadonlySet<string> } = {}): CarryForwardResult {
     const found = new Map<string, Rule>();
     for (const r of next) {
         const fp = ruleFingerprint(r);
@@ -127,6 +129,10 @@ export function carryForward(previous: readonly PreviousRule[], next: readonly R
         if (n !== undefined) {
             if (p.status !== "unverified") summary.carried++;
             return { ...ruleOnly(news[n]![1]), ref: p.ref, id: p.id, fingerprint, status: p.status };
+        }
+        if (p.anchor && o.stated?.has(p.anchor.text)) {
+            if (p.status !== "unverified") summary.carried++;
+            return { ...ruleOnly(p), id: p.id, fingerprint, status: p.status };
         }
         summary.evidenceGone++;
         return { ...ruleOnly(p), id: p.id, fingerprint, status: p.status, evidenceGone: p.evidenceGone ?? mark };

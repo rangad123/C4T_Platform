@@ -169,6 +169,17 @@ describe("carryForward with anchors (rules read from a document)", () => {
         expect(summary).toEqual({ carried: 1, added: 0, evidenceGone: 1 });
     });
 
+    it("a rule this reading did not state again keeps its evidence while its document was read again unchanged", () => {
+        // The model left out requirement 2.9's rule this time; 2.9 was read and is unchanged. 4.6 was not read again as it was.
+        const stated = new Set([anchor("2.9").text]);
+        const { rules, summary } = carryForward([previous[0]!, previous[3]!], [], MARK, { stated });
+        expect(rules.map((r) => [r.id, r.status, r.expected, r.evidenceGone])).toEqual([
+            ["id-0", "confirmed", read1[0]!.expected, MARK],
+            ["id-3", "rejected", read1[3]!.expected, undefined],
+        ]);
+        expect(summary).toEqual({ carried: 1, added: 0, evidenceGone: 1 });
+    });
+
     it("a stored rule without an anchor (stored before anchors) is still found by its fingerprint", () => {
         const legacy = stored(rule({ expected: "Quantity above 10 is refused with a message." }), "id-9", "confirmed");
         const { rules } = carryForward([legacy], [read1[0]!], MARK);

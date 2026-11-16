@@ -93,7 +93,8 @@ export const fragmentKey = (projectId: string, sourceId: string): string => path
 export const schemaKey = (projectId: string, sourceId: string): string => path.posix.join(projectId, "intel", "schemas", `${sourceId}.txt`);
 const repoIndexKey = (projectId: string, sourceId: string): string => path.posix.join(projectId, "intel", "repos", `${sourceId}.json`);
 
-const KEPT_AS_IS = new Set(["fingerprint", "processedAt", "analysedAt", "at"]);
+/** Not text: fingerprints (a fragment's `read` documents are sha256 fingerprints, model.ts) and times. */
+const KEPT_AS_IS = new Set(["fingerprint", "processedAt", "analysedAt", "at", "read"]);
 /** Names, addresses and references: the project's secrets and the shared redaction only (the password-shape rule would eat `file.md@c1#L2`). */
 const REFERENCES = new Set(["id", "ref", "sourceRef", "path", "from", "to", "page", "entity", "endpoint", "endpoints", "entities", "workflows", "reaches", "screenId", "method", "requestSchema", "responseSchema", "status", "kind", "origin", "sourceType", "explicitness", "type", "in"]);
 const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -441,7 +442,9 @@ export class AppAnalysis {
             const commits = inputs.repositories.filter((r) => !repoFailures.has(r.ref.slice(0, 500))).map((r) => r.commit.slice(0, 40));
             const appVersion: AppVersion = inputs.appVersion ?? (commits.length ? { source: "repository", label: commits.join(", ").slice(0, 200), analysedAt: now } : { source: "unversioned", label: "", analysedAt: now });
             const before = await this.intel.rules(projectId);
-            const carried = carryForward(before, merged.rules, { version, at: now });
+            // The documents read in full this time: a stored rule read from one of them still has its evidence.
+            const stated = new Set(fragments.flatMap((f) => f.read ?? []));
+            const carried = carryForward(before, merged.rules, { version, at: now }, { stated });
             const room = Math.max(0, MAX_RULES_PER_PROJECT - before.length);
             leftOut = Math.max(0, carried.rules.filter((r) => !r.id).length - room);
             const model = { ...merged.model, appVersion };
