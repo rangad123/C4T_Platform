@@ -148,7 +148,7 @@ describe("deleting the last step of an imported test on the Steps tab", () => {
         expect(await download.text()).not.toMatch(/Dashboard/);
     }, 180_000);
 
-    it("Switch to code after that run takes the saved steps' script, and the old steps are labelled as no longer run", async () => {
+    it("Switch to code after that run takes the saved steps' script, and the Steps tab then lists no steps", async () => {
         // Only a confirmed "Switch to code" makes a code test; it takes the test's current script, which must be the saved steps' one.
         await page.goto(`${BASE}/#/tests/${testId}/code`);
         await page.getByRole("button", { name: "Switch to code", exact: true }).first().click();
@@ -159,8 +159,8 @@ describe("deleting the last step of an imported test on the Steps tab", () => {
         expect(await code).not.toMatch(/Dashboard/);
         expect(await code).toMatch(/Log in/);
         await tab("Steps").click();
-        await pwExpect(page.getByText("This is a code test, so it has no steps to edit")).toBeVisible();
-        await pwExpect(page.getByRole("heading", { name: "Steps before the switch to code", exact: true })).toBeVisible();
-        await pwExpect(page.getByText("4 in all, no longer run: the code is what runs")).toBeVisible();
+        // One callout, no list: the steps from before the switch are not run, so they are not shown as the test's steps.
+        await pwExpect(page.getByText("This test is code only: it has no steps")).toBeVisible();
+        await pwExpect(page.locator(".bld-head, .bld-n")).toHaveCount(0);
     }, 120_000);
 });

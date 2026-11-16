@@ -256,8 +256,6 @@ describe("the step editor", () => {
         await pwExpect(inside).toContainText("Open /");
         await pwExpect(inside).toContainText("{{nickname}}");
         await pwExpect(page.getByRole("link", { name: "Edit the reusable steps", exact: true })).toHaveAttribute("href", `#/projects/${projectId}/scripts?section=steps&edit=Sign+in`);
-        // the script preview has the steps written out
-        await pwExpect(page.locator(".bld-script code").first()).toContainText("Grace", { timeout: 10_000 });
         await axeBoth("builder-block-step");
     });
 

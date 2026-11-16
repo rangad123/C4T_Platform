@@ -161,18 +161,21 @@ describe("opening the editor", () => {
             expect.stringContaining("Step 3 Click the “Search” button"),
             expect.stringContaining("Step 4"),
         ]);
-        // the script is shown beside the steps and is the stored one
-        await pwExpect(page.locator(".bld-script code").first()).toContainText("page.goto");
-        await pwExpect(page.getByText("Up to date")).toBeVisible();
-        // a hand-written test has no steps to edit: the tab says so
+        // the script shows only on the Code tab: the Steps tab links there and shows no script of its own
+        await pwExpect(page.getByRole("link", { name: "See the script", exact: true })).toHaveAttribute("href", `#/tests/${webId}/code`);
+        await pwExpect(page.getByRole("heading", { name: "Script", exact: true })).toHaveCount(0);
+        // the name is changed from the ⋯ menu, not from a field on this tab
+        await pwExpect(page.getByLabel("Test name")).toHaveCount(0);
+        // a hand-written test has no steps to edit: the tab says so once, and lists none
         await visit(`#/tests/${apiId}`);
-        await pwExpect(page.getByText("This is a code test, so it has no steps to edit")).toBeVisible();
+        await pwExpect(page.getByText("This test is code only: it has no steps")).toBeVisible();
         expect(await page.getByRole("button", { name: "Add a step", exact: true }).count()).toBe(0);
+        expect(await page.locator(".bld-n").count()).toBe(0);
     });
 });
 
 describe("editing with the mouse", () => {
-    it("adds a step, edits it, and the script preview follows", async () => {
+    it("adds a step and edits it, as a change waiting to be saved", async () => {
         await visit(builderHash());
         await pwExpect(heads().first()).toBeVisible();
         await heads().nth(0).click(); // select step 1 so the new step goes after it
@@ -181,7 +184,6 @@ describe("editing with the mouse", () => {
         await page.getByLabel("Text the title should contain", { exact: true }).fill("Products");
         await pwExpect(unsaved()).toContainText("unsaved change");
         expect((await headTexts())[1]).toContain("Check that the page title contains “Products”");
-        await pwExpect(page.locator(".bld-script code").first()).toContainText("toHaveTitle", { timeout: 10_000 });
         // the stored test is not touched by editing
         expect((await specNow()).spec.steps).toHaveLength(4);
     });
@@ -193,7 +195,7 @@ describe("editing with the mouse", () => {
         await page.getByLabel("Insert a value into text to type").selectOption("unique");
         await pwExpect(typed).toHaveValue("{{unique}}");
         await typed.fill("tent");
-        await pwExpect(page.locator(".bld-script code").first()).toContainText("tent", { timeout: 10_000 });
+        expect((await headTexts())[2]).toContain("“tent”");
     });
 
     it("switches a locator to a shared element from the object repository", async () => {
@@ -201,7 +203,6 @@ describe("editing with the mouse", () => {
         await page.getByLabel("How to find it", { exact: true }).selectOption("ref");
         await page.getByLabel("Shared element", { exact: true }).selectOption("Search button");
         expect((await headTexts())[3]).toContain("shared element “Search button”");
-        await pwExpect(page.locator(".bld-script code").first()).toContainText('getByRole("button", { name: "Search" })');
     });
 
     it("moves steps with the buttons and with the keyboard, keeping focus on the step", async () => {
@@ -290,6 +291,13 @@ describe("saving", () => {
     });
 
     it("saves and runs: the status goes to passed, the stored test and script follow", async () => {
+        // the name is changed from the ⋯ menu; a later save of the steps keeps the new name (the save carries the title)
+        await page.getByRole("button", { name: "More actions", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Rename" }).click();
+        await page.getByRole("textbox", { name: "New name of the script" }).fill("Search finds boots");
+        await page.getByRole("button", { name: "Save", exact: true }).click();
+        await pwExpect(page.getByRole("heading", { level: 1, name: "Search finds boots" })).toBeVisible();
+        const saveBody = page.waitForRequest((r) => r.method() === "PUT" && r.url().endsWith(`/api/tests/${webId}/spec`));
         await heads().nth(1).click();
         await page.getByLabel("Text to type", { exact: true }).fill("alpenglow");
         await addStep("Check", "The page title contains");
@@ -298,7 +306,9 @@ describe("saving", () => {
         // the result arrives in the results column of the same page
         await pwExpect(page.getByRole("complementary", { name: "Last run" }).getByText("This test is passing")).toBeVisible({ timeout: 90_000 });
         await pwExpect(unsaved()).toHaveCount(0);
+        expect((await saveBody).postDataJSON().spec.title).toBe("Search finds boots");
         const s = await specNow();
+        expect(s.spec.title).toBe("Search finds boots");
         expect(s.spec.steps[1].value).toBe("alpenglow");
         expect(s.spec.steps.some((x: { check?: string }) => x.check === "title")).toBe(true);
         expect(String((await api("GET", `/api/tests/${webId}/script`)).body)).toContain("alpenglow");
@@ -312,12 +322,14 @@ describe("saving", () => {
 });
 
 describe("read-only states", () => {
-    it("a hand-written test points to the Code tab and shows its steps without controls", async () => {
+    it("a hand-written test shows one callout that points to the Code tab, and no steps", async () => {
         await visit(builderHash(apiId));
-        await pwExpect(page.getByText("This is a code test, so it has no steps to edit")).toBeVisible();
-        await pwExpect(page.getByRole("link", { name: "Edit the code", exact: true }).first()).toHaveAttribute("href", `#/tests/${apiId}/code`);
+        const callout = page.locator(".callout", { hasText: "This test is code only: it has no steps" });
+        await pwExpect(callout).toHaveCount(1);
+        await pwExpect(callout.getByRole("link", { name: "Open the Code tab", exact: true })).toHaveAttribute("href", `#/tests/${apiId}/code`);
+        await pwExpect(page.getByRole("tabpanel").first()).not.toContainText("What this test checks");
         expect(await page.getByRole("button", { name: /^Move step/ }).count()).toBe(0);
-        expect(await page.locator(".bld-n").count()).toBeGreaterThan(0);
+        expect(await page.locator(".bld-n").count()).toBe(0);
     });
 
     it("a run in progress says so, and Try again works once it has finished", async () => {

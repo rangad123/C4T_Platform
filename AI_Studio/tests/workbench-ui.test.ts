@@ -73,7 +73,7 @@ const searchSpec = {
     ],
 };
 // a step with a setting no text phrase has: the text shows the closest version and says so
-const stuckSpec = { title: "Accessibility with a number", kind: "web", category: "Shop", steps: [{ action: "navigate", url: "/" }, { action: "assert", check: "a11y", expected: 100 }] };
+const stuckSpec = { title: "Accessibility with a number", kind: "web", category: "Shop", source: { origin: "requirements", requirements: ["REQ-7 Pages are accessible"] }, steps: [{ action: "navigate", url: "/" }, { action: "assert", check: "a11y", expected: 100 }] };
 const apiSpec = { title: "List products answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/api/products" }, { action: "assertResponse", check: "status", expected: 200 }] };
 const plainSpec = { title: "Orders answer", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/api/products" }, { action: "assertResponse", check: "status", expected: 200 }, { action: "assertResponse", check: "bodyContains", expected: "products" }] };
 
@@ -175,7 +175,7 @@ async function axeBoth(name: string, setup: () => Promise<void> = async () => un
 }
 
 describe("one page per test", () => {
-    it("opens on Steps with the steps, the last run beside them and the last run's marks", async () => {
+    it("opens on Steps with the steps, the last run beside them and the last run's marks; the script is one link away, on the Code tab", async () => {
         await visit(`#/tests/${webId}`);
         await pwExpect(page.getByRole("heading", { level: 1, name: "Search finds products" })).toBeVisible();
         await pwExpect(tab("Steps")).toHaveAttribute("aria-selected", "true");
@@ -188,11 +188,11 @@ describe("one page per test", () => {
         expect(await headTexts()).toEqual([expect.stringContaining("Step 1 Open /products"), expect.stringContaining("Step 2 Type"), expect.stringContaining("Step 3 Click"), expect.stringContaining("Step 4")]);
         await pwExpect(page.getByTestId("step-mark")).toHaveCount(4);
         expect(await page.getByTestId("step-mark").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")))).toEqual(["passed", "passed", "passed", "passed"]);
-        // the column beside the steps is the last run, and only things about the steps: the script is on the Code tab, the run's
-        // evidence and the other browsers on History, requirements in the header
+        // the column beside the steps is the last run, and only things about the steps: the script shows only on the Code tab, the
+        // run's evidence and the other browsers on History, requirements in the header
         const rail = page.getByRole("complementary", { name: "Last run" });
         await pwExpect(rail.getByText("This test is passing")).toBeVisible();
-        await pwExpect(rail.locator("pre.code")).toHaveCount(0);
+        await pwExpect(page.locator("pre.code")).toHaveCount(0);
         await pwExpect(rail.getByText("Runs of this test")).toHaveCount(0);
         await pwExpect(rail.getByTestId("latest-run")).toHaveCount(0);
         // the page says where it came from, and the compliance noise is not on a plain test
@@ -201,6 +201,21 @@ describe("one page per test", () => {
         // the last run sits to the right of the steps on a wide screen
         const [steps, last] = await Promise.all([page.locator(".bld-steps").boundingBox(), rail.getByRole("heading", { name: "Last run" }).boundingBox()]);
         expect(last!.x).toBeGreaterThan(steps!.x + steps!.width - 1);
+        // See the script opens the Code tab: the test first, the platform's setup folded
+        await page.getByRole("link", { name: "See the script", exact: true }).click();
+        await pwExpect(tab("Code")).toHaveAttribute("aria-selected", "true");
+        const code = page.getByRole("tabpanel", { name: "Code" });
+        await pwExpect(code.locator("pre.code").first()).toContainText("page.goto");
+        await pwExpect(code.getByText(/^Show setup code \(\d+ lines\)$/)).toBeVisible();
+    });
+
+    it("does not repeat the requirements a test covers on the Steps tab (they show once, outside the tabs)", async () => {
+        expect((await specNow(stuckId)).spec.source.requirements).toEqual(["REQ-7 Pages are accessible"]);
+        await visit(`#/tests/${stuckId}/steps`);
+        const steps = page.getByRole("tabpanel", { name: "Steps" });
+        await pwExpect(steps.getByRole("heading", { name: "What this test checks" })).toBeVisible();
+        await pwExpect(steps).not.toContainText("Covers requirements");
+        await pwExpect(steps).not.toContainText("REQ-7");
     });
 
     it("keeps the old routes working: /builder is the Steps tab and /code the Code tab", async () => {
@@ -473,10 +488,12 @@ describe("the Code tab and the way to code and back", () => {
         await page.getByLabel("Note for this version (optional)").fill("Added a note");
         await page.getByRole("button", { name: "Save and run", exact: true }).click();
         await pwExpect(page.getByTestId("saved-version")).toBeVisible({ timeout: 20_000 });
-        // the steps tab says why there is nothing to edit and links to the code
+        // the steps tab says, once, why there is nothing to edit and links to the code; the old steps are not listed
         await tab("Steps").click();
-        await pwExpect(page.getByText("This is a code test, so it has no steps to edit")).toBeVisible();
-        await pwExpect(page.getByRole("link", { name: "Edit the code", exact: true }).first()).toHaveAttribute("href", `#/tests/${plainId}/code`);
+        const callout = page.locator(".callout", { hasText: "This test is code only: it has no steps" });
+        await pwExpect(callout).toHaveCount(1);
+        await pwExpect(callout.getByRole("link", { name: "Open the Code tab", exact: true })).toHaveAttribute("href", `#/tests/${plainId}/code`);
+        await pwExpect(page.locator(".bld-n")).toHaveCount(0);
         // and the DSL tab says the script is code only, with a way to the code
         await tab("DSL").click();
         await pwExpect(page.getByText("This script is code only: it has no DSL")).toBeVisible();

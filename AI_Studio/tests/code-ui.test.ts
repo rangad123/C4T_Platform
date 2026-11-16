@@ -479,7 +479,11 @@ describe("A hand-written test", () => {
         await pwExpect(page.getByRole("button", { name: "Version history" })).toHaveCount(0);
         // the steps of the archived specification are not shown as if they still drove the test
         await page.getByRole("tab", { name: "Steps", exact: true }).click();
-        await pwExpect(page.getByText("A code test has no list of steps")).toBeVisible();
+        const stepsCallout = page.locator(".callout", { hasText: "This test is code only: it has no steps" });
+        await pwExpect(stepsCallout).toHaveCount(1);
+        await pwExpect(stepsCallout).toContainText("go back to the generated version there");
+        await pwExpect(stepsCallout.getByRole("link", { name: "Open the Code tab", exact: true })).toHaveAttribute("href", `#/tests/${testId}/code`);
+        await pwExpect(page.locator(".bld-n")).toHaveCount(0);
         await page.getByRole("tab", { name: "Code", exact: true }).click();
         await shot("custom-callout-light-1280");
         await axeBoth(async () => {
@@ -1095,7 +1099,7 @@ describe("Loading and layout", () => {
         fake.custom = makeCustom("taken-over");
         requested.length = 0;
         await visit(`#/tests/${testId}/steps`);
-        await pwExpect(page.getByText("A code test has no list of steps")).toBeVisible();
+        await pwExpect(page.getByText("This test is code only: it has no steps")).toBeVisible();
         await visit(`#/projects/${projectId}/scripts`);
         await pwExpect(page.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
         await visit(`#/projects/${projectId}/helpers`);

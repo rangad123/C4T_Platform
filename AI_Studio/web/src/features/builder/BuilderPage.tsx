@@ -1,7 +1,6 @@
 import { ArrowDown, ArrowUp, Blocks, Check, ChevronDown, Code2, Copy, GripVertical, ListPlus, Plus, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
-import { ScriptPreview } from "../../components/ScriptPreview";
 import { Badge, Button, Callout, Disclosure, EmptyState, ErrorState, LinkButton, Skeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { cleanReason, friendlyError, stepSentence, describeApiError } from "../../lib/labels";
@@ -24,14 +23,15 @@ import { useLeaveGuard } from "./guard";
 import { StepForm } from "./StepForm";
 import "./builder.css";
 
-/** What the workbench gives the editor: which view the route shows, where to put the script and the unsaved bar, the last run's marks. */
+/** What the workbench gives the editor: which view the route shows, where to put the unsaved bar, the last run's marks. */
 export interface EditorEmbed {
     mode: "steps" | "text";
     /** The editor changed its own view (after the checks passed): the route follows. */
     onMode: (mode: "steps" | "text") => void;
     /** False while another tab (Code, History) is showing: the editor stays mounted so unsaved work is kept, and puts nothing on screen. */
     active: boolean;
-    scriptSlot: HTMLElement | null;
+    /** No longer used: the script shows only on the Code tab, and the Steps view links there. Optional until the workbench stops passing it. */
+    scriptSlot?: HTMLElement | null;
     barSlot: HTMLElement | null;
     /** The last run's verdict per step, only when no edit was saved after that run. */
     marks?: Array<StepMark | undefined>;
@@ -44,7 +44,18 @@ export interface EditorEmbed {
 }
 
 /** The steps and the text of a generated test, one editor with two views. The workbench puts it inside the Steps and Text tabs. */
-export function StepsEditor({ id, embed, refreshKey }: { id: string; embed: EditorEmbed; /** Changes when something outside the editor changed what it may do (a run ended): the platform is asked again, the work in progress stays. */ refreshKey: number }) {
+export function StepsEditor({
+    id,
+    embed,
+    refreshKey,
+    title,
+}: {
+    id: string;
+    embed: EditorEmbed;
+    /** Changes when something outside the editor changed what it may do (a run ended): the platform is asked again, the work in progress stays. */ refreshKey: number;
+    /** The test's name as the page shows it now. A rename (the ⋯ menu) changes it, and a later save of the steps keeps the new name. */
+    title?: string;
+}) {
     const spec = useFetch<SpecAnswer>(`/tests/${id}/spec`);
     const first = useRef(true);
     useEffect(() => {
@@ -71,6 +82,7 @@ export function StepsEditor({ id, embed, refreshKey }: { id: string; embed: Edit
             id={id}
             data={d}
             embed={embed}
+            {...(title !== undefined ? { liveTitle: title } : {})}
             onRetry={spec.reload}
             justSaved={justSaved}
             onTextSaved={async (r) => {
@@ -93,7 +105,7 @@ export function StepsEditor({ id, embed, refreshKey }: { id: string; embed: Edit
     );
 }
 
-function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, onTextSaved }: { id: string; data: SpecAnswer; embed: EditorEmbed; onRetry: () => Promise<void>; onExtracted: (b: Block) => Promise<void>; onShared: () => Promise<void>; justSaved: string | null; onTextSaved: (r: SaveTextAnswer) => Promise<void> }) {
+function Editor({ id, data, embed, liveTitle, onRetry, onExtracted, onShared, justSaved, onTextSaved }: { id: string; data: SpecAnswer; embed: EditorEmbed; liveTitle?: string; onRetry: () => Promise<void>; onExtracted: (b: Block) => Promise<void>; onShared: () => Promise<void>; justSaved: string | null; onTextSaved: (r: SaveTextAnswer) => Promise<void> }) {
     const kind: Kind = data.kind === "api" ? "api" : "web";
     const editable = data.editable;
     const draftOf = (): Draft => ({ title: data.spec.title, testData: data.spec.testData ?? {}, steps: data.spec.steps });
@@ -106,10 +118,6 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
     const [selected, setSelected] = useState<string | null>(null);
     const [palette, setPalette] = useState(false);
     const [diags, setDiags] = useState<Diag[]>([]);
-    const [preview, setPreview] = useState<{ script: string; filename: string } | null>(null);
-    const [previewState, setPreviewState] = useState<"idle" | "loading" | "ok" | "error">("idle");
-    const [previewError, setPreviewError] = useState("");
-    const [showScript, setShowScript] = useState(true);
     const [saving, setSaving] = useState<"" | "save" | "run">("");
     const [saveError, setSaveError] = useState("");
     const [showChanges, setShowChanges] = useState(false);
@@ -145,26 +153,26 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
     const sig = JSON.stringify(draft) + JSON.stringify(extras);
     const seq = useRef(0);
     const titleProblem = title.trim().length < 3 ? "Give the test a name of at least 3 characters." : title.trim().length > data.kinds.limits.title ? `Keep the name under ${data.kinds.limits.title} characters.` : "";
+    // The name is changed with Rename in the ⋯ menu, outside this editor: follow it, so saving the steps never puts the old name back.
+    useEffect(() => {
+        if (liveTitle === undefined || liveTitle === base.title) return;
+        setBase((b) => ({ ...b, title: liveTitle }));
+        setTitle(liveTitle);
+    }, [liveTitle]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // The script follows the steps: asked for 500 ms after the last change, and an older answer never replaces a newer one.
+    // The problems follow the steps: checked 500 ms after the last change, and an older answer never replaces a newer one.
     useEffect(() => {
         if (!editable) return;
-        // The first look at the script is not delayed; later changes wait for a pause in typing.
+        // The first check is not delayed; later changes wait for a pause in typing.
         const delay = seq.current === 0 ? 0 : 500;
         const timer = window.setTimeout(async () => {
             const n = ++seq.current;
-            setPreviewState("loading");
             try {
                 const r = await bapi<PreviewAnswer>(`/tests/${id}/spec/preview`, { method: "POST", body: { spec: specFrom(baseSpec, draft) } });
                 if (n !== seq.current) return;
                 setDiags(r.diagnostics);
-                if (r.script) setPreview({ script: r.script, filename: r.filename ?? "test.spec.ts" });
-                setPreviewState("ok");
-                setPreviewError("");
-            } catch (e) {
-                if (n !== seq.current) return;
-                setPreviewState("error");
-                setPreviewError(describeApiError(e));
+            } catch {
+                // The problems list keeps the last answer; saving checks the steps again and names what is wrong.
             }
         }, delay);
         return () => clearTimeout(timer);
@@ -449,13 +457,9 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
                     {switchNote}
                     <Callout
                         tone={data.busy ? "warning" : "info"}
-                        title={data.busy ? "A run is in progress" : data.custom ? "This is a code test, so it has no steps to edit" : "These steps cannot be edited here"}
+                        title={data.busy ? "A run is in progress" : "These steps cannot be edited here"}
                         actions={
-                            data.custom ? (
-                                <LinkButton size="sm" variant="primary" href={routes.code(id)} icon={Code2}>
-                                    Edit the code
-                                </LinkButton>
-                            ) : data.busy ? (
+                            data.busy ? (
                                 <Button size="sm" onClick={() => void onRetry()}>
                                     Try again
                                 </Button>
@@ -467,9 +471,9 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
                     <section className="card" aria-labelledby="bld-steps-title">
                         <div className="card-head wrap">
                             <h2 className="t-section" id="bld-steps-title">
-                                {data.custom ? "Steps before the switch to code" : "Steps"}
+                                Steps
                             </h2>
-                            <span className="t-meta">{data.custom ? `${items.length} in all, no longer run: the code is what runs` : `${items.length} in all`}</span>
+                            <span className="t-meta">{items.length} in all</span>
                         </div>
                         <ol className="bld-steps" aria-label="Steps of this test">
                             {items.map((it, i) => (
@@ -496,45 +500,6 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
         return { mark: m, edited: canonOf(base.steps[orig]) !== canonOf(it.step) };
     }
 
-    const scriptCard = (
-        <section className="card bld-preview" aria-labelledby="bld-script-title">
-            <div className="card-head wrap">
-                <h2 className="t-section" id="bld-script-title">
-                    Script
-                </h2>
-                <span className="t-meta">{previewState === "loading" ? "Updating…" : previewState === "ok" && errors.length === 0 ? "Up to date" : ""}</span>
-                <span className="spacer" />
-                <Button size="sm" aria-expanded={showScript} aria-controls="bld-script" onClick={() => setShowScript((v) => !v)}>
-                    {showScript ? "Hide script" : "Show script"}
-                </Button>
-            </div>
-            {showScript && (
-                <div id="bld-script" className="bld-script">
-                    {previewState === "error" && (
-                        <div className="bld-pad">
-                            <Callout tone="warning" title="The preview could not be updated">
-                                {previewError}
-                            </Callout>
-                        </div>
-                    )}
-                    {previewState !== "error" && errors.length > 0 && <p className="hint bld-pad">The script below is the last one that could be created. Fix the problems to see the new one.</p>}
-                    {preview ? (
-                        <ScriptPreview code={preview.script} filename={preview.filename} label={preview.filename} />
-                    ) : previewState === "ok" || previewState === "error" ? (
-                        <p className="hint bld-pad">The script appears here as soon as the steps have no problems.</p>
-                    ) : (
-                        <div className="bld-pad" aria-busy="true" aria-label="Loading the preview">
-                            <Skeleton w="70%" h={14} />
-                            <Skeleton w="55%" h={14} style={{ marginTop: 10 }} />
-                        </div>
-                    )}
-                </div>
-            )}
-        </section>
-    );
-    // The script sits beside the steps (the workbench's right column) while this tab shows; without that column it follows the steps.
-    const scriptPlace = embed.active ? (embed.scriptSlot ? createPortal(scriptCard, embed.scriptSlot) : scriptCard) : null;
-
     return (
         <>
             <div className="stack bld-root">
@@ -546,6 +511,10 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
                     <Button icon={Blocks} disabled={dirty || items.length === 0} tip={dirty ? "Save or discard your changes first." : items.length === 0 ? "Add a step first." : "Moves some of these steps into reusable steps that other tests can use. This test then runs them from there."} onClick={() => setSaveAsBlock(true)}>
                         Save steps as reusable steps
                     </Button>
+                    <span className="spacer" />
+                    <LinkButton variant="ghost" icon={Code2} href={routes.code(id)}>
+                        See the script
+                    </LinkButton>
                 </div>
 
                 {palette && (
@@ -611,19 +580,7 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
                                 </ul>
                             </section>
                         )}
-                        <section className="card card-pad stack-sm" aria-labelledby="bld-details-title">
-                            <h2 className="t-section" id="bld-details-title">
-                                Test details
-                            </h2>
-                            <div className="field">
-                                <label htmlFor="bld-title">Test name</label>
-                                <input id="bld-title" className="input" value={title} maxLength={data.kinds.limits.title} aria-invalid={!!titleProblem} aria-describedby={titleProblem ? "bld-title-err" : undefined} onChange={(e) => setTitle(e.target.value)} />
-                                {titleProblem && (
-                                    <span className="error-text" id="bld-title-err">
-                                        {titleProblem}
-                                    </span>
-                                )}
-                            </div>
+                        <section className="card card-pad stack-sm" aria-label="Test values">
                             <Disclosure label="Test values">
                                 <div className="stack-sm">
                                     <p className="hint">Names you can use in steps as {"{{name}}"}. {data.placeholders.dataSet ? `The data set “${data.placeholders.dataSet}” stays attached.` : ""}</p>
@@ -770,7 +727,6 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
 
                 </div>
             </div>
-            {scriptPlace}
             {bar}
             {leaveDialog}
             {saveAsBlock && (

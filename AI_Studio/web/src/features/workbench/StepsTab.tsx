@@ -1,10 +1,9 @@
 import type { MutableRefObject } from "react";
-import { Callout, Disclosure, Term } from "../../components/ui";
+import { Callout, Disclosure, LinkButton, Term } from "../../components/ui";
 import { PlainOrigin } from "../authoring/PlainOrigin";
 import { descriptionOf } from "../authoring/authoring";
 import { StepsEditor, type EditorEmbed } from "../builder/BuilderPage";
-import type { Detail } from "./test-model";
-import type { StepMark } from "./test-model";
+import { testTabHref, type Detail, type StepMark } from "./test-model";
 
 /** The controls list is only useful where a test is about security, accessibility or access: elsewhere the mapping is generic ("applies to everything"). */
 const COMPLIANCE_TYPES = new Set(["security", "accessibility"]);
@@ -13,7 +12,8 @@ const COMPLIANCE_ORIGINS = new Set(["security-check", "a11y-audit", "access-chec
 export interface EditorProps {
     mode: "steps" | "text";
     active: boolean;
-    scriptSlot: HTMLElement | null;
+    /** No longer used: the script shows only on the Code tab. Optional until the workbench stops passing it. */
+    scriptSlot?: HTMLElement | null;
     barSlot: HTMLElement | null;
     marks: Array<StepMark | undefined> | undefined;
     onMode: EditorEmbed["onMode"];
@@ -24,24 +24,33 @@ export interface EditorProps {
 }
 
 /**
- * The Steps tab: what the test checks (in a sentence, with what it covers), then the step editor with the last run's marks on each
- * step. The generated script sits in the workbench's right column beside the steps. Steps and Text are two views of one editor, so
- * unsaved work in either survives a switch between them (and a visit to the other tabs).
+ * The Steps tab: what the test checks (in a sentence), then the step editor with the last run's marks on each step. The script
+ * shows only on the Code tab; a link here leads to it. Steps and Text are two views of one editor, so unsaved work in either survives
+ * a switch between them (and a visit to the other tabs). A code test has no steps: one callout points to the Code tab, like the DSL
+ * tab's.
  */
 export function StepsTab({ test, editor, onChanged, refreshKey }: { test: Detail; editor: EditorProps; onChanged: () => void; refreshKey: number }) {
     const t = test;
     const embed: EditorEmbed = { ...editor };
     const about = editor.mode === "steps";
+    if (t.custom) {
+        return (
+            <Callout
+                tone="info"
+                title="This test is code only: it has no steps"
+                actions={
+                    <LinkButton size="sm" variant="primary" href={testTabHref(t.id, "code")}>
+                        Open the Code tab
+                    </LinkButton>
+                }
+            >
+                It was written as code, so there are no steps to show or edit. The code is the test: read or change it in the Code tab{t.custom.canRestoreGenerated ? ", or go back to the generated version there to get the steps back" : ""}.
+            </Callout>
+        );
+    }
     return (
         <div className="stack">
-            {!about ? null : t.custom ? (
-                <section className="stack-sm" aria-labelledby="wb-what">
-                    <h2 className="t-section" id="wb-what">
-                        What this test checks
-                    </h2>
-                    <p className="t-secondary">A code test has no list of steps: the script is the test. Read it or change it in the Code tab.</p>
-                </section>
-            ) : (
+            {about && (
                 <section className="stack-sm" aria-labelledby="wb-what">
                     <h2 className="t-section" id="wb-what">
                         What this test checks
@@ -68,7 +77,6 @@ export function StepsTab({ test, editor, onChanged, refreshKey }: { test: Detail
                             </p>
                         </Disclosure>
                     ) : null}
-                    {t.spec.source?.requirements?.length ? <p className="t-meta">Covers requirements: {t.spec.source.requirements.join(", ")}</p> : null}
                     {t.dataDriven && (
                         <p className="t-meta" data-testid="data-driven">
                             Runs once for each row of the test data “{t.dataDriven.dataSet}”
@@ -104,7 +112,7 @@ export function StepsTab({ test, editor, onChanged, refreshKey }: { test: Detail
                     )}
                 </section>
             )}
-            <StepsEditor id={t.id} embed={embed} refreshKey={refreshKey} />
+            <StepsEditor id={t.id} embed={embed} refreshKey={refreshKey} title={t.title} />
         </div>
     );
 }
