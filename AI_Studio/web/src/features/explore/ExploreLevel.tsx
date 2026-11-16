@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, projectShape, type ProjectDetail } from "../../api";
+import { api, projectKind, projectShape, type ProjectDetail } from "../../api";
 import { Button, Callout } from "../../components/ui";
 import { describeApiError } from "../../lib/labels";
 import { useFetch } from "../../lib/hooks";
@@ -63,7 +63,8 @@ export function ScreenReviewChoice({ level, canReadImages, value, onChange }: { 
 
 /**
  * Project Settings → General: the level later explorations and schedules start from. Not shown for a project that tests only a phone
- * app: phone explorations have their own "How thorough" under Settings → Mobile app, and this level is not read there.
+ * app (phone explorations have their own "How thorough" under Settings → Mobile app, and this level is not read there), nor for a
+ * code project, which never explores. A project tested by both the AI agent and code keeps it.
  */
 export function ExploreLevelSetting({ id }: { id: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
@@ -73,7 +74,7 @@ export function ExploreLevelSetting({ id }: { id: string }) {
     const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
     useEffect(() => setLevel(saved), [saved]);
     if (!project.data) return null;
-    if (!projectShape(project.data).platforms.includes("web")) return null;
+    if (!projectShape(project.data).platforms.includes("web") || projectKind(project.data) === "code") return null;
     async function save() {
         setBusy(true);
         setMsg(null);

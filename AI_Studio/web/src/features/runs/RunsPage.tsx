@@ -1,6 +1,8 @@
+import { projectKind, type ProjectDetail } from "../../api";
 import { ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { ProjectRuns } from "../../pages/ProjectRuns";
 import { ProjectCompliance } from "../../pages/ProjectCompliance";
+import { useFetch } from "../../lib/hooks";
 import { routes, useRoute, type RunsSection } from "../../lib/router";
 import { ReleasesPage } from "../manual/ReleasesPage";
 import { ProjectSchedule } from "../schedules/ProjectSchedule";
@@ -11,8 +13,10 @@ import { ProjectSchedule } from "../schedules/ProjectSchedule";
  */
 export function RunsPage({ id }: { id: string }) {
     const section = (useRoute().query.get("section") as RunsSection | null) ?? "runs";
+    // A code project never explores, so its runs are only runs of tests.
+    const code = projectKind(useFetch<ProjectDetail>(`/projects/${id}`).data) === "code";
     const sections: HubSection[] = [
-        { key: "runs", label: "All runs", hint: "Every exploration and every run of tests", render: () => <ProjectRuns id={id} /> },
+        { key: "runs", label: "All runs", hint: code ? "Every run of tests" : "Every exploration and every run of tests", render: () => <ProjectRuns id={id} /> },
         { key: "schedules", label: "Schedules", hint: "Run tests on a timetable and get told when something changes", render: () => <ProjectSchedule id={id} section="schedules" /> },
         { key: "deploys", label: "After a deploy", hint: "Run tests when your pipeline says a new version is out", render: () => <ProjectSchedule id={id} section="deploys" /> },
         { key: "trends", label: "Trends", hint: "How results develop, and which tests are unreliable", render: () => <ProjectSchedule id={id} section="trends" /> },

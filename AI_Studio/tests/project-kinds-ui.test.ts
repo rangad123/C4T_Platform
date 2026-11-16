@@ -271,6 +271,25 @@ describe("the tabs follow the project's kind", () => {
         await row.getByRole("button", { name: "Change mobile app", exact: true }).click();
         await pwExpect(row.locator(".setting-body")).toBeVisible();
     });
+
+    it("a code project never explores: no Explore with AI in Mobile app, and Runs → All runs is every run of tests", async () => {
+        const runsHint = async (id: string) => {
+            await visit(routes.runs(id));
+            const all = page.getByRole("navigation", { name: "Runs sections" }).getByRole("link", { name: "All runs", exact: true });
+            await pwExpect(all).toBeVisible();
+            // The hint is the link's description (components/Tooltip.tsx); it settles once the project has loaded.
+            return all.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
+        };
+        for (const [id, explores] of [[code, false], [mixed, true]] as const) {
+            await visit(routes.projectSettings(id, "mobile"));
+            const row = page.getByTestId("setting-mobile");
+            await pwExpect(row.getByRole("button", { name: "Change mobile app", exact: true })).toBeVisible();
+            await pwExpect(row.getByRole("button", { name: "Explore with AI", exact: true })).toHaveCount(explores ? 1 : 0);
+            await pwExpect.poll(() => runsHint(id)).toBe(explores ? "Every exploration and every run of tests" : "Every run of tests");
+        }
+        await pwExpect.poll(() => runsHint(ran)).toBe("Every run of tests");
+        await pwExpect.poll(() => runsHint(agent)).toBe("Every exploration and every run of tests");
+    });
 });
 
 describe("the project header sits above the tabs on every place", () => {

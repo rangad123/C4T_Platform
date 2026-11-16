@@ -1,6 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
-import { api } from "../../api";
+import { api, projectKind, type ProjectDetail } from "../../api";
 import { Button, Callout, Skeleton } from "../../components/ui";
 import { HelpTip } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
@@ -20,6 +20,8 @@ interface Note {
  */
 export function NotesCard({ projectId }: { projectId: string }) {
     const notes = useFetch<{ notes: Note[]; max: number }>(`/projects/${projectId}/notes`);
+    // A code project never explores: its tip names only planning and writing tests.
+    const code = projectKind(useFetch<ProjectDetail>(`/projects/${projectId}`).data) === "code";
     const noSettings = useHere(projectId).why("ai_studio.project.settings");
     const [path, setPath] = useState("");
     const [text, setText] = useState("");
@@ -56,7 +58,7 @@ export function NotesCard({ projectId }: { projectId: string }) {
                 Notes for the AI{" "}
                 <HelpTip
                     label="notes for the AI"
-                    text={'Hints the AI reads when it explores, plans and writes tests: test data to use, what a page does, what to avoid. Add a page path to keep a note to that page and the pages under it (/product/* for every product). A note that starts with "never" is a rule: the AI does not use the control it names, for example: never press Delete account.'}
+                    text={`Hints the AI reads when it ${code ? "plans" : "explores, plans"} and writes tests: test data to use, what a page does, what to avoid. Add a page path to keep a note to that page and the pages under it (/product/* for every product). A note that starts with "never" is a rule: the AI does not use the control it names, for example: never press Delete account.`}
                 />
             </h2>
             {notes.error && <Callout tone="warning" title="Could not load the notes">{describeApiError(notes.error)}</Callout>}

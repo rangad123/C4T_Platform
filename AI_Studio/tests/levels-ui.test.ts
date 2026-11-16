@@ -86,6 +86,29 @@ describe("how much to explore", () => {
         await pwExpect(page.getByTestId("explore-level-setting")).toBeVisible();
     });
 
+    it("a code project has no level in Settings (it never explores); a project tested by both the AI agent and code keeps it", async () => {
+        const code = platform.repo.createProject({ name: "Level code", platforms: ["web"], testingModes: ["code"] }).id as string;
+        platform.repo.createApplication(code, SITE, { ...DEFAULT_JOB_OPTIONS });
+        const both = platform.repo.createProject({ name: "Level both", platforms: ["web"], testingModes: ["agent", "code"] }).id as string;
+        platform.repo.createApplication(both, SITE, { ...DEFAULT_JOB_OPTIONS });
+        await page.goto(`${BASE}/#/projects/${code}/settings`);
+        await pwExpect(page.getByRole("heading", { name: "Project details" })).toBeVisible();
+        await pwExpect(page.getByTestId("notes-card")).toBeVisible();
+        await page.waitForLoadState("networkidle");
+        await pwExpect(page.getByTestId("explore-level-setting")).toHaveCount(0);
+        // Its Notes for the AI tip names planning and writing tests, not exploring.
+        const tip = (id: string) => async () => {
+            await page.goto(`${BASE}/#/projects/${id}/settings`);
+            const help = page.getByRole("button", { name: "About notes for the AI" });
+            await pwExpect(help).toBeVisible();
+            await page.waitForLoadState("networkidle");
+            return help.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
+        };
+        expect(await tip(code)()).toMatch(/^Hints the AI reads when it plans and writes tests:/);
+        expect(await tip(both)()).toMatch(/^Hints the AI reads when it explores, plans and writes tests:/);
+        await pwExpect(page.getByTestId("explore-level-setting")).toBeVisible();
+    });
+
     it("the Explore page starts from the project's level, and the choice reaches the job", async () => {
         await page.goto(`${BASE}/#/new?project=${shop}`);
         const levels = page.getByTestId("explore-level");

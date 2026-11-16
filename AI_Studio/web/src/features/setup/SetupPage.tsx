@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { projectShape, type Job, type ProjectDetail } from "../../api";
+import { projectKind, projectShape, type Job, type ProjectDetail } from "../../api";
 import { CollapsedSetting, ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { MobileAppPanel } from "../../components/MobileAppPanel";
 import { formatBytes } from "../../lib/format";
@@ -50,10 +50,12 @@ function MobileSetting({ id }: { id: string }) {
     const m = project.data?.mobile;
     // Reached from the welcome page right after it saved an Android app: go on to the start panel.
     const auto = useRoute().query.get("start") === "phone";
-    const summary = project.loading ? "Loading…" : m ? `Phone tests use ${m.appPackage || m.iosBundleId || m.apk || "the uploaded app"}.${appState(m) === "ready" ? " The AI can explore it and plan tests." : appState(m) === "needs-package" ? " Add its package name and the AI can explore it." : ""}` : "No app is set. Only needed when you test an Android or iOS app.";
+    // A code project never explores: no "Explore with AI", and the summary says nothing about the AI exploring the app.
+    const explores = projectKind(project.data) !== "code";
+    const summary = project.loading ? "Loading…" : m ? `Phone tests use ${m.appPackage || m.iosBundleId || m.apk || "the uploaded app"}.${!explores ? "" : appState(m) === "ready" ? " The AI can explore it and plan tests." : appState(m) === "needs-package" ? " Add its package name and the AI can explore it." : ""}` : "No app is set. Only needed when you test an Android or iOS app.";
     return (
         <>
-            <CollapsedSetting title="Mobile app" summary={summary} testId="setting-mobile" tour="mobile-app" extra={project.loading ? undefined : <ExploreWithAi projectId={id} auto={auto} />}>
+            <CollapsedSetting title="Mobile app" summary={summary} testId="setting-mobile" tour="mobile-app" extra={project.loading || !explores ? undefined : <ExploreWithAi projectId={id} auto={auto} />}>
                 <MobileAppPanel projectId={id} current={m ?? null} mobile={config?.mobile} onSaved={() => void project.reload()} />
                 <DeviceFarmPanel projectId={id} />
             </CollapsedSetting>
