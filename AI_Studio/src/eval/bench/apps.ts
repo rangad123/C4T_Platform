@@ -67,7 +67,15 @@ export const BENCH_APPS: BenchApp[] = [
         ],
         // Every signed-in screen of the answer key lists the admin role, and People (/admin/users) lists only admin: an admin crawl can
         // reach all of them, the user account all but People. The detection benchmark keeps the user account its seeded defects need.
-        understanding: { credentials: { username: "ada@example.test", password: "Password1!" } },
+        // The admin owns no note in the app's data, and a note page shows its edit, share, stop-sharing and delete controls to the owner
+        // only: one note of the admin's, shared with a colleague, puts them in reach. The app's data starts fresh, so it is note n4.
+        understanding: {
+            credentials: { username: "ada@example.test", password: "Password1!" },
+            seed: [
+                { method: "POST", path: "/api/notes", body: { title: "Release checklist", body: "Check the sign-in page before the release." } },
+                { method: "POST", path: "/api/notes/n4/share", body: { email: "ben@example.test" } },
+            ],
+        },
     },
 ];
 

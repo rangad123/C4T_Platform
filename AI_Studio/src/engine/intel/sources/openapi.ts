@@ -1,6 +1,7 @@
 /**
  * An OpenAPI (or Swagger) document as a source of application knowledge, without AI: every operation becomes a documented endpoint with
- * the document's path as evidence, component schemas become entities, `$ref`s between schemas become relationships, and the request
+ * the document's path as evidence, component schemas become entities (and, without a schema of that name, a collection a path addresses
+ * by id becomes an inferred one), `$ref`s between schemas become relationships, and the request
  * chains the API test generator detects (list -> detail, create -> read...) become workflows. Nothing is requested from the application.
  */
 import { parseOpenApi, parseSpecText } from "../../api/openapi.js";
@@ -79,6 +80,8 @@ function entitiesOf(spec: Json, ref: string, model: AppModel, notes: string[]) {
         model.entities.push({
             id: cut(name, 100),
             name: cut(name, 100),
+            sourceType: "openapi",
+            explicitness: "explicit",
             fields: props.slice(0, MAX_FIELDS).map(([field, p]) => ({ name: cut(field, 100), ...(fieldType(p) ? { type: cut(fieldType(p), 50) } : {}), constraints: constraints(p ?? {}, required.has(field)) })),
             evidence: [evidence(ref, pointer)],
         });
@@ -90,6 +93,73 @@ function entitiesOf(spec: Json, ref: string, model: AppModel, notes: string[]) {
             model.relationships.push({ from: cut(name, 100), to: cut(to, 100), kind: many ? "has_many" : "references", evidence: [evidence(ref, `${pointer}/properties/${seg(field)}`)] });
         }
     }
+}
+
+/** "orders" -> "order", "categories" -> "category"; a word that is not plural (status, address, news is not checked) gives undefined. */
+function singular(word: string): string | undefined {
+    const w = word.toLowerCase();
+    if (!/^[a-z][a-z0-9_-]*s$/.test(w) || /(ss|us|is)$/.test(w)) return undefined;
+    if (w.endsWith("ies")) return `${w.slice(0, -3)}y`;
+    if (/(ches|shes|xes)$/.test(w)) return w.slice(0, -2);
+    return w.slice(0, -1);
+}
+const isParam = (s: string | undefined) => !!s && /^\{[^}]+\}$/.test(s);
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** The inline object schema of a request body or response (not a `$ref`: a schema it names is already an entity). */
+function inlineObject(holder: Json | undefined): Json | undefined {
+    if (!holder || typeof holder !== "object") return undefined;
+    const schemas = [holder.schema, ...Object.values<Json>(holder.content ?? {}).map((m) => m?.schema)];
+    return schemas.find((x) => x && typeof x === "object" && !x.$ref && x.properties && typeof x.properties === "object");
+}
+
+/**
+ * Entities inferred from paths, for a document without a schema of that name: a plural segment followed by a parameter
+ * (`/api/orders/{id}`) addresses records of a collection, "order". Under a segment that is itself a documented path (`/api/cart`), the
+ * name carries it ("cart item"). Its fields are those of the inline request bodies that create or change one (POST on the collection,
+ * PUT or PATCH on one) and of the inline answer for one (GET). Each is inferred: the document addresses the collection, it does not
+ * declare an entity.
+ */
+function pathEntitiesOf(spec: Json, ref: string, model: AppModel) {
+    const paths = spec.paths as Json;
+    const documented = new Set(Object.keys(paths).map((p) => p.replace(/\/+$/, "")));
+    const stated = new Set(model.entities.map((e) => squash(e.name)));
+    const found = new Map<string, AppModel["entities"][number]>();
+    for (const docPath of Object.keys(paths)) {
+        const parts = docPath.split("/");
+        for (let i = 1; i + 1 < parts.length; i++) {
+            const one = singular(parts[i]!);
+            if (!one || !isParam(parts[i + 1])) continue;
+            const prev = parts[i - 1];
+            const parent = prev && !isParam(prev) && documented.has(parts.slice(0, i).join("/")) ? (singular(prev) ?? prev.toLowerCase()) : undefined;
+            const name = cut(parent ? `${parent} ${one}` : one, 100);
+            if (stated.has(squash(name)) || found.has(name) || found.size + model.entities.length >= MAX_ENTITIES) continue;
+            const collection = parts.slice(0, i + 1).join("/");
+            const item = parts.slice(0, i + 2).join("/");
+            const entity = { id: cut(name.replace(/\s+/g, "-"), 100), name, fields: [] as AppModel["entities"][number]["fields"], sourceType: "inferred" as const, explicitness: "inferred" as const, evidence: [evidence(ref, `/paths/${seg(item in paths ? item : docPath)}`)] };
+            const bodies: [string, string, Json | undefined][] = [
+                [collection, "post", paths[collection]?.post],
+                [item, "put", paths[item]?.put],
+                [item, "patch", paths[item]?.patch],
+                [item, "get", paths[item]?.get],
+            ];
+            for (const [p, method, op] of bodies) {
+                if (!op || typeof op !== "object") continue;
+                const fromBody = method !== "get";
+                const holder = fromBody ? (op.requestBody ?? (Array.isArray(op.parameters) ? op.parameters.find((x: Json) => x?.in === "body") : undefined)) : Object.entries<Json>(op.responses ?? {}).find(([status]) => /^2/.test(status))?.[1];
+                const schema = inlineObject(holder);
+                if (!schema) continue;
+                const required = new Set<string>(Array.isArray(schema.required) ? schema.required : []);
+                for (const [field, f] of Object.entries<Json>(schema.properties)) {
+                    if (entity.fields.length >= MAX_FIELDS || entity.fields.some((x) => x.name === field)) continue;
+                    entity.fields.push({ name: cut(field, 100), ...(fieldType(f) ? { type: cut(fieldType(f), 50) } : {}), constraints: constraints(f ?? {}, required.has(field)) });
+                }
+                if (entity.evidence.length < 20) entity.evidence.push(evidence(ref, `/paths/${seg(p)}/${method}/${fromBody ? "requestBody" : "responses"}`));
+            }
+            found.set(name, entity);
+        }
+    }
+    model.entities.push(...found.values());
 }
 
 /** The documented endpoint a chain's request goes to: same method, same segments, a `{param}` matching any one segment. */
@@ -159,6 +229,7 @@ export function openApiFragment(spec: Json, opts: { ref: string; now?: string })
         });
     }
     entitiesOf(spec, ref, model, notes);
+    pathEntitiesOf(spec, ref, model);
     const chains = generateApiWorkflowSpecs(parsed.operations.slice(0, MAX_CHAIN_OPERATIONS), { allowMutating: true, maxWorkflows: MAX_WORKFLOWS }).specs;
     const usedIds = new Set<string>();
     for (const chain of chains) {

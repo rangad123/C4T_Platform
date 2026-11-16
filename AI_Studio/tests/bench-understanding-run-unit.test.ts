@@ -1,7 +1,8 @@
 /**
  * The understanding benchmark command's pure parts (src/eval/bench/understanding/run.ts and the scorer's screen rule): the options for
  * recorded judgements and for the requirements variant, which judgements apply to which trial, the whole document as one requirement
- * record, AI calls by purpose, and answer-key screens left out of U1 because no crawl can reach them. Expected values are worked out by
+ * record, AI calls by purpose, answer-key screens left out of U1 because no crawl can reach them, and bench-rbac's seed (the one part
+ * that starts the app, on loopback port 9879). Expected values are worked out by
  * hand from the definitions.
  */
 import fs from "node:fs";
@@ -9,9 +10,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AppModelSchema } from "../src/engine/intel/model.js";
-import { BENCH_APPS } from "../src/eval/bench/apps.js";
+import { BENCH_APPS, BenchAppHost } from "../src/eval/bench/apps.js";
 import { AnswerKeySchema, type Judgements } from "../src/eval/bench/understanding/answer-key.js";
-import { callsByPurpose, judgementFor, loadJudgements, parseUnderstandingArgs, wholeDocumentRequirement } from "../src/eval/bench/understanding/run.js";
+import { callsByPurpose, judgementFor, loadJudgements, parseUnderstandingArgs, seedApp, wholeDocumentRequirement } from "../src/eval/bench/understanding/run.js";
 import { screenRecall } from "../src/eval/bench/understanding/score.js";
 
 const judgement = (over: Partial<Judgements> = {}): Judgements => ({
@@ -129,4 +130,26 @@ describe("screens no crawl can reach", () => {
             }
         }
     });
+});
+
+describe("bench-rbac's understanding seed", () => {
+    it("gives the crawl's account a note of its own, shared with a colleague, so the owner's edit, share, stop-sharing and delete controls are there to find", async () => {
+        const app = BENCH_APPS.find((a) => a.id === "bench-rbac")!;
+        const account = app.understanding!.credentials!;
+        const host = new BenchAppHost(app, 9879);
+        try {
+            await host.start("none");
+            await seedApp(host.url, account, app.understanding!.seed);
+            const login = await fetch(`${host.url}/api/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: account.username, password: account.password }) });
+            const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0]!;
+            const notes = ((await (await fetch(`${host.url}/api/notes`, { headers: { cookie } })).json()) as { notes: Array<{ id: string; owner: string; sharedWith: Array<{ name: string }> }> }).notes;
+            const own = notes.filter((n) => n.owner === "Ada Brooks");
+            expect(own).toHaveLength(1);
+            expect(own[0]!.sharedWith.map((s) => s.name)).toEqual(["Ben Carter"]);
+            const page = await (await fetch(`${host.url}/notes/${own[0]!.id}`, { headers: { cookie } })).text();
+            for (const control of ["Save changes", ">Share<", "Stop sharing with Ben Carter", "Delete note"]) expect(page).toContain(control);
+        } finally {
+            await host.stop();
+        }
+    }, 30_000);
 });

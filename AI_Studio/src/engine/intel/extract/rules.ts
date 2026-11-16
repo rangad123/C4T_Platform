@@ -1,5 +1,5 @@
 /**
- * Business rules, workflows, roles and state transitions read from documents with AI (requirements, existing tests, page descriptions).
+ * Business rules, workflows, roles, entities and state transitions read from documents with AI (requirements, existing tests, page descriptions).
  *
  * The document text is untrusted: it reaches the model only as numbered lines inside one delimited block, after the shared redaction,
  * and the delimiter cannot be closed or opened from inside the text. The model has no tools. Its answer is data: validated by a strict
@@ -40,7 +40,7 @@ export interface ExtractionInput {
  */
 export const EXTRACTION_LIMITS = { chunkChars: 24_000, maxCalls: 40, maxLine: 1000, maxCited: 10, docsPerPart: 40, linesPerPart: 80 };
 /** The most items of each kind one answer may hold. */
-export const ANSWER_CAPS = { rules: 50, workflows: 20, roles: 20, transitions: 50 } as const;
+export const ANSWER_CAPS = { rules: 50, workflows: 20, roles: 20, transitions: 50, entities: 30 } as const;
 
 const Lines = z.array(z.number().int().min(1).max(1_000_000)).min(1).max(EXTRACTION_LIMITS.maxCited);
 const Quote = z.string().min(6).max(300);
@@ -93,6 +93,11 @@ export const ExtractionAnswerSchema = z
                     .strict(),
             )
             .max(ANSWER_CAPS.transitions),
+        /** Absent in an answer that names none (and in answers from before entities were asked for). */
+        entities: z
+            .array(z.object({ name: Str(100).min(1), fields: z.array(Str(100).min(1)).max(30).default([]), doc: Str(500).optional(), lines: Lines, quote: Quote }).strict())
+            .max(ANSWER_CAPS.entities)
+            .default([]),
     })
     .strict();
 type Answer = z.infer<typeof ExtractionAnswerSchema>;
@@ -105,7 +110,9 @@ List only what a document states:
 - rules: a business rule, constraint (input limits included), permission, calculation, invariant or workflow rule, with what is expected;
 - workflows: an ordered process a user goes through;
 - roles: a kind of user the document names;
-- transitions: a state change of an entity (from, to, what triggers it).
+- transitions: a state change of an entity (from, to, what triggers it);
+- entities: a kind of record the application keeps (for example an account, a product or an order), named as the document names it, with
+  the fields of it that the cited lines name.
 For every item give "doc", "lines" (the line numbers it comes from) and "quote": words copied exactly from those lines.
 "doc" is exactly the ref attribute of the document the lines are in (the value of ref in <document ref="...">), never its title or text. An item you cannot quote is not stated: leave it out. Do not guess. confidence is how clearly the text states the rule (0 to 1).
 A rule's "workflows" names the workflows it belongs to: only workflows in your answer (by name) or in the <known-workflows> list (by id).`;
@@ -131,6 +138,24 @@ const STOP = new Set(
 );
 /** Content words of a text: four letters or more, not a common word, compared by their first four letters (shipping ~ ship). */
 const words = (s: string) => new Set((norm(s).match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 4 && !STOP.has(w)).map((w) => w.slice(0, 4)));
+/** Whether the text names the phrase: every content word of it (camelCase split) is there; a phrase of short words only, as a word. */
+function names(text: string, phrase: string): boolean {
+    const spaced = phrase.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2");
+    const want = [...words(spaced)];
+    if (want.length) {
+        const have = words(text);
+        return want.every((w) => have.has(w));
+    }
+    const all = norm(text).match(/[\p{L}\p{N}]+/gu) ?? ([] as string[]);
+    const short = norm(spaced).match(/[\p{L}\p{N}]+/gu) ?? [];
+    return short.length > 0 && short.every((w) => all.includes(w));
+}
+const slugOf = (name: string) =>
+    norm(name)
+        .replace(/[^\p{L}\p{N}]+/gu, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 100) || "entity";
+
 /** The cited lines support the rule when at least half of the content words of what it expects (or of its description) are in them. */
 function supports(cited: string, rule: { expected: string; description: string }): boolean {
     const have = words(cited);
@@ -199,12 +224,13 @@ function untilAborted<T>(call: Promise<T>, signal: AbortSignal | undefined): Pro
 }
 
 /** Why an item was dropped, as counted in the fragment's note (one and several). */
-type Why = "doc" | "quote" | "short" | "support" | "caps";
+type Why = "doc" | "quote" | "short" | "support" | "name" | "caps";
 const DROP_REASONS: Record<Why, [string, string]> = {
     doc: ["named no document it could be found in", "named no document they could be found in"],
     quote: ["quote is not in the text at the lines cited", "quotes are not in the text at the lines cited"],
     short: ["quote is too short", "quotes are too short"],
     support: ["rule is not supported by the words of the lines cited", "rules are not supported by the words of the lines cited"],
+    name: ["entity is not named in the lines cited", "entities are not named in the lines cited"],
     caps: ["was over the limits of one reading", "were over the limits of one reading"],
 };
 
@@ -250,12 +276,18 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
     const documentPrint = (ref: string) => fingerprintText(`${ref}\n${byRef.get(ref)!.join("\n")}`);
     /** What each piece of evidence was read from (Rule.anchor): the whole document it cites and the lines it cites, as fingerprints. */
     const anchors = new WeakMap<Evidence, NonNullable<Rule["anchor"]>>();
+    /** The text of the lines an evidence ref cites ("L3" or "L3-L5"). */
+    const citedText = (ref: string, at: string): string => {
+        const lines = byRef.get(ref) ?? [];
+        const [a, b] = at.split("-").map((x) => Number(x.replace(/^L/, "")));
+        return lines.slice(a! - 1, b ?? a).join(" ");
+    };
     /**
      * Evidence for an item when its quote is inside one run of adjacent cited lines of its document (and, for a rule, those lines support
      * what it expects); otherwise why not. The document is the one `doc` names; when it names none, the one document where the item
      * passes these same checks, and none (an unknown document) when no document or several do.
      */
-    const evidenceIn = (ref: string, item: { lines: number[]; quote: string }, rule?: { expected: string; description: string }): Evidence | "quote" | "support" => {
+    const evidenceIn = (ref: string, item: { lines: number[]; quote: string }, rule?: { expected: string; description: string }, entity?: string): Evidence | "quote" | "support" | "name" => {
         const lines = byRef.get(ref)!;
         if (item.lines.some((n) => n > lines.length)) return "quote";
         const cited = [...new Set(item.lines)].sort((a, b) => a - b);
@@ -263,23 +295,24 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
         const text = cited.map((n) => lines[n - 1]!).join(" ");
         if (!norm(text).includes(norm(item.quote))) return "quote";
         if (rule && !supports(text, rule)) return "support";
+        if (entity !== undefined && !names(text, entity)) return "name";
         const at = cited.length === 1 ? `L${cited[0]}` : `L${cited[0]}-L${cited[cited.length - 1]}`;
         const ev: Evidence = { kind: "quote", ref: `${ref}#${at}`.slice(0, 500), excerpt: hideSecrets(item.quote, hide) };
         anchors.set(ev, { text: documentPrint(ref), lines: fingerprintText(`${ref}\n${cited.map((n) => lines[n - 1]!).join("\n")}`) });
         return ev;
     };
-    const evidenceOf = (item: { doc?: string; lines: number[]; quote: string }, rule?: { expected: string; description: string }): Evidence | Why => {
+    const evidenceOf = (item: { doc?: string; lines: number[]; quote: string }, rule?: { expected: string; description: string }, entity?: string): Evidence | Why => {
         // A rule needs a real quote (20 characters or more).
         if (rule && item.quote.trim().length < MIN_RULE_QUOTE) return "short";
         const named = item.doc && byRef.has(cleanRef(item.doc)) ? cleanRef(item.doc) : documents.length === 1 ? documents[0]!.ref : undefined;
-        if (named) return evidenceIn(named, item, rule);
-        const found = documents.map((d) => evidenceIn(d.ref, item, rule)).filter((x): x is Evidence => typeof x !== "string");
+        if (named) return evidenceIn(named, item, rule, entity);
+        const found = documents.map((d) => evidenceIn(d.ref, item, rule, entity)).filter((x): x is Evidence => typeof x !== "string");
         return found.length === 1 ? found[0]! : "doc";
     };
-    const dropped: Record<Why, number> = { doc: 0, quote: 0, short: 0, support: 0, caps: 0 };
+    const dropped: Record<Why, number> = { doc: 0, quote: 0, short: 0, support: 0, name: 0, caps: 0 };
     /** The item's evidence, or undefined with the reason it was dropped counted. */
-    const keep = (item: { doc?: string; lines: number[]; quote: string }, rule?: { expected: string; description: string }): Evidence | undefined => {
-        const ev = evidenceOf(item, rule);
+    const keep = (item: { doc?: string; lines: number[]; quote: string }, rule?: { expected: string; description: string }, entity?: string): Evidence | undefined => {
+        const ev = evidenceOf(item, rule, entity);
         if (typeof ev !== "string") return ev;
         dropped[ev]++;
         return undefined;
@@ -289,6 +322,7 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
     const model = AppModelSchema.parse({});
     const rules = new Map<string, Rule>();
     let unlinked = 0;
+    let fieldsDropped = 0;
     for (const a of answers) {
         // Workflows first, so the rules of the same answer can be linked to them.
         const linkable = new Map<string, string>();
@@ -356,7 +390,24 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
             // A stated transition is intended behaviour; one only inferred is not an expectation.
             model.transitions.push({ entity: t.entity, from: t.from, to: t.to, trigger: t.trigger, sourceType: input.sourceType, expectation: explicitness === "explicit", evidence: [ev] });
         }
+        // An entity is kept only where the lines it cites name it, and a field only where they name the field: nothing is invented.
+        for (const e of a.entities) {
+            const ev = keep(e, undefined, e.name);
+            if (!ev) continue;
+            const text = ev.ref.slice(ev.ref.lastIndexOf("#") + 1);
+            const cited = citedText(ev.ref.slice(0, ev.ref.lastIndexOf("#")), text);
+            const fields = e.fields.filter((f) => names(cited, f) || (fieldsDropped++, false));
+            const id = slugOf(e.name);
+            const known = model.entities.find((x) => x.id === id);
+            if (known) {
+                if (known.evidence.length < 20) known.evidence.push(ev);
+                for (const f of fields) if (known.fields.length < 100 && !known.fields.some((x) => norm(x.name) === norm(f))) known.fields.push({ name: f, constraints: [] });
+            } else if (model.entities.length < 500) {
+                model.entities.push({ id, name: e.name, fields: fields.map((name) => ({ name, constraints: [] })), sourceType: input.sourceType, explicitness, evidence: [ev] });
+            } else dropped.caps++;
+        }
     }
+    if (fieldsDropped) notes.push(`${fieldsDropped} entity field${fieldsDropped === 1 ? " was" : "s were"} dropped: not named in the lines cited.`);
     if (unlinked) notes.push(`${unlinked} workflow link${unlinked === 1 ? " was" : "s were"} dropped: not a workflow this reading knows.`);
     const total = Object.values(dropped).reduce((s, n) => s + n, 0);
     if (total) {

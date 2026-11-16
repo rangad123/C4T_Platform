@@ -225,3 +225,25 @@ describe("missingContext", () => {
         expect(one[1]!.text).toContain("The check-out is gone.");
     });
 });
+
+describe("entities from several sources", () => {
+    const named = (kind: string, ref: string, e: Record<string, unknown>) => fragment({ source: processed(kind, ref), model: { entities: [e] } });
+    const fromPath = named("openapi", "api.json", { id: "order", name: "order", fields: [{ name: "quantity", type: "integer", constraints: [] }], sourceType: "inferred", explicitness: "inferred", evidence: [{ kind: "openapi", ref: "api.json#/paths/~1api~1orders~1{id}" }] });
+    const fromDoc = named("requirements", "doc-1", { id: "order", name: "Order", fields: [{ name: "status", constraints: [] }], sourceType: "requirement", explicitness: "explicit", evidence: [{ kind: "quote", ref: "doc-1#L4", excerpt: "Orders have one of four states" }] });
+
+    it("are one entity per name; a source that states it wins over one that only infers it, and every source's evidence stays", () => {
+        for (const order of [[fromPath, fromDoc], [fromDoc, fromPath]]) {
+            const { model } = merge(undefined, order);
+            expect(model.entities).toHaveLength(1);
+            const e = model.entities[0]!;
+            expect(e).toMatchObject({ sourceType: "requirement", explicitness: "explicit" });
+            expect(e.fields.map((f) => f.name).sort()).toEqual(["quantity", "status"]);
+            expect(e.evidence.map((x) => x.ref).sort()).toEqual(["api.json#/paths/~1api~1orders~1{id}", "doc-1#L4"]);
+        }
+    });
+
+    it("one only inferred stays inferred", () => {
+        const { model } = merge(undefined, [fromPath]);
+        expect(model.entities[0]).toMatchObject({ sourceType: "inferred", explicitness: "inferred" });
+    });
+});
