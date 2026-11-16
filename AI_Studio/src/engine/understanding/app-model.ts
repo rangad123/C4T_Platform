@@ -32,6 +32,15 @@ export interface FormFieldModel {
     label?: string;
     placeholder?: string;
     required: boolean;
+    /** Constraints the page declares on the field (attributes as written; options are a select's choice labels). Absent on older models. */
+    min?: string;
+    max?: string;
+    minLength?: number;
+    maxLength?: number;
+    pattern?: string;
+    options?: string[];
+    /** The message shown after an invalid value was typed and the field left (nothing submitted), and which rule that value broke. */
+    validation?: { check: "type" | "min" | "max" | "minLength" | "pattern" | "required"; message: string };
 }
 
 export interface FormModel {
@@ -76,6 +85,16 @@ export interface PageModel {
     screenshot?: string;
     loadMs?: number;
     consoleErrors: string[];
+    /** 2 when the crawl that produced the page read constraints and structures; absent on pages from older crawls. */
+    discovery?: 2;
+    /** Names of the dialogs the page has, open or closed, including those a safe interaction opened. */
+    dialogs?: string[];
+    /** Menus (role menu or menubar) with their item names. */
+    menus?: Array<{ name: string; items: string[] }>;
+    /** Tables and grids: name and column headers only, never cell text. */
+    tables?: Array<{ name: string; headers: string[] }>;
+    /** Requests a safe interaction (opening a menu, tab or dialog, "Load more") caused: the control, method and path template. */
+    interactions?: Array<{ control: string; method: string; path: string }>;
 }
 
 export interface ApiEndpointModel {

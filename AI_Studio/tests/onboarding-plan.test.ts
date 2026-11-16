@@ -36,7 +36,8 @@ let dir: string;
 let svc: ReturnType<typeof getScheduleServices>;
 
 // ── the scripted model ────────────────────────────────────────────────────────
-const prompts = { analysis: 0, plan: 0, gap: 0 };
+/** `rules`: the application-understanding analysis after an exploration reads the explored pages for rules (one call). */
+const prompts = { analysis: 0, plan: 0, gap: 0, rules: 0 };
 let modelCalls = 0;
 /** When false the platform has no AI model configured (the real "unavailable" client). */
 let aiOn = true;
@@ -67,6 +68,10 @@ const scripted: LlmClient = {
         if (prompt.includes("Already covered by the plan")) {
             prompts.gap++;
             return { scenarios: [] };
+        }
+        if (/list what they state about its intended behaviour/.test(system)) {
+            prompts.rules++;
+            return { rules: [], workflows: [], roles: [], transitions: [] };
         }
         if (/analysing a web application/.test(system)) {
             prompts.analysis++;
@@ -153,8 +158,9 @@ describe("explore first, create after the person has looked", () => {
         expect(job.progress).toMatchObject({ discovery: "done", understanding: "done", planning: "done", generation: "skipped", validation: "skipped" });
         expect(job.counters.pagesDiscovered).toBeGreaterThan(3);
         expect(job.counters.scenariosPlanned).toBe(2);
-        // The AI was asked to understand and to plan (the plan, then one coverage-gap call), and never to author a test.
-        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1 });
+        // The AI was asked to understand and to plan (the plan, then one coverage-gap call), and never to author a test; the
+        // application-understanding analysis read the explored pages once.
+        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1, rules: 1 });
         expect(modelCalls).toBe(0);
         // Nothing exists yet: no test, no run summary, no script.
         expect(await testsOf(projectId)).toEqual([]);
@@ -230,10 +236,12 @@ describe("explore first, create after the person has looked", () => {
         expect(createdRow.options.startedBy).toEqual({ kind: "open", id: null });
         expect(JSON.stringify(platform.repo.getApplication(createdRow.applicationId)?.config ?? {})).not.toContain("someone-else");
 
-        // Nothing was explored, understood or planned again.
-        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1 });
+        // Nothing was explored, understood or planned again, and no analysis read anything: this job explored nothing.
+        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1, rules: 1 });
         const kinds = (await events(created.body.jobId)).map((e) => e.kind);
         expect(kinds).toContain("plan_reused");
+        // A job made from a stored plan explores nothing, so the application understanding is not read again.
+        expect(kinds.filter((k) => k.startsWith("analysis_"))).toEqual([]);
         expect(kinds).not.toContain("application_discovered");
 
         // The numbers in the plan are the numbers created: one journey (the other was left out), the API checks and the basic security checks.

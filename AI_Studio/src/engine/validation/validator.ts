@@ -36,6 +36,7 @@ import { proposeHeal, type HealResult } from "../healing/heal.js";
 import { phoneRepairTarget, proposePhoneRepair } from "../mobile/repair/phone-repair.js";
 import { phoneQualityFinding } from "../mobile/quality/findings.js";
 import { repairApi, repairWeb } from "./repair.js";
+import type { KnowledgeRule } from "../planning/planner.js";
 import { repairWithoutAi } from "./det-repair.js";
 import { deterministicRepairOn } from "../llm/without-ai.js";
 import type { MobileRunEnv } from "./mobile-runner.js";
@@ -52,6 +53,8 @@ export interface TestUnderValidation {
     spec: TestSpec;
     framework: Framework;
     scenario?: Scenario;
+    /** The scenario's rules (stated by a source or confirmed by a person): a repair keeps checking them. */
+    rules?: KnowledgeRule[];
     /** OpenAPI/observed-endpoint description handed to the API repair prompt. */
     endpointDoc?: unknown;
     /** Approved baseline screenshots (visual tests). Absent on a test's first validation. */
@@ -325,6 +328,7 @@ export async function validateBatch(
                         credentials: deps.env.credentials,
                         attempt,
                         secrets: secretsOfRun(deps.env),
+                        ...(t.rules?.length ? { rules: t.rules } : {}),
                     });
                 } else if (t.spec.kind === "api") {
                     repair = await repairApi(ctx, t.spec, run, t.endpointDoc);

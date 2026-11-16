@@ -88,6 +88,8 @@ function scriptedClient(name: string, own: string[], queue: ToolStep[]): LlmClie
             c.usage.outputTokens += OBJECT.output;
             // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
             if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
+            // The application-understanding analysis after the exploration reads the explored pages for rules: none here.
+            if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [] };
             if (/analysing a web application/.test(system)) {
                 return {
                     siteType: "ecommerce",
@@ -191,8 +193,9 @@ describe("a job with a fast model", () => {
         const tests = await testsOf(projectId);
         expect(tests.map((t) => t.title).sort()).toEqual(PLAN.map((p) => p.title).sort());
         expect(tests.every((t) => t.validationStatus === "VALIDATED")).toBe(true);
-        // Understanding and planning (the plan, then the coverage-gap call): main model only.
-        expect(objectCalls.main).toHaveLength(3);
+        // Understanding and planning (the plan, then the coverage-gap call), then the application-understanding analysis reading the
+        // explored pages: main model only.
+        expect(objectCalls.main).toHaveLength(4);
         expect(objectCalls.fast).toEqual([]);
         // The review of each finished test is a call of the job's client, not an agent step: the main model.
         expect(reviews).toEqual(["main-model", "main-model"]);
@@ -208,7 +211,8 @@ describe("a job with a fast model", () => {
         expect(u.summary).toMatch(/, 1 escalated to the main model$/);
         const byModel = Object.fromEntries((u.byModel as Array<{ key: string; inputTokens: number; escalations: number }>).map((g) => [g.key, g]));
         expect(byModel["fast-model"]!.inputTokens).toBe(4 * STEP.input);
-        expect(byModel["main-model"]!.inputTokens).toBe(3 * OBJECT.input + 2 * STEP.input + 2 * REVIEW.input);
+        // Four object calls: understanding, the plan, the coverage gap and the application-understanding analysis.
+        expect(byModel["main-model"]!.inputTokens).toBe(4 * OBJECT.input + 2 * STEP.input + 2 * REVIEW.input);
         expect(byModel["main-model"]!.escalations).toBe(1);
         // "Escalation" is not a purpose of its own in the breakdown.
         expect((u.byPurpose as Array<{ key: string }>).map((g) => g.key)).not.toContain("escalation");

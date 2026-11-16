@@ -42,7 +42,7 @@ import { APPROVAL_DEPS_MIGRATION } from "./approval-deps.js";
 import { TESTING_AGENTS_MIGRATION } from "./testing-agents.js";
 import { SHARED_INTEGRATIONS_MIGRATION } from "./shared-integrations.js";
 import { PROJECT_APP_MIGRATION } from "./project-app.js";
-import { APP_INTEL_MIGRATION } from "./app-intel-store.js";
+import { APP_INTEL_MIGRATION, APP_INTEL_V2_MIGRATION } from "./app-intel-store.js";
 import { agentInputsMigration } from "./agent-inputs-store.js";
 import { sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { sqliteSql, type Sql } from "./sql.js";
@@ -311,6 +311,7 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 61: two kinds of AI keys, organisational (assigned to admins and sub-admins) and personal, one chosen key per person, no AI choice on projects (schema lives in ai-config-store.ts; then backfillChosenKeys) */ AI_KEYS_MIGRATION,
     /* 62: application intelligence: versioned application models and business rules with their source, evidence and validation status (schema lives in app-intel-store.ts; nothing reads it in generation yet) */ APP_INTEL_MIGRATION,
     /* 63: the authoring agents' tool-call records are gone: nothing has written or read them since M1, and retention deleted what was left (agent_actions had no index of its own; agent_runs stays) */ `DROP TABLE IF EXISTS agent_actions;`,
+    /* 64: application intelligence sources, the application version and source fingerprints of each model version, and a fingerprint per rule (schema lives in app-intel-store.ts; existing versions and rules keep every row, the new columns start empty) */ APP_INTEL_V2_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */

@@ -108,6 +108,8 @@ export interface JobOptions {
     useMemory?: boolean;
     /** Send every page to the AI again, even pages unchanged since the last exploration (exploration reuse off for this job). Default false. */
     fullExploration?: boolean;
+    /** Benchmark only (Baseline-U): explore as an older runner does and analyse afterwards without AI. */
+    understandingBaseline?: true;
     /** Budget overrides for the page-speed checks, e.g. "lcp:3000 weight:5000000 slow-4g". */
     performanceBudgets?: string;
     /** Generate visual-regression baselines (web target). Default false. */

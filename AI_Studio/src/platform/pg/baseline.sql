@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-63 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 63;
+-- Equal to SQLite migration slots 1-64 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 64;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -292,7 +292,8 @@ CREATE TABLE alert_channels (
     min_severity TEXT,
     enabled BIGINT NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
 CREATE INDEX idx_channels_project ON alert_channels (project_id);
 
@@ -1807,7 +1808,9 @@ CREATE TABLE app_model_versions (
     diff_json TEXT,
     note TEXT NOT NULL DEFAULT '',
     created_by TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    app_version_json TEXT,
+    source_fingerprints_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE UNIQUE INDEX idx_app_model_versions_project ON app_model_versions (project_id, version);
 
@@ -1829,7 +1832,22 @@ CREATE TABLE app_rules (
     decided_by TEXT,
     decided_at TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    fingerprint TEXT
 );
 CREATE UNIQUE INDEX idx_app_rules_ref ON app_rules (project_id, ref);
 CREATE INDEX idx_app_rules_status ON app_rules (project_id, status);
+CREATE INDEX idx_app_rules_fingerprint ON app_rules (project_id, fingerprint);
+
+CREATE TABLE app_sources (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    fingerprint TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    processed_at TEXT,
+    error TEXT,
+    model_version_id TEXT REFERENCES app_model_versions(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX idx_app_sources_ref ON app_sources (project_id, kind, ref);

@@ -225,6 +225,12 @@ export const onlyOptions = (argv: string[], names: Set<string>): string[] => opt
 const slugDate = (iso: string) => iso.slice(0, 16).replace("T", "-").replace(":", "");
 
 export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<number> {
+    // The understanding benchmark (understanding/run.ts) has options and results of its own; the other modes are unchanged.
+    const modeAt = argv.indexOf("--mode");
+    if (modeAt >= 0 && argv[modeAt + 1] === "understanding") {
+        const { understandingMain } = await import("./understanding/run.js");
+        return understandingMain(argv, deps);
+    }
     const log = deps.log ?? ((s: string) => console.log(s));
     const env = deps.env ?? process.env;
     const scripted = Boolean(deps.makeLlm);

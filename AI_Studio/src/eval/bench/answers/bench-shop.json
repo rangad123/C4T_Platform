@@ -1,0 +1,682 @@
+{
+    "app": "bench-shop",
+    "version": "1",
+    "review": "awaiting-owner",
+    "catalogueVersion": "2026-11-14.1",
+    "requirementsDocument": "bench-shop-requirements.md",
+    "screens": [
+        {
+            "id": "products",
+            "path": "/",
+            "name": "Products",
+            "signIn": false,
+            "roles": [
+                "visitor",
+                "customer"
+            ]
+        },
+        {
+            "id": "product",
+            "path": "/products/:id",
+            "name": "Product",
+            "signIn": false,
+            "roles": [
+                "visitor",
+                "customer"
+            ]
+        },
+        {
+            "id": "sign-in",
+            "path": "/login",
+            "name": "Sign in",
+            "signIn": false,
+            "roles": [
+                "visitor"
+            ]
+        },
+        {
+            "id": "register",
+            "path": "/register",
+            "name": "Create account",
+            "signIn": false,
+            "roles": [
+                "visitor"
+            ]
+        },
+        {
+            "id": "cart",
+            "path": "/cart",
+            "name": "Cart",
+            "signIn": true,
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "checkout-address",
+            "path": "/checkout",
+            "name": "Checkout: delivery address",
+            "signIn": true,
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "checkout-review",
+            "path": "/checkout/review",
+            "name": "Checkout: review and pay",
+            "signIn": true,
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "orders",
+            "path": "/orders",
+            "name": "Orders",
+            "signIn": true,
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "order",
+            "path": "/orders/:id",
+            "name": "Order",
+            "signIn": true,
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "account",
+            "path": "/account",
+            "name": "Account",
+            "signIn": true,
+            "roles": [
+                "customer"
+            ]
+        }
+    ],
+    "workflows": [
+        {
+            "id": "browse-products",
+            "name": "Browse products",
+            "screens": [
+                "products",
+                "product"
+            ],
+            "endpoints": [
+                "GET /api/products",
+                "GET /api/products/:id"
+            ],
+            "roles": [
+                "visitor",
+                "customer"
+            ]
+        },
+        {
+            "id": "registration",
+            "name": "Create an account",
+            "screens": [
+                "register"
+            ],
+            "endpoints": [
+                "POST /api/register"
+            ],
+            "roles": [
+                "visitor"
+            ]
+        },
+        {
+            "id": "sign-in",
+            "name": "Sign in and sign out",
+            "screens": [
+                "sign-in"
+            ],
+            "endpoints": [
+                "POST /api/login",
+                "POST /api/logout"
+            ],
+            "roles": [
+                "visitor",
+                "customer"
+            ]
+        },
+        {
+            "id": "cart",
+            "name": "Add products to the cart and see its totals",
+            "screens": [
+                "product",
+                "cart"
+            ],
+            "endpoints": [
+                "POST /api/cart/items",
+                "GET /api/cart",
+                "DELETE /api/cart/items/:productId"
+            ],
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "cart-quantity",
+            "name": "Change quantities in the cart",
+            "screens": [
+                "product",
+                "cart"
+            ],
+            "endpoints": [
+                "POST /api/cart/items",
+                "PATCH /api/cart/items/:productId"
+            ],
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "cart-discount",
+            "name": "Apply a discount code",
+            "screens": [
+                "cart"
+            ],
+            "endpoints": [
+                "POST /api/cart/discount",
+                "GET /api/cart"
+            ],
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "cart-shipping",
+            "name": "Shipping charge and free shipping",
+            "screens": [
+                "cart",
+                "checkout-review"
+            ],
+            "endpoints": [
+                "GET /api/cart"
+            ],
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "checkout",
+            "name": "Check out and place an order",
+            "screens": [
+                "cart",
+                "checkout-address",
+                "checkout-review",
+                "order"
+            ],
+            "endpoints": [
+                "POST /api/checkout/address",
+                "POST /api/orders"
+            ],
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "order-history",
+            "name": "See your orders",
+            "screens": [
+                "orders",
+                "order"
+            ],
+            "endpoints": [
+                "GET /api/orders",
+                "GET /api/orders/:id"
+            ],
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "order-lifecycle",
+            "name": "Pay or cancel an order",
+            "screens": [
+                "order"
+            ],
+            "endpoints": [
+                "POST /api/orders/:id/pay",
+                "POST /api/orders/:id/cancel"
+            ],
+            "roles": [
+                "customer"
+            ]
+        },
+        {
+            "id": "account-profile",
+            "name": "Change your name and default delivery address",
+            "screens": [
+                "account"
+            ],
+            "endpoints": [
+                "GET /api/profile",
+                "PUT /api/profile"
+            ],
+            "roles": [
+                "customer"
+            ]
+        }
+    ],
+    "entities": [
+        {
+            "id": "product",
+            "name": "Product",
+            "fields": [
+                "id",
+                "name",
+                "price",
+                "description"
+            ]
+        },
+        {
+            "id": "account",
+            "name": "Account",
+            "fields": [
+                "id",
+                "name",
+                "email",
+                "password",
+                "address"
+            ]
+        },
+        {
+            "id": "cart",
+            "name": "Cart",
+            "fields": [
+                "lines",
+                "code",
+                "subtotal",
+                "discount",
+                "shipping",
+                "total"
+            ]
+        },
+        {
+            "id": "cart-line",
+            "name": "Cart line",
+            "fields": [
+                "productId",
+                "name",
+                "unitPrice",
+                "quantity",
+                "lineTotal"
+            ]
+        },
+        {
+            "id": "discount-code",
+            "name": "Discount code",
+            "fields": [
+                "code",
+                "percent"
+            ]
+        },
+        {
+            "id": "checkout",
+            "name": "Checkout",
+            "fields": [
+                "address"
+            ]
+        },
+        {
+            "id": "order",
+            "name": "Order",
+            "fields": [
+                "id",
+                "status",
+                "lines",
+                "subtotal",
+                "discount",
+                "shipping",
+                "total",
+                "address",
+                "placedAt"
+            ]
+        }
+    ],
+    "endpoints": [
+        {
+            "method": "GET",
+            "path": "/api/products",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/products/:id",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/register",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/login",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/logout",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/profile",
+            "documented": true
+        },
+        {
+            "method": "PUT",
+            "path": "/api/profile",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/cart",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/cart/items",
+            "documented": true
+        },
+        {
+            "method": "PATCH",
+            "path": "/api/cart/items/:productId",
+            "documented": true
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/cart/items/:productId",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/cart/discount",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/checkout/address",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/orders",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/orders",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/orders/:id",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/orders/:id/pay",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/orders/:id/cancel",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/login",
+            "documented": false
+        },
+        {
+            "method": "POST",
+            "path": "/register",
+            "documented": false
+        }
+    ],
+    "roles": [
+        {
+            "id": "visitor",
+            "name": "Visitor"
+        },
+        {
+            "id": "customer",
+            "name": "Customer"
+        }
+    ],
+    "rules": [
+        {
+            "defectId": "BS-01",
+            "kind": "calculation",
+            "statement": "Code SAVE10 takes 10% off the whole order subtotal (all cart lines together), rounded to the cent.",
+            "requirement": {
+                "id": "5.3",
+                "line": 54
+            },
+            "workflows": [
+                "cart-discount"
+            ],
+            "endpoints": [
+                "POST /api/cart/discount",
+                "GET /api/cart"
+            ],
+            "entities": [
+                "cart",
+                "discount-code"
+            ]
+        },
+        {
+            "defectId": "BS-02",
+            "kind": "calculation",
+            "statement": "The cart subtotal is the sum of all line totals (unit price times quantity).",
+            "requirement": {
+                "id": "4.9",
+                "line": 46
+            },
+            "workflows": [
+                "cart"
+            ],
+            "endpoints": [
+                "GET /api/cart",
+                "POST /api/cart/items"
+            ],
+            "entities": [
+                "cart",
+                "cart-line"
+            ]
+        },
+        {
+            "defectId": "BS-03",
+            "kind": "constraint",
+            "statement": "At most 10 of each item; a quantity above 10 is refused with a message.",
+            "requirement": {
+                "id": "4.6",
+                "line": 43
+            },
+            "workflows": [
+                "cart-quantity"
+            ],
+            "endpoints": [
+                "POST /api/cart/items",
+                "PATCH /api/cart/items/:productId"
+            ],
+            "entities": [
+                "cart-line"
+            ]
+        },
+        {
+            "defectId": "BS-04",
+            "kind": "constraint",
+            "statement": "Registration refuses an email address that is not a valid email address.",
+            "requirement": {
+                "id": "2.3",
+                "line": 20
+            },
+            "workflows": [
+                "registration"
+            ],
+            "endpoints": [
+                "POST /api/register"
+            ],
+            "entities": [
+                "account"
+            ]
+        },
+        {
+            "defectId": "BS-05",
+            "kind": "transition",
+            "statement": "A Shipped order cannot be cancelled; the attempt is refused (409).",
+            "requirement": {
+                "id": "7.7",
+                "line": 80
+            },
+            "workflows": [
+                "order-lifecycle"
+            ],
+            "endpoints": [
+                "POST /api/orders/:id/cancel"
+            ],
+            "entities": [
+                "order"
+            ]
+        },
+        {
+            "defectId": "BS-06",
+            "kind": "invariant",
+            "statement": "Saved account changes (name, default address) are stored and shown after a reload.",
+            "requirement": {
+                "id": "8.3",
+                "line": 89
+            },
+            "workflows": [
+                "account-profile"
+            ],
+            "endpoints": [
+                "PUT /api/profile",
+                "GET /api/profile"
+            ],
+            "entities": [
+                "account"
+            ]
+        },
+        {
+            "defectId": "BS-07",
+            "kind": "workflow",
+            "statement": "Placing an order empties the cart; placing again is refused because the cart is empty.",
+            "requirement": {
+                "id": "6.7",
+                "line": 68
+            },
+            "workflows": [
+                "checkout"
+            ],
+            "endpoints": [
+                "POST /api/orders"
+            ],
+            "entities": [
+                "cart",
+                "order"
+            ]
+        },
+        {
+            "defectId": "BS-08",
+            "kind": "permission",
+            "statement": "A customer sees only their own orders; another person's order is 'Order not found' (404).",
+            "requirement": {
+                "id": "7.5",
+                "line": 78
+            },
+            "workflows": [
+                "order-history"
+            ],
+            "endpoints": [
+                "GET /api/orders/:id"
+            ],
+            "entities": [
+                "order"
+            ]
+        },
+        {
+            "defectId": "BS-09",
+            "kind": "constraint",
+            "statement": "Adding a product that does not exist to the cart answers 404 and leaves the cart unchanged.",
+            "requirement": {
+                "id": "4.4",
+                "line": 41
+            },
+            "workflows": [
+                "cart"
+            ],
+            "endpoints": [
+                "POST /api/cart/items"
+            ],
+            "entities": [
+                "product",
+                "cart"
+            ]
+        },
+        {
+            "defectId": "BS-10",
+            "kind": "workflow",
+            "statement": "An order needs a delivery address from step 1; the review step without one goes back to step 1 and placing is refused.",
+            "requirement": {
+                "id": "6.4",
+                "line": 65
+            },
+            "workflows": [
+                "checkout"
+            ],
+            "endpoints": [
+                "POST /api/checkout/address",
+                "POST /api/orders"
+            ],
+            "entities": [
+                "checkout",
+                "order"
+            ]
+        },
+        {
+            "defectId": "BS-11",
+            "kind": "calculation",
+            "statement": "Shipping is free when the subtotal after discount is $50.00 or more.",
+            "requirement": {
+                "id": "5.6",
+                "line": 57
+            },
+            "workflows": [
+                "cart-shipping"
+            ],
+            "endpoints": [
+                "GET /api/cart"
+            ],
+            "entities": [
+                "cart"
+            ]
+        },
+        {
+            "defectId": "BS-12",
+            "kind": "invariant",
+            "statement": "The Orders page lists all of the customer's orders, newest first.",
+            "requirement": {
+                "id": "7.2",
+                "line": 75
+            },
+            "workflows": [
+                "order-history"
+            ],
+            "endpoints": [
+                "GET /api/orders"
+            ],
+            "entities": [
+                "order"
+            ]
+        }
+    ]
+}

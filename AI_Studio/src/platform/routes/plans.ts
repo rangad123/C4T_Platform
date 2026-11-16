@@ -113,8 +113,9 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         const { id, jobId } = req.params as { id: string; jobId: string };
         const job = planJob(id, jobId);
         if (ACTIVE_STATES.includes(job.status) || job.status === "QUEUED") return { jobId, status: job.status, ready: false };
-        if (job.status === "FAILED") throw new HttpError(409, job.error === "Cancelled" ? "Exploring was stopped, so there is no plan." : "This exploration did not produce a plan.");
         const loaded = await loadStoredPlan(repo, p.store, jobId);
+        // A failed exploration has no plan to use, unless it was cancelled after its plan was kept (while the application was being read).
+        if (job.status === "FAILED" && !(job.error === "Cancelled" && loaded.ok)) throw new HttpError(409, job.error === "Cancelled" ? "Exploring was stopped, so there is no plan." : "This exploration did not produce a plan.");
         if (!loaded.ok) throw new HttpError(410, PLAN_GONE);
         const plan = loaded.plan;
         const app0 = repo.getApplication(job.applicationId);
@@ -147,7 +148,9 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/plans/:jobId/create", async (req, reply) => {
         const { id, jobId } = req.params as { id: string; jobId: string };
         const job = planJob(id, jobId);
-        if (job.status === "FAILED" || ACTIVE_STATES.includes(job.status) || job.status === "QUEUED") throw new HttpError(409, "This exploration has no plan to create tests from.");
+        if (ACTIVE_STATES.includes(job.status) || job.status === "QUEUED") throw new HttpError(409, "This exploration has no plan to create tests from.");
+        // A failed exploration has no plan to use, unless it was cancelled after its plan was kept (while the application was being read).
+        if (job.status === "FAILED" && !(job.error === "Cancelled" && (await loadStoredPlan(repo, p.store, jobId)).ok)) throw new HttpError(409, "This exploration has no plan to create tests from.");
         const body = CreateBody.parse(req.body ?? {});
         const earlier = repo.listJobs(id).filter((j) => j.options.fromPlan === jobId);
         if (earlier.length) {

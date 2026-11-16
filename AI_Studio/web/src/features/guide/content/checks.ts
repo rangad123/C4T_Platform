@@ -276,6 +276,7 @@ export const checks: Topic[] = [
         words: ["exploration", "test"],
         related: ["explore-my-app", "compliance", "release-signoff"],
         keywords: ["requirements", "coverage", "user stories", "spec document", "traceability", "missing tests", "acceptance criteria", "forgotten"],
+        moreDoc: "docs/features/application-understanding.md",
     },
     {
         id: "compliance",

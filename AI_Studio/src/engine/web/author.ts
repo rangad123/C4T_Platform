@@ -38,6 +38,7 @@ import { scrubTraceFile } from "../evidence/trace-scrub.js";
 import { executeStep, locate, rememberPopup, runtimeData, type RuntimeData } from "./interpreter.js";
 import { sampleName, sampleTypeFor, SAMPLE_TYPES } from "./interruptions.js";
 import { notesFor, refusalText, refusedBy, type SiteNote } from "../memory/notes.js";
+import { knowledgeBlock, type KnowledgeRule } from "../planning/planner.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 
 export interface AuthorInput {
@@ -64,6 +65,8 @@ export interface AuthorInput {
     notes?: SiteNote[];
     /** Generated test data for the run (data-changing tests on): the agent gets a testValue tool, and the spec records the run tag. */
     testData?: TestData;
+    /** The scenario's rules (stated by a source or confirmed by a person): the test checks them where the scenario reaches them. */
+    rules?: KnowledgeRule[];
     /**
      * The run's other known secrets (authenticator secrets, API tokens, other accounts' passwords): what the application shows in the
      * console, page errors, failed requests and dialogs is masked with them (and the sign-in password) before the AI or a stored record sees
@@ -71,6 +74,11 @@ export interface AuthorInput {
      */
     secrets?: string[];
 }
+
+const AUTHORING_USE = " Where this scenario reaches what a rule describes, assert the expected behaviour it states; when the application genuinely does otherwise, call finish(result=\"defect\").";
+
+/** The rules section of the authoring prompt (quoted data in a delimited block); undefined when no usable rule is left. */
+export const authoringRulesNote = (rules: KnowledgeRule[] | undefined): string | undefined => knowledgeBlock({ rules: rules ?? [], workflows: [] }, AUTHORING_USE);
 
 /** Every secret this authoring run knows: the sign-in password and the caller's list. */
 const runSecretsOf = (input: Pick<AuthorInput, "credentials" | "secrets">): string[] =>
@@ -575,6 +583,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         };
 
         const snapshot = await snapshotFor(9_000);
+        const rulesNote = authoringRulesNote(input.rules);
         const prompt = `Scenario ${scenario.scenarioId}: ${scenario.title}
 Description: ${scenario.description}
 Category: ${scenario.category}   Type: ${scenario.type}
@@ -584,7 +593,7 @@ Expected results (assert ALL of them):
 ${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}
 Test account: ${credentials ? "available as {{credentials.username}} / {{credentials.password}}" : "NOT available"}
 ${pageHint(model, scenario)}
-${notesFor(input.notes, page.url()) ?? ""}
+${notesFor(input.notes, page.url()) ?? ""}${rulesNote ? `\n${rulesNote}` : ""}
 ${
     resume?.review
         ? `A review of this test against its scenario asked for these changes:\n${resume.failure}\nThe test's steps so far have been replayed (${resume.prefix.length - 1} steps). Continue from the current page state: apply the changes, then assert every expected result.\n`

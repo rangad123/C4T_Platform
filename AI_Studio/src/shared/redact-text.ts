@@ -15,7 +15,7 @@ export const MAX_TEXT = 8000;
  * whole prose words author, authors, authored, authoring, authority, authorities and authentic; authorization, authentication and their
  * compounds (authorizationKey, proxyAuthorization, x_authentication) stay secret names.
  */
-export const SECRET_KEY = String.raw`[A-Za-z0-9_.-]*(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|auth(?!or(?:s|ed|ing|ity|ities)?\b|entic\b)|credential|session|cookie|signature|salt|dsn|conn(?:ection)?[_-]?string)[A-Za-z0-9_.-]*`;
+export const SECRET_KEY = String.raw`[A-Za-z0-9_.-]{0,64}(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|auth(?!or(?:s|ed|ing|ity|ities)?\b|entic\b)|credential|session|cookie|signature|salt|dsn|conn(?:ection)?[_-]?string)[A-Za-z0-9_.-]{0,64}`;
 
 const EMAIL = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}/g;
 const AUTH_SCHEME = /\b(Bearer|Basic|Digest|Token)\s+([A-Za-z0-9._~+/=-]{6,})/gi;
@@ -71,7 +71,7 @@ export function hideAuthCredentials(
 /** Strict mode: any value after a bare `bearer`, however short or lowercase. */
 const BARE_BEARER = /\b(bearer)\s+([A-Za-z0-9._~+/=-]+)/gi;
 const JWT = /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*/g;
-const URL_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:"'<>]+(?::[^\s/@"'<>]*)?@/gi;
+const URL_USERINFO = /\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@:"'<>]+(?::[^\s/@"'<>]*)?@/gi;
 const SECRET_PARAM = new RegExp(String.raw`([?&;](?:${SECRET_KEY}|authori[sz]ation|key|code|otp|sig|ticket)=)[^&#\s"'<>]*`, "gi");
 const JSON_PAIR = new RegExp(String.raw`("${SECRET_KEY}"\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\s]+)`, "gi");
 /** A word that only ever starts ordinary prose, never a secret value ("secret: is not documented", "authored: The …"). */

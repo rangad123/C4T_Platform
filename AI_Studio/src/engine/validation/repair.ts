@@ -12,6 +12,7 @@
 import type { Browser } from "playwright";
 import { z } from "zod";
 import type { EngineContext } from "../context.js";
+import type { KnowledgeRule } from "../planning/planner.js";
 import { StepSchema, type Scenario, type Step, type TestSpec } from "../spec/schema.js";
 import type { AppModel } from "../understanding/app-model.js";
 import { authorWebSpec } from "../web/author.js";
@@ -76,6 +77,8 @@ export async function repairWeb(args: {
     attempt?: number;
     /** The run's known secrets: what the app shows in the browser while the test is re-authored is masked with them. */
     secrets?: readonly string[];
+    /** The scenario's rules: the re-written test still checks them (a repair fixes how a test checks, never what it must check). */
+    rules?: KnowledgeRule[];
 }): Promise<Repair> {
     const { ctx, spec, run } = args;
     const t = await triage(ctx, spec, run);
@@ -105,6 +108,7 @@ export async function repairWeb(args: {
         scenario: args.scenario,
         credentials: args.credentials,
         ...(args.secrets ? { secrets: [...args.secrets] } : {}),
+        ...(args.rules?.length ? { rules: args.rules } : {}),
         resume: { prefix, failure: failureText(spec, run) },
     });
     if (outcome.status === "complete") {

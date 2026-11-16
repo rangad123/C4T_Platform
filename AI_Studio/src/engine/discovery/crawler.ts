@@ -12,17 +12,19 @@
  *
  * Safety: never follows or clicks destructive-looking links/controls (logout, delete, pay...).
  */
-import type { Frame, Page } from "playwright";
+import type { Frame, Page, Route } from "playwright";
 import type { EngineContext } from "../context.js";
 import { throwIfAborted } from "../context.js";
 import { activityLine } from "../frames/activity.js";
-import type { ComponentModel, FormModel, PageModel, PageType, NavigationEdge } from "../understanding/app-model.js";
-import { ariaSnapshot, settle, type BrowserSession } from "./browser.js";
+import type { ComponentModel, FormFieldModel, FormModel, PageModel, PageType, NavigationEdge } from "../understanding/app-model.js";
+import { ariaSnapshot, BrowserSession, settle } from "./browser.js";
 import { hasPasswordField } from "./auth.js";
-import { captureSnapshot, type FormSnapshot } from "./snapshot.js";
+import type { NetworkInterceptor } from "./network.js";
+import { captureSnapshot, mergeStructures, readStructures, type FormSnapshot, type PageStructures } from "./snapshot.js";
 import { readFrameElements } from "../web/frame-elements.js";
 import { captchaMessage, detectCaptcha } from "../auth/captcha.js";
 import type { CrawlTransition } from "../screenmap/map.js";
+import { redactText } from "../../shared/redact-text.js";
 
 export interface CrawlOptions {
     startUrl: string;
@@ -45,6 +47,11 @@ export interface CrawlOptions {
     relogin?: () => Promise<boolean>;
     /** A "never ..." note for the project refuses this control or link (memory/notes.ts refusedBy). */
     refuse?: Refuse;
+    /**
+     * Read each page's field constraints, dialogs, menus and tables, and mark the page `discovery: 2` (default on). Off, the crawl
+     * returns what older runners send.
+     */
+    pageUnderstanding?: boolean;
 }
 
 type Refuse = (c: { name?: string; url: string }) => unknown;
@@ -151,7 +158,7 @@ function locatorHint(role: string, name: string): string {
     return `getByText(${n})`;
 }
 
-async function extractPage(page: Page, url: string, depth: number, status: number, loadMs: number): Promise<PageModel> {
+async function extractPage(page: Page, url: string, depth: number, status: number, loadMs: number, understand: boolean): Promise<PageModel> {
     const snap = await captureSnapshot(page);
     const aria = await ariaSnapshot(page, 6_000);
     const headings = await page
@@ -173,6 +180,7 @@ async function extractPage(page: Page, url: string, depth: number, status: numbe
             label: x.label,
             placeholder: x.placeholder,
             required: x.required,
+            ...(understand ? { min: x.min, max: x.max, minLength: x.minLength, maxLength: x.maxLength, pattern: x.pattern, options: x.options } : {}),
         })),
         purpose: classifyForm(f),
     }));
@@ -210,6 +218,7 @@ async function extractPage(page: Page, url: string, depth: number, status: numbe
         revealed: [],
         consoleErrors: [],
         loadMs,
+        ...(understand ? { discovery: 2 as const, ...(await readStructures(page)) } : {}),
     };
 }
 
@@ -309,12 +318,190 @@ async function probeConditionalFields(page: Page, forms: FormModel[], refuse?: R
     }
 }
 
+/** What the validation probe types into a field of these types: clearly invalid, and never stored. */
+export const VALIDATION_PROBES = { email: "not-an-email", url: "not a web address", tel: "phone-abc", pattern: "~invalid~" } as const;
+const VALIDATION_FIELDS_PER_PAGE = 8;
+const FILLABLE = new Set(["text", "search", "email", "url", "tel", "number", "textarea", "date", "time", "datetime-local", "month", "week"]);
+type Check = NonNullable<FormFieldModel["validation"]>["check"];
+
+/** The invalid value to try on a field, and the rule it breaks; none when the field has nothing a typed value can break. */
+function probeFor(f: FormFieldModel): { check: Check; value: string } | undefined {
+    if (!FILLABLE.has(f.type)) return undefined;
+    if (f.type === "email" || f.type === "url" || f.type === "tel") return { check: "type", value: VALIDATION_PROBES[f.type] };
+    if (f.type === "number" && f.min && Number.isFinite(Number(f.min))) return { check: "min", value: String(Number(f.min) - 1) };
+    if (f.type === "number" && f.max && Number.isFinite(Number(f.max))) return { check: "max", value: String(Number(f.max) + 1) };
+    if (f.type !== "number" && f.minLength && f.minLength > 1) return { check: "minLength", value: "x".repeat(Math.min(f.minLength, 200) - 1) };
+    if (f.type !== "number" && f.pattern) return { check: "pattern", value: VALIDATION_PROBES.pattern };
+    if (f.required) return { check: "required", value: "" };
+    return undefined;
+}
+
+/**
+ * The route handler that shuts the network while validation is probed (see probeValidation). It never throws or rejects (a rejection here
+ * would be unhandled and end the process): when the request cannot be read (a navigation whose frame is gone) it is refused, and a route
+ * already handled or closed is left as it is. Nothing is ever let through.
+ */
+export function refuseAllFor(probePage: Page): (route: Route) => Promise<void> {
+    return async (route: Route) => {
+        let own = false;
+        try {
+            const req = route.request();
+            own = req.isNavigationRequest() && req.frame() === probePage.mainFrame();
+        } catch {
+            /* the request's frame is gone: refuse it */
+        }
+        try {
+            await (own ? route.fulfill({ status: 204 }) : route.abort("blockedbyclient"));
+        } catch {
+            /* already handled, or its page closed */
+        }
+    };
+}
+
+/** Browser features that send without a request the route can refuse (workers, sockets, server events, peer connections); off on the probe page. */
+const PROBE_PAGE_OFF = ["Worker", "SharedWorker", "WebSocket", "EventSource", "RTCPeerConnection", "webkitRTCPeerConnection", "BroadcastChannel"];
+
+/**
+ * Client-side validation without anything typed ever leaving the browser: for a few fields per page, type a value that breaks the
+ * field's declared rule, leave the field, and read the message the page shows (the app's own message near the field, else the
+ * browser's). It runs in a browser context of its own, made for it from the crawl's sign-in state and thrown away after, so nothing
+ * the probe page stores (cookies, local storage, IndexedDB) or keeps running (workers, sockets, other tabs) reaches the crawl. In that
+ * context workers, shared workers, WebSockets, server events, peer connections and broadcast channels are switched off before the page's
+ * own scripts run, a WebSocket that is opened anyway is never connected once typing starts, and service workers are blocked. From before
+ * the first keystroke every request of the context is refused (a document load of the probe page is answered "204 No Content" so the
+ * page stays), and pages that open are closed. The whole context is then closed with the network still shut.
+ * A field is typed into only when the element found again on the fresh page has the snapshot's name and type and passes the same
+ * checks: fillable type, no destructive-sounding name or label, not refused, visible and editable. Search forms are left alone.
+ * Only the message is kept, never a value.
+ */
+async function probeValidation(session: BrowserSession, url: string, forms: FormModel[], refuse?: Refuse): Promise<void> {
+    const wanted: Array<{ i: number; j: number; f: FormFieldModel; probe: { check: Check; value: string } }> = [];
+    for (let i = 0; i < forms.length; i++) {
+        if (forms[i]!.purpose === "search") continue;
+        forms[i]!.fields.forEach((f, j) => {
+            const probe = probeFor(f);
+            const name = f.label ?? f.name ?? "";
+            if (probe && wanted.length < VALIDATION_FIELDS_PER_PAGE && !UNSAFE_NAME.test(name) && !UNSAFE_NAME.test(f.name ?? "") && !refuse?.({ name, url })) wanted.push({ i, j, f, probe });
+        });
+    }
+    if (!wanted.length) return;
+
+    const storageState = await session.context.storageState().catch(() => undefined);
+    const probeSession = await BrowserSession.launch(session.browser, { startUrl: url, storageState }).catch(() => undefined);
+    if (!probeSession) return;
+    const context = probeSession.context;
+    const probePage = probeSession.page;
+    let shut = false;
+    const refuseAll = refuseAllFor(probePage);
+    const closeOthers = (p: Page) => {
+        // A popup takes the foreground, where a background page would wait on its animation frames: back to the probe page.
+        if (p !== probePage) void p.close().then(() => probePage.bringToFront()).catch(() => undefined);
+    };
+    try {
+        await context.addInitScript((names: string[]) => {
+            for (const n of names) {
+                try {
+                    Object.defineProperty(window, n, { value: undefined, configurable: false, writable: false });
+                } catch {
+                    /* already fixed by the page */
+                }
+            }
+        }, PROBE_PAGE_OFF);
+        // A socket opened anyway (from a frame the script did not reach) is relayed until typing starts and never connected after.
+        await context.routeWebSocket(/.*/, (ws) => {
+            if (shut) return;
+            try {
+                const server = ws.connectToServer();
+                ws.onMessage((m) => {
+                    try {
+                        if (!shut) server.send(m);
+                    } catch {
+                        /* the socket closed */
+                    }
+                });
+                server.onMessage((m) => {
+                    try {
+                        ws.send(m);
+                    } catch {
+                        /* the socket closed */
+                    }
+                });
+            } catch {
+                /* the page closed: no socket to relay */
+            }
+        });
+        await gotoOnceMore(probePage, url);
+        await settle(probePage, 3_000);
+        if (normalizeUrl(probePage.url(), url) !== normalizeUrl(url, url)) return;
+        await context.route("**/*", refuseAll);
+        context.on("page", closeOthers);
+        shut = true;
+        for (const w of wanted) {
+            // The same place as in the snapshot when the field there has the same name and type; else the first field of that name and type.
+            const el = (
+                await probePage.evaluateHandle(
+                    ([fi, fj, name, type]) =>
+                        Array.from(document.forms)
+                            .flatMap((form, n) =>
+                                Array.from(form.elements)
+                                    .filter((e) => (e instanceof HTMLInputElement && e.type !== "hidden") || e instanceof HTMLSelectElement || e instanceof HTMLTextAreaElement)
+                                    .map((e, m) => ({ e, here: n === fi && m === fj })),
+                            )
+                            .filter(({ e }) => (e.getAttribute("name") ?? "") === name && (e instanceof HTMLInputElement ? e.type : e.tagName.toLowerCase()) === type)
+                            .sort((a, b) => Number(b.here) - Number(a.here))
+                            .find(({ here }) => here || name !== "")?.e ?? null,
+                    [w.i, w.j, w.f.name ?? "", w.f.type] as const,
+                )
+            ).asElement();
+            if (!el) continue;
+            const read = () =>
+                el.evaluate((e) => {
+                    const x = e as HTMLInputElement;
+                    const ids = `${x.getAttribute("aria-errormessage") ?? ""} ${x.getAttribute("aria-describedby") ?? ""}`.split(/\s+/).filter(Boolean);
+                    const near = ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+                    const scope = x.closest("label")?.parentElement ?? x.parentElement;
+                    const alert = scope?.querySelector("[role=alert], [aria-live]")?.textContent ?? "";
+                    const label = Array.from(x.labels ?? []).map((l) => l.textContent ?? "").join(" ");
+                    return {
+                        type: e instanceof HTMLInputElement ? e.type : e.tagName.toLowerCase(),
+                        name: x.getAttribute("name") ?? "",
+                        names: [label, x.getAttribute("aria-label") ?? "", x.getAttribute("placeholder") ?? "", x.getAttribute("name") ?? "", x.id].join(" ").replace(/\s+/g, " ").trim(),
+                        usable: x.getClientRects().length > 0 && !x.disabled && !x.readOnly,
+                        near: near.replace(/\s+/g, " ").trim(),
+                        alert: alert.replace(/\s+/g, " ").trim(),
+                        native: x.validationMessage,
+                    };
+                });
+            try {
+                const before = await read();
+                // The element found again must be the field that was checked: same name and type, and safe by its own attributes.
+                if (before.type !== w.f.type || before.name !== (w.f.name ?? "") || !FILLABLE.has(before.type) || UNSAFE_NAME.test(before.names) || refuse?.({ name: before.names, url }) || !before.usable) continue;
+                await el.fill(w.probe.value, { timeout: 1_000 });
+                await el.evaluate((e) => (e as HTMLElement).blur());
+                await probePage.waitForTimeout(150);
+                const after = await read();
+                let message = after.near && after.near !== before.near ? after.near : after.alert && after.alert !== before.alert ? after.alert : after.native;
+                if (w.probe.value.length > 1) message = message.split(w.probe.value).join("...");
+                message = redactText(message, 160).trim();
+                if (message) w.f.validation = { check: w.probe.check, message };
+            } catch {
+                /* the field changed under us; move on */
+            }
+        }
+    } finally {
+        // The whole context goes, network still shut: nothing it scheduled can run afterwards, and nothing it stored is kept.
+        context.off("page", closeOthers);
+        await probeSession.close();
+    }
+}
+
 const SAFE_TOGGLE = '[aria-haspopup]:visible, [aria-expanded="false"]:visible, [role="tab"]:visible, summary:visible';
 const UNSAFE_NAME = /delete|remove|pay|buy|order|submit|confirm|log\s?out|sign\s?out|send|publish|save|reset|clear all|unsubscribe/i;
 /** Menu entries that open a submenu on hover (no click needed, nothing is changed). */
 const HOVER_TARGETS = "nav li:visible, header li:visible, [role=menubar] > *:visible";
 const LOAD_MORE = /^(load|show|see|view) more\b/i;
 const TOGGLES_PER_PAGE = 8;
+const INTERACTIONS_PER_PAGE = 30;
 const HOVERS_PER_PAGE = 8;
 const LOAD_MORE_CLICKS = 2;
 
@@ -334,7 +521,17 @@ async function readLinks(page: Page): Promise<Array<{ text: string; href: string
  * entries, press "Load more" a couple of times, and record what appears: the new lines of the page, and the links
  * that were not in the document before (menus and tabs that render their links only when opened).
  */
-async function exploreSafeInteractions(page: Page, pageUrl: string, known: Array<{ href: string }>, refuse?: Refuse): Promise<{ revealed: string[]; links: Array<{ text: string; href: string }> }> {
+async function exploreSafeInteractions(
+    page: Page,
+    pageUrl: string,
+    known: Array<{ href: string }>,
+    refuse?: Refuse,
+    understanding?: { structures: PageStructures; network: NetworkInterceptor; interactions: NonNullable<PageModel["interactions"]> },
+): Promise<{ revealed: string[]; links: Array<{ text: string; href: string }> }> {
+    const caused = (control: string) => {
+        if (!understanding) return;
+        for (const r of understanding.network.endInteraction()) if (understanding.interactions.length < INTERACTIONS_PER_PAGE) understanding.interactions.push({ ...r, control: control.slice(0, 80) });
+    };
     const revealed = new Set<string>();
     const seenHref = new Set(known.map((l) => l.href));
     const links: Array<{ text: string; href: string }> = [];
@@ -354,8 +551,8 @@ async function exploreSafeInteractions(page: Page, pageUrl: string, known: Array
             const name = ((await el.getAttribute("aria-label")) ?? (await el.innerText({ timeout: 1000 }))).trim();
             if (UNSAFE_NAME.test(name) || refuse?.({ name, url: pageUrl }) || (await el.evaluate((e) => !!e.closest("form")))) continue;
             const before = await ariaSnapshot(page, 6_000);
-            await el.click({ timeout: 2_000 });
-            await page.waitForTimeout(250);
+            understanding?.network.beginInteraction(name);
+            await el.click({ timeout: 2_000 }).finally(() => page.waitForTimeout(250).then(() => caused(name || "toggle")));
             if (page.url() !== pageUrl) {
                 await page.goBack().catch(() => undefined);
                 continue;
@@ -366,6 +563,8 @@ async function exploreSafeInteractions(page: Page, pageUrl: string, known: Array
                 if (line && !beforeLines.has(line) && revealed.size < 15) revealed.add(`${name || "toggle"} → ${line}`.slice(0, 160));
             }
             await collect();
+            // A dialog or menu that exists only once opened.
+            if (understanding) mergeStructures(understanding.structures, await readStructures(page));
             await page.keyboard.press("Escape").catch(() => undefined);
         } catch {
             /* interaction not possible; move on */
@@ -390,8 +589,9 @@ async function exploreSafeInteractions(page: Page, pageUrl: string, known: Array
         try {
             const more = page.getByRole("button", { name: LOAD_MORE }).first();
             if (!(await more.isVisible().catch(() => false)) || (await more.evaluate((e) => !!e.closest("form")))) break;
-            await more.click({ timeout: 2_000 });
-            await page.waitForTimeout(300);
+            const label = ((await more.innerText({ timeout: 1_000 }).catch(() => "")) || "Load more").replace(/\s+/g, " ").trim();
+            understanding?.network.beginInteraction(label);
+            await more.click({ timeout: 2_000 }).finally(() => page.waitForTimeout(300).then(() => caused(label)));
             if (page.url() !== pageUrl) {
                 await page.goBack().catch(() => undefined);
                 break;
@@ -557,6 +757,7 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
     /** Pages visited that only one source led to (one plain event each at the end). */
     const foundBy: Record<Source, number> = { sitemap: 0, revealed: 0 };
     let reloginUsed = false;
+    const understand = opts.pageUnderstanding !== false;
 
     const enqueue = (raw: string, depth: number, from?: string, label?: string, via?: ClickPath, source?: Source): boolean => {
         const url = normalizeUrl(raw, opts.startUrl);
@@ -636,7 +837,7 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
             // The Explorer view (only when someone watches): the page that just opened.
             await ctx.frames?.capture(page, { note: activityLine({ kind: "opened", url: page.url() }), phase: "exploring", pagesSeen: pages.length + 1 });
 
-            const model = await extractPage(page, next.url, next.depth, status, Date.now() - t0);
+            const model = await extractPage(page, next.url, next.depth, status, Date.now() - t0, understand);
             model.consoleErrors = consoleErrors;
             const pathname = new URL(page.url()).pathname;
             model.apiCalls = session.network
@@ -647,8 +848,9 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
             const captcha = await detectCaptcha(page);
             if (captcha) ctx.emit({ stage: "discovery", kind: "captcha_found", level: "warn", message: captchaMessage(captcha, new URL(page.url()).pathname), data: { url: page.url(), captcha } });
             let hidden: Array<{ text: string; href: string }> = [];
-            if (model.type !== "error" && !captcha) ({ revealed: model.revealed, links: hidden } = await exploreSafeInteractions(page, page.url(), model.links, opts.refuse));
+            if (model.type !== "error" && !captcha) ({ revealed: model.revealed, links: hidden } = await exploreSafeInteractions(page, page.url(), model.links, opts.refuse, understand ? { structures: model as PageModel & PageStructures, network: session.network, interactions: (model.interactions = []) } : undefined));
             if (model.type !== "error" && !captcha) await probeConditionalFields(page, model.forms, opts.refuse);
+            if (understand && model.type !== "error" && !captcha) await probeValidation(session, page.url(), model.forms, opts.refuse);
             await ctx.frames?.capture(page, { note: activityLine({ kind: "read", links: model.links.length }), phase: "exploring", pagesSeen: pages.length + 1 });
 
             if (opts.screenshotsDir) {

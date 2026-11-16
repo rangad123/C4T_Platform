@@ -1,0 +1,16 @@
+.understanding-status-row { flex-wrap: wrap; gap: var(--space-2); }
+.understanding-status-row p { margin: 0; }
+.understanding-metrics { border: 1px solid var(--border-default); border-radius: var(--radius-card); overflow: hidden; }
+.understanding-group { display: grid; gap: var(--space-2); }
+.understanding-group h3 { margin: 0; }
+.understanding-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.understanding-list > li { display: grid; gap: var(--space-1); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-default); overflow-wrap: anywhere; }
+.understanding-list > li:last-child { border-bottom: 0; }
+.understanding-source { display: flex; align-items: center; gap: var(--space-2); min-width: 0; flex-wrap: wrap; }
+.understanding-why { font-size: var(--type-caption-size); }
+.understanding-rule { display: grid; gap: var(--space-2); }
+.understanding-rule .rule-head { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
+.understanding-rule .rule-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.understanding-rule blockquote { margin: 0; padding-left: var(--space-3); border-left: 2px solid var(--border-default); color: var(--text-secondary); }
+.understanding-form { display: flex; gap: var(--space-2); align-items: flex-end; flex-wrap: wrap; }
+.understanding-form .field { flex: 1 1 220px; max-width: 360px; }

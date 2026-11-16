@@ -150,6 +150,8 @@ const GenerateSchema = z.object({
     useMemory: z.boolean().optional(),
     /** Send every page to the AI again, even pages unchanged since the last exploration (default false). */
     fullExploration: z.boolean().optional(),
+    /** Benchmark only (Baseline-U): explore the way an older runner does (no field constraints, page structures or requests per interaction) and analyse afterwards without AI. */
+    understandingBaseline: z.literal(true).optional(),
     /** Remove the records that data-changing API tests create once the run ends (default true; also becomes the project's switch). */
     cleanupAfter: z.boolean().optional(),
     /** Budget overrides, e.g. "lcp:3000 weight:5000000 slow-4g". */
@@ -450,7 +452,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             ...(body.plan ? { planOnly: true } : {}),
             ...(body.level ? { level: body.level } : {}),
             ...effectiveLimits(body),
-            ...Object.fromEntries(Object.entries({ scope: body.scope, includePaths: body.includePaths, targets: body.targets, allowMutatingApiTests: body.allowMutatingApiTests, openApiUrl: body.openApiUrl, apiBaseUrl: body.apiBaseUrl, accessibility: body.accessibility, healthChecks: body.healthChecks, securityChecks: body.securityChecks, performanceChecks: body.performanceChecks, loadChecks: body.loadChecks, loadBudgets: body.loadBudgets, inputChecks: body.inputChecks, visionChecks: body.visionChecks,contractChecks: body.contractChecks, accessChecks: body.accessChecks, useMemory: body.useMemory, fullExploration: body.fullExploration, cleanupAfter: body.cleanupAfter, performanceBudgets: body.performanceBudgets, visual: body.visual, variants: body.variants?.length ? body.variants : undefined }).filter(([, v]) => v !== undefined)),
+            ...Object.fromEntries(Object.entries({ scope: body.scope, includePaths: body.includePaths, targets: body.targets, allowMutatingApiTests: body.allowMutatingApiTests, openApiUrl: body.openApiUrl, apiBaseUrl: body.apiBaseUrl, accessibility: body.accessibility, healthChecks: body.healthChecks, securityChecks: body.securityChecks, performanceChecks: body.performanceChecks, loadChecks: body.loadChecks, loadBudgets: body.loadBudgets, inputChecks: body.inputChecks, visionChecks: body.visionChecks,contractChecks: body.contractChecks, accessChecks: body.accessChecks, useMemory: body.useMemory, fullExploration: body.fullExploration, understandingBaseline: body.understandingBaseline, cleanupAfter: body.cleanupAfter, performanceBudgets: body.performanceBudgets, visual: body.visual, variants: body.variants?.length ? body.variants : undefined }).filter(([, v]) => v !== undefined)),
         } as JobOptions;
         // The project's chosen testing agents decide which checks run (routes/testing-agents.ts); a project with none saved runs as asked.
         const options = await withAgentChoice(p, project(id), asked, body);

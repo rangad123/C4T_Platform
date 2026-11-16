@@ -197,6 +197,15 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/intel/models/:version": "read",
     "GET /api/projects/:id/intel/rules": "read",
     "PUT /api/projects/:id/intel/rules/:ruleId/decision": "ai_studio.tests.write",
+    // Its sources and analyses (testing-engine Phase 2): anyone on the project sees the sources; adding a schema file, naming the version
+    // and starting an analysis need permission to write tests.
+    "GET /api/projects/:id/intel/sources": "read",
+    "POST /api/projects/:id/intel/sources/schema": "ai_studio.tests.write",
+    "DELETE /api/projects/:id/intel/sources/schema/:sourceId": "ai_studio.tests.write",
+    "PUT /api/projects/:id/intel/app-version": "ai_studio.tests.write",
+    // It spends AI: the AI permission here, writing tests checked in the route (as generate-cases).
+    "POST /api/projects/:id/intel/analyse": "ai_studio.tests.generate",
+    "DELETE /api/projects/:id/intel/analyse": "ai_studio.tests.write",
     "DELETE /api/projects/:id/memory": "ai_studio.tests.delete",
     "GET /api/projects/:id/cleanup": "read",
     "PUT /api/projects/:id/cleanup/settings": "ai_studio.project.settings",

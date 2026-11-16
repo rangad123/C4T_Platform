@@ -164,7 +164,8 @@ export class AlertStore {
     }
 
     list(projectId: string): AlertChannel[] {
-        return this.db.all("SELECT * FROM alert_channels WHERE project_id = ? ORDER BY created_at", projectId).map((r) => this.toChannel(r));
+        // Channels made in the same millisecond keep the order they were made in.
+        return this.db.all(`SELECT * FROM alert_channels WHERE project_id = ? ORDER BY created_at, ${this.db.dialect.insertionOrder()}`, projectId).map((r) => this.toChannel(r));
     }
 
     update(id: string, patch: { name?: string; url?: string; events?: AlertEvent[]; minSeverity?: Severity | null; enabled?: boolean }): AlertChannel | undefined {

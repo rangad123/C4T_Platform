@@ -21,6 +21,8 @@ import { SecurityProjectTab } from "../features/security/TestingType";
 import { SecuritySummaryCard } from "../features/security/SecurityPage";
 import { SetupChecklist } from "../features/workspace/SetupChecklist";
 import { RequirementsCoverageCard } from "../features/requirements/CoverageCard";
+import { UnderstandingCard } from "../features/understanding/UnderstandingCard";
+import { understandsApp } from "../features/understanding/understanding";
 import { usePage } from "../components/Shell";
 import { TechnicalDetails } from "../components/TechnicalDetails";
 import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton, Metric, Ribbon, RibbonLegend, SeverityBadge, Skeleton, StatusBadge, severityKey, statusKey, type Tick } from "../components/ui";
@@ -209,6 +211,9 @@ export function ProjectOverview({ id }: { id: string }) {
 
                 {/* Coverage by requirement (RP-02): passing, failing, covered, not covered. */}
                 <RequirementsCoverageCard projectId={id} />
+
+                {/* What was learnt about the application, for a website the AI agent explores. */}
+                {understandsApp(p) && <UnderstandingCard projectId={id} />}
 
                 {(storage.data?.needsSecrets.length ?? 0) > 0 && (
                     <Callout tone="warning" title="Some details need entering again" actions={<LinkButton size="sm" href={routes.setup(id, "storage")}>Open Storage and backup</LinkButton>}>

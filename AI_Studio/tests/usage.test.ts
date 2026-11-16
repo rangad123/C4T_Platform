@@ -96,6 +96,8 @@ const scripted: LlmClient = {
                 authenticationMechanisms: [],
             };
         }
+        // The application-understanding analysis after the exploration reads the explored pages for rules: none here.
+        if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [] };
         if (/failing API test|analyse why an automatically generated/.test(system)) throw new Error("repair must not reach the model in these tests");
         // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
         if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
@@ -329,20 +331,22 @@ describe("AI use by real jobs", () => {
         expect(tests.every((t) => t.validationStatus === "VALIDATED")).toBe(true);
 
         const u = await jobUsage(jobId);
-        // analysis x1, planning x2 (the plan, then the coverage-gap call), the authoring agent's 2 steps per scenario, and a review of each test
+        // analysis x2 (understanding the site, then the application-understanding analysis reading the explored pages), planning x2
+        // (the plan, then the coverage-gap call), the authoring agent's 2 steps per scenario, and a review of each test
         expect(Object.fromEntries(u.byPurpose.map((g: any) => [g.key, [g.calls, g.inputTokens, g.outputTokens]]))).toEqual({
-            analysis: [1, OBJECT.input, OBJECT.output],
+            analysis: [2, 2 * OBJECT.input, 2 * OBJECT.output],
             planning: [2, 2 * OBJECT.input, 2 * OBJECT.output],
             authoring: [4, 4 * STEP.input, 4 * STEP.output],
             review: [2, 2 * REVIEW.input, 2 * REVIEW.output],
         });
         expect(modelCalls.text).toBe(2);
-        expect(u.totals).toMatchObject({ calls: 9, inputTokens: 3 * OBJECT.input + 4 * STEP.input + 2 * REVIEW.input, outputTokens: 3 * OBJECT.output + 4 * STEP.output + 2 * REVIEW.output, estimated: false, cost: null });
+        expect(u.totals).toMatchObject({ calls: 10, inputTokens: 4 * OBJECT.input + 4 * STEP.input + 2 * REVIEW.input, outputTokens: 4 * OBJECT.output + 4 * STEP.output + 2 * REVIEW.output, estimated: false, cost: null });
         expect(u.byModel.map((g: any) => g.key)).toEqual(["scripted-usage"]);
-        expect(u.summary).toBe("25K in, 6K out, 9 calls");
+        expect(u.summary).toBe("30K in, 7K out, 10 calls");
         expect(u.stop).toBeNull();
         expect(u.projectId).toBe(p1);
-        // the job's own counters (used by the older technical details line) agree
+        // the job's own counters (used by the older technical details line) agree with the exploration's calls; the
+        // application-understanding analysis after it is counted in the usage above, not in these counters
         expect(job.counters.llmInputTokens).toBe(25_000);
 
         // no limits set: no warning, no stop
@@ -354,11 +358,12 @@ describe("AI use by real jobs", () => {
         const today = new Date().toISOString().slice(0, 10);
         expect(new Set(rows.map((r) => r.day))).toEqual(new Set([today]));
         const byProject = (await call("GET", "/api/usage?groupBy=project")).body;
-        expect(byProject.totals.totalTokens).toBe(31_000);
-        expect(byProject.month.usedTokens).toBe(31_000);
+        expect(byProject.totals.totalTokens).toBe(37_000);
+        expect(byProject.month.usedTokens).toBe(37_000);
         const byPurpose = (await call("GET", "/api/usage?groupBy=purpose")).body.groups;
-        expect(byPurpose.map((g: any) => [g.key, g.totalTokens])).toEqual([["planning", 12_000], ["authoring", 10_000], ["analysis", 6000], ["review", 3000]]);
-        expect((await call("GET", `/api/usage?projectId=${p1}`)).body.totals.totalTokens).toBe(31_000);
+        // analysis is two calls now (understanding, then the application-understanding analysis): level with planning, listed first
+        expect(byPurpose.map((g: any) => [g.key, g.totalTokens])).toEqual([["analysis", 12_000], ["planning", 12_000], ["authoring", 10_000], ["review", 3000]]);
+        expect((await call("GET", `/api/usage?projectId=${p1}`)).body.totals.totalTokens).toBe(37_000);
     }, 240_000);
 
     it("with a price set, the same job shows its cost; without one it shows tokens only", async () => {
@@ -366,7 +371,7 @@ describe("AI use by real jobs", () => {
         await call("PUT", "/api/usage/prices", { model: "scripted-usage", inputPerMTok: 10, outputPerMTok: 50, currency: "USD" });
         const u = await jobUsage(j1);
         expect(u.currency).toBe("USD");
-        expect(u.totals.cost).toBeCloseTo((25_000 / 1e6) * 10 + (6000 / 1e6) * 50, 10);
+        expect(u.totals.cost).toBeCloseTo((30_000 / 1e6) * 10 + (7000 / 1e6) * 50, 10);
         await call("DELETE", "/api/usage/prices?model=scripted-usage");
     });
 
@@ -398,7 +403,7 @@ describe("AI use by real jobs", () => {
 
     it("the project's monthly limit stops a new analysis before it spends anything, exactly at the limit", async () => {
         const used = (await call("GET", `/api/usage?projectId=${p1}`)).body.month.project.usedTokens as number;
-        expect(used).toBe(31_000);
+        expect(used).toBe(37_000);
         expect((await call("PUT", `/api/projects/${p1}/usage-budget`, { monthlyTokens: used })).status).toBe(200);
         const calls0 = modelCalls.object;
         const { job, jobId } = await analyse(p1);
@@ -407,15 +412,15 @@ describe("AI use by real jobs", () => {
         expect(job.error).toBe("The AI token limit for this project was reached");
         expect(modelCalls.object).toBe(calls0); // the model was never asked
         const stop = (await jobUsage(jobId)).stop;
-        expect(stop).toMatchObject({ cap: "project", usedTokens: 31_000, limitTokens: 31_000, scope: "This project this month" });
-        expect((await events(jobId)).find((e) => e.kind === "ai_budget_stop")?.message).toBe("The AI token limit for this project was reached. This project this month: 31,000 of 31,000 tokens used. AI work stops here; what was already created is kept.");
+        expect(stop).toMatchObject({ cap: "project", usedTokens: 37_000, limitTokens: 37_000, scope: "This project this month" });
+        expect((await events(jobId)).find((e) => e.kind === "ai_budget_stop")?.message).toBe("The AI token limit for this project was reached. This project this month: 37,000 of 37,000 tokens used. AI work stops here; what was already created is kept.");
         // the tests from the first analysis are still there
         expect(await testsOf(p1)).toHaveLength(2);
     }, 240_000);
 
     it("the platform's monthly limit stops every project; validation-only runs and plain re-runs are unaffected, and repair is skipped with the same plain message", async () => {
         const total = (await month()).usedTokens;
-        expect(total).toBeGreaterThanOrEqual(31_000 + 24_500);
+        expect(total).toBeGreaterThanOrEqual(37_000 + 24_500);
         await setBudgets({ monthlyTokens: total });
         expect((await month()).level).toBe("reached");
 

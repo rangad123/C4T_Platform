@@ -33,7 +33,7 @@ import { generatePerformanceSpecs, generateSignedInPerformanceSpecs } from "./pe
 import { generateSecuritySpecs } from "./security/specs.js";
 import { generateSignedInVisualSpecs, generateVisualSpecs } from "./visual/baseline.js";
 import { generateApiWorkflowSpecs } from "./api/workflows.js";
-import { planScenarios, requirementsCoverage } from "./planning/planner.js";
+import { planScenarios, requirementsCoverage, rulesForScenario } from "./planning/planner.js";
 import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
 import { reuseMessage } from "./memory/reuse.js";
@@ -116,6 +116,10 @@ export interface GenerationRequest {
     useMemory?: boolean;
     /** The project's notes for the AI (memory/notes.ts): the analysis, the plan and the test writers read them; a "never" note is a hard rule. */
     siteNotes?: import("./memory/notes.js").SiteNote[];
+    /** false: crawl without the page understanding additions (what an older runner sends). Default true. */
+    pageUnderstanding?: boolean;
+    /** What is known about the application (its latest model version): the plan and the test writers read its usable rules and workflows. */
+    appKnowledge?: import("./planning/planner.js").AppKnowledge;
     /** Send every page to the AI again, even those unchanged since the last exploration (exploration reuse off for this job). Default false. */
     fullExploration?: boolean;
     /** Remove the records data-changing API tests create once the run ends (see ./cleanup). Absent: scripts remove their own records. */
@@ -327,6 +331,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         // Signed in with the project's credentials: a session that ends mid-crawl is renewed once.
                         ...(creds && authState.loggedIn ? { relogin: async () => (await login(session, req.url, creds)).ok } : {}),
                         ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
+                        ...(req.pageUnderstanding === false ? { pageUnderstanding: false } : {}),
                     });
                     pages = result.pages;
                     navigation = result.navigation;
@@ -469,6 +474,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         const validatedScenarioIds = new Set<string>();
         /** Whether the AI understanding step ran (site memory is only updated after it). */
         let analysed = Boolean(req.plan?.analysed);
+        /** Why planning failed, when it did after the understanding step answered. */
+        let planningFailed: string | undefined;
         if (req.plan) {
             // The test ideas were planned and shown earlier; the person may have left some out.
             const left = new Set(req.excludeIdeas ?? []);
@@ -502,6 +509,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 throwIfAborted(ctx.signal);
 
                 await sink.phase("PLANNING", "planning", "running");
+                const warningsBefore = summary.errors.length;
                 const requirements = req.requirements ? await parseRequirements(ctx, req.requirements.text) : undefined;
                 if (req.requirements) {
                     ctx.emit({ stage: "planning", kind: "requirements_parsed", message: `${requirements!.length} requirements extracted from ${req.requirements.name}` });
@@ -518,12 +526,15 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                               requirements,
                               memory: memory.context("planning"),
                               notes: req.siteNotes,
+                              ...(req.appKnowledge ? { knowledge: req.appKnowledge } : {}),
                               digestElementsPerPage: levelSettings(req).digestElementsPerPage,
                               roles: req.roles?.map((r) => r.name),
                               roleDifferences: roleDifferences(accessReach),
                               warnings: summary.errors,
                               ...(testData ? { testData: { tag: testData.tag } } : {}),
                           });
+                // A planning call that did not finish is said as a warning when the others answered (planner.ts).
+                if (summary.errors.length > warningsBefore) planningFailed = summary.errors[summary.errors.length - 1];
                 await sink.counters({ scenariosPlanned: scenarios.length });
                 if (requirements?.length) {
                     const coverage = requirementsCoverage(requirements, scenarios);
@@ -541,6 +552,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 // A reached AI limit is reported in its own plain words (see engine/llm/usage.ts), not as a failure of the analysis.
+                if (analysed) planningFailed = msg;
                 summary.errors.push(isBudgetExceeded(err) ? msg : `Web analysis/planning failed: ${msg}`);
                 ctx.emit({ stage: "analysis", kind: "stage_failed", level: isBudgetExceeded(err) ? "warn" : "error", message: msg });
                 await sink.phase("ANALYZING", "understanding", "failed");
@@ -551,6 +563,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             await sink.phase("PLANNING", "planning", "skipped");
         }
         throwIfAborted(ctx.signal);
+        // Functional test cases were wanted, planning failed and nothing was planned: the job fails and says why, rather than ending
+        // with only its checks. An empty plan on purpose (functional test cases off) or one where nothing failed goes on as before.
+        if (planningFailed && !scenarios.length && req.functionalTests !== false) {
+            throw new Error(`No test ideas were planned because planning failed: ${planningFailed.trim().replace(/\.+$/, "")}.`);
+        }
 
         if (req.planOnly) {
             // The person looks at the plan and chooses; nothing is generated or run until they do.
@@ -575,6 +592,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         const persistNew = async (spec: TestSpec, framework: Framework, validation: "PENDING" | "NEEDS_REVIEW", reason?: string, meta?: Record<string, unknown>) => {
             // Stored sign-in details only go to the application's own site: refused before anything is created.
             assertCredentialsStayHome(spec, renderCtx);
+            // Which model version of the application the test was made from, when the exploration had one.
+            if (req.appKnowledge) meta = { ...meta, modelVersion: req.appKnowledge.modelVersionId };
             const h = await sink.createTest({ spec, framework, validation, reason, meta });
             handles.set(spec.testId, h);
             metas.set(spec.testId, meta ?? {});
@@ -593,6 +612,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 try {
                     // A role scenario is written signed in as its own test account, and its script runs as that account.
                     const asAccount = roleCredentials(scenario, req.roles);
+                    const scenarioRules = rulesForScenario(scenario, req.appKnowledge);
                     const outcome = await authorWebSpec({
                         ctx,
                         browser,
@@ -607,6 +627,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         retryBlocked: true,
                         ...(testData ? { testData } : {}),
                         ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
+                        ...(scenarioRules.length ? { rules: scenarioRules } : {}),
                         // Masking only: what the application shows the AI is cleaned of every secret of the run, not just the sign-in password.
                         secrets: authoringSecretsOf(req),
                     });
@@ -630,7 +651,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         return;
                     }
                     await persistNew(spec, "playwright", "PENDING", undefined, meta);
-                    pending.push({ spec, framework: "playwright", scenario });
+                    pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
                     ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (${spec.steps.length} steps)` });
                 } catch (err) {
                     await sink.finishAgentRun(runId, "error", err instanceof Error ? err.message : String(err));

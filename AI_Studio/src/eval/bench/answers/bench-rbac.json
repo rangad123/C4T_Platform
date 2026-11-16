@@ -1,0 +1,505 @@
+{
+    "app": "bench-rbac",
+    "version": "1",
+    "review": "awaiting-owner",
+    "catalogueVersion": "2026-11-14.1",
+    "requirementsDocument": "bench-rbac-requirements.md",
+    "screens": [
+        {
+            "id": "welcome",
+            "path": "/",
+            "name": "Welcome",
+            "signIn": false,
+            "roles": [
+                "visitor"
+            ]
+        },
+        {
+            "id": "sign-in",
+            "path": "/login",
+            "name": "Sign in",
+            "signIn": false,
+            "roles": [
+                "visitor"
+            ]
+        },
+        {
+            "id": "register",
+            "path": "/register",
+            "name": "Create account",
+            "signIn": false,
+            "roles": [
+                "visitor"
+            ]
+        },
+        {
+            "id": "notes",
+            "path": "/notes",
+            "name": "Notes",
+            "signIn": true,
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "note-new",
+            "path": "/notes/new",
+            "name": "New note",
+            "signIn": true,
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "note",
+            "path": "/notes/:id",
+            "name": "Note",
+            "signIn": true,
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "people",
+            "path": "/admin/users",
+            "name": "People",
+            "signIn": true,
+            "roles": [
+                "admin"
+            ]
+        },
+        {
+            "id": "account",
+            "path": "/account",
+            "name": "Account",
+            "signIn": true,
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        }
+    ],
+    "workflows": [
+        {
+            "id": "registration",
+            "name": "Create an account",
+            "screens": [
+                "register"
+            ],
+            "endpoints": [
+                "POST /api/register"
+            ],
+            "roles": [
+                "visitor"
+            ]
+        },
+        {
+            "id": "session",
+            "name": "Sign in and sign out",
+            "screens": [
+                "sign-in",
+                "account"
+            ],
+            "endpoints": [
+                "POST /api/login",
+                "POST /api/logout",
+                "GET /api/me"
+            ],
+            "roles": [
+                "visitor",
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "notes-create",
+            "name": "Create a note",
+            "screens": [
+                "notes",
+                "note-new",
+                "note"
+            ],
+            "endpoints": [
+                "POST /api/notes"
+            ],
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "notes-read",
+            "name": "List and read notes",
+            "screens": [
+                "notes",
+                "note"
+            ],
+            "endpoints": [
+                "GET /api/notes",
+                "GET /api/notes/:id"
+            ],
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "notes-edit",
+            "name": "Change a note",
+            "screens": [
+                "note"
+            ],
+            "endpoints": [
+                "PUT /api/notes/:id"
+            ],
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "notes-delete",
+            "name": "Delete a note",
+            "screens": [
+                "note"
+            ],
+            "endpoints": [
+                "DELETE /api/notes/:id"
+            ],
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "notes-share",
+            "name": "Share a note and stop sharing it",
+            "screens": [
+                "note"
+            ],
+            "endpoints": [
+                "POST /api/notes/:id/share",
+                "DELETE /api/notes/:id/share/:userId",
+                "GET /api/notes/:id"
+            ],
+            "roles": [
+                "user",
+                "manager",
+                "admin"
+            ]
+        },
+        {
+            "id": "admin-people",
+            "name": "See everyone with an account",
+            "screens": [
+                "people"
+            ],
+            "endpoints": [
+                "GET /api/admin/users"
+            ],
+            "roles": [
+                "admin"
+            ]
+        },
+        {
+            "id": "admin-roles",
+            "name": "Change someone's role",
+            "screens": [
+                "people"
+            ],
+            "endpoints": [
+                "PATCH /api/admin/users/:id"
+            ],
+            "roles": [
+                "admin"
+            ]
+        }
+    ],
+    "entities": [
+        {
+            "id": "account",
+            "name": "Account",
+            "fields": [
+                "id",
+                "name",
+                "email",
+                "password",
+                "role"
+            ]
+        },
+        {
+            "id": "session",
+            "name": "Session",
+            "fields": [
+                "sid",
+                "userId",
+                "ended"
+            ]
+        },
+        {
+            "id": "note",
+            "name": "Note",
+            "fields": [
+                "id",
+                "title",
+                "body",
+                "owner",
+                "sharedWith"
+            ]
+        }
+    ],
+    "endpoints": [
+        {
+            "method": "POST",
+            "path": "/api/register",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/login",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/logout",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/me",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/notes",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/notes",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/notes/:id",
+            "documented": true
+        },
+        {
+            "method": "PUT",
+            "path": "/api/notes/:id",
+            "documented": true
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/notes/:id",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/api/notes/:id/share",
+            "documented": true
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/notes/:id/share/:userId",
+            "documented": true
+        },
+        {
+            "method": "GET",
+            "path": "/api/admin/users",
+            "documented": true
+        },
+        {
+            "method": "PATCH",
+            "path": "/api/admin/users/:id",
+            "documented": true
+        },
+        {
+            "method": "POST",
+            "path": "/login",
+            "documented": false
+        },
+        {
+            "method": "POST",
+            "path": "/register",
+            "documented": false
+        }
+    ],
+    "roles": [
+        {
+            "id": "visitor",
+            "name": "Visitor"
+        },
+        {
+            "id": "user",
+            "name": "User"
+        },
+        {
+            "id": "manager",
+            "name": "Manager"
+        },
+        {
+            "id": "admin",
+            "name": "Admin"
+        }
+    ],
+    "rules": [
+        {
+            "defectId": "BR-01",
+            "kind": "permission",
+            "statement": "Only the owner, people a note is shared with, managers and admins can read it; anyone else gets 'Note not found' (404).",
+            "requirement": {
+                "id": "4.2",
+                "line": 44
+            },
+            "workflows": [
+                "notes-read"
+            ],
+            "endpoints": [
+                "GET /api/notes/:id"
+            ],
+            "entities": [
+                "note"
+            ]
+        },
+        {
+            "defectId": "BR-02",
+            "kind": "permission",
+            "statement": "Only the owner can change a note; a person it is shared with gets 403, through the API too.",
+            "requirement": {
+                "id": "5.1",
+                "line": 49
+            },
+            "workflows": [
+                "notes-edit"
+            ],
+            "endpoints": [
+                "PUT /api/notes/:id"
+            ],
+            "entities": [
+                "note"
+            ]
+        },
+        {
+            "defectId": "BR-03",
+            "kind": "permission",
+            "statement": "Only admins can list people through the API; anyone else gets 403.",
+            "requirement": {
+                "id": "7.3",
+                "line": 69
+            },
+            "workflows": [
+                "admin-people"
+            ],
+            "endpoints": [
+                "GET /api/admin/users"
+            ],
+            "entities": [
+                "account"
+            ]
+        },
+        {
+            "defectId": "BR-04",
+            "kind": "permission",
+            "statement": "Only admins can change roles; managers included, anyone else gets 403.",
+            "requirement": {
+                "id": "7.4",
+                "line": 70
+            },
+            "workflows": [
+                "admin-roles"
+            ],
+            "endpoints": [
+                "PATCH /api/admin/users/:id"
+            ],
+            "entities": [
+                "account"
+            ]
+        },
+        {
+            "defectId": "BR-05",
+            "kind": "invariant",
+            "statement": "After signing out, the old session no longer works, even if its cookie value is sent again.",
+            "requirement": {
+                "id": "2.9",
+                "line": 29
+            },
+            "workflows": [
+                "session"
+            ],
+            "endpoints": [
+                "POST /api/logout"
+            ],
+            "entities": [
+                "session"
+            ]
+        },
+        {
+            "defectId": "BR-06",
+            "kind": "permission",
+            "statement": "After the owner stops sharing with a person, that person can no longer read the note.",
+            "requirement": {
+                "id": "6.6",
+                "line": 62
+            },
+            "workflows": [
+                "notes-share"
+            ],
+            "endpoints": [
+                "DELETE /api/notes/:id/share/:userId",
+                "GET /api/notes/:id"
+            ],
+            "entities": [
+                "note"
+            ]
+        },
+        {
+            "defectId": "BR-07",
+            "kind": "constraint",
+            "statement": "Passwords need at least 8 characters; a shorter one is refused (400).",
+            "requirement": {
+                "id": "2.4",
+                "line": 24
+            },
+            "workflows": [
+                "registration"
+            ],
+            "endpoints": [
+                "POST /api/register"
+            ],
+            "entities": [
+                "account"
+            ]
+        },
+        {
+            "defectId": "BR-08",
+            "kind": "constraint",
+            "statement": "Every note needs a title; creating one without a title is refused with 400 and nothing is created.",
+            "requirement": {
+                "id": "3.4",
+                "line": 37
+            },
+            "workflows": [
+                "notes-create"
+            ],
+            "endpoints": [
+                "POST /api/notes"
+            ],
+            "entities": [
+                "note"
+            ]
+        }
+    ]
+}

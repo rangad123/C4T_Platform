@@ -14,6 +14,9 @@ import { ImportPanel } from "../requirements/ImportPanel";
 import { RequirementDetail } from "../requirements/RequirementDetail";
 import { RequirementForm } from "../requirements/RequirementForm";
 import { AgentInputs } from "../requirements/AgentInputs";
+import { RulesToConfirm } from "../understanding/RulesToConfirm";
+import { SourceInputs } from "../understanding/SourceInputs";
+import { understandsApp } from "../understanding/understanding";
 import { COVERAGE_HINT, COVERAGE_TONE, COVERAGE_WORDS, COVERAGES, PRIORITY_WORDS, STATUS_WORDS, STATUSES, type Coverage, type RequirementList, type RequirementStatus } from "../requirements/requirements";
 import "../requirements/requirements.css";
 
@@ -104,6 +107,13 @@ function RequirementList({ id }: { id: string }) {
             )}
 
             <AgentInputs projectId={id} />
+            {/* What was learnt about the application and what it can be given, for a website the AI agent explores. */}
+            {project.data && understandsApp(project.data) && (
+                <>
+                    <RulesToConfirm projectId={id} />
+                    <SourceInputs projectId={id} />
+                </>
+            )}
             <h2 className="t-section">Your requirements</h2>
             {list.loading ? (
                 <ListSkeleton rows={4} />

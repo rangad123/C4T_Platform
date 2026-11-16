@@ -308,6 +308,16 @@ describe("the Help button and panel", () => {
         await pwExpect(side).toBeFocused();
     });
 
+    it("Escape closes Help when focus is on the page body", async () => {
+        // As while the panel moves focus to new content: the keyboard is nowhere, and Escape still closes it.
+        await visit(routes.tests(P()));
+        await openHelp();
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+        await page.keyboard.press("Escape");
+        await pwExpect(panel()).toHaveCount(0);
+    });
+
     it("searches the whole guide: a question finds the topic, a typo is forgiven, nothing found suggests the chooser", async () => {
         await visit(routes.tests(P()));
         await openHelp();

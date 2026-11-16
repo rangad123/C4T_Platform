@@ -11,7 +11,7 @@ import { ensureSecurityTables } from "../src/security/store.js";
 const db = new Db(":memory:"); ensureSecurityTables(db);
 const d = db.dialect;
 // Tables ordered with db.dialect.insertionOrder() (rowid on SQLite).
-const SEQ = new Set(["applications","generation_jobs","test_executions","artifacts","run_summaries","trigger_tokens","manual_cases","releases","agent_tokens","agent_tasks","healing_proposals","runbooks","runbook_runs","quarantine_entries","security_assessments","security_authorizations"]);
+const SEQ = new Set(["applications","generation_jobs","test_executions","artifacts","run_summaries","trigger_tokens","manual_cases","releases","agent_tokens","agent_tasks","healing_proposals","runbooks","runbook_runs","quarantine_entries","security_assessments","security_authorizations","alert_channels"]);
 const tables = d.listTables(db);
 const deps = new Map(tables.map(t => [t, new Set(d.listForeignKeys(db, t).map(f => f.table).filter(x => x !== t))]));
 const order: string[] = []; const seen = new Set<string>();

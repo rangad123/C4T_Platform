@@ -52,6 +52,9 @@ import { routedLlmForJob } from "./llm-routing.js";
 import { NotesStore } from "./notes-store.js";
 import type { SiteNote } from "../engine/memory/notes.js";
 import { aiOwnerOfJob, configuredLlmForJob, jobSentenceOf, resolveAiFor, type WorkAi } from "./ai-config.js";
+import { analyseAfterExploration, ANALYSIS_OVER_TIME, ANALYSIS_STOPPED } from "./app-analysis.js";
+import { AppIntelStore } from "./app-intel-store.js";
+import { usableRules, usableWorkflows, type AppKnowledge } from "../engine/planning/planner.js";
 import { jobPersonGate } from "./phone-person-gate.js";
 import { agentServiceOf, RunnerAgentError } from "./agent-services.js";
 import { exploreOnRunner } from "./explore-dispatch.js";
@@ -126,6 +129,19 @@ function knownBugsOf(db: Repo["db"], tests: TestToValidate[]): { knownBugs?: Rec
 async function siteNotesOf(repo: Repo, projectId: string): Promise<{ siteNotes?: SiteNote[] }> {
     const notes = await new NotesStore(repo.db.sql).forEngine(projectId);
     return notes.length ? { siteNotes: notes } : {};
+}
+
+/**
+ * What is known about the application, read as it is now (app-intel-store.ts): the latest model version, the rules a source states or a
+ * person confirmed, and the workflows a source states. Never part of the job's stored options. None until the application was analysed.
+ */
+async function appKnowledgeOf(repo: Repo, projectId: string): Promise<{ appKnowledge?: AppKnowledge }> {
+    const intel = new AppIntelStore(repo.db.sql);
+    const latest = await intel.latest(projectId);
+    if (!latest) return {};
+    const rules = usableRules(await intel.rules(projectId)).map((r) => ({ ref: r.ref, kind: r.kind, description: r.description, expected: r.expected, explicitness: r.explicitness, workflows: r.workflows, status: r.status }));
+    const workflows = usableWorkflows(latest.model.workflows).map((w) => ({ id: w.id, name: w.name, steps: w.steps.map((x) => ({ order: x.order, action: x.action })), preconditions: w.preconditions, postconditions: w.postconditions, sourceType: w.sourceType }));
+    return { appKnowledge: { modelVersionId: latest.id, rules, workflows } };
 }
 
 export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeFastLlm">;
@@ -491,7 +507,10 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 useMemory: o.useMemory,
                 // Notes for the AI, read as they are now (notes-store.ts): never part of the job's stored options.
                 ...(await siteNotesOf(repo, job.projectId)),
+                // The application's rules and workflows, read as they are now: the plan and the test writers read them.
+                ...(await appKnowledgeOf(repo, job.projectId)),
                 ...(o.fullExploration ? { fullExploration: true } : {}),
+                ...(o.understandingBaseline ? { pageUnderstanding: false } : {}),
                 cleanup,
                 ...(signIn.savedSession ? { savedSession: signIn.savedSession } : {}),
             };
@@ -505,13 +524,40 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         // A run that stops at the abort may simply end: a job past its limit is still a failed one, whatever it got done.
         if (overTime) throw new Error(overTime);
 
+        // What the exploration produced is kept before the analysis below runs: a cancel during the analysis ends the job, never this.
+        if (summary.plan) await sink.saveTextArtifact(PLAN_ARTIFACT, PLAN_FILE, JSON.stringify(summary.plan));
+
         if (summary.model) {
             await sink.saveTextArtifact("app-model", "application-model.json", JSON.stringify(summary.model, null, 2));
+            // The application understanding is brought up to date from what this exploration saw (app-analysis.ts), under this job's lease,
+            // cancel and time limit, with its model client. Its failure is a warning: the exploration itself still counts.
+            // A job made from a stored plan explores nothing: there is nothing new for the analysis to read.
+            if ((o.mode ?? "generate") === "generate" && !o.fromPlan && !abort.signal.aborted) {
+                await sink.writes.flush();
+                try {
+                    const a = await analyseAfterExploration({ db: repo.db, sql: repo.db.sql, repo, config, store }, job.projectId, { ...(o.understandingBaseline ? { noAi: "the baseline run reads no rules." } : ai.blocked ? { noAi: ai.blocked } : { llm }), signal: abort.signal, createdBy: aiOwnerOfJob(o) });
+                    if (a.error) emit({ stage: "orchestration", kind: "analysis_failed", level: "warn", message: a.error });
+                    else emit({ stage: "orchestration", kind: "analysis_done", message: a.result!.changed ? `Application understanding updated (version ${a.result!.version}).` : "Application understanding checked: nothing changed." });
+                } catch (e) {
+                    emit({ stage: "orchestration", kind: "analysis_failed", level: "warn", message: `The application understanding was not updated: ${e instanceof Error ? e.message : String(e)}` });
+                }
+                // A person's cancel (or a lost lease) during the analysis ends the job as before. The time limit reached during it only stops
+                // the analysis: the exploration finished in time, so its result stands, with a warning.
+                if (repo.isCancelRequested(job.id) || leaseLost) {
+                    // A cancel asked for while the analysis ran may not have reached the job's signal yet (the lease beat checks every few
+                    // seconds): the job ends cancelled either way.
+                    if (!abort.signal.aborted) abort.abort();
+                    throw new Error(ANALYSIS_STOPPED);
+                }
+                if (overTime) {
+                    emit({ stage: "orchestration", kind: "analysis_over_time", level: "warn", message: ANALYSIS_OVER_TIME });
+                    overTime = undefined;
+                }
+            }
         }
 
         if (summary.plan) {
-            // An exploration that stops at a plan: keep the plan for the person, and say plainly whether there is anything to create.
-            await sink.saveTextArtifact(PLAN_ARTIFACT, PLAN_FILE, JSON.stringify(summary.plan));
+            // An exploration that stops at a plan (kept above for the person): say plainly whether there is anything to create.
             const planOpts = planOptionsOf(o, app.credentials);
             const possible = planTotal(planFamilies(summary.plan, planOpts), planOpts.targets);
             if (possible === 0) await finish("FAILED", summary.errors[0] ?? "Nothing to test was found at this address");

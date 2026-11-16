@@ -105,6 +105,34 @@ export class NetworkInterceptor {
     private readonly sockets = new Map<string, Set<string>>();
     private origin = "";
     private pagePath = "/";
+    /** The safe interaction going on now, and the API requests started since it began (method + path template). */
+    private interaction: { control: string; requests: string[] } | null = null;
+
+    /** From now until `endInteraction`, API requests the page starts are tied to this control. */
+    beginInteraction(control: string): void {
+        this.interaction = { control, requests: [] };
+    }
+
+    /** The API requests started since `beginInteraction`, at most 10; same-origin paths without their origin. */
+    endInteraction(): Array<{ control: string; method: string; path: string }> {
+        const done = this.interaction;
+        this.interaction = null;
+        return (done?.requests ?? []).map((r) => {
+            const [method, path] = r.split(" ", 2) as [string, string];
+            return { control: done!.control, method, path };
+        });
+    }
+
+    private noteInteraction(req: Request): void {
+        if (!this.interaction || this.interaction.requests.length >= 10 || !isApiRequest(req.url(), req.resourceType())) return;
+        try {
+            const u = new URL(req.url());
+            const key = `${req.method()} ${u.origin === this.origin ? "" : u.origin}${normalizeApiPath(u.pathname)}`;
+            if (!this.interaction.requests.includes(key)) this.interaction.requests.push(key);
+        } catch {
+            /* not an address */
+        }
+    }
 
     setCurrentPage(url: string): void {
         try {
@@ -117,7 +145,10 @@ export class NetworkInterceptor {
     }
 
     attach(page: Page): void {
-        page.on("request", (req) => this.noteHost(req));
+        page.on("request", (req) => {
+            this.noteHost(req);
+            this.noteInteraction(req);
+        });
         page.on("response", (res) => void this.record(res));
         page.on("websocket", (ws) => this.noteSocket(ws.url()));
     }

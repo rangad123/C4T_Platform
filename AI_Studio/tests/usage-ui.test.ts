@@ -86,6 +86,8 @@ const scripted: LlmClient = {
         }
         // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
         if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
+        // The application-understanding analysis after the exploration reads the explored pages for rules: none here.
+        if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [] };
         for (const s of PLAN) {
             toolQueue.push({ tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: s.heading } } });
             toolQueue.push({ tool: "finish", input: { result: "complete", explanation: "checked" } });
@@ -102,9 +104,11 @@ const total = (u: { input: number; output: number }) => u.input + u.output;
 const BEFORE_AUTHORING = times(3, OBJECT);
 /** One scenario: two agent steps (assert, finish) and the review of the finished test. */
 const SCENARIO = sum(times(2, STEP), REVIEW);
-/** Shop A runs unlimited: both scenarios. 9 calls. */
-const SHOP_A = sum(BEFORE_AUTHORING, times(2, SCENARIO));
-const SHOP_A_CALLS = 3 + 2 * 3;
+/** After a finished exploration: the application-understanding analysis reads the explored pages (1 object call). */
+const AFTER_EXPLORING = OBJECT;
+/** Shop A runs unlimited: both scenarios, then the application-understanding analysis. 10 calls. */
+const SHOP_A = sum(BEFORE_AUTHORING, times(2, SCENARIO), AFTER_EXPLORING);
+const SHOP_A_CALLS = 3 + 2 * 3 + 1;
 /** Shop B's per-job limit: above what scenario one needs before its review starts (so the review runs), at or below what scenario one ends
  * on (so scenario two's first step is refused): the job keeps one test and stops on this limit. */
 const JOB_LIMIT = total(BEFORE_AUTHORING) + 2 * total(STEP) + 1000;

@@ -57,9 +57,24 @@ function oldDatabase(file: string): { tables: string[]; indexes: string[]; trigg
 }
 
 describe("migration 63: agent_actions is dropped", () => {
-    it("is the last slot this code knows", () => {
-        expect(knownSchemaVersion()).toBe(63);
+    it("is a slot this code knows", () => {
+        expect(knownSchemaVersion()).toBeGreaterThanOrEqual(63);
     });
+
+    /** Tables that slots after 63 add: a database opened by this code has them too. */
+    const laterTables = (): string[] => {
+        const at63 = path.join(dir, "fresh63.db");
+        createDatabaseAtVersion(at63, 63);
+        const raw = openRaw(at63);
+        const latest = new Db(":memory:");
+        try {
+            const known = new Set(tables((s) => raw.prepare(s).all() as R[]));
+            return tables((s) => latest.all(s)).filter((t) => !known.has(t));
+        } finally {
+            raw.close();
+            latest.close();
+        }
+    };
 
     it("upgrades a slot-62 database with agent action rows: the table is gone, every other table, index and row stays", () => {
         const file = path.join(dir, "at62.db");
@@ -69,18 +84,19 @@ describe("migration 63: agent_actions is dropped", () => {
         const db = new Db(file);
         try {
             const all = (s: string) => db.all(s);
-            expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(63);
+            expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(knownSchemaVersion());
             const after = tables(all);
             expect(after).not.toContain("agent_actions");
-            expect(after).toEqual(before.tables.filter((t) => t !== "agent_actions"));
+            const later = laterTables();
+            expect(after.filter((t) => !later.includes(t))).toEqual(before.tables.filter((t) => t !== "agent_actions"));
             expect(indexes(all).filter((i) => i.startsWith("agent_actions."))).toEqual([]);
             expect(indexes(all)).toEqual(expect.arrayContaining(before.indexes.filter((i) => !i.startsWith("agent_actions."))));
             expect(triggers(all)).toEqual(before.triggers);
             expect(db.get("SELECT 1 FROM sqlite_sequence WHERE name = 'agent_actions'")).toBeUndefined();
             for (const [name, rows] of before.rows) {
                 if (name === "agent_actions") continue;
-                // schema_version gains exactly the row for 63 (checked below); its earlier rows stay as they were.
-                const now = db.all(`SELECT * FROM "${name}" ORDER BY rowid`).filter((r) => name !== "schema_version" || r.version !== 63);
+                // schema_version gains the rows for 63 (checked below) and any later slot; its earlier rows stay as they were.
+                const now = db.all(`SELECT * FROM "${name}" ORDER BY rowid`).filter((r) => name !== "schema_version" || Number(r.version) < 63);
                 // Columns the open adds without a slot (addActorColumns, addCacheColumns) may be new; every value that was there stays.
                 expect(now.map((r, i) => Object.fromEntries(Object.keys(rows[i] ?? {}).map((k) => [k, r[k]]))), name).toEqual(rows);
                 expect(now.length, name).toBe(rows.length);
@@ -102,11 +118,11 @@ describe("migration 63: agent_actions is dropped", () => {
         }
     });
 
-    it("a fresh database ends at 63 without the table, with the same tables as an upgraded one", () => {
+    it("a fresh database ends at the last slot without the table, with the same tables as an upgraded one", () => {
         const fresh = new Db(":memory:");
         const upgraded = new Db(path.join(dir, "at62.db"));
         try {
-            expect(fresh.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(63);
+            expect(fresh.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(knownSchemaVersion());
             expect(fresh.get("SELECT 1 FROM sqlite_master WHERE name = 'agent_actions'")).toBeUndefined();
             expect(tables((s) => fresh.all(s))).toEqual(tables((s) => upgraded.all(s)));
         } finally {
