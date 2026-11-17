@@ -5,7 +5,9 @@
  *   - each finding is replayed with the behaviours on, all off and each one alone: the failing item list is confirmed and attributed to SI-1,
  *     the broken link (there with everything off too) is a false positive, the wrong total (nothing checks it) is missed;
  *   - the daily call cap stops the run and saves its state, --resume finishes it on the same platform data, and only then is the
- *     baseline written (once; a second baseline is refused);
+ *     baseline written (once; a second baseline is refused); that run replays in isolation with a 180-minute job limit, which the resume
+ *     cannot change;
+ *   - a default run's config has neither the job limit nor isolated replays (as before they existed);
  *   - a run with a real model refuses to start without a price and a budget; a free model is approved with a budget of 0;
  *   - the defect ids and the catalogue never reach the platform: no project, test or exploration request carries them.
  * Ports 9471 (the stand-in app). Run under the browser lock:
@@ -135,8 +137,11 @@ describe("the benchmark command on a stand-in app", () => {
         // Recorded: engine, prompts, model, catalogue, app version, options.
         expect(b.config).toMatchObject({ model: { provider: "scripted", model: "scripted" }, catalogueVersion: expect.stringMatching(/^test-1 \([0-9a-f]{12}\)$/), apps: [{ id: "bench-standin", version: expect.stringMatching(/^[0-9a-f]{16}$/) }], approvedBudget: null, resumes: 0 });
         expect(b.config.prompts.length).toBeGreaterThan(3);
+        expect(b.config.options).not.toHaveProperty("jobTimeoutMin");
+        expect(b.config.options).not.toHaveProperty("isolatedReplays");
         expect(run.overall.benchmark).toMatchObject({ mode: "discovery", seeded: 2, detected: 1 });
         expect(fs.readFileSync(path.join(out, file.replace(/\.json$/, ".md")), "utf8")).toContain("| SI-1 |");
+        expect(fs.readFileSync(path.join(out, file.replace(/\.json$/, ".md")), "utf8")).toContain("Job time limit 45 minutes; replays one job per stage");
         // Nothing of the catalogue reached the platform: the model never saw a defect id or description.
         for (const c of llmCalls) for (const s of ["SI-1", "SI-2", "HTTP 500", "Total $31.00", "test-1"]) expect(c).not.toContain(s);
         // No state is left behind by a finished run.
@@ -146,7 +151,7 @@ describe("the benchmark command on a stand-in app", () => {
     it("stops at the daily call cap, keeps its state, resumes on the same data and only then writes the baseline (once)", async () => {
         const out = path.join(tmp, "run2");
         delayMs = 1500;
-        const stopped = await benchMain(["--apps", "bench-standin", "--port-base", String(PORT), "--out", out, "--data-dir", path.join(tmp, "data2"), "--baseline", "--daily-call-cap", "1", "--yes"], deps());
+        const stopped = await benchMain(["--apps", "bench-standin", "--port-base", String(PORT), "--out", out, "--data-dir", path.join(tmp, "data2"), "--baseline", "--daily-call-cap", "1", "--isolated-replays", "--job-timeout-min", "180", "--yes"], deps());
         delayMs = 0;
         expect(stopped, lines.join("\n")).toBe(4);
         const state = readJson(path.join(out, "bench-state.json"));
@@ -155,7 +160,7 @@ describe("the benchmark command on a stand-in app", () => {
         expect(fs.existsSync(path.join(out, "baseline.json"))).toBe(false);
         expect(fs.readdirSync(out).some((f) => /-partial\.json$/.test(f))).toBe(true);
 
-        const resumed = await benchMain(["--resume", "--out", out, "--daily-call-cap", "1000", "--yes"], deps());
+        const resumed = await benchMain(["--resume", "--out", out, "--daily-call-cap", "1000", "--job-timeout-min", "30", "--yes"], deps());
         expect(resumed, lines.join("\n")).toBe(0);
         const base = readJson(path.join(out, "baseline.json")) as EvalRun;
         expect(base.benchmark!.baseline).toBe(true);
@@ -163,6 +168,9 @@ describe("the benchmark command on a stand-in app", () => {
         expect(base.benchmark!.config.dailyCallCap).toBe(1000);
         expect(base.benchmark!.apps[0]!.status).toBe("done");
         expect(base.benchmark!.metrics.detected).toBe(1);
+        // Replayed one finding per job (same attribution as the batched run above), with the first attempt's limits.
+        expect(base.benchmark!.config.options).toMatchObject({ jobTimeoutMin: 180, isolatedReplays: true });
+        expect(fs.readFileSync(path.join(out, "baseline.md"), "utf8")).toMatch(/Job time limit 180 minutes; replays isolated/);
         expect(verifyBaseline(out)).toBe(true);
         expect(fs.existsSync(path.join(out, "bench-state.json"))).toBe(false);
         // Immutable: a second baseline in the same folder is refused before anything runs.

@@ -24,6 +24,7 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
     out.push(`- Model ${c.model.provider} / ${c.model.model}; fast model ${c.model.fastModel ?? "none"}; planning model ${c.model.planningModel ?? "none"}; temperature ${c.model.temperature}`);
     out.push(`- Catalogue ${c.catalogueVersion}; apps ${c.apps.map((a) => `${a.id} ${a.version}`).join(", ")}`);
     out.push(`- Options ${Object.entries(c.options).map(([k, v]) => `${k}=${String(v)}`).join(", ")}`);
+    out.push(`- Job time limit ${typeof c.options.jobTimeoutMin === "number" ? c.options.jobTimeoutMin : 45} minutes; replays ${c.options.isolatedReplays === true ? "isolated (one test per job, the app started fresh before each)" : "one job per stage"}`);
     out.push(`- Prompts ${c.prompts.map((p) => `${p.file.split("/").pop()} ${p.sha256.slice(0, 12)}`).join(", ")}`);
     out.push(`- Prices ${c.prices ? c.prices.map((p) => `${p.model} in ${p.inputPerMTok}/out ${p.outputPerMTok} per M`).join("; ") : "none given"}; approved budget ${c.approvedBudget === null ? "none (no paid model)" : `$${c.approvedBudget}`}`, "");
     for (const a of b.apps) {
