@@ -183,12 +183,14 @@ export async function runMobileGeneration(ctx: EngineContext, req: GenerationReq
             if (spec.kind !== "mobile") throw new Error("It is not a phone test");
             const meta = { model: ctx.llm.modelName, scenario: ideaScenarios({ ...phone, ideas: [idea] })[0], authoring: "exploration", explanation: idea.goal, phone: { appPackage, ideaId: idea.id, family: idea.family, path: idea.path } };
             const h = await sink.createTest({ spec, framework: "taqwright", validation: "PENDING", meta });
+            // The key the host saved the test under (taken at save, orchestrator.ts persistNew).
+            spec.testId = h.testId;
             handles.set(spec.testId, h);
             scriptIds.set(spec.testId, await sink.saveScript(h, renderWithAdapter(spec, "taqwright", renderCtx), true));
             await sink.counters({ testsGenerated: 1 }, true);
             summary.testsGenerated++;
             pending.push({ spec, framework: "taqwright" });
-            ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (${spec.steps.length} steps)` });
+            ctx.emit({ stage: "generation", kind: "script_generated", message: `${spec.testId} ${spec.title} (${spec.steps.length} steps)` });
         } catch (e) {
             summary.errors.push(`${idea.title}: ${e instanceof Error ? e.message : String(e)}`);
             ctx.emit({ stage: "generation", kind: "scenario_failed", level: "warn", message: `${idea.title} could not be written: ${e instanceof Error ? e.message : String(e)}` });

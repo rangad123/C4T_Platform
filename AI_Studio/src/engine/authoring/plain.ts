@@ -113,6 +113,8 @@ export async function runPlainAuthoring(ctx: EngineContext, req: PlainRequest, s
             await sink.updateTest(h, { spec, validation: status === "PENDING" ? "VALIDATING" : "NEEDS_REVIEW", reason: reason ?? null, attempts: 0, meta: meta(extra) });
         } else {
             h = await sink.createTest({ spec, framework, validation: status, reason, meta: meta(extra) });
+            // The key the host saved the test under (taken at save, orchestrator.ts persistNew).
+            spec.testId = h.testId;
         }
         handles.set(spec.testId, h);
         scriptIds.set(spec.testId, await sink.saveScript(h, renderWithAdapter(spec, framework, renderCtx), true));

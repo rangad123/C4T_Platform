@@ -619,6 +619,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             // Which model version of the application the test was made from, when the exploration had one.
             if (req.appKnowledge) meta = { ...meta, modelVersion: req.appKnowledge.modelVersionId };
             const h = await sink.createTest({ spec, framework, validation, reason, meta });
+            // The host takes the key at save (another scenario may have saved under the one asked for): the spec, its script and
+            // everything after go by the key the test was saved under.
+            spec.testId = h.testId;
             handles.set(spec.testId, h);
             metas.set(spec.testId, meta ?? {});
             const script = renderWithAdapter(spec, framework, renderCtx);
@@ -675,23 +678,23 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                                 ? await checkIndependence(browser, origin, { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
                                 : { independence: "not_run" as const, replays: [] };
                         const found = defectFinding({ scenario, rules: scenarioRules, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
-                        if (!found.finding) ctx.emit({ stage: "generation", kind: "finding_invalid", level: "warn", message: `${key} ${spec.title}: its candidate finding could not be built (${found.problem}); the test is saved for review without it.` });
                         const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
-                        await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation.trim().replace(/\.+$/, "")}. ${found.basis}`, defectMeta);
+                        const saved = (await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation.trim().replace(/\.+$/, "")}. ${found.basis}`, defectMeta)).testId;
+                        if (!found.finding) ctx.emit({ stage: "generation", kind: "finding_invalid", level: "warn", message: `${saved} ${spec.title}: its candidate finding could not be built (${found.problem}); the test is saved for review without it.` });
                         summary.testsNeedingReview++;
                         await sink.counters({ testsNeedingReview: 1 }, true);
                         ctx.emit({
                             stage: "generation",
                             kind: "possible_defect",
                             level: "warn",
-                            message: `${key} ${spec.title}: ${outcome.explanation}`,
-                            data: { testKey: key, capture, confidence: found.confidence, independence: independence.independence, source: found.source },
+                            message: `${saved} ${spec.title}: ${outcome.explanation}`,
+                            data: { testKey: saved, capture, confidence: found.confidence, independence: independence.independence, source: found.source },
                         });
                         return;
                     }
                     await persistNew(spec, "playwright", "PENDING", undefined, meta);
                     pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
-                    ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (${spec.steps.length} steps)` });
+                    ctx.emit({ stage: "generation", kind: "script_generated", message: `${spec.testId} ${spec.title} (${spec.steps.length} steps)` });
                 } catch (err) {
                     await sink.finishAgentRun(runId, "error", err instanceof Error ? err.message : String(err));
                     throw err;
