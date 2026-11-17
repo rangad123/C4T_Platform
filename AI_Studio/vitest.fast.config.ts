@@ -253,6 +253,7 @@ export default defineConfig({
             "tests/explore-perturb-unit.test.ts",
             "tests/candidate-findings-migration-66.test.ts",
             "tests/candidate-finding-store.test.ts",
+            "tests/repair-web-guard-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
