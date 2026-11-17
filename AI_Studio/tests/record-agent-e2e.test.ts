@@ -257,7 +257,7 @@ describe("recording on the real agent program", () => {
         expect(["COMPLETED", "PARTIALLY_COMPLETED"]).toContain(job.status);
         const after = (await admin("GET", `/api/tests/${savedTestId}`)).body;
         expect(after.validationStatus, JSON.stringify(after.validationReason)).toBe("VALIDATED");
-        expect((await admin("GET", `/api/test-generation/${saved.body.jobId}`)).body.ranOn).toMatchObject({ kind: "agent", name: "Maya's laptop" });
+        expect((await admin("GET", `/api/test-generation/${saved.body.jobId}`)).body.ranOn).toMatchObject({ kind: "agent", name: "e2e" }); // as Settings names the runner
     }, 180_000);
 
     it("the typed password is nowhere in the platform's database, its answers, or what the agent sent or said", async () => {

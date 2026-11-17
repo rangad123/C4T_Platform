@@ -143,7 +143,8 @@ describe("a validation job that runs on a real agent", () => {
             const started = await admin("POST", `/api/tests/${ids[title]}/validate`);
             expect(started.status, started.text).toBe(202);
             const job = await jobDone(started.body.jobId);
-            expect(job.ranOn).toMatchObject({ kind: "agent", name: "e2e agent" });
+            // Named as Settings names the runner (the name given to it there, "e2e"), not what the computer calls itself.
+            expect(job.ranOn).toMatchObject({ kind: "agent", name: "e2e" });
             const exec = (await admin("GET", `/api/tests/${ids[title]}/executions`)).body;
             expect(exec[0]).toMatchObject({ status: "passed" });
         }
