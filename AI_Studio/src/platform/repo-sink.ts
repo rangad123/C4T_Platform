@@ -22,6 +22,8 @@ import { CustomScriptStore } from "./custom-script-store.js";
 import { maskOptional, maskText, maskValue } from "./redact-text.js";
 import type { VersionSource } from "./review-store.js";
 import { isJpeg, THUMBNAIL_LIMITS, THUMBNAIL_NAME, THUMBNAIL_RUN_LIMITS } from "../engine/discovery/thumbnails.js";
+import { CandidateFindingStore } from "./candidate-finding-store.js";
+import { CandidateFindingSchema } from "../engine/explore/finding.js";
 
 /**
  * Stores a rendered script as the test's current version for its framework. An unchanged script
@@ -138,8 +140,22 @@ export class RepoSink implements GenerationSink {
             linkGeneratedTest(this.repo.db, this.job.projectId, id, spec.source.requirements);
             this.suiteSlugByTest.set(id, slug);
             if (testId !== spec.testId) this.rekeyed.set(id, testId);
+            // A defect saved for review carries its candidate finding (engine/explore/finding.ts): one row per project and fingerprint.
+            if (validation === "NEEDS_REVIEW" && meta?.finding !== undefined) return this.saveFinding(id, testId, meta.finding).then(() => ({ id, testId }));
             return { id, testId };
         });
+
+    /** The finding is parsed again here (the boundary); one that does not parse, or cannot be stored, is skipped with a warning and the test stays. */
+    private async saveFinding(testDbId: string, testKey: string, given: unknown): Promise<void> {
+        const parsed = CandidateFindingSchema.safeParse(given);
+        const skip = (why: string) => this.event({ stage: "generation", kind: "finding_skipped", level: "warn", message: `${testKey}: its candidate finding was not stored (${why}); the test is saved for review.` });
+        if (!parsed.success) return skip(parsed.error.issues.map((i) => `${i.path.join(".") || "finding"}: ${i.message}`).join("; "));
+        try {
+            await new CandidateFindingStore(this.repo.db.sql).upsert({ projectId: this.job.projectId, jobId: this.job.id, testId: testDbId, finding: parsed.data });
+        } catch (err) {
+            skip(err instanceof Error ? err.message : String(err));
+        }
+    }
 
     /** Tests this job saved under another key than the engine asked for (createTest): test id -> the key it was saved under. */
     private readonly rekeyed = new Map<string, string>();

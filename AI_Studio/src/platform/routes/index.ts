@@ -15,6 +15,7 @@ import { registerEnvironmentRoutes } from "./environments.js";
 import { registerEvidenceRoutes } from "./evidence.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { registerKnowledgeRoutes } from "./knowledge.js";
+import { registerExploreFindingRoutes } from "./explore-findings.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerUserRoutes } from "./users.js";
 import { registerProjectAccessRoutes } from "./project-access.js";
@@ -109,6 +110,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerManualCaseRoutes(ctx);
     // Requirements as records and the tests that cover them (routes/requirements.ts).
     registerRequirementRoutes(ctx);
+    // Candidate findings from exploration, read only (routes/explore-findings.ts, testing-engine Phase 3).
+    registerExploreFindingRoutes(ctx);
     registerSentryRoutes(ctx);
     // Integrations set up once for an organisation, and the projects that use them (routes/shared-integrations.ts).
     registerSharedIntegrationRoutes(ctx);

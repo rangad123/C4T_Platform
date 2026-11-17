@@ -358,6 +358,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "PUT /api/projects/:id/manual-cases/:cid": "ai_studio.tests.write",
     "DELETE /api/projects/:id/manual-cases/:cid": "ai_studio.tests.delete",
     // Requirements as records and the tests that cover them (routes/requirements.ts). Refining an import with the AI spends tokens.
+    // Candidate findings from exploration (routes/explore-findings.ts): read only.
+    "GET /api/projects/:id/candidate-findings": "read",
     "GET /api/projects/:id/requirements": "read",
     "POST /api/projects/:id/requirements": "ai_studio.tests.write",
     "GET /api/projects/:id/requirements/coverage": "read",
