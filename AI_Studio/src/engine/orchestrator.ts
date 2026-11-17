@@ -52,8 +52,11 @@ import type { ApiEndpointModel, AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
 import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
-import { authorWebSpec, toSpec } from "./web/author.js";
+import { authorWebSpec, toSpec, type AuthorOutcome } from "./web/author.js";
 import { checkStrength } from "./mutation/strength.js";
+import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
+import { checkIndependence, type IndependenceCheck } from "./explore/independence.js";
+import type { KnowledgeRule } from "./planning/planner.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 
@@ -664,10 +667,25 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     const spec = TestSpecSchema.parse(asAccount ? asRole(written, asAccount.name) : written);
                     const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
                     if (outcome.status === "defect") {
-                        await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation}`, meta);
+                        // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
+                        const capture = outcome.capture ?? "observed_only";
+                        const independence =
+                            capture === "captured"
+                                ? await checkIndependence(browser, origin, { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
+                                : { independence: "not_run" as const, replays: [] };
+                        const found = defectFinding({ scenario, rules: scenarioRules, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
+                        if (!found.finding) ctx.emit({ stage: "generation", kind: "finding_invalid", level: "warn", message: `${key} ${spec.title}: its candidate finding could not be built (${found.problem}); the test is saved for review without it.` });
+                        const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
+                        await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation.trim().replace(/\.+$/, "")}. ${found.basis}`, defectMeta);
                         summary.testsNeedingReview++;
                         await sink.counters({ testsNeedingReview: 1 }, true);
-                        ctx.emit({ stage: "generation", kind: "possible_defect", level: "warn", message: `${key} ${spec.title}: ${outcome.explanation}` });
+                        ctx.emit({
+                            stage: "generation",
+                            kind: "possible_defect",
+                            level: "warn",
+                            message: `${key} ${spec.title}: ${outcome.explanation}`,
+                            data: { testKey: key, capture, confidence: found.confidence, independence: independence.independence, source: found.source },
+                        });
                         return;
                     }
                     await persistNew(spec, "playwright", "PENDING", undefined, meta);
@@ -1013,4 +1031,55 @@ function authoringSecretsOf(req: Pick<GenerationRequest, "credentials" | "roles"
     const c = req.credentials;
     const list = [c?.password, c?.totpSecret, c?.apiToken, c?.apiAuthHeader, ...(req.roles ?? []).flatMap((r) => [r.password, r.totpSecret, r.apiToken])];
     return list.filter((v): v is string => typeof v === "string" && v.length >= 4);
+}
+
+const EXPECTED_SOURCE = /^expected:([1-9]\d{0,2})$/;
+const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+/**
+ * The candidate finding of a defect test (explore/finding.ts, Decision 9), the sentence its review reason ends with, and what the
+ * possible_defect event says. The expected result comes from the captured check's source (the scenario's n-th expected result, or a
+ * rule given to the scenario), never from what the application did; an observed-only defect has no source and its scenario's expected
+ * results as the expected text. Parsed with the contract (redacted, cut) before it goes on the test; no AI calls.
+ */
+export function defectFinding(p: {
+    scenario: Scenario;
+    rules: readonly KnowledgeRule[];
+    outcome: Extract<AuthorOutcome, { status: "defect" }>;
+    capture: CaptureState;
+    independence: IndependenceCheck;
+    stepCount: number;
+    modelVersion: string | null;
+}): { finding?: CandidateFinding; problem?: string; basis: string; confidence: FindingConfidence; source: string | null } {
+    const L = CANDIDATE_FINDING_LIMITS;
+    const source = p.capture === "captured" ? (p.outcome.capturedCheck?.source ?? null) : null;
+    const n = source ? EXPECTED_SOURCE.exec(source) : null;
+    const rule = source && !n ? p.rules.find((r) => r.ref === source) : undefined;
+    const expected = n ? (p.scenario.expectedResults[Number(n[1]) - 1] ?? "") : rule ? rule.expected || rule.description : p.scenario.expectedResults.join("; ");
+    const capture: CaptureState = source ? p.capture : "observed_only";
+    const confidence = confidenceOf({ sourced: source !== null, capture, independence: p.independence.independence });
+    const named = n ? `expected result ${n[1]} (${cut(expected, 200)})` : rule ? `rule ${source}` : source ? `${source}` : "";
+    const independent = { independent: "both fresh replays failed at it", state_dependent: "the fresh replays did not fail at it the same way", not_run: "the fresh replays could not be run" }[p.independence.independence];
+    const basis = source
+        ? `The failing check is of ${named}; ${independent} (confidence ${confidence}).`
+        : `No failing check of a stated expectation was kept, so this is observed only (confidence ${confidence}).`;
+    const problems = p.outcome.evidence ?? [];
+    const isConsole = (line: string) => /^(Console error|Page error):/.test(line) || !/^[A-Z]+ \S+ (answered|failed)/.test(line);
+    const o = p.scenario.objective;
+    const input = {
+        objective: o ? { id: o.id, kind: o.kind, source: cut(o.source, L.refMax), ...(o.operator ? { operator: o.operator } : {}) } : null,
+        actions: { stepCount: Math.min(p.stepCount, L.stepsMax) },
+        expected: { text: expected, source },
+        observed: p.outcome.explanation,
+        evidence: { screenshots: [], requests: problems.filter((l) => !isConsole(l)).slice(0, L.requestsMax), console: problems.filter(isConsole).slice(0, L.consoleMax) },
+        capture,
+        independence: p.independence.independence,
+        confidence,
+        fingerprint: findingFingerprint({ source, expected, scenario: p.scenario.title }),
+        modelVersion: p.modelVersion,
+        replays: p.independence.replays.slice(0, L.replaysMax),
+    };
+    const parsed = CandidateFindingSchema.safeParse(input);
+    const problem = parsed.success ? undefined : parsed.error.issues.map((i) => `${i.path.join(".") || "finding"}: ${i.message}`).join("; ");
+    return { ...(parsed.success ? { finding: parsed.data } : { problem }), basis, confidence, source };
 }
