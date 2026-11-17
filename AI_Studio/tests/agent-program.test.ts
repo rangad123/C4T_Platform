@@ -521,8 +521,8 @@ describe("connection loop", () => {
 
     it("stops with a plain message and its own exit code for a bad token, a revoked token, a refusal and a protocol mismatch", async () => {
         const cases: Array<{ reject?: 401 | 404 | 409; protocol?: number; code: number; message: RegExp }> = [
-            { reject: 401, code: 3, message: /not valid or was revoked/ },
-            { reject: 404, code: 3, message: /not valid or was revoked/ },
+            { reject: 401, code: 3, message: /The platform no longer accepts this runner\. Token is not valid\./ },
+            { reject: 404, code: 3, message: /The platform no longer accepts this runner\. Token is not valid\./ },
             { reject: 409, code: 5, message: /refused this agent.*Another agent with this name/ },
             // The agent speaks 1 and 2 (it offers both and falls back to 1); a platform answering a version it does not know stops it.
             { protocol: 3, code: 4, message: /speaks protocol 1 and 2 but the platform speaks protocol 3/ },
@@ -597,7 +597,7 @@ describe("the command line program", () => {
         await fake.start();
         const cli = runCli(["--work-dir", path.join(tmp, "cli-work-1")], { AITP_URL: fake.url, AITP_AGENT_TOKEN: TOKEN });
         expect(await cli.exited).toBe(3);
-        expect(cli.output()).toMatch(/The agent token is not valid or was revoked/);
+        expect(cli.output()).toMatch(/The platform no longer accepts this runner\. Token is not valid\./);
         expect(cli.output()).not.toContain(TOKEN);
         await fake.stop();
     }, 60_000);
