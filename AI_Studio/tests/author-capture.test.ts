@@ -124,6 +124,16 @@ describe("authoring keeps a failing sourced check", () => {
         expect(out.steps[1]).toMatchObject({ check: "visible", source: "expected:1" });
     }, 90_000);
 
+    it("captures with expected:<n> when that expected result names a requirement of the job the scenario covers; not without the job's ids", async () => {
+        const tied = { ...scenario, requirements: ["REQ-7"], expectedResults: ["The cart page is shown", "The total is $25.00 (REQ-7)"] };
+        const steps = () => [heading, { tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$25.00", source: "expected:2" } }, finishDefect];
+        const out = await authorWebSpec({ ctx: ctxFor(scripted(steps())), browser, baseUrl: BASE, model: emptyModel, scenario: tied, requirementIds: ["REQ-7"] });
+        expect(out).toMatchObject({ status: "defect", capture: "captured", capturedCheck: { source: "expected:2" } });
+        expect(out.steps.at(-1)).toMatchObject({ check: "exactText", source: "expected:2" });
+        const claimed = await authorWebSpec({ ctx: ctxFor(scripted(steps())), browser, baseUrl: BASE, model: emptyModel, scenario: tied });
+        expect(claimed).toMatchObject({ status: "defect", capture: "observed_only" });
+    }, 90_000);
+
     it("captures with expected:<n> of an objective scenario (its expected result cites its source)", async () => {
         const objective = { ...scenario, expectedResults: ["The total is $25.00 (source: R-TOTAL)"], objective: { id: "obj-total", kind: "rule" as const, source: "R-TOTAL", operator: "as_stated" } };
         const out = await authorWebSpec({

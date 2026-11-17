@@ -565,6 +565,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // ── 2-3. UNDERSTANDING + PLANNING (LLM, web) ──────────────────────────
         let scenarios: Scenario[] = [];
+        /** The ids of the job's requirements, as the planner keeps them: an expected result naming one its scenario covers is stated (author.ts statedSource). */
+        let requirementIds: string[] = [];
         let model: AppModel = summary.model!;
         // Site memory informs the prompts below and the change summary; the crawl above already ran in full.
         const memory = await openMemory(ctx, sink, { origin, enabled: req.useMemory !== false, secrets: secretValues(req) });
@@ -610,6 +612,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 await sink.phase("PLANNING", "planning", "running");
                 const warningsBefore = summary.errors.length;
                 const requirements = req.requirements ? await parseRequirements(ctx, req.requirements.text) : undefined;
+                requirementIds = requirements?.map((r) => r.id) ?? [];
                 if (req.requirements) {
                     ctx.emit({ stage: "planning", kind: "requirements_parsed", message: `${requirements!.length} requirements extracted from ${req.requirements.name}` });
                 }
@@ -726,7 +729,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     capture === "captured"
                         ? await checkIndependence(browser, origin, { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
-                const found = defectFinding({ scenario, rules: scenarioRules, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
+                const found = defectFinding({ scenario, rules: scenarioRules, requirementIds, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
                 const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
                 const saved = (await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation.trim().replace(/\.+$/, "")}. ${found.basis}`, defectMeta)).testId;
                 if (!found.finding) ctx.emit({ stage: "generation", kind: "finding_invalid", level: "warn", message: `${saved} ${spec.title}: its candidate finding could not be built (${found.problem}); the test is saved for review without it.` });
@@ -771,6 +774,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ...(testData ? { testData } : {}),
                         ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
                         ...(scenarioRules.length ? { rules: scenarioRules } : {}),
+                        ...(requirementIds.length ? { requirementIds } : {}),
                         // Masking only: what the application shows the AI is cleaned of every secret of the run, not just the sign-in password.
                         secrets: authoringSecretsOf(req),
                     });
@@ -1255,6 +1259,8 @@ const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)
 export function defectFinding(p: {
     scenario: Scenario;
     rules: readonly KnowledgeRule[];
+    /** The ids of the job's requirements (statedSource): an expected result naming one its scenario covers is stated. */
+    requirementIds?: readonly string[];
     outcome: Extract<AuthorOutcome, { status: "defect" }>;
     capture: CaptureState;
     independence: IndependenceCheck;
@@ -1264,7 +1270,7 @@ export function defectFinding(p: {
     const L = CANDIDATE_FINDING_LIMITS;
     // Only a stated source captures (author.ts statedSource, the rule the author applied): a check of the planner's own expected result does not.
     const cited = p.capture === "captured" ? (p.outcome.capturedCheck?.source ?? null) : null;
-    const source = cited && statedSource(cited, p.scenario, p.rules) ? cited : null;
+    const source = cited && statedSource(cited, p.scenario, p.rules, p.requirementIds) ? cited : null;
     const n = source ? EXPECTED_SOURCE.exec(source) : null;
     const rule = source && !n ? p.rules.find((r) => r.ref === source) : undefined;
     const expected = n ? (p.scenario.expectedResults[Number(n[1]) - 1] ?? "") : rule ? rule.expected || rule.description : p.scenario.expectedResults.join("; ");

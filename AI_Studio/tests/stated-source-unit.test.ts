@@ -58,6 +58,39 @@ describe("statedSource", () => {
     });
 });
 
+describe("statedSource: an expected result naming a requirement id", () => {
+    const covering = (requirements: string[], expected: string): Scenario =>
+        ScenarioSchema.parse({ scenarioId: "S-REQ", title: "Cart total", description: "d", category: "Cart", startPath: "/cart", requirements, expectedResults: ["The cart page is shown", expected] });
+    const PROJECT = ["REQ-1", "REQ-2", "1.2"];
+
+    it("is stated when the scenario covers that requirement and the project has it", () => {
+        expect(statedSource("expected:2", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBe(true);
+        expect(statedSource("expected:2", covering(["REQ-2", "REQ-1"], "REQ-1: the total is $25.00."), [RULE], PROJECT)).toBe(true);
+        expect(statedSource("expected:2", covering(["1.2"], "The total is $25.00 (requirement 1.2)."), undefined, PROJECT)).toBe(true);
+        // The other expected result of the same scenario names nothing: still the planner's own.
+        expect(statedSource("expected:1", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBe(false);
+    });
+
+    it("is not stated for a real requirement id the scenario does not cover", () => {
+        expect(statedSource("expected:2", covering(["REQ-2"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBe(false);
+        expect(statedSource("expected:2", covering([], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBe(false);
+    });
+
+    it("is not stated for an id the scenario claims but the project does not have", () => {
+        expect(statedSource("expected:2", covering(["REQ-9"], "The total is $25.00 (REQ-9)"), undefined, PROJECT)).toBe(false);
+        expect(statedSource("expected:2", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, undefined)).toBe(false);
+        expect(statedSource("expected:2", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, [])).toBe(false);
+    });
+
+    it("is not stated for a near-miss token", () => {
+        for (const text of ["The total is $25.00 (REQ-10)", "The total is $25.00 (XREQ-1)", "The total is $25.00 (REQ-1-B)", "The total is $25.00 (REQ-1.3)", "The total is $25.00 (req-1)"]) {
+            expect(statedSource("expected:2", covering(["REQ-1"], text), undefined, PROJECT), text).toBe(false);
+        }
+        expect(statedSource("expected:2", covering(["1.2"], "The total is $25.00 (section 1.2.3)"), undefined, PROJECT)).toBe(false);
+        expect(statedSource("expected:2", covering(["1.2"], "The total is $25.00 (section 11.2)"), undefined, PROJECT)).toBe(false);
+    });
+});
+
 describe("defectFinding keeps the rule", () => {
     const outcome = (source: string): Extract<AuthorOutcome, { status: "defect" }> => ({ status: "defect", steps: [], testData: {}, explanation: "The total shows $30.00", capture: "captured", capturedCheck: { source, observed: "$30.00" } });
     const notRun = { independence: "not_run" as const, replays: [] };
@@ -76,5 +109,20 @@ describe("defectFinding keeps the rule", () => {
         const rule = defectFinding({ scenario: planned(["The total is $25.00"]), rules: [RULE], outcome: outcome("R-TOTAL"), capture: "captured", independence: notRun, stepCount: 3, modelVersion: null });
         expect(rule).toMatchObject({ confidence: "medium", source: "R-TOTAL" });
         expect(rule.finding).toMatchObject({ capture: "captured", expected: { text: "Total = sum of lines", source: "R-TOTAL" } });
+    });
+
+    it("a check of an expected result naming a requirement of the job its scenario covers: captured; without the job's ids, observed only", () => {
+        const s = ScenarioSchema.parse({ scenarioId: "S-REQ", title: "Cart total", description: "d", category: "Cart", requirements: ["REQ-1"], expectedResults: ["The cart page is shown", "The total is $25.00 (REQ-1)"] });
+        const tied = defectFinding({ scenario: s, rules: [], requirementIds: ["REQ-1"], outcome: outcome("expected:2"), capture: "captured", independence: independent, stepCount: 3, modelVersion: null });
+        expect(tied).toMatchObject({ confidence: "high", source: "expected:2" });
+        expect(tied.finding).toMatchObject({ capture: "captured", expected: { text: "The total is $25.00 (REQ-1)", source: "expected:2" } });
+        const unknown = defectFinding({ scenario: s, rules: [], outcome: outcome("expected:2"), capture: "captured", independence: independent, stepCount: 3, modelVersion: null });
+        expect(unknown).toMatchObject({ confidence: "low", source: null });
+    });
+
+    it("a defect of an objective scenario (built the way the objective stage builds it) names its objective", () => {
+        const s = objectiveScenario();
+        const found = defectFinding({ scenario: s, rules: [{ ...RULE, ref: "R-7" }], outcome: outcome("R-7"), capture: "captured", independence: independent, stepCount: 3, modelVersion: "mv-1" });
+        expect(found.finding).toMatchObject({ objective: { ...s.objective!, source: "R-7", operator: "as_stated" }, capture: "captured", modelVersion: "mv-1" });
     });
 });
