@@ -357,7 +357,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
 
     const recorded: Step[] = [];
     /** Sourced checks that ran and failed (with what the page showed instead); the last one still failing ends a defect test. */
-    const failedChecks: Array<{ step: Step; observed: string }> = [];
+    const failedChecks: Array<{ step: Step; observed: string; at: number }> = [];
     const masks = observedTextSecrets(runSecretsOf(input));
     const observations: string[] = [];
     const data: RuntimeData = runtimeData({}, credentials);
@@ -451,12 +451,6 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 await settle(tab, 1_500);
             }
             const snapshot = await snapshotFor(7_000);
-            if (step.action === "assert" && step.source) {
-                // A sourced check that passed now is no failure to keep any more; one that failed is kept with what the page showed.
-                const same = (s: Step) => JSON.stringify({ ...s, description: "" }) === JSON.stringify({ ...step, description: "" });
-                for (let i = failedChecks.length - 1; i >= 0; i--) if (same(failedChecks[i]!.step)) failedChecks.splice(i, 1);
-                if (!r.ok) failedChecks.push({ step: { ...step, description: step.description || describeStep(step) } as Step, observed: redactText(maskObservedText(r.full ?? r.error ?? "failed", masks, 400), 400) });
-            }
             if (r.ok) {
                 // A click that opened a new tab is recorded as one that waits for it, so a replay and the script follow it too.
                 recorded.push({ ...step, ...(told.popup && step.action === "click" ? { opensPopup: true } : {}), description: step.description || describeStep(step) } as Step);
@@ -465,6 +459,13 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 // The answer armed for a dialog belongs right before the action that opens it: an action that failed drops it.
                 recorded.pop();
                 told.lines.push("The prepared dialog answer was dropped because this action failed. Prepare it again right before the action that opens the dialog.");
+            }
+            if (step.action === "assert" && step.source) {
+                // A sourced check that passed now is no failure to keep any more; one that failed is kept with what the page showed,
+                // and with where it ran (the steps recorded by then), so a defect test ends there and not after later actions.
+                const same = (s: Step) => JSON.stringify({ ...s, description: "" }) === JSON.stringify({ ...step, description: "" });
+                for (let i = failedChecks.length - 1; i >= 0; i--) if (same(failedChecks[i]!.step)) failedChecks.splice(i, 1);
+                if (!r.ok) failedChecks.push({ step: { ...step, description: step.description || describeStep(step) } as Step, observed: redactText(maskObservedText(r.full ?? r.error ?? "failed", masks, 400), 400), at: recorded.length });
             }
             input.onAction?.({ tool: toolName, args, ok: r.ok, observation: [r.ok ? `url=${here().url()}` : (r.error ?? "failed"), ...told.lines].join(" ") });
             // Arriving on another page: the notes for that page come with it, once.
@@ -662,11 +663,12 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         return { done: false, error: NO_OUTCOME_HINT };
                     }
                     if (result === "defect") {
-                        // The last sourced check still failing becomes the final step: the saved test then fails while the bug is there.
+                        // The last sourced check still failing becomes the final step, where it ran: the saved test is the steps up to it, then
+                        // the check (later steps are dropped, the defect shows there), so it fails while the bug is there.
                         const kept = failedChecks.at(-1);
                         outcome = {
                             status: result,
-                            steps: kept ? [...recorded, kept.step] : [...recorded],
+                            steps: kept ? [...recorded.slice(0, kept.at), kept.step] : [...recorded],
                             testData,
                             explanation,
                             ...(evidence.length ? { evidence: [...new Set(evidence)].slice(0, 15) } : {}),
