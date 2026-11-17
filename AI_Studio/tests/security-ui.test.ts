@@ -441,6 +441,32 @@ describe("findings", () => {
         await pwExpect(page.getByTestId("sec-findings").locator("li")).toHaveCount(3);
     });
 
+    it("words typed right after Apply, before the page has caught up with the new address, are kept and applied next", async () => {
+        const { p } = seeded();
+        await visit(`#/projects/${p.id}/security/findings`);
+        await pwExpect(page.getByTestId("sec-findings").locator("li")).toHaveCount(3);
+        const search = page.getByLabel("Search", { exact: true });
+        await search.fill("cookie");
+        // Apply, then type new words in the same browser task: the address change ("hashchange") reaches the page only after the typing,
+        // as it does on a busy computer.
+        await page.evaluate(() => {
+            const input = document.getElementById("ff-q") as HTMLInputElement;
+            input.form!.requestSubmit();
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "nothing like this");
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        await pwExpect(page).toHaveURL(/q=cookie/);
+        await pwExpect(page.getByRole("status").filter({ hasText: "finding" })).toHaveText("1 finding");
+        await pwExpect(search).toHaveValue("nothing like this");
+        await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+        await pwExpect(page).toHaveURL(/q=nothing/);
+        await pwExpect(page.getByText("No findings match these filters", { exact: true })).toBeVisible();
+        // A change of address that did not come from this form (Clear filters) still shows the address's words.
+        await page.getByRole("button", { name: "Clear filters", exact: true }).first().click();
+        await pwExpect(search).toHaveValue("");
+        await pwExpect(page.getByTestId("sec-findings").locator("li")).toHaveCount(3);
+    });
+
     it("a finding: evidence, steps to see it, the AI note kept apart; a state change needs a reason and is kept in the history", async () => {
         const { p, high } = seeded();
         await visit(`#/projects/${p.id}/security/findings/${high.id}`);
