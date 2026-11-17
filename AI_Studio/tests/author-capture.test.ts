@@ -3,7 +3,9 @@
  * an assert that cites a source (a rule given to the scenario, or `expected:<n>` for its n-th expected result) and fails is remembered,
  * and when the agent then finishes with "defect" it becomes the saved test's last step, so the saved test fails on the app with the bug
  * and passes on the app without it. Without such a check the defect is "observed only". A source the scenario was not given is
- * refused and nothing is recorded; a failing assert without a source stays unrecorded, as before.
+ * refused and nothing is recorded; a failing assert without a source stays unrecorded, as before. `expected:<n>` is stated only when that
+ * expected result is tied to a stated source (an objective scenario, or one that cites a rule given to it): a failing check of a planner's
+ * own expected result leaves the defect observed only (queue row 172).
  */
 import http from "node:http";
 import { MockLanguageModelV3 } from "ai/test";
@@ -111,14 +113,51 @@ describe("authoring keeps a failing sourced check", () => {
         seeded = true;
     }, 90_000);
 
-    it("accepts expected:<n> for one of the scenario's expected results", async () => {
+    it("captures with expected:<n> when that expected result cites a rule given to the scenario", async () => {
+        const tied = { ...scenario, expectedResults: ["The cart page is shown", "The total is $25.00 (source: R-TOTAL)"] };
         const out = await authorWebSpec({
             ctx: ctxFor(scripted([heading, { tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$25.00", source: "expected:2" } }, finishDefect])),
-            browser, baseUrl: BASE, model: emptyModel, scenario,
+            browser, baseUrl: BASE, model: emptyModel, scenario: tied, rules: [RULE],
         });
-        expect(out).toMatchObject({ status: "defect", capture: "captured" });
+        expect(out).toMatchObject({ status: "defect", capture: "captured", capturedCheck: { source: "expected:2" } });
         expect(out.steps.at(-1)).toMatchObject({ check: "exactText", source: "expected:2" });
         expect(out.steps[1]).toMatchObject({ check: "visible", source: "expected:1" });
+    }, 90_000);
+
+    it("captures with expected:<n> of an objective scenario (its expected result cites its source)", async () => {
+        const objective = { ...scenario, expectedResults: ["The total is $25.00 (source: R-TOTAL)"], objective: { id: "obj-total", kind: "rule" as const, source: "R-TOTAL", operator: "as_stated" } };
+        const out = await authorWebSpec({
+            ctx: ctxFor(scripted([{ tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$25.00", source: "expected:1" } }, finishDefect])),
+            browser, baseUrl: BASE, model: emptyModel, scenario: objective,
+        });
+        expect(out).toMatchObject({ status: "defect", capture: "captured", capturedCheck: { source: "expected:1" } });
+        expect(out.steps.at(-1)).toMatchObject({ check: "exactText", source: "expected:1" });
+    }, 90_000);
+
+    it("a failing check of the planner's own expected result is not captured: observed only, the check is not kept", async () => {
+        const out = await authorWebSpec({
+            ctx: ctxFor(scripted([heading, { tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$25.00", source: "expected:2" } }, finishDefect])),
+            browser, baseUrl: BASE, model: emptyModel, scenario, rules: [RULE],
+        });
+        expect(out).toMatchObject({ status: "defect", capture: "observed_only" });
+        expect(out).not.toHaveProperty("capturedCheck");
+        // The passing check of expected:1 stays; the failing check of the planner's own expected result 2 is not the test's last step.
+        expect(out.steps.map((s) => s.action)).toEqual(["navigate", "assert"]);
+        expect(out.steps[1]).toMatchObject({ check: "visible", source: "expected:1" });
+    }, 90_000);
+
+    it("a stated failing check before an unstated one is the one kept", async () => {
+        const out = await authorWebSpec({
+            ctx: ctxFor(scripted([
+                heading,
+                { tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$25.00", source: "R-TOTAL" } },
+                { tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$24.00", source: "expected:2" } },
+                finishDefect,
+            ])),
+            browser, baseUrl: BASE, model: emptyModel, scenario, rules: [RULE],
+        });
+        expect(out).toMatchObject({ status: "defect", capture: "captured", capturedCheck: { source: "R-TOTAL" } });
+        expect(out.steps.at(-1)).toMatchObject({ check: "exactText", expected: "$25.00", source: "R-TOTAL" });
     }, 90_000);
 
     it("refuses a source the scenario was not given, with a sentence, and records nothing", async () => {

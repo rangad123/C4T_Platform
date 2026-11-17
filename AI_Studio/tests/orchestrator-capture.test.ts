@@ -1,13 +1,14 @@
 /**
  * A defect test carries its candidate finding (testing-engine Phase 3, P3-12), through real jobs: HTTP API -> queue -> worker -> real
  * discovery of a local site -> planning and authoring in a real browser with a scripted model double (never a real model):
- *   - a defect captured by a failing check of the scenario's expected result: the independence check replays it twice in fresh browsers
+ *   - a defect captured by a failing check of the scenario's expected result that cites a stated rule: the independence check replays it twice in fresh browsers
  *     (both fail at that check: independent), the test's meta.finding parses as a CandidateFinding with confidence high, meta.capture is
  *     "captured", the NEEDS_REVIEW reason names the source, and the possible_defect event carries capture and confidence;
  *   - a defect captured by a failing check of a rule: the expected text is the rule's, the finding names the model version and the
  *     scenario's objective;
  *   - a defect the replays do not show again (the page is wrong on its first visit only): state dependent, confidence medium;
  *   - a defect claimed without a failing sourced check: still saved NEEDS_REVIEW, observed only, confidence low, no replays;
+ *   - a defect whose failing check is of the planner's own expected result (tied to nothing stated, queue row 172): the same, observed only;
  *   - every AI call of each job is counted: the independence check and the finding add none.
  * Fixture site: port 9764. Run under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/orchestrator-capture.test.ts
@@ -143,6 +144,19 @@ const total = (source?: string) => ({ tool: "assert", input: { check: "exactText
 const finishDefect = { tool: "finish", input: { result: "defect", explanation: "The total shows $30.00, not $25.00" } };
 const cartScenario = (startPath: string) => ({ title: "Cart total", description: "The cart adds up its lines", category: "Cart", priority: "high", journey: "Check the cart", startPath, expectedResults: ["The cart page is shown", "The total is $25.00"] });
 
+/** The stated rule R-TOTAL of the workflow the cart scenario's journey names, so authoring is given it; returns the model version. */
+async function statedRule(projectId: string): Promise<string> {
+    const intel = new AppIntelStore(platform.db.sql);
+    const version = await intel.addVersion({ projectId, model: { workflows: [{ id: "wf-cart", name: "Check the cart", steps: [{ order: 1, action: "Open the cart" }], sourceType: "requirement" }] } });
+    await intel.addRule(projectId, {
+        ref: "R-TOTAL", kind: "constraint", description: "The total is the sum of the line prices", expected: "The total equals the sum of the lines", sourceType: "requirement", sourceRef: "req.md#total", explicitness: "explicit", confidence: 0.9, workflows: ["wf-cart"],
+    }, { modelVersionId: version.id });
+    return version.id;
+}
+/** The cart scenario with its second expected result tied to the stated rule R-TOTAL. */
+const TIED = "The total is $25.00 (source: R-TOTAL)";
+const tiedScenario = (startPath: string) => ({ ...cartScenario(startPath), expectedResults: ["The cart page is shown", TIED] });
+
 const metaOf = (t: { generationMeta: unknown }) => t.generationMeta as Record<string, unknown>;
 const defectEvent = (events: Event[]) => {
     const found = events.filter((e) => e.kind === "possible_defect");
@@ -153,7 +167,8 @@ const defectEvent = (events: Event[]) => {
 describe("a defect test carries its candidate finding", () => {
     it("captured by a failing expected-result check that both replays show: independent, confidence high, the source named", async () => {
         const projectId = (await call("POST", "/api/projects", { name: "Captured" })).body.id as string;
-        plan = cartScenario("/cart");
+        const version = await statedRule(projectId);
+        plan = tiedScenario("/cart");
         script = [heading, total("expected:2"), finishDefect];
         const { test, events } = await explore(projectId);
 
@@ -165,20 +180,20 @@ describe("a defect test carries its candidate finding", () => {
         expect(finding).toMatchObject({
             objective: null,
             actions: { stepCount: test.spec.steps.length },
-            expected: { text: "The total is $25.00", source: "expected:2" },
+            expected: { text: TIED, source: "expected:2" },
             observed: "The total shows $30.00, not $25.00",
             capture: "captured",
             independence: "independent",
             confidence: "high",
-            modelVersion: null,
+            modelVersion: version,
         });
-        expect(finding.fingerprint).toBe(findingFingerprint({ source: "expected:2", expected: "The total is $25.00", scenario: "Cart total" }));
+        expect(finding.fingerprint).toBe(findingFingerprint({ source: "expected:2", expected: TIED, scenario: "Cart total" }));
         expect(finding.replays).toHaveLength(2);
         for (const r of finding.replays) expect(r).toMatchObject({ outcome: "failed", failedStep: test.spec.steps.length });
         expect(finding).not.toHaveProperty("testId");
 
         expect(test.validationReason).toMatch(/^The application did not behave as expected: /);
-        expect(test.validationReason).toContain("expected result 2 (The total is $25.00)");
+        expect(test.validationReason).toContain(`expected result 2 (${TIED})`);
         expect(test.validationReason).toContain("confidence high");
         const e = defectEvent(events);
         expect(e.data).toMatchObject({ capture: "captured", confidence: "high", independence: "independent", source: "expected:2" });
@@ -211,7 +226,8 @@ describe("a defect test carries its candidate finding", () => {
 
     it("a defect the fresh replays do not show again: state dependent, confidence medium", async () => {
         const projectId = (await call("POST", "/api/projects", { name: "Once" })).body.id as string;
-        plan = cartScenario("/once");
+        await statedRule(projectId);
+        plan = tiedScenario("/once");
         script = [heading, total("expected:2"), finishDefect];
         const { test, events } = await explore(projectId);
 
@@ -237,6 +253,25 @@ describe("a defect test carries its candidate finding", () => {
         expect(test.validationReason).toMatch(/^The application did not behave as expected: /);
         expect(test.validationReason).toContain("observed only");
         expect(test.validationReason).toContain("confidence low");
+        expect(defectEvent(events).data).toMatchObject({ capture: "observed_only", confidence: "low", independence: "not_run", source: null });
+    }, 300_000);
+
+    it("a failing check of the planner's own expected result: saved for review, observed only, confidence low, no replays", async () => {
+        const projectId = (await call("POST", "/api/projects", { name: "Planner" })).body.id as string;
+        await statedRule(projectId);
+        plan = cartScenario("/cart");
+        script = [heading, total("expected:2"), finishDefect];
+        const { test, events } = await explore(projectId);
+
+        expect(test.validationStatus).toBe("NEEDS_REVIEW");
+        const meta = metaOf(test);
+        expect(meta.capture).toBe("observed_only");
+        expect(meta).not.toHaveProperty("capturedCheck");
+        // The failing check is not the saved test's last step: the test is what ran, and it passes on this app.
+        expect(test.spec.steps.at(-1)).toMatchObject({ check: "visible", source: "expected:1" });
+        const finding = CandidateFindingSchema.parse(meta.finding);
+        expect(finding).toMatchObject({ expected: { source: null }, capture: "observed_only", independence: "not_run", confidence: "low", replays: [] });
+        expect(test.validationReason).toContain("observed only");
         expect(defectEvent(events).data).toMatchObject({ capture: "observed_only", confidence: "low", independence: "not_run", source: null });
     }, 300_000);
 });

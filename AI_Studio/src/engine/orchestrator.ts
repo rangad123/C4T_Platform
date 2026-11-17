@@ -53,7 +53,7 @@ import type { ApiEndpointModel, AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
 import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
-import { authorWebSpec, toSpec, type AuthorOutcome } from "./web/author.js";
+import { authorWebSpec, statedSource, toSpec, type AuthorOutcome } from "./web/author.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
 import { checkIndependence, type IndependenceCheck } from "./explore/independence.js";
@@ -1445,7 +1445,9 @@ export function defectFinding(p: {
     modelVersion: string | null;
 }): { finding?: CandidateFinding; problem?: string; basis: string; confidence: FindingConfidence; source: string | null } {
     const L = CANDIDATE_FINDING_LIMITS;
-    const source = p.capture === "captured" ? (p.outcome.capturedCheck?.source ?? null) : null;
+    // Only a stated source captures (author.ts statedSource, the rule the author applied): a check of the planner's own expected result does not.
+    const cited = p.capture === "captured" ? (p.outcome.capturedCheck?.source ?? null) : null;
+    const source = cited && statedSource(cited, p.scenario, p.rules) ? cited : null;
     const n = source ? EXPECTED_SOURCE.exec(source) : null;
     const rule = source && !n ? p.rules.find((r) => r.ref === source) : undefined;
     const expected = n ? (p.scenario.expectedResults[Number(n[1]) - 1] ?? "") : rule ? rule.expected || rule.description : p.scenario.expectedResults.join("; ");
