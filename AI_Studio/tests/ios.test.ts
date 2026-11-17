@@ -286,6 +286,8 @@ describe("iOS tests on a runner agent that is a Mac (fake toolchain)", () => {
 
     it("a problem with the Mac (no simulator, Xcode not answering) is an infrastructure error, never a failed test", async () => {
         const before = (await admin("GET", `/api/tests/${ids.general}/executions`)).body.length;
+        const testNow = async () => ((await admin("GET", `/api/projects/${projectId}/tests`)).body as Array<Record<string, unknown>>).find((t) => t.id === ids.general)!;
+        const earlier = await testNow();
         resetSimulators({ failList: true });
         const started = await admin("POST", `/api/tests/${ids.general}/validate`);
         expect(started.status).toBe(202);
@@ -293,12 +295,12 @@ describe("iOS tests on a runner agent that is a Mac (fake toolchain)", () => {
         expect(job.status).not.toBe("COMPLETED");
         const events = JSON.stringify((await admin("GET", `/api/test-generation/${started.body.jobId}/events`)).body);
         expect(events).toContain("Xcode's simulator tool did not answer");
-        // no run is recorded in the test's history for this problem; the test shows the plain reason (the platform's usual
-        // "Validation interrupted" handling for any runner problem), not a failing step
+        // no run is recorded in the test's history for this problem, and the test gets no verdict from it: a runner that could not run
+        // the tests puts them back to what they were (job-runner.ts, runner_failed_tests_restored); the run says why
         expect((await admin("GET", `/api/tests/${ids.general}/executions`)).body.length).toBe(before);
-        const tests = (await admin("GET", `/api/projects/${projectId}/tests`)).body as Array<Record<string, unknown>>;
-        const item = tests.find((t) => t.id === ids.general)!;
-        expect(JSON.stringify(item)).toContain("Xcode's simulator tool did not answer");
+        const item = await testNow();
+        expect({ status: item.validationStatus, reason: item.validationReason }).toEqual({ status: earlier.validationStatus, reason: earlier.validationReason });
+        expect(events).toContain("runner_failed_tests_restored");
         expect(xcrunCalls()).toEqual([]);
     }, 120_000);
 
