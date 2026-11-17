@@ -92,6 +92,11 @@ export async function repairWeb(args: {
     if (t.category === "app_defect" || t.category === "environment" || !t.fixable) {
         return { verdict: t.category === "app_defect" ? "app_defect" : "unfixable", reason: t.reason };
     }
+    // A failing sourced check is a stated expectation the app does not meet: never "fixed" by re-writing the test (roadmap 2.4).
+    const failedStep = run.failedStepIndex >= 0 ? spec.steps[run.failedStepIndex] : undefined;
+    if (failedStep?.action === "assert" && failedStep.source) {
+        return { verdict: "app_defect", reason: `a stated expectation is not met (${failedStep.source}): ${t.reason}` };
+    }
 
     // Keep the steps before the first *wrong* one — which can be earlier than the failing step (a stray
     // navigation that still "works" only breaks a later assertion). If a resumed repair already failed,
@@ -112,6 +117,11 @@ export async function repairWeb(args: {
         resume: { prefix, failure: failureText(spec, run) },
     });
     if (outcome.status === "complete") {
+        const rejected = weakensWebTest(spec, outcome.steps);
+        if (rejected) {
+            ctx.emit({ stage: "validation", kind: "repair_rejected", level: "warn", message: `${spec.testId}: proposed fix rejected — ${rejected}` });
+            return { verdict: "unfixable", reason: `${t.reason} (proposed fix rejected: ${rejected})` };
+        }
         return { verdict: "fixed", reason: t.reason, spec: { ...spec, steps: outcome.steps, testData: { ...spec.testData, ...outcome.testData } } };
     }
     if (outcome.status === "defect") return { verdict: "app_defect", reason: outcome.explanation };
@@ -186,6 +196,55 @@ export function weakensApiTest(original: TestSpec, proposed: Step[]): string | u
                 .map((s) => `${s.check}=${s.expected}`)
                 .join("|");
         if (statuses(original.steps) !== statuses(proposed)) return "expected status of a security test changed";
+    }
+    return undefined;
+}
+
+type AssertStep = Extract<Step, { action: "assert" }>;
+/** A check the original may be replaced with: the same, or one that proves strictly more. */
+const STRICTER: Partial<Record<AssertStep["check"], readonly AssertStep["check"][]>> = { text: ["exactText"] };
+/** Checks that pass when the shown text contains `expected`: a longer expected value is stricter, a shorter one wider. */
+const CONTAINS = new Set<AssertStep["check"]>(["text", "url", "title", "accessibleErrorMessage"]);
+
+/** Why `after` checks less than `before` (same source), or undefined when it checks at least as much. Locators may change. */
+function loosening(before: AssertStep, after: AssertStep): string | undefined {
+    if (after.check !== before.check && !STRICTER[before.check]?.includes(after.check)) return `check ${before.check} → ${after.check}`;
+    if (after.name !== before.name || after.compare !== before.compare) return "its name or comparison changed";
+    if (before.expected === undefined) return undefined;
+    if (after.expected === undefined) return "its expected value was dropped";
+    const was = String(before.expected);
+    const now = String(after.expected);
+    if (was === now) return undefined;
+    if (CONTAINS.has(before.check) && now.includes(was)) return undefined;
+    if (before.check === "notText" && after.check === "notText" && was.includes(now)) return undefined;
+    return `expected ${JSON.stringify(before.expected)} → ${JSON.stringify(after.expected)}`;
+}
+
+/** An action step's identity for "did the check move before it": what it does and to what (a re-located action is a new step). */
+const stepKey = (s: Step) => JSON.stringify({ ...s, description: undefined });
+
+/**
+ * Structural guard on web repairs, like weakensApiTest: a re-written test keeps every sourced check (a stated expectation) with the
+ * same source, no looser (same or stricter check, same or narrower expected value), and after the step it depended on (the last
+ * non-check step before it, when the re-written test still has that step). Unsourced checks may change. Returns a reason when refused.
+ */
+export function weakensWebTest(original: TestSpec, proposed: Step[]): string | undefined {
+    const asserts = (steps: Step[]) => steps.flatMap((s, i) => (s.action === "assert" ? [{ s, i }] : []));
+    const after = asserts(proposed);
+    for (const { s: before, i } of asserts(original.steps)) {
+        if (!before.source) continue;
+        const kept = after.find(({ s }) => s.source === before.source);
+        if (!kept) {
+            const same = after.some(({ s }) => s.check === before.check && JSON.stringify(s.locator) === JSON.stringify(before.locator));
+            return same ? `sourced check ${before.source}: its source was changed or dropped` : `sourced check ${before.source} was removed`;
+        }
+        const why = loosening(before, kept.s);
+        if (why) return `sourced check ${before.source} was loosened (${why})`;
+        const dep = original.steps.slice(0, i).reverse().find((s) => s.action !== "assert");
+        if (dep) {
+            const at = proposed.findIndex((s) => stepKey(s) === stepKey(dep));
+            if (at > kept.i) return `sourced check ${before.source} was moved before the step it depended on`;
+        }
     }
     return undefined;
 }
