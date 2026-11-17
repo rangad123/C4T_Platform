@@ -60,7 +60,11 @@ afterAll(async () => {
 });
 
 let n = 0;
-/** A runner on a computer with no Chrome, no Edge and no Playwright browsers: every folder the lookup sees is empty and temporary. */
+/**
+ * A runner on a computer with no Chrome, no Edge and no Playwright browsers: every folder the lookup sees is empty and temporary. On Windows
+ * the folders come from the environment; on a Mac or Linux they are fixed paths, looked up under `root` (the setup's `root` option), so a
+ * Chrome installed on the computer running the tests is not seen.
+ */
 function blankComputer(extra: NodeJS.ProcessEnv = {}) {
     const root = path.join(tmp, `pc-${++n}`);
     fs.mkdirSync(root, { recursive: true });
@@ -88,7 +92,7 @@ describe("downloading what is missing", () => {
         const pc = blankComputer();
         const { log, lines } = memoryLogger();
         let changed = 0;
-        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, onChange: () => changed++ });
+        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, root: pc.root, onChange: () => changed++ });
         await s.prepare();
         expect(s.report()).toMatchObject({ chromium: "pending", note: "The runner is downloading Chromium for web tests." });
         const w = await s.forWeb();
@@ -102,7 +106,7 @@ describe("downloading what is missing", () => {
         expect(text).toContain(`Ready for web tests in Chromium ${bundled.major}, downloaded by the runner.`);
         // The next start finds it and still says where it came from; nothing is downloaded again.
         const before = requests.length;
-        const again = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir });
+        const again = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, root: pc.root });
         expect(await again.forWeb()).toMatchObject({ ok: true, browser: { source: "downloaded" } });
         expect(requests.length).toBe(before);
     }, 120_000);
@@ -111,7 +115,7 @@ describe("downloading what is missing", () => {
         answer = (u) => (u.includes("/cft/") ? 404 : "ok");
         const pc = blankComputer();
         const { log, lines } = memoryLogger();
-        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir });
+        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, root: pc.root });
         const w = await s.forWeb();
         expect(w.ok).toBe(false);
         const error = (w as { error: string }).error;
@@ -127,7 +131,7 @@ describe("downloading what is missing", () => {
         hangClosed = 0;
         const pc = blankComputer();
         const { log } = memoryLogger();
-        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, downloadTimeoutMs: 4000 });
+        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, root: pc.root, downloadTimeoutMs: 4000 });
         const started = Date.now();
         const w = await s.forWeb();
         expect(Date.now() - started).toBeLessThan(60_000);
@@ -149,7 +153,7 @@ describe("downloading what is missing", () => {
             fs.writeFileSync(path.join(pc.browsers, `${f}-${bundled.revision}`, "INSTALLATION_COMPLETE"), "");
         }
         const { log, lines } = memoryLogger();
-        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir });
+        const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, root: pc.root });
         await s.prepare();
         expect(requests).toEqual([]);
         const [a, b] = await Promise.all([s.engine("firefox"), s.engine("firefox")]);
@@ -184,7 +188,7 @@ console.log("|■■■■■■■■■■          |  30% of 150.2 MiB"); con
         process.env.NODE_EXTRA_CA_CERTS = path.join(pc.root, "company-ca.pem"); // as if the network setup exported it into the runner's process later
         try {
             const { log, lines } = memoryLogger();
-            const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, cli, policy: "bundled" });
+            const s = new BrowserSetup({ env: pc.env, log, workDir: pc.workDir, root: pc.root, cli, policy: "bundled" });
             expect(await s.forWeb()).toMatchObject({ ok: true, browser: { source: "downloaded" } });
             const got = JSON.parse(fs.readFileSync(seen, "utf8")) as { argv: string[]; env: Record<string, string> };
             expect(got.argv).toEqual(["install", "chromium"]);
