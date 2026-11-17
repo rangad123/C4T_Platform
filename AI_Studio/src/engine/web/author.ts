@@ -39,7 +39,9 @@ import { scrubTraceFile } from "../evidence/trace-scrub.js";
 import { executeStep, locate, rememberPopup, runtimeData, type RuntimeData } from "./interpreter.js";
 import { sampleName, sampleTypeFor, SAMPLE_TYPES } from "./interruptions.js";
 import { notesFor, refusalText, refusedBy, type SiteNote } from "../memory/notes.js";
-import { knowledgeBlock, type KnowledgeRule } from "../planning/planner.js";
+import { knowledgeBlock, usableRules, type KnowledgeRule } from "../planning/planner.js";
+import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
+import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 
 export interface AuthorInput {
@@ -88,8 +90,39 @@ const runSecretsOf = (input: Pick<AuthorInput, "credentials" | "secrets">): stri
 /** `observations`: screens the vision model judged to look wrong while authoring (only when `vision` was on). */
 export type AuthorOutcome =
     | { status: "complete"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[] }
-    | { status: "defect"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[]; /** Errors the app reported while the agent worked (console, failed requests). */ evidence?: string[] }
+    | {
+          status: "defect";
+          steps: Step[];
+          testData: Record<string, string>;
+          explanation: string;
+          observations?: string[];
+          /** Errors the app reported while the agent worked (console, failed requests). */
+          evidence?: string[];
+          /**
+           * "captured": the test ends with a failing check tied to a stated expectation (a rule or an expected result), so the saved
+           * test fails while the bug is there; "observed_only": the agent reported the defect without such a check.
+           */
+          capture?: Capture;
+          /** The captured check's source and what the application showed instead (masked, one line). */
+          capturedCheck?: { source: string; observed: string };
+      }
     | { status: "blocked"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[]; /** The session's Playwright trace (passwords masked), kept as evidence of what blocked it. */ trace?: string };
+
+export type Capture = "captured" | "observed_only";
+
+/** `expected:<n>`: the scenario's n-th expected result as an assert's source. */
+const EXPECTED_SOURCE = /^expected:([1-9]\d{0,2})$/;
+const normRef = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/**
+ * The source an assert may cite: a usable rule given to this scenario (its ref as stored), or `expected:<n>` for one of its expected
+ * results; undefined when it names neither.
+ */
+export function sourceOf(given: string, scenario: Pick<Scenario, "expectedResults">, rules: readonly KnowledgeRule[] | undefined): string | undefined {
+    const n = EXPECTED_SOURCE.exec(given.trim())?.[1];
+    if (n) return Number(n) <= scenario.expectedResults.length ? `expected:${Number(n)}` : undefined;
+    return usableRules(rules ?? []).find((r) => normRef(r.ref) === normRef(given))?.ref;
+}
 
 const SYSTEM = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
 Every action you perform successfully is recorded into a reusable Playwright test, so be deliberate:
@@ -112,6 +145,7 @@ Every action you perform successfully is recorded into a reusable Playwright tes
 - Never perform irreversible/destructive real-world actions (payment, deleting accounts, sending messages). Stop before them and assert on the UI.
 - When every expected result is verified, call finish(result="complete").
 - If an assertion fails because the application genuinely behaves differently from the expected result, call finish(result="defect") and explain what was observed.
+  Give each assertion that checks an expected result or a rule its source, so a failing one is kept as the check that shows the bug.
 - If you cannot make progress (element missing, blocked), call finish(result="blocked") and explain.
 - Be efficient: do not explore unrelated pages. Do not repeat failed actions unchanged.
 - Stay in the UI: do not navigate to API/JSON endpoints; verify what a user sees in the pages.
@@ -288,6 +322,9 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     const evidence: string[] = [];
 
     const recorded: Step[] = [];
+    /** Sourced checks that ran and failed (with what the page showed instead); the last one still failing ends a defect test. */
+    const failedChecks: Array<{ step: Step; observed: string }> = [];
+    const masks = observedTextSecrets(runSecretsOf(input));
     const observations: string[] = [];
     const data: RuntimeData = runtimeData({}, credentials);
     const testData: Record<string, string> = {};
@@ -303,14 +340,14 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
 
     try {
         return (finished = await (async (): Promise<AuthorOutcome> => {
-        const run = async (step: Step): Promise<{ ok: boolean; error?: string }> => {
+        const run = async (step: Step): Promise<{ ok: boolean; error?: string; /** The whole message up to Playwright's call log (it holds what was received). */ full?: string }> => {
             try {
                 await executeStep(page, step, data, baseUrl);
                 await settle(here(), 1_500);
                 return { ok: true };
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                return { ok: false, error: msg.split("\n").slice(0, 4).join(" ").slice(0, 400) };
+                return { ok: false, error: msg.split("\n").slice(0, 4).join(" ").slice(0, 400), full: msg.split(/\n\s*Call log:/)[0]! };
             }
         };
 
@@ -378,6 +415,12 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 await settle(tab, 1_500);
             }
             const snapshot = await snapshotFor(7_000);
+            if (step.action === "assert" && step.source) {
+                // A sourced check that passed now is no failure to keep any more; one that failed is kept with what the page showed.
+                const same = (s: Step) => JSON.stringify({ ...s, description: "" }) === JSON.stringify({ ...step, description: "" });
+                for (let i = failedChecks.length - 1; i >= 0; i--) if (same(failedChecks[i]!.step)) failedChecks.splice(i, 1);
+                if (!r.ok) failedChecks.push({ step: { ...step, description: step.description || describeStep(step) } as Step, observed: redactText(maskObservedText(r.full ?? r.error ?? "failed", masks, 400), 400) });
+            }
             if (r.ok) {
                 // A click that opened a new tab is recorded as one that waits for it, so a replay and the script follow it too.
                 recorded.push({ ...step, ...(told.popup && step.action === "click" ? { opensPopup: true } : {}), description: step.description || describeStep(step) } as Step);
@@ -512,21 +555,26 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             }),
             assert: tool({
                 description:
-                    "Verify something about the page (auto-retries ~6s). check: visible|hidden (locator or expected text), text (locator contains expected), exactText (whole text is expected), notText (does NOT contain expected), value, enabled, disabled, editable, checked, unchecked, focused, inViewport, count (expected number), url (current URL contains expected), urlPattern (expected like /orders/*), title, attribute (name + optional expected), class (expected class), css (name = property, expected = computed value), accessibleName, accessibleErrorMessage (a field's validation message), ariaSnapshot (target = the result list/table/summary; leave expected empty: its structure is captured, numbers and dates become patterns), remembered (target compared with a remembered value: name + compare equals|contains|greater|less). Only passing assertions are recorded.",
+                    "Verify something about the page (auto-retries ~6s). check: visible|hidden (locator or expected text), text (locator contains expected), exactText (whole text is expected), notText (does NOT contain expected), value, enabled, disabled, editable, checked, unchecked, focused, inViewport, count (expected number), url (current URL contains expected), urlPattern (expected like /orders/*), title, attribute (name + optional expected), class (expected class), css (name = property, expected = computed value), accessibleName, accessibleErrorMessage (a field's validation message), ariaSnapshot (target = the result list/table/summary; leave expected empty: its structure is captured, numbers and dates become patterns), remembered (target compared with a remembered value: name + compare equals|contains|greater|less). source: what this check proves - a rule's ref from the rules section, or expected:<n> for the scenario's n-th expected result. Passing assertions are recorded; a failing one is recorded only when it has a source, and then only if you finish with result=\"defect\": it becomes the test's last step, the check that shows the bug. A failing assertion without a source is not recorded.",
                 inputSchema: z.object({
                     check: z.enum(AUTHOR_CHECKS),
                     target: LocatorSchema.optional(),
                     expected: z.union([z.string(), z.number()]).optional(),
                     name: z.string().max(100).optional().describe("attribute / css: the attribute or property; remembered: the remembered value's name"),
                     compare: z.enum(REMEMBER_COMPARE).optional(),
+                    source: z.string().max(500).optional().describe("The rule's ref, or expected:<n> for the scenario's n-th expected result"),
                     why: z.string().optional(),
                 }),
-                execute: async ({ check, target: t, expected: given, name, compare, why }) => {
+                execute: async ({ check, target: t, expected: given, name, compare, source: cited, why }) => {
                     let expected = given;
                     const refuse = (error: string) => {
                         input.onAction?.({ tool: "assert", args: { check, target: t, expected }, ok: false, observation: error });
                         return { success: false, error, url: page.url() };
                     };
+                    // The source goes into the saved test as written: only a rule this scenario was given, or one of its expected results.
+                    const source = cited?.trim() ? sourceOf(cited, scenario, input.rules) : undefined;
+                    if (cited?.trim() && !source)
+                        return refuse(`The source ${JSON.stringify(cited.slice(0, 100))} is not a rule given to this scenario nor one of its expected results (expected:1 to expected:${scenario.expectedResults.length}); use one of those, or leave source out.`);
                     if (NEEDS_LOCATOR.has(check) && !t) return refuse(`"${check}" needs a target`);
                     if ((check === "attribute" || check === "css" || check === "remembered") && !name) return refuse(`"${check}" needs a name`);
                     // The region's structure, captured now as a template a later run with other numbers still matches.
@@ -539,7 +587,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         }
                     }
                     if (NEEDS_EXPECTED.has(check) && (expected === undefined || expected === "")) return refuse(`"${check}" needs a non-empty expected value`);
-                    const extra = { ...(name ? { name } : {}), ...(check === "remembered" ? { compare: compare ?? "equals" } : {}) };
+                    const extra = { ...(name ? { name } : {}), ...(check === "remembered" ? { compare: compare ?? "equals" } : {}), ...(source ? { source } : {}) };
                     // An empty expectation makes url/title/text/value checks vacuous (e.g. toHaveURL(/(?:)/i)
                     // always passes) yet would still satisfy the "has an assertion" rule — refuse it.
                     const needsExpected = ["url", "title", "text", "value", "count"].includes(check);
@@ -577,7 +625,19 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         input.onAction?.({ tool: "finish", args: { result }, ok: false, observation: NO_OUTCOME_HINT });
                         return { done: false, error: NO_OUTCOME_HINT };
                     }
-                    outcome = result === "defect" ? { status: result, steps: [...recorded], testData, explanation, ...(evidence.length ? { evidence: [...new Set(evidence)].slice(0, 15) } : {}) } : { status: result, steps: [...recorded], testData, explanation };
+                    if (result === "defect") {
+                        // The last sourced check still failing becomes the final step: the saved test then fails while the bug is there.
+                        const kept = failedChecks.at(-1);
+                        outcome = {
+                            status: result,
+                            steps: kept ? [...recorded, kept.step] : [...recorded],
+                            testData,
+                            explanation,
+                            ...(evidence.length ? { evidence: [...new Set(evidence)].slice(0, 15) } : {}),
+                            capture: kept ? "captured" : "observed_only",
+                            ...(kept ? { capturedCheck: { source: (kept.step as { source: string }).source, observed: kept.observed } } : {}),
+                        };
+                    } else outcome = { status: result, steps: [...recorded], testData, explanation };
                     return { done: true };
                 },
             }),

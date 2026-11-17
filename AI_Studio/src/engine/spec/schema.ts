@@ -402,6 +402,11 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         name: z.string().min(1).max(100).optional(),
         /** remembered only: how the element's text compares with the remembered value (greater/less compare the first number in each). */
         compare: z.enum(REMEMBER_COMPARE).optional(),
+        /**
+         * The stated expectation this check proves: a rule's ref, or `expected:<n>` for the scenario's n-th expected result. A sourced
+         * check that failed while the test was written is kept as the last step of a defect test (web/author.ts).
+         */
+        source: z.string().min(1).max(500).optional(),
         ...popupBase,
         ...base,
     }),
@@ -541,6 +546,9 @@ export const TestSpecSchema = z.object({
 });
 export type TestSpec = z.infer<typeof TestSpecSchema>;
 
+/** What an exploration objective comes from (explore/objectives.ts). */
+export const OBJECTIVE_KINDS = ["rule", "workflow", "constraint", "transition", "coverage-gap"] as const;
+
 /** A planned scenario: what to test, before concrete steps exist. */
 export const ScenarioSchema = z.object({
     scenarioId: z.string(),
@@ -560,6 +568,15 @@ export const ScenarioSchema = z.object({
     requirements: z.array(z.string()).default([]),
     /** The named test account this scenario signs in as (role scenarios, see ../identity/role-differences.ts). Absent: the project's own account. */
     role: z.string().optional(),
+    /** The exploration objective this scenario pursues: its id, kind, the ref of what it comes from, and the operator applied, if any. */
+    objective: z
+        .object({
+            id: z.string().min(1).max(200),
+            kind: z.enum(OBJECTIVE_KINDS),
+            source: z.string().min(1).max(500),
+            operator: z.string().min(1).max(100).optional(),
+        })
+        .optional(),
 });
 export type Scenario = z.infer<typeof ScenarioSchema>;
 
