@@ -197,6 +197,12 @@ const modelServer = http.createServer((req, res) => {
             res.writeHead(200, { "content-type": "application/json" });
             res.end(JSON.stringify({ id: "x", object: "chat.completion", created: 1, model: body.model, choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }));
         };
+        // The platform's own reading of the site (a reading that fails fails the job): a plain site with nothing to plan, so a generation job
+        // here makes only the checks it is asked for.
+        const system = String(body.messages.find((m) => m.role === "system")?.content ?? "");
+        if (/analysing a web application/.test(system)) return reply(JSON.stringify({ siteType: "webapp", purpose: "A small fixture site", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] }));
+        if (/list what they state about its intended behaviour/.test(system)) return reply(JSON.stringify({ rules: [], workflows: [], roles: [], transitions: [] }));
+        if (/planning a web test suite/.test(system)) return reply(JSON.stringify({ scenarios: [] }));
         if (text.includes("CUE:noimage")) {
             res.writeHead(400, { "content-type": "application/json" });
             return res.end(JSON.stringify({ error: { message: "This model does not support image input", type: "invalid_request_error" } }));
@@ -752,7 +758,7 @@ describe("through the platform, with the real provider talking to a scripted end
     type T = { id: string; title: string; validationStatus: string; validationReason: string | null; severity: { severity: string; basis: string } | null };
     let projectId = "";
     let tests: Record<string, T> = {};
-    /** Everything else off, so a generation job here only exercises the AI checks (the model double cannot plan scenarios). */
+    /** Everything else off, so a generation job here only exercises the AI checks (the model double plans no scenarios). */
     const onlyVisionRelevant = { accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false, maxPages: 4, maxDepth: 1 };
 
     beforeAll(async () => {
