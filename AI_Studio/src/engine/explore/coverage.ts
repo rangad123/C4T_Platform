@@ -142,9 +142,10 @@ export function coverageOf(input: CoverageInput): CoverageRecord {
     for (const o of input.outcomes) outcomesOf.set(o.objectiveId, [...(outcomesOf.get(o.objectiveId) ?? []), o]);
     const exercisedKeys = new Set<string>([...input.outcomes.filter((o) => EXERCISED.has(o.status)).map((o) => o.objectiveId)]);
     for (const t of tests) if (t.objective?.id) exercisedKeys.add(pursuitKey(t.objective.id, t.objective.operator));
-    // A saved check citing a rule's ref exercises that rule's objective.
+    // A saved check citing a rule's ref checks the rule as stated: the same pursuit key a pursuit of it has, never a bare id (which
+    // would count that pursuit twice).
     const sourcedChecks = new Set(tests.flatMap((t) => t.steps.filter((s) => s.action === "assert" && s.source).map((s) => s.source!)));
-    for (const o of input.objectives) if (o.kind === "rule" && sourcedChecks.has(o.source.ref)) exercisedKeys.add(o.id);
+    for (const o of input.objectives) if (o.kind === "rule" && sourcedChecks.has(o.source.ref)) exercisedKeys.add(pursuitKey(o.id, "as_stated"));
     const ran = (id: string, op?: string) => exercisedKeys.has(id) || (op !== undefined && exercisedKeys.has(pursuitKey(id, op)));
     const ranAny = (o: Objective) => exercisedKeys.has(o.id) || [...exercisedKeys].some((k) => splitKey(k).id === o.id);
     /** The most telling outcome of a key (or its bare objective), for a reason. */
@@ -217,7 +218,9 @@ export function coverageOf(input: CoverageInput): CoverageRecord {
     if (input.objectives.some((o) => o.operators.includes("back"))) add({ operator: "history_back", reason: HISTORY_BACK_NOT_COVERED });
     const notRunAll = [...notRun.entries()].sort(([a], [b]) => byText(a, b)).map(([, n]) => n);
 
-    const scenarios = new Set([...exercisedKeys].map((k) => pursuitKey(splitKey(k).id, splitKey(k).operator)));
+    // A bare id (an outcome for the whole objective) is one scenario, unless a pursuit of one of its operators is already counted.
+    const withOperator = new Set([...exercisedKeys].filter((k) => splitKey(k).operator).map((k) => splitKey(k).id));
+    const scenarios = new Set([...exercisedKeys].filter((k) => splitKey(k).operator || !withOperator.has(k)));
     return {
         pages: { ...tally(pages.map((p) => [p.path, visitedPaths.has(pagePattern.get(p.id)!)] as const)), unknown: unknown.slice(0, LIST_CAP).map(clip) },
         states: new Set(performed.map((r) => r.state)).size,

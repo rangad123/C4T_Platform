@@ -164,6 +164,28 @@ describe("coverageOf", () => {
         expect([c.endpoints.total, c.endpoints.exercised]).toEqual([1, 1]);
     });
 
+    it("counts a rule pursued as stated and cited by a saved check's source as one scenario, not two", () => {
+        const asStated = pursuitKey(R1.id, "as_stated");
+        const c = coverageOf({
+            model,
+            objectives,
+            outcomes: [outcome(asStated, "completed"), outcome(pursuitKey(C.id, "invalid_input"), "completed")],
+            actionLog: [row(asStated, "/cart|aaaaaaaaaaaaaaaa", "click button Checkout")],
+            tests: [{ objective: { id: R1.id, operator: "as_stated" }, steps: [{ action: "assert", source: "R-1" }] }],
+        });
+        // R-1 as stated and C invalid_input: the check citing R-1 is the same pursuit.
+        expect(c.uniqueScenarios).toBe(2);
+        expect([c.rules.total, c.rules.exercised]).toEqual([3, 1]);
+        expect(c.unexplored.map((u) => u.objectiveId)).not.toContain(R1.id);
+        expect(c.notRun.filter((n) => n.objectiveId === R1.id)).toEqual([]);
+        // A check alone credits the rule's as-stated pursuit, the same key a pursuit of it would have.
+        const checkOnly = coverageOf({ model, objectives, outcomes: [outcome(asStated, "completed")], actionLog: [], tests: [{ steps: [{ action: "assert", source: "R-1" }] }] });
+        expect(checkOnly.uniqueScenarios).toBe(1);
+        // An outcome for the whole objective next to a saved test of one of its operators is still one scenario.
+        const bareAndTest = coverageOf({ model, objectives, outcomes: [outcome(R1.id, "completed")], actionLog: [], tests: [{ objective: { id: R1.id, operator: "as_stated" }, steps: [] }] });
+        expect(bareAndTest.uniqueScenarios).toBe(1);
+    });
+
     it("keeps an explicitly skipped operator even when nothing else about the session is known", () => {
         const c = coverageOf({ model: {}, objectives: [W], outcomes: [], actionLog: [], skipped: [{ objectiveId: W.id, operator: "double_submit", reason: "not run: data changes off" }] });
         expect(c.notRun.filter((n) => n.operator === "double_submit")).toEqual([{ objectiveId: W.id, operator: "double_submit", reason: "not run: data changes off" }]);
