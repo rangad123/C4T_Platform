@@ -62,10 +62,10 @@ import { createHash } from "node:crypto";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { LlmClient } from "./llm/provider.js";
 import { inputClassesFor } from "./explore/input-classes.js";
-import { runExploration, type Budgets, type ExplorationResult, type LoopObjective, type ObjectiveContext, type ObjectiveOutcome, type ObjectiveRun, type StopReason } from "./explore/loop.js";
+import { runExploration, type ActionLogRow, type Budgets, type ExplorationResult, type LoopObjective, type ObjectiveContext, type ObjectiveOutcome, type ObjectiveRun, type StopReason } from "./explore/loop.js";
 import { objectivesFrom, type Objective, type ObjectiveField, type ObjectiveOperator } from "./explore/objectives.js";
 import { operatorApplied, scenariosFor, type OperatorCheck, type PerturbOptions } from "./explore/perturb.js";
-import { pursuitKey, type SkippedOperator } from "./explore/coverage.js";
+import { coverageOf, pursuitKey, type CoverageModel, type CoverageRecord, type CoverageTest, type SkippedOperator } from "./explore/coverage.js";
 import { pathPattern } from "./explore/state.js";
 import { usableRules, type AppKnowledge } from "./planning/planner.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
@@ -241,6 +241,38 @@ export interface ExplorationSummary {
     skipped: SkippedOperator[];
     outcomes: Array<ObjectiveOutcome<PursuitResult>>;
     usage: ExplorationResult["usage"];
+    /** What the session exercised and what it left (explore/coverage.ts), from the whole action log and the tests it saved. */
+    coverage: CoverageRecord;
+    /** The loop's action log, its first ACTION_LOG_CAP rows; `actionLogOmitted` counts the rows left out. */
+    actionLog: ActionLogRow[];
+    actionLogOmitted: number;
+}
+
+/** At most this many action-log rows are kept in the job summary. */
+export const ACTION_LOG_CAP = 2_000;
+
+/** The action log as the job summary keeps it: the first ACTION_LOG_CAP rows and how many were left out. */
+export function boundedActionLog(rows: readonly ActionLogRow[]): { actionLog: ActionLogRow[]; actionLogOmitted: number } {
+    return { actionLog: rows.slice(0, ACTION_LOG_CAP), actionLogOmitted: Math.max(0, rows.length - ACTION_LOG_CAP) };
+}
+
+/**
+ * The model coverage is measured against: the crawled pages with their named elements (a page the objectives know by id keeps that id,
+ * so workflow steps naming it match), objective pages the crawl did not reach, the endpoints, and the knowledge's transitions and
+ * workflow steps.
+ */
+export function coverageModelOf(model: Pick<AppModel, "pages">, inputs: NonNullable<AppKnowledge["objectiveInputs"]>, apis: ReadonlyArray<Pick<ApiEndpointModel, "method" | "path">>): CoverageModel {
+    const idOf = new Map(inputs.pages.map((p) => [p.path, p.id]));
+    const crawled = new Set(model.pages.map((p) => p.path));
+    return {
+        pages: [
+            ...model.pages.map((p) => ({ id: idOf.get(p.path) ?? p.path, path: p.path, elements: p.components.map((c) => ({ role: c.role, name: c.name })) })),
+            ...inputs.pages.filter((p) => !crawled.has(p.path)).map((p) => ({ id: p.id, path: p.path })),
+        ],
+        workflows: inputs.workflowSteps.map((w) => ({ id: w.workflowId, steps: w.steps })),
+        transitions: inputs.transitions.map((t) => ({ entity: t.entity, from: t.from, to: t.to })),
+        endpoints: apis.map((a) => ({ method: a.method, path: a.path })),
+    };
 }
 
 /** What one pursuit left: the saved test, or why nothing was saved. */
@@ -795,6 +827,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 });
                 // The run's own AI counter: every call the test writer makes in this stage goes through `gatedLlm` and is counted there.
                 const calls = { n: 0 };
+                // The tests this stage saved, for the coverage record.
+                const saved: CoverageTest[] = [];
                 const tokensNow = () => ctx.llm.usage.inputTokens + ctx.llm.usage.outputTokens;
                 const pursue = async (p: ObjectivePursuit, loop: ObjectiveContext): Promise<ObjectiveRun<PursuitResult>> => {
                     const startedAt = Date.now();
@@ -851,6 +885,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         return { status: "completed", result: { applied: false, authoring: outcome.status } };
                     }
                     const testKey = await keepAuthored(p.scenario, outcome, undefined, rules);
+                    saved.push({ objective: { id: p.objective.id, operator: p.operator }, steps: outcome.steps });
                     return { status: "completed", result: { applied: true, authoring: outcome.status, testKey } };
                 };
                 const session = await runExploration<ObjectivePursuit, PursuitResult>({
@@ -874,6 +909,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     skipped: built.skipped,
                     outcomes: session.outcomes,
                     usage: session.usage,
+                    coverage: coverageOf({ model: coverageModelOf(model, knowledge.objectiveInputs, apis), objectives: built.objectives, outcomes: session.outcomes, actionLog: session.actionLog, tests: saved, skipped: built.skipped }),
+                    ...boundedActionLog(session.actionLog),
                 };
                 ctx.emit({
                     stage: "generation",

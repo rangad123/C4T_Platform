@@ -15,11 +15,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AGENT_LIMITS } from "../src/engine/agent/objective.js";
 import { CandidateFindingSchema } from "../src/engine/explore/finding.js";
 import { checkIndependence } from "../src/engine/explore/independence.js";
-import { runExploration } from "../src/engine/explore/loop.js";
+import { runExploration, type ActionLogRow } from "../src/engine/explore/loop.js";
 import { SKIP_REASONS } from "../src/engine/explore/perturb.js";
 import { LEVEL_SETTINGS, LEVELS } from "../src/engine/levels.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
-import { actionTracker, ExplorationStopped, gatedLlm, objectivePursuits } from "../src/engine/orchestrator.js";
+import { actionTracker, boundedActionLog, coverageModelOf, ExplorationStopped, gatedLlm, objectivePursuits } from "../src/engine/orchestrator.js";
 import { COMPLIANT, exploreShop, scriptedShopModel, shopKnowledge, startShop, type ShopSite } from "./fixtures/objectives-shop.js";
 
 const thorough = LEVEL_SETTINGS.thorough;
@@ -55,6 +55,36 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         expect(off.skipped).toEqual([{ objectiveId: constraint.id, operator: "boundary_input", reason: SKIP_REASONS.dataOff }]);
         expect(off.pursuits.map((p) => p.operator).sort()).toEqual(["as_stated", "invalid_input"]);
         expect(pursuitsOf(true).skipped).toEqual([]);
+    });
+
+    it("the job keeps the first 2,000 rows of the action log and counts the rows it left out", () => {
+        const row = (seq: number): ActionLogRow => ({ seq, objectiveId: "OBJ-1:as_stated", state: "/cart|", action: `click ${seq}`, atMs: seq, result: "performed" });
+        const rows = (n: number) => Array.from({ length: n }, (_, i) => row(i + 1));
+        const big = boundedActionLog(rows(2_345));
+        expect(big.actionLog).toHaveLength(2_000);
+        expect([big.actionLog[0]!.seq, big.actionLog.at(-1)!.seq]).toEqual([1, 2_000]);
+        expect(big.actionLogOmitted).toBe(345);
+        expect(boundedActionLog(rows(2_000))).toEqual({ actionLog: rows(2_000), actionLogOmitted: 0 });
+        expect(boundedActionLog([])).toEqual({ actionLog: [], actionLogOmitted: 0 });
+    });
+
+    it("coverage reads the crawled pages with their named elements, the objective pages by id, the endpoints and the knowledge's workflow steps", () => {
+        const k = shopKnowledge();
+        k.objectiveInputs!.workflowSteps = [{ workflowId: "WF-1", steps: [{ order: 1, action: "Order one", page: "page-order", endpoint: "POST /api/order" }] }];
+        k.objectiveInputs!.transitions = [{ entity: "order", from: "new", to: "paid", trigger: "pay", sourceType: "requirement", expectation: true, evidence: [] }];
+        const page = (path: string, components: Array<{ role: string; name: string }>) => ({ path, components }) as never;
+        const m = coverageModelOf(
+            { pages: [page("/cart", [{ role: "status", name: "Total" }]), page("/order", [{ role: "button", name: "Order" }])] } as never,
+            k.objectiveInputs!,
+            [{ method: "POST", path: "/api/order" }] as never,
+        );
+        expect(m.pages).toEqual([
+            { id: "/cart", path: "/cart", elements: [{ role: "status", name: "Total" }] },
+            { id: "page-order", path: "/order", elements: [{ role: "button", name: "Order" }] },
+        ]);
+        expect(m.endpoints).toEqual([{ method: "POST", path: "/api/order" }]);
+        expect(m.workflows).toEqual([{ id: "WF-1", steps: [{ order: 1, action: "Order one", page: "page-order", endpoint: "POST /api/order" }] }]);
+        expect(m.transitions).toEqual([{ entity: "order", from: "new", to: "paid" }]);
     });
 
     it("every level's session budgets sit inside its own limits; thorough pursues at most 25 objectives", () => {
@@ -129,6 +159,15 @@ describe("exploring the seeded shop by objectives", () => {
         expect(ex.outcomes.map((o) => o.status)).toEqual(["completed", "completed"]);
         expect(ex.usage.aiCalls).toBe(calls.filter((c) => !c.startsWith("object:")).length);
         expect(ex.usage.actions).toBe(5);
+        // The action log (every row, under the 2,000-row cap) and the coverage record built from it and the saved tests.
+        expect(ex.actionLog.filter((r) => r.result === "performed")).toHaveLength(5);
+        expect(ex.actionLogOmitted).toBe(0);
+        expect(ex.coverage.rules).toMatchObject({ total: 1, exercised: 1 });
+        expect(ex.coverage.inputClasses).toMatchObject({ exercised: 1, notExercised: ["page-order/order/qty boundary_input"] });
+        expect(ex.coverage.pages.notExercised).not.toContain("/cart");
+        expect(ex.coverage.pages.notExercised).not.toContain("/order");
+        expect(ex.coverage.notRun).toContainEqual({ objectiveId: ex.skipped[0]!.objectiveId, operator: "boundary_input", reason: "data changes off" });
+        expect(ex.coverage.unexplored).toEqual([]);
 
         // Two defect tests for review, each carrying a captured finding tied to its objective and operator.
         expect(tests.map((t) => t.validation)).toEqual(["NEEDS_REVIEW", "NEEDS_REVIEW"]);
