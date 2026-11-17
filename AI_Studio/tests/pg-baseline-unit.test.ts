@@ -9,14 +9,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { Db } from "../src/platform/db.js";
 import { ensureSecurityTables } from "../src/security/store.js";
+import { renderBaseline, SEQ_TABLES } from "../scripts/pg-baseline-render.js";
 
 const BASELINE = path.resolve(__dirname, "../src/platform/pg/baseline.sql");
 
-/** Tables ordered with `db.dialect.insertionOrder()`: on PostgreSQL they carry `seq`, which SQLite has as its rowid. */
-const SEQ_TABLES = [
-    "agent_tasks", "agent_tokens", "alert_channels", "applications", "artifacts", "generation_jobs", "healing_proposals", "manual_cases", "quarantine_entries",
-    "releases", "run_summaries", "runbook_runs", "runbooks", "security_assessments", "security_authorizations", "security_profile_approvals", "test_executions", "trigger_tokens",
-];
 /** SQLite type as declared → baseline type. Slots from 34 on may declare the portable BIGINT and SMALLINT directly (§5.3). */
 const TYPE_MAP: Record<string, string> = { INTEGER: "BIGINT", BIGINT: "BIGINT", SMALLINT: "SMALLINT", TEXT: "TEXT", REAL: "DOUBLE PRECISION" };
 
@@ -175,6 +171,22 @@ describe("PostgreSQL baseline", () => {
         db.close();
         expect(autoTables.length).toBeGreaterThan(0);
         for (const t of autoTables) expect(pg.get(t)?.columns.get("id")?.identity, t).toBe(true);
+    });
+
+    it("is exactly what scripts/pg-baseline.ts writes, so the generator and the file never drift apart", () => {
+        const file = fs.readFileSync(BASELINE, "utf8");
+        // On a mismatch: run `npx tsx scripts/pg-baseline.ts` and read the diff; the file is not edited by hand.
+        expect(renderBaseline(file)).toBe(file);
+    });
+
+    it("keeps what the previous baseline had in its place and appends a new slot's tables and columns", () => {
+        const file = fs.readFileSync(BASELINE, "utf8");
+        // As if the last table and one column of an earlier table were new: both come back where the file has them.
+        const last = [...file.matchAll(/^CREATE TABLE (\w+) /gm)].at(-1)![1]!;
+        const withoutLast = file.slice(0, file.indexOf(`CREATE TABLE ${last} `));
+        const withoutColumn = withoutLast.replace(/,\n    owner_person_id TEXT\n\);/, "\n);");
+        expect(withoutColumn).not.toBe(withoutLast);
+        expect(renderBaseline(withoutColumn)).toBe(file);
     });
 
     it("creates each referenced table before the tables that reference it", () => {
