@@ -136,8 +136,13 @@ Every action you perform successfully is recorded into a reusable Playwright tes
   accessibleErrorMessage for a field's validation message, ariaSnapshot for a result list or summary. To prove a value carries over
   (the product page price is the cart price), remember it first and assert check "remembered" later.
 - Wait for things (wait until url / response / hidden / visible), never a fixed time.
-- Use {{unique}} inside values that must be unique (emails/usernames you create), and {{credentials.username}} / {{credentials.password}}
-  for the provided test account. Never invent real people's data; example.com addresses only.
+- The test runs on its own: in a fresh browser on a fresh session (signed out, nothing remembered), before or after any other test, on an
+  application that may have been reset. It never relies on what another test or an earlier attempt left (items already in a cart, an order or
+  record that exists, a setting already changed): set that up with the test's own steps (add the item before checking the cart, create the
+  order before checking the Orders list). Make each of the scenario's preconditions true with your first steps; never assume one holds.
+- Use {{unique}} in every new record the test creates (names, titles, emails, usernames), so it never clashes with records an earlier run
+  or another test made, and {{credentials.username}} / {{credentials.password}} for the provided test account. Never invent real people's
+  data; example.com addresses only.
 - You MUST finish with assertions: use the assert tool to verify EVERY expected result of the scenario (visible text, URL, value, count...).
   A test without assertions is worthless. Assert on what the user would observe, after the final action, and wait via assertions (they auto-retry) rather than fixed sleeps.
   Assert the OUTCOME, not only that what you clicked is still visible: the confirmation text, the new URL, the changed value or count.
@@ -192,6 +197,15 @@ async function acceptOf(page: Page, l: Locator): Promise<string> {
             return field instanceof HTMLInputElement ? field.accept : "";
         }, undefined, { timeout: 2_000 })
         .catch(() => "");
+}
+
+/**
+ * The scenario's preconditions as the first things the test sets up with its own steps (a test never assumes another one left them true),
+ * or "Preconditions: none".
+ */
+export function preconditionsNote(preconditions: readonly string[]): string {
+    if (!preconditions.length) return "Preconditions: none";
+    return `Set up first (the scenario's preconditions: make each true with the test's own first steps, never assume another test left it so):\n${preconditions.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}`;
 }
 
 function pageHint(model: AppModel, scenario: Scenario): string {
@@ -616,7 +630,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                   }
                 : {}),
             finish: tool({
-                description: "End the authoring session.",
+                description: "End the authoring session. A complete test sets up everything it checks with its own steps.",
                 inputSchema: z.object({ result: z.enum(["complete", "defect", "blocked"]), explanation: z.string() }),
                 execute: async ({ result, explanation }) => {
                     // A complete test must prove the outcome: pushed back (a bounded number of times) and the agent continues.
@@ -648,7 +662,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         const prompt = `Scenario ${scenario.scenarioId}: ${scenario.title}
 Description: ${scenario.description}
 Category: ${scenario.category}   Type: ${scenario.type}
-Preconditions: ${scenario.preconditions.join("; ") || "none"}
+${preconditionsNote(scenario.preconditions)}
 Required data: ${scenario.requiredData.join("; ") || "none"}
 Expected results (assert ALL of them):
 ${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}
