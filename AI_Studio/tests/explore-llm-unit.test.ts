@@ -76,8 +76,11 @@ async function taskOn(p: Platform): Promise<ExploreTaskRef> {
     const app = p.repo.createApplication(project.id, "http://example.test", {
         ...DEFAULT_JOB_OPTIONS,
     });
+    // Started on this server without accounts (the open server), so the job's AI is the server's own model; a job nobody started has no AI
+    // since round 57 (ai-config.ts resolveAiFor).
     const job = await p.repo.createJob(project.id, app, {
         ...DEFAULT_JOB_OPTIONS,
+        startedBy: { kind: "open", id: null },
     });
     return {
         taskId: `t${taskNo}`,
