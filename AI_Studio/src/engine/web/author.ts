@@ -440,6 +440,8 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             session.takeEvents();
             const r = await run(step);
             await session.quiet();
+            // A new tab whose page answers slowly is handed out late: waited for here, so the click that opened it is the one told and recorded.
+            await session.newTab();
             const events = session.takeEvents();
             const told = await interruptionNotes(events, step, r.ok);
             evidence.push(...events.problems.slice(0, 5));
