@@ -6,6 +6,7 @@
  * - An endpoint an OpenAPI document describes takes the document's record; traffic that showed it stays as evidence. An endpoint seen
  *   only in traffic stays "observed". Only endpoints a fragment lists are recorded: a request named elsewhere (a control, a rule, a
  *   workflow step) never becomes one.
+ * - A workflow only the exploration found becomes stated when stated rules read from a document belong to it: it cites their lines.
  * - Rules are one per fingerprint; a rule a source states wins over a guessed one. An entity takes the source type of a source that
  *   names it over one that only infers it.
  * - The result does not depend on the order of the fragments: they are put in one fixed order first.
@@ -113,9 +114,23 @@ export function merge(previous: AppModel | undefined, fragments: readonly ModelF
 
     // Workflows: one per id; one a source states wins over one inferred or observed. An id that was hidden names nothing: such a
     // workflow is one per content, never folded into another whose id was hidden too.
+    // A workflow no source states (one the exploration followed) that a stated rule read from a document belongs to is described by
+    // that rule's lines: it cites them and takes the rule's source type, keeping its own steps. Only a rule's quote that was checked
+    // against the lines it cites when it was read (it has the anchor extract/rules.ts gives it) is cited; nothing else makes one stated.
+    const citing = new Map<string, Rule[]>();
+    for (const r of fs.flatMap((f) => f.rules)) {
+        if (r.explicitness !== "explicit" || !STATING_SOURCES.has(r.sourceType) || !r.anchor || r.evidence[0]?.kind !== "quote") continue;
+        for (const id of new Set(r.workflows)) citing.set(id, [...(citing.get(id) ?? []), r]);
+    }
     const workflows = group(all("workflows"), (w) => (w.id.includes(HIDDEN) ? stable(w) : w.id)).map((g) => {
         const kept = g.find((w) => STATING_SOURCES.has(w.sourceType)) ?? g[0]!;
-        return { ...kept, steps: kept.steps.map((s) => (s.page ? { ...s, page: page(s.page) } : s)), evidence: evidence(g.map((w) => w.evidence)) };
+        const steps = kept.steps.map((s) => (s.page ? { ...s, page: page(s.page) } : s));
+        const cites = STATING_SOURCES.has(kept.sourceType) || kept.id.includes(HIDDEN) ? [] : (citing.get(kept.id) ?? []);
+        if (!cites.length) return { ...kept, steps, evidence: evidence(g.map((w) => w.evidence)) };
+        const quotes = cites.map((r) => ({ ev: r.evidence[0]!, anchor: { ref: r.evidence[0]!.ref, ...r.anchor! } }));
+        const ev = evidence([quotes.map((q) => q.ev), ...g.map((w) => w.evidence)]);
+        const anchors = union(quotes.filter((q) => ev.some((e) => stable(e) === stable(q.ev))).map((q) => q.anchor)).slice(0, 20);
+        return { ...kept, steps, sourceType: (cites.find((r) => r.sourceType === "requirement") ?? cites[0]!).sourceType, evidence: ev, anchors };
     });
 
     const scenarios = group(all("scenarios"), (s) => s.id).map((g) => {

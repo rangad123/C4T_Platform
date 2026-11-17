@@ -10,6 +10,7 @@ import { ModelFragmentSchema, type ModelFragment } from "../src/engine/intel/fra
 import { merge } from "../src/engine/intel/merge.js";
 import { missingContext } from "../src/engine/intel/missing-context.js";
 import { AppModelSchema, RuleSchema, ruleFingerprint, type SourceRecord } from "../src/engine/intel/model.js";
+import { usableWorkflows } from "../src/engine/planning/planner.js";
 
 const fragment = (f: Record<string, unknown>): ModelFragment => ModelFragmentSchema.parse({ model: {}, ...f });
 const processed = (kind: string, ref: string): SourceRecord => ({ kind, ref, fingerprint: `sha-${ref}`, status: "processed", processedAt: "2026-11-16T00:00:00Z" }) as SourceRecord;
@@ -245,5 +246,65 @@ describe("entities from several sources", () => {
     it("one only inferred stays inferred", () => {
         const { model } = merge(undefined, [fromPath]);
         expect(model.entities[0]).toMatchObject({ sourceType: "inferred", explicitness: "inferred" });
+    });
+});
+
+describe("a workflow found by exploration that a requirement describes", () => {
+    const hex = (c: string) => c.repeat(64);
+    const journey = { id: "journey-2-register", name: "Register a new account", steps: [{ order: 0, action: "Submit name, email and password", endpoint: "POST /api/register" }], sourceType: "inferred", evidence: [{ kind: "page", ref: "/register" }] };
+    const crawl = fragment({ source: processed("exploration", "https://shop.test"), model: { workflows: [journey] } });
+    const quote = (ref: string, excerpt: string) => ({ kind: "quote", ref, excerpt });
+    /** A rule read from the requirements (extract/rules.ts): its one quote was checked at its lines, and it carries their anchor. */
+    const read = (over: Record<string, unknown>) =>
+        rule({ ref: "R-a", kind: "constraint", workflows: ["journey-2-register"], evidence: [quote("2.1#L1", "Anyone can create an account with a name")], anchor: { text: hex("a"), lines: hex("b") }, ...over });
+    const reading = (rules: unknown[]) => fragment({ source: processed("requirements", "requirements"), model: { contextSources: ["requirements"] }, rules });
+    const wf = (fs: ModelFragment[]) => merge(undefined, fs).model.workflows.find((w) => w.id === "journey-2-register")!;
+
+    it("cites the lines of the stated rules linked to it, with their anchors, and is stated by their source", () => {
+        const second = read({ ref: "R-b", expected: "A second registration is refused.", evidence: [quote("2.5#L1", "An email address can belong to one account only")], anchor: { text: hex("c"), lines: hex("d") } });
+        const w = wf([crawl, reading([read({}), second])]);
+        expect(w.sourceType).toBe("requirement");
+        expect(w.evidence).toEqual([quote("2.1#L1", "Anyone can create an account with a name"), quote("2.5#L1", "An email address can belong to one account only"), { kind: "page", ref: "/register" }]);
+        expect(w.anchors).toEqual([
+            { ref: "2.1#L1", text: hex("a"), lines: hex("b") },
+            { ref: "2.5#L1", text: hex("c"), lines: hex("d") },
+        ]);
+        // The steps stay the ones the exploration followed.
+        expect(w.steps).toEqual(journey.steps);
+        expect(usableWorkflows([w])).toHaveLength(1);
+    });
+
+    it("stays inferred when no requirement describes it", () => {
+        const other = read({ workflows: ["journey-9-checkout"] });
+        const w = wf([crawl, reading([other])]);
+        expect(w).toMatchObject({ sourceType: "inferred", evidence: journey.evidence });
+        expect(w.anchors).toBeUndefined();
+        expect(usableWorkflows([w])).toHaveLength(0);
+    });
+
+    it("never takes a citation from a guessed rule, or from one whose quote was not checked against document lines", () => {
+        const guessed = read({ sourceType: "inferred", explicitness: "inferred" });
+        const unanchored = read({ anchor: undefined });
+        const notQuote = read({ evidence: [{ kind: "openapi", ref: "api.json#/paths/~1api~1register/post" }] });
+        for (const r of [guessed, unanchored, notQuote]) {
+            const w = wf([crawl, reading([r])]);
+            expect(w).toMatchObject({ sourceType: "inferred", evidence: journey.evidence });
+            expect(w.anchors).toBeUndefined();
+        }
+    });
+
+    it("leaves a workflow a source already states as that source states it", () => {
+        const tests = fragment({ source: processed("existing_tests", "tests"), model: { workflows: [{ ...journey, sourceType: "existing_test", evidence: [{ kind: "test", ref: "register.spec.ts" }] }] } });
+        const w = wf([crawl, tests, reading([read({})])]);
+        expect(w.sourceType).toBe("existing_test");
+        expect(w.anchors).toBeUndefined();
+        expect(w.evidence).not.toContainEqual(expect.objectContaining({ kind: "quote" }));
+    });
+
+    it("gives the same workflow whatever order the fragments arrive in", () => {
+        const fs = [crawl, reading([read({})]), reading([read({ ref: "R-c", expected: "Other.", evidence: [quote("2.2#L1", "The name is required; an empty name")], anchor: { text: hex("e"), lines: hex("f") } })])];
+        fs[2] = { ...fs[2]!, source: { ...fs[2]!.source, ref: "requirements-2" } };
+        const results = permutations(fs).map((x) => JSON.stringify(wf(x)));
+        expect(new Set(results).size).toBe(1);
     });
 });
