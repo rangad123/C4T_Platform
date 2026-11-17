@@ -1,8 +1,7 @@
 import "./code.css";
-import { History, Undo2 } from "lucide-react";
+import { Undo2 } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, Callout, LinkButton } from "../../components/ui";
-import { relativeTime } from "../../lib/format";
 import { routes } from "../../lib/router";
 import { ORIGIN_LABEL, shortCommit, type CustomInfo } from "./code";
 import { Modal } from "../../components/Modal";
@@ -18,7 +17,10 @@ export function OriginBadge({ custom }: { custom: CustomInfo }) {
 interface RepoRow { id: string; host: string; path: string; ref: string; commit: string }
 interface CheckResult { upToDate: boolean; newCommit?: string; changed: Array<{ testId: string; path: string }> }
 
-/** On a code test's page: why it is different, and what can be done (edit, history, go back, check Git). */
+/**
+ * On a code test's Code tab, one line: where it came from in Git, and what can be done that the editor cannot (go back to the
+ * generated version, check the repository). The header already says it is a code test; versions are on the History tab.
+ */
 export function CustomCallout({ testId, projectId, custom, onChanged }: { testId: string; projectId: string; custom: CustomInfo; onChanged: () => void }) {
     const [confirm, setConfirm] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -48,7 +50,7 @@ export function CustomCallout({ testId, projectId, custom, onChanged }: { testId
         try {
             const repos = await api<RepoRow[]>(`/projects/${projectId}/git-imports`);
             const repo = repos.find((r) => r.host === g.host && r.path === g.path && r.ref === g.ref) ?? repos.find((r) => r.host === g.host && r.path === g.path);
-            if (!repo) throw new Error("This repository is no longer linked. Import it again from Tests, More actions, Import from Git.");
+            if (!repo) throw new Error("This repository is no longer linked. Import it again with Import on the Test scripts page.");
             setCheck({ ok: true, res: await api<CheckResult>(`/projects/${projectId}/git-imports/${repo.id}/check`, { method: "POST" }) });
         } catch (e) {
             setCheck({ ok: false, text: describeApiError(e) });
@@ -59,33 +61,25 @@ export function CustomCallout({ testId, projectId, custom, onChanged }: { testId
 
     return (
         <>
-            <Callout
-                tone="info"
-                title="This is a code test"
-                actions={
-                    <>
-                        <LinkButton size="sm" href={routes.code(testId)}>Edit the code</LinkButton>
-                        <LinkButton size="sm" icon={History} href={routes.code(testId, { history: true })}>Version history</LinkButton>
-                        {custom.canRestoreGenerated && (
-                            <Button size="sm" icon={Undo2} onClick={() => setConfirm(true)}>
-                                Go back to the generated version
-                            </Button>
-                        )}
-                        {custom.git && (
-                            <Button size="sm" loading={checking} tip="Compares this test with the newest commit of its repository. Nothing is changed." onClick={() => void checkGit()}>
-                                Check for updates
-                            </Button>
-                        )}
-                    </>
-                }
-            >
-                The script is the source of truth. It is not made again from steps, so changes to shared elements and to settings that shape the generated script do not apply here, and repair suggestions are off. Everything that runs a script still works. A code test since {relativeTime(custom.since)}.
-                {custom.git && (
-                    <span className="code-gitline" data-testid="git-line">
-                        From {custom.git.host}/{custom.git.path}, {custom.git.ref}, commit {shortCommit(custom.git.commit)}
-                    </span>
-                )}
-            </Callout>
+            {(custom.canRestoreGenerated || custom.git) && (
+                <div className="row" data-testid="custom-line">
+                    {custom.git && (
+                        <span className="t-secondary" data-testid="git-line">
+                            From {custom.git.host}/{custom.git.path}, {custom.git.ref}, commit {shortCommit(custom.git.commit)}
+                        </span>
+                    )}
+                    {custom.canRestoreGenerated && (
+                        <Button size="sm" icon={Undo2} onClick={() => setConfirm(true)}>
+                            Go back to the generated version
+                        </Button>
+                    )}
+                    {custom.git && (
+                        <Button size="sm" loading={checking} tip="Compares this test with the newest commit of its repository. Nothing is changed." onClick={() => void checkGit()}>
+                            Check for updates
+                        </Button>
+                    )}
+                </div>
+            )}
             {check && (
                 <div role="status" data-testid="git-check">
                     {check.ok ? (

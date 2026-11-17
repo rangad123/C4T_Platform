@@ -145,12 +145,12 @@ describe("test data cleanup in the UI", () => {
 
     it("a test's own page says what its run created", async () => {
         const tests = (await call("GET", `/api/projects/${projectId}/tests`)).body as Array<{ id: string; testId: string }>;
-        await page.goto(`${base}/#/tests/${tests.find((t) => t.testId === "API-003")!.id}`);
+        await page.goto(`${base}/#/tests/${tests.find((t) => t.testId === "API-003")!.id}/history`);
         const line = page.getByTestId("test-cleanup");
         await pwExpect(line).toBeVisible();
         await pwExpect(line).toContainText("The last run created 1 record; 0 removed, 1 left behind.");
         await pwExpect(line).toContainText("no way to remove it");
-        await page.goto(`${base}/#/tests/${tests.find((t) => t.testId === "API-001")!.id}`);
+        await page.goto(`${base}/#/tests/${tests.find((t) => t.testId === "API-001")!.id}/history`);
         await pwExpect(page.getByTestId("test-cleanup")).toContainText("The last run created 1 record; 1 removed.");
     });
 

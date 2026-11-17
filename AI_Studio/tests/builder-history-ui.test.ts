@@ -114,7 +114,7 @@ async function visit(hash: string) {
 const builderHash = (id = webId) => `#/tests/${id}/steps`;
 const historyHash = (id = webId) => `#/tests/${id}/history`;
 const unsaved = () => page.getByTestId("unsaved-bar");
-const resultsRail = () => page.getByRole("complementary", { name: "Results and script" });
+const resultsRail = () => page.getByRole("complementary", { name: "Last run" });
 const heads = () => page.locator(".bld-head");
 async function noOverflow() {
     const wide = await page.evaluate(() =>
@@ -147,14 +147,16 @@ const addStep = async (group: string, name: string) => {
 // The version history is the History tab: steps and code versions, runs and repairs in one list; these are the rows of step versions.
 const versionRows = () => page.locator("[data-testid=history] li.wb-hist").filter({ has: page.getByRole("checkbox", { name: /^Compare steps version/ }) });
 const compare = (v: number) => page.getByLabel(`Compare steps version ${v}`, { exact: true });
-/** Waits for the run a save started to end (no run left going and the test passing), then for the results column to say so on the same page. */
+/** Waits for the run a save started to end (no run left going and the test passing), then for the page to say so without leaving it. */
 async function waitPassed() {
     for (let i = 0; i < 300; i++) {
         const active = platform.db.all("SELECT id FROM generation_jobs WHERE project_id = ? AND status NOT IN ('COMPLETED','PARTIALLY_COMPLETED','FAILED')", projectId);
         if (active.length === 0 && (await specNow()).validationStatus === "VALIDATED") break;
         await new Promise((r) => setTimeout(r, 400));
     }
-    await pwExpect(resultsRail().getByText("This test is passing")).toBeVisible({ timeout: 30_000 });
+    // The header's status is on every tab (the History tab has no last-run column); on the edit tabs the column says it too.
+    await pwExpect(page.locator(".page-head").getByText("Passing", { exact: true })).toBeVisible({ timeout: 30_000 });
+    if (!page.url().endsWith("/history")) await pwExpect(resultsRail().getByText("This test is passing")).toBeVisible({ timeout: 30_000 });
 }
 
 describe("history before any edit", () => {

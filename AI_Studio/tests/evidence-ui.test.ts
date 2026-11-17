@@ -92,7 +92,7 @@ const section = () => page.getByRole("region", { name: "What the page did", exac
 
 describe("failure evidence in the UI", () => {
     it("a failed test explains what the page did: the sentence, the failing request, the console error", async () => {
-        await page.goto(`${base}/#/tests/${ids.cart}`);
+        await page.goto(`${base}/#/tests/${ids.cart}/history`);
         await pwExpect(section()).toBeVisible();
         await pwExpect(section().getByTestId("evidence-summary")).toContainText("1 request failed: POST /api/cart answered 500");
         await pwExpect(section().getByTestId("evidence-summary")).toContainText("the page made");
@@ -136,14 +136,14 @@ describe("failure evidence in the UI", () => {
     });
 
     it("a failed run without recorded details says why there is nothing to show", async () => {
-        await page.goto(`${base}/#/tests/${ids.boom}`);
+        await page.goto(`${base}/#/tests/${ids.boom}/history`);
         await pwExpect(section()).toBeVisible();
         await pwExpect(section().getByTestId("evidence-empty")).toContainText("No network or console details were recorded for this run");
         await pwExpect(section().getByTestId("evidence-summary")).toHaveCount(0);
     });
 
     it("a passing test has no such section", async () => {
-        await page.goto(`${base}/#/tests/${ids.home}`);
+        await page.goto(`${base}/#/tests/${ids.home}/history`);
         await pwExpect(page.getByRole("heading", { name: "The home page loads", exact: true })).toBeVisible();
         await pwExpect(section()).toHaveCount(0);
     });

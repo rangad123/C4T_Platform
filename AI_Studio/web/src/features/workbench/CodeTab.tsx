@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { CodeViewer } from "../../components/CodeViewer";
 import { ScriptPreview } from "../../components/ScriptPreview";
 import { Callout, Disclosure, ErrorState, Skeleton } from "../../components/ui";
@@ -7,7 +8,6 @@ import { useRoute } from "../../lib/router";
 import { fetchScriptText, type Diagnostic, type SaveResult } from "../code/code";
 import { CustomCallout } from "../code/CustomParts";
 import { EditScriptButton } from "../code/TakeOver";
-import { VersionHistory } from "../code/VersionHistory";
 import { Workbench as CodeEditor } from "../code/Workbench";
 import { useRunPolicy } from "../code/policy";
 import "../code/code.css";
@@ -17,16 +17,26 @@ import { api } from "../../api";
 
 /**
  * The Code tab. A generated test shows its script read-only (the test first, the platform's setup folded) and the one-way door:
- * Switch to code, with what stops said plainly before anything happens. A code test shows the editor, its checks and its versions.
+ * Switch to code, with what stops said plainly before anything happens. A code test shows the editor and its checks; its versions
+ * are on the History tab. The tab's own column (`aside`, below the last run) holds the editor's problems and rules and the download
+ * that runs the test on another computer.
  */
-export function CodeTab({ test, reload, fwName, framework, onFramework }: { test: Detail; reload: () => Promise<void>; fwName: (f: string) => string; framework: string; onFramework: (f: string) => void }) {
+export function CodeTab({ test, reload, fwName, framework, onFramework, aside, onDirty, scriptKey }: { test: Detail; reload: () => Promise<void>; fwName: (f: string) => string; framework: string; onFramework: (f: string) => void; aside: HTMLElement | null; onDirty: (dirty: boolean) => void; /** Changes when a version of the code was restored elsewhere (the History tab): the editor loads the script again. */ scriptKey: number }) {
     const t = test;
     const scripts = t.scripts;
     const script = scripts.find((s) => s.framework === (framework || t.framework)) ?? scripts[0];
+    const [editorAside, setEditorAside] = useState<HTMLElement | null>(null);
+    const column = (
+        <>
+            <div className="stack" ref={setEditorAside} hidden={!t.custom} />
+            {scripts.length > 0 && <RunnableDownload testId={t.id} testKey={t.testId} phone={t.kind === "mobile"} />}
+        </>
+    );
     return (
         <div className="stack">
+            {aside ? createPortal(column, aside) : column}
             {t.custom ? (
-                <CustomCode test={t} reload={reload} />
+                <CustomCode test={t} reload={reload} aside={editorAside} onDirty={onDirty} scriptKey={scriptKey} />
             ) : (
                 <section className="stack-sm" aria-labelledby="wb-code-title">
                     <div className="row">
@@ -55,8 +65,6 @@ export function CodeTab({ test, reload, fwName, framework, onFramework }: { test
                 </section>
             )}
 
-            {scripts.length > 0 && <RunnableDownload testId={t.id} testKey={t.testId} phone={t.kind === "mobile"} />}
-
             <div className="card" style={{ padding: "0 20px" }}>
                 <Disclosure label="View technical details">
                     <dl className="kv" style={{ marginBottom: 12 }}>
@@ -75,10 +83,11 @@ export function CodeTab({ test, reload, fwName, framework, onFramework }: { test
                             </>
                         )}
                     </dl>
-                    {t.spec ? (
+                    {/* A code test's old steps are not shown: they no longer run, and the script is in the editor above. */}
+                    {t.spec && !t.custom ? (
                         <>
                             <div className="t-card" style={{ marginBottom: 6 }}>
-                                {t.custom ? "The steps this test had before it was switched to code (JSON, no longer used)" : "This test as JSON"}
+                                This test as JSON
                             </div>
                             <CodeViewer code={JSON.stringify(t.spec, null, 2)} language="json" filename={`${t.testId}.json`} label="The test, independent of any framework" />
                         </>
@@ -91,40 +100,32 @@ export function CodeTab({ test, reload, fwName, framework, onFramework }: { test
     );
 }
 
-/** The editor of a code test: live checks, versions, and the run a save starts (the same editor the code feature always had). */
-function CustomCode({ test: t, reload }: { test: Detail; reload: () => Promise<void> }) {
+/** The editor of a code test: live checks, Save or Save and run, and the run a save starts. A restore on the History tab reloads it. */
+function CustomCode({ test: t, reload, aside, onDirty, scriptKey }: { test: Detail; reload: () => Promise<void>; aside: HTMLElement | null; onDirty: (dirty: boolean) => void; scriptKey: number }) {
     const id = t.id;
     const { query } = useRoute();
     const policy = useRunPolicy(t.projectId);
-    const [script, setScript] = useState<{ text: string; key: number } | null>(null);
+    const [script, setScript] = useState<{ text: string; key: string } | null>(null);
     const [loadError, setLoadError] = useState("");
     const [again, setAgain] = useState(0);
-    const [historyKey, setHistoryKey] = useState(0);
-    const [showHistory, setShowHistory] = useState(query.get("history") === "1");
-    const [dirty, setDirty] = useState(false);
-    // A link to the version history (the callout's) opens it even when the editor was already showing.
-    const wantsHistory = query.get("history") === "1";
-    useEffect(() => {
-        if (wantsHistory) setShowHistory(true);
-    }, [wantsHistory]);
 
     useEffect(() => {
         let gone = false;
         setLoadError("");
         fetchScriptText(id)
-            .then((text) => !gone && setScript({ text, key: again }))
+            .then((text) => !gone && setScript({ text, key: `${again}:${scriptKey}` }))
             .catch((e) => !gone && setLoadError(describeApiError(e)));
         return () => {
             gone = true;
         };
-    }, [id, again]);
+    }, [id, again, scriptKey]);
 
     const save = useCallback(
-        async (content: string, note: string) => {
-            const res = await api<SaveResult>(`/tests/${id}/script`, { method: "PUT", body: { content, ...(note ? { note } : {}) } });
-            setHistoryKey((k) => k + 1);
+        async (content: string, note: string, o: { run: boolean }) => {
+            const res = await api<SaveResult>(`/tests/${id}/script`, { method: "PUT", body: { content, ...(note ? { note } : {}), ...(o.run ? {} : { run: false }) } });
             void reload();
-            return res;
+            // A plain save starts nothing: the line under the editor says so, and where to run it.
+            return !o.run && !res.jobId && !res.note ? { ...res, note: "the script is saved. Use Run at the top when you want to run it." } : res;
         },
         [id], // eslint-disable-line react-hooks/exhaustive-deps
     );
@@ -149,31 +150,18 @@ function CustomCode({ test: t, reload }: { test: Detail; reload: () => Promise<v
                 baselineKey={script.key}
                 saveLabel="Save and run"
                 savingLabel="Saving…"
+                saveOnlyLabel="Save"
                 withNote
                 testId={id}
                 onSave={save}
                 onCheck={check}
-                onHistory={() => setShowHistory((s) => !s)}
-                historyOpen={showHistory}
+                aside={aside}
                 runPolicy={policy}
                 guard={policy.config?.guard}
                 maxBytes={policy.config?.maxBytes}
                 startSaved={startSaved}
-                onDirty={setDirty}
-            >
-                {showHistory && (
-                    <VersionHistory
-                        testId={id}
-                        refreshKey={historyKey}
-                        dirty={dirty}
-                        onRestored={() => {
-                            setAgain((n) => n + 1);
-                            setHistoryKey((k) => k + 1);
-                            void reload();
-                        }}
-                    />
-                )}
-            </CodeEditor>
+                onDirty={onDirty}
+            />
         </>
     );
 }

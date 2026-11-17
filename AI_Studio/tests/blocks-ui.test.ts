@@ -263,7 +263,7 @@ describe("the step editor", () => {
 
     it("saves and runs: the test uses the reusable steps and passes", async () => {
         await page.getByTestId("unsaved-bar").getByRole("button", { name: "Save and run", exact: true }).click();
-        await pwExpect(page.getByRole("complementary", { name: "Results and script" }).getByText("This test is passing")).toBeVisible({ timeout: 90_000 });
+        await pwExpect(page.getByRole("complementary", { name: "Last run" }).getByText("This test is passing")).toBeVisible({ timeout: 90_000 });
         const t = (await api("GET", `/api/tests/${plainId}`)).body;
         expect(t.spec.steps.map((s: { action: string }) => s.action)).toEqual(["navigate", "assert", "useBlock"]);
         expect(t.spec.steps[2]).toMatchObject({ block: "Sign in", args: { nickname: "Grace" } });

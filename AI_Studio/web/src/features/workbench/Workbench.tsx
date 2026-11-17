@@ -11,8 +11,8 @@ import { CodeTab } from "./CodeTab";
 import { HistoryTab, type Restored } from "./HistoryTab";
 import { announceRunsChanged, useActiveRun } from "../runs/runs";
 import { TEST_CHANGED } from "./changed";
-import { ResultsPane } from "./ResultsPane";
-import { CoveredRequirements } from "../requirements/CoverageCard";
+import { LatestRun, QuarantineStatus, ResultsPane } from "./ResultsPane";
+import { RunStrip } from "../runs/RunStrip";
 import { StepsTab } from "./StepsTab";
 import { TestHeader } from "./TestHeader";
 import { SavedBar } from "./UnsavedBar";
@@ -49,12 +49,15 @@ function RunEndWatcher({ projectId, onEnded }: { projectId: string; onEnded: () 
 }
 
 /**
- * One page per test: DSL, Code, Steps and History are tabs of the same page (and routes), the header and the results stay put when
- * the tab changes, and a run started from here shows its result here. Work that is not saved survives a change of tab.
- */
 /** What a saved bar says about the run a save queued; the note says when that run does not use the saved change (a draft never runs). */
 const runningWords = (note?: string) => (note ? `A run has started. ${note}` : "The test is running.");
 
+/**
+ * One page per test: DSL, Code, Steps and History are tabs of the same page (and routes). Above the tabs only what is about the whole
+ * test: the header, the version that runs, a run going now, quarantine. Each tab shows only its own things: DSL, Code and Steps put
+ * the last run and that tab's actions in a column beside the work; History is full width, with the latest run's evidence on top.
+ * Work that is not saved survives a change of tab.
+ */
 export function Workbench({ id, tab }: { id: string; tab: Tab }) {
     // While the test is running (from here or from anywhere) the page keeps asking, so the verdict and the editors catch up by themselves.
     const test = useFetch<Detail>(`/tests/${id}`, (d) => (d?.validationStatus === "VALIDATING" ? 2500 : null));
@@ -83,6 +86,8 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
     const [historyKey, setHistoryKey] = useState(0);
     const [quarantineKey, setQuarantineKey] = useState(0);
     const [dirty, setDirty] = useState({ count: 0, label: "" });
+    const [codeDirty, setCodeDirty] = useState(false);
+    const [scriptKey, setScriptKey] = useState(0);
     const [saved, setSaved] = useState<Saved | null>(null);
     const [undoing, setUndoing] = useState(false);
 
@@ -98,7 +103,8 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
     const lastView = useRef<"steps" | "text">(tab === "text" ? "text" : "steps");
     if (tab === "steps" || tab === "text") lastView.current = tab;
     const switchRef = useRef<((mode: "steps" | "text") => Promise<boolean>) | null>(null);
-    const [scriptSlot, setScriptSlot] = useState<HTMLElement | null>(null);
+    // The Code tab's own column (its editor's problems and rules, the download to run it elsewhere) goes below the last run.
+    const [codeSlot, setCodeSlot] = useState<HTMLElement | null>(null);
     const [barSlot, setBarSlot] = useState<HTMLElement | null>(null);
 
     // ── runs ──
@@ -133,7 +139,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
         },
         [follow], // eslint-disable-line react-hooks/exhaustive-deps
     );
-    async function run(kind: "validate" | "baseline") {
+    async function run(kind: "baseline") {
         setBusy(kind);
         setActionError("");
         try {
@@ -211,7 +217,10 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
             setSaved(null);
             setEpoch((n) => n + 1);
             await Promise.all([test.reload(), versions.reload()]);
-            if (r.family === "code") setRefreshKey((k) => k + 1);
+            if (r.family === "code") {
+                setRefreshKey((k) => k + 1);
+                setScriptKey((k) => k + 1);
+            }
             if (r.jobId) void followRun(r.jobId);
         },
         [followRun], // eslint-disable-line react-hooks/exhaustive-deps
@@ -283,6 +292,22 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
     const editorOpen = mounted.has("steps") || mounted.has("text");
     const showEditor = tab === "steps" || tab === "text";
 
+    // A save of the steps or the text says what it made in the editor's own panel (the code editor has its own line).
+    const savedBar = saved && (
+        <SavedBar
+            key={saved.n}
+            headline={saved.headline}
+            detail={saved.detail}
+            canUndo={saved.version !== null && saved.version > 1 && dirty.count === 0}
+            undoHint={dirty.count > 0 ? "Save or discard your changes first" : undefined}
+            undoing={undoing}
+            onUndo={() => saved.version && void goBackTo(saved.version - 1, { run: saved.ran, note: `Undid version ${saved.version}`, headline: `Went back to version ${saved.version! - 1}.` })}
+            onDismiss={() => setSaved(null)}
+        />
+    );
+    // The test types the project's sign-in ({{credentials.*}}): the panels that edit it say where to add it when none is saved.
+    const signInHint = usesCredentials(JSON.stringify(t.spec?.steps ?? []) + (t.custom ? t.scripts.map((s) => s.content).join("\n") : "")) ? <MissingSignInHint projectId={t.projectId} /> : null;
+
     return (
         <div className="wb">
             <RunEndWatcher projectId={t.projectId} onEnded={whenRunEnds} />
@@ -324,6 +349,9 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                 </Callout>
             )}
 
+            <RunStrip projectId={t.projectId} testId={t.id} />
+            <QuarantineStatus key={quarantineKey} test={t} onChanged={() => void test.reload()} />
+
             <div className="wb-tabs" role="tablist" aria-label="Views of this test" onKeyDown={onKeys} data-tour="workbench-tabs">
                 {TABS.map((k) => (
                     <button
@@ -342,31 +370,18 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                         onClick={() => void selectTab(k)}
                     >
                         {TAB_LABEL[k]}
-                        {k === "steps" && dirty.count > 0 && <span className="wb-tab-dot" aria-hidden />}
+                        {/* Steps and DSL are two views of one editor, so its unsaved work shows on both; the code editor's on Code. */}
+                        {((k === "steps" || (k === "text" && !t.custom)) && dirty.count > 0) || (k === "code" && codeDirty) ? <span className="wb-tab-dot" aria-hidden /> : null}
                     </button>
                 ))}
             </div>
 
-            <div className="wb-grid">
+            <div className={`wb-grid${tab === "history" ? " is-full" : ""}`}>
                 <div className="wb-main stack">
-                    {saved && (
-                        <SavedBar
-                            key={saved.n}
-                            headline={saved.headline}
-                            detail={saved.detail}
-                            canUndo={saved.version !== null && saved.version > 1 && dirty.count === 0}
-                            undoHint={dirty.count > 0 ? "Save or discard your changes first" : undefined}
-                            undoing={undoing}
-                            onUndo={() => saved.version && void goBackTo(saved.version - 1, { run: saved.ran, note: `Undid version ${saved.version}`, headline: `Went back to version ${saved.version! - 1}.` })}
-                            onDismiss={() => setSaved(null)}
-                        />
-                    )}
-
-                    {/* The test types the project's sign-in ({{credentials.*}}): say where to add it when none is saved. */}
-                    {usesCredentials(JSON.stringify(t.spec?.steps ?? []) + (t.custom ? t.scripts.map((s) => s.content).join("\n") : "")) && <MissingSignInHint projectId={t.projectId} />}
-
                     {editorOpen && (
-                        <div role="tabpanel" id="wb-panel-edit" data-tour="wb-edit" aria-labelledby={`wb-tab-${showEditor ? tab : lastView.current}`} hidden={!showEditor}>
+                        <div role="tabpanel" id="wb-panel-edit" data-tour="wb-edit" className="stack" aria-labelledby={`wb-tab-${showEditor ? tab : lastView.current}`} hidden={!showEditor}>
+                            {savedBar}
+                            {signInHint}
                             {t.custom && tab === "text" ? (
                                 <Callout
                                     tone="info"
@@ -388,7 +403,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                                     editor={{
                                         mode: showEditor ? (tab as "steps" | "text") : lastView.current,
                                         active: showEditor,
-                                        scriptSlot,
+                                        scriptSlot: null,
                                         barSlot,
                                         marks,
                                         onMode: (m) => {
@@ -409,34 +424,35 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                     )}
 
                     {mounted.has("code") && (
-                        <div role="tabpanel" id="wb-panel-code" aria-labelledby="wb-tab-code" hidden={tab !== "code"}>
-                            <CodeTab test={t} reload={refreshAll} fwName={fwName} framework={scriptFramework} onFramework={setScriptFramework} />
+                        <div role="tabpanel" id="wb-panel-code" className="stack" aria-labelledby="wb-tab-code" hidden={tab !== "code"}>
+                            {signInHint}
+                            <CodeTab test={t} reload={refreshAll} fwName={fwName} framework={scriptFramework} onFramework={setScriptFramework} aside={codeSlot} onDirty={setCodeDirty} scriptKey={scriptKey} />
                         </div>
                     )}
 
                     {mounted.has("history") && (
-                        <div role="tabpanel" id="wb-panel-history" aria-labelledby="wb-tab-history" hidden={tab !== "history"}>
-                            <HistoryTab test={t} versions={versions.data} versionsState={{ loading: versions.loading, ...(versions.error ? { error: versions.error } : {}), reload: versions.reload }} refreshKey={historyKey} unsaved={dirty.count} onRestored={(r) => void restoredFromHistory(r)} />
+                        <div role="tabpanel" id="wb-panel-history" className="stack" aria-labelledby="wb-tab-history" hidden={tab !== "history"}>
+                            <LatestRun test={t} reload={test.reload} />
+                            <HistoryTab test={t} versions={versions.data} versionsState={{ loading: versions.loading, ...(versions.error ? { error: versions.error } : {}), reload: versions.reload }} refreshKey={historyKey} unsaved={dirty.count + (codeDirty ? 1 : 0)} onRestored={(r) => void restoredFromHistory(r)} />
                         </div>
                     )}
 
                     <div className="wb-bar-slot" ref={setBarSlot} />
                 </div>
 
-                <aside className="wb-rail stack" aria-label="Results and script">
-                    <ResultsPane
-                        quarantineKey={quarantineKey}
-                        test={t}
-                        reload={test.reload}
-                        running={busy === "validate"}
-                        onRun={() => void run("validate")}
-                        ranOn={ranOn}
-                        undo={undo}
-                        undoing={undoing}
-                        onUndo={() => undo && void goBackTo(undo.goBackTo, { run: true, note: `Undid version ${undo.version}`, headline: `Went back to version ${undo.goBackTo}.` })}
-                    />
-                    <CoveredRequirements testId={t.id} projectId={t.projectId} />
-                    <div className="stack wb-script-slot" ref={setScriptSlot} />
+                <aside className="wb-rail stack" aria-label="Last run" hidden={tab === "history"}>
+                    {tab !== "history" && (
+                        <ResultsPane
+                            tab={tab}
+                            test={t}
+                            reload={test.reload}
+                            ranOn={ranOn}
+                            undo={undo}
+                            undoing={undoing}
+                            onUndo={() => undo && void goBackTo(undo.goBackTo, { run: true, note: `Undid version ${undo.version}`, headline: `Went back to version ${undo.goBackTo}.` })}
+                        />
+                    )}
+                    <div className="stack wb-code-slot" ref={setCodeSlot} hidden={tab !== "code"} />
                 </aside>
             </div>
         </div>

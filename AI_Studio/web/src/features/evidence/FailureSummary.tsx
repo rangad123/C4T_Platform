@@ -1,4 +1,4 @@
-import { Code2, Image, ListPlus, RefreshCw, Video, Wrench } from "lucide-react";
+import { Code2, Image, ListPlus, Video, Wrench } from "lucide-react";
 import { artifactUrl, projectKind, type ProjectDetail } from "../../api";
 import { Button, LinkButton, Term } from "../../components/ui";
 import { Tooltip } from "../../components/Tooltip";
@@ -7,7 +7,6 @@ import { cleanReason, stepSentence } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { EditScriptButton } from "../code/TakeOver";
 import type { CustomInfo } from "../code/code";
-import type { TestQuarantine } from "../quarantine/quarantine";
 import "./evidence.css";
 
 /** The fields of the test answer this block reads (the platform adds `failure` and each failed step's `expected` / `actual`). */
@@ -33,15 +32,15 @@ const firstLine = (s: string | null | undefined, n = 200) => (s ?? "").replace(/
 
 /**
  * What a failing test comes down to: which step, what it expected and what it got, the files that show it, the cause when the platform
- * names one, and the things the tester can do next. Every action listed exists on this page. Where the platform gave no expected and
- * actual values, the stored message is shown as it is (cleaned), never a guess.
+ * names one, and the things the tester can do next on the tab it shows on. Running again is the header's Run, and quarantine is in its
+ * menu, so neither is repeated here; a tab never links to itself. Where the platform gave no expected and actual values, the stored
+ * message is shown as it is (cleaned), never a guess.
  */
-export function FailureSummary({ test, last, onRun, running }: { test: FailureInput; last?: FailureRun; onRun: () => void; running: boolean }) {
+export function FailureSummary({ test, last, tab }: { test: FailureInput; last?: FailureRun; /** The tab of the test page it shows on. */ tab: "text" | "code" | "steps" }) {
     const finding = test.validationStatus === "NEEDS_REVIEW";
-    const healing = useFetch<{ proposals: Array<{ status: string; canApply: boolean }> }>((test.kind === "web" || test.kind === "mobile") && !test.custom ? `/tests/${test.id}/healing` : null);
-    const quarantine = useFetch<TestQuarantine>(`/tests/${test.id}/quarantine`);
+    // The repair card sits beside the steps, so the jump to it is offered only there.
+    const healing = useFetch<{ proposals: Array<{ status: string; canApply: boolean }> }>(tab === "steps" && (test.kind === "web" || test.kind === "mobile") && !test.custom ? `/tests/${test.id}/healing` : null);
     const canRepair = !!healing.data?.proposals.some((p) => p.status === "proposed" && p.canApply);
-    const canQuarantine = !!quarantine.data && !quarantine.data.entry && quarantine.data.eligible;
 
     const missingToken = test.failure?.kind === "missing-api-token";
     // Where the token goes depends on the project: agent and mixed projects keep it with what the agents need (Requirements); a code
@@ -66,6 +65,10 @@ export function FailureSummary({ test, last, onRun, running }: { test: FailureIn
     const shot = files.find((a) => a.kind === "screenshot" || a.kind === "visual-diff") ?? files.find((a) => a.kind === "visual-actual" || a.kind === "vision-shot");
     const video = files.find((a) => a.kind === "video");
     const trace = files.find((a) => a.kind === "trace");
+
+    const tokenAct = missingToken && !!tokenPlace;
+    const editSteps = tab !== "steps" && (test.kind === "web" || test.kind === "api") && !test.custom;
+    const editCode = tab !== "code" && (test.kind === "web" || test.kind === "api" || test.kind === "desktop" || test.kind === "mobile");
 
     const jump = (selector: string) => {
         const el = document.querySelector<HTMLElement>(selector);
@@ -149,35 +152,29 @@ export function FailureSummary({ test, last, onRun, running }: { test: FailureIn
                 </p>
             )}
 
-            <div>
-                <h3 className="t-card" style={{ margin: "4px 0 8px" }}>What you can do</h3>
-                <div className="fail-acts">
-                    {missingToken && tokenPlace && (
-                        <LinkButton size="sm" variant="primary" href={tokenPlace === "environment" ? routes.projectSettings(test.projectId, "environments") : routes.projectSettings(test.projectId, "signin")}>
-                            Add an API token
-                        </LinkButton>
-                    )}
-                    {canRepair && (
-                        <Button size="sm" variant="primary" icon={Wrench} onClick={() => jump("#heal-card")}>
-                            Apply the repair
-                        </Button>
-                    )}
-                    {(test.kind === "web" || test.kind === "api") && !test.custom && (
-                        <LinkButton size="sm" icon={ListPlus} href={routes.builder(test.id)}>
-                            Edit steps
-                        </LinkButton>
-                    )}
-                    {(test.kind === "web" || test.kind === "api" || test.kind === "desktop" || test.kind === "mobile") && (test.custom ? <LinkButton size="sm" icon={Code2} href={routes.code(test.id)}>Edit the code</LinkButton> : <EditScriptButton testId={test.id} />)}
-                    {canQuarantine && (
-                        <Button size="sm" onClick={() => jump("#quarantine-card")}>
-                            See the quarantine option
-                        </Button>
-                    )}
-                    <Button size="sm" icon={RefreshCw} loading={running} disabled={running} onClick={onRun}>
-                        Run this test again
-                    </Button>
+            {(tokenAct || canRepair || editSteps || editCode) && (
+                <div>
+                    <h3 className="t-card" style={{ margin: "4px 0 8px" }}>What you can do</h3>
+                    <div className="fail-acts">
+                        {tokenAct && tokenPlace && (
+                            <LinkButton size="sm" variant="primary" href={tokenPlace === "environment" ? routes.projectSettings(test.projectId, "environments") : routes.projectSettings(test.projectId, "signin")}>
+                                Add an API token
+                            </LinkButton>
+                        )}
+                        {canRepair && (
+                            <Button size="sm" variant="primary" icon={Wrench} onClick={() => jump("#heal-card")}>
+                                Apply the repair
+                            </Button>
+                        )}
+                        {editSteps && (
+                            <LinkButton size="sm" icon={ListPlus} href={routes.builder(test.id)}>
+                                Edit steps
+                            </LinkButton>
+                        )}
+                        {editCode && (test.custom ? <LinkButton size="sm" icon={Code2} href={routes.code(test.id)}>Edit the code</LinkButton> : <EditScriptButton testId={test.id} />)}
+                    </div>
                 </div>
-            </div>
+            )}
         </section>
     );
 }

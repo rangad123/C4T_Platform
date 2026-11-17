@@ -1,5 +1,6 @@
-import { CircleAlert, History, RotateCcw, ShieldCheck, TriangleAlert, WrapText } from "lucide-react";
+import { CircleAlert, Play, RotateCcw, Save, ShieldCheck, TriangleAlert, WrapText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Badge, Button, Callout, Disclosure } from "../../components/ui";
 import { NOT_ENABLED_TEXT, NOT_ENABLED_TITLE, asDiagnostics, type CodeConfig, type Diagnostic, type SaveResult } from "./code";
 import { LazyEditor, type EditorHandle } from "./LazyEditor";
@@ -18,12 +19,14 @@ interface Props {
     readOnlyWhy?: string;
     saveLabel: string;
     savingLabel?: string;
-    onSave: (text: string, note: string) => Promise<SaveResult>;
+    /** Set where a save can also run (a test): a plain save beside the main one, which saves without running (`run: false`). */
+    saveOnlyLabel?: string;
+    onSave: (text: string, note: string, o: { run: boolean }) => Promise<SaveResult>;
     /** Without it there is no live check and no Check button: the problems show when the script is saved. */
     onCheck?: (text: string) => Promise<Diagnostic[]>;
     withNote?: boolean;
-    onHistory?: () => void;
-    historyOpen?: boolean;
+    /** Where the problems and the rules go (the Code tab's column beside the editor); without it they sit under the editor. */
+    aside?: HTMLElement | null;
     /** Set for a test: shows the run status after a save. */
     testId?: string;
     /** The save that led to this page (right after a test was written): its run is shown straight away. */
@@ -49,7 +52,7 @@ export function Workbench(p: Props) {
     const [checkState, setCheckState] = useState<"idle" | "checking" | "done" | "failed">("idle");
     const [wrap, setWrap] = useState(false);
     const [note, setNote] = useState("");
-    const [saving, setSaving] = useState(false);
+    const [saving, setSaving] = useState<"" | "save" | "run">("");
     const [saveError, setSaveError] = useState("");
     const [saved, setSaved] = useState<{ res: SaveResult; at: number } | null>(p.startSaved ? { res: { diagnostics: [], ...p.startSaved }, at: 0 } : null);
     const [confirm, setConfirm] = useState<null | { kind: "discard" } | { kind: "leave"; href: string }>(null);
@@ -127,12 +130,12 @@ export function Workbench(p: Props) {
         };
     }, []);
 
-    async function save() {
+    async function save(run: boolean) {
         if (saving || p.readOnly || tooBig) return;
-        setSaving(true);
+        setSaving(run ? "run" : "save");
         setSaveError("");
         try {
-            const res = await p.onSave(text, note.trim());
+            const res = await p.onSave(text, note.trim(), { run });
             setBaseline(text);
             setDiags(res.diagnostics ?? []);
             setCheckState("done");
@@ -145,77 +148,22 @@ export function Workbench(p: Props) {
                 const d = asDiagnostics(e.body.diagnostics ?? e.details);
                 setDiags(d);
                 setCheckState("done");
-                setSaveError(d.length ? "Not saved. Fix the problems listed below and save again. Your text is still here." : `Not saved. ${e.message}`);
+                setSaveError(d.length ? `Not saved. Fix the problems listed ${p.aside === undefined ? "below" : "under Problems"} and save again. Your text is still here.` : `Not saved. ${e.message}`);
             } else setSaveError(describeApiError(e));
         } finally {
-            setSaving(false);
+            setSaving("");
         }
     }
+    // Ctrl+S is the plain save where there is one: saving never starts a run by itself.
+    const keySave = () => void save(!p.saveOnlyLabel);
 
     const policy = p.runPolicy;
     const showNotEnabled = !!p.testId && !!policy?.known && !policy.enabled;
     const hintId = "code-editor-hint";
 
-    return (
-        <div className="stack">
-            {showNotEnabled && (
-                <Callout tone="warning" title={NOT_ENABLED_TITLE}>
-                    {NOT_ENABLED_TEXT}
-                </Callout>
-            )}
-            {p.readOnly && p.readOnlyWhy && <Callout tone="info">{p.readOnlyWhy}</Callout>}
-
-            <section className="card code-bench" aria-label="Script">
-                <div className="code-toolbar" role="toolbar" aria-label="Editor actions">
-                    <Button variant="primary" loading={saving} disabled={p.readOnly || tooBig} onClick={() => void save()}>
-                        {saving ? (p.savingLabel ?? "Saving…") : p.saveLabel}
-                    </Button>
-                    {p.onCheck && (
-                        <Button icon={ShieldCheck} disabled={checkState === "checking" || tooBig} tip={tooBig ? "This script is too long to check. Shorten it first." : "Checks the script now, without saving it. It is also checked by itself when you pause typing."} onClick={() => void runCheck(text)}>
-                            Check
-                        </Button>
-                    )}
-                    {p.onHistory && (
-                        <Button icon={History} aria-expanded={!!p.historyOpen} onClick={p.onHistory}>
-                            Version history
-                        </Button>
-                    )}
-                    <Button icon={RotateCcw} disabled={!dirty} onClick={() => setConfirm({ kind: "discard" })}>
-                        Discard changes
-                    </Button>
-                    <Button variant="ghost" icon={WrapText} aria-pressed={wrap} onClick={() => setWrap((w) => !w)}>
-                        Wrap lines
-                    </Button>
-                    <span className="spacer" />
-                    {p.readOnly && <Badge tone="neutral">Read-only</Badge>}
-                    {dirty && <Badge tone="warning">Unsaved changes</Badge>}
-                </div>
-
-                {p.withNote && (
-                    <div className="field code-note">
-                        <label htmlFor="code-note">Note for this version (optional)</label>
-                        <input id="code-note" className="input" maxLength={200} value={note} disabled={p.readOnly} onChange={(e) => setNote(e.target.value)} placeholder="What changed, in a few words" />
-                    </div>
-                )}
-
-                <LazyEditor ref={editor} value={text} onChange={setText} readOnly={p.readOnly} wrap={wrap} diagnostics={diags} describedBy={hintId} onSave={() => void save()} />
-                <p className="t-meta code-hint" id={hintId}>
-                    Press Tab to indent. To leave the editor with the keyboard, press Escape, then Tab. Ctrl+F searches, Ctrl+Z undoes.
-                    {p.maxBytes !== undefined && <span className={tooBig ? "code-over" : ""}> {Math.ceil(size / 1024)} KB of {Math.round(p.maxBytes / 1024)} KB.</span>}
-                </p>
-            </section>
-
-            {saveError && (
-                <Callout tone="danger" title="That didn’t save">
-                    {saveError}
-                </Callout>
-            )}
-            {tooBig && (
-                <Callout tone="danger" title="This script is too long">
-                    The limit is {Math.round((p.maxBytes ?? 0) / 1024)} KB. Move shared code into a helper or shorten the script.
-                </Callout>
-            )}
-
+    // The problems (with a jump to the line) and the rules serve only this editor.
+    const side = (
+        <>
             <section className="card" aria-label="Problems">
                 <div className="card-head wrap">
                     <h2 className="t-section">Problems</h2>
@@ -255,6 +203,80 @@ export function Workbench(p: Props) {
                     <p className="code-ok t-secondary">{checkState === "done" ? "Nothing to fix." : "Problems appear here, with a link to the line."}</p>
                 )}
             </section>
+            <div className="card" style={{ padding: "0 var(--space-card-padding)" }}>
+                <Disclosure label="What’s allowed in a script">
+                    <div className="stack-sm">
+                        {p.guard?.length ? <ul className="bullets">{p.guard.map((g, i) => <li key={i}>{g}</li>)}</ul> : <p className="muted">The rules could not be loaded. They are shown with any problem the check finds.</p>}
+                        <p className="t-secondary">
+                            These rules are a guard against mistakes. They are not a security boundary: a script is code, so it only runs on a runner or a server whose owner has allowed code tests.
+                        </p>
+                    </div>
+                </Disclosure>
+            </div>
+        </>
+    );
+
+    return (
+        <div className="stack">
+            {showNotEnabled && (
+                <Callout tone="warning" title={NOT_ENABLED_TITLE}>
+                    {NOT_ENABLED_TEXT}
+                </Callout>
+            )}
+            {p.readOnly && p.readOnlyWhy && <Callout tone="info">{p.readOnlyWhy}</Callout>}
+
+            <section className="card code-bench" aria-label="Script">
+                <div className="code-toolbar" role="toolbar" aria-label="Editor actions">
+                    {p.saveOnlyLabel && (
+                        <Button icon={Save} loading={saving === "save"} disabled={p.readOnly || tooBig || !!saving} tip="Saves the script as a new version. The test is not run." onClick={() => void save(false)}>
+                            {p.saveOnlyLabel}
+                        </Button>
+                    )}
+                    <Button variant="primary" {...(p.saveOnlyLabel ? { icon: Play } : {})} loading={saving === "run"} disabled={p.readOnly || tooBig || (!!p.saveOnlyLabel && !!saving)} onClick={() => void save(true)}>
+                        {saving === "run" ? (p.savingLabel ?? "Saving…") : p.saveLabel}
+                    </Button>
+                    {p.onCheck && (
+                        <Button icon={ShieldCheck} disabled={checkState === "checking" || tooBig} tip={tooBig ? "This script is too long to check. Shorten it first." : "Checks the script now, without saving it. It is also checked by itself when you pause typing."} onClick={() => void runCheck(text)}>
+                            Check
+                        </Button>
+                    )}
+                    <Button icon={RotateCcw} disabled={!dirty} onClick={() => setConfirm({ kind: "discard" })}>
+                        Discard changes
+                    </Button>
+                    <Button variant="ghost" icon={WrapText} aria-pressed={wrap} onClick={() => setWrap((w) => !w)}>
+                        Wrap lines
+                    </Button>
+                    <span className="spacer" />
+                    {p.readOnly && <Badge tone="neutral">Read-only</Badge>}
+                    {dirty && <Badge tone="warning">Unsaved changes</Badge>}
+                </div>
+
+                {p.withNote && (
+                    <div className="field code-note">
+                        <label htmlFor="code-note">Note for this version (optional)</label>
+                        <input id="code-note" className="input" maxLength={200} value={note} disabled={p.readOnly} onChange={(e) => setNote(e.target.value)} placeholder="What changed, in a few words" />
+                    </div>
+                )}
+
+                <LazyEditor ref={editor} value={text} onChange={setText} readOnly={p.readOnly} wrap={wrap} diagnostics={diags} describedBy={hintId} onSave={keySave} />
+                <p className="t-meta code-hint" id={hintId}>
+                    Press Tab to indent. To leave the editor with the keyboard, press Escape, then Tab. Ctrl+F searches, Ctrl+Z undoes.
+                    {p.maxBytes !== undefined && <span className={tooBig ? "code-over" : ""}> {Math.ceil(size / 1024)} KB of {Math.round(p.maxBytes / 1024)} KB.</span>}
+                </p>
+            </section>
+
+            {saveError && (
+                <Callout tone="danger" title="That didn’t save">
+                    {saveError}
+                </Callout>
+            )}
+            {tooBig && (
+                <Callout tone="danger" title="This script is too long">
+                    The limit is {Math.round((p.maxBytes ?? 0) / 1024)} KB. Move shared code into a helper or shorten the script.
+                </Callout>
+            )}
+
+            {p.aside === undefined ? side : p.aside ? createPortal(side, p.aside) : null}
 
             {saved && p.testId && <RunStatus testId={p.testId} jobId={saved.res.jobId ?? null} note={saved.res.note} key={saved.at} />}
             {saved && !p.testId && p.savedNotice && (
@@ -268,17 +290,6 @@ export function Workbench(p: Props) {
                     Saved as version {saved.res.version}.
                 </p>
             )}
-
-            <div className="card" style={{ padding: "0 var(--space-card-padding)" }}>
-                <Disclosure label="What’s allowed in a script">
-                    <div className="stack-sm">
-                        {p.guard?.length ? <ul className="bullets">{p.guard.map((g, i) => <li key={i}>{g}</li>)}</ul> : <p className="muted">The rules could not be loaded. They are shown with any problem the check finds.</p>}
-                        <p className="t-secondary">
-                            These rules are a guard against mistakes. They are not a security boundary: a script is code, so it only runs on a runner or a server whose owner has allowed code tests.
-                        </p>
-                    </div>
-                </Disclosure>
-            </div>
 
             {p.children}
 

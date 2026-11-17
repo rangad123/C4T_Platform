@@ -129,6 +129,8 @@ describe("issue tracker journey", () => {
         // The finding's page: create the issue
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("link", { name: /Cart loads for a signed-in shopper/ }).click();
+        // filing an issue is about the run: the History tab's latest run
+        await page.getByRole("tab", { name: "History", exact: true }).click();
         const section = page.getByRole("region", { name: "Issue tracker" });
         await pwExpect(section).toBeVisible();
         await section.getByRole("button", { name: "Create issue" }).click();
@@ -161,7 +163,7 @@ describe("issue tracker journey", () => {
         await panel.getByRole("button", { name: "Yes, remove" }).click();
         await pwExpect(panel.getByText("Nothing connected yet")).toBeVisible();
 
-        await page.goto(`${BASE}/#/tests/${testId}`);
+        await page.goto(`${BASE}/#/tests/${testId}/history`);
         const section = page.getByRole("region", { name: "Issue tracker" });
         await pwExpect(section.getByRole("link", { name: /GitHub #1/ })).toBeVisible();
         await pwExpect(section.getByText(/No issue tracker is connected now/)).toBeVisible();

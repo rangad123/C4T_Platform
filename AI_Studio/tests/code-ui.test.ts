@@ -158,7 +158,7 @@ async function front(req: http.IncomingMessage, res: http.ServerResponse) {
         fake.versions.push({ version, createdAt: iso(0), note: body?.note ?? null, bytes: Buffer.byteLength(content), kind: "edited", by: "Nitika", content });
         fake.script = content;
         fake.jobStatus = "QUEUED";
-        return json(200, { version, diagnostics: diagnose(content).filter((d) => d.severity === "warning"), jobId: fake.saveMode === "nojob" ? null : "job-fake-code", ...(fake.saveMode === "nojob" ? { note: "Running hand-written scripts is not switched on for this server, so the test stays Not validated." } : {}) });
+        return json(200, { version, diagnostics: diagnose(content).filter((d) => d.severity === "warning"), jobId: fake.saveMode === "nojob" || body?.run === false ? null : "job-fake-code", ...(fake.saveMode === "nojob" ? { note: "Running hand-written scripts is not switched on for this server, so the test stays Not validated." } : {}) });
     }
     if ((m = p.match(/^\/api\/tests\/([^/]+)\/script\/check$/)) && method === "POST") {
         fake.checkCalls++;
@@ -457,16 +457,19 @@ describe("Taking over a generated test", () => {
 });
 
 describe("A hand-written test", () => {
-    it("shows the badge, the origin and the callout, and goes back to the generated version after a confirmation", async () => {
+    it("shows the badge, the origin and one line with what only the Code tab can do, and goes back to the generated version after a confirmation", async () => {
         resetFake();
         fake.custom = makeCustom("taken-over");
         await visit(testHash());
         await pwExpect(page.getByText("Code test", { exact: true }).first()).toBeVisible();
         await pwExpect(page.getByText("Switched to code", { exact: true }).first()).toBeVisible();
-        const callout = page.locator(".callout", { hasText: "This is a code test" });
-        await pwExpect(callout).toContainText("The script is the source of truth");
-        await pwExpect(callout.getByRole("link", { name: "Edit the code", exact: true })).toHaveAttribute("href", `#/tests/${testId}/code`);
-        await pwExpect(callout.getByRole("link", { name: "Version history", exact: true })).toHaveAttribute("href", `#/tests/${testId}/code?history=1`);
+        // one line on the Code tab: no second "this is a code test", no link to the tab it is on, no second list of versions
+        const callout = page.getByTestId("custom-line");
+        await pwExpect(callout.getByRole("button", { name: "Go back to the generated version", exact: true })).toBeVisible();
+        await pwExpect(page.getByText("This is a code test", { exact: true })).toHaveCount(0);
+        await pwExpect(page.locator("#wb-panel-code").getByRole("link", { name: "Edit the code", exact: true })).toHaveCount(0);
+        await pwExpect(page.getByRole("link", { name: "Version history" })).toHaveCount(0);
+        await pwExpect(page.getByRole("button", { name: "Version history" })).toHaveCount(0);
         // the steps of the archived specification are not shown as if they still drove the test
         await page.getByRole("tab", { name: "Steps", exact: true }).click();
         await pwExpect(page.getByText("A code test has no list of steps")).toBeVisible();
@@ -484,7 +487,7 @@ describe("A hand-written test", () => {
         expect(fake.calls.filter((c) => c.path.endsWith("restore-generated"))).toEqual([]);
         await callout.getByRole("button", { name: "Go back to the generated version", exact: true }).click();
         await page.getByRole("dialog").getByRole("button", { name: "Go back to the generated version", exact: true }).click();
-        await pwExpect(page.locator(".callout", { hasText: "This is a code test" })).toHaveCount(0);
+        await pwExpect(page.getByTestId("custom-line")).toHaveCount(0);
         expect(fake.calls.find((c) => c.path.endsWith("restore-generated"))?.body).toEqual({ confirm: true });
     });
 
@@ -606,8 +609,8 @@ describe("The editor", () => {
         await focusEditorEnd();
         await page.keyboard.type("\n// my change", { delay: 5 });
         await page.getByRole("button", { name: "Save and run", exact: true }).click();
-        await pwExpect(page.getByText("Not saved. Fix the problems listed below")).toBeVisible();
-        await pwExpect(page.getByRole("button", { name: /This script cannot be saved/ })).toBeVisible();
+        await pwExpect(page.getByText("Not saved. Fix the problems listed under Problems")).toBeVisible();
+        await pwExpect(page.getByRole("complementary", { name: "Last run" }).getByRole("button", { name: /This script cannot be saved/ })).toBeVisible();
         expect(await editorText()).toContain("// my change");
         await pwExpect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
 
@@ -660,6 +663,35 @@ describe("The editor", () => {
         await page.keyboard.type("\n// no run", { delay: 5 });
         await page.getByRole("button", { name: "Save and run", exact: true }).click();
         await pwExpect(page.getByTestId("run-status")).toContainText("Not run: Running hand-written scripts is not switched on for this server");
+    });
+
+    it("Save keeps a version without running it; Ctrl+S is that plain save; the Code tab shows the unsaved dot", async () => {
+        resetFake();
+        fake.custom = makeCustom("taken-over");
+        history3();
+        await visit(editorHash());
+        await editorReady();
+        await focusEditorEnd();
+        await page.keyboard.type("\n// saved, not run", { delay: 5 });
+        await pwExpect(page.getByRole("tab", { name: "Code", exact: true }).locator(".wb-tab-dot")).toHaveCount(1);
+        const toolbar = page.getByRole("toolbar", { name: "Editor actions" });
+        await toolbar.getByRole("button", { name: "Save", exact: true }).click();
+        await pwExpect(page.getByTestId("saved-version")).toHaveText("Saved as version 4.");
+        expect(fake.calls.filter((c) => c.method === "PUT" && c.path.endsWith("/script")).map((c) => c.body.run)).toEqual([false]);
+        await pwExpect(page.getByTestId("run-status")).toContainText("Not run: the script is saved. Use Run at the top when you want to run it.");
+        await pwExpect(page.getByRole("tab", { name: "Code", exact: true }).locator(".wb-tab-dot")).toHaveCount(0);
+        // the keyboard save is the plain one too
+        await focusEditorEnd();
+        await page.keyboard.type("\n// by keyboard", { delay: 5 });
+        await page.keyboard.press("Control+s");
+        await pwExpect(page.getByTestId("saved-version")).toHaveText("Saved as version 5.");
+        expect(fake.calls.filter((c) => c.method === "PUT" && c.path.endsWith("/script")).map((c) => c.body.run)).toEqual([false, false]);
+        // Save and run still runs
+        await focusEditorEnd();
+        await page.keyboard.type("\n// and run", { delay: 5 });
+        await toolbar.getByRole("button", { name: "Save and run", exact: true }).click();
+        await pwExpect(page.getByTestId("run-status")).toContainText("Queued");
+        expect(fake.calls.filter((c) => c.method === "PUT" && c.path.endsWith("/script")).at(-1)?.body.run).toBeUndefined();
     });
 
     it("protects unsaved changes: leaving asks first, discarding asks first, closing the tab warns", async () => {
@@ -728,65 +760,43 @@ describe("The editor", () => {
 });
 
 describe("Version history", () => {
-    it("lists the versions, compares two with a line diff, and restores one after a confirmation", async () => {
+    it("lives on the History tab only: two code versions compare with a line diff, a restore asks first and the editor shows it", async () => {
         resetFake();
         fake.custom = makeCustom("taken-over");
         history3();
-        await visit(editorHash(testId, "?history=1"));
+        await visit(editorHash());
         await editorReady();
-        const list = page.getByTestId("versions");
-        await pwExpect(list.getByRole("listitem")).toHaveCount(3);
-        const v3 = list.locator('[data-version="3"]');
-        await pwExpect(v3).toContainText("Current");
-        await pwExpect(list.locator('[data-version="1"]')).toContainText("Switched to code");
-        await pwExpect(list.locator('[data-version="2"]')).toContainText("Edited");
-        await pwExpect(list.locator('[data-version="2"]')).toContainText("Match the shop title");
-
-        // one picked: compared with the newest
-        await list.locator('[data-version="2"]').getByLabel("Compare version 2").check();
-        await pwExpect(page.getByRole("heading", { name: "Version 2 compared with version 3" })).toBeVisible();
-        await pwExpect(page.getByTestId("diff-summary")).toHaveText("4 lines added, 0 lines removed");
-        // two picked: those two
-        await list.locator('[data-version="1"]').getByLabel("Compare version 1").check();
-        await pwExpect(page.getByRole("heading", { name: "Version 1 compared with version 2" })).toBeVisible();
+        // the Code tab has no list of versions of its own
+        await pwExpect(page.getByRole("button", { name: "Version history" })).toHaveCount(0);
+        await pwExpect(page.getByTestId("versions")).toHaveCount(0);
+        await page.getByRole("tab", { name: "History", exact: true }).click();
+        const history = page.getByTestId("history");
+        await pwExpect(history).toContainText("Code edited");
+        await pwExpect(history).toContainText("Match the shop title");
+        await history.getByLabel("Compare code version 1", { exact: true }).check();
+        await history.getByLabel("Compare code version 2", { exact: true }).check();
+        await pwExpect(page.getByTestId("history-compare")).toContainText("Code version 1 compared with version 2");
         await pwExpect(page.getByTestId("diff-summary")).toHaveText("1 line added, 1 line removed");
         const diff = page.getByTestId("diff");
-        // added and removed lines carry a symbol and a spoken label, not only a colour
-        await pwExpect(diff.locator(".cell.del").first()).toContainText("−");
-        await pwExpect(diff.locator(".cell.del").first()).toContainText("Removed:");
         await pwExpect(diff.locator(".cell.del code")).toContainText("/Atlas/");
-        await pwExpect(diff.locator(".cell.add").first()).toContainText("+");
-        await pwExpect(diff.locator(".cell.add").first()).toContainText("Added:");
         await pwExpect(diff.locator(".cell.add code")).toContainText("/Atlas shop/");
-        // side by side on a wide screen
-        const cols = await diff.locator(".code-diff-row").first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
-        expect(cols).toBe(2);
-        await shot("version-diff-light-1280");
         await axeBoth(async () => {
-            await visit(editorHash(testId, "?history=1"));
-            await editorReady();
-            await page.locator('[data-version="2"]').getByLabel("Compare version 2").check();
-            await page.locator('[data-version="1"]').getByLabel("Compare version 1").check();
+            await visit(`#/tests/${testId}/history`);
+            await page.getByTestId("history").getByLabel("Compare code version 2", { exact: true }).check();
             await pwExpect(page.getByTestId("diff-summary")).toBeVisible();
         }, "version-diff");
 
-        // identical versions say so
-        await list.locator('[data-version="1"]').getByLabel("Compare version 1").uncheck();
-        await list.locator('[data-version="2"]').getByLabel("Compare version 2").uncheck();
-
-        // restore: asks first, then makes a new version, shows it in the editor and follows the run
-        await list.locator('[data-version="1"]').getByRole("button", { name: "Restore version 1" }).click();
-        const dialog = page.getByRole("dialog", { name: "Restore version 1?" });
-        await pwExpect(dialog).toContainText("saves version 1 again as the newest version");
+        // restore: asks first, then makes a new version, and the Code tab's editor shows the restored text
+        await history.getByRole("button", { name: "Restore code version 1", exact: true }).click();
+        const dialog = page.getByRole("dialog", { name: "Restore code version 1?" });
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
         expect(fake.calls.filter((c) => c.path.includes("/restore"))).toEqual([]);
-        await list.locator('[data-version="1"]').getByRole("button", { name: "Restore version 1" }).click();
+        await history.getByRole("button", { name: "Restore code version 1", exact: true }).click();
         await page.getByRole("dialog").getByRole("button", { name: "Restore this version", exact: true }).click();
-        await pwExpect(page.getByText("Version 1 is restored")).toBeVisible();
-        await pwExpect(page.getByRole("listitem").filter({ hasText: "Restored" }).first()).toContainText("Version 4");
+        await pwExpect(page.getByText("Code version 1 is restored")).toBeVisible();
+        await page.getByRole("tab", { name: "Code", exact: true }).click();
         await pwExpect(page.locator(".cm-line", { hasText: "/Atlas/" }).first()).toBeVisible();
         expect(await editorText()).not.toContain("pricing page");
-        await pwExpect(page.getByTestId("run-status")).toContainText("Queued");
     });
 });
 
@@ -1094,21 +1104,30 @@ describe("Loading and layout", () => {
         fake.custom = makeCustom("taken-over");
         history3();
         await page.setViewportSize({ width: 375, height: 800 });
-        await visit(editorHash(testId, "?history=1"));
+        await visit(editorHash());
         await editorReady();
-        await pwExpect(page.getByTestId("versions")).toBeVisible();
-        await page.locator('[data-version="2"]').getByLabel("Compare version 2").check();
-        await page.locator('[data-version="1"]').getByLabel("Compare version 1").check();
-        await pwExpect(page.getByTestId("diff-summary")).toBeVisible();
         await noOverflow();
-        const stacked = await page.locator(".code-diff-row").first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
-        expect(stacked).toBe(1);
         const small = await page.evaluate(() =>
-            Array.from(document.querySelectorAll<HTMLElement>(".code-toolbar .btn, .code-version .btn, .code-version-pick"))
+            Array.from(document.querySelectorAll<HTMLElement>(".code-toolbar .btn, .wb-hist .btn, .wb-hist-pick"))
                 .map((el) => ({ n: el.textContent?.trim() || el.className, h: Math.round(el.getBoundingClientRect().height) }))
                 .filter((x) => x.h < 44),
         );
         expect(small).toEqual([]);
+        // the code versions are compared on the History tab, and the difference stacks on a phone
+        await page.getByRole("tab", { name: "History", exact: true }).click();
+        const history = page.getByTestId("history");
+        await history.getByLabel("Compare code version 1", { exact: true }).check();
+        await history.getByLabel("Compare code version 2", { exact: true }).check();
+        await pwExpect(page.getByTestId("diff-summary")).toBeVisible();
+        await noOverflow();
+        const stacked = await page.locator(".code-diff-row").first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
+        expect(stacked).toBe(1);
+        const smallHere = await page.evaluate(() =>
+            Array.from(document.querySelectorAll<HTMLElement>(".wb-hist .btn, .wb-hist-pick"))
+                .map((el) => ({ n: el.textContent?.trim() || el.className, h: Math.round(el.getBoundingClientRect().height) }))
+                .filter((x) => x.h < 44),
+        );
+        expect(smallHere).toEqual([]);
         await shot("editor-history-light-375");
 
         for (const hash of [testHash(), `#/projects/${projectId}/helpers`, `#/projects/${projectId}/write-code?title=Phone%20test&kind=web`]) {
@@ -1140,14 +1159,17 @@ describe("Loading and layout", () => {
         await page.setViewportSize({ width: 390, height: 844 });
         await page.emulateMedia({ colorScheme: "dark" });
         await page.waitForTimeout(400);
-        await visit(editorHash(testId, "?history=1"));
+        await visit(editorHash());
         await editorReady();
         await focusEditorEnd();
         await page.keyboard.type('\nconst fs = require("fs");', { delay: 5 });
         await pwExpect(page.getByTestId("check-state")).toContainText("1 error", { timeout: 8000 });
         await shot("editor-problems-dark-390");
-        await page.locator('[data-version="2"]').getByLabel("Compare version 2").check();
-        await page.locator('[data-version="1"]').getByLabel("Compare version 1").check();
+        await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+        await page.getByRole("dialog").getByRole("button", { name: "Discard changes", exact: true }).click();
+        await page.getByRole("tab", { name: "History", exact: true }).click();
+        await page.getByTestId("history").getByLabel("Compare code version 1", { exact: true }).check();
+        await page.getByTestId("history").getByLabel("Compare code version 2", { exact: true }).check();
         await shot("version-diff-dark-390");
         await page.emulateMedia({ colorScheme: null });
         await page.setViewportSize({ width: 1280, height: 900 });
@@ -1179,7 +1201,7 @@ describe("Against the real platform routes", () => {
             await pwExpect(page.locator(".cm-lintRange-error").first()).toBeVisible();
             // the real save refuses it and keeps the text
             await page.getByRole("button", { name: "Save and run", exact: true }).click();
-            await pwExpect(page.getByText("Not saved. Fix the problems listed below")).toBeVisible();
+            await pwExpect(page.getByText("Not saved. Fix the problems listed under Problems")).toBeVisible();
             expect(await editorText()).toContain("require");
             await page.getByRole("button", { name: "Discard changes", exact: true }).click();
             await page.getByRole("dialog").getByRole("button", { name: "Discard changes", exact: true }).click();
@@ -1190,14 +1212,14 @@ describe("Against the real platform routes", () => {
             await page.getByRole("button", { name: "Save and run", exact: true }).click();
             await pwExpect(page.getByTestId("saved-version")).toBeVisible({ timeout: 10_000 });
             await pwExpect(page.getByTestId("run-status")).toContainText("Not run:");
-            await page.getByRole("button", { name: "Version history", exact: true }).click();
-            await expect.poll(async () => page.getByTestId("versions").getByRole("listitem").count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+            await page.getByRole("tab", { name: "History", exact: true }).click();
+            await pwExpect(page.getByTestId("history")).toContainText("Code edited", { timeout: 10_000 });
 
             // back on the test page, the callout offers the generated version
             await visit(testHash(realId));
             await page.getByRole("button", { name: "Go back to the generated version", exact: true }).click();
             await page.getByRole("dialog").getByRole("button", { name: "Go back to the generated version", exact: true }).click();
-            await pwExpect(page.getByText("This is a code test")).toHaveCount(0, { timeout: 10_000 });
+            await pwExpect(page.getByTestId("custom-line")).toHaveCount(0, { timeout: 10_000 });
 
             // helpers
             await visit(`#/projects/${projectId}/helpers`);

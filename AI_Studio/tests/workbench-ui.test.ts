@@ -175,7 +175,7 @@ async function axeBoth(name: string, setup: () => Promise<void> = async () => un
 }
 
 describe("one page per test", () => {
-    it("opens on Steps with the steps, the generated script beside them and the last run's marks", async () => {
+    it("opens on Steps with the steps, the last run beside them and the last run's marks", async () => {
         await visit(`#/tests/${webId}`);
         await pwExpect(page.getByRole("heading", { level: 1, name: "Search finds products" })).toBeVisible();
         await pwExpect(tab("Steps")).toHaveAttribute("aria-selected", "true");
@@ -186,17 +186,19 @@ describe("one page per test", () => {
         expect(await headTexts()).toEqual([expect.stringContaining("Step 1 Open /products"), expect.stringContaining("Step 2 Type"), expect.stringContaining("Step 3 Click"), expect.stringContaining("Step 4")]);
         await pwExpect(page.getByTestId("step-mark")).toHaveCount(4);
         expect(await page.getByTestId("step-mark").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")))).toEqual(["passed", "passed", "passed", "passed"]);
-        // the script is on the right, the test first, the platform's setup folded
-        const rail = page.getByRole("complementary", { name: "Results and script" });
-        await pwExpect(rail.locator("pre.code").first()).toContainText("page.goto");
-        await pwExpect(rail.getByText(/^Show setup code \(\d+ lines\)$/)).toBeVisible();
+        // the column beside the steps is the last run, and only things about the steps: the script is on the Code tab, the run's
+        // evidence and the other browsers on History, requirements in the header
+        const rail = page.getByRole("complementary", { name: "Last run" });
         await pwExpect(rail.getByText("This test is passing")).toBeVisible();
+        await pwExpect(rail.locator("pre.code")).toHaveCount(0);
+        await pwExpect(rail.getByText("Runs of this test")).toHaveCount(0);
+        await pwExpect(rail.getByTestId("latest-run")).toHaveCount(0);
         // the page says where it came from, and the compliance noise is not on a plain test
         await pwExpect(page.getByTestId("origin-strip")).toBeVisible();
         await pwExpect(page.getByRole("heading", { name: "What this test checks" })).toBeVisible();
-        // the script sits to the right of the steps on a wide screen
-        const [steps, script] = await Promise.all([page.locator(".bld-steps").boundingBox(), rail.locator("pre.code").first().boundingBox()]);
-        expect(script!.x).toBeGreaterThan(steps!.x + steps!.width - 1);
+        // the last run sits to the right of the steps on a wide screen
+        const [steps, last] = await Promise.all([page.locator(".bld-steps").boundingBox(), rail.getByRole("heading", { name: "Last run" }).boundingBox()]);
+        expect(last!.x).toBeGreaterThan(steps!.x + steps!.width - 1);
     });
 
     it("keeps the old routes working: /builder is the Steps tab and /code the Code tab", async () => {
@@ -393,7 +395,7 @@ describe("a failing run, in view", () => {
         await pwExpect(page.getByTestId("saved-bar")).toContainText(/Saved version [0-9]+[.]/);
         // the live strip, then the verdict in the results column, without leaving the page
         await pwExpect(page.getByTestId("run-strip")).toBeVisible({ timeout: 30_000 });
-        const rail = page.getByRole("complementary", { name: "Results and script" });
+        const rail = page.getByRole("complementary", { name: "Last run" });
         await pwExpect(rail.getByText("This test is failing")).toBeVisible({ timeout: 90_000 });
         expect(page.url()).toContain(`#/tests/${webId}/steps`);
         const failure = rail.getByTestId("failure-summary");
@@ -404,10 +406,11 @@ describe("a failing run, in view", () => {
         await pwExpect(page.locator(".bld-step.is-failed")).toHaveCount(1);
         await pwExpect(page.locator(".bld-step.is-failed")).toContainText("Step 4");
         expect(await page.getByTestId("step-mark").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")))).toEqual(["passed", "passed", "passed", "failed"]);
-        // the runs of this test as a strip, newest first
-        const strip = rail.getByRole("list", { name: "Recent runs, newest first" });
-        await pwExpect(strip.locator("li").first()).toContainText("Did not pass");
-        await pwExpect(strip).toContainText("Passed");
+        // the Steps column offers what belongs to the steps: no link to the Steps tab itself, no second Run (the header has it), no
+        // list of runs (History has them)
+        await pwExpect(failure.getByRole("link", { name: "Edit steps", exact: true })).toHaveCount(0);
+        await pwExpect(failure.getByRole("button", { name: "Run this test again" })).toHaveCount(0);
+        await pwExpect(rail.getByRole("list", { name: "Recent runs, newest first" })).toHaveCount(0);
         await shot("failing-steps");
         // the edit that came before the failure can be undone, and the page says why it offers it
         const undo = rail.getByRole("button", { name: "Undo my last edit", exact: true });
@@ -455,7 +458,7 @@ describe("the Code tab and the way to code and back", () => {
         await page.getByRole("button", { name: "Switch to code", exact: true }).first().click();
         await page.getByRole("dialog", { name: "Switch this test to code?" }).getByRole("button", { name: "Switch to code", exact: true }).click();
         await pwExpect(page).toHaveURL(new RegExp(`#/tests/${plainId}/code`));
-        await pwExpect(page.getByText("This is a code test", { exact: true })).toBeVisible({ timeout: 15_000 });
+        await pwExpect(page.getByTestId("custom-line").getByRole("button", { name: "Go back to the generated version", exact: true })).toBeVisible({ timeout: 15_000 });
         await pwExpect(page.locator(".page-head").getByText("Code test", { exact: true })).toBeVisible();
         await pwExpect(page.locator(".cm-editor")).toBeVisible({ timeout: 15_000 });
         await page.locator(".cm-content").click();
@@ -499,6 +502,9 @@ describe("History: everything that happened to the test", () => {
         await visit(`#/tests/${webId}/history`);
         const history = page.getByTestId("history");
         await pwExpect(history.getByRole("list", { name: "History of this test" })).toBeVisible();
+        // History is full width: no last-run column; the latest run's evidence is the card on top
+        await pwExpect(page.getByRole("complementary", { name: "Last run" })).toBeHidden();
+        await pwExpect(page.getByTestId("latest-run").getByRole("heading", { name: "Latest run" })).toBeVisible();
         await pwExpect(history).toContainText("The steps as they were before the first edit");
         await pwExpect(history).toContainText("Steps edited");
         await pwExpect(history).toContainText("Undid version");
@@ -601,7 +607,7 @@ describe("looks and works everywhere", () => {
         await heads().nth(3).click();
         await page.getByLabel("Text it should contain", { exact: true }).fill("no such words anywhere");
         await bar().getByRole("button", { name: "Save and run", exact: true }).click();
-        await pwExpect(page.getByRole("complementary", { name: "Results and script" }).getByText("This test is failing")).toBeVisible({ timeout: 90_000 });
+        await pwExpect(page.getByRole("complementary", { name: "Last run" }).getByText("This test is failing")).toBeVisible({ timeout: 90_000 });
         await heads().nth(1).click();
         await page.getByLabel("Text to type", { exact: true }).fill("tent");
         await pwExpect(bar()).toBeVisible();
@@ -625,7 +631,7 @@ describe("looks and works everywhere", () => {
         await pwExpect(heads().first()).toBeVisible();
         await page.waitForTimeout(400); // the panel that was hidden has settled
         await noOverflow();
-        const rail = await page.getByRole("complementary", { name: "Results and script" }).boundingBox();
+        const rail = await page.getByRole("complementary", { name: "Last run" }).boundingBox();
         const main = await page.locator(".wb-main").boundingBox();
         expect(rail!.y).toBeGreaterThan(main!.y + main!.height - 4);
         const small = await page.evaluate(() =>

@@ -159,16 +159,20 @@ describe("quarantine in the UI", () => {
         await dialog.getByLabel("Note (optional)").fill("Fixed the wait");
         await dialog.getByRole("button", { name: "Release from quarantine" }).click();
         await pwExpect(dialog).toBeHidden();
-        await pwExpect(page.getByText("Quarantine ended; this test counts again", { exact: true })).toBeVisible();
+        // quarantine is a status: once released, nothing about it stays above the tabs; the History tab keeps what happened
         await pwExpect(page.getByTestId("quarantine-callout")).toHaveCount(0);
-        await pwExpect(page.getByText("Quarantine history (2)")).toBeVisible();
-        // it still looks unreliable, so quarantine is offered again, never applied by itself
-        await pwExpect(page.getByText("This test is unreliable")).toBeVisible();
+        await pwExpect(page.getByText("This test is unreliable")).toHaveCount(0);
+        await page.getByRole("tab", { name: "History", exact: true }).click();
+        await pwExpect(page.getByTestId("history")).toContainText("released it from quarantine");
+        await pwExpect(page.getByTestId("history")).toContainText("put it in quarantine");
     });
 
-    it("puts it back in quarantine from its own page, with the reason prefilled", async () => {
-        await open(testUrl("wobbly"), async () => pwExpect(page.getByText("This test is unreliable")).toBeVisible());
-        await page.getByRole("button", { name: "Quarantine", exact: true }).click();
+    it("puts it back in quarantine from its own page (the header menu, the one place to act), with the reason prefilled", async () => {
+        await open(testUrl("wobbly"), async () => pwExpect(page.getByRole("heading", { level: 1 })).toBeVisible());
+        // it still looks unreliable, so quarantine is offered in the menu, never applied by itself
+        await pwExpect(page.getByTestId("quarantine-callout")).toHaveCount(0);
+        await page.getByRole("button", { name: "More actions", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Quarantine", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Put this test in quarantine" });
         await pwExpect(dialog.getByLabel("Why is it in quarantine?")).toHaveValue(/^Passed and failed on identical runs \d+ times$/);
         await pwExpect(dialog.getByLabel("Your name")).toHaveValue("Dana");

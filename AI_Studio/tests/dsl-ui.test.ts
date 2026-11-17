@@ -325,7 +325,7 @@ describe("saving from the text", () => {
         await writeText(text);
         await pwExpect(page.getByText("No problems found.")).toBeVisible({ timeout: 10_000 });
         await unsaved().getByRole("button", { name: "Save and run", exact: true }).click();
-        await pwExpect(page.getByRole("complementary", { name: "Results and script" }).getByText("This test is passing")).toBeVisible({ timeout: 90_000 });
+        await pwExpect(page.getByRole("complementary", { name: "Last run" }).getByText("This test is passing")).toBeVisible({ timeout: 90_000 });
         await pwExpect(unsaved()).toHaveCount(0);
         await pwExpect(editor()).toBeVisible();
         expect(await textNow()).toContain('Type "tent" into');

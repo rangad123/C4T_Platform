@@ -1,4 +1,4 @@
-/* The test workbench: one page per test, four tabs, a results column that stays put. Design tokens only. */
+/* The test workbench: one page per test, four tabs, each with only its own things. Design tokens only. */
 .wb { display: grid; gap: 16px; min-width: 0; }
 .wb [hidden] { display: none !important; }
 
@@ -9,11 +9,11 @@
 .wb-tab[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--text-brand); }
 .wb-tab-dot, .wb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-warning-fg); flex: none; }
 
-/* Work on the left, the last run and the script on the right; stacked on a narrow screen. */
+/* Work on the left, the last run and the tab's own column on the right; stacked on a narrow screen. History has no column. */
 .wb-grid { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1100px) { .wb-grid { grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); } }
+@media (min-width: 1100px) { .wb-grid:not(.is-full) { grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); } }
 .wb-main, .wb-rail, .wb-results { min-width: 0; grid-template-columns: minmax(0, 1fr); }
-.wb-script-slot:empty { display: none; }
+.wb-code-slot:empty { display: none; }
 .wb .bld-grid { grid-template-columns: minmax(0, 1fr); }
 
 /* The unsaved bar stays at the bottom of the work area while changes are not saved. */
@@ -37,12 +37,6 @@
 .bld-step.is-failed { box-shadow: inset 3px 0 0 var(--status-error-fg); }
 .bld-edited, .bld-err { flex-basis: 100%; padding-left: 0; }
 .bld-err { color: var(--status-error-fg); }
-
-/* Runs of this test as a strip of marks with times. */
-.wb-runstrip { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.wb-runchip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-full); font-size: var(--type-caption-size); }
-.wb-runchip.is-passed { color: var(--status-success-fg); border-color: var(--status-success-line); }
-.wb-runchip.is-failed { color: var(--status-error-fg); border-color: var(--status-error-line); }
 
 /* The History tab: one list of everything that happened. */
 .wb-history { list-style: none; margin: 0; padding: 0; }

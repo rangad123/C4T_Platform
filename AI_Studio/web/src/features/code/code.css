@@ -23,7 +23,6 @@
 .code-ok { margin: 0; padding: 16px var(--space-card-padding); }
 
 .code-run { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin: 0; padding: 14px var(--space-card-padding); border: 1px solid var(--border-default); border-radius: var(--radius-card); background: var(--surface-raised); }
-.code-gitline { display: block; margin-top: 6px; font-family: var(--font-mono); font-size: 12.5px; overflow-wrap: anywhere; }
 
 /* Version history */
 .code-versions { list-style: none; margin: 0; padding: 0; }

@@ -181,6 +181,8 @@ describe("environments in the UI", () => {
         await panel.getByRole("radio", { name: "staging", exact: true }).check();
         await pwExpect(panel.getByTestId("run-sentence")).toContainText("against staging");
         await panel.getByRole("button", { name: "Start run" }).click();
+        // the result per environment is run evidence: it is on the History tab
+        await page.getByRole("tab", { name: "History", exact: true }).click();
         const strip = page.getByRole("list", { name: "Last result in each environment" });
         await pwExpect(strip.getByRole("listitem").filter({ hasText: "staging" })).toContainText("Failed", { timeout: 120_000 });
         await pwExpect(strip.getByRole("listitem").filter({ hasText: "staging" })).toContainText(/5O|over/);
@@ -220,6 +222,7 @@ describe("environments in the UI", () => {
 
         await panel.getByRole("radio", { name: "staging", exact: true }).check();
         await panel.getByRole("button", { name: "Start run" }).click();
+        await page.getByRole("tab", { name: "History", exact: true }).click();
         await pwExpect(page.getByRole("list", { name: "Last result in each environment" }).getByRole("listitem").filter({ hasText: "staging" })).toContainText("Passed", { timeout: 120_000 });
         expect(staging.mutations).toBe(1);
         expect(prod.mutations).toBe(0);

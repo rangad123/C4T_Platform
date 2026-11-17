@@ -283,7 +283,7 @@ describe("a person's own runner runs their tests, from setting it up in Settings
         expect(exec[0].status).not.toBe("passed");
         expect(exec[0].error).toMatch(/Total paid|toBeVisible/);
 
-        await pageA.goto(`${BASE}/#/tests/${ids.receipt}`);
+        await pageA.goto(`${BASE}/#/tests/${ids.receipt}/history`); // the screenshot of the failed run is on the History tab
         const shot = pageA.getByRole("img", { name: "Screenshot at the moment of failure" }).first();
         await pwExpect(shot).toBeVisible({ timeout: 30_000 });
         await pwExpect.poll(() => shot.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0);

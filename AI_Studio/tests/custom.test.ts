@@ -538,6 +538,17 @@ describe("hand-written tests, with the run policy on", () => {
         expect(t.validationStatus).toBe("FAILED_VALIDATION");
         expect(JSON.stringify(t.executions)).toMatch(/Cannot find module|helpers\/open-shop/);
     }, 240_000);
+
+    it("a plain Save (run: false) keeps the new version and starts no run", async () => {
+        const before = (await versions("api"))[0]!.version;
+        const res = await e.call("PUT", `/api/tests/${ids.api}/script`, { content: API("saved-not-run"), run: false });
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        expect(res.body).toMatchObject({ version: before + 1, jobId: null });
+        expect(await script("api")).toBe(API("saved-not-run"));
+        expect((await detail("api")).validationStatus).toBe("PENDING");
+        expect(hitsOf("saved-not-run")).toBe(0);
+        expect((await e.call("PUT", `/api/tests/${ids.api}/script`, { content: "x", run: "no" })).status).toBe(400);
+    }, 60_000);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

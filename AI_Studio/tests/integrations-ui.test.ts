@@ -177,7 +177,7 @@ describe("Notion and Sentry journey", () => {
     }, 120_000);
 
     it("creates a Notion page from the failed test and shows related errors in Sentry with the reason, as links out", async () => {
-        await page.goto(`${BASE}/#/tests/${testId}`);
+        await page.goto(`${BASE}/#/tests/${testId}/history`);
         const tracker = page.getByRole("region", { name: "Issue tracker" });
         await pwExpect(tracker).toBeVisible();
         // only one place to file the issue: Sentry is not offered
@@ -212,7 +212,7 @@ describe("Notion and Sentry journey", () => {
 
     it("says plainly when nothing looks related, and when Sentry cannot be checked", async () => {
         sentryMode = "empty";
-        await page.goto(`${BASE}/#/tests/${testId}`);
+        await page.goto(`${BASE}/#/tests/${testId}/history`);
         const related = page.getByRole("region", { name: "Related errors in Sentry" });
         await related.getByRole("button", { name: "Check again" }).click();
         await pwExpect(related.getByText("Nothing in Sentry looks related")).toBeVisible();
@@ -226,7 +226,7 @@ describe("Notion and Sentry journey", () => {
     }, 60_000);
 
     it("shows nothing about Sentry on a project that has not connected it", async () => {
-        await page.goto(`${BASE}/#/tests/${otherTestId}`);
+        await page.goto(`${BASE}/#/tests/${otherTestId}/history`);
         await pwExpect(page.getByTestId("issue-empty")).toBeVisible();
         await page.waitForLoadState("networkidle");
         await pwExpect(page.getByRole("region", { name: "Related errors in Sentry" })).toHaveCount(0);
@@ -242,7 +242,7 @@ describe("Notion and Sentry journey", () => {
         await pwExpect(box.getByRole("button", { name: "Connect Sentry" })).toBeVisible();
         await pwExpect(panel.getByRole("list", { name: "Connected issue trackers" })).toContainText("Notion");
 
-        await page.goto(`${BASE}/#/tests/${testId}`);
+        await page.goto(`${BASE}/#/tests/${testId}/history`);
         await pwExpect(page.getByRole("region", { name: "Issue tracker" })).toBeVisible();
         await page.waitForLoadState("networkidle");
         await pwExpect(page.getByRole("region", { name: "Related errors in Sentry" })).toHaveCount(0);
@@ -250,7 +250,7 @@ describe("Notion and Sentry journey", () => {
 
     it("works on a phone-sized screen without sideways scrolling", async () => {
         await page.setViewportSize({ width: 390, height: 800 });
-        for (const target of [`${BASE}/#/tests/${testId}`]) {
+        for (const target of [`${BASE}/#/tests/${testId}/history`]) {
             await page.goto(target);
             await pwExpect(page.getByRole("region", { name: "Issue tracker" })).toBeVisible();
             expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);

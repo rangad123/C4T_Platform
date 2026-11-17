@@ -296,7 +296,7 @@ describe("saving", () => {
         await page.getByLabel("Text the title should contain", { exact: true }).fill("Products");
         await unsaved().getByRole("button", { name: "Save and run", exact: true }).click();
         // the result arrives in the results column of the same page
-        await pwExpect(page.getByRole("complementary", { name: "Results and script" }).getByText("This test is passing")).toBeVisible({ timeout: 90_000 });
+        await pwExpect(page.getByRole("complementary", { name: "Last run" }).getByText("This test is passing")).toBeVisible({ timeout: 90_000 });
         await pwExpect(unsaved()).toHaveCount(0);
         const s = await specNow();
         expect(s.spec.steps[1].value).toBe("alpenglow");

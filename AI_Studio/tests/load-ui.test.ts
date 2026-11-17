@@ -108,7 +108,8 @@ describe("the result on the test page", () => {
         const exec = repo.addExecution({ testId: id, scriptId: null, jobId: null, attempt: 1, status: "failed", durationMs: 4000, startedAt: new Date().toISOString(), steps: [] });
         await recordMetrics(repo.db.sql, { projectId, testId: id, executionId: exec, samples });
 
-        await page.goto(`${BASE}/#/tests/${id}`);
+        // the load numbers are run evidence: the History tab's latest run
+        await page.goto(`${BASE}/#/tests/${id}/history`);
         const card = page.getByTestId("load-check");
         await pwExpect(card.getByText("Handles 4 users at once", { exact: true })).toBeVisible();
         await pwExpect(card.getByText("read-only requests, about 10 seconds, at most 300")).toBeVisible();
@@ -128,6 +129,7 @@ describe("the result on the test page", () => {
         for (const empty of ["load_4xx", "load_5xx", "load_429", "load_network"]) await pwExpect(card.locator(`[data-metric="${empty}"]`)).toHaveCount(0);
         // the ordinary speed card is not shown for a load check, and the finding reads in plain words
         await pwExpect(page.getByTestId("page-speed")).toHaveCount(0);
+        await page.goto(`${BASE}/#/tests/${id}/steps`);
         await pwExpect(page.getByText("Load check:").first()).toBeVisible();
         await pwExpect(page.getByText("struggled at 2 users at once").first()).toBeVisible();
     }, 120_000);

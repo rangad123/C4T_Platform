@@ -128,6 +128,8 @@ describe("cross-browser check in the UI", () => {
 
     it("shows where and why on the test page, then checks again on Safari from there", async () => {
         await page.locator("a.sr-title", { hasText: "A special offer can be claimed" }).click();
+        // the browsers matrix is run evidence: it is on the History tab
+        await page.getByRole("tab", { name: "History", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "Other browsers & screen sizes" })).toBeVisible();
         await pwExpect(page.getByText("This doesn’t behave the same everywhere")).toBeVisible();
         await pwExpect(page.getByText("Medium severity").first()).toBeVisible();

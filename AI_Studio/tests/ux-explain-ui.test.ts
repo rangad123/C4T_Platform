@@ -337,7 +337,7 @@ describe("where a test came from", () => {
 });
 
 describe("what failed", () => {
-    it("shows the step in plain words with expected and got, and the actions that exist", async () => {
+    it("shows the step in plain words with expected and got, and only the actions that belong to the tab", async () => {
         await visit(testHash("status-401"));
         const box = page.getByTestId("failure-summary");
         await pwExpect(box.getByRole("heading", { name: "What failed" })).toBeVisible();
@@ -347,15 +347,25 @@ describe("what failed", () => {
         await pwExpect(box.getByTestId("failure-facts")).toContainText("HTTP 200");
         await pwExpect(box.getByTestId("failure-facts")).toContainText("Got");
         await pwExpect(box.getByTestId("failure-facts")).toContainText("HTTP 401");
-        await pwExpect(box.getByRole("link", { name: "Edit steps", exact: true })).toHaveAttribute("href", `#/tests/${ids["status-401"]}/steps`);
+        // On Steps: no link to the tab it is on; running again is the header's Run, so the summary has no second one.
+        await pwExpect(box.getByRole("link", { name: "Edit steps", exact: true })).toHaveCount(0);
         await pwExpect(box.getByRole("button", { name: "Switch to code", exact: true })).toBeVisible();
-        await pwExpect(box.getByRole("button", { name: "Run this test again", exact: true })).toBeVisible();
+        await pwExpect(box.getByRole("button", { name: /run/i })).toHaveCount(0);
         // Actions that do not apply are not offered: nothing to repair, nothing unreliable.
         await pwExpect(box.getByRole("button", { name: "Apply the repair" })).toHaveCount(0);
         await pwExpect(box.getByRole("button", { name: /quarantine/i })).toHaveCount(0);
         // The stale advice is gone.
         await pwExpect(page.getByText(/import it again/i)).toHaveCount(0);
         await shot("failing-light-1280");
+        // On DSL: Edit steps leads to the Steps tab, and Switch to code is offered.
+        await visit(`${testHash("status-401")}/text`);
+        await pwExpect(box.getByRole("link", { name: "Edit steps", exact: true })).toHaveAttribute("href", `#/tests/${ids["status-401"]}/steps`);
+        await pwExpect(box.getByRole("button", { name: "Switch to code", exact: true })).toBeVisible();
+        // On Code: the Switch to code card is already on the tab, so the summary does not repeat it.
+        await visit(`${testHash("status-401")}/code`);
+        await pwExpect(box.getByRole("link", { name: "Edit steps", exact: true })).toBeVisible();
+        await pwExpect(box.getByRole("button", { name: "Switch to code", exact: true })).toHaveCount(0);
+        await pwExpect(page.getByText("Want to change the code itself?")).toBeVisible();
     });
 
     it("says what the page showed for a text check, in the step's own plain words", async () => {
@@ -372,7 +382,7 @@ describe("what failed", () => {
         const box = page.getByTestId("failure-summary");
         await pwExpect(box.getByTestId("failure-facts")).toHaveCount(0);
         await pwExpect(page.locator(".callout", { hasText: "This test is failing" })).toContainText("the page said something unusual");
-        await pwExpect(box.getByRole("button", { name: "Run this test again", exact: true })).toBeVisible();
+        await pwExpect(box.getByRole("button", { name: "Switch to code", exact: true })).toBeVisible();
     });
 
     it("names a missing API token as the cause and links to where it is added", async () => {
@@ -403,9 +413,10 @@ describe("what failed", () => {
         await pwExpect(page.getByText("not a broken test")).toBeVisible();
     });
 
-    it("offers “Run again” from the summary and it starts a run", async () => {
+    it("runs again from the header's Run, the one Run on the page, and it starts a run", async () => {
         await visit(testHash("status-401"));
-        await page.getByTestId("failure-summary").getByRole("button", { name: "Run this test again", exact: true }).click();
+        await pwExpect(page.getByTestId("failure-summary").getByRole("button", { name: "Run this test again" })).toHaveCount(0);
+        await page.getByRole("button", { name: "Run again", exact: true }).first().click();
         await pwExpect.poll(() => platform.repo.listJobs(shop.projectId).some((j) => !TERMINAL_STATES.includes(j.status))).toBe(true);
         finishQueuedJobs();
         await pwExpect(page.getByRole("button", { name: "Run again" }).first()).toBeEnabled({ timeout: 15_000 });
@@ -449,8 +460,8 @@ describe("Term: a word with its explanation one press away", () => {
 
 describe("the script shows the test first", () => {
     it("folds the platform's setup code behind one line and still copies the whole script", async () => {
-        await visit(testHash("explored"));
-        // the script sits in the results column of the Steps tab: no button to open it
+        await visit(`${testHash("explored")}/code`);
+        // the script is on the Code tab, open as it loads: no button to show it
         const preview = page.getByTestId("script-preview");
         await pwExpect(preview).toBeVisible();
         const first = preview.locator("pre.code").first();
@@ -476,8 +487,8 @@ describe("the script shows the test first", () => {
     });
 
     it("an API script has a shorter setup and is folded the same way", async () => {
-        await visit(testHash("openapi"));
-        // the script sits in the results column of the Steps tab: no button to open it
+        await visit(`${testHash("openapi")}/code`);
+        // the script is on the Code tab, open as it loads: no button to show it
         const preview = page.getByTestId("script-preview");
         await pwExpect(preview.locator("pre.code").first()).toContainText("test(");
         await pwExpect(preview.getByText(/^Show setup code \(\d+ lines\)$/)).toBeVisible();
@@ -506,7 +517,7 @@ describe("compliance only where it says something", () => {
 
 describe("less noise", () => {
     it("shows one line and one action, not a card, when no issue tracker is connected", async () => {
-        await visit(testHash("status-401"));
+        await visit(`${testHash("status-401")}/history`);
         const line = page.getByTestId("issue-empty");
         await pwExpect(line).toContainText("No issue tracker is connected");
         await pwExpect(line.getByRole("link")).toHaveCount(1);

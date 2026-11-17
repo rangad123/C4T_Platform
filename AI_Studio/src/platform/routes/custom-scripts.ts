@@ -52,9 +52,10 @@ export function registerCustomScriptRoutes(ctx: RouteCtx): void {
     // ── the script ──
     app.put("/api/tests/:id/script", async (req, reply) => {
         const t = test((req.params as { id: string }).id);
-        const body = Content.parse(req.body);
+        // `run: false` is the editor's plain Save: a new version, no run (saving never starts a run by itself).
+        const body = Content.extend({ run: z.boolean().optional() }).parse(req.body);
         try {
-            const r = await svc.saveScript(t.id, body.content, { note: body.note ?? null });
+            const r = await svc.saveScript(t.id, body.content, { note: body.note ?? null, queue: body.run !== false });
             return { version: r.version, diagnostics: r.diagnostics, jobId: r.jobId, ...(r.note ? { note: r.note } : {}) };
         } catch (e) {
             return refuse(reply, e);
