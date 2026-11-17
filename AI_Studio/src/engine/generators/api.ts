@@ -9,7 +9,7 @@
  * `data` object, so later `{{name}}` placeholders (paths, query, headers, bodies and assertion
  * expectations) resolve to them at runtime.
  */
-import { describeStep, placeholdersIn, type Step, type TestSpec } from "../spec/schema.js";
+import { describeStep, placeholdersIn, repeatOf, type Step, type TestSpec } from "../spec/schema.js";
 import type { RenderContext, RenderedScript, ScriptGenerator } from "./types.js";
 import { knownBugLine, testDetails } from "./playwright.js";
 import { dataDeclaration, dataRowsFor, dataSetDeclaration, expr, fileHeader, lit, ROW_SETUP, rowTitle, scriptFilename } from "./render-utils.js";
@@ -150,7 +150,7 @@ function requestStrings(step: Extract<Step, { action: "request" }>): string[] {
 const hasPlaceholder = (v: unknown): v is string => typeof v === "string" && placeholdersIn(v).length > 0;
 
 /** Placeholders that only exist once a step has captured them (not builtins, not declared testData). */
-const isRuntimeVar = (name: string, declared: Set<string>) => name !== "unique" && !name.startsWith("credentials.") && !name.startsWith("env.") && !declared.has(name);
+const isRuntimeVar = (name: string, declared: Set<string>) => name !== "unique" && !repeatOf(name) && !name.startsWith("credentials.") && !name.startsWith("env.") && !declared.has(name);
 
 /** The `call(...)` expression of a request step (also used to repeat it for latency measurements). */
 function callExpr(step: Extract<Step, { action: "request" }>): string {

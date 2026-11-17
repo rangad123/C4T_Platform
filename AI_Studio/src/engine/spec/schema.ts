@@ -580,9 +580,38 @@ export const ScenarioSchema = z.object({
 });
 export type Scenario = z.infer<typeof ScenarioSchema>;
 
-/** Replace {{name}} placeholders. `{{unique}}` resolves to a per-call token. */
+/** The longest value a `{{repeat.<c>.<n>}}` placeholder stands for (the longest input class, explore/input-classes.ts INPUT_VALUE_MAX). */
+export const REPEAT_MAX = 10_000;
+const REPEAT_NAME = /^repeat\.([A-Za-z0-9])\.([1-9]\d{0,4})$/;
+
+/**
+ * `{{repeat.<c>.<n>}}` stands for the letter or digit `c` written `n` times (1 to REPEAT_MAX), so a long input value is written short in a
+ * prompt and a step: the interpreter (interpolate) and the rendered script (generators/render-utils.ts) both expand it when the step runs.
+ * Returns the character and count, or undefined when `name` is not such a placeholder.
+ */
+export function repeatOf(name: string): { char: string; count: number } | undefined {
+    const m = REPEAT_NAME.exec(name);
+    if (!m) return undefined;
+    const count = Number(m[2]);
+    return count <= REPEAT_MAX ? { char: m[1]!, count } : undefined;
+}
+
+/** The value with only its `{{repeat.<c>.<n>}}` placeholders expanded; every other placeholder is left as written. */
+export function expandRepeats(value: string): string {
+    return value.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (m, key: string) => {
+        const r = repeatOf(key);
+        return r ? r.char.repeat(r.count) : m;
+    });
+}
+
+/**
+ * Replace {{name}} placeholders. `{{unique}}` resolves to a per-call token; `{{repeat.<c>.<n>}}` to `c` written `n` times (before any
+ * data value, as the rendered script does).
+ */
 export function interpolate(template: string, data: Record<string, string>): string {
     return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (m, key: string) => {
+        const r = repeatOf(key);
+        if (r) return r.char.repeat(r.count);
         if (key in data) return data[key]!;
         if (key === "unique") return String(Date.now());
         return m;
