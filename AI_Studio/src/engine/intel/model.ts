@@ -182,6 +182,11 @@ export const WorkflowSchema = z
         sourceType: SourceTypeSchema,
         /** The pages, requests or document lines it was built from. */
         evidence: z.array(EvidenceSchema).max(20).default([]),
+        /**
+         * For a workflow found by exploration that document lines describe (merge.ts): what each cited quote was read from, as a rule's
+         * anchor is (`ref` is the quote evidence's ref). Absent otherwise. Only sha256 hex besides the ref.
+         */
+        anchors: z.array(z.object({ ref: Text(500), text: Sha256, lines: Sha256 }).strict()).max(20).optional(),
     })
     .strict();
 
