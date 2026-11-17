@@ -10,10 +10,12 @@ import { register } from "tsx/esm/api";
 import { holdLock } from "./lock.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const envFile = path.join(root, ".env");
-if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 const argv = process.argv.slice(2);
-if (!argv.includes("--help") && !argv.includes("-h")) {
+// bench-report only reads result files: no browser, no AI, so no lock and no .env.
+const readOnly = argv[0] === "bench-report";
+const envFile = path.join(root, ".env");
+if (!readOnly && fs.existsSync(envFile)) process.loadEnvFile(envFile);
+if (!readOnly && !argv.includes("--help") && !argv.includes("-h")) {
     try {
         await holdLock("browser", `scripts/eval.mjs ${argv.join(" ")}`.trim());
     } catch (e) {
