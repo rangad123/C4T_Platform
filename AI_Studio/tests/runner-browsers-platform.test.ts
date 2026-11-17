@@ -39,6 +39,8 @@ const connect = async (projectId: string, name: string, caps: Capabilities) => {
     return agent;
 };
 const svc = () => getAgentServices(platform);
+/** Started on this open server (no accounts), whose runner the runs go to: a run nobody started has no runner (one runner per person). */
+const OPEN_START = { kind: "open", id: null };
 
 beforeAll(async () => {
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "5", AGENT_WATCH_MS: "50", AGENT_NO_AGENT_GRACE_SECONDS: "5" }); // one project, several runners
@@ -92,7 +94,7 @@ describe("a run's browser", () => {
 
     const runOnce = async (browser: unknown) => {
         const app = platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
-        const job = await platform.repo.createJob(projectId, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
+        const job = await platform.repo.createJob(projectId, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy: OPEN_START });
         const pending = svc()
             .executorFor({ projectId, jobId: job.id })
             .execute("playwright", { scratchDir: path.join(dataDir, "scratch"), scripts: [{ testId: "WEB-001", filename: "WEB-001.spec.ts", content: "// script" }] }, { run: { baseUrl: APP, headless: true } }, { workers: 1 });
@@ -127,7 +129,7 @@ describe("a run's browser", () => {
 
     it("a browser the protocol does not know is refused with the rest of the result", async () => {
         const app = platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
-        const job = await platform.repo.createJob(projectId, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
+        const job = await platform.repo.createJob(projectId, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy: OPEN_START });
         const pending = svc()
             .executorFor({ projectId, jobId: job.id })
             .execute("playwright", { scratchDir: path.join(dataDir, "scratch"), scripts: [{ testId: "WEB-002", filename: "WEB-002.spec.ts", content: "// script" }] }, { run: { baseUrl: APP, headless: true } }, { workers: 1, timeoutMs: 20_000 })
