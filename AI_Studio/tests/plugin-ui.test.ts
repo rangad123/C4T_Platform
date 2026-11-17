@@ -69,7 +69,9 @@ beforeAll(async () => {
         }
     }, KEY);
     page = await context.newPage();
-    page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+    // Signed in with the shared access key, which has no AI keys of its own: the shell's GET /api/me/ai is refused (403) on purpose
+    // (ai-config-api.test.ts) and the page shows "AI not set up" (ai-keys-ui.test.ts). That one refusal is expected; any other error counts.
+    page.on("console", (m) => m.type() === "error" && !(/status of 403/.test(m.text()) && new URL(m.location().url || "about:blank").pathname === "/api/me/ai") && consoleErrors.push(m.text()));
     page.on("pageerror", (e) => consoleErrors.push(String(e)));
 }, 90_000);
 
