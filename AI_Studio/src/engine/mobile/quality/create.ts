@@ -40,11 +40,13 @@ export async function createQualityTests(
             if (bad) throw new Error(bad);
             if (spec.kind !== "mobile") throw new Error("It is not a phone test");
             const h = await sink.createTest({ spec, framework: "taqwright", validation: "NEEDS_REVIEW", reason: t.reason, meta: { model: ctx.llm.modelName, authoring: "exploration", explanation: spec.description, phone: { appPackage: o.appPackage, ideaId: t.id, check: t.kind } } });
+            // The key the host saved the test under (taken at save, orchestrator.ts persistNew).
+            spec.testId = h.testId;
             await sink.saveScript(h, renderWithAdapter(spec, "taqwright", { baseUrl: `android-app://${o.appPackage}`, apiBaseUrl: `android-app://${o.appPackage}` }), true);
             await sink.counters({ testsGenerated: 1, testsNeedingReview: 1 }, true);
             o.summary.testsGenerated++;
             made++;
-            ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (needs a look: ${t.reason.split("\n")[0]!.slice(0, 160)})` });
+            ctx.emit({ stage: "generation", kind: "script_generated", message: `${spec.testId} ${spec.title} (needs a look: ${t.reason.split("\n")[0]!.slice(0, 160)})` });
         } catch (e) {
             o.summary.errors.push(`${t.title}: ${e instanceof Error ? e.message : String(e)}`);
             ctx.emit({ stage: "generation", kind: "scenario_failed", level: "warn", message: `${t.title} could not be written: ${e instanceof Error ? e.message : String(e)}` });
