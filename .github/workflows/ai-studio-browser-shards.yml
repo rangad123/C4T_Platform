@@ -43,16 +43,16 @@ jobs:
           node-version: 24
       # Round-robin over the file list; tests/shard-durations.json ({"tests/x.test.ts": seconds}), when present, balances by time
       # instead (longest first, each file to the shard with the least time so far).
+      # Local machine only (localOnly below): these need an unprivileged user network namespace (unshare -rn) for the scanners'
+      # isolated network, which GitHub's Ubuntu image blocks. Run them locally before a push:
+      #   npx vitest run tests/security-profile-gate.test.ts tests/security-profile-gate-expiry.test.ts
+      # security-egress-isolation*.test.ts and security-scanner-isolation.test.ts stay here; they skip their namespace parts themselves.
       - id: split
         run: |
           node --input-type=module -e '
             import fs from "node:fs";
             import { tiers } from "./scripts/test-tiers.mjs";
             const t = tiers();
-            // Local machine only: these need an unprivileged user network namespace (unshare -rn) for the scanners' isolated
-            // network, which GitHub's Ubuntu image blocks. Run them locally before a push:
-            //   npx vitest run tests/security-profile-gate.test.ts tests/security-profile-gate-expiry.test.ts
-            // (security-egress-isolation*, security-scanner-isolation skip their namespace parts here by themselves.)
             const localOnly = ["tests/security-profile-gate.test.ts", "tests/security-profile-gate-expiry.test.ts"];
             const files = [...t.browser, ...t.phone].filter((f) => !localOnly.includes(f));
             console.log(`local machine only (not run here): ${localOnly.join(", ")}`);
