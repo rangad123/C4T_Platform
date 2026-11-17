@@ -1,7 +1,9 @@
 # AI keys (round 57)
 
-An AI key here is a whole AI configuration: the provider, the model (and an optional fast model), the key itself, and an address for a
-custom endpoint. There are two kinds. A project may name the AI model its work uses (below); it never holds a key.
+An AI key here is a whole AI configuration: the provider, the model (and an optional fast model), the key itself, and an address: required for a
+custom endpoint, optional for the other providers (a gateway that speaks that provider's API; the key and every call go there, never to the
+provider's own host; empty means the provider's own host). Every address passes the same checks (http or https, no user name or password,
+the private-address guard when it is on). There are two kinds. A project may name the AI model its work uses (below); it never holds a key.
 
 ## The two kinds
 

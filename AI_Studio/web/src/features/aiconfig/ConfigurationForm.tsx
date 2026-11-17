@@ -28,7 +28,7 @@ export function ConfigurationForm({ idPrefix, providers, current, path, onSaved,
         setBusy(true);
         setError("");
         try {
-            const fields = { label: label.trim(), provider, model: model.trim(), fastModel: fastModel.trim() || null, baseUrl: chosen?.needsAddress ? baseUrl.trim() : null, ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) };
+            const fields = { label: label.trim(), provider, model: model.trim(), fastModel: fastModel.trim() || null, baseUrl: baseUrl.trim() || null, ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) };
             const answer = await api<{ key?: KeyView } | undefined>(path, { method: current ? "PATCH" : "POST", body: fields });
             setApiKey("");
             await onSaved(answer?.key);
@@ -63,12 +63,15 @@ export function ConfigurationForm({ idPrefix, providers, current, path, onSaved,
                     ))}
                 </select>
             </div>
-            {chosen?.needsAddress && (
-                <div className="field">
-                    <label htmlFor={`${idPrefix}-address`}>Address</label>
-                    <input id={`${idPrefix}-address`} className="input" autoComplete="off" placeholder="https://llm.example.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-                </div>
-            )}
+            <div className="field">
+                <label htmlFor={`${idPrefix}-address`}>{chosen?.needsAddress ? "Address" : "Address (optional)"}</label>
+                <input id={`${idPrefix}-address`} className="input" autoComplete="off" aria-describedby={chosen?.needsAddress ? undefined : `${idPrefix}-address-hint`} placeholder="https://llm.example.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+                {!chosen?.needsAddress && (
+                    <span className="hint" id={`${idPrefix}-address-hint`}>
+                        Only for a gateway that speaks this provider's API. Empty: the provider's own address.
+                    </span>
+                )}
+            </div>
             <div className="field">
                 <label htmlFor={`${idPrefix}-model`}>Model</label>
                 <input id={`${idPrefix}-model`} className="input mono" autoComplete="off" value={model} onChange={(e) => setModel(e.target.value)} />

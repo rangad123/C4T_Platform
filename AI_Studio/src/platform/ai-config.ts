@@ -302,6 +302,8 @@ function ownKeyOptions(c: AiConfiguration, key: string, words: boolean, onKeyFai
     return {
         fallbacks: [],
         fetch: guardedFetch,
+        // The key's own address, whatever its provider (an Anthropic-compatible gateway, say): its key goes only where it was entered for.
+        baseURLFor: (p) => (p === c.provider ? (c.baseUrl ?? undefined) : undefined),
         ownKey: {
             id: c.id,
             onKeyFailed,

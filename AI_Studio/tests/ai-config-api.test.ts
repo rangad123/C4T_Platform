@@ -182,6 +182,38 @@ describe("a key is stored once and never comes back", () => {
         expect(r.status).toBe(400);
         expect(r.body.error).toBe("Put the key in the key field, not in the address.");
     });
+
+    it("an Anthropic key may have an address (a gateway), checked by the same rules as a custom endpoint's; without one it has none", async () => {
+        const base = { provider: "anthropic", model: "claude-stand-in", apiKey: CORA_KEY };
+        const plain = await as("t-cora", "POST", "/api/me/ai/keys", { ...base, label: "Plain" });
+        expect(plain.status, plain.text).toBe(201);
+        expect(plain.body.key.baseUrl).toBeNull();
+        const gateway = await as("t-cora", "POST", "/api/me/ai/keys", { ...base, label: "Gateway", baseUrl: `${PROVIDER}/` });
+        expect(gateway.status, gateway.text).toBe(201);
+        expect(gateway.body.key.baseUrl).toBe(PROVIDER);
+        const admin = await as("t-admin", "POST", "/api/admin/ai-keys", { ...base, label: "Org gateway", baseUrl: PROVIDER, apiKey: ORG_KEY });
+        expect(admin.status, admin.text).toBe(201);
+        expect(admin.body.key.baseUrl).toBe(PROVIDER);
+        for (const [baseUrl, error] of [
+            ["ftp://llm.example.com/v1", "The address must start with http:// or https://."],
+            ["http://user:pw@127.0.0.1:1/v1", "Put the key in the key field, not in the address."],
+            ["not an address", "That address is not a valid URL."],
+        ]) {
+            const r = await as("t-cora", "POST", "/api/me/ai/keys", { ...base, label: "x", baseUrl });
+            expect(r.status, baseUrl).toBe(400);
+            expect(r.body.error).toBe(error);
+        }
+        process.env.BLOCK_PRIVATE_TARGETS = "true";
+        try {
+            for (const provider of ["anthropic", "openai-compatible"]) {
+                const r = await as("t-cora", "POST", "/api/me/ai/keys", { ...base, provider, label: "Private", baseUrl: PROVIDER });
+                expect(r.status, provider).toBe(400);
+                expect(r.text).toContain("private/loopback");
+            }
+        } finally {
+            delete process.env.BLOCK_PRIVATE_TARGETS;
+        }
+    });
 });
 
 describe("who sees which key", () => {

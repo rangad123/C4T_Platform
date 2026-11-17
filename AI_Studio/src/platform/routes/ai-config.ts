@@ -72,14 +72,16 @@ const ChangeBody = z.object({ label: Label.optional(), model: Model.optional(), 
 const ChosenBody = z.object({ keyId: z.string().min(1).max(100) }).strict();
 const AssigneesBody = z.object({ personIds: z.array(z.string().min(1).max(100)).max(200) }).strict();
 
-/** An address for a custom endpoint: only that provider has one, it must be a plain http(s) URL, and the platform's address guard applies. */
+/**
+ * A key's address: a custom endpoint needs one; any other provider may have one (a gateway that speaks that provider's API), else it uses the
+ * provider's own host. Either way it must be a plain http(s) URL, and the platform's address guard applies.
+ */
 async function checkedAddress(provider: LlmProviderId, baseUrl: string | null | undefined): Promise<string | null> {
     const raw = baseUrl?.trim() || null;
-    if (provider !== "openai-compatible") {
-        if (raw) throw new HttpError(400, "Only a custom endpoint has an address.");
+    if (!raw) {
+        if (provider === "openai-compatible") throw new HttpError(400, "A custom endpoint needs its address, like https://llm.example.com/v1.");
         return null;
     }
-    if (!raw) throw new HttpError(400, "A custom endpoint needs its address, like https://llm.example.com/v1.");
     let u: URL;
     try {
         u = new URL(raw);
