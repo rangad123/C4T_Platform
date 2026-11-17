@@ -788,7 +788,10 @@ function shell(args) {
         case "dumpsys": {
             if (rest[0] === "window") {
                 const sc = currentScreen();
-                out("WINDOW MANAGER WINDOWS (dumpsys window windows)\n  mCurrentFocus=Window{4f2a1c u0 " + (sc.pkg || app.pkg) + "/" + sc.activity + "}\n  mFocusedApp=ActivityRecord{abc u0 " + (sc.pkg || app.pkg) + "/" + sc.activity + " t12}\n  " + lockedText() + "\n");
+                // A locked phone has the lock screen in front (the NotificationShade window has the focus), as a real one reports it; the keyguard
+                // flag alone is not "locked" (isLockedFromWindowDump: some emulator images keep it set on a usable home screen).
+                const focus = faults.has("locked") ? "NotificationShade" : (sc.pkg || app.pkg) + "/" + sc.activity;
+                out("WINDOW MANAGER WINDOWS (dumpsys window windows)\n  mCurrentFocus=Window{4f2a1c u0 " + focus + "}\n  mFocusedApp=ActivityRecord{abc u0 " + (sc.pkg || app.pkg) + "/" + sc.activity + " t12}\n  " + lockedText() + "\n");
             } else if (rest[0] === "input_method") out("Input Method Service:\n  mInputShown=" + Boolean(state.app && state.app.keyboard && state.fg) + "\n");
             return;
         }
