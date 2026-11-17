@@ -1,5 +1,5 @@
 import { Plus, Search, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, Skeleton } from "../../components/ui";
 import { BadgeKey, FieldHelp, HelpTip } from "../../components/Tooltip";
@@ -25,7 +25,14 @@ export function FindingsPage({ id }: { id: string }) {
     const findings = useFetch<SecurityFinding[] | { findings: SecurityFinding[] }>(`${SEC}/projects/${id}/findings${qs ? `?${qs}` : ""}`);
     const apps = useApps(id);
     const [text, setText] = useState({ location: filters.location, q: filters.q });
-    useEffect(() => setText({ location: filters.location, q: filters.q }), [filters.location, filters.q]);
+    // The words this form last put in the address. The address reaches the page a moment after Apply (hashchange), so words typed in
+    // between must not be replaced by the ones just applied; an address from anywhere else (Clear filters, Back, a shared link) shows its own.
+    const applied = useRef({ location: filters.location, q: filters.q });
+    useEffect(() => {
+        if (applied.current.location === filters.location && applied.current.q === filters.q) return;
+        applied.current = { location: filters.location, q: filters.q };
+        setText({ location: filters.location, q: filters.q });
+    }, [filters.location, filters.q]);
 
     const setFilter = (patch: Partial<Record<FilterKey | "open", string>>) => {
         const next = new URLSearchParams();
@@ -78,7 +85,8 @@ export function FindingsPage({ id }: { id: string }) {
                     aria-label="Filter findings"
                     onSubmit={(e) => {
                         e.preventDefault();
-                        setFilter({ location: text.location.trim(), q: text.q.trim() });
+                        applied.current = { location: text.location.trim(), q: text.q.trim() };
+                        setFilter(applied.current);
                     }}
                 >
                     <div className="sec-filters">
