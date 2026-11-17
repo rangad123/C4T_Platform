@@ -23,7 +23,8 @@ import type { Requirement } from "../requirements/parse.js";
 import { testDataPlanningRule } from "../testdata/generate.js";
 import type { AppModel, PageModel } from "../understanding/app-model.js";
 import { uncoveredTransitions } from "../screenmap/map.js";
-import { STATING_SOURCES, type Rule, type RuleStatus, type WorkflowSchema } from "../intel/model.js";
+import { STATING_SOURCES, type AppModel as IntelModel, type Rule, type RuleStatus, type WorkflowSchema } from "../intel/model.js";
+import type { ObjectiveField, ObjectiveModel } from "../explore/objectives.js";
 
 const PlanSchema = z.object({ scenarios: z.array(ScenarioSchema.omit({ scenarioId: true })) });
 
@@ -61,6 +62,72 @@ export interface AppKnowledge {
     modelVersionId: string;
     rules: KnowledgeRule[];
     workflows: KnowledgeWorkflow[];
+    /** What exploration objectives are built from (explore/objectives.ts), from the same model version; never part of a prompt. */
+    objectiveInputs?: ObjectiveInputs;
+}
+
+/**
+ * The parts of the analysed model objectives read (`objectivesFrom` takes it as its model): pages with their constrained form fields, the
+ * model's transitions (`objectivesFrom` decides which are stated and which are coverage gaps), and the usable workflows' steps with their
+ * page and endpoint. What a page merely says (its purpose, elements, shown messages, evidence excerpts) is not carried.
+ */
+export interface ObjectiveInputs extends ObjectiveModel {
+    pages: Array<{ id: string; path: string; forms: Array<{ name: string; fields: ObjectiveField[] }> }>;
+    transitions: Array<{ entity: string; from: string; to: string; trigger: string; sourceType: IntelModel["transitions"][number]["sourceType"]; expectation: boolean; evidence: Array<{ ref: string }> }>;
+    workflowSteps: Array<{ workflowId: string; steps: Array<{ order: number; action: string; page?: string; endpoint?: string }> }>;
+    /** What the caps left out, and a sentence saying so. */
+    truncated?: { pages: number; fields: number; note: string };
+}
+
+/** Caps on the objective inputs: pages with constrained fields, and constrained fields per page. */
+export const OBJECTIVE_INPUT_LIMITS = { pages: 60, fieldsPerPage: 40, evidencePerTransition: 5 } as const;
+
+/** Types that declare nothing about the value. */
+const PLAIN_FIELD_TYPES = new Set(["", "text", "hidden", "submit", "button", "reset", "image", "search"]);
+const constrained = (f: ObjectiveField) =>
+    !!f.required || !PLAIN_FIELD_TYPES.has((f.type ?? "").trim().toLowerCase()) || !!f.min || !!f.max || f.minLength !== undefined || f.maxLength !== undefined || !!f.pattern || !!f.options?.length;
+const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** The objective inputs of an analysed model and its usable workflows (see `ObjectiveInputs`), capped, in an order the model's does not change. */
+export function objectiveInputsOf(model: Pick<IntelModel, "pages" | "transitions">, workflows: ReadonlyArray<{ id: string; steps: ReadonlyArray<{ order: number; action: string; page?: string; endpoint?: string }> }>): ObjectiveInputs {
+    const L = OBJECTIVE_INPUT_LIMITS;
+    let fieldsLeft = 0;
+    const withForms = [...model.pages]
+        .sort((a, b) => byKey(a.path, b.path) || byKey(a.id, b.id))
+        .map((p) => ({
+            id: p.id,
+            path: p.path,
+            forms: p.forms
+                .map((f) => ({
+                    name: f.name,
+                    fields: f.fields.map(({ message: _shown, ...field }): ObjectiveField => field).filter(constrained),
+                }))
+                .filter((f) => f.fields.length),
+        }))
+        .filter((p) => p.forms.length);
+    const pages = withForms.slice(0, L.pages).map((p) => {
+        let room = L.fieldsPerPage;
+        const forms = p.forms
+            .map((f) => {
+                const kept = f.fields.slice(0, Math.max(0, room));
+                fieldsLeft += f.fields.length - kept.length;
+                room -= kept.length;
+                return { name: f.name, fields: kept };
+            })
+            .filter((f) => f.fields.length);
+        return { ...p, forms };
+    });
+    const pagesLeft = withForms.length - pages.length;
+    for (const p of withForms.slice(L.pages)) for (const f of p.forms) fieldsLeft += f.fields.length;
+    const transitions = model.transitions.map((t) => ({ entity: t.entity, from: t.from, to: t.to, trigger: t.trigger, sourceType: t.sourceType, expectation: t.expectation, evidence: t.evidence.slice(0, L.evidencePerTransition).map((e) => ({ ref: e.ref })) }));
+    const workflowSteps = workflows.map((w) => ({
+        workflowId: w.id,
+        steps: [...w.steps].sort((a, b) => a.order - b.order || byKey(a.action, b.action)).map((s) => ({ order: s.order, action: s.action, ...(s.page ? { page: s.page } : {}), ...(s.endpoint ? { endpoint: s.endpoint } : {}) })),
+    }));
+    const out: ObjectiveInputs = { pages, transitions, workflowSteps };
+    if (pagesLeft || fieldsLeft)
+        out.truncated = { pages: pagesLeft, fields: fieldsLeft, note: `${pagesLeft} pages and ${fieldsLeft} form fields were left out of the objectives for length.` };
+    return out;
 }
 
 /**

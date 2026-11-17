@@ -57,8 +57,8 @@ import { NotesStore } from "./notes-store.js";
 import type { SiteNote } from "../engine/memory/notes.js";
 import { aiOwnerOfJob, configuredLlmForJob, jobSentenceOf, resolveAiFor, type WorkAi } from "./ai-config.js";
 import { analyseAfterExploration, ANALYSIS_OVER_TIME, ANALYSIS_STOPPED } from "./app-analysis.js";
-import { AppIntelStore } from "./app-intel-store.js";
-import { usableRules, usableWorkflows, type AppKnowledge } from "../engine/planning/planner.js";
+import { AppIntelStore, withWorkflowDecisions } from "./app-intel-store.js";
+import { objectiveInputsOf, usableRules, usableWorkflows, type AppKnowledge } from "../engine/planning/planner.js";
 import { jobPersonGate } from "./phone-person-gate.js";
 import { agentServiceOf, RunnerAgentError } from "./agent-services.js";
 import { exploreOnRunner } from "./explore-dispatch.js";
@@ -140,17 +140,22 @@ async function siteNotesOf(repo: Repo, projectId: string): Promise<{ siteNotes?:
 
 /**
  * What is known about the application, read as it is now (app-intel-store.ts): the latest model version, the rules a source states or a
- * person confirmed, and the workflows a source states. Never part of the job's stored options. None until the application was analysed.
+ * person confirmed, the workflows a source states, and what exploration objectives are built from (`objectiveInputsOf`: constrained form
+ * fields, transitions, workflow steps with page and endpoint). Never part of the job's stored options. None until the application was analysed.
  */
 export async function appKnowledgeOf(repo: Repo, projectId: string): Promise<{ appKnowledge?: AppKnowledge }> {
     const intel = new AppIntelStore(repo.db.sql);
-    const latest = await intel.decidedWorkflows(projectId);
-    if (!latest) return {};
+    // One read of the latest version: the workflows, their decisions and the objective inputs all come from it.
+    const version = await intel.latest(projectId);
+    if (!version) return {};
+    const latest = { modelVersionId: version.id, workflows: withWorkflowDecisions(version.model.workflows, await intel.workflowDecisions(projectId)) };
     const rules = usableRules(await intel.rules(projectId)).map((r) => ({ ref: r.ref, kind: r.kind, description: r.description, expected: r.expected, explicitness: r.explicitness, workflows: r.workflows, status: r.status }));
     // A workflow a person rejected is left out; one they confirmed counts as confirmed by a person, whatever source guessed it.
     const decided = latest.workflows.filter((w) => w.decision?.status !== "rejected").map((w) => (w.decision?.status === "confirmed" ? { ...w, sourceType: "user_confirmed" as const } : w));
-    const workflows = usableWorkflows(decided).map((w) => ({ id: w.id, name: w.name, steps: w.steps.map((x) => ({ order: x.order, action: x.action })), preconditions: w.preconditions, postconditions: w.postconditions, sourceType: w.sourceType }));
-    return { appKnowledge: { modelVersionId: latest.modelVersionId, rules, workflows } };
+    const usable = usableWorkflows(decided);
+    const workflows = usable.map((w) => ({ id: w.id, name: w.name, steps: w.steps.map((x) => ({ order: x.order, action: x.action })), preconditions: w.preconditions, postconditions: w.postconditions, sourceType: w.sourceType }));
+    // What exploration objectives are built from (explore/objectives.ts): never part of a prompt.
+    return { appKnowledge: { modelVersionId: latest.modelVersionId, rules, workflows, objectiveInputs: objectiveInputsOf(version.model, usable) } };
 }
 
 export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeFastLlm">;
