@@ -58,6 +58,16 @@ import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, finding
 import { checkIndependence, type IndependenceCheck } from "./explore/independence.js";
 import type { KnowledgeRule } from "./planning/planner.js";
 import type { MobileTarget } from "./mobile/target.js";
+import { createHash } from "node:crypto";
+import { wrapLanguageModel, type LanguageModel } from "ai";
+import type { LlmClient } from "./llm/provider.js";
+import { inputClassesFor } from "./explore/input-classes.js";
+import { runExploration, type Budgets, type ExplorationResult, type LoopObjective, type ObjectiveContext, type ObjectiveOutcome, type ObjectiveRun, type StopReason } from "./explore/loop.js";
+import { objectivesFrom, type Objective, type ObjectiveField, type ObjectiveOperator } from "./explore/objectives.js";
+import { operatorApplied, scenariosFor, type OperatorCheck, type PerturbOptions } from "./explore/perturb.js";
+import { pursuitKey, type SkippedOperator } from "./explore/coverage.js";
+import { pathPattern } from "./explore/state.js";
+import { usableRules, type AppKnowledge } from "./planning/planner.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 
 export type JobStatusName = "DISCOVERING" | "ANALYZING" | "PLANNING" | "GENERATING" | "VALIDATING";
@@ -139,6 +149,17 @@ export interface GenerationRequest {
     plan?: StoredPlan;
     /** With `plan`: test ideas (scenarioIds) the person left out. */
     excludeIdeas?: string[];
+    /**
+     * Explore by objectives (Phase 3): after planning, the objectives of `appKnowledge.objectiveInputs` are pursued one operator at a time
+     * by the test writer inside the level's session budgets (levels.ts `exploration`, explore/loop.ts). Only a runner that lists the
+     * "objectives" explore mode gets it; absent or false: the job is exactly what it was before.
+     */
+    objectives?: boolean;
+    /**
+     * The server allows data-changing operators (EXPLORE_DATA_OPERATORS=true, Decision 6). They run only with this and
+     * `allowMutatingApiTests` both true; otherwise they are skipped with the reason "data changes off".
+     */
+    dataOperators?: boolean;
 }
 
 export interface TestHandle {
@@ -203,6 +224,33 @@ export interface GenerationSummary {
     errors: string[];
     /** Set by a `planOnly` run. */
     plan?: StoredPlan;
+    /** Set when the job explored by objectives (`GenerationRequest.objectives`): how the session ended and what each pursuit did. */
+    exploration?: ExplorationSummary;
+}
+
+/** One objective-driven exploration session, as the job keeps it. */
+export interface ExplorationSummary {
+    stopReason: StopReason;
+    stopDetail: string;
+    /** The session budgets used (from the level, never from the request or a page). */
+    budgets: Budgets & { steps: number };
+    objectives: Array<Pick<Objective, "id" | "kind" | "priority" | "reason" | "operators"> & { source: string }>;
+    /** Objectives the session cap left out. */
+    overCap: number;
+    /** Operators that did not become a pursuit, and why (e.g. "data changes off"). */
+    skipped: SkippedOperator[];
+    outcomes: Array<ObjectiveOutcome<PursuitResult>>;
+    usage: ExplorationResult["usage"];
+}
+
+/** What one pursuit left: the saved test, or why nothing was saved. */
+export interface PursuitResult {
+    /** False: the recorded steps did not apply the operator, so nothing was saved for it. */
+    applied?: boolean;
+    authoring?: AuthorOutcome["status"];
+    testKey?: string;
+    /** Why the pursuit ended without a saved test. */
+    ended?: string;
 }
 
 const NOISE_PATH = /^\/(_next|static|assets|cdn-cgi|__|favicon|sockjs|hot-update)/i;
@@ -630,6 +678,43 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             return h;
         };
 
+        /**
+         * Saves what the test writer made of a scenario: a defect test with its candidate finding (S1, replayed twice in fresh browsers
+         * without AI) for review, or a complete test for validation. Returns the saved test's key.
+         */
+        const keepAuthored = async (scenario: Scenario, outcome: Exclude<AuthorOutcome, { status: "blocked" }>, asAccount: ReturnType<typeof roleCredentials>, scenarioRules: KnowledgeRule[]): Promise<string> => {
+            const key = await sink.nextTestKey("WEB");
+            const written = toSpec(scenario, outcome, key);
+            const spec = TestSpecSchema.parse(asAccount ? asRole(written, asAccount.name) : written);
+            const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
+            if (outcome.status === "defect") {
+                // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
+                const capture = outcome.capture ?? "observed_only";
+                const independence =
+                    capture === "captured"
+                        ? await checkIndependence(browser, origin, { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
+                        : { independence: "not_run" as const, replays: [] };
+                const found = defectFinding({ scenario, rules: scenarioRules, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
+                const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
+                const saved = (await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation.trim().replace(/\.+$/, "")}. ${found.basis}`, defectMeta)).testId;
+                if (!found.finding) ctx.emit({ stage: "generation", kind: "finding_invalid", level: "warn", message: `${saved} ${spec.title}: its candidate finding could not be built (${found.problem}); the test is saved for review without it.` });
+                summary.testsNeedingReview++;
+                await sink.counters({ testsNeedingReview: 1 }, true);
+                ctx.emit({
+                    stage: "generation",
+                    kind: "possible_defect",
+                    level: "warn",
+                    message: `${saved} ${spec.title}: ${outcome.explanation}`,
+                    data: { testKey: saved, capture, confidence: found.confidence, independence: independence.independence, source: found.source },
+                });
+                return saved;
+            }
+            await persistNew(spec, "playwright", "PENDING", undefined, meta);
+            pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
+            ctx.emit({ stage: "generation", kind: "script_generated", message: `${spec.testId} ${spec.title} (${spec.steps.length} steps)` });
+            return spec.testId;
+        };
+
         // 4a. Web: author every scenario in a real browser, one agent run per scenario.
         if (scenarios.length) {
             const results = await mapLimit(scenarios, ctx.config.CONCURRENCY, async (scenario) => {
@@ -665,35 +750,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ctx.emit({ stage: "generation", kind: "scenario_skipped", level: "warn", message: `${scenario.scenarioId} "${scenario.title}" could not be authored: ${outcome.explanation}` });
                         return;
                     }
-                    const key = await sink.nextTestKey("WEB");
-                    const written = toSpec(scenario, outcome, key);
-                    const spec = TestSpecSchema.parse(asAccount ? asRole(written, asAccount.name) : written);
-                    const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
-                    if (outcome.status === "defect") {
-                        // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
-                        const capture = outcome.capture ?? "observed_only";
-                        const independence =
-                            capture === "captured"
-                                ? await checkIndependence(browser, origin, { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
-                                : { independence: "not_run" as const, replays: [] };
-                        const found = defectFinding({ scenario, rules: scenarioRules, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
-                        const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
-                        const saved = (await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation.trim().replace(/\.+$/, "")}. ${found.basis}`, defectMeta)).testId;
-                        if (!found.finding) ctx.emit({ stage: "generation", kind: "finding_invalid", level: "warn", message: `${saved} ${spec.title}: its candidate finding could not be built (${found.problem}); the test is saved for review without it.` });
-                        summary.testsNeedingReview++;
-                        await sink.counters({ testsNeedingReview: 1 }, true);
-                        ctx.emit({
-                            stage: "generation",
-                            kind: "possible_defect",
-                            level: "warn",
-                            message: `${saved} ${spec.title}: ${outcome.explanation}`,
-                            data: { testKey: saved, capture, confidence: found.confidence, independence: independence.independence, source: found.source },
-                        });
-                        return;
-                    }
-                    await persistNew(spec, "playwright", "PENDING", undefined, meta);
-                    pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
-                    ctx.emit({ stage: "generation", kind: "script_generated", message: `${spec.testId} ${spec.title} (${spec.steps.length} steps)` });
+                    await keepAuthored(scenario, outcome, asAccount, scenarioRules);
                 } catch (err) {
                     await sink.finishAgentRun(runId, "error", err instanceof Error ? err.message : String(err));
                     throw err;
@@ -712,6 +769,119 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     summary.errors.push(`Authoring "${r.item.title}": ${msg}`);
                     ctx.emit({ stage: "generation", kind: "scenario_failed", level: "error", message: `${r.item.scenarioId}: ${msg}` });
                 }
+            }
+        }
+
+        // 4a2. Objective-driven exploration (Phase 3, only when asked): the objectives of the application's model, one operator at a
+        // time, written by the test writer inside the level's session budgets. Objectives and budgets are fixed here, before any page of
+        // the session is read; the loop (explore/loop.ts) counts actions and AI calls itself and ends the session with one stop reason.
+        if (wantWeb && req.objectives === true) {
+            const knowledge = req.appKnowledge;
+            if (!knowledge?.objectiveInputs) {
+                ctx.emit({ stage: "generation", kind: "objectives_unavailable", level: "warn", message: "Exploring by objectives needs an analysed model of the application, and there is none yet, so this exploration ran without objectives." });
+            } else {
+                const lv = levelSettings(req);
+                const b = lv.exploration;
+                const dataOperators = req.dataOperators === true && req.allowMutatingApiTests === true;
+                const requiresAuth = Boolean(creds && authState.loggedIn);
+                const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataOperators, requiresAuth });
+                const budgets: Budgets = { objectives: b.objectives, actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
+                ctx.emit({
+                    stage: "generation",
+                    kind: "objectives_planned",
+                    message: `${built.objectives.length} objective(s) to explore as ${built.pursuits.length} pursuit(s); ${built.skipped.length} operator(s) not run${built.overCap ? `; ${built.overCap} objective(s) over the session's limit of ${b.objectives}` : ""}.`,
+                    data: { objectives: built.objectives.length, pursuits: built.pursuits.length, skipped: built.skipped.length, overCap: built.overCap, budgets: { ...budgets, steps: lv.authoringMaxSteps } },
+                });
+                // The run's own AI counter: every call the test writer makes in this stage goes through `gatedLlm` and is counted there.
+                const calls = { n: 0 };
+                const tokensNow = () => ctx.llm.usage.inputTokens + ctx.llm.usage.outputTokens;
+                const pursue = async (p: ObjectivePursuit, loop: ObjectiveContext): Promise<ObjectiveRun<PursuitResult>> => {
+                    const startedAt = Date.now();
+                    const tokensAt = tokensNow();
+                    const gate = () => {
+                        const stop = loop.check();
+                        if (stop) throw new ExplorationStopped(`The session stopped (${stop}).`);
+                        if (loop.signal.aborted) throw new ExplorationStopped("The exploration ended this pursuit.");
+                        if (Date.now() - startedAt >= p.objective.budget.minutes * 60_000) throw new ExplorationStopped(`The objective's time limit of ${p.objective.budget.minutes} minutes was reached.`);
+                        if (tokensNow() - tokensAt >= p.objective.budget.tokens) throw new ExplorationStopped(`The objective's limit of ${p.objective.budget.tokens} AI tokens was reached.`);
+                        calls.n += 1;
+                    };
+                    const signal = ctx.signal ? AbortSignal.any([ctx.signal, loop.signal]) : loop.signal;
+                    const state = actionTracker(new URL(p.scenario.startPath, origin).href);
+                    const rules = p.objective.kind === "rule" ? usableRules(knowledge.rules).filter((r) => r.ref === p.objective.source.ref) : rulesForScenario(p.scenario, knowledge);
+                    const runId = await sink.startAgentRun("web-authoring", `${p.scenario.scenarioId} ${p.scenario.title}`);
+                    let outcome: AuthorOutcome;
+                    try {
+                        outcome = await authorWebSpec({
+                            ctx: { ...ctx, llm: gatedLlm(ctx.llm, gate), signal },
+                            browser,
+                            baseUrl: origin,
+                            model,
+                            scenario: p.scenario,
+                            credentials: requiresAuth ? creds : undefined,
+                            onAction: (a) => {
+                                sink.agentAction(runId, a);
+                                // Told after the action ran (the test writer has no hook before it): a refusal ends the pursuit before its next model call.
+                                if (a.tool !== "finish") loop.act(state(a));
+                            },
+                            vision: wantVision,
+                            maxSteps: Math.min(lv.authoringMaxSteps, p.objective.budget.steps),
+                            review: true,
+                            ...(testData ? { testData } : {}),
+                            ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
+                            ...(rules.length ? { rules } : {}),
+                            secrets: authoringSecretsOf(req),
+                        });
+                    } catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        await sink.finishAgentRun(runId, "error", msg);
+                        // Ended by the loop or by the objective's own limits: an ended pursuit, not a broken environment.
+                        if (loop.signal.aborted || err instanceof ExplorationStopped || (err instanceof Error && err.cause instanceof ExplorationStopped)) return { status: "completed", result: { ended: err instanceof ExplorationStopped ? msg : "The exploration ended this pursuit." } };
+                        if (isBudgetExceeded(err) && !summary.errors.includes(msg)) summary.errors.push(msg);
+                        return { status: "environment_failure", reason: msg };
+                    }
+                    await sink.finishAgentRun(runId, outcome.status, outcome.explanation);
+                    if (outcome.status === "blocked" || loop.signal.aborted) {
+                        ctx.emit({ stage: "generation", kind: "objective_not_written", message: `${p.scenario.scenarioId}: no test was saved (${loop.signal.aborted ? "the exploration ended this pursuit" : outcome.explanation}).` });
+                        return { status: "completed", result: { authoring: outcome.status, ended: loop.signal.aborted ? "The exploration ended this pursuit." : outcome.explanation } };
+                    }
+                    if (!operatorApplied(outcome.steps, p.operator, p.check)) {
+                        ctx.emit({ stage: "generation", kind: "operator_not_applied", level: "warn", message: `${p.scenario.scenarioId}: the recorded steps do not apply the operator "${p.operator}", so no test was saved for it.` });
+                        return { status: "completed", result: { applied: false, authoring: outcome.status } };
+                    }
+                    const testKey = await keepAuthored(p.scenario, outcome, undefined, rules);
+                    return { status: "completed", result: { applied: true, authoring: outcome.status, testKey } };
+                };
+                const session = await runExploration<ObjectivePursuit, PursuitResult>({
+                    objectives: built.pursuits,
+                    budgets,
+                    runObjective: pursue,
+                    now: Date.now,
+                    usage: () => ({ aiCalls: calls.n, tokens: tokensNow() }),
+                    // Each pursuit's test writer opens a new browser context of its own; the reset checks the browser is still there.
+                    reset: async () => {
+                        if (!browser.isConnected()) throw new Error("The browser is no longer running.");
+                    },
+                    ...(ctx.signal ? { cancel: ctx.signal } : {}),
+                });
+                summary.exploration = {
+                    stopReason: session.stopReason,
+                    stopDetail: session.stopDetail,
+                    budgets: { ...budgets, steps: lv.authoringMaxSteps },
+                    objectives: built.objectives.map((o) => ({ id: o.id, kind: o.kind, source: o.source.ref, priority: o.priority, reason: o.reason, operators: o.operators })),
+                    overCap: built.overCap,
+                    skipped: built.skipped,
+                    outcomes: session.outcomes,
+                    usage: session.usage,
+                };
+                ctx.emit({
+                    stage: "generation",
+                    kind: "exploration_stopped",
+                    level: session.stopReason === "objectives_done" ? "info" : "warn",
+                    message: `Exploring by objectives stopped: ${session.stopDetail}`,
+                    data: { stopReason: session.stopReason, pursued: session.usage.objectives, actions: session.usage.actions, aiCalls: session.usage.aiCalls },
+                });
+                throwIfAborted(ctx.signal);
             }
         }
 
@@ -1085,4 +1255,159 @@ export function defectFinding(p: {
     const parsed = CandidateFindingSchema.safeParse(input);
     const problem = parsed.success ? undefined : parsed.error.issues.map((i) => `${i.path.join(".") || "finding"}: ${i.message}`).join("; ");
     return { ...(parsed.success ? { finding: parsed.data } : { problem }), basis, confidence, source };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// Objective-driven exploration (Phase 3): what the stage above pursues, and the bounds it runs the test writer in.
+
+/** One operator of one objective, as the loop pursues it. */
+export interface ObjectivePursuit extends LoopObjective {
+    objective: Objective;
+    operator: ObjectiveOperator;
+    scenario: Scenario;
+    check: OperatorCheck;
+}
+
+const normRef = (t: string) => t.replace(/\s+/g, " ").trim();
+const refOf = (t: string) => {
+    const s = normRef(t);
+    return s.length <= 500 ? s : `${s.slice(0, 499).trimEnd()}…`;
+};
+
+/**
+ * The objectives of a model version and their pursuits, without AI or a browser: objectives (explore/objectives.ts) from the objective
+ * inputs, rules and workflows; each allowed operator as a scenario (explore/perturb.ts), its workflow steps or its field's input classes
+ * from the same inputs. A pursuit's fingerprint is the objective's with the scenario (operator, cancel step), so the loop pursues each
+ * operator of an objective once and never takes the second operator for a repeat of the first. Operators that cannot run are listed
+ * with their reason. Every number comes from `opts` (the level), nothing from the model's text.
+ */
+export function objectivePursuits(
+    k: Pick<AppKnowledge, "rules" | "workflows" | "objectiveInputs">,
+    opts: { maxObjectives: number; steps: number; perObjective: { minutes: number; tokens: number }; dataOperators: boolean; requiresAuth: boolean },
+): { objectives: Objective[]; overCap: number; pursuits: ObjectivePursuit[]; skipped: SkippedOperator[] } {
+    const inputs = k.objectiveInputs ?? { pages: [], transitions: [], workflowSteps: [] };
+    const { objectives, overCap } = objectivesFrom(inputs, k.rules, k.workflows, { maxObjectives: opts.maxObjectives, budget: { steps: opts.steps, minutes: opts.perObjective.minutes, tokens: opts.perObjective.tokens } });
+    const fields = new Map<string, ObjectiveField>();
+    for (const page of inputs.pages) for (const form of page.forms) for (const field of form.fields) fields.set(refOf(`${page.id}/${form.name?.trim() || "form"}/${field.name}`), field);
+    const pursuits: ObjectivePursuit[] = [];
+    const skipped: SkippedOperator[] = [];
+    for (const o of objectives) {
+        const options: PerturbOptions = { dataOperators: opts.dataOperators, requiresAuth: opts.requiresAuth };
+        if (o.kind === "workflow") {
+            const wf = k.workflows.find((w) => normRef(w.id) === normRef(o.source.ref));
+            const paged = inputs.workflowSteps.find((w) => normRef(w.workflowId) === normRef(o.source.ref))?.steps;
+            if (wf) options.workflow = { preconditions: wf.preconditions ?? [], steps: paged ?? wf.steps };
+        }
+        if (o.kind === "constraint") {
+            const field = fields.get(o.source.ref);
+            if (field) options.inputClasses = inputClassesFor(field, o.source.ref);
+        }
+        for (const r of scenariosFor(o, options)) {
+            if (r.status === "skipped") {
+                skipped.push({ objectiveId: o.id, operator: r.operator, reason: r.reason });
+                continue;
+            }
+            pursuits.push({
+                id: pursuitKey(o.id, r.operator),
+                priority: o.priority,
+                fingerprint: createHash("sha256").update(JSON.stringify(["pursuit", o.fingerprint, r.scenario.scenarioId])).digest("hex"),
+                objective: o,
+                operator: r.operator,
+                scenario: r.scenario,
+                check: r.check,
+            });
+        }
+    }
+    return { objectives, overCap, pursuits, skipped };
+}
+
+/** A model call refused because the session or the objective has spent its budget. */
+export class ExplorationStopped extends Error {
+    override name = "ExplorationStopped";
+}
+
+/**
+ * The run's AI client for one pursuit: every call (each test-writer step, review and verdict) first passes `gate`, which counts it and
+ * throws when a budget is spent. The usage object stays the run's own, so tokens are counted where they always were.
+ */
+export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
+    let wrapped: LanguageModel | undefined;
+    const gated: LlmClient = {
+        get modelName() {
+            return base.modelName;
+        },
+        get model() {
+            if (wrapped === undefined) {
+                const m = base.model;
+                wrapped =
+                    typeof m === "object" && m?.specificationVersion === "v3"
+                        ? wrapLanguageModel({
+                              model: m,
+                              middleware: {
+                                  specificationVersion: "v3",
+                                  wrapGenerate: async ({ doGenerate }) => {
+                                      gate();
+                                      return doGenerate();
+                                  },
+                                  wrapStream: async ({ doStream }) => {
+                                      gate();
+                                      return doStream();
+                                  },
+                              },
+                          })
+                        : m;
+            }
+            return wrapped;
+        },
+        get usage() {
+            return base.usage;
+        },
+        set usage(u) {
+            base.usage = u;
+        },
+        text: async (a) => {
+            gate();
+            return base.text(a);
+        },
+        object: async (a) => {
+            gate();
+            return base.object(a);
+        },
+        ...(base.imageObject
+            ? {
+                  imageObject: (async (a: Parameters<NonNullable<LlmClient["imageObject"]>>[0]) => {
+                      gate();
+                      return base.imageObject!(a);
+                  }) as LlmClient["imageObject"],
+              }
+            : {}),
+        ...(base.setEventSink ? { setEventSink: (e: Parameters<NonNullable<LlmClient["setEventSink"]>>[0]) => base.setEventSink!(e) } : {}),
+    };
+    return gated;
+}
+
+/**
+ * The loop's view of the test writer's actions: each as a stable key on a state. The test writer reports an action after it ran, with
+ * the address it left the page on, and never the page's outline, so a state here is the address pattern with what was done since the
+ * page was last loaded (the values typed, the action before). The same click twice in a row is two states (a double submit); the same
+ * action again on the same state is a repeat the loop refuses.
+ */
+export function actionTracker(startUrl: string): (a: { tool: string; args: unknown; ok: boolean; observation: string }) => { state: string; action: string } {
+    let url = startUrl;
+    let typed: string[] = [];
+    let previous = "";
+    return (a) => {
+        const action = `${a.tool} ${JSON.stringify(a.args ?? null) ?? ""}`;
+        const digest = createHash("sha256").update(JSON.stringify([typed, previous])).digest("hex").slice(0, 12);
+        const state = `${pathPattern(url)}|${digest}`;
+        previous = action;
+        const args = (a.args ?? {}) as { value?: unknown };
+        if (a.ok && (a.tool === "fill" || a.tool === "select") && typeof args.value === "string") typed = [...typed, args.value].slice(-50);
+        const moved = a.ok ? /^url=(\S+)/.exec(a.observation)?.[1] : undefined;
+        if (moved && (moved !== url || a.tool === "navigate")) {
+            url = moved;
+            typed = [];
+        }
+        return { state, action };
+    };
 }

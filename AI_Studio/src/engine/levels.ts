@@ -44,6 +44,29 @@ export interface LevelSettings {
     repeatPasses: number;
     /** Conditions (validation/variants.ts) the key validated web tests also run under, without being asked. */
     conditionVariants: readonly string[];
+    /**
+     * One objective-driven exploration session (Phase 3, explore/loop.ts): how many objectives it pursues and what it may spend in all.
+     * Inside the level's own limits: the AI calls never exceed what the level's test writing may use (maxScenarios × authoringMaxSteps),
+     * and each objective gets at most the objective agent's limits (agent/objective.ts AGENT_LIMITS). Never from the request or the page.
+     */
+    exploration: Readonly<ExplorationBudgets>;
+}
+
+/** The session budgets of objective-driven exploration (the loop's `Budgets`, explore/loop.ts) and each objective's share. */
+export interface ExplorationBudgets {
+    /** Objectives pursued in one session (each operator of an objective is one pursuit). */
+    objectives: number;
+    /** Browser actions in the whole session. */
+    actions: number;
+    /** AI calls in the whole session, counted by the engine. */
+    aiCalls: number;
+    /** AI tokens (input + output) in the whole session. */
+    tokens: number;
+    minutes: number;
+    /** How often one state may be visited in one pursuit. */
+    depth: number;
+    /** Per objective: AI minutes and tokens (steps are the level's authoringMaxSteps). */
+    perObjective: { minutes: number; tokens: number };
 }
 
 export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSettings>>> = {
@@ -65,6 +88,7 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         strengthTests: 15,
         repeatPasses: 3,
         conditionVariants: [],
+        exploration: { objectives: 25, actions: 25 * 30, aiCalls: 25 * 30, tokens: 25 * 300_000, minutes: 90, depth: 8, perObjective: { minutes: 10, tokens: 300_000 } },
     },
     deep: {
         maxPages: 120,
@@ -84,6 +108,7 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         strengthTests: 40,
         repeatPasses: 3,
         conditionVariants: ["dark", "locale"],
+        exploration: { objectives: 50, actions: 50 * 40, aiCalls: 50 * 40, tokens: 50 * 300_000, minutes: 150, depth: 10, perObjective: { minutes: 10, tokens: 300_000 } },
     },
     everything: {
         maxPages: 250,
@@ -103,6 +128,7 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         strengthTests: Infinity,
         repeatPasses: 5,
         conditionVariants: ["dark", "locale"],
+        exploration: { objectives: 100, actions: 100 * 50, aiCalls: 100 * 50, tokens: 100 * 300_000, minutes: 180, depth: 12, perObjective: { minutes: 10, tokens: 300_000 } },
     },
 };
 
