@@ -8,6 +8,7 @@
  * what the platform's specs can use: flat tables imported from CSV, JSON or YAML (see THIRD_PARTY_LICENSES.md).
  */
 import YAML from "yaml";
+import { repeatOf } from "../spec/schema.js";
 
 export const MAX_DATA_ROWS = 200;
 export const MAX_DATA_COLUMNS = 20;
@@ -226,7 +227,7 @@ function stringsOf(value: unknown, out: string[] = []): string[] {
 
 /**
  * Placeholders a data-driven spec uses that nothing provides: not a column, not a testData value, not captured by an earlier
- * request step, and not one of the built-ins ({{unique}}, {{credentials...}}, {{env...}}). Returned in first-use order.
+ * request step, and not one of the built-ins ({{unique}}, {{repeat.<c>.<n>}}, {{credentials...}}, {{env...}}). Returned in first-use order.
  */
 export function unknownPlaceholders(spec: { steps: unknown[]; testData: Record<string, string> }, columns: string[]): string[] {
     const known = new Set<string>([...columns, ...Object.keys(spec.testData).filter((k) => k !== DATA_SET_KEY), "unique"]);
@@ -235,7 +236,7 @@ export function unknownPlaceholders(spec: { steps: unknown[]; testData: Record<s
     for (const text of stringsOf(spec.steps)) {
         for (const m of text.matchAll(PLACEHOLDER)) {
             const name = m[1]!;
-            if (known.has(name) || name.startsWith("credentials.") || name.startsWith("env.")) continue;
+            if (known.has(name) || name.startsWith("credentials.") || name.startsWith("env.") || repeatOf(name)) continue;
             if (!unknown.includes(name)) unknown.push(name);
         }
     }
