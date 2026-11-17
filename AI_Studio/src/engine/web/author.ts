@@ -188,6 +188,26 @@ async function interruptionNotes(e: SessionEvents, step: Step, ok: boolean): Pro
     return { lines, ...(popup ? { popup } : {}) };
 }
 
+/**
+ * The tools' calls run one at a time, in the order they started, so steps are recorded in that order. The AI SDK starts the tool calls
+ * of one model turn together; each call settles the page, reads what happened and takes a snapshot before its step is recorded, so a call
+ * with a slower aftermath (a click whose new tab is slow to settle) was recorded after a later call of the same turn, and the saved test
+ * ran its steps in another order. Each run's tools get their own queue.
+ */
+export function inStartOrder<T extends object>(tools: T): T {
+    let last: Promise<unknown> = Promise.resolve();
+    for (const t of Object.values(tools) as Array<{ execute?: (...args: never[]) => unknown }>) {
+        const execute = t.execute;
+        if (!execute) continue;
+        t.execute = (...args) => {
+            const mine = last.then(() => execute(...args));
+            last = mine.catch(() => undefined);
+            return mine;
+        };
+    }
+    return tools;
+}
+
 /** The `accept` attribute of the file field a target is, holds, or labels (empty when there is none or it cannot be read). */
 async function acceptOf(page: Page, l: Locator): Promise<string> {
     return locate(page, l, {})
@@ -452,7 +472,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             return { success: r.ok, ...(r.error ? { error: r.error } : {}), ...(told.lines.length ? { happened: told.lines.join("\n") } : {}), url: here().url(), snapshot, ...(pageNotes ? { notes: pageNotes } : {}) };
         };
 
-        const tools = {
+        const tools = inStartOrder({
             click: tool({
                 description: "Click an element.",
                 inputSchema: z.object({ target, why: z.string().optional().describe("Short user-facing description of this step") }),
@@ -655,7 +675,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                     return { done: true };
                 },
             }),
-        };
+        });
 
         const snapshot = await snapshotFor(9_000);
         const rulesNote = authoringRulesNote(input.rules);
