@@ -4,8 +4,9 @@
  *   1. For each app: start it with its seeded behaviours switched on (discovery) or off (regression), and run the normal evaluation entry
  *      through the platform's API (harness.ts: explore and plan, create the tests from the plan, rerun them). Nothing in the platform or the
  *      engine is told about the defects: it gets the app's address and its seeded sign-in account, nothing else.
- *   2. Findings are the tests the platform reported as possible application problems (validation status NEEDS_REVIEW); in regression mode,
- *      the created tests that fail when they run against the app with the defects in.
+ *   2. Findings are the tests the platform reported as possible application problems (validation status NEEDS_REVIEW) when their creation
+ *      ended, read before the harness reruns them (a rerun moves a test out of review); in regression mode, the created tests that fail when
+ *      they run against the app with the defects in. A run that resumes past creation has no rerun and reads them as they are.
  *   3. Each finding is replayed through the platform's own run route, with no model: with the defects on again, with all off, and with each
  *      seeded defect alone (only for findings that failed with them on and passed with them off). metrics.ts turns the verdicts into a
  *      category and the defects it is attributed to.
@@ -167,6 +168,8 @@ function emptyMetrics(seeded: string[]) {
 }
 
 type TestRow = { id: string; testId: string; title: string; type: string; validationStatus: string; validationReason?: string | null };
+/** The project's tests as their creation left them, and when they were read (before any rerun ran them again). */
+type Collected = { at: string; tests: TestRow[] };
 
 async function benchApp(
     client: PlatformClient,
@@ -185,6 +188,7 @@ async function benchApp(
     const user = `BENCH_${key}_USER`;
     const pass = `BENCH_${key}_PASSWORD`;
     const entry: CorpusEntry = { id: app.id, kind: "web", url: host.url, ...(app.credentials ? { credentials: { username: user, password: pass } } : {}) };
+    let collected: Collected | undefined;
     const run = await runCorpus(client, { name: `benchmark-${o.mode}`, entries: [entry] }, {
         repeat: o.repeat,
         planOnly: false,
@@ -196,6 +200,9 @@ async function benchApp(
         pollMs: o.pollMs,
         jobTimeoutMs: o.jobTimeoutMs,
         exploration: o.exploration,
+        onCreated: ({ at, tests }) => {
+            collected = { at, tests: tests as TestRow[] };
+        },
     });
     const e = run.entries[0]!;
     // Stopped by the provider's rate limit or the daily cap: judge what was made so far. A job that finished only partly because the model
@@ -218,7 +225,7 @@ async function benchApp(
             ? { aiCalls: e.metrics.aiCalls, inputTokens: e.metrics.inputTokens, outputTokens: e.metrics.outputTokens, cost: e.metrics.cost, cacheReadTokens: e.usage?.cacheReadTokens ?? 0, cacheWriteTokens: e.usage?.cacheWriteTokens ?? 0 }
             : recorded;
     if (stopped) return { result: await stoppedResult(client, app, seeded, o, projectId, jobs, usage, stopped, log) };
-    return judgeApp(client, host, app, seeded, o, log, benchStart, t0, projectId, jobs, usage, e.metrics?.flaky ?? 0, e.status === "done" ? e : undefined, []);
+    return judgeApp(client, host, app, seeded, o, log, benchStart, t0, projectId, jobs, usage, e.metrics?.flaky ?? 0, e.status === "done" ? e : undefined, [], collected);
 }
 
 type Usage = Awaited<ReturnType<typeof jobsUsage>>;
@@ -332,9 +339,18 @@ export async function plannedTestsLeft(client: PlatformClient, prev: BenchAppRes
 }
 
 /** Judge an app's finished tests: replay the findings with and without the defects, attribute them, and work out the numbers. */
-async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchApp, seeded: string[], o: BenchOptions, log: (s: string) => void, benchStart: string, t0: number, projectId: string, jobs: AppJobs, usage: Usage, flaky: number, entry: EntryResult | undefined, caveats: string[]): Promise<{ entry?: EntryResult; result: BenchAppResult }> {
+async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchApp, seeded: string[], o: BenchOptions, log: (s: string) => void, benchStart: string, t0: number, projectId: string, jobs: AppJobs, usage: Usage, flaky: number, entry: EntryResult | undefined, caveats: string[], collected?: Collected): Promise<{ entry?: EntryResult; result: BenchAppResult }> {
     const call = async (method: "GET" | "POST", url: string, what: string, body?: unknown) => ok(await client.call(method, url, body), what);
-    const tests = (await call("GET", `/api/projects/${projectId}/tests`, "Reading the tests")) as TestRow[];
+    const now = (await call("GET", `/api/projects/${projectId}/tests`, "Reading the tests")) as TestRow[];
+    // Judged on the statuses (and reasons) the creation left, not what the harness's rerun made of them: a defect test in review becomes
+    // VALIDATED or FAILED_VALIDATION once it has run. A run that resumed past creation had no rerun: its tests are read as they are now.
+    // So a resumed run and one that was not collect the same tests.
+    const at = collected?.at ?? new Date().toISOString();
+    const left = new Map((collected?.tests ?? now).map((t) => [t.id, t]));
+    const tests = now.map((t) => {
+        const c = left.get(t.id);
+        return c ? { ...t, validationStatus: c.validationStatus, validationReason: c.validationReason } : t;
+    });
     // Which areas the tests reached, from their own steps.
     const paths: string[] = [];
     const details = new Map<string, { generationMeta?: { capture?: unknown } | null }>();
@@ -392,7 +408,8 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         const replayed = verdicts.get(t.id)!;
         const { category, defects } = categorize(replayed);
         const execs = (await call("GET", `/api/tests/${t.id}/executions`, "Reading a test's runs")) as Array<{ status: string; startedAt: string }>;
-        const before = execs.filter((x) => x.startedAt < replayStart);
+        // Runs before the tests were collected: none for a defect test the author stopped, even after the harness's rerun ran it.
+        const before = execs.filter((x) => x.startedAt < at);
         const firstFail = before.filter((x) => x.status !== "passed" && x.status !== "skipped").map((x) => x.startedAt).sort()[0];
         const label = o.labels?.[`${app.id}/${t.testId}`];
         // What the author recorded when it stopped the test as a defect (the observed-vs-captured report's "author recorded" column).
