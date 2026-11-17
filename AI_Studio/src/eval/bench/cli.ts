@@ -23,8 +23,9 @@ import { CATALOGUE_FILE, loadCatalogue } from "./catalogue.js";
 import { plannedTestsLeft, runBenchmark, runUsageSoFar } from "./controller.js";
 import { calibrationOf, estimate, estimateLines, loadPrices, tokenLimitsLeft } from "./cost.js";
 import { engineVersion, promptFingerprints, writeBaseline } from "./record.js";
-import { benchMarkdown } from "./report.js";
-import type { BenchAppResult, BenchConfig, PriceRow } from "./schema.js";
+import { observedOf, trialProblem, withLabels } from "./observed.js";
+import { benchMarkdown, observedMarkdown } from "./report.js";
+import { BenchmarkSchema, type Benchmark, type BenchAppResult, type BenchConfig, type PriceRow } from "./schema.js";
 
 export interface BenchDeps {
     /** Tests only: a scripted model for the in-process platform. Then no money is spent and no budget is asked for. */
@@ -505,4 +506,62 @@ export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, dep
             platform.db.close();
         },
     };
+}
+
+export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --observed <results folder or file> [<more>...] [--labels <file>]
+  Prints the "Observed vs captured" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
+  Read-only: no platform, no app, no AI; nothing is written.
+  --labels <file>   { "<app>/<testKey>": "<defect id>" | "false_positive" } for findings the replays could not verify`;
+
+/** The one finished result a trial stands for: the file itself, or the single non-partial `*-benchmark-*.json` in the folder. */
+function trialFile(target: string): string {
+    if (!fs.existsSync(target)) throw new Error(`${target} does not exist: this trial is missing.`);
+    if (fs.statSync(target).isFile()) return target;
+    const finished = fs.readdirSync(target).filter((n) => /-benchmark-[a-z]+(-[a-z0-9-]+)?\.json$/.test(n) && !n.endsWith("-partial.json"));
+    if (!finished.length) throw new Error(`No finished benchmark result in ${target}: this trial is missing (a -partial file is a stopped run, never counted). Finish it with --resume or leave the folder out.`);
+    if (finished.length > 1) throw new Error(`${finished.length} finished benchmark results in ${target} (${finished.join(", ")}): name the file of the trial meant.`);
+    return path.join(target, finished[0]!);
+}
+
+/** `bench-report --observed <folder>...`: read-only. Exit 0 printed, 2 a missing or unfinished trial, a bad file or bad options. */
+export async function benchReportMain(argv: string[], deps: { log?: (line: string) => void } = {}): Promise<number> {
+    const log = deps.log ?? ((s: string) => console.log(s));
+    const targets: string[] = [];
+    let labelsFile: string | undefined;
+    let observed = false;
+    for (let i = 0; i < argv.length; i++) {
+        const k = argv[i]!;
+        if (k === "--observed") observed = true;
+        else if (k === "--labels") labelsFile = argv[++i];
+        else if (k === "--help" || k === "-h") {
+            log(BENCH_REPORT_USAGE);
+            return 0;
+        } else if (k.startsWith("--")) {
+            log(`Unknown option ${k}.\n${BENCH_REPORT_USAGE}`);
+            return 2;
+        } else targets.push(path.resolve(k));
+    }
+    if (!observed || !targets.length) {
+        log(BENCH_REPORT_USAGE);
+        return 2;
+    }
+    try {
+        const labels = labelsFile ? (JSON.parse(fs.readFileSync(labelsFile, "utf8")) as Record<string, string>) : undefined;
+        const trials: Array<{ name: string; observed: ReturnType<typeof observedOf> }> = [];
+        for (const t of targets) {
+            const file = trialFile(t);
+            const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { benchmark?: unknown };
+            const parsed = BenchmarkSchema.safeParse(raw.benchmark);
+            if (!parsed.success) throw new Error(`${file} is not a benchmark result: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
+            const problem = trialProblem(parsed.data);
+            if (problem) throw new Error(`${file}: ${problem}`);
+            const b: Benchmark = labels ? withLabels(parsed.data, labels) : parsed.data;
+            trials.push({ name: path.relative(process.cwd(), file) || file, observed: observedOf(b) });
+        }
+        log(observedMarkdown(trials));
+        return 0;
+    } catch (e) {
+        log(e instanceof Error ? e.message : String(e));
+        return 2;
+    }
 }
