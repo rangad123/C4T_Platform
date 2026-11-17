@@ -124,6 +124,32 @@ export function sourceOf(given: string, scenario: Pick<Scenario, "expectedResult
     return usableRules(rules ?? []).find((r) => normRef(r.ref) === normRef(given))?.ref;
 }
 
+/** `text` names `ref` as a whole token (not as part of a longer ref: "R-1" is not cited by "R-10"), ignoring spacing. */
+function cites(text: string, ref: string): boolean {
+    const r = normRef(ref);
+    if (!r) return false;
+    const escaped = r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`).test(normRef(text));
+}
+
+/**
+ * Whether a check's source (as `sourceOf` returns it) is STATED, so a failing check of it captures a defect (queue row 172). A usable rule's
+ * ref is. `expected:<n>` is only when the scenario's n-th expected result is itself tied to a stated source: an objective scenario
+ * (explore/perturb.ts scenarioFor: a stated objective, and its expected result cites the objective's source as "(source: <ref>)"), or an
+ * expected result that names a usable rule given to the scenario by its ref. A planner's own expected result is not: the AI wrote it, not
+ * the application or its documents, so a check of it failing on the clean app too is the planner's guess, not a defect.
+ */
+export function statedSource(source: string, scenario: Pick<Scenario, "expectedResults" | "objective">, rules: readonly KnowledgeRule[] | undefined): boolean {
+    const usable = usableRules(rules ?? []);
+    const n = EXPECTED_SOURCE.exec(source.trim())?.[1];
+    if (!n) return usable.some((r) => normRef(r.ref) === normRef(source));
+    const text = scenario.expectedResults[Number(n) - 1];
+    if (text === undefined) return false;
+    const o = scenario.objective;
+    if (o && o.kind !== "coverage-gap" && normRef(text).includes(`(source: ${normRef(o.source).replace(/…$/, "")}`)) return true;
+    return usable.some((r) => cites(text, r.ref));
+}
+
 const SYSTEM = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
 Every action you perform successfully is recorded into a reusable Playwright test, so be deliberate:
 - Perform the scenario step by step; after each action you receive the page's accessibility snapshot. Look before you act.
@@ -663,9 +689,10 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         return { done: false, error: NO_OUTCOME_HINT };
                     }
                     if (result === "defect") {
-                        // The last sourced check still failing becomes the final step, where it ran: the saved test is the steps up to it, then
-                        // the check (later steps are dropped, the defect shows there), so it fails while the bug is there.
-                        const kept = failedChecks.at(-1);
+                        // The last check of a STATED source still failing becomes the final step, where it ran: the saved test is the steps up
+                        // to it, then the check (later steps are dropped, the defect shows there), so it fails while the bug is there. A failing
+                        // check of the planner's own expected result is not kept: the defect is observed only (statedSource).
+                        const kept = failedChecks.filter((c) => statedSource((c.step as { source: string }).source, scenario, input.rules)).at(-1);
                         outcome = {
                             status: result,
                             steps: kept ? [...recorded.slice(0, kept.at), kept.step] : [...recorded],
