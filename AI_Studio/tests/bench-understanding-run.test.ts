@@ -49,7 +49,7 @@ const scriptedFor = (config: Config): LlmClient => {
         object: (async (args: { system: string; schema: unknown }) => {
             const extraction = args.schema === ExtractionAnswerSchema;
             calls.push({ side, extraction });
-            if (extraction) return { rules: [], workflows: [], roles: [], transitions: [] };
+            if (extraction) return { rules: [], workflows: [], roles: [], transitions: [], entities: [] };
             if (/analysing a web application/.test(args.system)) return { siteType: "ecommerce", purpose: "A small web application", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] };
             return { scenarios: [] };
         }) as LlmClient["object"],
@@ -190,7 +190,7 @@ describe("the paid series (a stand-in provider, no real call)", () => {
         const answer = /analysing a web application/.test(system)
             ? { siteType: "ecommerce", purpose: "A small web application", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] }
             : /list what they state about its intended behaviour/.test(system)
-              ? { rules: [], workflows: [], roles: [], transitions: [] }
+              ? { rules: [], workflows: [], roles: [], transitions: [], entities: [] }
               : { scenarios: [] };
         return new Response(JSON.stringify({ id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [{ type: "text", text: JSON.stringify(answer) }], stop_reason: "end_turn", usage: { input_tokens: 1000, output_tokens: Math.min(outputTokens, body.max_tokens ?? outputTokens) } }), { status: 200, headers: { "content-type": "application/json" } });
     };
@@ -370,7 +370,7 @@ describe("U7 in a full series: decisions carried, a no-change rerun and a rerun 
                 const prompt = String(args.prompt ?? "");
                 extractions.push(prompt);
                 if (!/1\.1: A person signs in with an email address and a password/.test(prompt)) return answer;
-                return { rules: [{ kind: "workflow", description: "A person signs in with an email address and a password.", expected: "Signing in takes an email address and a password.", doc: "1.1", lines: [1], quote: "A person signs in with an email address and a password", confidence: 0.9, entities: [], endpoints: [], workflows: [] }], workflows: [], roles: [], transitions: [] };
+                return { rules: [{ kind: "workflow", description: "A person signs in with an email address and a password.", expected: "Signing in takes an email address and a password.", doc: "1.1", lines: [1], quote: "A person signs in with an email address and a password", confidence: 0.9, entities: [], endpoints: [], workflows: [] }], workflows: [], roles: [], transitions: [], entities: [] };
             }) as LlmClient["object"],
         };
     };

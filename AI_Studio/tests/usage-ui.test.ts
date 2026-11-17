@@ -87,7 +87,7 @@ const scripted: LlmClient = {
         // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
         if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
         // The application-understanding analysis after the exploration reads the explored pages for rules: none here.
-        if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [] };
+        if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [], entities: [] };
         for (const s of PLAN) {
             toolQueue.push({ tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: s.heading } } });
             toolQueue.push({ tool: "finish", input: { result: "complete", explanation: "checked" } });

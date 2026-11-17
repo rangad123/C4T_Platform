@@ -97,7 +97,7 @@ const scripted: LlmClient = {
             };
         }
         // The application-understanding analysis after the exploration reads the explored pages for rules: none here.
-        if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [] };
+        if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [], entities: [] };
         if (/failing API test|analyse why an automatically generated/.test(system)) throw new Error("repair must not reach the model in these tests");
         // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
         if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
