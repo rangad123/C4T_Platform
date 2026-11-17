@@ -15,6 +15,7 @@ import { localPathOf, putText } from "./object-store.js";
 import { addVariantExecution, isRepeatedSkip } from "./variants-store.js";
 import { rememberPhone } from "./phone-run-store.js";
 import { JobWriteQueue } from "./job-write-queue.js";
+import { retryOnUniqueViolation } from "./sql-dialect.js";
 import { linkGeneratedTest } from "./requirement-store.js";
 import type { EngineEvent } from "../engine/context.js";
 import { CustomScriptStore } from "./custom-script-store.js";
@@ -108,14 +109,29 @@ export class RepoSink implements GenerationSink {
             const meta = this.shown(given);
             const slug = slugify(spec.category);
             const suiteId = this.repo.getOrCreateSuite(this.job.projectId, spec.category, slug);
-            const id = this.repo.insertTest({ projectId: this.job.projectId, suiteId, jobId: this.job.id, spec, framework, validationStatus: validation, meta, versionSource: this.versionSource });
+            // The key is taken here, with the insert: the one the engine asked for (nextTestKey) is only a proposal, and another scenario
+            // or job may have saved under it since (a defect replays its failure for seconds before it is saved). Taken: the next free
+            // key of the same prefix. On PostgreSQL a writer that commits the same key between the read and the insert meets the unique
+            // index, and the whole transaction runs again.
+            const projectId = this.job.projectId;
+            const prefix = /^([A-Z]+)-\d+$/.exec(spec.testId)?.[1];
+            const { id, testId } = retryOnUniqueViolation(this.repo.db.dialect, () =>
+                this.repo.db.tx(() => {
+                    const free = prefix && this.repo.existingTestKeys(projectId, [spec.testId]).length ? { ...spec, testId: this.repo.nextTestKey(projectId, prefix) } : spec;
+                    return { id: this.repo.insertTest({ projectId, suiteId, jobId: this.job.id, spec: free, framework, validationStatus: validation, meta, versionSource: this.versionSource }), testId: free.testId };
+                }),
+            );
             if (reason) this.repo.updateTest(id, { reason: this.maskReason(reason) });
             // A test written from a requirements document names the requirements it covers: each that is a requirement record of the
             // project (by its reference) gets a link (requirement-store.ts).
             linkGeneratedTest(this.repo.db, this.job.projectId, id, spec.source.requirements);
             this.suiteSlugByTest.set(id, slug);
-            return { id, testId: spec.testId };
+            if (testId !== spec.testId) this.rekeyed.set(id, testId);
+            return { id, testId };
         });
+
+    /** Tests this job saved under another key than the engine asked for (createTest): test id -> the key it was saved under. */
+    private readonly rekeyed = new Map<string, string>();
 
     /** What each test was before this job began validating it (status and reason), so a cancelled job can put it back. */
     private readonly before = new Map<string, { status: ValidationState; reason: string | null }>();
@@ -127,7 +143,9 @@ export class RepoSink implements GenerationSink {
                 if (t) this.before.set(h.id, { status: t.validationStatus as ValidationState, reason: t.validationReason ?? null });
             }
             // A test that ran its approved version while a newer draft waits: the run's steps are never written over the draft.
-            const spec = this.keepSteps.has(h.id) ? undefined : patch.spec;
+            // A test saved under another key than the one asked for (createTest) keeps it, whatever key the engine's copy of its spec carries.
+            const rekeyed = this.rekeyed.get(h.id);
+            const spec = this.keepSteps.has(h.id) ? undefined : patch.spec && rekeyed ? { ...patch.spec, testId: rekeyed } : patch.spec;
             this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: this.maskReason(patch.reason), attempts: patch.attempts, meta: this.shown(patch.meta), versionSource: this.versionSource });
         });
 

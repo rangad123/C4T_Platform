@@ -185,7 +185,8 @@ describe("a role scenario", () => {
                     if (k === "nextTestKey") return `${String(args[0])}-${String(++keys).padStart(3, "0")}`;
                     if (k === "createTest") {
                         created.push(args[0] as never);
-                        return { id: `t${created.length}`, testId: `T-${created.length}` };
+                        // As a real sink answers: the key the test was saved under.
+                        return { id: `t${created.length}`, testId: (args[0] as { spec: { testId: string } }).spec.testId };
                     }
                     if (k === "startAgentRun") return "run-1";
                     if (k === "loadBaselines") return [];

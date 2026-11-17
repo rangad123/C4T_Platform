@@ -210,6 +210,7 @@ export default defineConfig({
             "tests/sql-races-unit.test.ts",
             "tests/sql-async-unit.test.ts",
             "tests/sink-queue-unit.test.ts",
+            "tests/test-key-concurrency-unit.test.ts",
             "tests/agent-inputs.test.ts",
             "tests/project-sign-in.test.ts",
             "tests/sign-in-run-unit.test.ts",
