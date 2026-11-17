@@ -250,6 +250,7 @@ export default defineConfig({
             "tests/explore-loop-unit.test.ts",
             "tests/explore-objectives-unit.test.ts",
             "tests/explore-coverage-unit.test.ts",
+            "tests/explore-perturb-unit.test.ts",
             "tests/candidate-findings-migration-66.test.ts",
             "tests/candidate-finding-store.test.ts",
         ],
