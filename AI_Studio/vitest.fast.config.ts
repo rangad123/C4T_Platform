@@ -9,6 +9,7 @@ export default defineConfig({
     test: {
         include: [
             "tests/levels-unit.test.ts",
+            "tests/stated-source-unit.test.ts",
             "tests/app-intel-store.test.ts",
             "tests/test-quality-unit.test.ts",
             "tests/remote-frames-unit.test.ts",
