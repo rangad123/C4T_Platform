@@ -484,10 +484,11 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     "test-code": {
         title: "A test: Code",
-        what: "The script that actually runs. For most tests it is made for you and you only read it. A code test is one you own and edit.",
+        what: "The script that actually runs. For most tests it is made for you and you only read it. A code test is one you own, edit and save here.",
         canDo: [
             { text: "Read the script the platform made from the steps.", button: "Read about the Code tab", to: { topic: "write-code", search: "code test" } },
             { text: "Choose Switch to code to edit the script yourself. The steps and text then stop updating it.", button: "Read what changes", to: { topic: "write-code", search: "switch to code" }, ui: ["Switch to code"] },
+            { text: "In a code test, choose Save to keep an edit, or Save and run to run it too.", button: "Read about code tests", to: { topic: "write-code", search: "code test" }, ui: ["Save", "Save and run"] },
             { text: "Go back to the steps.", button: "Show the Steps tab", to: { testTab: "steps" }, ui: ["Steps"] },
             { text: "See earlier versions and go back to one.", button: "Show the History tab", to: { testTab: "history" }, ui: ["History"] },
         ],
@@ -497,7 +498,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     "test-history": {
         title: "A test: History",
-        what: "Every earlier version of this test, and every time it ran. You can look at what changed and go back.",
+        what: "Every earlier version of this test, and its latest run with the screenshots, recording and trace. You can look at what changed and go back.",
         canDo: [
             { text: "See what changed between two versions.", button: "Read about history", to: { topic: "history-and-undo", search: "history versions of a test" } },
             { text: "Go back to an earlier version.", button: "Read how to go back", to: { topic: "history-and-undo", search: "restore an earlier version" } },
@@ -510,7 +511,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     recorder: {
         title: "Record a test",
-        what: "Click through your application in a real browser and the platform turns what you do into steps. You see each step as it is added.",
+        what: "Click through your application in a real browser and the platform turns what you do into steps. AI agent projects only: a code project writes scripts.",
         canDo: [
             { text: "Type the address, then choose Start recording.", button: "Read how recording works", to: { topic: "record-a-test", search: "record a test" }, ui: ["Start recording"] },
             { text: "Check each step as it appears and remove a mistake.", button: "Read about checking steps", to: { topic: "record-a-test", search: "recorded steps" } },
@@ -535,12 +536,12 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     settings: {
         title: "Settings",
-        what: "Your runner, your AI keys, and how this whole platform is set up: the people who use it and what kinds of tests are allowed.",
+        what: "Your runner, your AI keys, and how this whole platform is set up, one section at a time: Your runner, AI keys, People and access, Platform, Usage and quality.",
         canDo: [
             { text: "Use Your runner to set up the program on your computer that runs your tests.", button: "Read about your runner", to: { topic: "runners" }, ui: ["Your runner"] },
             { text: "Use AI keys to add your own key or choose the one your AI work uses.", button: "Read about AI keys", to: { topic: "ai-keys" }, ui: ["AI keys"] },
-            { text: "Let colleagues in with their own accounts and roles.", button: "Read about people and access", to: { topic: "people-and-access", search: "people" } },
-            { text: "Read which kinds of tests can run here.", button: "Read about settings", to: { topic: "settings-page", search: "settings" } },
+            { text: "Use People and access to let colleagues in with their own accounts and roles.", button: "Read about people and access", to: { topic: "people-and-access", search: "people" }, ui: ["People and access"] },
+            { text: "Use Platform to read which kinds of tests can run here.", button: "Read about settings", to: { topic: "settings-page", search: "settings" }, ui: ["Platform"] },
         ],
         words: ["access-key", "frameworks"],
         next: [{ text: "Back to your projects when you are done.", button: "Open projects", to: here("projects") }],
@@ -622,14 +623,14 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     develop: {
         title: "Test development",
-        what: "Start writing tests in any of your projects: with the AI, by recording, step by step or as code.",
+        what: "Open any project's test scripts to write tests. AI agent projects can also be explored by the AI or recorded.",
         canDo: [
-            { text: "Let the AI explore an application and write tests for it.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
-            { text: "Record a test by using the application yourself.", button: "Read how recording works", to: { topic: "record-a-test" } },
-            { text: "Describe a test in your own words and let the AI write the steps.", button: "Read about describing a test", to: { topic: "describe-a-test" } },
+            { text: "Choose Open test scripts, then New test script for every way to write one.", button: "Read about describing a test", to: { topic: "describe-a-test" }, ui: ["Open test scripts", "New test script"] },
+            { text: "In an AI agent project, let the AI explore the application and write tests.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
+            { text: "In an AI agent project, record a test by using the application yourself.", button: "Read how recording works", to: { topic: "record-a-test" } },
         ],
         words: ["test", "exploration", "plan"],
-        next: [{ text: "Open a project's test cases to see every way to add a test.", button: "Open projects", to: here("projects") }],
+        next: [{ text: "Open a project's test scripts to see every way to add a test.", button: "Open projects", to: here("projects") }],
         topic: "first-steps",
     },
     "runners-global": {

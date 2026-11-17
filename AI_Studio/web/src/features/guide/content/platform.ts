@@ -70,7 +70,7 @@ export const platform: Topic[] = [
         why: "You see whether the AI is connected and the platform is ready.",
         steps: [
             step("Choose Settings in the sidebar.", "Settings"),
-            step("Read AI keys to see which key your AI work uses and whether it works.", "AI keys"),
+            step("Choose the AI keys section to see which key your AI work uses and whether it works.", "AI keys"),
             step("Under AI keys, choose Test this key to send one tiny request.", "AI keys"),
         ],
         goodToKnow: [
@@ -113,7 +113,7 @@ export const platform: Topic[] = [
         why: "Everyone gets the access they need, and you see who changed what.",
         steps: [
             step("Choose Settings in the sidebar.", "Settings"),
-            step("Under People, choose Add a person and pick a role.", "People", "Add a person"),
+            step("Choose the People and access section, then Add a person, and pick a role.", "People and access", "Add a person"),
             step("Send the invite link to the person; they choose their password with it."),
             step("Read Activity to see who changed what.", "Activity"),
         ],

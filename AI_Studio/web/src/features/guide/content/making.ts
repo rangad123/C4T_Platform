@@ -114,7 +114,7 @@ export const making: Topic[] = [
         what: "You click through your app and the platform writes down each step.",
         why: "You know the journey and want the steps written for you, with no AI.",
         steps: [
-            step("Open Test development and choose Record beside the project.", "Test development", "Record"),
+            step("Open Test development and choose Record beside the project (code projects have none).", "Test development", "Record"),
             step("Click through your application. Each step appears on the page."),
             step("Choose Add a check to turn a click into a check, such as this text is visible.", "Add a check"),
             step("Choose Save as a test.", "Save as a test"),

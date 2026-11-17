@@ -7,7 +7,7 @@ export const oneTest: Topic[] = [
         id: "test-page",
         group: "one-test",
         title: "Read and change one test",
-        what: "One page per test, with four tabs: DSL, Code, Steps and History.",
+        what: "One page per test, with four tabs: DSL, Code, Steps and History, each with only its own things.",
         why: "It is where you see why a test failed and change it.",
         steps: [
             step("Open Test scripts, then open a test.", "Test scripts"),
@@ -17,7 +17,7 @@ export const oneTest: Topic[] = [
         ],
         goodToKnow: [
             "Save stores a version and runs nothing.",
-            "The pass and fail marks on steps disappear when you edit, because they would no longer be true.",
+            "Step pass and fail marks disappear when you edit, as they would no longer be true.",
             "A test has no duplicate or delete action.",
         ],
         open: { label: "Open Test scripts", to: { place: "tests" } },
@@ -30,13 +30,13 @@ export const oneTest: Topic[] = [
         id: "history-and-undo",
         group: "one-test",
         title: "Go back to an earlier version",
-        what: "Every version, run, repair and import of one test, in one list.",
+        what: "Every version, run, repair and import of one test, in one list, with the latest run and its evidence on top.",
         why: "You see what changed and when, and you can go back.",
         steps: [
             step("Open the test and choose the History tab.", "History"),
             step("Tick two versions of the same kind to compare them."),
             step("Choose Restore this version to save an old version as the newest and run it.", "Restore this version"),
-            step("After an edit that stopped a passing test, choose Undo my last edit.", "Undo my last edit"),
+            step("On Steps or DSL, after an edit that stopped a passing test, choose Undo my last edit.", "Steps", "DSL", "Undo my last edit"),
         ],
         goodToKnow: ["Nothing is deleted when you undo.", "Only the last run marks steps. Old runs keep no step-by-step results."],
         open: { label: "Open Test scripts", to: { place: "tests" } },
@@ -95,7 +95,7 @@ export const oneTest: Topic[] = [
         why: "Many failures are explained by a failed request or a script error.",
         steps: [
             step("Open a failing web test."),
-            step("Find the requests in the results column. Failed and slow ones come first."),
+            step("Choose the History tab and find the requests under Latest run. Failed and slow ones come first.", "History", "Latest run"),
             step("Read the one-sentence summary above them."),
         ],
         goodToKnow: ["The contents of requests, cookies and anything that looks like a secret are never stored.", "Phone and API tests are not covered."],

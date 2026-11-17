@@ -411,9 +411,9 @@ project is made).
   before ("Workspace", Projects), no testing-type choice anywhere, and `#/security` or `#/projects/:id/security` say it is turned off
   without asking anything else. On: the sidebar names the two capabilities apart ("Functional testing" with Projects; "Security" with
   Security assessment, `#/security`, which lists the projects that include it).
-- **Testing type** (`GET|PUT /projects/:id/testing-type`). New project asks Functional testing / Security assessment / Both above the ways
+- **Functional or security testing** (`GET|PUT /projects/:id/testing-type`). New project asks Functional testing / Security assessment / Both above the ways
   to start. Security assessment needs only a project name, stores the type and opens Register application. Both keeps every way to
-  start and stores the type right after the project is made. Setup shows a "Testing type" row above its sections. A project that includes
+  start and stores the type right after the project is made. Settings, General shows a "Functional or security testing" row. A project that includes
   security gets a "Security assessment" tab after Setup and one small summary card on its Overview (open critical or high, awaiting review)
   linking to the section; a security-only project's Overview opens its security overview. A functional project's security section offers
   "Turn on security assessment" (sets Both).
