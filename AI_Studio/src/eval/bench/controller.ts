@@ -28,7 +28,8 @@ import type { EntryResult, EvalRun } from "../run.js";
 import { BenchAppHost, workflowsReached, type BenchApp, type Switches } from "./apps.js";
 import { defectsOf, type Catalogue } from "./catalogue.js";
 import { benchMetrics, categorize, combineMetrics } from "./metrics.js";
-import type { BenchAppResult, BenchConfig, BenchFinding, BenchHeadline, Benchmark, ReplayVerdict } from "./schema.js";
+import { candidateOf, sessionsFromEvents } from "./observed.js";
+import type { BenchAppResult, BenchConfig, BenchFinding, BenchHeadline, Benchmark, ExplorationSession, ReplayVerdict } from "./schema.js";
 
 const CHECK_TYPES = new Set(["accessibility", "health", "performance", "input", "visual", "vision"]);
 const DONE = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -353,7 +354,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     });
     // Which areas the tests reached, from their own steps.
     const paths: string[] = [];
-    const details = new Map<string, { generationMeta?: { capture?: unknown } | null }>();
+    const details = new Map<string, { generationMeta?: { capture?: unknown; finding?: unknown } | null }>();
     for (const t of tests.slice(0, MAX_DETAILS)) {
         const d = await call("GET", `/api/tests/${t.id}`, "Reading a test");
         details.set(t.id, d);
@@ -413,21 +414,28 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         const firstFail = before.filter((x) => x.status !== "passed" && x.status !== "skipped").map((x) => x.startedAt).sort()[0];
         const label = o.labels?.[`${app.id}/${t.testId}`];
         // What the author recorded when it stopped the test as a defect (the observed-vs-captured report's "author recorded" column).
-        const capture = (details.get(t.id) ?? (await call("GET", `/api/tests/${t.id}`, "Reading a test")))?.generationMeta?.capture;
+        const meta = (details.get(t.id) ?? (await call("GET", `/api/tests/${t.id}`, "Reading a test")))?.generationMeta;
+        const capture = meta?.capture;
+        const source: BenchFinding["source"] = CHECK_TYPES.has(t.type) ? "check" : before.length ? "validation" : "authoring";
         findings.push({
             id: t.id,
             testKey: t.testId,
             title: t.title.slice(0, 500),
             ...(t.validationReason ? { reason: t.validationReason.slice(0, 500) } : {}),
-            source: CHECK_TYPES.has(t.type) ? "check" : before.length ? "validation" : "authoring",
+            source,
             replay: replayed,
             category,
             defects: defects.filter((d) => seeded.includes(d)),
             ...(label && category === "unreproduced" && (label === "false_positive" || seeded.includes(label)) ? { label } : {}),
             ...(capture === "captured" || capture === "observed_only" ? { capture } : {}),
             firstSeenAt: firstFail ? new Date(firstFail).toISOString() : null,
+            // A defect the author stopped is a candidate finding: its objective and the E7 fields it lacks (observed.ts).
+            ...(o.mode === "discovery" && source === "authoring" ? { candidate: candidateOf(meta?.finding, t.testId) } : {}),
         });
     }
+    // The objective sessions of the app's jobs, from their events (E6, stop reasons).
+    const sessions: ExplorationSession[] = [];
+    for (const id of [jobs.planJobId, ...jobs.createJobIds]) if (id) sessions.push(...sessionsFromEvents(id, await jobEvents(client, id)));
 
     const metrics = benchMetrics({
         seeded,
@@ -457,7 +465,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     const version = o.config.apps.find((a) => a.id === app.id)?.version ?? "unknown";
     return {
         ...(entry ? { entry } : {}),
-        result: { id: app.id, entryId: app.id, projectId, status: "done", appVersion: version, seededDefects: seeded, defects, findings, metrics, jobs, ...(caveats.length ? { caveats } : {}) },
+        result: { id: app.id, entryId: app.id, projectId, status: "done", appVersion: version, seededDefects: seeded, defects, findings, metrics, jobs, exploration: { sessions: sessions.slice(0, 30) }, ...(caveats.length ? { caveats } : {}) },
     };
 }
 
@@ -476,6 +484,24 @@ async function settledJobs(client: PlatformClient, jobIds: Array<string | undefi
             await sleep(o.pollMs ?? 1000);
         }
     }
+}
+
+/** Events read per job, at most (500 a page): enough for an objective session's `objectives_planned` and `exploration_stopped`. */
+const MAX_EVENT_PAGES = 200;
+
+/** Every event of a job, page by page (the route returns at most 500 after an id). An unreadable page ends the reading. */
+async function jobEvents(client: PlatformClient, jobId: string): Promise<unknown[]> {
+    const all: unknown[] = [];
+    let after = 0;
+    for (let page = 0; page < MAX_EVENT_PAGES; page++) {
+        const r = await client.call("GET", `/api/test-generation/${jobId}/events?after=${after}`);
+        if (r.status !== 200 || !Array.isArray(r.body) || !r.body.length) break;
+        all.push(...(r.body as unknown[]));
+        const last = (r.body[r.body.length - 1] as { id?: unknown })?.id;
+        if (typeof last !== "number" || r.body.length < 500) break;
+        after = last;
+    }
+    return all;
 }
 
 /** The AI use of these jobs from the platform's usage records (for an app stopped before the harness could add it up). */

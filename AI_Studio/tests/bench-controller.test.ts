@@ -142,6 +142,9 @@ describe("the benchmark command on a stand-in app", () => {
         expect(run.overall.benchmark).toMatchObject({ mode: "discovery", seeded: 2, detected: 1 });
         expect(fs.readFileSync(path.join(out, file.replace(/\.json$/, ".md")), "utf8")).toContain("| SI-1 |");
         expect(fs.readFileSync(path.join(out, file.replace(/\.json$/, ".md")), "utf8")).toContain("Job time limit 45 minutes; replays one job per stage");
+        // The exploration record is written: this run did not explore by objectives, so it has no session (shown as such, not "not available").
+        expect(app.exploration).toEqual({ sessions: [] });
+        expect(fs.readFileSync(path.join(out, file.replace(/\.json$/, ".md")), "utf8")).toContain("| Objective sessions | 0 (the trial did not explore by objectives) |");
         // Nothing of the catalogue reached the platform: the model never saw a defect id or description.
         for (const c of llmCalls) for (const s of ["SI-1", "SI-2", "HTTP 500", "Total $31.00", "test-1"]) expect(c).not.toContain(s);
         // No state is left behind by a finished run.

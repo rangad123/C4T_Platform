@@ -9,9 +9,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { benchReportMain } from "../src/eval/bench/cli.js";
 import { categorize } from "../src/eval/bench/metrics.js";
-import { observedKind, observedOf, seriesOf, trialProblem, withLabels } from "../src/eval/bench/observed.js";
-import { observedMarkdown } from "../src/eval/bench/report.js";
-import { BenchmarkSchema, type BenchFinding, type Benchmark } from "../src/eval/bench/schema.js";
+import { candidateOf, EVIDENCE_FIELDS, evidenceGaps, NO_SCREENSHOTS, observedKind, observedOf, overBudget, seriesOf, sessionsFromEvents, trialProblem, withLabels } from "../src/eval/bench/observed.js";
+import { e8Lines, observedMarkdown } from "../src/eval/bench/report.js";
+import { BenchmarkSchema, type BenchFinding, type Benchmark, type ExplorationSession } from "../src/eval/bench/schema.js";
+import { CandidateFindingSchema } from "../src/engine/explore/finding.js";
 
 const f = (testKey: string, source: BenchFinding["source"], replay: BenchFinding["replay"], over: Partial<BenchFinding> = {}): BenchFinding => {
     const { category, defects } = categorize(replay);
@@ -185,5 +186,214 @@ describe("bench-report --observed <folder> (read-only)", () => {
         const r = await cli([]);
         expect(r.code).toBe(2);
         expect(r.out).toMatch(/Usage: node scripts\/eval.mjs bench-report --observed/);
+    });
+});
+
+// ── Per-objective counts, stop reasons, E6–E8 (P3-23) ────────────────────────────────────────────────────────────────────────────────
+
+/** A candidate finding as the engine stores it on the test (parsed with the engine's own contract, so the field names are the real ones). */
+const complete = () =>
+    CandidateFindingSchema.parse({
+        objective: { id: "obj-1", kind: "rule", source: "R-1", operator: "invalid_input" },
+        actions: { stepCount: 6 },
+        expected: { text: "The total is the sum of the lines.", source: "R-1" },
+        observed: "The total was $31.00 for lines of $10 and $20.",
+        evidence: { screenshots: [], requests: ["POST /api/cart -> 200"], console: [] },
+        capture: "captured",
+        independence: "independent",
+        confidence: "high",
+        fingerprint: "a".repeat(64),
+        modelVersion: "mv-1",
+        replays: [],
+    });
+
+describe("E7: what a candidate finding carries", () => {
+    it("a complete finding lacks nothing", () => {
+        expect(evidenceGaps(complete(), "WEB-001")).toEqual([]);
+    });
+
+    it("each missing field is named", () => {
+        const f = complete();
+        expect(evidenceGaps({ ...f, expected: { ...f.expected, source: null } }, "WEB-001")).toEqual(["source"]);
+        expect(evidenceGaps({ ...f, objective: null }, "WEB-001")).toEqual(["objective"]);
+        expect(evidenceGaps({ ...f, evidence: { screenshots: [], requests: [], console: [] } }, "WEB-001")).toEqual(["evidence"]);
+        expect(evidenceGaps({ ...f, actions: { stepCount: 0 } }, "WEB-001")).toEqual(["actions"]);
+        expect(evidenceGaps({ ...f, modelVersion: null, observed: "  " }, "WEB-001")).toEqual(["observed", "modelVersion"]);
+        expect(evidenceGaps({ ...f, confidence: "certain" }, "WEB-001")).toEqual(["confidence"]);
+        expect(evidenceGaps(f, "")).toEqual(["reproduction"]);
+    });
+
+    it("only a captured finding needs a stated source: one marked observed_only with no source is not missing it", () => {
+        const f = complete();
+        const observedOnly = { ...f, capture: "observed_only", independence: "not_run", confidence: "low", expected: { ...f.expected, source: null } };
+        expect(evidenceGaps(observedOnly, "WEB-001")).toEqual([]);
+        // Captured with no source, or not marked at all: the source is missing.
+        expect(evidenceGaps({ ...f, expected: { ...f.expected, source: null } }, "WEB-001")).toEqual(["source"]);
+        const { capture: _c, ...unmarked } = observedOnly;
+        expect(evidenceGaps(unmarked, "WEB-001")).toEqual(["source"]);
+    });
+
+    it("request or console lines are evidence enough; no screenshot is noted, not a gap", () => {
+        const f = complete();
+        expect(evidenceGaps(f, "WEB-001")).toEqual([]);
+        expect(evidenceGaps({ ...f, evidence: { screenshots: [], requests: [], console: ["Console error: boom"] } }, "WEB-001")).toEqual([]);
+        expect(candidateOf(f, "WEB-001").notes).toEqual([NO_SCREENSHOTS]);
+        expect(candidateOf({ ...f, evidence: { ...f.evidence, screenshots: ["shots/1.png"] } }, "WEB-001")).not.toHaveProperty("notes");
+    });
+
+    it("a defect test without a candidate finding lacks it and every field", () => {
+        expect(evidenceGaps(undefined, "WEB-001")).toEqual(["finding", ...EVIDENCE_FIELDS]);
+        expect(candidateOf(undefined, "WEB-001")).toEqual({ objective: null, missing: ["finding", ...EVIDENCE_FIELDS] });
+    });
+
+    it("keeps the objective's kind and operator", () => {
+        expect(candidateOf(complete(), "WEB-001")).toEqual({ objective: { kind: "rule", operator: "invalid_input" }, missing: [], notes: [NO_SCREENSHOTS] });
+        const { operator: _o, ...noOperator } = complete().objective!;
+        expect(candidateOf({ ...complete(), objective: noOperator }, "WEB-001").objective).toEqual({ kind: "rule", operator: null });
+    });
+});
+
+const planned = (budgets: unknown) => ({ id: 1, kind: "objectives_planned", message: "planned", data: { objectives: 3, pursuits: 4, skipped: 0, overCap: 0, budgets } });
+const stopped = (data: unknown, message = "Exploring by objectives stopped: all objectives were pursued.") => ({ id: 9, kind: "exploration_stopped", message, data });
+const BUDGETS = { objectives: 4, actions: 50, aiCalls: 60, tokens: 1_000_000, minutes: 30, depth: 3, steps: 25 };
+
+describe("sessions and E6 from the job's events", () => {
+    it("pairs objectives_planned with exploration_stopped, in order; one left open has no stop reason", () => {
+        const s = sessionsFromEvents("job-1", [
+            planned(BUDGETS),
+            { id: 2, kind: "possible_defect", message: "x", data: {} },
+            stopped({ stopReason: "ai_calls", pursued: 3, actions: 40, aiCalls: 61 }),
+            planned(BUDGETS),
+        ]);
+        expect(s).toEqual([
+            { jobId: "job-1", stopReason: "ai_calls", detail: "Exploring by objectives stopped: all objectives were pursued.", budgets: { objectives: 4, actions: 50, aiCalls: 60 }, used: { objectives: 3, actions: 40, aiCalls: 61 } },
+            { jobId: "job-1", stopReason: null, detail: "", budgets: { objectives: 4, actions: 50, aiCalls: 60 }, used: null },
+        ]);
+        expect(overBudget(s[0]!)).toEqual(["aiCalls"]);
+        expect(overBudget(s[1]!)).toEqual([]);
+    });
+
+    it("reaching a budget exactly is not over it; unreadable data is left out, never guessed", () => {
+        const [at] = sessionsFromEvents("j", [planned(BUDGETS), stopped({ stopReason: "actions", pursued: 4, actions: 50, aiCalls: 60 })]);
+        expect(overBudget(at!)).toEqual([]);
+        const [bad] = sessionsFromEvents("j", [planned({ actions: "many" }), stopped({ stopReason: "", pursued: -1 })]);
+        expect(bad).toMatchObject({ stopReason: null, budgets: null, used: null });
+        expect(sessionsFromEvents("j", [])).toEqual([]);
+    });
+
+    it("a second stop with no session opened stands alone; it never overwrites the closed one", () => {
+        const s = sessionsFromEvents("j", [planned(BUDGETS), stopped({ stopReason: "time", pursued: 1, actions: 2, aiCalls: 3 }), stopped({ stopReason: "cancelled", pursued: 0, actions: 0, aiCalls: 0 })]);
+        expect(s.map((x) => [x.stopReason, x.budgets !== null])).toEqual([["time", true], ["cancelled", false]]);
+    });
+});
+
+const session = (over: Partial<ExplorationSession> = {}): ExplorationSession => ({ jobId: "job-c", stopReason: "objectives_done", detail: "", budgets: { objectives: 4, actions: 50, aiCalls: 60 }, used: { objectives: 4, actions: 30, aiCalls: 20 }, ...over });
+const cand = (testKey: string, kind: string | null, operator: string | null, missing: string[] = []): BenchFinding =>
+    f(testKey, "authoring", { seeded: "failed", clean: "passed", single: {} }, { candidate: { objective: kind ? { kind, operator } : null, missing } });
+/** A trial with the exploration record: its findings, sessions, AI calls and cost. */
+const trial = (findings: BenchFinding[], sessions: ExplorationSession[], o: { baseline?: boolean; aiCalls?: number; cost?: number | null } = {}): Benchmark => {
+    const b = bench(findings);
+    const m = { ...b.metrics, aiCalls: o.aiCalls ?? 10, cost: o.cost === undefined ? null : o.cost };
+    return { ...b, baseline: o.baseline ?? false, metrics: m, apps: b.apps.map((a) => ({ ...a, metrics: m, exploration: { sessions } })) };
+};
+
+describe("per trial: findings by objective, stop reasons, E6, E7, E8", () => {
+    // Hand-built: two rule/invalid_input findings (one without its evidence), one workflow/repeat, one without an objective, and a check.
+    const FOUND = [cand("WEB-101", "rule", "invalid_input"), cand("WEB-102", "rule", "invalid_input", ["evidence"]), cand("WEB-103", "workflow", "repeat"), cand("WEB-104", null, null, ["objective"]), FINDINGS[7]!];
+
+    it("gives the stated counts", () => {
+        const o = observedOf(trial(FOUND, [session(), session({ jobId: "job-d", stopReason: "ai_calls", used: { objectives: 2, actions: 10, aiCalls: 61 } })], { aiCalls: 90, cost: 0.12 }));
+        expect(o.byObjective).toEqual([
+            { kind: "none", operator: "none", findings: 1 },
+            { kind: "rule", operator: "invalid_input", findings: 2 },
+            { kind: "workflow", operator: "repeat", findings: 1 },
+        ]);
+        expect(o.e6).toEqual({ sessions: 2, withStopReason: 2, stopReasons: { ai_calls: 1, objectives_done: 1 }, overBudget: [{ jobId: "job-d", over: ["aiCalls"] }], pass: false });
+        // The check is not a candidate finding: 4 candidates, 2 complete; one missing field fails E7 for the trial.
+        expect(o.e7).toEqual({ n: 2, of: 4, rate: 0.5, missing: { evidence: 1, objective: 1 }, pass: false });
+        expect(o.e8).toEqual({ aiCalls: 90, cost: 0.12, sessionCalls: 81 });
+    });
+
+    it("all bounded and complete: E6 and E7 pass", () => {
+        const o = observedOf(trial([cand("WEB-101", "rule", "invalid_input")], [session()]));
+        expect(o.e6).toMatchObject({ pass: true });
+        expect(o.e7).toMatchObject({ n: 1, of: 1, pass: true });
+        const md = observedMarkdown([{ name: "t", observed: o }]);
+        expect(md).toContain("| E6 bounded: every session has a stop reason, none over budget | pass |");
+        expect(md).toContain("| E7 evidence: candidate findings with every field | 1 of 1 (100%): pass |");
+        expect(md).toContain("| rule | invalid_input | 1 |");
+    });
+
+    it("a session with no recorded stop reason fails E6", () => {
+        const o = observedOf(trial([], [session({ stopReason: null, used: null })]));
+        expect(o.e6).toMatchObject({ sessions: 1, withStopReason: 0, pass: false });
+        expect(observedMarkdown([{ name: "t", observed: o }])).toContain("1 session(s) with no recorded stop reason");
+    });
+
+    it("the Markdown names the failures", () => {
+        const md = observedMarkdown([{ name: "t", observed: observedOf(trial(FOUND, [session({ jobId: "job-d", used: { objectives: 5, actions: 10, aiCalls: 1 } })])) }]);
+        expect(md).toContain("| Sessions over a budget | job-d (objectives) |");
+        expect(md).toContain("| E7 evidence: candidate findings with every field | 2 of 4 (50%): fail |");
+        expect(md).toContain("| Fields missing (findings) | evidence 1, objective 1 |");
+        expect(md).toMatch(/\| WEB-102 \| authoring \|.*\| rule \/ invalid_input \| evidence \|/);
+    });
+
+    it("the missing-fields column keeps 'screenshots: none saved' visible, and it does not fail E7", () => {
+        const shotless = f("WEB-201", "authoring", { seeded: "failed", clean: "passed", single: {} }, { candidate: { objective: { kind: "rule", operator: "as_stated" }, missing: [], notes: [NO_SCREENSHOTS] } });
+        const o = observedOf(trial([shotless], [session()]));
+        expect(o.e7).toMatchObject({ n: 1, of: 1, pass: true });
+        expect(observedMarkdown([{ name: "t", observed: o }])).toMatch(/\| WEB-201 \| .*\| rule \/ as_stated \| screenshots: none saved \|/);
+    });
+
+    it("on a baseline trial E6 and E7 are not applicable, never a fail; the per-objective counts still show", () => {
+        const o = observedOf(trial(FOUND, [session({ stopReason: null, used: null })], { baseline: true }));
+        expect(o.e6).toBe("not_applicable");
+        expect(o.e7).toBe("not_applicable");
+        expect(o.byObjective).toContainEqual({ kind: "rule", operator: "invalid_input", findings: 2 });
+        const md = observedMarkdown([{ name: "b", observed: o }]);
+        expect(md).toContain("| E6 bounded | not applicable (baseline does not explore by objectives) |");
+        expect(md).toContain("| E7 evidence | not applicable (baseline does not explore by objectives) |");
+        expect(md).not.toMatch(/: fail \||\| fail \|/);
+    });
+
+    it("an older result without the exploration record reports them as not available, never zero", () => {
+        const o = observedOf(bench(FINDINGS));
+        expect(o.byObjective).toBeNull();
+        expect(o.e6).toBeNull();
+        expect(o.e7).toBeNull();
+        expect(o.e8).toEqual({ aiCalls: 10, cost: null, sessionCalls: null });
+        const md = observedMarkdown([{ name: "old", observed: o }]);
+        expect(md).toContain("| E6 bounded | not available");
+        expect(md).toContain("| E7 evidence | not available");
+        expect(md).toContain("| AI calls in the objective sessions | not available");
+        expect(md).toContain("Candidate findings by objective: not available");
+        expect(md).not.toMatch(/\| (Objective sessions|Sessions over a budget) \| 0/);
+        // And it still parses.
+        expect(BenchmarkSchema.safeParse(bench(FINDINGS)).success).toBe(true);
+        expect(BenchmarkSchema.safeParse(trial(FOUND, [session()])).success).toBe(true);
+    });
+});
+
+describe("E8 across trials: candidate median against the baseline median", () => {
+    const t = (baseline: boolean, aiCalls: number, cost: number | null) => observedOf(trial([], [], { baseline, aiCalls, cost }));
+
+    it("at most 2× the baseline median passes", () => {
+        const lines = e8Lines([t(true, 10, 0.1), t(true, 20, 0.2), t(true, 30, 0.3), t(false, 30, 0.4), t(false, 50, 0.4)]);
+        expect(lines[0]).toBe("- E8 AI calls: candidate median 40 (2 trials, range 30–50), baseline median 20 (3 trials), 2×: pass (at most 2× the baseline median)");
+        expect(lines[1]).toBe("- E8 estimated cost: candidate median $0.40 (2 trials, range $0.40–$0.40), baseline median $0.20 (3 trials), 2×: pass (at most 2× the baseline median)");
+    });
+
+    it("more than 2× fails", () => {
+        expect(e8Lines([t(true, 20, null), t(false, 41, null)])[0]).toMatch(/candidate median 41 .* baseline median 20 .*: fail/);
+    });
+
+    it("without a baseline trial, or without prices, it says there is nothing to compare", () => {
+        expect(e8Lines([t(false, 10, 0.1), t(false, 20, 0.1)])).toEqual(["- E8: no baseline trial among these, so no comparison with the baseline median"]);
+        expect(e8Lines([t(true, 20, null), t(false, 30, null)])[1]).toBe("- E8 estimated cost: no baseline trial was priced, so no comparison");
+    });
+
+    it("is in the multi-trial section", () => {
+        const md = observedMarkdown([{ name: "b", observed: t(true, 20, null) }, { name: "c", observed: t(false, 30, null) }]);
+        expect(md).toContain("- E8 AI calls: candidate median 30 (1 trials, range 30–30), baseline median 20 (1 trials), 1.5×: pass");
     });
 });

@@ -60,16 +60,73 @@ export function observedMarkdown(trials: Array<{ name: string; observed: Observe
         out.push(`| E1 capture: author-time findings whose saved script fails on the seeded app | ${ofText(o.e1)} |`, `| E2 replay isolation: of those, scripts that pass on the clean app | ${ofText(o.e2)} |`);
         out.push(`| Clean replay not run (counted as not passing in E2) | ${o.cleanNotRun} |`, `| Author recorded: captured / observed only / not recorded | ${o.authorCapture.captured} / ${o.authorCapture.observed_only} / ${o.authorCapture.unrecorded} |`);
         out.push(`| Defects seen but not captured (person's labels) | ${o.observedDefects.length ? o.observedDefects.join(", ") : "none"}; ${o.observedUnlabelled} observed-only finding(s) unlabelled |`, "");
-        out.push("| App | Finding | Source | Author recorded | Seeded | Clean | Observed vs captured | Label |", "|---|---|---|---|---|---|---|---|");
-        for (const r of o.rows) out.push(`| ${r.app} | ${r.testKey} | ${r.source} | ${r.capture ?? "-"} | ${r.seeded} | ${r.clean ?? "-"} | ${r.kind.replace("_", " ")} | ${r.label ?? ""} |`);
-        out.push("");
+        out.push("| App | Finding | Source | Author recorded | Seeded | Clean | Observed vs captured | Label | Objective | E7 missing |", "|---|---|---|---|---|---|---|---|---|---|");
+        for (const r of o.rows) out.push(`| ${r.app} | ${r.testKey} | ${r.source} | ${r.capture ?? "-"} | ${r.seeded} | ${r.clean ?? "-"} | ${r.kind.replace("_", " ")} | ${r.label ?? ""} | ${r.objective ?? "-"} | ${r.missing === undefined ? "-" : [...r.missing, ...(r.notes ?? [])].join(", ") || "none"} |`);
+        out.push("", ...objectivesMarkdown(o));
     }
     if (trials.length > 1) {
         for (const [k, pick] of [["E1", (o: Observed) => o.e1.rate], ["E2", (o: Observed) => o.e2.rate]] as const) {
             const s = seriesOf(trials.map((t) => pick(t.observed)));
             out.push(s.n ? `- ${k} over ${s.n} trials: median ${pct(s.median)}, range ${pct(s.min)}–${pct(s.max)}` : `- ${k}: no trial had anything to divide by`);
         }
-        out.push("");
+        out.push(...e8Lines(trials.map((t) => t.observed)), "");
     }
     return out.join("\n");
+}
+
+const NA = "not available (this result was written before the benchmark recorded it)";
+const NOT_APPLICABLE = "not applicable (baseline does not explore by objectives)";
+
+/** Per trial: candidate findings by objective, the sessions' stop reasons, and E6–E8 (definitions in observed.ts). */
+function objectivesMarkdown(o: Observed): string[] {
+    const out: string[] = ["#### Exploration by objectives", "", "| Measure | Value |", "|---|---|"];
+    out.push(`| Trial | ${o.baseline ? "baseline" : "candidate"} |`);
+    if (!o.e6) out.push(`| Objective sessions and stop reasons | ${NA} |`, `| E6 bounded | ${NA} |`);
+    else if (o.e6 === "not_applicable") out.push(`| E6 bounded | ${NOT_APPLICABLE} |`);
+    else {
+        const reasons = Object.entries(o.e6.stopReasons).sort(([a], [b]) => a.localeCompare(b)).map(([r, n]) => `${r} ${n}`);
+        const unrecorded = o.e6.sessions - o.e6.withStopReason;
+        out.push(`| Objective sessions | ${o.e6.sessions}${o.e6.sessions ? "" : " (the trial did not explore by objectives)"} |`);
+        out.push(`| Stop reasons | ${reasons.length ? reasons.join(", ") : "none"}${unrecorded ? `; ${unrecorded} session(s) with no recorded stop reason` : ""} |`);
+        out.push(`| Sessions over a budget | ${o.e6.overBudget.length ? o.e6.overBudget.map((x) => `${x.jobId} (${x.over.join(", ")})`).join("; ") : "0"} |`);
+        out.push(`| E6 bounded: every session has a stop reason, none over budget | ${o.e6.sessions ? (o.e6.pass ? "pass" : "fail") : "no session"} |`);
+    }
+    if (!o.e7) out.push(`| E7 evidence | ${NA} |`);
+    else if (o.e7 === "not_applicable") out.push(`| E7 evidence | ${NOT_APPLICABLE} |`);
+    else {
+        const missing = Object.entries(o.e7.missing).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => `${k} ${n}`);
+        out.push(`| E7 evidence: candidate findings with every field | ${o.e7.of ? `${ofText(o.e7)}: ${o.e7.pass ? "pass" : "fail"}` : "no candidate finding"} |`);
+        if (missing.length) out.push(`| Fields missing (findings) | ${missing.join(", ")} |`);
+    }
+    out.push(`| E8 AI calls / estimated cost (whole trial) | ${o.e8.aiCalls} / ${money(o.e8.cost)} |`, `| AI calls in the objective sessions | ${o.e8.sessionCalls === null ? NA : o.e8.sessionCalls} |`, "");
+    if (o.byObjective === null) out.push(`Candidate findings by objective: ${NA}.`, "");
+    else if (!o.byObjective.length) out.push("Candidate findings by objective: none.", "");
+    else {
+        out.push("| Objective kind | Operator | Candidate findings |", "|---|---|---|");
+        for (const g of o.byObjective) out.push(`| ${g.kind} | ${g.operator} | ${g.findings} |`);
+        out.push("");
+    }
+    return out;
+}
+
+/** E8 across trials: the candidate trials' median AI calls and cost against the baseline trials' median (pass: at most 2×). */
+export function e8Lines(trials: Observed[]): string[] {
+    const base = trials.filter((t) => t.baseline);
+    const cand = trials.filter((t) => !t.baseline);
+    if (!base.length || !cand.length) return [`- E8: ${base.length ? "no candidate" : "no baseline"} trial among these, so no comparison with the baseline median`];
+    const out: string[] = [];
+    const fmt = { calls: (v: number | null) => (v === null ? "n/a" : String(v)), cost: money };
+    for (const [k, pick] of [["calls", (o: Observed) => o.e8.aiCalls], ["cost", (o: Observed) => o.e8.cost]] as const) {
+        const b = seriesOf(base.map((t) => pick(t)));
+        const c = seriesOf(cand.map((t) => pick(t)));
+        const what = k === "calls" ? "AI calls" : "estimated cost";
+        if (!b.n || !c.n) {
+            out.push(`- E8 ${what}: ${!b.n ? "no baseline" : "no candidate"} trial was priced, so no comparison`);
+            continue;
+        }
+        const ratio = b.median! > 0 ? c.median! / b.median! : null;
+        const pass = c.median! <= 2 * b.median!;
+        out.push(`- E8 ${what}: candidate median ${fmt[k](c.median)} (${c.n} trials, range ${fmt[k](c.min)}–${fmt[k](c.max)}), baseline median ${fmt[k](b.median)} (${b.n} trials)${ratio === null ? "" : `, ${Math.round(ratio * 100) / 100}×`}: ${pass ? "pass" : "fail"} (at most 2× the baseline median)`);
+    }
+    return out;
 }
