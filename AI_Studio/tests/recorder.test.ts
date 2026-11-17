@@ -151,7 +151,7 @@ describe("recorder: access, limits and safety", () => {
             delete process.env.WAYLAND_DISPLAY;
             const headed = await call("POST", `/api/projects/${pidA}/recordings`, { url: FIXTURE });
             expect(headed.status).toBe(422);
-            expect(headed.body.error).toMatch(/no screen.*Show the browser|turn .*off/i);
+            expect(headed.body.error).toBe("This computer has no screen for a recording window. Record on a computer with a screen, or on your runner.");
         } finally {
             Object.defineProperty(process, "platform", platformDesc);
             if (savedDisplay.d !== undefined) process.env.DISPLAY = savedDisplay.d;
