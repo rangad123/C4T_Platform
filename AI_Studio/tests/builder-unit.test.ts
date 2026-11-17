@@ -42,7 +42,8 @@ describe("the field table follows the schema", () => {
     it("offers a form field for every key an action carries (except the action name and the note)", () => {
         for (const o of options) {
             const action = o.shape.action!.value!;
-            const keys = Object.keys(o.shape).filter((k) => k !== "action" && k !== "description");
+            // An assert's `source` (the rule or expected result it proves) is set by the engine, not typed by a person: no field for it.
+            const keys = Object.keys(o.shape).filter((k) => k !== "action" && k !== "description" && !(action === "assert" && k === "source"));
             const have = allFieldNames(action);
             for (const k of keys) expect(have, `${action}.${k}`).toContain(k);
         }
@@ -123,6 +124,20 @@ describe("list helpers and dirty tracking", () => {
         const loaded = { title: "Old", description: "kept", testData: { dataSet: "users" }, steps, priority: "high" };
         const out = specFrom(loaded, { title: "  New  ", testData: { dataSet: "users" }, steps: [steps[0]!] });
         expect(out).toEqual({ ...loaded, title: "New", steps: [steps[0]] });
+    });
+});
+
+describe("a check's source survives editing", () => {
+    it("an assert the engine marked with a source keeps it through edits and saving; a hand-made assert has none", () => {
+        const sourced = { action: "assert", check: "text", locator: { by: "role", role: "status", value: "Total" }, expected: "$25", source: "R-TOTAL" };
+        expect(fieldsFor(sourced).map((f) => f.name)).not.toContain("source");
+        const edited = setCheck(setField(setField(sourced, "expected", "$25.00"), "description", "The total is right"), "exactText");
+        const items = replaceAt(toItems([{ action: "navigate", url: "/cart" }, sourced]), 1, edited);
+        const out = specFrom({ title: "Cart", testData: {}, steps: [] }, { title: "Cart", testData: {}, steps: stepsOf(items) });
+        const saved = checkSpecInput(out, { testId: "WEB-001", kind: "web", category: "Cart", source: { origin: "browser-agent" } });
+        expect(saved.spec?.steps[1]).toMatchObject({ check: "exactText", expected: "$25.00", source: "R-TOTAL" });
+
+        for (const p of PALETTE.web.flatMap((g) => [...g.items, ...(g.more ?? [])]).filter((x) => x.id.startsWith("assert:"))) expect(p.make(), p.id).not.toHaveProperty("source");
     });
 });
 
