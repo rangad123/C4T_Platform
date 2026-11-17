@@ -89,7 +89,7 @@ function scriptedClient(name: string, own: string[], queue: ToolStep[]): LlmClie
             // The coverage-gap call (pages the plan does not touch yet): nothing new, so planning ends there.
             if (prompt.includes("Already covered by the plan")) return { scenarios: [] };
             // The application-understanding analysis after the exploration reads the explored pages for rules: none here.
-            if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [] };
+            if (/list what they state about its intended behaviour/.test(system)) return { rules: [], workflows: [], roles: [], transitions: [], entities: [] };
             if (/analysing a web application/.test(system)) {
                 return {
                     siteType: "ecommerce",

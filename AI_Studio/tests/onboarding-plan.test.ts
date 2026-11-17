@@ -71,7 +71,7 @@ const scripted: LlmClient = {
         }
         if (/list what they state about its intended behaviour/.test(system)) {
             prompts.rules++;
-            return { rules: [], workflows: [], roles: [], transitions: [] };
+            return { rules: [], workflows: [], roles: [], transitions: [], entities: [] };
         }
         if (/analysing a web application/.test(system)) {
             prompts.analysis++;
