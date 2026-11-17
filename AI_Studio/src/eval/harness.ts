@@ -38,6 +38,12 @@ export interface HarnessOptions {
     warm?: boolean;
     /** More exploration options sent as they are (the benchmark's level, page and scenario limits, data-changing tests on its own apps). */
     exploration?: Record<string, unknown>;
+    /**
+     * Called once the creation has finished and before any rerun, with the project's tests as the creation left them and the time they were
+     * read. The reruns change a test's status (a defect test in review becomes VALIDATED or FAILED_VALIDATION once it has run), so the
+     * benchmark collects its findings from this.
+     */
+    onCreated?: (created: { projectId: string; at: string; tests: Array<Record<string, unknown>> }) => void | Promise<void>;
 }
 
 const DONE = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -176,7 +182,10 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
             log("  creating and running the tests...");
             const createJob = await finished(created.jobId);
             if (createJob.status === "FAILED") throw new Error(`Creating the tests failed: ${createJob.error ?? "no reason given"}`);
-            const list = ((await call("GET", `/api/projects/${project.id}/tests`, "Reading the tests")) as Array<{ id: string; testId: string; title: string }>).filter((t) => !warmTests.has(t.id)).slice(0, MAX_TESTS_PER_ENTRY);
+            const createdAt = new Date().toISOString();
+            const all = (await call("GET", `/api/projects/${project.id}/tests`, "Reading the tests")) as Array<{ id: string; testId: string; title: string }>;
+            await o.onCreated?.({ projectId: project.id, at: createdAt, tests: all });
+            const list = all.filter((t) => !warmTests.has(t.id)).slice(0, MAX_TESTS_PER_ENTRY);
             const first = await call("GET", `/api/projects/${project.id}/runs/${created.jobId}`, "Reading the first run");
             const firstOf = new Map<string, { state: string; reason?: string }>((first.tests ?? []).map((t: { id: string; state: string; reason?: string }) => [t.id, t]));
             const reruns = new Map<string, Verdict[]>(list.map((t) => [t.id, []]));
