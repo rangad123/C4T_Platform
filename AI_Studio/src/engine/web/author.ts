@@ -70,6 +70,8 @@ export interface AuthorInput {
     testData?: TestData;
     /** The scenario's rules (stated by a source or confirmed by a person): the test checks them where the scenario reaches them. */
     rules?: KnowledgeRule[];
+    /** The ids of the project's requirements (the job's requirements document): an expected result naming one the scenario covers is stated (statedSource). */
+    requirementIds?: readonly string[];
     /**
      * The run's other known secrets (authenticator secrets, API tokens, other accounts' passwords): what the application shows in the
      * console, page errors, failed requests and dialogs is masked with them (and the sign-in password) before the AI or a stored record sees
@@ -124,22 +126,32 @@ export function sourceOf(given: string, scenario: Pick<Scenario, "expectedResult
     return usableRules(rules ?? []).find((r) => normRef(r.ref) === normRef(given))?.ref;
 }
 
-/** `text` names `ref` as a whole token (not as part of a longer ref: "R-1" is not cited by "R-10"), ignoring spacing. */
+/**
+ * `text` names `ref` as a whole token (not as part of a longer ref: "R-1" is not cited by "R-10" or "R-1.2", nor "1.2" by
+ * "1.2.3"), ignoring spacing. A full stop ending the sentence is not part of the token.
+ */
 function cites(text: string, ref: string): boolean {
     const r = normRef(ref);
     if (!r) return false;
     const escaped = r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`).test(normRef(text));
+    return new RegExp(`(?<![\\w-]|\\w\\.)${escaped}(?![\\w-]|\\.\\w)`).test(normRef(text));
 }
 
 /**
  * Whether a check's source (as `sourceOf` returns it) is STATED, so a failing check of it captures a defect (queue row 172). A usable rule's
  * ref is. `expected:<n>` is only when the scenario's n-th expected result is itself tied to a stated source: an objective scenario
  * (explore/perturb.ts scenarioFor: a stated objective, and its expected result cites the objective's source as "(source: <ref>)"), or an
- * expected result that names a usable rule given to the scenario by its ref. A planner's own expected result is not: the AI wrote it, not
- * the application or its documents, so a check of it failing on the clean app too is the planner's guess, not a defect.
+ * expected result that names a usable rule given to the scenario by its ref, or that names a requirement id the scenario covers which is
+ * also one of the project's requirements (`requirementIds`: the ids of the job's requirements document, as the planner keeps them; the
+ * scenario's own list is not enough). A planner's own expected result is not: the AI wrote it, not the application or its documents, so
+ * a check of it failing on the clean app too is the planner's guess, not a defect.
  */
-export function statedSource(source: string, scenario: Pick<Scenario, "expectedResults" | "objective">, rules: readonly KnowledgeRule[] | undefined): boolean {
+export function statedSource(
+    source: string,
+    scenario: Pick<Scenario, "expectedResults" | "objective" | "requirements">,
+    rules: readonly KnowledgeRule[] | undefined,
+    requirementIds?: readonly string[],
+): boolean {
     const usable = usableRules(rules ?? []);
     const n = EXPECTED_SOURCE.exec(source.trim())?.[1];
     if (!n) return usable.some((r) => normRef(r.ref) === normRef(source));
@@ -147,7 +159,9 @@ export function statedSource(source: string, scenario: Pick<Scenario, "expectedR
     if (text === undefined) return false;
     const o = scenario.objective;
     if (o && o.kind !== "coverage-gap" && normRef(text).includes(`(source: ${normRef(o.source).replace(/…$/, "")}`)) return true;
-    return usable.some((r) => cites(text, r.ref));
+    if (usable.some((r) => cites(text, r.ref))) return true;
+    const known = new Set(requirementIds ?? []);
+    return (scenario.requirements ?? []).some((id) => known.has(id) && cites(text, id));
 }
 
 const SYSTEM = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
@@ -692,7 +706,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         // The last check of a STATED source still failing becomes the final step, where it ran: the saved test is the steps up
                         // to it, then the check (later steps are dropped, the defect shows there), so it fails while the bug is there. A failing
                         // check of the planner's own expected result is not kept: the defect is observed only (statedSource).
-                        const kept = failedChecks.filter((c) => statedSource((c.step as { source: string }).source, scenario, input.rules)).at(-1);
+                        const kept = failedChecks.filter((c) => statedSource((c.step as { source: string }).source, scenario, input.rules, input.requirementIds)).at(-1);
                         outcome = {
                             status: result,
                             steps: kept ? [...recorded.slice(0, kept.at), kept.step] : [...recorded],

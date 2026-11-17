@@ -4,8 +4,9 @@
  *   - a defect captured by a failing check of the scenario's expected result that cites a stated rule: the independence check replays it twice in fresh browsers
  *     (both fail at that check: independent), the test's meta.finding parses as a CandidateFinding with confidence high, meta.capture is
  *     "captured", the NEEDS_REVIEW reason names the source, and the possible_defect event carries capture and confidence;
- *   - a defect captured by a failing check of a rule: the expected text is the rule's, the finding names the model version and the
- *     scenario's objective;
+ *   - a defect captured by a failing check of a rule: the expected text is the rule's, the finding names the model version; an
+ *     objective the planner's model wrote into its reply is dropped (only the objective stage sets one: the finding of an objective
+ *     scenario names it in explore-objectives-run and stated-source-unit), so the finding has none;
  *   - a defect the replays do not show again (the page is wrong on its first visit only): state dependent, confidence medium;
  *   - a defect claimed without a failing sourced check: still saved NEEDS_REVIEW, observed only, confidence low, no replays;
  *   - a defect whose failing check is of the planner's own expected result (tied to nothing stated, queue row 172): the same, observed only;
@@ -199,20 +200,22 @@ describe("a defect test carries its candidate finding", () => {
         expect(e.data).toMatchObject({ capture: "captured", confidence: "high", independence: "independent", source: "expected:2" });
     }, 300_000);
 
-    it("captured by a failing rule check: the rule's expected text, the model version and the scenario's objective", async () => {
+    it("captured by a failing rule check: the rule's expected text and the model version; an objective the planner's model wrote is dropped", async () => {
         const projectId = (await call("POST", "/api/projects", { name: "Rule" })).body.id as string;
         const intel = new AppIntelStore(platform.db.sql);
         const version = await intel.addVersion({ projectId, model: { workflows: [{ id: "wf-cart", name: "Check the cart", steps: [{ order: 1, action: "Open the cart" }], sourceType: "requirement" }] } });
         await intel.addRule(projectId, {
             ref: "R-TOTAL", kind: "constraint", description: "The total is the sum of the line prices", expected: "The total equals the sum of the lines", sourceType: "requirement", sourceRef: "req.md#total", explicitness: "explicit", confidence: 0.9, workflows: ["wf-cart"],
         }, { modelVersionId: version.id });
+        // The planner's model writes an objective of its own: the planner drops it, so it never reaches the test or its finding.
         plan = { ...cartScenario("/cart"), objective: { id: "obj-total", kind: "rule", source: "R-TOTAL" } };
         script = [heading, total("R-TOTAL"), finishDefect];
         const { test, events } = await explore(projectId);
 
         const finding = CandidateFindingSchema.parse(metaOf(test).finding);
+        expect((metaOf(test).scenario as Record<string, unknown>).objective).toBeUndefined();
         expect(finding).toMatchObject({
-            objective: { id: "obj-total", kind: "rule", source: "R-TOTAL" },
+            objective: null,
             expected: { text: "The total equals the sum of the lines", source: "R-TOTAL" },
             capture: "captured",
             independence: "independent",

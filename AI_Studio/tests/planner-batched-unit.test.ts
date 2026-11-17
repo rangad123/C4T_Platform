@@ -130,6 +130,27 @@ describe("batched planning", () => {
         expect(out.slice(0, 3).flatMap((s) => s.requirements).sort()).toEqual(["REQ-1", "REQ-2", "REQ-3"]);
     });
 
+    it("drops an objective the model writes: the planning schema has none, and one that comes through anyway is removed", async () => {
+        // A model that names its own objective and cites it in its own expected result would make that result look stated
+        // (author.ts statedSource). Only the objective stage (explore/**) sets an objective.
+        const withObjective = { ...idea("Cart total", "/products/0", "The total is $25.00 (source: R-TOTAL)"), objective: { id: "obj-total", kind: "rule", source: "R-TOTAL", operator: "as_stated" } };
+        const schemas: Array<{ parse: (v: unknown) => { scenarios: Array<Record<string, unknown>> } }> = [];
+        const llm: LlmClient = {
+            modelName: "scripted", model: {} as never, usage: { inputTokens: 0, outputTokens: 0 }, text: async () => "",
+            // Answers without parsing, as a client that does not apply the schema would: the planner must still drop the objective.
+            object: (async ({ schema }: { schema: (typeof schemas)[number] }) => (schemas.push(schema), { scenarios: [withObjective] })) as LlmClient["object"],
+        };
+        const out = await planScenarios(ctxWith(llm), bigModel(), { maxScenarios: 5, hasCredentials: false });
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ title: "Cart total", expectedResults: ["The total is $25.00 (source: R-TOTAL)"] });
+        expect(out[0]).not.toHaveProperty("objective");
+        // The schema the model is held to has no objective: parsing the same reply leaves it out and keeps the rest.
+        expect(schemas.length).toBeGreaterThan(0);
+        const parsed = schemas[0]!.parse({ scenarios: [withObjective] }).scenarios[0]!;
+        expect(parsed).toMatchObject({ title: "Cart total", startPath: "/products/0" });
+        expect(parsed).not.toHaveProperty("objective");
+    });
+
     it("says a reached AI limit in plain words: the whole plan, or the part made before it", async () => {
         const hit = new BudgetExceeded({ cap: "job", used: 120, limit: 100, percent: 120 });
         const none: LlmClient = { modelName: "m", model: {} as never, usage: { inputTokens: 0, outputTokens: 0 }, text: async () => "", object: (async () => { throw hit; }) as LlmClient["object"] };

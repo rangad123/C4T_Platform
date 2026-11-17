@@ -26,7 +26,8 @@ import { uncoveredTransitions } from "../screenmap/map.js";
 import { STATING_SOURCES, type AppModel as IntelModel, type Rule, type RuleStatus, type WorkflowSchema } from "../intel/model.js";
 import type { ObjectiveField, ObjectiveModel } from "../explore/objectives.js";
 
-const PlanSchema = z.object({ scenarios: z.array(ScenarioSchema.omit({ scenarioId: true })) });
+// No objective: only the objective stage (explore/**) sets one, so a model cannot make its own expected result look stated (author.ts statedSource).
+const PlanSchema = z.object({ scenarios: z.array(ScenarioSchema.omit({ scenarioId: true, objective: true })) });
 
 export interface PlanOptions {
     maxScenarios: number;
@@ -556,7 +557,10 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
     let vague = 0;
     const accept = (list: Planned[]): number => {
         let added = 0;
-        for (const raw of list) {
+        for (const reply of list) {
+            // An objective in the model's reply is dropped whatever let it through: only the objective stage (explore/**) sets one.
+            const raw: Planned = { ...reply };
+            delete (raw as { objective?: unknown }).objective;
             // Only the project's own account names count as a role; anything else is the project's account.
             const s = raw.role && !roleNames.has(raw.role) ? { ...raw, role: undefined } : raw;
             if (opts.hasCredentials === false && s.requiresAuth && !s.role) continue;
