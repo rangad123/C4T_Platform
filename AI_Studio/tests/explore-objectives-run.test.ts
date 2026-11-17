@@ -168,6 +168,8 @@ describe("exploring the seeded shop by objectives", () => {
         expect(ex.coverage.pages.notExercised).not.toContain("/order");
         expect(ex.coverage.notRun).toContainEqual({ objectiveId: ex.skipped[0]!.objectiveId, operator: "boundary_input", reason: "data changes off" });
         expect(ex.coverage.unexplored).toEqual([]);
+        // The rule as stated (its pursuit and the saved check citing its ref are one scenario) and the quantity's invalid input.
+        expect(ex.coverage.uniqueScenarios).toBe(2);
 
         // Two defect tests for review, each carrying a captured finding tied to its objective and operator.
         expect(tests.map((t) => t.validation)).toEqual(["NEEDS_REVIEW", "NEEDS_REVIEW"]);
