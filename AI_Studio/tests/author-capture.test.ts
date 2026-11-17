@@ -148,6 +148,30 @@ describe("authoring keeps a failing sourced check", () => {
         expect(out.steps.map((s) => s.action)).toEqual(["navigate", "assert"]);
     }, 90_000);
 
+    it("failed, then more actions: the saved defect test ends at the failing check, where it failed", async () => {
+        seeded = true;
+        const out = await authorWebSpec({
+            ctx: ctxFor(scripted([
+                heading,
+                { tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$25.00", source: "R-TOTAL" } },
+                // The agent goes on after the check failed: to another page, where it checks something that passes.
+                { tool: "navigate", input: { url: "/recalc" } },
+                { tool: "assert", input: { check: "visible", target: { by: "role", role: "button", value: "Recalculate" } } },
+                finishDefect,
+            ])),
+            browser, baseUrl: BASE, model: emptyModel, scenario, rules: [RULE],
+        });
+        expect(out).toMatchObject({ status: "defect", capture: "captured" });
+        // The steps after the failing check are dropped: the test is what ran up to the check, then the check.
+        expect(out.steps.map((s) => s.action)).toEqual(["navigate", "assert", "assert"]);
+        expect(out.steps.at(-1)).toMatchObject({ check: "exactText", expected: "$25.00", source: "R-TOTAL" });
+        const spec = TestSpecSchema.parse(toSpec(scenario, out, "WEB-901"));
+        expect(await replays(spec.steps)).toBe(false);
+        seeded = false;
+        expect(await replays(spec.steps)).toBe(true);
+        seeded = true;
+    }, 90_000);
+
     it("does not append a sourced check that failed once and then passed", async () => {
         const check = { check: "exactText", target: totalLocator, expected: "$25.00", source: "R-TOTAL" };
         const out = await authorWebSpec({
