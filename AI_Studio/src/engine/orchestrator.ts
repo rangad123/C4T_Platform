@@ -570,7 +570,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 // A reached AI limit is reported in its own plain words (see engine/llm/usage.ts), not as a failure of the analysis.
                 if (analysed) planningFailed = msg;
                 // No AI model or key on purpose keeps today's way (checks only); a model that is set up but failed to read the app fails the job.
-                else if (!(err instanceof LlmNotConfiguredError || (err instanceof Error && err.name === "LlmNotConfiguredError"))) readingFailed = msg;
+                // A reached AI limit is not a failed reading: the job stops with the limit's own words (the usage meter's stop).
+                else if (!(err instanceof LlmNotConfiguredError || (err instanceof Error && err.name === "LlmNotConfiguredError")) && !isBudgetExceeded(err)) readingFailed = msg;
                 summary.errors.push(isBudgetExceeded(err) ? msg : `Web analysis/planning failed: ${msg}`);
                 ctx.emit({ stage: "analysis", kind: "stage_failed", level: isBudgetExceeded(err) ? "warn" : "error", message: msg });
                 await sink.phase("ANALYZING", "understanding", "failed");
