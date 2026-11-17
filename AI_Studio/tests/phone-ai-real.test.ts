@@ -133,8 +133,10 @@ describe.skipIf(missing.length > 0)("the screens on the real platform with a fak
         await page.evaluate(() => localStorage.setItem("aitp.explorer.watch", "1"));
         await page.getByRole("button", { name: "Explore with AI", exact: true }).click();
         await pwExpect(dialog()).toBeVisible();
-        // The platform really can: the fake toolchain makes this server a place the AI can use.
-        await pwExpect(dialog().getByRole("radio", { name: /This server/ })).toBeChecked();
+        // The platform really can: the fake toolchain makes this server a place the AI can use. Where it runs is said, not chosen (since
+        // "one runner per person throughout"): where the project runs its tests.
+        await pwExpect(dialog().getByRole("radio")).toHaveCount(0);
+        await pwExpect(dialog().getByTestId("phone-where")).toContainText("This server. An Android emulator is ready here (Pixel_Test).");
         await dialog().locator("summary", { hasText: "Advanced options" }).click();
         await dialog().getByLabel("Username or email").fill("tester");
         await dialog().getByLabel("Password").fill(PASSWORD);
