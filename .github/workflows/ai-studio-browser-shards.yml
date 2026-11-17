@@ -1,0 +1,166 @@
+name: AI Studio browser shards
+
+# The slow test tiers (browser + phone, scripts/test-tiers.mjs) split across parallel jobs, so a run that takes hours one file
+# at a time on one machine finishes in well under an hour. Runs by hand, or on a push to a test-shards/** branch. It never runs on
+# main, is not "AI Studio CI" (which the deploy waits for), uses no secrets and deploys nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to test
+        required: false
+        default: ''
+  push:
+    branches: ['test-shards/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-studio-browser-shards-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+env:
+  SHARDS: 10
+
+defaults:
+  run:
+    working-directory: AI_Studio
+
+jobs:
+  plan:
+    name: Split the browser and phone files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Round-robin over the file list; tests/shard-durations.json ({"tests/x.test.ts": seconds}), when present, balances by time
+      # instead (longest first, each file to the shard with the least time so far).
+      - id: split
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { tiers } from "./scripts/test-tiers.mjs";
+            const t = tiers();
+            const files = [...t.browser, ...t.phone];
+            const n = Number(process.env.SHARDS);
+            let dur = {};
+            try { dur = JSON.parse(fs.readFileSync("tests/shard-durations.json", "utf8")); } catch {}
+            const shards = Array.from({ length: n }, (_, i) => ({ shard: i + 1, files: [], secs: 0 }));
+            const known = Object.keys(dur).length > 0;
+            const order = known ? [...files].sort((a, b) => (dur[b] ?? 60) - (dur[a] ?? 60)) : files;
+            order.forEach((f, i) => {
+              const s = known ? shards.reduce((m, x) => (x.secs < m.secs ? x : m)) : shards[i % n];
+              s.files.push(f);
+              s.secs += dur[f] ?? 60;
+            });
+            const matrix = { include: shards.map((s) => ({ shard: s.shard, files: s.files.join(" ") })) };
+            console.log(`${files.length} files (browser ${t.browser.length}, phone ${t.phone.length}) in ${n} shards`);
+            for (const s of shards) console.log(`shard ${s.shard}: ${s.files.length} files${known ? `, ~${Math.round(s.secs / 60)} min` : ""}`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(matrix)}\n`);
+          '
+
+  shard:
+    name: Shard ${{ matrix.shard }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: AI_Studio/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install browsers
+        run: npx playwright install chromium firefox webkit
+      # As in ai-studio-ci.yml: the images carry most browser libraries, and Ubuntu's mirrors are sometimes unreachable from
+      # GitHub's machines. A library that is really missing still fails the tests that need it.
+      - name: System libraries for the browsers
+        continue-on-error: true
+        run: npx playwright install-deps chromium firefox webkit
+
+      - name: Build the web app
+        run: npx vite build web
+
+      # One file at a time (vitest.config.ts), under a virtual display for the tests that open a visible window.
+      - name: Tests
+        run: |
+          mkdir -p ../shard-report
+          xvfb-run -a npx vitest run ${{ matrix.files }} \
+            --reporter=default --reporter=junit --reporter=json \
+            --outputFile.junit=../shard-report/junit.xml --outputFile.json=../shard-report/results.json
+        env:
+          # A path that does not exist, so no test can reach a real phone. No AI keys are set.
+          TAQWRIGHT_HOME: /nonexistent-taqwright
+          FORCE_COLOR: '0'
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}
+          path: shard-report/
+          if-no-files-found: warn
+
+  summary:
+    name: Failed tests across shards
+    needs: [plan, shard]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: reports
+      - name: List failures
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const n = Number(process.env.SHARDS);
+            const out = [];
+            const fails = [];
+            let missing = 0;
+            out.push("| Shard | Files | Passed | Failed | Skipped | Minutes |", "|---:|---:|---:|---:|---:|---:|");
+            for (let i = 1; i <= n; i++) {
+              let r;
+              try { r = JSON.parse(fs.readFileSync(`reports/shard-${i}/results.json`, "utf8")); } catch { missing++; out.push(`| ${i} | - | - | no report | - | - |`); fails.push(`shard ${i}: no report (the job failed before or during the tests)`); continue; }
+              let p = 0, f = 0, s = 0, ms = 0;
+              for (const file of r.testResults) {
+                const name = file.name.replace(/^.*?\/AI_Studio\//, "");
+                ms += (file.endTime ?? 0) - (file.startTime ?? 0);
+                for (const a of file.assertionResults) {
+                  if (a.status === "passed") p++;
+                  else if (a.status === "failed") { f++; fails.push(`${name} > ${a.fullName}: ${(a.failureMessages?.[0] ?? "").split("\n")[0].slice(0, 300)}`); }
+                  else s++;
+                }
+                if (file.status === "failed" && !file.assertionResults.some((a) => a.status === "failed")) { f++; fails.push(`${name} (file error): ${(file.message ?? "").split("\n")[0].slice(0, 300)}`); }
+              }
+              out.push(`| ${i} | ${r.testResults.length} | ${p} | ${f} | ${s} | ${(ms / 60000).toFixed(1)} |`);
+            }
+            out.push("", `## Failures (${fails.length})`, "", ...fails.map((x) => `- ${x}`));
+            const text = out.join("\n") + "\n";
+            console.log(text);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `# Browser and phone shards\n\n${text}`);
+            process.exit(fails.length ? 1 : 0);
+          '
