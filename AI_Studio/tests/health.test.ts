@@ -23,19 +23,24 @@ import { assessSeverity } from "../src/engine/validation/severity.js";
 import { runScripts, type ScriptRun } from "../src/engine/validation/runner.js";
 import { executeStep, runtimeData } from "../src/engine/web/interpreter.js";
 import { modelFor, startChecksApp } from "./fixtures/checks-app.js";
+import { removeMintedTls, selfSignedTls, TLS_SKIP_REASON } from "./fixtures/tls-files.js";
 
 const PORTS = { weak: 5217, hardened: 5218, spa: 5219, weakTls: 5220, dead: 5221 };
 const base = (port: number, scheme = "http") => `${scheme}://127.0.0.1:${port}`;
 const children: ChildProcess[] = [];
 let browser: Browser;
+// The https fixture's key is not in the repository: the published one when present, else one made now (tests/fixtures/tls-files.ts).
+const SELF_SIGNED = selfSignedTls("localhost");
+if (!SELF_SIGNED) console.warn(TLS_SKIP_REASON);
 
 beforeAll(async () => {
-    children.push(await startChecksApp(PORTS.weak, "weak"), await startChecksApp(PORTS.hardened, "hardened"), await startChecksApp(PORTS.spa, "spa"), await startChecksApp(PORTS.weakTls, "weak", "localhost"));
+    children.push(await startChecksApp(PORTS.weak, "weak"), await startChecksApp(PORTS.hardened, "hardened"), await startChecksApp(PORTS.spa, "spa"), ...(SELF_SIGNED ? [await startChecksApp(PORTS.weakTls, "weak", SELF_SIGNED.name)] : []));
     browser = await launchChromium(true);
 }, 60_000);
 afterAll(async () => {
     await browser?.close();
     for (const c of children) c.kill();
+    removeMintedTls();
 });
 
 const specsFor = (origin: string, pages: Array<{ path: string; type: "home" | "content" }>): TestSpec[] =>
@@ -262,7 +267,7 @@ describe("severity of health findings", () => {
 });
 
 describe("mixed content, noise and live-interpreter parity", () => {
-    it("finds http:// resources on an https page (requests and DOM) and nothing on an http page", async () => {
+    it.skipIf(!SELF_SIGNED)("finds http:// resources on an https page (requests and DOM) and nothing on an http page", async () => {
         const rt = loadHealthRuntime();
         const secure = await browser.newContext({ ignoreHTTPSErrors: true }); // the fixture's certificate is self-signed
         const insecure = await browser.newContext();
