@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, RUNNER_LIFECYCLE_MIGRATION, RUNNER_RESET_MIGRATION, RUNNER_SHARING_MIGRATION, RUNNER_SHOW_BROWSER_MIGRATION } from "./agent-store.js";
 import { BLOCKS_MIGRATION } from "./block-store.js";
+import { CANDIDATE_FINDINGS_MIGRATION } from "./candidate-finding-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
 import { DEVICE_FARM_MIGRATION } from "./device-farm-store.js";
@@ -313,6 +314,7 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 63: the authoring agents' tool-call records are gone: nothing has written or read them since M1, and retention deleted what was left (agent_actions had no index of its own; agent_runs stays) */ `DROP TABLE IF EXISTS agent_actions;`,
     /* 64: application intelligence sources, the application version and source fingerprints of each model version, and a fingerprint per rule (schema lives in app-intel-store.ts; existing versions and rules keep every row, the new columns start empty) */ APP_INTEL_V2_MIGRATION,
     /* 65: people's decisions about workflows (confirmed or rejected), one per project and workflow fingerprint, with the name and steps they decided about (schema lives in app-intel-store.ts; existing projects have none) */ APP_WORKFLOW_DECISIONS_MIGRATION,
+    /* 66: candidate findings from exploration, one per project and fingerprint, shaped like security_findings, status candidate only (schema lives in candidate-finding-store.ts; existing projects have none) */ CANDIDATE_FINDINGS_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */
