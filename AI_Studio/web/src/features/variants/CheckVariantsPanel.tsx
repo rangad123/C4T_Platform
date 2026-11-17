@@ -45,7 +45,7 @@ export function CheckVariantsPanel({ projectId, onStarted, onClose }: { projectI
                 <span className="spacer" />
                 <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
             </div>
-            <p className="t-secondary">We’ll repeat your passing web tests on the browsers and screen sizes you pick and show where they break. Your tests’ own results don’t change.</p>
+            <p className="t-secondary">We’ll repeat your passing web tests on the browsers, screen sizes and conditions you pick and show where they break. Your tests’ own results don’t change.</p>
             <VariantPicker value={picked} onChange={setPicked} disabled={busy} />
             <p className="t-meta">Accessibility, visual, API and not-yet-passing tests aren’t repeated.</p>
             {error && <Callout tone="danger" title="We couldn’t start the check">{error}</Callout>}

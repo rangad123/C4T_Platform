@@ -130,13 +130,17 @@ describe("test suites page", () => {
     });
 
     it("saves how the suite runs", async () => {
-        await page.getByLabel("Firefox").check();
+        await page.getByRole("group", { name: "Browsers and screen sizes", exact: true }).getByLabel("Firefox").check();
+        // the conditions are a group of their own, beside the browsers and screen sizes
+        const conditions = page.getByRole("group", { name: "Conditions", exact: true });
+        await pwExpect(conditions.getByRole("checkbox")).toHaveCount(5);
+        await conditions.getByLabel("Dark mode").check();
         await page.getByLabel("When a test fails").selectOption("1");
         await page.getByLabel("Stop at the first failure").check();
         await page.getByRole("button", { name: "Save settings" }).click();
         await pwExpect(page.getByText("Saved. The next run uses these settings.")).toBeVisible();
-        expect((await api("GET", `/api/projects/${projectId}/test-suites/${sid}`)).suite.settings).toMatchObject({ browsers: ["firefox"], retries: 1, stopOnFirstFailure: true, environment: null });
-        await pwExpect(page.getByText(/also on Firefox, a failing test is run again once, stops at the first failure/)).toBeVisible();
+        expect((await api("GET", `/api/projects/${projectId}/test-suites/${sid}`)).suite.settings).toMatchObject({ browsers: ["firefox", "dark"], retries: 1, stopOnFirstFailure: true, environment: null });
+        await pwExpect(page.getByText(/also on Firefox, Dark mode, a failing test is run again once, stops at the first failure/)).toBeVisible();
     });
 
     it("runs the suite and shows the run in Last runs", async () => {
@@ -146,6 +150,7 @@ describe("test suites page", () => {
         await pwExpect(runs.getByText("2 tests waiting to start")).toBeVisible();
         const jobId = (await api("GET", `/api/projects/${projectId}/test-suites/${sid}`)).runs[0].jobId;
         expect(platform.repo.getJob(jobId)!.options.testIds).toEqual([ids["Cart opens"], ids["Pay by card"]]);
+        expect(platform.repo.getJob(jobId)!.options.variants).toEqual(["firefox", "dark"]); // the condition picked in the settings rides along
         platform.db.run("UPDATE generation_jobs SET status = 'COMPLETED', finished_at = ? WHERE id = ?", new Date().toISOString(), jobId);
     });
 

@@ -13,6 +13,7 @@ import { isRunnerRefusal, needOfTest, useReadiness, type RunnerNeeds } from "../
 import { RunStartError } from "../runners/RunnerRefusal";
 import { RunnerNotReady } from "./RunnerNotReady";
 import { resetSentence, type ResetAnswer } from "../webpages/webpages";
+import { VARIANT_GROUPS, variantGroup } from "../variants/variants";
 import "./runs.css";
 import { routes } from "../../lib/router";
 
@@ -364,15 +365,23 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                     {!environment && (
                         <Disclosure label="How">
                             <div className="run-how">
-                                {variantList.map((v) => (
-                                    <label key={v.id} className="run-opt">
-                                        <input type="checkbox" checked={variantsPicked.includes(v.id)} onChange={(e) => setVariantsPicked((p) => (e.target.checked ? [...p, v.id] : p.filter((x) => x !== v.id)))} />
-                                        <span className="text">
-                                            Also check on {v.label}
-                                            <span className="t-meta"> {v.description}</span>
-                                        </span>
-                                    </label>
-                                ))}
+                                {VARIANT_GROUPS.map((g) => {
+                                    const inGroup = variantList.filter((v) => variantGroup(v.id) === g.id);
+                                    return inGroup.length === 0 ? null : (
+                                        <div key={g.id} className="run-how" role="group" aria-label={g.title}>
+                                            <span className="t-meta">{g.title}</span>
+                                            {inGroup.map((v) => (
+                                                <label key={v.id} className="run-opt">
+                                                    <input type="checkbox" checked={variantsPicked.includes(v.id)} onChange={(e) => setVariantsPicked((p) => (e.target.checked ? [...p, v.id] : p.filter((x) => x !== v.id)))} />
+                                                    <span className="text">
+                                                        Also check on {v.label}
+                                                        <span className="t-meta"> {v.description}</span>
+                                                    </span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    );
+                                })}
                                 <label className="run-opt">
                                     <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} />
                                     <span className="text">

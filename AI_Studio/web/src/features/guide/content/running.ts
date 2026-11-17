@@ -68,6 +68,7 @@ export const running: Topic[] = [
         steps: [
             step("Choose More actions, then Check other browsers & screen sizes.", "More actions", "Check other browsers & screen sizes"),
             step("Pick Firefox, Safari (WebKit), Phone or Tablet.", "Firefox", "Safari (WebKit)", "Phone", "Tablet"),
+            step("Or pick a condition: Dark mode, Another language and time zone, High contrast, Reduced motion or JavaScript off.", "Dark mode", "Another language and time zone", "High contrast", "Reduced motion", "JavaScript off"),
             step("Or choose Check again on one test.", "Check again"),
             step("Use the Differs by browser filter to list tests that fail elsewhere.", "Differs by browser"),
         ],
@@ -75,7 +76,7 @@ export const running: Topic[] = [
         open: { label: "Open Test scripts", to: { place: "tests" } },
         words: ["emulator"],
         related: ["run-panel", "phones-and-emulators", "visual-changes"],
-        keywords: ["firefox", "safari", "chrome", "mobile screen", "tablet", "responsive", "cross browser", "different browsers"],
+        keywords: ["firefox", "safari", "mobile screen", "tablet", "responsive", "cross browser", "different browsers", "dark mode", "high contrast", "javascript off"],
         moreDoc: "docs/features/variants.md",
     },
     {

@@ -12,7 +12,7 @@ import { PRODUCTION_WARNING } from "../environments/environments";
 import { isRunnerRefusal, refusalLink, useReadiness } from "../runners/my-runner";
 import { RunnerNotReady } from "../runs/RunnerNotReady";
 import { RunStartError } from "../runners/RunnerRefusal";
-import { VARIANT_UI, variantLabel, type VariantId } from "../variants/variants";
+import { VARIANT_GROUPS, variantLabel, variantsIn, type VariantId } from "../variants/variants";
 import { moved, runResult, settingsSentence, type Suite, type SuiteDetailData, type SuiteSettings, type SuiteTest } from "./suites";
 
 /** One suite a person built: its tests in run order, how it runs, its last runs, and Run. */
@@ -492,17 +492,22 @@ function SettingsCard({ projectId, d, canWrite, onChanged }: { projectId: string
                     {onEnv && <p className="t-secondary">A run against an environment checks desktop Chrome only, runs each test once and runs every test. The options below apply to runs against the project’s own address.</p>}
                     <fieldset className="stack-sm" disabled={onEnv || !canWrite}>
                         <legend className="label">Also check on</legend>
-                        <div className="suite-browsers">
-                            {VARIANT_UI.map((v) => (
-                                <label key={v.id} className="check">
-                                    <input type="checkbox" checked={draft.browsers.includes(v.id)} onChange={(e) => set({ browsers: e.target.checked ? [...draft.browsers, v.id] : draft.browsers.filter((b: VariantId) => b !== v.id) })} />
-                                    <span>
-                                        <span className="title">{v.label}</span>
-                                        <span className="hint">{v.hint}</span>
-                                    </span>
-                                </label>
-                            ))}
-                        </div>
+                        {VARIANT_GROUPS.map((g) => (
+                            <fieldset key={g.id} className="stack-sm">
+                                <legend className="t-card">{g.title}</legend>
+                                <div className="suite-browsers">
+                                    {variantsIn(g.id).map((v) => (
+                                        <label key={v.id} className="check">
+                                            <input type="checkbox" checked={draft.browsers.includes(v.id)} onChange={(e) => set({ browsers: e.target.checked ? [...draft.browsers, v.id] : draft.browsers.filter((b: VariantId) => b !== v.id) })} />
+                                            <span>
+                                                <span className="title">{v.label}</span>
+                                                <span className="hint">{v.hint}</span>
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </fieldset>
+                        ))}
                         <p className="hint">Desktop Chrome always runs. Tests that pass there are also checked on the ones you choose.</p>
                         <div className="field">
                             <label htmlFor="suite-retries">When a test fails</label>

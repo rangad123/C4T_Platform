@@ -13,6 +13,18 @@ A web test is validated on desktop Chrome (Chromium). That says nothing about Fi
 | Phone | Chromium with a mobile browser profile, touch, 390 × 844 |
 | Tablet | Chromium with a tablet profile, touch, 820 × 1180 |
 
+Conditions (desktop Chrome, 1280 × 800, under another setting), shown in their own "Conditions" group:
+
+| Name in the UI | What runs |
+|---|---|
+| Dark mode | `colorScheme: "dark"` |
+| Another language and time zone | `locale: "de-DE"`, `timezoneId: "Pacific/Auckland"` |
+| High contrast | `forcedColors: "active"`, `contrast: "more"` |
+| Reduced motion | `reducedMotion: "reduce"` |
+| JavaScript off | `javaScriptEnabled: false`; only tests that open pages and read them are repeated |
+
+Every picker (Check other browsers & screen sizes, a test's "Check again", suite settings, the run panel's *How*) and the matrix on a test's page show the two groups, "Browsers and screen sizes" and "Conditions". The UI's list is `web/src/features/variants/variants.ts` `VARIANT_UI`; `tests/variants-ui.test.ts` checks its ids, names and groups against the server's (`src/engine/validation/variants.ts`).
+
 Desktop Chrome is the existing main run and is never repeated here.
 
 The main result is never changed. A test is `VALIDATED` because of the desktop Chrome run alone; a variant run only adds a compatibility result and can never turn a test into "Validation failed".

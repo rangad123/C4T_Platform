@@ -21,7 +21,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { VARIANT_UI } from "../web/src/features/variants/variants.js";
-import { VARIANTS, EXTRA_VARIANT_IDS } from "../src/engine/validation/variants.js";
+import { VARIANTS, EXTRA_VARIANT_IDS, CONDITION_VARIANT_IDS } from "../src/engine/validation/variants.js";
 import { FIXTURE_SPECS, startVariantsApp } from "./fixtures/variants-app.js";
 
 const FIXTURE_PORT = 5231;
@@ -90,6 +90,11 @@ describe("the UI's browser names match the server's", () => {
     it("lists the same variants with the same plain-language names", () => {
         expect(VARIANT_UI.map((v) => v.id)).toEqual([...EXTRA_VARIANT_IDS]);
         for (const v of VARIANT_UI) expect(v.label).toBe(VARIANTS[v.id].label);
+    });
+
+    it("puts exactly the server's conditions in the Conditions group", () => {
+        expect(VARIANT_UI.filter((v) => v.group === "condition").map((v) => v.id)).toEqual([...CONDITION_VARIANT_IDS]);
+        expect(VARIANT_UI.filter((v) => v.group === "browser").map((v) => v.id)).toEqual(EXTRA_VARIANT_IDS.filter((id) => !(CONDITION_VARIANT_IDS as readonly string[]).includes(id)));
     });
 });
 
@@ -167,4 +172,32 @@ describe("cross-browser check in the UI", () => {
         await pwExpect(page.getByRole("checkbox", { name: /^Safari/ })).toBeDisabled();
         delete process.env.INSTALLED_BROWSERS_OVERRIDE;
     }, 60_000);
+
+    it("offers the conditions in their own group, and a picked condition is sent and checked", async () => {
+        await page.goto(`${base}/?x=4#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "More actions" }).click();
+        await page.getByRole("menuitem", { name: /Check other browsers & screen sizes/ }).click();
+        const panel = page.getByRole("region", { name: "Check other browsers and screen sizes" });
+        const browsers = panel.getByRole("group", { name: "Browsers and screen sizes", exact: true });
+        const conditions = panel.getByRole("group", { name: "Conditions", exact: true });
+        await pwExpect(browsers.getByRole("checkbox")).toHaveCount(4);
+        await pwExpect(conditions.getByRole("checkbox")).toHaveCount(5);
+        for (const name of ["Dark mode", "Another language and time zone", "High contrast", "Reduced motion", "JavaScript off"]) await pwExpect(conditions.getByRole("checkbox", { name: new RegExp(`^${name}`) })).toBeEnabled();
+
+        await conditions.getByRole("checkbox", { name: /^Dark mode/ }).check();
+        const sent = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith(`/api/projects/${projectId}/variants`));
+        await panel.getByRole("button", { name: "Run checks" }).click();
+        expect((await sent).postDataJSON()).toEqual({ variants: ["dark"] });
+        await pwExpect(panel.getByText(/2 tests will be checked on Dark mode/)).toBeVisible();
+
+        // The result lands in the test page's Conditions list, apart from the browsers.
+        await waitIdle();
+        await page.goto(`${base}/?x=5#/projects/${projectId}/scripts`);
+        await page.locator("a.sr-title", { hasText: "Add to cart updates the cart" }).click();
+        await page.getByRole("tab", { name: "History", exact: true }).click();
+        const underConditions = page.getByRole("list", { name: "Result under each condition" });
+        await pwExpect(underConditions.getByRole("listitem").filter({ hasText: "Dark mode" })).toContainText("Passed", { timeout: 60_000 });
+        await pwExpect(underConditions.getByRole("listitem").filter({ hasText: "JavaScript off" })).toContainText("Not checked");
+        await pwExpect(page.getByRole("list", { name: "Result on each browser and screen size" }).getByRole("listitem").filter({ hasText: "Dark mode" })).toHaveCount(0);
+    }, 240_000);
 });

@@ -1,5 +1,7 @@
 /* Cross-browser / responsive checks. Uses the app's design tokens only. */
-.variant-picker { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 8px; }
+.variant-picker { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 16px; }
+.variant-picker .variant-group { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 8px; }
+.variant-picker .variant-group > legend { padding: 0 0 4px; }
 .variant-picker .check[aria-disabled="true"] { opacity: 0.7; cursor: not-allowed; }
 .compat-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
 .compat-list > li { display: grid; grid-template-columns: 22px minmax(0, 150px) minmax(0, 1fr); gap: 4px 12px; align-items: start; padding: 12px 14px; }

@@ -5,7 +5,7 @@ import { Button, Callout, Disclosure, SeverityBadge } from "../../components/ui"
 import { relativeTime } from "../../lib/format";
 import { cleanReason, describeApiError, stepSentence } from "../../lib/labels";
 import { VariantPicker } from "./VariantPicker";
-import { VARIANT_UI, variantLabel, type CompatDetail, type CompatEntry } from "./variants";
+import { VARIANT_UI, variantLabel, variantsIn, type CompatDetail, type CompatEntry } from "./variants";
 import "./variants.css";
 
 interface MatrixTest extends Partial<CompatDetail> {
@@ -16,7 +16,7 @@ interface MatrixTest extends Partial<CompatDetail> {
 }
 
 /**
- * The compatibility matrix on a test's page: one row per browser / screen size, saying whether the test passed
+ * The compatibility matrix on a test's page: one row per browser / screen size and per condition (two lists), saying whether the test passed
  * there, failed (with the failing step and evidence), could not run, or was not repeated (with the reason).
  */
 export function CompatibilityMatrix({ test, onChanged }: { test: MatrixTest; onChanged: () => void | Promise<void> }) {
@@ -42,22 +42,31 @@ export function CompatibilityMatrix({ test, onChanged }: { test: MatrixTest; onC
                 </Callout>
             )}
             {failing.length === 0 && passed.length > 0 && (
-                <Callout tone="success" title={couldNotRun.length ? "Passed everywhere it could run" : "Works on every browser and screen size we checked"}>
+                <Callout tone="success" title={couldNotRun.length ? "Passed everywhere it could run" : "Works everywhere we checked"}>
                     {couldNotRun.length ? `${couldNotRun.map((v) => v.label).join(" and ")} couldn’t run here, so we can’t say how it behaves there.` : `Checked on ${passed.map((v) => v.label).join(", ")}.`}
                 </Callout>
             )}
 
             {hasEntries ? (
-                <ul className="compat-list" aria-label="Result on each browser and screen size">
-                    <Row name="Chrome (desktop)" mark="passed" label={test.validationStatus === "VALIDATED" ? "Passed" : "Main run"} detail="This is the test’s main run." muted={test.validationStatus !== "VALIDATED"} />
-                    {VARIANT_UI.map((v) => (
-                        <EntryRow key={v.id} name={v.label} entry={entries[v.id]} steps={test.spec.steps} />
-                    ))}
-                </ul>
+                <>
+                    <h3 className="t-card">Browsers and screen sizes</h3>
+                    <ul className="compat-list" aria-label="Result on each browser and screen size">
+                        <Row name="Chrome (desktop)" mark="passed" label={test.validationStatus === "VALIDATED" ? "Passed" : "Main run"} detail="This is the test’s main run." muted={test.validationStatus !== "VALIDATED"} />
+                        {variantsIn("browser").map((v) => (
+                            <EntryRow key={v.id} name={v.label} entry={entries[v.id]} steps={test.spec.steps} />
+                        ))}
+                    </ul>
+                    <h3 className="t-card">Conditions</h3>
+                    <ul className="compat-list" aria-label="Result under each condition">
+                        {variantsIn("condition").map((v) => (
+                            <EntryRow key={v.id} name={v.label} entry={entries[v.id]} steps={test.spec.steps} />
+                        ))}
+                    </ul>
+                </>
             ) : eligible ? (
-                <p className="t-secondary">This test hasn’t been checked on other browsers or screen sizes yet. Pick where to repeat it.</p>
+                <p className="t-secondary">This test hasn’t been checked on other browsers, screen sizes or conditions yet. Pick where to repeat it.</p>
             ) : (
-                <p className="t-secondary" data-testid="compat-not-checked">Not checked on other browsers or screen sizes. {test.variantCheck?.reason}</p>
+                <p className="t-secondary" data-testid="compat-not-checked">Not checked on other browsers, screen sizes or conditions. {test.variantCheck?.reason}</p>
             )}
 
             {eligible &&
