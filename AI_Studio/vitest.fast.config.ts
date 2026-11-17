@@ -246,6 +246,7 @@ export default defineConfig({
             "tests/app-intel-migration-65.test.ts",
             "tests/bench-understanding-paid-unit.test.ts",
             "tests/bench-understanding-run-unit.test.ts",
+            "tests/explore-loop-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
