@@ -184,6 +184,7 @@ export default defineConfig({
             "tests/eval-unit.test.ts",
             "tests/bench-metrics-unit.test.ts",
             "tests/bench-observed-unit.test.ts",
+            "tests/bench-harness-limits-unit.test.ts",
             "tests/selection-unit.test.ts",
             "tests/selection-freshness.test.ts",
             "tests/retention-agent-shots.test.ts",

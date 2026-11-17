@@ -11,7 +11,8 @@
  *      category and the defects it is attributed to.
  *   4. The numbers (metrics.ts) per app and overall; everything recorded (engine commit, prompt fingerprints, model, options, app and
  *      catalogue versions, prices).
- * The apps' data is fresh for every exploration and every replay (each start resets it).
+ * The apps' data is fresh for every exploration and every replay (each start resets it). With `isolatedReplays` each finding is replayed
+ * alone, in a job of its own on a freshly started app, in every replay stage: one test's changes never reach the next (slower; no AI).
  *
  * Stops without losing work: when the AI provider's rate limit or the daily call cap stops an app, the app is marked "stopped", the tests
  * made so far are still judged, and the state is saved after every app so `--resume` runs only what did not finish. The model is never
@@ -23,7 +24,7 @@ import type { CorpusEntry } from "../corpus.js";
 import { runCorpus } from "../harness.js";
 import { overallOf } from "../metrics.js";
 import type { EntryResult, EvalRun } from "../run.js";
-import { BenchAppHost, workflowsReached, type BenchApp } from "./apps.js";
+import { BenchAppHost, workflowsReached, type BenchApp, type Switches } from "./apps.js";
 import { defectsOf, type Catalogue } from "./catalogue.js";
 import { benchMetrics, categorize, combineMetrics } from "./metrics.js";
 import type { BenchAppResult, BenchConfig, BenchFinding, BenchHeadline, Benchmark, ReplayVerdict } from "./schema.js";
@@ -66,7 +67,10 @@ export interface BenchOptions {
     signal?: AbortSignal;
     log?: (line: string) => void;
     pollMs?: number;
+    /** Longest the exploration, a creation and each replay job may take (default the harness's 45 minutes; the command's --job-timeout-min). */
     jobTimeoutMs?: number;
+    /** One test per replay job, the app started fresh before each, in every replay stage (the command's --isolated-replays). */
+    isolatedReplays?: boolean;
     /** For tests: how long a stopped job gets to wind down (default WIND_DOWN_MS), and the validation run of a continued app (default CONTINUED_VALIDATION_MS). */
     windDownMs?: number;
     continuedValidationMs?: number;
@@ -333,8 +337,10 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     const tests = (await call("GET", `/api/projects/${projectId}/tests`, "Reading the tests")) as TestRow[];
     // Which areas the tests reached, from their own steps.
     const paths: string[] = [];
+    const details = new Map<string, { generationMeta?: { capture?: unknown } | null }>();
     for (const t of tests.slice(0, MAX_DETAILS)) {
         const d = await call("GET", `/api/tests/${t.id}`, "Reading a test");
+        details.set(t.id, d);
         for (const s of (d.spec?.steps ?? []) as Array<{ action?: string; url?: string; path?: string }>) {
             const u = s.url ?? s.path;
             if (!u || (s.action !== "navigate" && s.action !== "request")) continue;
@@ -358,29 +364,25 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         candidates = tests.filter((t) => t.validationStatus === "NEEDS_REVIEW").slice(0, MAX_FINDINGS);
         log(`  ${candidates.length} reported findings; replaying them`);
         if (candidates.length) {
-            await host.start(seeded);
-            const again = await replay(client, projectId, candidates.map((t) => t.id), o, replaySignal.signal);
+            const again = await replayStage(client, host, seeded, projectId, candidates.map((t) => t.id), o, replaySignal.signal);
             for (const t of candidates) verdicts.set(t.id, { seeded: again.get(t.id) ?? "not_run", clean: null, single: {} });
         }
     } else {
         // Regression: the tests made on the correct app, run with the defects in; the failing ones are the findings.
-        await host.start(seeded);
         const runnable = tests.filter((t) => t.validationStatus === "VALIDATED");
-        const first = await replay(client, projectId, runnable.map((t) => t.id), o, replaySignal.signal);
+        const first = await replayStage(client, host, seeded, projectId, runnable.map((t) => t.id), o, replaySignal.signal);
         candidates = runnable.filter((t) => failing(first.get(t.id) ?? "not_run")).slice(0, MAX_FINDINGS);
         log(`  ${candidates.length} of ${runnable.length} tests fail with the defects in; replaying them`);
         for (const t of candidates) verdicts.set(t.id, { seeded: first.get(t.id)!, clean: null, single: {} });
     }
     const reproduced = candidates.filter((t) => failing(verdicts.get(t.id)!.seeded));
     if (reproduced.length) {
-        await host.start("none");
-        const clean = await replay(client, projectId, reproduced.map((t) => t.id), o, replaySignal.signal);
+        const clean = await replayStage(client, host, "none", projectId, reproduced.map((t) => t.id), o, replaySignal.signal);
         for (const t of reproduced) verdicts.get(t.id)!.clean = clean.get(t.id) ?? "not_run";
         const toPin = reproduced.filter((t) => verdicts.get(t.id)!.clean === "passed");
         for (const d of toPin.length ? seeded : []) {
             if (replaySignal.signal.aborted) break;
-            await host.start([d]);
-            const one = await replay(client, projectId, toPin.map((t) => t.id), o, replaySignal.signal);
+            const one = await replayStage(client, host, [d], projectId, toPin.map((t) => t.id), o, replaySignal.signal);
             for (const t of toPin) verdicts.get(t.id)!.single[d] = one.get(t.id) ?? "not_run";
         }
     }
@@ -393,6 +395,8 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         const before = execs.filter((x) => x.startedAt < replayStart);
         const firstFail = before.filter((x) => x.status !== "passed" && x.status !== "skipped").map((x) => x.startedAt).sort()[0];
         const label = o.labels?.[`${app.id}/${t.testId}`];
+        // What the author recorded when it stopped the test as a defect (the observed-vs-captured report's "author recorded" column).
+        const capture = (details.get(t.id) ?? (await call("GET", `/api/tests/${t.id}`, "Reading a test")))?.generationMeta?.capture;
         findings.push({
             id: t.id,
             testKey: t.testId,
@@ -403,6 +407,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
             category,
             defects: defects.filter((d) => seeded.includes(d)),
             ...(label && category === "unreproduced" && (label === "false_positive" || seeded.includes(label)) ? { label } : {}),
+            ...(capture === "captured" || capture === "observed_only" ? { capture } : {}),
             firstSeenAt: firstFail ? new Date(firstFail).toISOString() : null,
         });
     }
@@ -472,6 +477,24 @@ async function jobsUsage(client: PlatformClient, jobIds: Array<string | undefine
         if (typeof x.cost === "number") t.cost = (t.cost ?? 0) + x.cost;
     }
     return t;
+}
+
+/**
+ * One replay stage: the app started with these behaviours, then the tests run once. With `isolatedReplays`, each test runs alone, in a
+ * job of its own, on an app started fresh just before it.
+ */
+async function replayStage(client: PlatformClient, host: BenchAppHost, switches: Switches, projectId: string, testIds: string[], o: BenchOptions, signal: AbortSignal): Promise<Map<string, ReplayVerdict>> {
+    if (!o.isolatedReplays) {
+        await host.start(switches);
+        return replay(client, projectId, testIds, o, signal);
+    }
+    const out = new Map<string, ReplayVerdict>();
+    for (const id of testIds) {
+        if (signal.aborted) throw new Error("Stopped; the replays were stopped.");
+        await host.start(switches);
+        for (const [k, v] of await replay(client, projectId, [id], o, signal)) out.set(k, v);
+    }
+    return out;
 }
 
 /** Run these tests once through the platform's run route and read each one's verdict. No model is involved. */
