@@ -1104,12 +1104,14 @@ describe("the CI watch over the fast tier", () => {
     const watch = path.join(root, "scripts", "no-browser-watch.mjs");
 
     it.skipIf(process.platform === "win32")("fails the run when a browser process appears under it, naming it, and passes the command's own result otherwise", async () => {
-        // A stand-in named like a browser (a shell script that sleeps): no real browser is started.
+        // A stand-in named like a browser (this Node.js under a browser's name, waiting a second): no real browser is started. It is one
+        // process that starts no other: a shell script that ran `sleep` forked a copy of itself, still named like a browser until `sleep`
+        // replaced it, and a busy machine sometimes showed that copy as a second browser process.
         const bin = path.join(tmp, "watch-bin");
         fs.mkdirSync(bin);
-        fs.writeFileSync(path.join(bin, "chrome-headless-shell"), "#!/bin/sh\nsleep 1\n", { mode: 0o755 });
+        fs.symlinkSync(process.execPath, path.join(bin, "chrome-headless-shell"));
         const env = { ...cleanEnv() };
-        const caught = await run(process.execPath, [watch, "--", "sh", "-c", `${path.join(bin, "chrome-headless-shell")}; exit 0`], { cwd: tmp, env }).done;
+        const caught = await run(process.execPath, [watch, "--", "sh", "-c", `${path.join(bin, "chrome-headless-shell")} -e 'setTimeout(() => {}, 1000)'; exit 0`], { cwd: tmp, env }).done;
         expect(caught.code, caught.out).toBe(1);
         expect(caught.out).toMatch(/\[no-browser-watch\] 1 browser process\(es\) started under a run that must start none:\n {2}pid \d+ \(parent \d+\): .*chrome-headless-shell/);
         const clean = await run(process.execPath, [watch, "--", "sh", "-c", "sleep 0.5; exit 0"], { cwd: tmp, env }).done;
