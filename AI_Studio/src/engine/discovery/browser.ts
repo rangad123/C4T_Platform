@@ -7,7 +7,7 @@
  * instead of being stopped after they start. Each session watches its page's API traffic (./network.ts).
  */
 import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
-import { chromium, type Browser, type BrowserContext, type Dialog, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Dialog, type Page, type Request } from "playwright";
 import type { SiteNote } from "../memory/notes.js";
 import { installOverlayHandlers, overlayRules } from "../web/interruptions.js";
 import { GuardProxy, privateTargetsBlocked } from "./guard-proxy.js";
@@ -129,6 +129,8 @@ export class BrowserSession {
         let session: BrowserSession | undefined;
         const early: Page[] = [];
         context.on("page", (p) => (session ? session.watch(p, rules) : early.push(p)));
+        context.on("request", (r) => session?.noteTabRequest(r));
+        context.on("requestfailed", (r) => void session?.tabRequests.delete(r));
         const page = await context.newPage();
         session = new BrowserSession(browser, context, page, host, guard);
         session.masks = observedTextSecrets(opts.secrets ?? []);
@@ -180,8 +182,29 @@ export class BrowserSession {
         while (this.inFlight > 0 && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
     }
 
+    /**
+     * Navigations of new tabs Playwright has not handed out yet. It hands a new tab out only once its first page answered, so a slow page
+     * would arrive after quiet() and look like nothing opened; its navigation request comes at once, with no frame yet.
+     */
+    private readonly tabRequests = new Set<Request>();
+    private noteTabRequest(r: Request): void {
+        if (!r.isNavigationRequest()) return;
+        try {
+            r.frame();
+        } catch {
+            this.tabRequests.add(r);
+        }
+    }
+
+    /** A new tab whose navigation started since the last takeEvents(): wait (at most `ms`) until it is handed out, or its navigation failed. Returns at once when none started. */
+    async newTab(ms = 10_000): Promise<void> {
+        const end = Date.now() + ms;
+        while (this.tabRequests.size > 0 && this.events.opened.length === 0 && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+    }
+
     /** What happened since the last call (dialogs answered, tabs opened, errors), then forgotten. */
     takeEvents(): SessionEvents {
+        this.tabRequests.clear();
         const e = this.events;
         this.events = { dialogs: [], opened: [], problems: [], serverError: false, downloads: [] };
         return e;
