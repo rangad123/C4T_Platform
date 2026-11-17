@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, RUNNER_LIFECYCLE_MIGRATION, RUNNER_RESET_MIGRATION, RUNNER_SHARING_MIGRATION, RUNNER_SHOW_BROWSER_MIGRATION } from "./agent-store.js";
 import { BLOCKS_MIGRATION } from "./block-store.js";
+import { CANDIDATE_FINDINGS_MIGRATION } from "./candidate-finding-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
 import { DEVICE_FARM_MIGRATION } from "./device-farm-store.js";
@@ -316,9 +317,9 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 65: people's decisions about workflows (confirmed or rejected), one per project and workflow fingerprint, with the name and steps they decided about (schema lives in app-intel-store.ts; existing projects have none) */ APP_WORKFLOW_DECISIONS_MIGRATION,
     /* 66: a project's AI model, a provider and a model name its AI work uses when the person doing it may use one (never a key; ai-config.ts; existing projects have none, so each person's default) */ `ALTER TABLE projects ADD COLUMN ai_provider TEXT;
 ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
-    // 67 is held for candidate findings (Phase 3): it is replaced by its SQL when that work joins this one, and its main table goes into
-    // LATE_FILLED_SLOTS. 66 adds only columns, so it has no entry there.
-    /* 67: reserved (candidate findings) */ `-- reserved`,
+    // 67 was held for candidate findings on main (recorded as `-- reserved` there), so a database main opened is repaired by
+    // LATE_FILLED_SLOTS (told by its table).
+    /* 67: candidate findings from exploration, one per project and fingerprint, shaped like security_findings, status candidate only (schema lives in candidate-finding-store.ts; existing projects have none) */ CANDIDATE_FINDINGS_MIGRATION,
     /* 68: the AI response cache: answers of allowed reading calls per project, by a hash of the whole question, and the cached-call counts on AI usage rows (schema lives in llm-response-cache.ts; existing projects start with none, existing usage rows with 0) */ RESPONSE_CACHE_MIGRATION,
 ];
 
@@ -346,6 +347,7 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
     // After 51: it may rebuild the agents table that 53 adds a column to.
     { slot: 53, table: "agent_task_events" },
     { slot: 54, table: "test_version_deps" },
+    { slot: 67, table: "candidate_findings" },
 ];
 
 export type Row = Record<string, any>;

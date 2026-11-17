@@ -1868,6 +1868,28 @@ CREATE TABLE app_workflow_decisions (
     PRIMARY KEY (project_id, fingerprint)
 );
 
+CREATE TABLE candidate_findings (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    first_job_id TEXT REFERENCES generation_jobs(id) ON DELETE SET NULL,
+    last_job_id TEXT REFERENCES generation_jobs(id) ON DELETE SET NULL,
+    test_id TEXT REFERENCES test_cases(id) ON DELETE SET NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    capture TEXT NOT NULL,
+    finding_json TEXT NOT NULL,
+    seen_count BIGINT NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_cand_find_first_job ON candidate_findings (first_job_id);
+CREATE UNIQUE INDEX idx_cand_find_fp ON candidate_findings (project_id, fingerprint);
+CREATE INDEX idx_cand_find_last ON candidate_findings (project_id, last_seen_at);
+CREATE INDEX idx_cand_find_last_job ON candidate_findings (last_job_id);
+
 CREATE TABLE llm_response_cache (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     cache_key TEXT NOT NULL,
