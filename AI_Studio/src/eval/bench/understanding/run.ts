@@ -3,7 +3,8 @@
  * benchmark app fresh, creates a project on that side's own in-process platform (its own data folder), gives it the configuration's
  * inputs, explores and plans (nothing is generated or run), lets the analysis after the exploration build the application model, then
  * reruns the analysis once with nothing changed. The latest model version and its rules are scored against the app's answer key
- * (score.ts) and the series is reported per configuration (report.ts).
+ * (score.ts) and the series is reported per configuration (report.ts). With full inputs each trial's detail also has E5, the objective
+ * coverage of that model version (objectives-score.ts).
  *
  * Sides: "baseline" (Baseline-U) explores the way an older runner does and analyses without AI, from the URL and sign-in only, whatever
  * the input configuration; "candidate" is the current engine with the configuration's inputs. Sides alternate within every trial.
@@ -35,6 +36,7 @@ import { ANSWERS_DIR, INPUTS_DIR, parseAnswerKey, parseJudgements, requireApprov
 import { buildReport, renderReportMd, type CallsByPurpose, type DocVariant, type Engine, type Inputs, type TrialResult } from "./report.js";
 import { PAID_KEY_ENV, PAID_MODEL, paidKeyFrom, paidLlm, paidPlatformEnv, paidPricesIn, SpendGuard, type PaidPrices } from "./paid.js";
 import { scoreUnderstanding, type ScoredRule } from "./score.js";
+import { objectiveCoverage, type ObjectiveCoverage } from "./objectives-score.js";
 
 export const UNDERSTANDING_USAGE = `Usage: node scripts/eval.mjs bench --mode understanding [options]
   --apps <id,id>             benchmark apps (default: ${BENCH_APPS.map((a) => a.id).join(", ")})
@@ -438,6 +440,19 @@ async function runTrial(
             ...(notReachable.length ? { notReachableScreens: notReachable.map((s) => s.id) } : {}),
             incremental: { before: decided, after: rulesChanged, changedSourceRefs: edited, noChange: { newVersion: versionsAfter > versionsBefore, aiCallsForUnchangedSources: usageAfter.calls - usage.calls }, ...(oneChanged ? { oneChanged } : {}) },
         });
+        // E5 (full inputs): the objectives an exploration would get from this model version, against its rules and the catalogue workflows.
+        // A model the objectives cannot be built from is reported as such; it does not fail the understanding trial.
+        let objectives: ObjectiveCoverage | { error: string } | undefined;
+        if (o.inputs === "full") {
+            try {
+                objectives = objectiveCoverage({ model, rules, key: o.key, catalogueWorkflows: o.catalogueWorkflows, ...(judged.judgements ? { judgements: judged.judgements } : {}) });
+                const pct = (r: { found: number; total: number }) => `${r.found}/${r.total}`;
+                o.log(`  E5 objectives: rules ${pct(objectives.rules)}, workflows ${pct(objectives.workflows)}${objectives.met ? "" : " (not met)"}.`);
+            } catch (e) {
+                objectives = { error: (e instanceof Error ? e.message : String(e)).slice(0, 500) };
+                o.log(`  E5 objectives could not be worked out: ${objectives.error}`);
+            }
+        }
         return {
             result: { ...base, status: "completed", score, counts: { aiCalls: usage.calls, failedCalls: usage.failedCalls, pages, byPurpose: usage.byPurpose } },
             detail: {
@@ -451,6 +466,7 @@ async function runTrial(
                 ...(engine === "candidate" && o.inputs === "full" ? { requirementsImport: o.doc } : {}),
                 judgements: judged.judgements ? "applied" : (judged.note ?? "none recorded"),
                 rules: rules.length,
+                ...(objectives ? { objectives } : {}),
                 rerun: { versionsBefore, versionsAfter, aiCalls: usageAfter.calls - usage.calls },
                 incremental: {
                     decided: decided.filter((r) => r.status !== "unverified").length,
