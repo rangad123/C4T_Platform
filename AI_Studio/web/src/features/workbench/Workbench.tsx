@@ -403,7 +403,6 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                                     editor={{
                                         mode: showEditor ? (tab as "steps" | "text") : lastView.current,
                                         active: showEditor,
-                                        scriptSlot: null,
                                         barSlot,
                                         marks,
                                         onMode: (m) => {

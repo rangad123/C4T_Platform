@@ -43,7 +43,6 @@ export interface CodeConfig {
 }
 export type ConfigWithCode = PlatformConfig & { customScripts?: CodeConfig };
 
-export const ORIGIN_LABEL: Record<Origin, string> = { "taken-over": "Switched to code", git: "From Git", written: "Written as code" };
 export const VERSION_KIND_LABEL: Record<VersionKind, string> = { generated: "Generated", "taken-over": "Switched to code", edited: "Edited", git: "From Git", restored: "Restored" };
 
 export const HELPER_NAME = /^[a-z][a-z0-9-]{0,40}$/;

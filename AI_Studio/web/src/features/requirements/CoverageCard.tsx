@@ -3,7 +3,7 @@ import { Badge } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
-import { COVERAGE_HINT, COVERAGE_TONE, COVERAGE_WORDS, type Coverage, type CoverageSummary, type RequirementStatus } from "./requirements";
+import { COVERAGE_HINT, COVERAGE_TONE, COVERAGE_WORDS, type Coverage, type CoverageSummary } from "./requirements";
 import "./requirements.css";
 
 /** The project dashboard's coverage panel: how many requirements are passing, failing, covered and not covered (retired left out). */
@@ -47,30 +47,6 @@ export function RequirementsCoverageCard({ projectId }: { projectId: string }) {
                     </ul>
                 </>
             )}
-        </section>
-    );
-}
-
-/** On a test's page: the requirements it covers, each a link to its page. Nothing is shown when it covers none. */
-export function CoveredRequirements({ testId, projectId }: { testId: string; projectId: string }) {
-    const r = useFetch<{ requirements: Array<{ id: string; ref: string; title: string; status: RequirementStatus }> }>(`/tests/${testId}/requirements`);
-    const list = r.data?.requirements ?? [];
-    if (list.length === 0) return null;
-    return (
-        <section className="card card-pad stack-sm" aria-labelledby="test-reqs-title" data-testid="test-requirements">
-            <h2 className="t-card" id="test-reqs-title">
-                Requirements it covers
-            </h2>
-            <ul className="req-links">
-                {list.map((q) => (
-                    <li key={q.id}>
-                        <a href={routes.requirement(projectId, q.id)}>
-                            <span className="req-ref mono">{q.ref}</span> {q.title}
-                        </a>
-                        {q.status === "retired" && <span className="t-meta"> (retired)</span>}
-                    </li>
-                ))}
-            </ul>
         </section>
     );
 }

@@ -30,8 +30,6 @@ export interface EditorEmbed {
     onMode: (mode: "steps" | "text") => void;
     /** False while another tab (Code, History) is showing: the editor stays mounted so unsaved work is kept, and puts nothing on screen. */
     active: boolean;
-    /** No longer used: the script shows only on the Code tab, and the Steps view links there. Optional until the workbench stops passing it. */
-    scriptSlot?: HTMLElement | null;
     barSlot: HTMLElement | null;
     /** The last run's verdict per step, only when no edit was saved after that run. */
     marks?: Array<StepMark | undefined>;

@@ -1,18 +1,12 @@
 import "./code.css";
 import { Undo2 } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Callout, LinkButton } from "../../components/ui";
+import { Button, Callout, LinkButton } from "../../components/ui";
 import { routes } from "../../lib/router";
-import { ORIGIN_LABEL, shortCommit, type CustomInfo } from "./code";
+import { shortCommit, type CustomInfo } from "./code";
 import { Modal } from "../../components/Modal";
 import { api } from "../../api";
 import { describeApiError } from "../../lib/labels";
-
-
-/** The origin of a code test in words, as a small badge. */
-export function OriginBadge({ custom }: { custom: CustomInfo }) {
-    return <Badge tone="neutral">{ORIGIN_LABEL[custom.origin]}</Badge>;
-}
 
 interface RepoRow { id: string; host: string; path: string; ref: string; commit: string }
 interface CheckResult { upToDate: boolean; newCommit?: string; changed: Array<{ testId: string; path: string }> }

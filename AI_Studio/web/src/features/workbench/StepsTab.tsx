@@ -12,8 +12,6 @@ const COMPLIANCE_ORIGINS = new Set(["security-check", "a11y-audit", "access-chec
 export interface EditorProps {
     mode: "steps" | "text";
     active: boolean;
-    /** No longer used: the script shows only on the Code tab. Optional until the workbench stops passing it. */
-    scriptSlot?: HTMLElement | null;
     barSlot: HTMLElement | null;
     marks: Array<StepMark | undefined> | undefined;
     onMode: EditorEmbed["onMode"];

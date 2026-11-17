@@ -379,6 +379,25 @@ describe("Record a test: start", () => {
         await pwExpect(page.getByRole("menuitem", { name: "Record it in a browser" })).toHaveCount(0);
     });
 
+    it("is not offered to a code project: its address shows a plain message that links to Test scripts, and no form", async () => {
+        resetFake();
+        const code = platform.repo.createProject({ name: "Code only shop", testingModes: ["code"] }).id as string;
+        await page.goto(`${BASE}/#/projects/${code}/record`);
+        await page.reload();
+        await pwExpect(page.getByText("Recording is not part of a code project")).toBeVisible();
+        await pwExpect(page.getByRole("link", { name: "Open test scripts", exact: true })).toHaveAttribute("href", `#/projects/${code}/scripts`);
+        await pwExpect(page.getByText("We open a browser window on the computer that runs this platform.")).toHaveCount(0);
+        await pwExpect(page.getByRole("button", { name: "Start recording", exact: true })).toHaveCount(0);
+        // a session address does not open one either
+        await page.goto(`${BASE}/#/projects/${code}/record?session=rec-1`);
+        await page.reload();
+        await pwExpect(page.getByText("Recording is not part of a code project")).toBeVisible();
+        expect({ calls: fake.calls, polls: fake.polls }).toEqual({ calls: [], polls: 0 });
+        // an AI agent project still records
+        await openStart();
+        await pwExpect(page.getByText("We open a browser window on the computer that runs this platform.")).toBeVisible();
+    });
+
     it("explains the page, prefills the project address and warns about personal data", async () => {
         resetFake();
         await openStart();

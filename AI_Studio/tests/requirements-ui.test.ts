@@ -129,14 +129,6 @@ describe("requirements in the browser", () => {
         await pwExpect(panel).toContainText("1 not covered");
     });
 
-    it("shows the requirements a test covers on its page, with a link", async () => {
-        await open(`${BASE}/#/tests/${shop.tests.get("pay")}`);
-        const box = page.getByTestId("test-requirements");
-        await pwExpect(box).toBeVisible();
-        await box.getByRole("link", { name: /REQ-1/ }).click();
-        await pwExpect(page.getByRole("heading", { name: "REQ-1 A shopper can pay by card" })).toBeVisible();
-    });
-
     it("names the requirements a test covers in one line under its header, each a link", async () => {
         await open(`${BASE}/#/tests/${shop.tests.get("pay")}`);
         const line = page.getByTestId("header-requirements");
