@@ -54,6 +54,20 @@ export const FindingSchema = z
         capture: z.enum(["captured", "observed_only"]).optional(),
         /** When the platform first recorded the failure (earliest failing execution, else the test's creation run). */
         firstSeenAt: z.string().datetime().nullable(),
+        /**
+         * For a finding the author stopped as a defect (source "authoring", discovery mode): its candidate finding's objective (kind and
+         * operator; null when the finding has no objective) and the E7 fields it lacks (observed.ts `evidenceGaps`; empty = complete).
+         * Absent in results written before it existed.
+         */
+        candidate: z
+            .object({
+                objective: z.object({ kind: Text(40), operator: Text(80).nullable() }).strict().nullable(),
+                missing: z.array(Text(40)).max(20),
+                /** Shown, not counted against E7 (observed.ts NO_SCREENSHOTS). */
+                notes: z.array(Text(60)).max(10).optional(),
+            })
+            .strict()
+            .optional(),
     })
     .strict();
 export type BenchFinding = z.infer<typeof FindingSchema>;
@@ -106,6 +120,24 @@ export const BenchMetricsSchema = z
     .strict();
 export type BenchMetrics = z.infer<typeof BenchMetricsSchema>;
 
+/**
+ * One objective-driven exploration session of an app's jobs, read from the job's events (`objectives_planned` opens it with the level's
+ * budgets, `exploration_stopped` closes it with the stop reason and what was used): E6 per trial (observed.ts).
+ */
+export const ExplorationSessionSchema = z
+    .object({
+        jobId: Text(100),
+        /** null: the session has no `exploration_stopped` event (it ended without a recorded stop reason). */
+        stopReason: Text(40).nullable(),
+        detail: Text(600),
+        /** The budgets the session was given; null when its `objectives_planned` event is missing or unreadable. */
+        budgets: z.object({ objectives: Count, actions: Count, aiCalls: Count }).strict().nullable(),
+        /** What it used, from `exploration_stopped`; null without that event. */
+        used: z.object({ objectives: Count, actions: Count, aiCalls: Count }).strict().nullable(),
+    })
+    .strict();
+export type ExplorationSession = z.infer<typeof ExplorationSessionSchema>;
+
 export const BenchAppResultSchema = z
     .object({
         id: Id,
@@ -122,6 +154,11 @@ export const BenchAppResultSchema = z
         metrics: BenchMetricsSchema,
         /** The platform jobs that made this app's tests: the exploration, then every creation (more than one when a stop was continued). */
         jobs: z.object({ planJobId: Text(100).optional(), createJobIds: z.array(Text(100)).max(30), validationJobIds: z.array(Text(100)).max(30).optional() }).strict().optional(),
+        /**
+         * The app's objective-driven exploration sessions (empty: its jobs did not explore by objectives). Absent in results written
+         * before it existed: then per-objective counts, stop reasons, E6 and E7 are not available for the trial (never zero).
+         */
+        exploration: z.object({ sessions: z.array(ExplorationSessionSchema).max(30) }).strict().optional(),
         /** What makes this app's numbers differ from one uninterrupted run (said in the report). */
         caveats: z.array(Text(600)).max(10).optional(),
     })
