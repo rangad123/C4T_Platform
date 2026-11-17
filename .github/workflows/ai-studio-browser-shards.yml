@@ -51,7 +51,9 @@ jobs:
       # One test of tests/runner-kit.test.ts is local only too (the rest of that file runs here): "start-runner.sh on a computer
       # without Node.js ..." hides Node.js from the script, but GitHub's machines have Node in /usr/local/bin and /usr/local/n, folders
       # start-runner.sh searches on purpose. The Tests step leaves it out by name (LOCAL_ONLY_TEST below). Run it locally before a push:
-      #   npx vitest run tests/runner-kit.test.ts -t "start-runner.sh on a computer without Node.js"
+      #   npx vitest run tests/runner-kit.test.ts
+      # (the whole file: the test needs the kit an earlier test of that file builds). It needs a bash whose own folder holds no Node,
+      # as Git Bash on Windows; on Linux that folder is /usr/bin, where a system Node often is.
       # security-egress-isolation*.test.ts and security-scanner-isolation.test.ts stay here; they skip their namespace parts themselves.
       - id: split
         run: |
