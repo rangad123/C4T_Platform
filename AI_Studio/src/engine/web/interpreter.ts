@@ -126,7 +126,21 @@ export function rememberPopup(top: Page, popup: Page): void {
 /** The dialog a dialog step armed on each page: checked after the step that follows it (the step that should open it), as the script does. */
 const pendingDialogs = new WeakMap<Page, { shown: Promise<string>; message?: string }>();
 
-export async function executeStep(top: Page, step: Step, data: RuntimeData, baseUrl: string, timeout = 6_000, options: StepOptions = {}): Promise<void> {
+/** The step running on each page: the next one waits for it. */
+const runningStep = new WeakMap<Page, Promise<void>>();
+
+/**
+ * Runs one step. The steps of one page run one at a time, in the order they were started: the AI SDK runs the tool calls of one model
+ * turn at the same time, and two fills at once type into whichever field took the focus last (a fill focuses its field, then types with
+ * the page keyboard), so a sign-in's email went into the Password field.
+ */
+export function executeStep(top: Page, step: Step, data: RuntimeData, baseUrl: string, timeout = 6_000, options: StepOptions = {}): Promise<void> {
+    const mine = (runningStep.get(top) ?? Promise.resolve()).then(() => executeOne(top, step, data, baseUrl, timeout, options));
+    runningStep.set(top, mine.catch(() => undefined));
+    return mine;
+}
+
+async function executeOne(top: Page, step: Step, data: RuntimeData, baseUrl: string, timeout: number, options: StepOptions): Promise<void> {
     const pending = step.action === "dialog" ? undefined : pendingDialogs.get(top);
     pendingDialogs.delete(top);
     await runOneStep(top, step, data, baseUrl, timeout, options);
