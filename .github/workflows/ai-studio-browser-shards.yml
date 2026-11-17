@@ -97,6 +97,11 @@ jobs:
         continue-on-error: true
         run: npx playwright install-deps chromium firefox webkit
 
+      # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor; the security-profile tests need one (unshare -rn) for
+      # the scanners' isolated network, as on a developer's Linux machine.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Build the web app
         run: npx vite build web
 
