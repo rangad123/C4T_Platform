@@ -1,5 +1,6 @@
 /** The benchmark result as a short Markdown report (written beside the JSON). Numbers only from the result itself. */
 import type { EvalRun } from "../run.js";
+import { observedOf, seriesOf, type Observed } from "./observed.js";
 import type { Benchmark } from "./schema.js";
 
 const pct = (v: number | null) => (v === null ? "n/a" : `${Math.round(v * 1000) / 10}%`);
@@ -37,6 +38,37 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
         for (const f of a.findings) out.push(`| ${f.testKey} | ${f.title.replace(/\|/g, "/")} | ${f.source} | ${f.category}${f.label ? ` (labelled ${f.label})` : ""} | ${f.defects.join(", ")} |`);
         out.push("");
     }
+    out.push(observedMarkdown([{ name: run.startedAt, observed: observedOf(b) }]));
     if (b.notes.length) out.push("## Notes", "", ...b.notes.map((n) => `- ${n}`), "");
+    return out.join("\n");
+}
+
+const ofText = (r: { n: number; of: number; rate: number | null }) => `${r.n} of ${r.of}${r.rate === null ? "" : ` (${pct(r.rate)})`}`;
+
+/**
+ * The "Observed vs captured" section (definitions in observed.ts): per trial the kinds, E1 and E2 with their denominators and every finding;
+ * with more than one trial, E1 and E2 as median and range.
+ */
+export function observedMarkdown(trials: Array<{ name: string; observed: Observed }>): string {
+    const out: string[] = ["## Observed vs captured", ""];
+    for (const { name, observed: o } of trials) {
+        if (trials.length > 1) out.push(`### ${name}`, "");
+        out.push("| Measure | Value |", "|---|---|");
+        out.push(`| Findings | ${o.rows.length} |`, `| Captured: the saved script fails on the seeded app | ${o.counts.captured} |`, `| Observed only: the author said defect, the replay passed | ${o.counts.observed_only} |`);
+        out.push(`| False positive | ${o.counts.false_positive} |`, `| Not verified | ${o.counts.unverified} |`);
+        out.push(`| E1 capture: author-time findings whose saved script fails on the seeded app | ${ofText(o.e1)} |`, `| E2 replay isolation: of those, scripts that pass on the clean app | ${ofText(o.e2)} |`);
+        out.push(`| Clean replay not run (counted as not passing in E2) | ${o.cleanNotRun} |`, `| Author recorded: captured / observed only / not recorded | ${o.authorCapture.captured} / ${o.authorCapture.observed_only} / ${o.authorCapture.unrecorded} |`);
+        out.push(`| Defects seen but not captured (person's labels) | ${o.observedDefects.length ? o.observedDefects.join(", ") : "none"}; ${o.observedUnlabelled} observed-only finding(s) unlabelled |`, "");
+        out.push("| App | Finding | Source | Author recorded | Seeded | Clean | Observed vs captured | Label |", "|---|---|---|---|---|---|---|---|");
+        for (const r of o.rows) out.push(`| ${r.app} | ${r.testKey} | ${r.source} | ${r.capture ?? "-"} | ${r.seeded} | ${r.clean ?? "-"} | ${r.kind.replace("_", " ")} | ${r.label ?? ""} |`);
+        out.push("");
+    }
+    if (trials.length > 1) {
+        for (const [k, pick] of [["E1", (o: Observed) => o.e1.rate], ["E2", (o: Observed) => o.e2.rate]] as const) {
+            const s = seriesOf(trials.map((t) => pick(t.observed)));
+            out.push(s.n ? `- ${k} over ${s.n} trials: median ${pct(s.median)}, range ${pct(s.min)}–${pct(s.max)}` : `- ${k}: no trial had anything to divide by`);
+        }
+        out.push("");
+    }
     return out.join("\n");
 }

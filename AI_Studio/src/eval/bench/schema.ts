@@ -47,6 +47,11 @@ export const FindingSchema = z
         defects: z.array(Id).max(100),
         /** A person's label for a finding the replays could not verify: a defect id, or "false_positive". Never set by code. */
         label: z.union([Id, z.literal("false_positive")]).optional(),
+        /**
+         * What the author recorded when it stopped the test as a defect (the test's `meta.capture`): "captured" when the saved script ends
+         * with the failing sourced check, "observed_only" when it does not. Absent in results written before it existed.
+         */
+        capture: z.enum(["captured", "observed_only"]).optional(),
         /** When the platform first recorded the failure (earliest failing execution, else the test's creation run). */
         firstSeenAt: z.string().datetime().nullable(),
     })
