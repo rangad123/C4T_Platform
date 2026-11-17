@@ -120,10 +120,13 @@ describe("UI journey", () => {
         await pwExpect(page.getByText("This test is passing")).toBeVisible();
     });
 
-    it("shows the generated code beside the steps, and re-runs a test", async () => {
-        // the script sits beside the steps in the workbench (the test first), and the Code tab shows it on its own
+    it("shows the generated code on the Code tab, not beside the steps, and re-runs a test", async () => {
+        // the Steps tab shows no script, only a way to it; the Code tab shows it
         await page.getByRole("tab", { name: "Steps", exact: true }).click();
         await pwExpect(page.getByRole("tab", { name: "Steps", exact: true })).toHaveAttribute("aria-selected", "true");
+        await pwExpect(page.locator("pre.code:visible")).toHaveCount(0);
+        await page.getByRole("link", { name: "See the script", exact: true }).click();
+        await pwExpect(page.getByRole("tab", { name: "Code", exact: true })).toHaveAttribute("aria-selected", "true");
         // the test comes first; the platform's setup code (which holds API_BASE_URL) is folded behind one line
         await pwExpect(page.locator("pre.code:visible")).toContainText("test(");
         await pwExpect(page.getByText(/^Show setup code \(\d+ lines\)$/)).toBeVisible();

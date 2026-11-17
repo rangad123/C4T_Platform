@@ -66,8 +66,9 @@ export function YourRunnerSection() {
     }, [me.data]);
     const state = !me.data ? null : !runner ? "not-set-up" : runner.status;
     return (
-        <section className="card card-pad stack-sm" id="runner" aria-labelledby="runner-title" data-testid="your-runner" data-tour="your-runner" data-state={state ?? "loading"}>
-            <div className="row">
+        <section className="card card-pad stack-sm" id="runner" aria-labelledby="runner-title" data-testid="your-runner" data-state={state ?? "loading"}>
+            {/* The tour points at the head line: on its own Settings section the whole card is too tall to leave room for the card beside it. */}
+            <div className="row" data-tour="your-runner">
                 <Laptop size={18} aria-hidden />
                 <h2 className="t-section" id="runner-title">
                     Your runner

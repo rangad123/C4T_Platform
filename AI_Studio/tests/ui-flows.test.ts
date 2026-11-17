@@ -143,10 +143,13 @@ describe("visual change review in the UI", () => {
         await runAgain(project.id);
         await pwExpect(page.getByText("This test found something that needs a look")).toBeVisible();
         await pwExpect(page.getByText("Low severity").first()).toBeVisible();
+        // the run's pictures are on History, under Latest run
+        await page.getByRole("tab", { name: "History", exact: true }).click();
         await pwExpect(page.getByRole("img", { name: "Differences highlighted in red" })).toBeVisible();
         await pwExpect(page.getByText("New screenshot", { exact: true })).toBeVisible();
 
         await page.getByRole("button", { name: "Accept new screenshot" }).click();
+        await page.getByRole("tab", { name: "Steps", exact: true }).click(); // the verdict is in the Last run column of the edit tabs
         await pwExpect(page.getByText("This test is passing")).toBeVisible({ timeout: 60_000 });
         await pwExpect(page.getByRole("button", { name: "Accept new screenshot" })).toHaveCount(0);
     }, 180_000);
@@ -349,12 +352,14 @@ describe("page speed", () => {
         await pwExpect(page.locator(".script-row", { hasText: "Fast page loads quickly" }).getByText("Passing", { exact: true })).toBeVisible();
 
         await slowRow.locator("a.sr-title").click();
+        await page.getByRole("tab", { name: "History", exact: true }).click(); // the run's measurements are under Latest run
         const card = page.getByTestId("page-speed");
         await pwExpect(card.getByText("Page speed", { exact: true })).toBeVisible();
         const ttfb = card.locator('[data-metric="ttfb"]');
         await pwExpect(ttfb.getByText("Server starts responding")).toBeVisible();
         await pwExpect(ttfb.getByText("Over budget")).toBeVisible(); // words, not only colour
         await pwExpect(ttfb.getByText("budget 300 ms")).toBeVisible();
+        await page.getByRole("tab", { name: "Steps", exact: true }).click(); // the verdict is in the Last run column of the edit tabs
         await pwExpect(page.getByText("The server takes").first()).toBeVisible(); // the finding in plain language
 
         await page.goto(`${base}/#/projects/${project.id}`);
@@ -431,7 +436,7 @@ describe("API response speed", () => {
         await recordMetrics(repo.db.sql, { projectId, testId: id, executionId: exec, samples: [{ metric: "p50", value: 284, unit: "ms" }, { metric: "p95", value: 317, unit: "ms", budget: 130 }, { metric: "max", value: 317, unit: "ms" }] });
 
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        await page.goto(`${base}/#/tests/${id}`);
+        await page.goto(`${base}/#/tests/${id}/history`); // the run's measurements are under Latest run
         const card = page.getByTestId("page-speed");
         await pwExpect(card.getByText("Response speed", { exact: true })).toBeVisible();
         await pwExpect(card.getByText("one request at a time")).toBeVisible();
@@ -442,6 +447,7 @@ describe("API response speed", () => {
         await pwExpect(p95.getByText("budget 130 ms")).toBeVisible();
         await pwExpect(p95.getByText("Over budget")).toBeVisible();
         await pwExpect(card.locator('[data-metric="max"]').getByText("Slowest response")).toBeVisible();
+        await page.getByRole("tab", { name: "Steps", exact: true }).click(); // the verdict is in the Last run column of the edit tabs
         await pwExpect(page.getByText("API speed:").first()).toBeVisible(); // the finding in plain words
         await page.close();
     }, 60_000);

@@ -140,6 +140,8 @@ describe("AI judgement results in the UI", () => {
         await pwExpect(steps.last()).toContainText("Ask an AI reviewer whether the page looks right");
         await pwExpect(steps.last()).toHaveClass(/is-failed/);
         await pwExpect(steps.first()).not.toHaveClass(/is-failed/);
+        // the screenshot the AI looked at is on History, under Latest run
+        await page.getByRole("tab", { name: "History", exact: true }).click();
         const figure = page.locator("figure", { hasText: "What the AI reviewer looked at" });
         await pwExpect(figure.getByRole("img", { name: "Screenshot the AI reviewer looked at" })).toBeVisible();
         // the image really loaded (not a broken link)

@@ -23,7 +23,7 @@ import { AgentRunStore } from "../src/platform/agent-run-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { ROUTE_ALIASES, resolveAlias } from "../web/src/lib/aliases.js";
-import { LIBRARY_SECTIONS, RELEASE_SECTIONS, SETUP_SECTIONS, routes } from "../web/src/lib/router.js";
+import { LIBRARY_SECTIONS, RELEASE_SECTIONS, SETUP_SECTIONS, WORKSPACE_SETTINGS_SECTIONS, routes } from "../web/src/lib/router.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
 const PORT = 8786;
@@ -438,7 +438,7 @@ describe("sidebar and the Projects page", () => {
     });
 
     it("the emulator panel is in Settings, as Mobile tooling on this computer (round 45: no Runners page)", async () => {
-        await visit(routes.settings);
+        await visit(routes.settingsSection("platform")); // the Platform section of Settings
         const tooling = page.getByTestId("mobile-tooling");
         await pwExpect(tooling.getByRole("heading", { name: "Mobile tooling on this computer", exact: true })).toBeVisible();
         await pwExpect(page.getByRole("heading", { name: "Mobile testing", exact: true })).toHaveCount(0);
@@ -738,6 +738,7 @@ describe("every route builder opens a page without an error", () => {
             agent: [routes.agent("accessibility"), routes.agent("chatbot")],
             profile: [routes.profile],
             settings: [routes.settings],
+            settingsSection: WORKSPACE_SETTINGS_SECTIONS.map((k) => routes.settingsSection(k)),
             guide: [routes.guide],
             guideTopic: [routes.guideTopic("first-steps")],
             guideWords: [routes.guideWords],
