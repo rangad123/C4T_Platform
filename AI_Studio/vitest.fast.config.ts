@@ -258,6 +258,7 @@ export default defineConfig({
             "tests/explore-objectives-unit.test.ts",
             "tests/explore-coverage-unit.test.ts",
             "tests/explore-perturb-unit.test.ts",
+            "tests/bench-objectives-score-unit.test.ts",
             "tests/candidate-findings-migration-66.test.ts",
             "tests/candidate-finding-store.test.ts",
             "tests/repair-web-guard-unit.test.ts",
