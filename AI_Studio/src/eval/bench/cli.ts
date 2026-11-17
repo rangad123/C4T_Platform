@@ -57,6 +57,8 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --single-model             no fast model and no separate planning model: the main model does everything
   --max                      the deepest run: --level everything --allow-data-changes --all-checks --single-model
   --repeat <n>               reruns of every created test, 1 to 10 (default 1)
+  --job-timeout-min <n>      longest the exploration, a creation and each replay job may take, in minutes (default 45)
+  --isolated-replays         replay each finding alone, in a job of its own, on a freshly started app (every replay stage; slower, no AI)
   --port-base <n>            first port for the apps (default 5291)
   --prices <file>            price table: [{ "model", "inputPerMTok", "outputPerMTok", "cachedInputPerMTok"?, "cacheWritePerMTok"?, "note"? }] in US dollars
   --approved-budget-usd <n>  the most this run may spend (required with a real AI model; 0 for a free model); AI work stops at it
@@ -80,6 +82,8 @@ interface Args {
     allChecks: boolean;
     singleModel: boolean;
     repeat: number;
+    jobTimeoutMin?: number;
+    isolatedReplays: boolean;
     portBase: number;
     prices?: string;
     budget?: number;
@@ -95,7 +99,7 @@ interface Args {
 }
 
 export function parseBenchArgs(argv: string[]): Args {
-    const a: Args = { apps: BENCH_APPS.map((x) => x.id), mode: "discovery", login: "html", allowDataChanges: false, allChecks: false, singleModel: false, repeat: 1, portBase: 5291, estimateOnly: false, baseline: false, resume: false, out: "", yes: false, help: false };
+    const a: Args = { apps: BENCH_APPS.map((x) => x.id), mode: "discovery", login: "html", allowDataChanges: false, allChecks: false, singleModel: false, repeat: 1, isolatedReplays: false, portBase: 5291, estimateOnly: false, baseline: false, resume: false, out: "", yes: false, help: false };
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         const value = () => {
@@ -130,6 +134,8 @@ export function parseBenchArgs(argv: string[]): Args {
             a.level = "everything";
             a.allowDataChanges = a.allChecks = a.singleModel = true;
         } else if (k === "--repeat") a.repeat = whole(1, 10);
+        else if (k === "--job-timeout-min") a.jobTimeoutMin = whole(1, 24 * 60);
+        else if (k === "--isolated-replays") a.isolatedReplays = true;
         else if (k === "--port-base") a.portBase = whole(1024, 65000);
         else if (k === "--prices") a.prices = path.resolve(value());
         else if (k === "--approved-budget-usd") {
@@ -214,7 +220,7 @@ export function writeState(out: string, state: object): void {
 }
 const RESUME_MAY_CHANGE = new Set(["--yes", "--approved-budget-usd", "--daily-call-cap", "--resume", "--out"]);
 /** Options that take no value. */
-const FLAGS = new Set(["--allow-data-changes", "--all-checks", "--single-model", "--max", "--estimate-only", "--baseline", "--resume", "--yes", "--help", "-h"]);
+const FLAGS = new Set(["--allow-data-changes", "--isolated-replays", "--all-checks", "--single-model", "--max", "--estimate-only", "--baseline", "--resume", "--yes", "--help", "-h"]);
 /** argv split into options, each with its value when it has one. */
 function optionsOf(argv: string[]): string[][] {
     const out: string[][] = [];
@@ -223,6 +229,24 @@ function optionsOf(argv: string[]): string[][] {
 }
 export const withoutOptions = (argv: string[], names: Set<string>): string[] => optionsOf(argv).filter((o) => !names.has(o[0]!)).flat();
 export const onlyOptions = (argv: string[], names: Set<string>): string[] => optionsOf(argv).filter((o) => names.has(o[0]!)).flat();
+
+/** A resume runs with the first attempt's options; only the few in RESUME_MAY_CHANGE are taken from the resume command. */
+export function resumedArgs(firstArgv: string[], argv: string[]): Args {
+    const first = withoutOptions(firstArgv, RESUME_MAY_CHANGE);
+    const keep = onlyOptions(argv, RESUME_MAY_CHANGE).filter((x) => x !== "--resume");
+    return { ...parseBenchArgs([...first, ...keep]), resume: true };
+}
+
+/**
+ * The job time limit and isolated replays: what the run's config records (only when set, so a default run's config is what it was) and
+ * what the controller is given.
+ */
+export function configLimits(a: Pick<Args, "jobTimeoutMin" | "isolatedReplays">): { options: Record<string, number | boolean>; run: { jobTimeoutMs?: number; isolatedReplays?: true } } {
+    return {
+        options: { ...(a.jobTimeoutMin !== undefined ? { jobTimeoutMin: a.jobTimeoutMin } : {}), ...(a.isolatedReplays ? { isolatedReplays: true } : {}) },
+        run: { ...(a.jobTimeoutMin !== undefined ? { jobTimeoutMs: a.jobTimeoutMin * 60_000 } : {}), ...(a.isolatedReplays ? { isolatedReplays: true as const } : {}) },
+    };
+}
 
 const slugDate = (iso: string) => iso.slice(0, 16).replace("T", "-").replace(":", "");
 
@@ -252,9 +276,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             if (!fs.existsSync(stateFile(args.out))) throw new Error(`There is no stopped run to resume in ${args.out} (bench-state.json).`);
             state = JSON.parse(fs.readFileSync(stateFile(args.out), "utf8")) as BenchState;
             // The first attempt's options, with the few a resume may change taken from this command.
-            const first = withoutOptions(state.argv, RESUME_MAY_CHANGE);
-            const keep = onlyOptions(argv, RESUME_MAY_CHANGE).filter((x) => x !== "--resume");
-            args = { ...parseBenchArgs([...first, ...keep]), resume: true, out: args.out };
+            args = { ...resumedArgs(state.argv, argv), out: args.out };
         }
         const known = deps.apps ?? BENCH_APPS;
         apps = args.apps.map((id) => {
@@ -323,6 +345,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 singleModel: args.singleModel,
                 repeat: args.repeat,
                 mode: args.mode,
+                ...configLimits(args).options,
             };
             config = {
                 engineCommit: eng.commit,
@@ -413,6 +436,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             signal: ac.signal,
             log,
             pollMs: deps.pollMs,
+            ...configLimits(args).run,
         });
 
         const kept = await client.call("POST", "/api/eval/runs", run);
