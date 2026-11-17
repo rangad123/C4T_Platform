@@ -22,6 +22,8 @@ concurrency:
 
 env:
   SHARDS: 10
+  # The one test left out on GitHub (a regular expression for vitest's --testNamePattern; see "Local machine only" below).
+  LOCAL_ONLY_TEST: 'start-runner\.sh on a computer without Node\.js'
 
 defaults:
   run:
@@ -46,6 +48,10 @@ jobs:
       # Local machine only (localOnly below): these need an unprivileged user network namespace (unshare -rn) for the scanners'
       # isolated network, which GitHub's Ubuntu image blocks. Run them locally before a push:
       #   npx vitest run tests/security-profile-gate.test.ts tests/security-profile-gate-expiry.test.ts
+      # One test of tests/runner-kit.test.ts is local only too (the rest of that file runs here): "start-runner.sh on a computer
+      # without Node.js ..." hides Node.js from the script, but GitHub's machines have Node in /usr/local/bin and /usr/local/n, folders
+      # start-runner.sh searches on purpose. The Tests step leaves it out by name (LOCAL_ONLY_TEST below). Run it locally before a push:
+      #   npx vitest run tests/runner-kit.test.ts -t "start-runner.sh on a computer without Node.js"
       # security-egress-isolation*.test.ts and security-scanner-isolation.test.ts stay here; they skip their namespace parts themselves.
       - id: split
         run: |
@@ -55,7 +61,7 @@ jobs:
             const t = tiers();
             const localOnly = ["tests/security-profile-gate.test.ts", "tests/security-profile-gate-expiry.test.ts"];
             const files = [...t.browser, ...t.phone].filter((f) => !localOnly.includes(f));
-            console.log(`local machine only (not run here): ${localOnly.join(", ")}`);
+            console.log(`local machine only (not run here): ${localOnly.join(", ")}; and in tests/runner-kit.test.ts, the test ${process.env.LOCAL_ONLY_TEST}`);
             const n = Number(process.env.SHARDS);
             let dur = {};
             try { dur = JSON.parse(fs.readFileSync("tests/shard-durations.json", "utf8")); } catch {}
@@ -111,6 +117,7 @@ jobs:
         run: |
           mkdir -p ../shard-report
           xvfb-run -a npx vitest run ${{ matrix.files }} \
+            --testNamePattern "^(?!.*${LOCAL_ONLY_TEST})" \
             --reporter=default --reporter=junit --reporter=json \
             --outputFile.junit=../shard-report/junit.xml --outputFile.json=../shard-report/results.json
         env:
