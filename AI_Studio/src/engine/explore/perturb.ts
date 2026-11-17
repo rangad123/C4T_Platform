@@ -14,7 +14,8 @@
  *   account" (Q2: two-account checks are Phase 4).
  * Pure: no AI, no browser, no clock.
  */
-import { ScenarioSchema, type Scenario, type Step } from "../spec/schema.js";
+import { expandRepeats, REPEAT_MAX, ScenarioSchema, type Scenario, type Step } from "../spec/schema.js";
+import type { InputClass } from "./input-classes.js";
 import { OBJECTIVE_OPERATORS, type Objective, type ObjectiveOperator } from "./objectives.js";
 
 /** Why an operator did not become a scenario. Coverage (P3-16) shows the first two as "not run: data changes off" and "needs a second account". */
@@ -55,6 +56,32 @@ export interface PerturbInputClass {
     boundary?: boolean;
 }
 
+/**
+ * An input class (P3-14) as this file's input: `accepted` when the class's expected result is that the form takes it; `boundary` for a
+ * value at or around a stated limit, or a long value one past the maximum length (a long value with no limit is not a boundary).
+ */
+export function perturbInputClassOf(c: InputClass): PerturbInputClass {
+    return {
+        name: [c.class, c.variant].filter(Boolean).join(" ") + (c.limit ? ` (${c.limit})` : ""),
+        value: c.value,
+        accepted: c.expected === "accepted",
+        boundary: c.class === "boundary" || (c.class === "long" && c.limit !== undefined),
+    };
+}
+
+const isInputClass = (c: PerturbInputClass | InputClass): c is InputClass => "key" in c && "class" in c;
+
+/** A run of one letter or digit this long or longer is written as a {{repeat.<c>.<n>}} placeholder in the prompt. */
+const REPEAT_FROM = 50;
+/**
+ * A value as the prompt shows it: each run of REPEAT_FROM or more of one letter or digit becomes `{{repeat.<c>.<n>}}` (spec/schema.ts),
+ * which the step renders back to the exact value when it runs. So a 2,001-character class is a short line, and the agent copies it whole.
+ */
+export function promptValueOf(value: string): string {
+    return value.replace(/([A-Za-z0-9])\1+/g, (run, c: string) => (run.length >= REPEAT_FROM && run.length <= REPEAT_MAX ? `{{repeat.${c}.${run.length}}}` : run));
+}
+const shownValue = (c: PerturbInputClass) => JSON.stringify(promptValueOf(c.value).slice(0, 1100));
+
 /** A workflow's stated steps, with the page each happens on when the model knows it (P3-18 `objectiveInputs`). */
 export interface PerturbWorkflow {
     preconditions?: readonly string[];
@@ -66,8 +93,8 @@ export interface PerturbOptions {
     dataOperators?: boolean;
     /** For a workflow objective: its stated steps and preconditions. */
     workflow?: PerturbWorkflow;
-    /** For a constraint objective: the field's input classes. */
-    inputClasses?: readonly PerturbInputClass[];
+    /** For a constraint objective: the field's input classes (P3-14's own, or already mapped with perturbInputClassOf). */
+    inputClasses?: ReadonlyArray<PerturbInputClass | InputClass>;
     /** Where the scenario starts; default the first step's page, a constraint's page, or "/". */
     startPath?: string;
     requiresAuth?: boolean;
@@ -159,9 +186,11 @@ function stepsFor(op: ObjectiveOperator, ctx: { later?: string; cancelAt?: strin
             ];
         case "invalid_input":
         case "boundary_input": {
-            const list = (ctx.values ?? []).map((c, i) => `   ${String.fromCharCode(97 + (i % 26))}. ${clip(c.name, 60)}: ${JSON.stringify(c.value.slice(0, 1100))} (the constraint says the form ${c.accepted ? "accepts" : "refuses"} it)`);
+            const list = (ctx.values ?? []).map((c, i) => `   ${String.fromCharCode(97 + (i % 26))}. ${clip(c.name, 60)}: ${shownValue(c)} (the constraint says the form ${c.accepted ? "accepts" : "refuses"} it)`);
+            const repeats = list.some((l) => l.includes("{{repeat."));
             return [
                 `On the form${ctx.page ? ` at ${quote(ctx.page)}` : ""}, fill the field with each value below, one at a time, and submit after each:\n${list.join("\n")}`,
+                ...(repeats ? ["Type each value exactly as written, placeholders included: {{repeat.a.2001}} is the letter a written 2001 times, filled in when the step runs."] : []),
                 "Check each expected result after each submit.",
             ];
         }
@@ -197,7 +226,7 @@ export function scenarioFor(o: Objective, op: ObjectiveOperator, options: Pertur
         check.url = later;
     }
     if (op === "invalid_input" || op === "boundary_input") {
-        values = (options.inputClasses ?? []).filter((c) => (op === "invalid_input" ? !c.accepted : c.boundary === true));
+        values = (options.inputClasses ?? []).map((c) => (isInputClass(c) ? perturbInputClassOf(c) : c)).filter((c) => (op === "invalid_input" ? !c.accepted : c.boundary === true));
         if (!values.length) return skip(SKIP_REASONS.noInputClasses);
         check.values = values.map((c) => c.value);
     }
@@ -228,7 +257,7 @@ export function scenarioFor(o: Objective, op: ObjectiveOperator, options: Pertur
         preconditions: (options.workflow?.preconditions ?? []).map((p) => clip(p, 500)).filter(Boolean),
         expectedResults: [expectedFor(o, op, cancelAt?.action)],
         requiresAuth: options.requiresAuth ?? false,
-        requiredData: values?.map((c) => `${clip(c.name, 60)}: ${JSON.stringify(c.value.slice(0, 1100))}`) ?? [],
+        requiredData: values?.map((c) => `${clip(c.name, 60)}: ${shownValue(c)}`) ?? [],
         objective: { id: o.id, kind: o.kind, source: clip(o.source.ref, 500), operator: op },
     });
     return { status: "ready", operator: op, dataChanging: DATA_CHANGING[op], scenario, check };
@@ -275,7 +304,8 @@ const CANCEL_WORDS = /\b(?:cancel|close|discard|abort|dismiss|never ?mind)\b/i;
  * - back: an address opened before is opened again after a different one;
  * - direct_url: `check.url` is the first address opened, before any other action;
  * - cancel: a click on a control named cancel / close / discard / abort / dismiss, or Escape pressed;
- * - invalid_input / boundary_input: a value from `check.values` is filled and then a click or key press follows.
+ * - invalid_input / boundary_input: a value from `check.values` is filled (as written, or as the value its {{repeat.<c>.<n>}} placeholders
+ *   render) and then a click or key press follows.
  */
 export function operatorApplied(steps: readonly Step[], op: ObjectiveOperator, check: OperatorCheck = {}): boolean {
     const all = steps.slice(0, MAX_STEPS);
@@ -323,7 +353,7 @@ export function operatorApplied(steps: readonly Step[], op: ObjectiveOperator, c
         case "boundary_input": {
             const values = new Set(check.values ?? []);
             if (!values.size) return false;
-            return all.some((s, i) => s.action === "fill" && values.has(s.value) && all.slice(i + 1).some((t) => t.action === "click" || t.action === "press"));
+            return all.some((s, i) => s.action === "fill" && (values.has(s.value) || values.has(expandRepeats(s.value))) && all.slice(i + 1).some((t) => t.action === "click" || t.action === "press"));
         }
     }
 }

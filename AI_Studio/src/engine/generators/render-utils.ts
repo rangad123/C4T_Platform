@@ -1,4 +1,4 @@
-import { isLocatorRef, type Locator, type PlainLocator, type TestSpec } from "../spec/schema.js";
+import { isLocatorRef, repeatOf, type Locator, type PlainLocator, type TestSpec } from "../spec/schema.js";
 import { DATA_SET_KEY, dataSetNameOf, resolveRows, type DataSet } from "../testdata/dataset.js";
 import { frameSelector } from "../web/pages.js";
 import type { FieldClue } from "../web/label-fallback.js";
@@ -37,6 +37,9 @@ export function expr(value: string, inDataInitializer = false): string {
 
 function varExpr(name: string, inDataInitializer: boolean): string {
     if (name === "unique") return "unique";
+    // {{repeat.a.2001}}: a long input value written short (spec/schema.ts repeatOf); the character is a letter or digit, the count a number.
+    const repeat = repeatOf(name);
+    if (repeat) return `${lit(repeat.char)}.repeat(${repeat.count})`;
     if (name === "credentials.username") return '(process.env.TEST_USERNAME ?? "")';
     if (name === "credentials.password") return '(process.env.TEST_PASSWORD ?? "")';
     // A one-time code is computed when the step runs (never embedded): totpCode() is the helper the generator adds to the script.
