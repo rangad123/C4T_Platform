@@ -1,11 +1,12 @@
 import { ChevronRight } from "lucide-react";
 import { useMemo } from "react";
+import { artifactUrl } from "../../api";
 import { Badge, Callout } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { CAPTURE_WORD, CONFIDENCE_WORD, confidenceMeaning, findingOrder, NOT_SETTLED, replayText, sourceText, type FindingRecord, type FindingsAnswer } from "./findings";
+import { CAPTURE_WORD, CONFIDENCE_WORD, confidenceMeaning, findingOrder, NOT_SETTLED, replayText, shotAlt, sourceText, type FindingRecord, type FindingsAnswer } from "./findings";
 import { kindWord, operatorWord } from "./objectives";
 import "./findings.css";
 
@@ -57,12 +58,29 @@ function Finding({ rec, n }: { rec: FindingRecord; n: number }) {
             <details className="disclosure">
                 <summary>
                     <ChevronRight size={16} className="chev" aria-hidden />
-                    Evidence ({plural(ev.requests.length, "request")}, {plural(ev.console.length, "console line")})
+                    Evidence ({plural(ev.screenshots.length, "screenshot")}, {plural(ev.requests.length, "request")}, {plural(ev.console.length, "console line")})
                 </summary>
                 <div className="stack-sm fnd-evidence" data-testid="finding-evidence">
-                    <p className="t-secondary" data-testid="finding-screenshots">
-                        {ev.screenshots.length ? `${plural(ev.screenshots.length, "screenshot")} recorded; they are not shown here yet.` : "Screenshots are not saved with findings yet."}
-                    </p>
+                    {ev.screenshots.length ? (
+                        <>
+                            <h4 className="t-meta fnd-sub">Screenshots</h4>
+                            <ul className="fnd-shots" data-testid="finding-screenshots">
+                                {ev.screenshots.map((id, i) => (
+                                    <li key={id}>
+                                        <a href={artifactUrl(id)} target="_blank" rel="noreferrer">
+                                            <img className="fnd-thumb" src={artifactUrl(id)} alt={shotAlt(i, ev.screenshots.length)} loading="lazy" />
+                                            <span className="t-meta">Open larger</span>
+                                        </a>
+                                    </li>
+                                ))}
+                            </ul>
+                            <p className="t-meta">Password fields and stored secrets are covered in these pictures.</p>
+                        </>
+                    ) : (
+                        <p className="t-secondary" data-testid="finding-screenshots">
+                            No screenshot was saved for this finding.
+                        </p>
+                    )}
                     {ev.requests.length > 0 && (
                         <>
                             <h4 className="t-meta fnd-sub">Requests</h4>

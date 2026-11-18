@@ -16,3 +16,7 @@
 .fnd-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .fnd-foot a { display: inline-flex; align-items: center; gap: 2px; }
 .fnd-model { font-family: var(--font-mono); }
+.fnd-shots { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 12px; }
+.fnd-shots a { display: grid; gap: 4px; justify-items: start; }
+.fnd-thumb { display: block; width: 160px; max-width: 100%; height: auto; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-muted); }
+@media (max-width: 640px) { .fnd-thumb { width: 120px; } }

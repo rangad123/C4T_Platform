@@ -1011,7 +1011,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             "vision-shot": "image/jpeg",
             trace: "application/zip",
         };
-        // A page thumbnail an exploration kept (engine/discovery/thumbnails.ts) is a screenshot stored as a JPEG.
+        // A page thumbnail an exploration kept (engine/discovery/thumbnails.ts) and a candidate finding's screenshot (repo-sink.ts saveImageArtifact, row 173) are screenshots stored as JPEGs; older screenshots are PNGs.
         const type = a.kind === "screenshot" && /\.jpe?g$/i.test(String(a.path)) ? "image/jpeg" : (TYPES[a.kind as string] ?? "application/octet-stream");
         // An object store with short-lived links (S3, M4) sends the browser there, recorded in Activity; local disk has none and is served as always.
         const signed = await p.store.signedUrl(a.path as string, { ttlSeconds: 300, contentType: type, ...(a.kind === "trace" ? { filename: path.posix.basename(a.path as string) } : {}) });
