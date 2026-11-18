@@ -98,9 +98,10 @@ export const Capabilities = z.object({
      * Round 52 (additive, optional): the other job kinds this agent runs as an explore task, beside an exploration: "plain" (a test described in
      * words) and "agent" (an AI agent run); "mobile" (an exploration of a phone app on this computer's phone) and "assessment" (a security
      * assessment, its checks sent from this computer). The platform offers such a task only to an agent that lists the mode; an older one is
-     * told to update.
+     * told to update. Phase 3 (P3-21): "objectives" is not a job kind: this agent's exploration can explore by objectives
+     * (GenerationRequest.objectives); an older one explores as before and the job says why in one sentence.
      */
-    exploreModes: z.array(z.enum(["plain", "agent", "mobile", "assessment"])).max(8).optional(),
+    exploreModes: z.array(z.enum(["plain", "agent", "mobile", "assessment", "objectives"])).max(8).optional(),
     /** Additive, optional: while someone watches, an exploration on this agent sends pictures of its browser (explore-frame.ts). An older agent sends none. */
     explorerFrames: z.boolean().optional(),
     /**
