@@ -20,7 +20,8 @@ const planned = (expectedResults: string[]): Scenario => ScenarioSchema.parse({ 
 const objectiveScenario = (): Scenario => {
     const budget = { steps: 30, minutes: 10, tokens: 300_000 };
     const o = objectivesFrom({}, [{ ...RULE, ref: "R-7" } as never], [], { maxObjectives: 10, budget }).objectives[0]!;
-    const r = scenarioFor(o, "as_stated");
+    // "As stated" submits forms, so it is built only where data changes are allowed (owner, 2026-11-21).
+    const r = scenarioFor(o, "as_stated", { dataOperators: true });
     if (r.status !== "ready") throw new Error("objective scenario not ready");
     return r.scenario;
 };

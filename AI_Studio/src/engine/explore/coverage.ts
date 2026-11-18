@@ -201,8 +201,16 @@ export function coverageOf(input: CoverageInput): CoverageRecord {
         .sort((a, b) => b.priority - a.priority || byText(a.id, b.id))
         .map((o): UnexploredItem => {
             const last = input.outcomes.filter((x) => splitKey(x.objectiveId).id === o.id).sort(mostTelling)[0];
+            // Nothing of it was pursued because its operators were skipped (for example "data changes off"): that reason, not "not reached".
+            const skipped = input.skipped?.find((x) => x.objectiveId === o.id);
             const status =
-                o.kind === "coverage-gap" ? "coverage gap: no source states what should happen, so nothing was run" : last ? `${NOT_RUN.has(last.status) ? "not run" : "not finished"}: ${last.reason}` : "not run: not reached in this session";
+                o.kind === "coverage-gap"
+                    ? "coverage gap: no source states what should happen, so nothing was run"
+                    : last
+                      ? `${NOT_RUN.has(last.status) ? "not run" : "not finished"}: ${last.reason}`
+                      : skipped
+                        ? `not run: ${skipped.reason.replace(/^not run: /, "")}`
+                        : "not run: not reached in this session";
             return { objectiveId: o.id, kind: o.kind, source: clip(o.source.ref), priority: o.priority, reason: o.reason, status: clip(status) };
         });
 

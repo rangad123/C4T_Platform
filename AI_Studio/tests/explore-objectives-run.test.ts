@@ -241,7 +241,8 @@ describe("exploring the seeded shop by objectives", () => {
         expect(ex.coverage.inputClasses).toMatchObject({ exercised: 1, notExercised: ["page-order/order/qty boundary_input"] });
         expect(ex.coverage.pages.notExercised).not.toContain("/cart");
         expect(ex.coverage.pages.notExercised).not.toContain("/order");
-        expect(ex.coverage.notRun).toEqual([]);
+        // Nothing is "data changes off"; the only operator not run is the boundary value whose test writer stopped.
+        expect(ex.coverage.notRun).toEqual([{ objectiveId: field, operator: "boundary_input", reason: "not finished: The test writer stopped before finishing the test" }]);
         expect(ex.coverage.unexplored).toEqual([]);
         // The rule as stated (its pursuit and the saved check citing its ref are one scenario) and the quantity's invalid input.
         expect(ex.coverage.uniqueScenarios).toBe(2);
