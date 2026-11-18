@@ -120,7 +120,9 @@ describe("an empty plan after a failed planning call", () => {
 
     it("one planning call fails and the other plans nothing: the job fails the same way, naming the failed call", async () => {
         planning = "first fails";
-        const doc = "# Shop\n\n- The products page lists every product.\n";
+        // A requirement about no page of the site: no area call shows it (planner.ts retrieves the ones about an area's pages), so the
+        // catch-all requirements pass plans it, the second planning call.
+        const doc = "# Billing\n\n- Refunds reach the customer's bank within five working days.\n";
         const r = await explore("One planning call fails", ["test-generation", "ux"], { requirements: { filename: "requirements.md", contentBase64: Buffer.from(doc).toString("base64") } });
         expect(planningCalls).toBeGreaterThan(1);
         expect(r.job.status).toBe("FAILED");
