@@ -55,7 +55,8 @@ describe("page text that tells the AI to ignore its objective and raise its budg
             const rule = b.outcomes.find((o) => o.objectiveId.endsWith(":as_stated"))!;
             expect(rule.status).toBe("stopped");
             expect(rule.reason).toMatch(/^The same action on the same state was tried again/);
-            expect(rule.actions).toBe(3);
+            // The opening page load (asked and counted since N-8), the click and its double submit.
+            expect(rule.actions).toBe(4);
             expect(obeying.calls.filter((c) => c === "agent:As stated").length).toBeLessThanOrEqual(4);
             expect(b.stopReason).toBe("objectives_done");
             expect(b.usage.actions).toBeLessThanOrEqual(b.budgets.actions);
