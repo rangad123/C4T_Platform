@@ -9,7 +9,7 @@
  */
 import { captchaFinding } from "../auth/captcha-run.js";
 import type { Browser } from "playwright";
-import { mapLimit, type EngineContext } from "../context.js";
+import { mapLanes, type EngineContext } from "../context.js";
 import { LlmNotConfiguredError } from "../llm/provider.js";
 import { isBudgetExceeded } from "../llm/usage.js";
 import { deleteOperationsOfSpec, mergeOperations } from "../cleanup/helper.js";
@@ -141,6 +141,42 @@ export interface ValidationDeps {
     cleanup?: { enabled: boolean; /** Outbound guard for every DELETE (the platform passes assertAllowedTarget). */ guard?: (url: string) => Promise<void>; fetch?: typeof fetch; /** Set by validateBatch. */ collect?: (testId: string, run: ScriptRun) => void };
     /** Shared helper modules the hand-written tests of this batch import (./helpers/<name>). */
     helpers?: Array<{ name: string; content: string }>;
+    /**
+     * Tests that sign in as the same account share its state on the server (cart, discount, profile), so they run one at a time, first
+     * runs, re-runs and repairs alike (testAccountLane); signed-out tests and other accounts' tests run beside them, up to `workers`.
+     * Unset: every test may run at once, as before.
+     */
+    accountLanes?: boolean;
+}
+
+/** Placeholders and script variables that sign in: {{credentials.username}} / TEST_USERNAME (the project's account), {{credentials.bob.password}} / TEST_BOB_PASSWORD (a named one). */
+const MAIN_SIGN_IN = /\{\{\s*credentials\.(?:username|password|totp)\s*\}\}|process\.env\.TEST_(?:USERNAME|PASSWORD|TOTP_SECRET)\b/;
+const ROLE_SIGN_IN = /\{\{\s*credentials\.([a-z][a-z0-9_-]*)\.(?:username|password|totp)\s*\}\}|process\.env\.TEST_(?!ENV_)([A-Z][A-Z0-9_]*?)_(?:USERNAME|PASSWORD|TOTP_SECRET)\b/;
+
+/** The account a test signs in as, as a lane key: "main", "role:<name>", or undefined for a test that never signs in. */
+export function testAccountLane(t: Pick<TestUnderValidation, "spec" | "custom">): string | undefined {
+    const text = t.custom ? t.custom.content : JSON.stringify(t.spec.steps);
+    const role = ROLE_SIGN_IN.exec(text);
+    if (role) return `role:${(role[1] ?? role[2]!).toLowerCase().replace(/-/g, "_")}`;
+    return MAIN_SIGN_IN.test(text) ? "main" : undefined;
+}
+
+/**
+ * The first runs of a laned batch, in rounds: each round holds at most one test of each account (in order) and is filled with
+ * signed-out tests up to `width`; the signed-out tests left over join the last round. Indexes into the batch.
+ */
+export function laneRounds(lanes: ReadonlyArray<string | undefined>, width: number): number[][] {
+    const byLane = new Map<string, number[]>();
+    const free: number[] = [];
+    lanes.forEach((lane, i) => (lane === undefined ? free.push(i) : byLane.set(lane, [...(byLane.get(lane) ?? []), i])));
+    const rounds: number[][] = [];
+    for (let r = 0; [...byLane.values()].some((l) => r < l.length); r++) {
+        const round = [...byLane.values()].flatMap((l) => (r < l.length ? [l[r]!] : []));
+        while (round.length < width && free.length) round.push(free.shift()!);
+        rounds.push(round);
+    }
+    if (free.length) rounds.length ? rounds[rounds.length - 1]!.push(...free) : rounds.push(free);
+    return rounds;
 }
 
 /**
@@ -187,12 +223,19 @@ export async function validateBatch(
     if (collector && deps.cleanup) deps = { ...deps, cleanup: { ...deps.cleanup, collect: (testId, run) => { const t = current.find((c) => c.spec.testId === testId); if (t) collector.addRun(t.spec, run); } } };
 
     ctx.emit({ stage: "validation", kind: "validation_started", message: `Executing ${tests.length} generated scripts` });
-    const firstRuns = await execute(
-        ctx,
-        deps,
-        scripts.map((s, i) => input(current[i]!, s)),
-        deps.workers,
-    );
+    const inputs = scripts.map((s, i) => input(current[i]!, s));
+    const lanes = current.map((t) => (deps.accountLanes ? testAccountLane(t) : undefined));
+    const shared = lanes.filter((l) => l !== undefined && lanes.indexOf(l) !== lanes.lastIndexOf(l)).length;
+    let firstRuns: ScriptRun[];
+    if (!shared) firstRuns = await execute(ctx, deps, inputs, deps.workers);
+    else {
+        ctx.emit({ stage: "validation", kind: "account_lanes", message: `${shared} tests that sign in as the same account run one at a time` });
+        firstRuns = new Array(inputs.length);
+        for (const round of laneRounds(lanes, Math.max(1, deps.workers))) {
+            const runs = await execute(ctx, deps, round.map((i) => inputs[i]!), deps.workers);
+            round.forEach((i, k) => (firstRuns[i] = runs[k]!));
+        }
+    }
 
     /** Another run of one script. Undefined when the job was cancelled before it gave a result (the run before it then stands). */
     const runAgain = async (t: TestUnderValidation, script: { filename: string; content: string }): Promise<ScriptRun | undefined> => {
@@ -207,7 +250,7 @@ export async function validateBatch(
         return { status: "NOT_RUN", spec: t.spec, script, attempts: 0, lastRun: run };
     };
 
-    const results = await mapLimit(current, Math.max(1, deps.workers), async (t, i) => {
+    const results = await mapLanes(current, Math.max(1, deps.workers), (_t, i) => lanes[i], async (t, i) => {
         // No abort check here: a run that already happened must be recorded truthfully (a test that
         // passed stays VALIDATED even if the job is being cancelled). Cancellation only stops repairs.
         let script = scripts[i]!;

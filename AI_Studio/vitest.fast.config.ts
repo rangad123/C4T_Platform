@@ -11,6 +11,7 @@ export default defineConfig({
             "tests/levels-unit.test.ts",
             "tests/stated-source-unit.test.ts",
             "tests/leftovers-unit.test.ts",
+            "tests/account-lanes-unit.test.ts",
             "tests/app-intel-store.test.ts",
             "tests/test-quality-unit.test.ts",
             "tests/remote-frames-unit.test.ts",
