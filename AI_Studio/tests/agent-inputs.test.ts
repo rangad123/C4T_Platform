@@ -453,6 +453,34 @@ describe("saved inputs stay where they were saved, and go only where they may", 
         expect(view).toMatchObject({ openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: true, signIn: { username: null, hasPassword: false, hasTotpSecret: false }, apiAccess: { hasToken: false, oauth2: null } });
     });
 
+    it("a restored project keeps \"Keep page thumbnails\" off; one left on stays on", async () => {
+        const off = await agentProject("Thumbs off shop");
+        expect((await as("t-cora", "PUT", `/api/projects/${off}/agent-inputs`, { keepThumbnails: false })).status).toBe(200);
+        const back = await restoreBackup(platform, (await buildBackup(platform, off, { evidence: false, maxEvidenceMB: 0 })).bytes, { name: "Thumbs off restored" });
+        expect((await asKey("GET", `/api/projects/${back.project.id}/agent-inputs`)).body.keepThumbnails).toBe(false);
+        const on = await agentProject("Thumbs on shop");
+        const backOn = await restoreBackup(platform, (await buildBackup(platform, on, { evidence: false, maxEvidenceMB: 0 })).bytes, { name: "Thumbs on restored" });
+        expect((await asKey("GET", `/api/projects/${backOn.project.id}/agent-inputs`)).body.keepThumbnails).toBe(true);
+    });
+
+    it("a restored project keeps its AI model where the platform has one per project (sheet #4), and a platform without it still restores", async () => {
+        const id = await agentProject("Model shop");
+        // Before sheet #4's columns: nothing about a model is written, and the restore works.
+        if (!("ai_provider" in (platform.repo.getProject(id) ?? {}))) {
+            const before = await restoreBackup(platform, (await buildBackup(platform, id, { evidence: false, maxEvidenceMB: 0 })).bytes, { name: "Model shop before" });
+            expect(before.project.id).toBeTruthy();
+            // Sheet #4's slot 66, as that branch adds it.
+            platform.db.raw.exec("ALTER TABLE projects ADD COLUMN ai_provider TEXT; ALTER TABLE projects ADD COLUMN ai_model TEXT;");
+        }
+        platform.db.run("UPDATE projects SET ai_provider = ?, ai_model = ? WHERE id = ?", "anthropic", "MiniMax-M3.1-Flash", id);
+        const back = await restoreBackup(platform, (await buildBackup(platform, id, { evidence: false, maxEvidenceMB: 0 })).bytes, { name: "Model shop restored" });
+        expect(platform.db.get("SELECT ai_provider, ai_model FROM projects WHERE id = ?", back.project.id)).toEqual({ ai_provider: "anthropic", ai_model: "MiniMax-M3.1-Flash" });
+        // A project with none chosen comes back with none.
+        const plain = await agentProject("No model shop");
+        const backPlain = await restoreBackup(platform, (await buildBackup(platform, plain, { evidence: false, maxEvidenceMB: 0 })).bytes, { name: "No model restored" });
+        expect(platform.db.get("SELECT ai_provider, ai_model FROM projects WHERE id = ?", backPlain.project.id)).toEqual({ ai_provider: null, ai_model: null });
+    });
+
     it("no secret of this block appears in any answer either", () => {
         for (const v of [...Object.values(S), ...Object.values(T)]) expect(answers.join("\n")).not.toContain(v);
     });

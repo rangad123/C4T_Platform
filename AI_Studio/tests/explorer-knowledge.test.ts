@@ -143,6 +143,8 @@ beforeAll(async () => {
     const usage = new UsageStore(platform.db);
     usage.addUsage({ jobId: jobA, projectId: PA, purpose: "planning", model: "claude-haiku-4-5", at: new Date(), calls: 2, failedCalls: 0, inputTokens: 8000, outputTokens: 900, images: 0, estimatedCalls: 0, cacheReadTokens: 6000, cacheWriteTokens: 1500 });
     usage.addUsage({ jobId: jobA, projectId: PA, purpose: "analysis", model: "claude-haiku-4-5", at: new Date(), calls: 1, failedCalls: 0, inputTokens: 2000, outputTokens: 300, images: 0, estimatedCalls: 0 });
+    // Two answers the response cache served: no AI call, and the tokens they would have used.
+    usage.addUsage({ jobId: jobA, projectId: PA, purpose: "requirements", model: "claude-haiku-4-5", at: new Date(), calls: 0, failedCalls: 0, inputTokens: 0, outputTokens: 0, images: 0, estimatedCalls: 0, cachedCalls: 2, savedInputTokens: 4200, savedOutputTokens: 700 });
 }, 60_000);
 
 afterAll(async () => {
@@ -187,11 +189,11 @@ describe("what the explorer knows, from a recorded exploration", () => {
 
     it("shows the cache figures to a person who may see AI usage, and leaves them out for one who may not", async () => {
         const seen = (await knowledge("t-usage")).body;
-        expect(seen.cacheSavings).toEqual({ aiCalls: 3, inputTokens: 10_000, cacheReadTokens: 6000, cacheWriteTokens: 1500, cacheReadPercent: 60, aiCallsSaved: 0 });
+        expect(seen.cacheSavings).toEqual({ aiCalls: 3, inputTokens: 10_000, cacheReadTokens: 6000, cacheWriteTokens: 1500, cacheReadPercent: 60, aiCallsSaved: 2, savedInputTokens: 4200, savedOutputTokens: 700 });
         const viewer = await knowledge("t-viewer");
         expect(viewer.status).toBe(200);
         expect(viewer.body).not.toHaveProperty("cacheSavings");
-        expect(JSON.stringify(viewer.body)).not.toMatch(/cacheRead|cacheWrite|inputTokens|aiCalls|6000|10000/);
+        expect(JSON.stringify(viewer.body)).not.toMatch(/cacheRead|cacheWrite|inputTokens|aiCalls|saved|6000|10000|4200/);
         // The rest is the same for both.
         expect(viewer.body.siteMap).toEqual(seen.siteMap);
         expect(viewer.body.reused).toEqual(seen.reused);

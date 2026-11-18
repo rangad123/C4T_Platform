@@ -13,7 +13,7 @@ import type { RouteCtx } from "./types.js";
  *       reused: { pages: [{ path, since }], spotChecked, expired, changed, reprobed, signIn, pagesFromMemory, understanding, requirements, memory },
  *       reuseOff: [{ reason, message }],
  *       thumbnails: { keep, count },
- *       cacheSavings?: { aiCalls, inputTokens, cacheReadTokens, cacheWriteTokens, cacheReadPercent, aiCallsSaved }
+ *       cacheSavings?: { aiCalls, inputTokens, cacheReadTokens, cacheWriteTokens, cacheReadPercent, aiCallsSaved, savedInputTokens, savedOutputTokens }
  *   }
  *
  * Built only from what the job recorded: its events (crawler.ts probes_reused / page_visited / reuse_off / reuse_reprobed / pages_from_memory,
@@ -159,7 +159,10 @@ export function registerKnowledgeRoutes(ctx: RouteCtx): void {
         const answer: Record<string, unknown> = { siteMap: { pages, from }, reused, reuseOff, thumbnails: { keep, count: pages.filter((pg) => pg.thumbnail).length } };
 
         if (!hidesCost(actorOf(req))) {
-            const u = repo.db.get<{ calls: number | null; i: number | null; cr: number | null; cw: number | null }>("SELECT SUM(calls) AS calls, SUM(input_tokens) AS i, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw FROM ai_usage WHERE job_id = ?", jobId);
+            const u = repo.db.get<{ calls: number | null; i: number | null; cr: number | null; cw: number | null; cc: number | null; si: number | null; so: number | null }>(
+                "SELECT SUM(calls) AS calls, SUM(input_tokens) AS i, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw, SUM(cached_calls) AS cc, SUM(saved_input_tokens) AS si, SUM(saved_output_tokens) AS so FROM ai_usage WHERE job_id = ?",
+                jobId,
+            );
             const input = Number(u?.i ?? 0);
             const cr = Number(u?.cr ?? 0);
             answer.cacheSavings = {
@@ -169,8 +172,11 @@ export function registerKnowledgeRoutes(ctx: RouteCtx): void {
                 cacheWriteTokens: Number(u?.cw ?? 0),
                 // Cached reads are part of the input tokens (engine/llm/usage.ts).
                 cacheReadPercent: input > 0 ? Math.round((Math.min(cr, input) / input) * 100) : 0,
-                // Answers served from the response cache, with no AI call (none until that cache exists).
-                aiCallsSaved: of("response_cache_hit").length,
+                // Answers served from the response cache, with no AI call, and the tokens those calls would have used
+                // (metered by llm-response-cache.ts as cached_calls, never as calls).
+                aiCallsSaved: Number(u?.cc ?? 0),
+                savedInputTokens: Number(u?.si ?? 0),
+                savedOutputTokens: Number(u?.so ?? 0),
             };
         }
         return answer;

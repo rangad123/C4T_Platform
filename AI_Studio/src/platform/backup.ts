@@ -259,6 +259,10 @@ export async function buildBackup(p: Platform, projectId: string, opts: BackupOp
         application,
         retention: saved ? { keepDays: saved.keepDays, keepFailedDays: saved.keepFailedDays, keepLatestRuns: saved.keepLatestRuns, maxArtifactMB: saved.maxArtifactMB ?? null } : null,
         ...(({ platforms, testingModes }) => ({ platforms, testingModes }))(projectSetupOf(project)),
+        // Per-project switches (sheet #8): only a saved "off" is written, so a backup of a project on the default stays as it was.
+        ...(new AgentInputsStore(db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).keepThumbnails(projectId) ? {} : { keepThumbnails: false }),
+        // The project's AI model (sheet #4), on a platform that has those columns and when one is chosen.
+        ...(typeof project.ai_provider === "string" && project.ai_provider && typeof project.ai_model === "string" && project.ai_model ? { aiModel: { provider: project.ai_provider, model: project.ai_model } } : {}),
     };
 
     // ── optional files ──
@@ -596,8 +600,11 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
             // What the agents need (agent-inputs-store.ts): the OpenAPI address and the data-changing choice come back with the application;
             // the sign-in and API access are never in a backup and are typed again (the restore says so).
             const c = projectDoc.application.config as { openApiUrl?: unknown; allowMutatingApiTests?: unknown };
-            new AgentInputsStore(db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).save(pid, { site: projectDoc.application.url, ...(typeof c.openApiUrl === "string" && c.openApiUrl ? { openApiUrl: c.openApiUrl } : {}), ...(typeof c.allowMutatingApiTests === "boolean" ? { allowMutatingApiTests: c.allowMutatingApiTests } : {}) });
+            new AgentInputsStore(db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).save(pid, { site: projectDoc.application.url, ...(typeof c.openApiUrl === "string" && c.openApiUrl ? { openApiUrl: c.openApiUrl } : {}), ...(typeof c.allowMutatingApiTests === "boolean" ? { allowMutatingApiTests: c.allowMutatingApiTests } : {}), ...(projectDoc.keepThumbnails === false ? { keepThumbnails: false } : {}) });
         }
+        // The project's AI model, only where this platform has the columns (sheet #4); whether a person may use it is still decided
+        // when they use it (ai-config.ts), so restoring a name gives no one a model they could not use.
+        if (projectDoc.aiModel && "ai_provider" in (repo.getProject(pid) ?? {})) db.run("UPDATE projects SET ai_provider = ?, ai_model = ? WHERE id = ?", projectDoc.aiModel.provider, projectDoc.aiModel.model, pid);
 
         // Shared elements first: the restored tests refer to them by name.
         const locatorStore = new LocatorStore(db);

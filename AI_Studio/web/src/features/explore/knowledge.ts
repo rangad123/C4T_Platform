@@ -33,7 +33,7 @@ export interface Knowledge {
     reuseOff: Array<{ reason: string; message: string }>;
     thumbnails: { keep: boolean; count: number };
     /** Left out by the platform for people who may not see AI usage and cost. */
-    cacheSavings?: { aiCalls: number; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheReadPercent: number; aiCallsSaved: number };
+    cacheSavings?: { aiCalls: number; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheReadPercent: number; aiCallsSaved: number; savedInputTokens?: number; savedOutputTokens?: number };
 }
 
 export interface SiteNode {

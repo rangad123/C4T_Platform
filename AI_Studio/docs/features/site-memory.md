@@ -69,17 +69,62 @@ run, as page text already is; the memory section tells the model the crawl is th
 
 ## How the notes are used (and not used)
 
-1. The crawl runs **in full**, exactly as without memory. Memory never filters, limits or reorders discovery.
+1. The crawl visits every page it would visit without memory, and the scope, the page limit and the safety refusals still apply. With
+   exploration reuse on (below), it **starts from the pages the last exploration found** instead of only the start page, so deep pages are
+   reached without walking the menus again. Memory never removes a page from the crawl.
 2. After the crawl the platform compares it with the notes (pages and endpoints) and adds a bounded **"Previously known about this
    application"** section (about 5,000 characters at most) to the **understanding** and **planning** prompts: type and purpose, known pages,
    journeys (with the tests that validated), endpoints, and what the new crawl shows compared with that. The section ends with rules: use
    it to keep names stable and focus on what is new; do not describe or plan anything the crawl data does not show; a page missing from
    the crawl is reported as missing.
-3. **Exploration reuse** (on by default, see [repair-and-reuse-without-ai.md](repair-and-reuse-without-ai.md)): a crawled page whose two
-   fingerprints match the notes is given to the understanding step as one line with its remembered purpose instead of its snapshot. The
-   crawl is unchanged; "Send every page to the AI again" (`fullExploration`) or the switch in Settings turns it off.
+3. **Exploration reuse** (on by default, see [repair-and-reuse-without-ai.md](repair-and-reuse-without-ai.md) and the next section): a
+   crawled page whose two fingerprints match the notes, and whose purpose was written by the same AI model, is given to the understanding
+   step as one line with its remembered purpose instead of its snapshot.
 4. After validation the platform distils the new notes, compares them with the old and stores both (the notes and the change summary).
    Notes are only saved when the understanding step succeeded and the job ran to the end (a cancelled or crashed job leaves the old notes).
+
+## Reusing an earlier exploration
+
+A repeat exploration of the same application spends its time and AI on what is new or changed. The rule behind every part of it:
+**earlier results may skip discovery work, never a check.** Tests, oracle and vision verdicts, validations and repairs always run in
+full; nothing is shown as tested in this run unless it ran in this run.
+
+What is reused, from the project's own latest application model (same origin only, never another project's):
+
+* **Known pages as starting points.** The crawl starts from the pages found last time, at the depth they were found. Sign-in and sign-up
+  pages are left to the sign-in and the signed-out pass. A known page that is gone now is left out unless a page links to it
+  (`pages_from_memory` says how many were used and how many are gone).
+* **Probe results of unchanged pages.** A page with the same address, structural fingerprint and understanding fingerprint, read from the
+  page as it loads now, takes its menus, tabs and dialogs, revealed links, requests, conditional fields and validation messages from last
+  time. Its probes (opening menus, trying drop-downs, typing invalid values) are skipped, and it is marked `reusedFrom: { jobId, at }`.
+  The endpoints those probes found come with it. Event: `probes_reused` ("reused: N pages unchanged since <date>").
+* **The sign-in page.** The exploration goes straight to the remembered sign-in path. The form is still filled and the result still
+  checked. No form there falls back to the usual search; a failed sign-in there is tried again only on another page the search finds
+  (`signin_reused`). Sessions and cookies are never stored here (only in the encrypted hard sign-in store).
+* **The AI's reading of unchanged pages** (the one-line form above). Site memory version 2 records which AI model understood each page:
+  another model reads the page again. Version 1 records are read as version 2 pages that name no model, so they are read again once.
+
+Its limits, because the fingerprints do not see behaviour (a changed validation message behind the same field):
+
+* Probe results older than **30 days**, or reused **5 runs in a row**, are found again (`reuse_reprobed`).
+* **Spot check**: one reusable page in five (20%, and the first one always) is probed anyway and compared. Any difference turns reuse off
+  for the rest of the run, and the pages reused before it are probed again (`reuse_off` with the page and the reason).
+* When **more than half** of the known pages changed (likely a new release), reuse is off for the whole run, the same way.
+* A page that changed is probed as on a first exploration; the change summary still reports it.
+
+Turning it off: **Explore everything again** for one exploration (`fullExploration`), `useMemory: false`, or the exploration reuse switch
+in Settings for every exploration. **Forget what we learned** clears the notes, so the next exploration starts from scratch. Each run's
+**What the explorer knows** view ([explorer-knowledge.md](explorer-knowledge.md)) lists what was reused and why reuse went off.
+
+## Plan-only explorations and Runs
+
+* **Plan-only explorations save the notes too.** An exploration that only plans (no tests run) saves the pages, journeys and endpoints
+  like any other. A test that was written and not run leaves its journey's validated tests as they were: writing a test is not evidence
+  that the journey works.
+* **A person's Run updates which journeys have passing tests.** When saved tests that belong to a planned journey run, a test that passed
+  is added to its journey's validated tests and one that failed is taken off (`noteRunInMemory`, memory-store.ts). Tests that did not run
+  change nothing. Pages, endpoints and the change summary stay as the last exploration left them, and a Run never creates notes for an
+  application that has none. This keeps the "journeys with a passing test" signal now that explorations write tests without running them.
 
 ## Controls and API
 
@@ -97,8 +142,8 @@ run, as page text already is; the memory section tells the model the crawl is th
 * **Per project.** Every read and write is scoped by project id; one project's notes never reach another's prompts or answers. Notes are
   deleted with their project. A project keeps notes for up to 5 application addresses (the oldest are dropped).
 * **Survives restarts** (SQLite, migration slot 10, table `site_memory`).
-* **Versioned.** A record saved by a different version of the platform is ignored (and left in place), with a warning event; the analysis
-  carries on and saves fresh notes.
+* **Versioned** (version 2 since sheet #8; version 1 records are still read). A record saved by another version of the platform is ignored
+  (and left in place), with a warning event; the analysis carries on and saves fresh notes.
 * **Damaged or oversized records** are deleted with a warning event ("...was damaged or too large, so it was discarded"); the job is
   never failed by memory. Any error while saving is a warning event too.
 * **Web analyses only.** API-only jobs, re-validation jobs and browser-compatibility jobs neither read nor change the notes. The CLI has
@@ -111,12 +156,16 @@ run, as page text already is; the memory section tells the model the crawl is th
 
 ## For developers
 
-* Engine: `src/engine/memory/` — `types.ts` (zod schemas, limits), `distill.ts` (AppModel → record, scrubbing, fingerprints, size cap),
+* Engine: `src/engine/memory/` — `probe-reuse.ts` (known pages, unchanged-page probe reuse, spot check, 30-day and 5-run limits, the
+  more-than-half rule), `types.ts` (zod schemas, limits), `distill.ts` (AppModel → record, scrubbing, fingerprints, size cap),
   `diff.ts` (change summary), `context.ts` (bounded prompt section), `session.ts` (one run's use of memory; the orchestrator calls
   `openMemory`, `noteCrawl`, `context`, `analysed`, `remember`).
 * Platform: `src/platform/memory-store.ts` (migration, save/load/forget), `src/platform/routes/memory.ts`; `RepoSink` implements the
   optional `loadMemory` / `saveMemory` of `GenerationSink`. `RunnerDeps.makeLlm` lets tests hand the worker a scripted model double.
 * UI: `web/src/features/memory/` (`SiteMemoryCard.tsx`), hooked into `ProjectOverview.tsx` and `NewProject.tsx`.
+* Tests for reuse: `tests/probe-reuse-unit.test.ts` (the rules), `tests/probe-reuse-crawl.test.ts` (a real crawl skipping and redoing
+  probes; fixture `tests/fixtures/reuse-site.ts`), `tests/probe-reuse-pipeline.test.ts` (two explorations through the worker, the
+  sign-in path, Runs updating journeys).
 * Tests: `tests/memory.test.ts` (distillation, fingerprints, change-summary table, size, versions, corruption, isolation, API, session),
   `tests/memory-pipeline.test.ts` (real jobs through the worker on a site that changes between two analyses, with a scripted model
   double; fixture `tests/fixtures/memory-site.ts`), `tests/memory-ui.test.ts` (the Overview card journey and the checkbox).

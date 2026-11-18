@@ -94,6 +94,13 @@ export const ProjectDocSchema = z.object({
     /** What the project tests and how (round 26). Absent from older backups: the restore then uses the defaults. */
     platforms: z.array(z.enum(["web", "android", "ios"])).min(1).optional(),
     testingModes: z.array(z.enum(["agent", "code"])).min(1).optional(),
+    /** Sheet #8: the project's "Keep page thumbnails" switch (agent-inputs-store.ts). Absent from older backups: on, the default. */
+    keepThumbnails: z.boolean().optional(),
+    /**
+     * Sheet #4: the project's AI model, a provider and a model name (never a key). Only written by a platform that has
+     * projects.ai_provider/ai_model, and only restored by one; absent: each person's default.
+     */
+    aiModel: z.object({ provider: z.string().trim().min(1).max(60), model: z.string().trim().min(1).max(200) }).optional(),
 });
 export type ProjectDoc = z.infer<typeof ProjectDocSchema>;
 

@@ -160,6 +160,7 @@ function Reused({ k }: { k: Knowledge }) {
                         <Metric value={s.cacheReadTokens.toLocaleString("en-US")} label="Cache read tokens" />
                         <Metric value={s.cacheWriteTokens.toLocaleString("en-US")} label="Cache write tokens" />
                         <Metric value={s.aiCallsSaved} label="AI calls saved" tip="Answers reused from the response cache, so no AI call was made for them." />
+                        <Metric value={((s.savedInputTokens ?? 0) + (s.savedOutputTokens ?? 0)).toLocaleString("en-US")} label="Tokens saved" tip="The input and output tokens the answers reused from the response cache would have used." />
                     </div>
                 </div>
             )}

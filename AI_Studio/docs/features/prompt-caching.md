@@ -67,3 +67,57 @@ Where the markers go:
 - One-off calls only cache their instructions and, where a series shares it, the start of the prompt; the rest of their input (page content, the app model) differs every call.
 - The 1-hour cache is not used. It costs twice the input price to write (the 5-minute one 1.25 times) and pays off only when the same prefix comes back after more than 5 minutes and within the hour. The platform's repeats are either seconds apart (the calls of one job, the steps of an agent loop) or days apart (the next exploration), so it would add write cost and save nothing; measure the gaps in a real run before turning it on.
 - A one-off call whose instructions never repeat within 5 minutes (for example the single "understand the app" call of a job) pays the 25% write premium on its instructions for nothing; on the sizes the platform uses that is a few hundred tokens.
+
+## The response cache (a stored answer instead of a new AI call)
+
+Prompt caching makes a repeated *opening* cheaper; the call is still made. The **response cache** (sheet #8) goes one step further for a
+few calls that only read something and describe it: when the same project asks exactly the same question again, the answer kept from the
+first time is used and **no AI call is made**. A repeat exploration of an unchanged application asks many such questions again.
+
+**Which calls** (the allow-list, `src/engine/llm/response-cache-calls.ts`; a call opts in with `cacheAs`, and the platform refuses any
+other id):
+
+| Call | Where |
+|---|---|
+| `understanding` | the understanding of the explored pages (`understanding/analyzer.ts`) |
+| `rules` | the business rules read from a source (`intel/extract/rules.ts`) |
+| `docs` | a documentation page read during discovery (`discovery/docs.ts`) |
+| `requirements` | the requirements read from a document (`requirements/parse.ts`) |
+
+**Never cached**, whatever their inputs: test plans and suite proposals (planning), test authoring and every agent tool loop (they are tied
+to the live browser), vision, review and oracle verdicts, repairs, and anything that judges a result. A verdict is never served from the
+cache. On a runner only a structured call without tools and without images can be answered from it.
+
+**The key** is a sha256 over the project, the AI in use (provider, endpoint, model, fast model, and for a key its id and when it last
+changed), the call and its version, the system text, the prompt, the answer's schema and the answer size. Any byte different, or another
+model or key, misses by construction. Rows are read and written by project id: one project never reads another's answer, even for the
+same bytes.
+
+**What is kept**: only a whole answer that passed its schema, never a failed, refused, cut or empty one, and only when the run's secrets and
+the shared redaction patterns find nothing in it. An answer that would need masking is not kept at all, so a stored answer is always
+exactly what the model said. Each answer is kept for **14 days** from when it was made; each project keeps at most **1,000 answers or
+20 MB** (least recently used go first, one answer over 512 KB is not kept). Table `llm_response_cache`, migration 68.
+
+**How it is counted**: the cache sits around the job's model client outside the usage meter (`jobLlm` in `platform/job-runner.ts`), so a
+stored answer is never a model call and never counts against a limit. It adds a row with `cached_calls` and the tokens it saved
+(`ai_usage.cached_calls`, `saved_input_tokens`, `saved_output_tokens`), never `calls`. Each use writes a `response_cache_hit` event. The
+run's **What the explorer knows** view shows "AI calls saved" and "Tokens saved" to people who may see AI usage
+([explorer-knowledge.md](explorer-knowledge.md)); like the other cost fields, they are hidden from everyone else (`auth/cost-hiding.ts`).
+
+**Explorations on a runner** send their calls to the platform (`explore-llm.ts`), which answers them from the same cache
+(`platform/llm-response-cache-runner.ts`). The runner never sees a key or another project's stored answer.
+
+**Turning it off**:
+
+| Where | Effect |
+|---|---|
+| `LLM_RESPONSE_CACHE=false` (`off`, `0`, `no`) in `.env` | off for the whole server |
+| job option `responseCache: false` | off for that run |
+| **Explore everything again** (`fullExploration`) | off for that run, with the other savings |
+| **Forget what we learned** | removes the project's stored answers (with the site memory) |
+| deleting the project | removes them |
+
+Code: `src/platform/llm-response-cache.ts` (store, key, limits, the job wrapper), `src/platform/llm-response-cache-runner.ts` (a runner's
+calls). Tests: `tests/llm-response-cache.test.ts` (a hit with zero provider calls and a meter row; misses for any input, model, version or
+project difference; calls off the allow-list never kept; failed, cut, schema-breaking and secret-holding answers never kept; the off
+switches; Forget; the 14 days; the LRU limits; the runner path) and `tests/llm-response-cache-migration-68.test.ts`.
