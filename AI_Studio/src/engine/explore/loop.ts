@@ -304,8 +304,11 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
             await Promise.race([pursuit, cancelled, wait(remaining, round.signal)]);
             round.abort();
             if (settled !== undefined) break;
-            const s = budgetStop();
-            if (s === "time" || s === "cancelled") {
+            budgetStop();
+            // A cancel or the end of the session's time abandons the pursuit whatever stop was recorded first. Asking the stored reason
+            // instead kept a session an earlier budget had stopped (actions, AI calls, tokens) in this loop after a cancel, racing promises
+            // that had already settled, so the event loop never ran again and the pursuit could never finish (CP2 H-1).
+            if (input.cancel?.aborted || now() - startedAt >= budgets.minutes * 60_000) {
                 abandoned = true;
                 sessionStoppedDuring = true;
                 controller.abort();

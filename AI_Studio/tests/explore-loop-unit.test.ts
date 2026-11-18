@@ -7,6 +7,8 @@
  * run reports; a safe reset runs between objectives; N consecutive environment failures stop the session (instability); and every
  * session ends with exactly one stop reason from the fixed list.
  */
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { runExploration, STOP_REASONS, type Budgets, type LoopObjective, type ObjectiveContext, type ObjectiveRun } from "../src/engine/explore/loop.js";
 import { outlineShape, pathPattern, stateFingerprint } from "../src/engine/explore/state.js";
@@ -525,5 +527,54 @@ describe("runExploration: the live list is told of each pursuit (row 173)", () =
         const quiet = await run([obj("a", 2), obj("b", 1)]);
         const loud = await run([obj("a", 2), obj("b", 1)], { onPursuit: () => { throw new Error("listener broke"); } });
         expect(loud).toEqual(quiet);
+    });
+});
+
+describe("runExploration: a cancel after a budget already stopped the session (CP2 H-1)", () => {
+    const script = fileURLToPath(new URL("./fixtures/loop-cancel-after-stop.ts", import.meta.url));
+    const tsx = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+    // Its own process: a starved event loop would also starve this test's own timeout.
+    for (const kind of ["actions", "ai_calls", "tokens"]) {
+        it(`${kind}: the session still ends, and the event loop keeps running while it waits`, () => {
+            const p = spawnSync(tsx, [script, kind], { encoding: "utf8", timeout: 8_000 });
+            expect(p.stdout.trim(), `the session never ended within 8 s (event loop starved); ${p.error?.message ?? ""} ${p.stderr}`).not.toBe("");
+            const out = JSON.parse(p.stdout.trim().split("\n").pop()!) as { stopReason: string; status: string; ms: number; ticks: number };
+            // The first stop reason stays; the cancelled pursuit is abandoned at once instead of awaited.
+            expect(out.stopReason).toBe(kind);
+            expect(out.status).toBe("interrupted");
+            expect(out.ms).toBeLessThan(2_000);
+        }, 20_000);
+    }
+
+    it("an injected wait that returns at once is not spun on after the cancel", async () => {
+        const fake = world();
+        const cancel = new AbortController();
+        let waits = 0;
+        let finish: (r: ObjectiveRun) => void = () => undefined;
+        const r = await run(
+            [
+                obj("a", 1, {
+                    script: (ctx) => {
+                        ctx.act({ state: "s", action: "a1" });
+                        ctx.act({ state: "s", action: "a2" });
+                        cancel.abort();
+                        return new Promise<ObjectiveRun>((resolve) => (finish = resolve));
+                    },
+                }),
+            ],
+            {
+                budgets: { ...BUDGETS, actions: 1 },
+                cancel: cancel.signal,
+                // A loop that keeps waiting is let out after 50 rounds (the pursuit ends), so the test fails instead of hanging.
+                wait: async () => {
+                    waits += 1;
+                    if (waits >= 50) finish(done());
+                },
+            },
+            fake,
+        );
+        expect(r.stopReason).toBe("actions");
+        expect(r.outcomes[0]).toMatchObject({ status: "interrupted" });
+        expect(waits).toBeLessThanOrEqual(1);
     });
 });
