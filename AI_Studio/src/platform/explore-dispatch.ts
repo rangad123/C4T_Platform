@@ -11,7 +11,7 @@ import { refusalsOf } from "./agent-store.js";
 import { parkForHandover } from "./runner-handover.js";
 import { forgetExploreLlm } from "./explore-llm.js";
 import { dropExplorePresets, exploreRepoSink, forgetExploreSink, presetExploreHandle } from "./explore-sink.js";
-import { EXPLORE_ADAPTER_ID, EXPLORE_NO_SUMMARY, EXPLORE_RUNNER_GONE, exploreModeOfRequest, exploreOffer, requestSecrets, type ExploreMode, type ExploreRequest } from "./explore-task.js";
+import { EXPLORE_ADAPTER_ID, EXPLORE_NO_SUMMARY, EXPLORE_RUNNER_GONE, exploreModeOfRequest, exploreOffer, objectivesProblem, requestSecrets, withoutObjectives, type ExploreMode, type ExploreRequest } from "./explore-task.js";
 import type { JobLlmDeps } from "./job-runner.js";
 import type { JobRow } from "./repo.js";
 
@@ -73,6 +73,13 @@ export async function exploreOnRunner(
         // A plugged-in phone only when the runner's owner allowed it (Settings, Your runner), as for a phone session; else an emulator.
         if (mode === "mobile") request = { ...request, runnerPhone: { realPhone: svc.ownRunner(svc.jobStarter(job.id).ownerId, job.projectId)?.token.allowRealPhone === true } } as unknown as ExploreRequest;
         const secrets = requestSecrets(request as Parameters<typeof requestSecrets>[0], [...(o.secrets ?? []), ...svc.projectSecrets(job.projectId)]);
+        // Phase 3 (P3-21): exploring by objectives only on a runner that says it can; an older one explores as before, and the job says why.
+        const runner = svc.ownRunner(svc.jobStarter(job.id).ownerId, job.projectId)?.agent;
+        const tooOld = mode === "generate" && (request as { objectives?: unknown }).objectives === true && runner ? objectivesProblem(runner) : undefined;
+        if (tooOld) {
+            request = withoutObjectives(request);
+            o.emit({ stage: "orchestration", kind: "objectives_need_runner", level: "warn", message: tooOld });
+        }
         // A visible browser window only when the starter's own runner has "Show the browser while exploring" on (Settings, Your runner).
         const showBrowser = svc.ownRunner(svc.jobStarter(job.id).ownerId, job.projectId)?.token.showBrowser === true;
         let offer: TaskOffer;

@@ -32,6 +32,14 @@ const EnvSchema = z.object({
         .string()
         .default("false")
         .transform((v) => v === "true"),
+    /**
+     * Phase 3, Decision 6: explorations by objectives may try data-changing operators (they still need the run's data-changes setting).
+     * Off unless exactly "true"; read here only (job-runner.ts puts it on the request; the engine reads no environment for it).
+     */
+    EXPLORE_DATA_OPERATORS: z
+        .string()
+        .default("false")
+        .transform((v) => v === "true"),
     /** Run the queue worker inside the API process. Set false to run `npm run worker` separately. */
     WORKER_EMBEDDED: z
         .string()

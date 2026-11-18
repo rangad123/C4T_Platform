@@ -291,7 +291,8 @@ export class CapabilityProbe {
         caps.explore = true;
         // Round 52: and a test described in words, and an AI agent run, as the same kind of task (explore-child.ts runs the matching engine entry).
         // Also a phone app's exploration (on this computer's phone; whether one is attached is `android`) and a security assessment.
-        caps.exploreModes = ["plain", "agent", "mobile", "assessment"];
+        // Phase 3 (P3-21): and its explorations can explore by objectives (the engine's objective stage); not a job kind of its own.
+        caps.exploreModes = ["plain", "agent", "mobile", "assessment", "objectives"];
         caps.explorerFrames = true;
         // Row 208: and carries on from a stopped one (the request's `resume` and `carry`, explore-child.ts), so a Continue makes nothing twice.
         caps.exploreResume = true;

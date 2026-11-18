@@ -24,7 +24,8 @@ import { llmClientFromModel } from "../src/engine/llm/provider.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
-import { EXPLORE_RUNNER_GONE, exploreNeedsUpdate, modeNeedsUpdate } from "../src/platform/explore-task.js";
+import { CapabilityProbe } from "../src/agent/capabilities.js";
+import { EXPLORE_RUNNER_GONE, exploreNeedsUpdate, modeNeedsUpdate, objectivesNeedRunner, objectivesOf } from "../src/platform/explore-task.js";
 import { removeServerExecutionGuard, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, serverRunRefusals } from "../src/platform/runner-only.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -38,7 +39,7 @@ const API_KEY = "explore-runner-admin-key-5e19";
 const PASSWORD = "Explore-Pass word/42&z";
 const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "AGENT_ACCEPT_SECONDS", "BLOCK_PRIVATE_TARGETS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-const caps = (explore = true) => ({ os: "linux", arch: "x64", node: "v24.0.0", browsers: ["chromium"], runnerSwitches: true, ...(explore ? { explore: true } : {}) });
+const caps = (explore = true, modes?: string[]) => ({ os: "linux", arch: "x64", node: "v24.0.0", browsers: ["chromium"], runnerSwitches: true, ...(explore ? { explore: true } : {}), ...(modes ? { exploreModes: modes } : {}) });
 
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
@@ -119,18 +120,18 @@ async function person(name: string) {
     return { ...who, project };
 }
 /** A hand-driven protocol-2 agent for this person's runner. */
-async function rawAgent(ownerId: string, name: string, explore = true) {
+async function rawAgent(ownerId: string, name: string, explore = true, modes?: string[]) {
     const { secret } = personalRunner(platform, { ownerId, label: name });
-    const hello = await agentApi(secret, "POST", "/api/agent/hello", { protocol: 1, protocols: [1, 2], name, version: "51.0.0", concurrency: 1, capabilities: caps(explore) });
+    const hello = await agentApi(secret, "POST", "/api/agent/hello", { protocol: 1, protocols: [1, 2], name, version: "51.0.0", concurrency: 1, capabilities: caps(explore, modes) });
     expect(hello.status).toBe(200);
     expect(hello.body.protocol).toBe(2);
-    return { token: secret, agentId: hello.body.agentId as string, explore };
+    return { token: secret, agentId: hello.body.agentId as string, explore, modes };
 }
-const pollOnce = async (a: { token: string; agentId: string; explore: boolean }) => {
-    const r = await agentApi(a.token, "POST", "/api/agent/poll", { agentId: a.agentId, freeSlots: 1, capabilities: caps(a.explore) });
+const pollOnce = async (a: { token: string; agentId: string; explore: boolean; modes?: string[] }) => {
+    const r = await agentApi(a.token, "POST", "/api/agent/poll", { agentId: a.agentId, freeSlots: 1, capabilities: caps(a.explore, a.modes) });
     return r.status === 200 ? r.body : undefined;
 };
-const poll = async (a: { token: string; agentId: string; explore: boolean }) => {
+const poll = async (a: { token: string; agentId: string; explore: boolean; modes?: string[] }) => {
     for (let i = 0; i < 20; i++) {
         const offer = await pollOnce(a);
         if (offer) return offer;
@@ -257,6 +258,62 @@ describe("an exploration goes to its starter's runner", () => {
         expect(job.status).toBe("FAILED");
         expect(job.error).toContain(exploreNeedsUpdate("Downgraded laptop"));
     }, 60_000);
+
+    // P3-21: exploring by objectives needs a runner that says it can ("objectives" in exploreModes); an older one explores as before.
+    it("explores by objectives on a runner that can, as before with one sentence on an older one; data operators only with the server setting", async () => {
+        const stop = async (p: { token: string }, jobId: string) => {
+            expect((await call("DELETE", `/api/test-generation/${jobId}`, undefined, p.token)).status).toBe(202);
+            await jobDone(jobId);
+        };
+        // An older runner (no "objectives"): the exploration it gets is today's, and the job says why in one sentence.
+        const older = await person("Objectives, older runner");
+        const olderRunner = await rawAgent(older.id, "Older laptop", true, ["plain", "agent", "mobile", "assessment"]);
+        const a = await explore(older);
+        expect(a.status, a.text).toBe(202);
+        const offerA = await poll(olderRunner);
+        expect(offerA.explore.request).not.toHaveProperty("objectives");
+        expect(offerA.explore.request).not.toHaveProperty("dataOperators");
+        const said = platform.repo.listEvents(a.body.jobId).filter((e) => e.kind === "objectives_need_runner");
+        expect(said.map((e) => e.message)).toEqual([objectivesNeedRunner("Older laptop")]);
+        expect(objectivesNeedRunner("Older laptop")).toMatch(/^[^.]*download the runner again to explore by objectives\.$/i);
+        await stop(older, a.body.jobId);
+        // A runner that can: objectives on (an AI agent project, every level is Thorough or above); the server setting is absent, so no data operators.
+        const newer = await person("Objectives, new runner");
+        const newRunner = await rawAgent(newer.id, "New laptop", true, ["plain", "agent", "mobile", "assessment", "objectives"]);
+        const b = await explore(newer);
+        expect(b.status, b.text).toBe(202);
+        const offerB = await poll(newRunner);
+        expect(offerB.explore.request.objectives).toBe(true);
+        expect(offerB.explore.request).not.toHaveProperty("dataOperators");
+        expect(kinds(b.body.jobId)).not.toContain("objectives_need_runner");
+        await stop(newer, b.body.jobId);
+        // With EXPLORE_DATA_OPERATORS=true on the server, the request allows data operators too (the engine still needs the run's data-changes setting).
+        const config = platform.config as { EXPLORE_DATA_OPERATORS: boolean };
+        expect(config.EXPLORE_DATA_OPERATORS).toBe(false);
+        config.EXPLORE_DATA_OPERATORS = true;
+        try {
+            const c = await explore(newer);
+            expect(c.status, c.text).toBe(202);
+            const offerC = await poll(newRunner);
+            expect(offerC.explore.request).toMatchObject({ objectives: true, dataOperators: true });
+            await stop(newer, c.body.jobId);
+        } finally {
+            config.EXPLORE_DATA_OPERATORS = false;
+        }
+    }, 60_000);
+
+    it("objectives: the runner program says it can; only AI agent projects; data operators only with the server setting and objectives", async () => {
+        const probed = await new CapabilityProbe({ env: { TAQWRIGHT_HOME: "/nonexistent-taqwright" }, platform: "linux", exec: async () => undefined, browsers: () => ["chromium"] }).discover();
+        expect(probed.exploreModes).toContain("objectives");
+        expect(objectivesOf({ testingModes: ["agent", "code"] }, false)).toEqual({ objectives: true });
+        expect(objectivesOf({ testingModes: ["agent"] }, true)).toEqual({ objectives: true, dataOperators: true });
+        expect(objectivesOf({ testingModes: ["code"] }, true)).toEqual({});
+        expect(objectivesOf({ testingModes: [] }, false)).toEqual({});
+        // The server setting is read from the environment once, by the platform's config: off unless exactly "true".
+        expect(loadConfig({ DATA_DIR: dataDir }).EXPLORE_DATA_OPERATORS).toBe(false);
+        expect(loadConfig({ DATA_DIR: dataDir, EXPLORE_DATA_OPERATORS: "1" }).EXPLORE_DATA_OPERATORS).toBe(false);
+        expect(loadConfig({ DATA_DIR: dataDir, EXPLORE_DATA_OPERATORS: "true" }).EXPLORE_DATA_OPERATORS).toBe(true);
+    });
 
     it("fences the explore routes to the running attempt; a cancel stops the task", async () => {
         const p = await person("Fenced");
