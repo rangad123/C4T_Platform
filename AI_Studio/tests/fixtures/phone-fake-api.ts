@@ -309,6 +309,8 @@ export class PhoneFake {
             if (method === "GET" && ["framework-settings", "api-changes", "memory", "performance", "cleanup", "application-model"].includes(rest)) return { status: 404, body: { error: "Not found" } };
             // Cards of the project's Dashboard (round 34), as a project with nothing to report answers them.
             if (method === "GET" && rest === "setup-check") return { body: { items: [] } };
+            // The project's AI model (General settings): none chosen and no models of this person's keys (routes/project-ai-model.ts).
+            if (method === "GET" && rest === "ai-model") return { body: { selected: null, selectedYours: true, choices: [] } };
             if (method === "GET" && rest === "requirements/coverage") return { body: { total: 0, notCovered: 0, covered: 0, passing: 0, failing: 0, retired: 0 } };
             // The Test scripts list (round 38): the requirements each script covers, and each script's review state; none here.
             if (method === "GET" && rest === "requirements/links") return { body: { links: [] } };
