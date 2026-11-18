@@ -119,9 +119,37 @@ export class RepoSink implements GenerationSink {
         return this.modelShownAs && meta && "model" in meta ? ({ ...meta, model: this.modelShownAs } as M) : meta;
     }
 
+    /**
+     * A candidate finding's free text (expected, observed, the request and console evidence, the replays' summaries) with this run's
+     * secrets and the shared patterns masked, before it is stored in the finding's row or the test's meta (CP3 N-5). Whatever is not a
+     * text of a finding (ids, refs, the fingerprint) is left as given, and the platform parses the result as before.
+     */
+    private maskFinding(given: unknown): unknown {
+        if (!given || typeof given !== "object" || Array.isArray(given)) return given;
+        const secrets = [...this.secrets];
+        const m = <T>(v: T): T => (typeof v === "string" ? (maskText(v, secrets) as T) : v);
+        const lines = (v: unknown) => (Array.isArray(v) ? v.map(m) : v);
+        const f = given as Record<string, unknown>;
+        const ev = f.evidence && typeof f.evidence === "object" ? (f.evidence as Record<string, unknown>) : undefined;
+        const ex = f.expected && typeof f.expected === "object" ? (f.expected as Record<string, unknown>) : undefined;
+        return {
+            ...f,
+            ...(ex ? { expected: { ...ex, text: m(ex.text) } } : {}),
+            ...("observed" in f ? { observed: m(f.observed) } : {}),
+            ...(ev ? { evidence: { ...ev, requests: lines(ev.requests), console: lines(ev.console) } } : {}),
+            ...(Array.isArray(f.replays) ? { replays: f.replays.map((r) => (r && typeof r === "object" ? { ...(r as object), summary: m((r as Record<string, unknown>).summary) } : r)) } : {}),
+        };
+    }
+
+    /** A test's meta as stored: the model as shown, and its candidate finding masked. */
+    private storedMeta<M extends Record<string, unknown> | undefined>(given: M): M {
+        const meta = this.shown(given);
+        return meta && meta.finding !== undefined ? ({ ...meta, finding: this.maskFinding(meta.finding) } as M) : meta;
+    }
+
     createTest: GenerationSink["createTest"] = ({ spec, framework, validation, reason, meta: given }) =>
         this.writes.run(() => {
-            const meta = this.shown(given);
+            const meta = this.storedMeta(given);
             const slug = slugify(spec.category);
             const suiteId = this.repo.getOrCreateSuite(this.job.projectId, spec.category, slug);
             // The key is taken here, with the insert: the one the engine asked for (nextTestKey) is only a proposal, and another scenario
@@ -147,7 +175,7 @@ export class RepoSink implements GenerationSink {
             return { id, testId };
         });
 
-    /** The finding is parsed again here (the boundary); one that does not parse, or cannot be stored, is skipped with a warning and the test stays. */
+    /** The finding (masked by createTest) is parsed again here (the boundary); one that does not parse, or cannot be stored, is skipped with a warning and the test stays. */
     private async saveFinding(testDbId: string, testKey: string, given: unknown): Promise<void> {
         const parsed = CandidateFindingSchema.safeParse(given);
         const skip = (why: string) => this.event({ stage: "generation", kind: "finding_skipped", level: "warn", message: `${testKey}: its candidate finding was not stored (${why}); the test is saved for review.` });
@@ -175,7 +203,7 @@ export class RepoSink implements GenerationSink {
             // A test saved under another key than the one asked for (createTest) keeps it, whatever key the engine's copy of its spec carries.
             const rekeyed = this.rekeyed.get(h.id);
             const spec = this.keepSteps.has(h.id) ? undefined : patch.spec && rekeyed ? { ...patch.spec, testId: rekeyed } : patch.spec;
-            this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: this.maskReason(patch.reason), attempts: patch.attempts, meta: this.shown(patch.meta), versionSource: this.versionSource });
+            this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: this.maskReason(patch.reason), attempts: patch.attempts, meta: this.storedMeta(patch.meta), versionSource: this.versionSource });
         });
 
     /** Tests whose steps this run must not write back (set by the job runner from the versions it pinned, review-store.ts). */

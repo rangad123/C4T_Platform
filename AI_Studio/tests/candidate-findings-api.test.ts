@@ -136,6 +136,30 @@ describe("a defect test saved for review", () => {
         await save("No finding", "NEEDS_REVIEW", { capture: "observed_only" });
         expect((await call(list(B))).body.findings).toEqual([]);
     });
+
+    it("masks the run's stored secrets in every text of the finding, in its row and in the test's meta (CP3 N-5)", async () => {
+        const C = seedProject(platform, "Secret shop", "https://secret.example.test");
+        const { sink, save } = await jobOf(C);
+        const SECRET = "RunEnvSecret-77x";
+        sink.addSecrets([SECRET]);
+        const h = await save("Secret in finding", "NEEDS_REVIEW", {
+            capture: "captured",
+            finding: finding("Secret in finding", {
+                expected: { text: `Signing in with ${SECRET} opens the account.`, source: "R-4" },
+                observed: `After typing ${SECRET} the page showed an error.`,
+                evidence: { screenshots: [], requests: [`POST /api/login?key=${SECRET} -> 500`], console: [`Console error: login failed for ${SECRET}`] },
+                replays: [{ label: "independence 1", outcome: "failed", failedStep: 2, summary: `Stopped after typing ${SECRET}` }],
+            }),
+        });
+        const r = await call(list(C));
+        expect(r.body.findings).toHaveLength(1);
+        expect(r.raw).not.toContain(SECRET);
+        const f = r.body.findings[0].finding;
+        // The rest of each text stays readable.
+        expect(f.observed).toMatch(/^After typing .+ the page showed an error\.$/);
+        expect(f.evidence.requests[0]).toMatch(/^POST \/api\/login/);
+        expect(JSON.stringify(platform.repo.getTest(h.id)?.generationMeta ?? {})).not.toContain(SECRET);
+    });
 });
 
 describe("GET /api/projects/:id/candidate-findings", () => {
