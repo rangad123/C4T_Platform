@@ -40,7 +40,7 @@ import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
 import { reuseMessage } from "./memory/reuse.js";
 import { EVENT_PAGES_REUSED, explorationReuseOn } from "./llm/without-ai.js";
-import { levelSettings, visionOn, type ExploreLevel } from "./levels.js";
+import { levelSettings, visionOn, type ExplorationBudgets, type ExploreLevel } from "./levels.js";
 import { buildScreenMap, coverWithTests, type CrawlTransition, type RoleCrawl } from "./screenmap/map.js";
 import { asRole, roleCredentials, roleDifferences } from "./identity/role-differences.js";
 import { refusedBy } from "./memory/notes.js";
@@ -891,7 +891,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const dataOperators = req.dataOperators === true && dataChanges;
                 const requiresAuth = Boolean(creds && authState.loggedIn);
                 const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataChanges, dataOperators, requiresAuth, ...(req.exploredObjectives ? { explored: req.exploredObjectives } : {}) });
-                const budgets: Budgets = { objectives: b.objectives, actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
+                const budgets = sessionBudgets(b, built.pursuits.length);
                 ctx.emit({
                     stage: "generation",
                     kind: "objectives_planned",
@@ -1469,6 +1469,15 @@ export function objectivePursuits(
         }
     }
     return { objectives, overCap, pursuits, skipped };
+}
+
+/**
+ * The loop's budgets for one objective session. The level's `objectives` caps the objectives when the list is built (objectivePursuits);
+ * the loop then runs every pursuit built from them (one objective with one operator each), so its pursuit count is the number built.
+ * Time, actions, AI calls and tokens are the level's own and still bound the session.
+ */
+export function sessionBudgets(b: Omit<ExplorationBudgets, "perObjective">, pursuits: number): Budgets {
+    return { objectives: pursuits, actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
 }
 
 /** A model call refused because the session or the objective has spent its budget. */
