@@ -1,0 +1,18 @@
+/* Candidate findings on a finished exploration's run page. Design tokens only. A captured finding has a solid border, an observed-only one
+   a dashed border on a sunken surface, so the two read differently without relying on colour. */
+.fnd-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.fnd-item { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-raised); min-width: 0; }
+.fnd-item.is-observed_only { border-style: dashed; border-color: var(--border-default); background: var(--surface-sunken); }
+.fnd-item p { margin: 0; overflow-wrap: anywhere; }
+.fnd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.fnd-title { flex: 1 1 240px; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.fnd-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.fnd-block { display: block; }
+.fnd-source { font-family: var(--font-mono); font-size: var(--type-caption-size); overflow-wrap: anywhere; }
+.fnd-conf { font-weight: var(--fw-medium); color: var(--text-primary); }
+.fnd-sub { margin: 0; font-weight: var(--fw-medium); }
+.fnd-lines { margin: 0; padding: 8px 12px; list-style: none; display: grid; gap: 4px; border-radius: var(--radius-sm); background: var(--surface-muted); font-family: var(--font-mono); font-size: var(--type-caption-size); line-height: var(--type-caption-line); color: var(--text-primary); overflow-wrap: anywhere; }
+.fnd-replays { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.fnd-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.fnd-foot a { display: inline-flex; align-items: center; gap: 2px; }
+.fnd-model { font-family: var(--font-mono); }
