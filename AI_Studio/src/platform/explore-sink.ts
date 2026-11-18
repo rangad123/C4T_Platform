@@ -26,7 +26,9 @@ import type { ExploreTaskRef } from "./explore-task.js";
 import { HttpError } from "./http-error.js";
 import { aiOwnerOfJob, resolveAiFor } from "./ai-config.js";
 import { PERSONAL_KEY_MODEL } from "./usage-store.js";
-import { RepoSink } from "./repo-sink.js";
+import { RepoSink, screenshotProblem } from "./repo-sink.js";
+import { EXPLORATION_ARTIFACT, EXPLORATION_FILE } from "./exploration-store.js";
+import { PLAN_ARTIFACT, PLAN_FILE } from "./plan-store.js";
 import { agentServiceOf } from "./agent-services.js";
 import { applyAgentCall } from "./agent-on-runner.js";
 import { envSecrets } from "./agent-routing.js";
@@ -104,6 +106,20 @@ function loadSaved(p: Platform, task: ExploreTaskRef): Saved | undefined {
 const refuse = (message: string): never => {
     throw new HttpError(400, message);
 };
+
+/**
+ * Text artifacts the platform writes itself from a validated part of the result (the exploration record, row 184) or from the job's own
+ * summary (plan, application model), and screenshots, which come only through saveImageArtifact: a runner cannot write one of these kinds
+ * through saveTextArtifact, nor a text under one of their file names (it would take that file's place in the job's folder).
+ */
+const PLATFORM_TEXT_KINDS = new Set([EXPLORATION_ARTIFACT, PLAN_ARTIFACT, "app-model", "screenshot"]);
+const PLATFORM_FILE_NAMES = new Set([EXPLORATION_FILE, PLAN_FILE, "application-model.json"]);
+export function runnerTextArtifactProblem(kind: string, name: string): string | undefined {
+    if (PLATFORM_TEXT_KINDS.has(kind)) return `A runner cannot save a "${kind}" artifact this way.`;
+    const base = path.posix.basename(name).toLowerCase();
+    if (PLATFORM_FILE_NAMES.has(base) || /\.jpe?g$/.test(base)) return `A runner cannot save a text artifact named "${base}".`;
+    return undefined;
+}
 
 /** The task's sink is no longer needed (the task ended or moved to another attempt): what it queued is stored, its folder removed. */
 export async function forgetExploreSink(taskId: string, p?: Pick<Platform, "repo">): Promise<void> {
@@ -351,13 +367,19 @@ async function apply(p: Platform, task: ExploreTaskRef, s: TaskSink, c: SinkCall
             const sid = scriptId(s, c.scriptId);
             return withRun(s, c.r.run, (run) => k.recordEnvironment(h, sid, { ...c.r, run }, c.startedAt));
         }
-        case "saveTextArtifact":
+        case "saveTextArtifact": {
+            const problem = runnerTextArtifactProblem(c.kind, c.name);
+            if (problem) refuse(problem);
             return k.saveTextArtifact(c.kind, c.name, c.content);
+        }
         case "saveImageArtifact": {
             // Counted against the attempt's file cap like every file a runner sends.
             const got = await receive(s, [c.file]);
             try {
-                return await k.saveImageArtifact(c.kind, c.file.name, await fs.readFile(got.paths[0]!));
+                const bytes = await fs.readFile(got.paths[0]!);
+                const problem = screenshotProblem(c.file.name, bytes);
+                if (problem) refuse(problem);
+                return await k.saveImageArtifact(c.kind, c.file.name, bytes);
             } finally {
                 await fs.rm(got.dir, { recursive: true, force: true }).catch(() => undefined);
             }

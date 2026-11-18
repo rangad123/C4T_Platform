@@ -72,6 +72,8 @@ describe("a finding's screenshot", () => {
         const r = await get(`/api/artifacts/${ids.a.shot}`, bearer(tokens.viewer));
         expect(r.statusCode).toBe(200);
         expect(r.headers["content-type"]).toBe("image/jpeg");
+        // The browser keeps the stated type and never guesses another from the bytes (CP2 L-2).
+        expect(r.headers["x-content-type-options"]).toBe("nosniff");
         expect(r.rawPayload.equals(JPEG)).toBe(true);
     });
 
@@ -89,5 +91,6 @@ describe("a finding's screenshot", () => {
         const r = await get(`/api/artifacts/${ids.a.png}`, { "x-api-key": KEY });
         expect(r.statusCode).toBe(200);
         expect(r.headers["content-type"]).toBe("image/png");
+        expect(r.headers["x-content-type-options"]).toBe("nosniff");
     });
 });
