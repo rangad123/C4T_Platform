@@ -26,9 +26,10 @@
  * the marker is there. No script downloads a browser any more: the runner program chooses one itself (installed Chrome or Edge, or a
  * download it makes once).
  *
- * Two environment variables exist for the tests only: AITP_KIT_EXTRA_NODE_DIRS (more folders to look in, ";" separated on Windows,
- * ":" elsewhere) and AITP_KIT_SKIP_SHELL_SEARCH=1 (skip the last-resort search of the person's shell or the saved Windows PATH, which
- * would otherwise find the Node.js of the computer the test runs on).
+ * Three environment variables exist for the tests only: AITP_KIT_EXTRA_NODE_DIRS (more folders to look in, ";" separated on Windows,
+ * ":" elsewhere), AITP_KIT_SKIP_SHELL_SEARCH=1 (skip the last-resort search of the person's shell or the saved Windows PATH, which
+ * would otherwise find the Node.js of the computer the test runs on) and AITP_KIT_NODE_DIRS_ONLY=1 (skip the fixed installer and
+ * version-manager folders, such as /usr/bin or Program Files, so a test on a computer with Node.js installed there can see "not found").
  */
 
 export type KitPlatform = "windows" | "unix";
@@ -72,6 +73,7 @@ for %%D in ("%AITP_KIT_EXTRA_NODE_DIRS:;=" "%") do call :trydir "%%~D"
 if defined NODE_BIN goto havenode
 :noextra
 
+if "%AITP_KIT_NODE_DIRS_ONLY%"=="1" goto fixeddone
 call :trydir "%ProgramFiles%\\nodejs"
 call :trydir "%ProgramW6432%\\nodejs"
 call :trydir "%ProgramFiles(x86)%\\nodejs"
@@ -87,6 +89,7 @@ for /d %%D in ("%APPDATA%\\fnm\\node-versions\\*") do call :trydir "%%~D\\instal
 for /d %%D in ("%LOCALAPPDATA%\\fnm\\node-versions\\*") do call :trydir "%%~D\\installation"
 for /d %%D in ("%LOCALAPPDATA%\\fnm_multishells\\*") do call :trydir "%%~D"
 if defined NODE_BIN goto havenode
+:fixeddone
 
 rem Last resort: ask PowerShell, which also reads the PATH Windows has saved (this window may have started before Node.js was installed).
 if "%AITP_KIT_SKIP_SHELL_SEARCH%"=="1" goto searchdone
@@ -451,8 +454,8 @@ find_node() {
     if [ -n "$AITP_KIT_EXTRA_NODE_DIRS" ]; then
         try_dirs "$(printf '%s\\n' "$AITP_KIT_EXTRA_NODE_DIRS" | tr ':' '\\n')" && return 0
     fi
-    # 2. The places Homebrew, installers and version managers use.
-    for fn_dir in \\
+    # 2. The places Homebrew, installers and version managers use (and 3. nvm), unless a test asked for the folders above only.
+    [ "$AITP_KIT_NODE_DIRS_ONLY" = "1" ] || for fn_dir in \\
         /opt/homebrew/bin /opt/homebrew/opt/node*/bin /usr/local/bin /usr/local/opt/node*/bin /opt/local/bin /usr/bin \\
         "$HOME/.volta/bin" "$HOME/.asdf/shims" "$HOME/.local/share/mise/shims" "$HOME/.mise/shims" "$HOME/.nodenv/shims" "$HOME/.n/bin" \\
         "\${NVM_DIR:-$HOME/.nvm}"/versions/node/*/bin "$HOME"/.nvm/versions/node/*/bin \\
@@ -463,7 +466,7 @@ find_node() {
         try_node "$fn_dir/node" && return 0
     done
     # 3. nvm, read the way a terminal would (in a throwaway shell, so nothing here changes).
-    for fn_nvm in "\${NVM_DIR:-$HOME/.nvm}/nvm.sh" /opt/homebrew/opt/nvm/nvm.sh /usr/local/opt/nvm/nvm.sh; do
+    [ "$AITP_KIT_NODE_DIRS_ONLY" = "1" ] || for fn_nvm in "\${NVM_DIR:-$HOME/.nvm}/nvm.sh" /opt/homebrew/opt/nvm/nvm.sh /usr/local/opt/nvm/nvm.sh; do
         [ -s "$fn_nvm" ] || continue
         fn_out=$(bounded 10 /bin/sh -c '. "$1" >/dev/null 2>&1; nvm use default >/dev/null 2>&1; command -v node' sh "$fn_nvm" 2>/dev/null)
         try_lines "$fn_out" && return 0

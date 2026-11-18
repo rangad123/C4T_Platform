@@ -471,9 +471,20 @@ describe("the unzipped kit really runs", () => {
 
     it.skipIf(!BASH)("start-runner.sh on a computer without Node.js explains it and does not start a runner", async () => {
         const kit = unpack((await download("mac")).buf, "shnonode");
-        const tools = path.dirname(BASH!); // Git's own tools (dirname, uname), but no node
+        // On Windows, Git's own tools (dirname, uname), but no node. Elsewhere the bash folder (/usr/bin) may hold this computer's Node.js,
+        // so the PATH is a fresh folder of links to everything there but Node.js, and the script skips its fixed folders (/usr/bin among them).
+        let tools = path.dirname(BASH!);
+        const nodeOnly: Record<string, string> = {};
+        if (process.platform !== "win32") {
+            const linked = fs.mkdtempSync(path.join(tmp, "tools-"));
+            for (const name of fs.readdirSync(tools)) {
+                if (!["node", "nodejs", "npm", "npx", "corepack"].includes(name)) fs.symlinkSync(path.join(tools, name), path.join(linked, name));
+            }
+            tools = linked;
+            nodeOnly.AITP_KIT_NODE_DIRS_ONLY = "1";
+        }
         const home = fs.mkdtempSync(path.join(tmp, "home-")); // an empty home: no nvm, Volta or fnm to find
-        const run = launch(BASH!, ["start-runner.sh"], kit, { PATH: tools, Path: tools, HOME: home.replaceAll("\\", "/"), AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1" });
+        const run = launch(BASH!, ["start-runner.sh"], kit, { PATH: tools, Path: tools, HOME: home.replaceAll("\\", "/"), AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1", ...nodeOnly });
         expect(await run.exited, output(run)).toBe(1);
         const text = output(run);
         expect(text).toContain("Node.js was not found on this computer. The runner needs Node.js 24 or newer.");
