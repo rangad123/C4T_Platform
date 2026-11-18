@@ -913,7 +913,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             await persistNew(spec, "playwright", "PENDING", undefined, meta);
             // Written, not run, unless the request asks (runTestCases, evaluation only): the same rule for an objective's pursuit.
             if (!runsTestCases(req)) notRun++;
-            else pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
+            else pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}), ...(requirementIds.length ? { requirementIds } : {}) });
             ctx.emit({ stage: "generation", kind: "script_generated", message: `${spec.testId} ${spec.title} (${spec.steps.length} steps)`, data: { scenarioId: scenario.scenarioId, testId: spec.testId } });
             return spec.testId;
         };

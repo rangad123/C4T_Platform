@@ -2,8 +2,10 @@
  * A web repair fixes how a test checks, never what it must check (fast tier, no browser, no model):
  *   - weakensWebTest refuses a proposal that removes a sourced check, changes its source, loosens it (a weaker check, a widened or
  *     dropped expected value) or moves it before the step it depended on; an unsourced check may still change or go;
- *   - repairWeb refuses such a re-written test, and a failure *at* a sourced check is a stated expectation not met (app_defect),
- *     never a re-authored test, even when triage calls it fixable.
+ *   - repairWeb refuses such a re-written test, and a failure *at* a check of a STATED source (author.ts statedSource: a usable rule
+ *     given to the scenario, or an expected result tied to one, to an objective or to a requirement of the job) is a stated expectation
+ *     not met (app_defect), never a re-authored test, even when triage calls it fixable. A check of the planner's own expected result is
+ *     not stated: triage's verdict stands and a fixable failure is repaired (queue row 182, C1c's WEB-037).
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -17,6 +19,7 @@ vi.mock("../src/engine/web/author.js", async (importOriginal) => ({
 }));
 
 import type { EngineContext } from "../src/engine/context.js";
+import type { KnowledgeRule } from "../src/engine/planning/planner.js";
 import { ScenarioSchema, type Step, type TestSpec } from "../src/engine/spec/schema.js";
 import { repairWeb, weakensWebTest } from "../src/engine/validation/repair.js";
 import type { ScriptRun } from "../src/engine/validation/runner.js";
@@ -87,13 +90,17 @@ describe("repairWeb keeps sourced checks", () => {
     const ctxWith = (answer: object, events: Array<{ kind: string }> = []) =>
         ({ emit: (e: { kind: string }) => void events.push(e), llm: { object: async () => answer } }) as unknown as EngineContext;
     const failedAt = (i: number) => ({ testId: "WEB-001", status: "failed", durationMs: 1, failedStepIndex: i, steps: [], artifacts: [], responses: [], error: "expected text" }) as ScriptRun;
-    const repair = (ctx: EngineContext, run: ScriptRun) => repairWeb({ ctx, browser: {} as never, baseUrl: "http://shop.test", model: {} as never, scenario, spec: original, run });
+    const RULE: KnowledgeRule = { ref: "R-1", kind: "constraint" as KnowledgeRule["kind"], description: "The total is the sum of the lines", expected: "Total: 20.00", explicitness: "explicit", status: "unverified", workflows: [] };
+    // expected:1 is tied to the rule R-1 here, so it is stated too.
+    const tied = { ...scenario, expectedResults: ["Two items (source: R-1)"] };
+    const repair = (ctx: EngineContext, run: ScriptRun, extra: { scenario?: typeof scenario; rules?: KnowledgeRule[]; requirementIds?: string[]; spec?: TestSpec } = {}) =>
+        repairWeb({ ctx, browser: {} as never, baseUrl: "http://shop.test", model: {} as never, scenario, spec: original, run, ...extra });
 
-    it("a failure at a sourced check that triage calls fixable is an app defect, never a re-authored test", async () => {
+    it("a failure at a check of a stated source that triage calls fixable is an app defect, never a re-authored test", async () => {
         authoring.calls = 0;
         authoring.steps = original.steps;
         for (const i of [2, 4]) {
-            const r = await repair(ctxWith(fixable), failedAt(i));
+            const r = await repair(ctxWith(fixable), failedAt(i), { scenario: tied, rules: [RULE] });
             expect(r.verdict).toBe("app_defect");
             expect(r.reason).toMatch(/a stated expectation is not met/);
             expect(r.spec).toBeUndefined();
@@ -107,6 +114,45 @@ describe("repairWeb keeps sourced checks", () => {
         expect((await repair(ctxWith(fixable), failedAt(5))).verdict).toBe("fixed");
         authoring.steps = replace(3, relocate(checkout, "Go to checkout"));
         expect((await repair(ctxWith({ ...fixable, category: "locator" }), failedAt(3))).verdict).toBe("fixed");
+        expect(authoring.calls).toBe(2);
+    });
+
+    // C1c's WEB-037: a validation test whose check cites the planner's own expected result 1; the analyzer says the test's data is wrong.
+    const field = role("textbox", "Quantity");
+    const validation = {
+        testId: "WEB-037", title: "Quantity is validated", kind: "web", expectedResults: ["An error says the quantity must be at most 99"], testData: {},
+        steps: [{ action: "navigate", url: "/cart" }, { action: "fill", locator: field, value: "99" }, { action: "click", locator: role("button", "Update") }, { action: "assert", check: "text", locator: role("alert", "Error"), expected: "at most 99", source: "expected:1" }],
+    } as unknown as TestSpec;
+    const planned = ScenarioSchema.parse({ scenarioId: "S-037", title: "Quantity", description: "Quantity", category: "Cart", expectedResults: validation.expectedResults, requirements: ["REQ-9"] });
+    const wrongData = { category: "test_data", fixable: true, reason: "99 is allowed; the test should enter 100 to see the error" };
+
+    it("a failure at a check of the planner's own expected result is repaired when triage says the test data is wrong (WEB-037)", async () => {
+        authoring.calls = 0;
+        authoring.steps = validation.steps.map((s, i) => (i === 1 ? { ...s, value: "100" } : s));
+        const r = await repair(ctxWith(wrongData), failedAt(3), { spec: validation, scenario: planned, rules: [RULE], requirementIds: ["REQ-9"] });
+        expect(r.verdict).toBe("fixed");
+        expect(authoring.calls).toBe(1);
+        expect(r.spec?.steps[1]).toMatchObject({ action: "fill", value: "100" });
+    });
+
+    it("the same check is an app defect once its expected result is stated: by a rule's ref or a requirement of the job the scenario covers", async () => {
+        authoring.calls = 0;
+        const byRule = { ...planned, expectedResults: ["An error says the quantity must be at most 99 (R-1)"] };
+        expect((await repair(ctxWith(wrongData), failedAt(3), { spec: validation, scenario: byRule, rules: [RULE] })).verdict).toBe("app_defect");
+        const byRequirement = { ...planned, expectedResults: ["An error says the quantity must be at most 99 (REQ-9)"] };
+        expect((await repair(ctxWith(wrongData), failedAt(3), { spec: validation, scenario: byRequirement, requirementIds: ["REQ-9"] })).verdict).toBe("app_defect");
+        expect(authoring.calls).toBe(0);
+        // Without the job's requirement ids (or the rule) it is the planner's own: repaired.
+        authoring.steps = validation.steps;
+        expect((await repair(ctxWith(wrongData), failedAt(3), { spec: validation, scenario: byRequirement })).verdict).toBe("fixed");
+        expect((await repair(ctxWith(wrongData), failedAt(3), { spec: validation, scenario: byRule })).verdict).toBe("fixed");
+    });
+
+    it("a rule check names a rule only when that rule was given: R-1 without its rule is repaired", async () => {
+        authoring.calls = 0;
+        authoring.steps = original.steps;
+        expect((await repair(ctxWith(fixable), failedAt(4))).verdict).toBe("fixed");
+        expect((await repair(ctxWith(fixable), failedAt(4), { rules: [{ ...RULE, explicitness: "implicit" as KnowledgeRule["explicitness"] }] })).verdict).toBe("fixed");
         expect(authoring.calls).toBe(2);
     });
 

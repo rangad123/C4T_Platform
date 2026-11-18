@@ -15,7 +15,7 @@ import type { EngineContext } from "../context.js";
 import type { KnowledgeRule } from "../planning/planner.js";
 import { StepSchema, type Scenario, type Step, type TestSpec } from "../spec/schema.js";
 import type { AppModel } from "../understanding/app-model.js";
-import { authorWebSpec } from "../web/author.js";
+import { authorWebSpec, statedSource } from "../web/author.js";
 import type { ScriptRun } from "./runner.js";
 
 const TriageSchema = z.object({
@@ -79,6 +79,8 @@ export async function repairWeb(args: {
     secrets?: readonly string[];
     /** The scenario's rules: the re-written test still checks them (a repair fixes how a test checks, never what it must check). */
     rules?: KnowledgeRule[];
+    /** The ids of the job's requirements: an expected result naming one the scenario covers is stated (author.ts statedSource). */
+    requirementIds?: readonly string[];
 }): Promise<Repair> {
     const { ctx, spec, run } = args;
     const t = await triage(ctx, spec, run);
@@ -92,9 +94,11 @@ export async function repairWeb(args: {
     if (t.category === "app_defect" || t.category === "environment" || !t.fixable) {
         return { verdict: t.category === "app_defect" ? "app_defect" : "unfixable", reason: t.reason };
     }
-    // A failing sourced check is a stated expectation the app does not meet: never "fixed" by re-writing the test (roadmap 2.4).
+    // A failing check of a STATED source is a stated expectation the app does not meet: never "fixed" by re-writing the test (roadmap 2.4).
+    // Stated as the author decides it (statedSource, queue row 182): a check of the planner's own expected result is not, so triage's
+    // verdict stands and a fixable failure is repaired (C1c's WEB-037: wrong test data reported as an app defect).
     const failedStep = run.failedStepIndex >= 0 ? spec.steps[run.failedStepIndex] : undefined;
-    if (failedStep?.action === "assert" && failedStep.source) {
+    if (failedStep?.action === "assert" && failedStep.source && statedSource(failedStep.source, args.scenario, args.rules, args.requirementIds)) {
         return { verdict: "app_defect", reason: `a stated expectation is not met (${failedStep.source}): ${t.reason}` };
     }
 
@@ -114,6 +118,7 @@ export async function repairWeb(args: {
         credentials: args.credentials,
         ...(args.secrets ? { secrets: [...args.secrets] } : {}),
         ...(args.rules?.length ? { rules: args.rules } : {}),
+        ...(args.requirementIds?.length ? { requirementIds: args.requirementIds } : {}),
         resume: { prefix, failure: failureText(spec, run) },
     });
     if (outcome.status === "complete") {
