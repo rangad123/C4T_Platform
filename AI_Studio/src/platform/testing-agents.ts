@@ -165,7 +165,7 @@ export const TESTING_AGENTS: readonly TestingAgent[] = [
         id: "test-generation",
         name: "Test Case Generation Agent",
         summary: "Explores the application, plans the journeys worth testing, and writes a test case with steps for each.",
-        description: "The AI goes through the application like a visitor, works out its main journeys, plans test cases for them (from a requirements document too, when you give one) and writes each one with plain-English steps and the code that runs them. It also tries search forms with harmless unusual input. Each test case is a draft until it is reviewed.",
+        description: "The AI goes through the application like a visitor, works out its main journeys, plans test cases for them (from a requirements document too, when you give one) and writes each one with plain-English steps and the code that can run them. It does not run the test cases: you run them when you choose. It also tries search forms with harmless unusual input. Each test case is a draft until it is reviewed.",
         checks: ["The main journeys through the application", "Requirements from a document you give", "Search forms with unusual input", "Android: the app's screens and journeys"],
         platforms: ["web", "android"],
         needs: [EXPLORE_NEEDS, "The address of the application, or the Android app. Test accounts if the journeys need signing in."],

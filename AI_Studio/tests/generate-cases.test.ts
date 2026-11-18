@@ -131,8 +131,16 @@ describe("generating test cases", () => {
                 { requirement: "REQ-404", title: "Not asked for", priority: "low", type: "manual", steps: [] },
             ]),
         );
+        // What exists before: generating cases adds none of it (no job of any kind, no runnable test or script, no execution).
+        const ran = () => ({
+            jobs: withAi.repo.listJobs(A.projectId).length,
+            tests: withAi.repo.listTests(A.projectId).length,
+            executions: withAi.db.all("SELECT e.id FROM test_executions e JOIN test_cases t ON t.id = e.test_case_id WHERE t.project_id = ?", A.projectId).length,
+        });
+        const before = ran();
         const r = await call("POST", `${reqs(A)}/generate-cases`, { requirementIds: [pay.id, basket.id] });
         expect(r.status, JSON.stringify(r.body)).toBe(201);
+        expect(ran()).toEqual(before);
         expect(r.body).toMatchObject({ created: 3, duplicates: 0, limited: false, failed: [], note: null, total: 3 });
         expect(r.body.perRequirement).toEqual([
             { id: pay.id, ref: pay.ref, created: 2, failed: false },

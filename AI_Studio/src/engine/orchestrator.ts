@@ -57,6 +57,10 @@ import { checkStrength } from "./mutation/strength.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 
+/** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
+export const TEST_CASES_NOT_RUN = "test_cases_not_run";
+export const testCasesNotRun = (n: number) => `${n} test case${n === 1 ? " was" : "s were"} written and not run. Run ${n === 1 ? "it" : "them"} from Test scripts when you choose.`;
+
 export type JobStatusName = "DISCOVERING" | "ANALYZING" | "PLANNING" | "GENERATING" | "VALIDATING";
 export type PhaseName = "discovery" | "understanding" | "planning" | "generation" | "validation";
 
@@ -83,6 +87,12 @@ export interface GenerationRequest {
     accessChecks?: boolean;
     /** Plan and write functional test cases for the journeys (web target). Default true; false: only the checks are generated. */
     functionalTests?: boolean;
+    /**
+     * Run the journeys' test cases (web and phone) once they are written. Default true; false: they are saved as written, "Not run yet",
+     * and a person runs them when they choose (the platform's plan confirmation: the Test Case Generation Agent only writes them).
+     * The checks of the other kinds still run: running them is what makes them checks.
+     */
+    runTestCases?: boolean;
     /** Generate axe-core accessibility audits for key pages (web target). Default true. */
     accessibility?: boolean;
     /** Generate page health checks (JavaScript errors, failed requests, broken links...) for key pages (web target). Default true. */
@@ -626,6 +636,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         };
 
         // 4a. Web: author every scenario in a real browser, one agent run per scenario.
+        /** Journeys written and, as asked (runTestCases false), left for a person to run. */
+        let notRun = 0;
         if (scenarios.length) {
             const results = await mapLimit(scenarios, ctx.config.CONCURRENCY, async (scenario) => {
                 throwIfAborted(ctx.signal);
@@ -672,7 +684,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         return;
                     }
                     await persistNew(spec, "playwright", "PENDING", undefined, meta);
-                    pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
+                    if (req.runTestCases === false) notRun++;
+                    else pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
                     ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (${spec.steps.length} steps)` });
                 } catch (err) {
                     await sink.finishAgentRun(runId, "error", err instanceof Error ? err.message : String(err));
@@ -869,6 +882,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             if (visual.length) ctx.emit({ stage: "generation", kind: "visual_tests_generated", message: `${visual.length} visual baseline tests generated` });
         }
         await sink.phase("GENERATING", "generation", summary.testsGenerated > 0 ? "done" : "failed");
+        if (notRun) ctx.emit({ stage: "generation", kind: TEST_CASES_NOT_RUN, message: testCasesNotRun(notRun) });
         throwIfAborted(ctx.signal);
 
         // ── 5. VALIDATION ─────────────────────────────────────────────────────

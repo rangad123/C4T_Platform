@@ -175,7 +175,7 @@ export function PlanPreview({ projectId, job, onChanged }: { projectId: string; 
             )}
 
             <div className="row plan-actions">
-                <Button variant="primary" size="lg" icon={Sparkles} loading={busy === "create"} disabled={total === 0 || busy !== ""} onClick={() => void create()} tip={total === 0 ? "Nothing is included. Tick at least one kind of test under Edit the plan." : "Creates the tests left in the plan and runs each one. The application is not explored again."}>
+                <Button variant="primary" size="lg" icon={Sparkles} loading={busy === "create"} disabled={total === 0 || busy !== ""} onClick={() => void create()} tip={total === 0 ? "Nothing is included. Tick at least one kind of test under Edit the plan." : "Creates the tests left in the plan and runs the checks. The test cases are written, not run: you run them when you choose. The application is not explored again."}>
                     {busy === "create" ? "Starting…" : "Create the tests"}
                 </Button>
                 <Button variant="ghost" loading={busy === "discard"} disabled={busy !== ""} onClick={() => void discard()} tip="Forgets this plan. Nothing was created and your existing tests stay. Explore again for a new plan.">

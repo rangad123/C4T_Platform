@@ -149,7 +149,7 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
             const w = await call("POST", `/api/projects/${project.id}/test-generation`, "Starting the warm-up exploration", exploration);
             const wj = await finished(w.jobId);
             if (wj.status === "FAILED") throw new Error(`The warm-up exploration failed: ${wj.error ?? "no reason given"}`);
-            const wc = await call("POST", `/api/projects/${project.id}/plans/${w.jobId}/create`, "Creating the warm-up tests", {});
+            const wc = await call("POST", `/api/projects/${project.id}/plans/${w.jobId}/create`, "Creating the warm-up tests", { runTestCases: true });
             await finished(wc.jobId);
             for (const t of (await call("GET", `/api/projects/${project.id}/tests`, "Reading the warm-up tests")) as Array<{ id: string }>) warmTests.add(t.id);
         }
@@ -170,7 +170,7 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
         let covered = 0;
         let repairsFixed = 0;
         if (!o.planOnly) {
-            const created = await call("POST", `/api/projects/${project.id}/plans/${started.jobId}/create`, "Creating the tests", {});
+            const created = await call("POST", `/api/projects/${project.id}/plans/${started.jobId}/create`, "Creating the tests", { runTestCases: true });
             out.createJobId = created.jobId;
             jobIds.push(created.jobId);
             log("  creating and running the tests...");

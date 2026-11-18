@@ -136,6 +136,8 @@ export function ProjectOverview({ id }: { id: string }) {
     const heldCount = list.filter((t) => t.quarantine).length;
     const attention = list.filter((t) => t.validationStatus === "NEEDS_REVIEW" || t.validationStatus === "FAILED_VALIDATION").sort((a, b) => attentionRank(a) - attentionRank(b));
     const validated = list.filter((t) => t.validationStatus === "VALIDATED").length;
+    // Written and never run: the journeys' test cases a plan creates wait for the person's Run.
+    const notRun = list.filter((t) => t.validationStatus === "PENDING").length;
     const active = isActive(job?.status);
     // An exploration that stops at a plan has made no tests: what it shows is the plan, not a result.
     const planStage = job?.planOnly === true;
@@ -188,7 +190,7 @@ export function ProjectOverview({ id }: { id: string }) {
                 {!job && !code && (
                     <div className="card">
                         <EmptyState icon={Sparkles} title="Not explored yet" actions={<LinkButton href={routes.newProject({ project: id })} variant="primary" icon={Sparkles}>Start exploring</LinkButton>}>
-                            Start with the application’s URL. We’ll explore it, create tests and run them.
+                            Start with the application’s URL. We’ll explore it and show you a plan. The test cases it writes run only when you run them.
                         </EmptyState>
                     </div>
                 )}
@@ -226,9 +228,9 @@ export function ProjectOverview({ id }: { id: string }) {
                 {/* The last picture of the Explorer view stays on screen after the exploration (only when this tab was watching). */}
                 {job && !active && <ExplorerWatch job={job} />}
 
-                {job && !active && planStage && (job.status === "FAILED" ? <Result job={job} total={list.length} validated={validated} attention={attention.length} projectId={id} code={code} /> : <><HelpPlace place="plan-preview" /><PlanPreview key={job.jobId} projectId={id} job={job} onChanged={project.reload} /></>)}
+                {job && !active && planStage && (job.status === "FAILED" ? <Result job={job} total={list.length} validated={validated} attention={attention.length} notRun={notRun} projectId={id} code={code} /> : <><HelpPlace place="plan-preview" /><PlanPreview key={job.jobId} projectId={id} job={job} onChanged={project.reload} /></>)}
 
-                {job && settled && <Result job={job} total={list.length} validated={validated} attention={attention.length} projectId={id} code={code} />}
+                {job && settled && <Result job={job} total={list.length} validated={validated} attention={attention.length} notRun={notRun} projectId={id} code={code} />}
 
                 {job && settled && (list.length > 0 || job.status !== "FAILED") && (
                     <div className="card divided" style={{ overflow: "hidden" }}>
@@ -317,7 +319,9 @@ export function ProjectOverview({ id }: { id: string }) {
     );
 }
 
-function Result({ job, total, validated, attention, projectId, code }: { job: NonNullable<ProjectDetail["latestJob"]>; total: number; validated: number; attention: number; projectId: string; /** A code project: nothing offers exploring. */ code: boolean }) {
+const notRunLine = (n: number) => `${plural(n, "test case")} ${n === 1 ? "is" : "are"} written and not run yet: run ${n === 1 ? "it" : "them"} when you choose.`;
+
+function Result({ job, total, validated, attention, notRun = 0, projectId, code }: { job: NonNullable<ProjectDetail["latestJob"]>; total: number; validated: number; attention: number; /** Tests written and not run yet. */ notRun?: number; projectId: string; /** A code project: nothing offers exploring. */ code: boolean }) {
     if (job.mode === "variants") return <VariantsResult job={job} projectId={projectId} />;
     if (job.mode === "environment") return <EnvironmentResult job={job} projectId={projectId} />;
     if (job.mode === "plain") return <PlainResult job={job} projectId={projectId} />;
@@ -388,9 +392,11 @@ function Result({ job, total, validated, attention, projectId, code }: { job: No
                     )
                 }
             >
-                {allGood
+                {allGood && notRun === 0
                     ? `${plural(validated, "test")} created and ${validated === 1 ? "it was" : "all were"} run successfully.`
-                    : `${plural(validated, "test")} passed.${attention > 0 ? " The rest found something worth checking or couldn’t be made reliable." : ""}`}
+                    : allGood
+                      ? `${validated ? `${plural(validated, "test")} passed. ` : ""}${notRunLine(notRun)}`
+                      : `${plural(validated, "test")} passed.${attention > 0 ? " The rest found something worth checking or couldn’t be made reliable." : ""}${notRun ? ` ${notRunLine(notRun)}` : ""}`}
             </Callout>
             {problems.map((e) => (
                 <Callout

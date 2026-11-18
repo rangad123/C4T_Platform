@@ -1,6 +1,6 @@
 /**
  * A project that has a website AND a phone app: one exploration covers both. The website and API part runs first, exactly as before; then the AI explores the
- * phone. The plan carries both, the counts add up, and creating from it makes the checks of both and runs each where it belongs.
+ * phone. The plan carries both, the counts add up, and creating from it makes the checks of both: the API checks run, the phone test cases are written and wait for a Run.
  *
  * Starts a real browser for the website part, so it runs under the browser lock:
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/mobile-explore-mixed.test.ts
@@ -99,7 +99,7 @@ async function finished(jobId: string): Promise<any> {
 }
 
 describe("a website and a phone app in one project", () => {
-    it("plans both, counts both, creates both and runs each where it belongs", async () => {
+    it("plans both, counts both, creates both, and runs the API checks while the phone test cases wait for a Run", async () => {
         const id = (await call("POST", "/api/projects", { name: "Both" })).body.id as string;
         expect((await call("PUT", `/api/projects/${id}/mobile-app`, { appPackage: "com.example.shop" })).status).toBe(200);
         const llm = scriptedPhoneModel([{ tap: "Products" }, { tap: "Product 1" }, { back: true }, { tap: "Cart" }, { finish: true }]);
@@ -130,7 +130,9 @@ describe("a website and a phone app in one project", () => {
         const tests = (await call("GET", `/api/projects/${id}/tests`)).body as Array<{ testId: string; kind: string; validationStatus: string }>;
         const mobile = tests.filter((t) => t.kind === "mobile");
         expect(mobile).toHaveLength(plan.phone.ideas.length);
-        expect(mobile.every((t) => t.validationStatus === "VALIDATED")).toBe(true);
+        // The phone test cases are written, not run (the API checks are run: running is what makes them checks).
+        expect(mobile.every((t) => t.validationStatus === "PENDING")).toBe(true);
+        expect(tests.filter((t) => t.kind !== "mobile").every((t) => t.validationStatus !== "PENDING")).toBe(true);
         expect(tests.length).toBeGreaterThan(mobile.length);
         expect(tests.length).toBe(plan.total);
         // The phone was not explored a second time.

@@ -104,6 +104,13 @@ const newProject = async (name: string, mobile: Record<string, unknown> | null =
     if (mobile) expect((await call("PUT", `/api/projects/${id}/mobile-app`, mobile)).status).toBe(200);
     return id;
 };
+/** A Project Admin approves the AI's draft (drafts never run until approved, review-store.ts). */
+const approve = async (testId: string) => {
+    const v = await call("GET", `/api/tests/${testId}/review/1`);
+    expect(v.status, JSON.stringify(v.body)).toBe(200);
+    const r = await call("POST", `/api/tests/${testId}/review/1/approve`, { seen: v.body.updatedAt });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+};
 const eventsOf = async (jobId: string) => (await call("GET", `/api/test-generation/${jobId}/events`)).body as Array<{ kind: string; message: string; level?: string }>;
 const testsOf = async (projectId: string) => (await call("GET", `/api/projects/${projectId}/tests`)).body as Array<{ id: string; testId: string; title: string; validationStatus: string; validationReason: string | null; kind: string }>;
 
@@ -250,7 +257,7 @@ describe("explore a phone app, approve the plan, create and run the tests", () =
         expect(wordedPrompts[0]).not.toContain(PASSWORD);
     });
 
-    it("creates exactly the planned tests, minus the idea left out, and runs them on the phone stand-in", async () => {
+    it("creates exactly the planned tests, minus the idea left out, without running them; the person's Run runs them on the phone stand-in", async () => {
         const leave = plan.phone.ideas.find((i: { family: string }) => i.family === "back" || i.family === "lists" || i.family === "navigation").id as string;
         const expected = plan.phone.ideas.filter((i: { id: string }) => i.id !== leave);
         const created = await call("POST", `/api/projects/${projectId}/plans/${planJob}/create`, { excludeIdeas: [leave] });
@@ -264,9 +271,20 @@ describe("explore a phone app, approve the plan, create and run the tests", () =
         expect(tests).toHaveLength(expected.length);
         expect(tests.every((t) => t.kind === "mobile" && /^MOB-\d{3}$/.test(t.testId))).toBe(true);
         expect(tests.map((t) => t.title).sort()).toEqual(expected.map((i: { title: string }) => i.title).sort());
-        // They really ran, through the existing phone runner, and passed.
-        for (const t of tests) expect(t.validationStatus, `${t.testId} ${t.validationReason ?? ""}`).toBe("VALIDATED");
+        // Creating writes the test cases and runs none of them (the Test Case Generation Agent only writes them).
+        for (const t of tests) expect(t.validationStatus, t.testId).toBe("PENDING");
         expect(job.status).toBe("COMPLETED");
+        expect(job.testsValidated).toBe(0);
+        expect(job.progress.validation).toBe("skipped");
+        for (const t of tests) expect((await call("GET", `/api/tests/${t.id}`)).body.executions, t.testId).toEqual([]);
+        expect((await eventsOf(created.body.jobId)).map((e: { kind: string }) => e.kind)).toContain("test_cases_not_run");
+        // The person approves the AI's drafts and runs them: they really run, through the existing phone runner, and pass.
+        for (const t of tests) await approve(t.id);
+        const run = await call("POST", `/api/projects/${projectId}/runs`, {});
+        expect(run.status, JSON.stringify(run.body)).toBe(202);
+        const ran = await finished(run.body.jobId);
+        expect(ran.status).toBe("COMPLETED");
+        for (const t of await testsOf(projectId)) expect(t.validationStatus, `${t.testId} ${t.validationReason ?? ""}`).toBe("VALIDATED");
         // Counts per family in the plan are the counts of what was created (the same function made both).
         const detailTags = await Promise.all(tests.map(async (t) => ((await call("GET", `/api/tests/${t.id}`)).body.spec.tags as string[])));
         for (const f of plan.families as Array<{ id: string; label: string; effective: number }>) {
@@ -277,7 +295,7 @@ describe("explore a phone app, approve the plan, create and run the tests", () =
         expect(tagCount("ai-explored")).toBe(expected.length);
         expect(tagCount("signIn")).toBe(expected.filter((i: { family: string }) => i.family === "signIn").length);
         expect(job.testsGenerated).toBe(expected.length);
-        expect(job.testsValidated).toBe(expected.length);
+        expect(ran.testsValidated).toBe(expected.length);
         const seen = JSON.parse(fs.readFileSync(OBSERVED, "utf8")) as { env: Record<string, string> };
         expect(seen.env.MOBILE_APP_PACKAGE).toBe(PKG);
         // The test account reaches the test run through its environment (never through a script).
@@ -331,7 +349,7 @@ describe("explore a phone app, approve the plan, create and run the tests", () =
 });
 
 describe("a plan approved when no phone can run the tests", () => {
-    it("writes the tests, keeps them as not run with the reason, and never reports them as passing", async () => {
+    it("writes the tests without running them; the person's Run says why they cannot run, and never reports them as passing", async () => {
         const project = await newProject("No runner later");
         const { jobId } = await explorePlan(project, shopTour());
         const toolchain = process.env.TAQWRIGHT_HOME;
@@ -340,12 +358,21 @@ describe("a plan approved when no phone can run the tests", () => {
             const created = await call("POST", `/api/projects/${project}/plans/${jobId}/create`, {});
             expect(created.status, JSON.stringify(created.body)).toBe(202);
             const job = await finished(created.body.jobId);
-            expect(job.status).toBe("PARTIALLY_COMPLETED");
-            expect(job.error).toMatch(/were not run: .*taqwright install/);
+            // Creating never tries to run them, so the missing phone is not a problem yet.
+            expect(job.status).toBe("COMPLETED");
             const tests = await testsOf(project);
             expect(tests.length).toBeGreaterThan(3);
             expect(tests.every((t) => t.validationStatus === "PENDING")).toBe(true);
             expect(job.testsValidated).toBe(0);
+            // The person's Run is where the missing phone is said, with the reason; nothing is reported as passing.
+            for (const t of tests) await approve(t.id);
+            const run = await call("POST", `/api/projects/${project}/runs`, {});
+            expect(run.status, JSON.stringify(run.body)).toBe(202);
+            const ran = await finished(run.body.jobId);
+            expect(ran.status).not.toBe("COMPLETED");
+            expect(JSON.stringify(ran.error) + JSON.stringify(await eventsOf(run.body.jobId))).toMatch(/taqwright install/);
+            expect((await testsOf(project)).some((t) => t.validationStatus === "VALIDATED")).toBe(false);
+            expect(ran.testsValidated).toBe(0);
         } finally {
             setEnv({ TAQWRIGHT_HOME: toolchain });
         }

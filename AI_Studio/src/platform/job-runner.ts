@@ -494,6 +494,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 openApiUrl: o.openApiUrl,
                 apiBaseUrl: o.apiBaseUrl,
                 ...(o.functionalTests === false ? { functionalTests: false } : {}),
+                ...(o.runTestCases === false ? { runTestCases: false } : {}),
                 accessibility: o.accessibility,
                 healthChecks: o.healthChecks,
                 securityChecks: o.securityChecks,
@@ -571,11 +572,14 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             return;
         }
         const total = summary.testsGenerated;
+        // Test cases this job wrote and was told not to run (runTestCases false): still "Not run yet", here or on a runner.
+        const leftToRun = () => (o.runTestCases === false ? repo.listTests(job.projectId, { jobId: job.id, validationStatus: "PENDING" }).length : 0);
         if (total === 0) {
             await finish("FAILED", summary.errors[0] ?? (o.mode === "variants" ? "None of the selected tests can be checked on other browsers" : validateOnly ? "No executable tests to validate" : "No tests could be generated for this application"));
-        } else if (summary.testsValidated === total && summary.errors.length === 0) {
+        } else if (summary.testsValidated + leftToRun() === total && summary.errors.length === 0) {
             // A stage that errored (e.g. no LLM for web planning) means part of the job did not run:
-            // never report COMPLETED then, even if every test that *was* produced validated.
+            // never report COMPLETED then, even if every test that *was* produced validated. Test cases left for the person to run
+            // (runTestCases false) were never meant to run here: they do not make it partial.
             await finish("COMPLETED");
         } else {
             const note = summary.errors.length ? summary.errors.join(" | ").slice(0, 900) : undefined;

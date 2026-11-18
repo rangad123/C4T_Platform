@@ -20,7 +20,8 @@ import { testingAgentsOf } from "./testing-agents.js";
  * runs nothing, see platform/job-runner.ts). These routes read that plan back and confirm it:
  *   GET    /api/projects/:id/plans/:jobId          what was found, the test ideas, and how many tests each kind of check would create
  *   POST   /api/projects/:id/plans/:jobId/create   create the tests from the plan with the choices made (a normal generation job that starts
- *                                                  from the plan: nothing is explored again)
+ *                                                  from the plan: nothing is explored again). The journeys' test cases are written and
+ *                                                  not run (runTestCases false); the checks run.
  *   DELETE /api/projects/:id/plans/:jobId          forget a plan that will not be used
  * Callers that never pass `plan` (the CLI, the MCP server, schedules, the old form) behave exactly as before.
  */
@@ -46,6 +47,11 @@ const CreateBody = z
          * excludeIdeas. Off by default: a plan is created once.
          */
         continueStopped: z.boolean().optional(),
+        /**
+         * true: the journeys' test cases also run in this job, as they did before (the evaluation harness, which measures them). Absent
+         * or false: they are written and not run. The web app never sends it.
+         */
+        runTestCases: z.boolean().optional(),
     })
     .strict();
 
@@ -175,7 +181,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
 
         // Who started the plan is not who creates its tests: the person acting now is recorded (createJob), so their AI key and runner are used.
         const { planOnly: _p, fromPlan: _f, excludeIdeas: _e, requirementsText: _r, startedBy: _s, ...kept } = job.options;
-        const { targets: _t, excludeIdeas: _x, continueStopped: _cs, ...switches } = body;
+        const { targets: _t, excludeIdeas: _x, continueStopped: _cs, runTestCases: runCases, ...switches } = body;
         const asked: JobOptions = {
             ...kept,
             ...Object.fromEntries(Object.entries(switches).filter(([, v]) => v !== undefined)),
@@ -204,10 +210,12 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         refuseUnlessRunsStart(ctx.p, EXPLORING_OFF_MESSAGE); // tests switched off on this server: nothing is queued
         await ctx.assertNoActiveJob(id);
         // The application keeps the generation settings and the sign-in details of the plan, minus the one-off plan fields.
-        const { fromPlan: _a, excludeIdeas: _b, startedBy: _c, ...config } = options;
+        const { fromPlan: _a, excludeIdeas: _b, startedBy: _c, runTestCases: _rt, ...config } = options;
         const keptMobile = planned.config.mobile;
         const appId = repo.createApplication(id, planned.url, keptMobile ? { ...config, mobile: keptMobile } : config, planned.credentials);
-        const created = await repo.createJob(id, appId, options);
+        // The Test Case Generation Agent only writes the test cases: they are run when the person runs them (POST /runs), not here
+        // unless the caller asks (runTestCases). The checks of the other agents run as part of the creation.
+        const created = await repo.createJob(id, appId, { ...options, runTestCases: runCases === true });
         if (narrowed.dropped.length) repo.addEvent(created.id, { stage: "planning", kind: "agent_checks_dropped", level: "warn", message: droppedChecksNote(narrowed.dropped), data: { dropped: narrowed.dropped } });
         return reply.code(202).send({ jobId: created.id, status: created.status });
     });

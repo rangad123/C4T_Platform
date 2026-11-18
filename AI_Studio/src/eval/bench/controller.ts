@@ -245,7 +245,7 @@ async function continueApp(client: PlatformClient, host: BenchAppHost, app: Benc
     const exclude = [...new Set([...made, ...decided])];
     log(`  continuing: ${made.size} ideas already made, ${decided.size} skipped by the stopped creation`);
     let stopped: string | undefined;
-    const created = await client.call("POST", `/api/projects/${projectId}/plans/${jobs.planJobId}/create`, { continueStopped: true, excludeIdeas: exclude });
+    const created = await client.call("POST", `/api/projects/${projectId}/plans/${jobs.planJobId}/create`, { continueStopped: true, excludeIdeas: exclude, runTestCases: true });
     if (created.status === 400 && /Nothing is (left|selected) to create/.test(String(created.body?.error ?? ""))) log("  every planned idea is made");
     else {
         const job = ok(created, "Continuing the creation");
