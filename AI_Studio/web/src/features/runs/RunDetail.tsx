@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronRight, History } from "lucide-react";
-import type { ProjectDetail } from "../../api";
+import { projectShape, type ProjectDetail } from "../../api";
 import { usePage } from "../../components/Shell";
 import { TechnicalDetails } from "../../components/TechnicalDetails";
 import { Badge, Callout, EmptyState, ErrorState, ListSkeleton, PageHeader } from "../../components/ui";
@@ -18,6 +18,7 @@ import { RunStrip } from "./RunStrip";
 import { RunTestList } from "./RunStrip";
 import { followsRunner, liveCounts, LiveRunPanel, useIsMine, useLiveRun } from "./LiveRun";
 import { StopRun } from "./StopDialog";
+import { RunCoverage, useCoverage } from "./ObjectivesPanel";
 import { Elapsed, RelTime } from "./RunTime";
 import { announceRunsChanged, ranSentence, runTitle, startedByText, STATE_WORD, stoppedLine, useRunAnswer, whereOf, type RunState } from "./runs";
 import { BadgeKey, keyEntries } from "../../components/Tooltip";
@@ -35,6 +36,12 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
     // A run on a runner: its phase, steps, screenshots and log, rebuilt from the run's stored events (so a refresh loses nothing).
     const runner = useLiveRun(jobId, followsRunner(a?.job), Boolean(a?.active), run.stream);
     const mine = useIsMine(a?.job ?? {});
+    // Exploring by objectives (an AI agent project's exploration): its finished record, once the run is over.
+    const explored = a !== undefined && (a.job.mode === "generate" || a.job.mode === undefined) && !a.job.planOnly;
+    const coverage = useCoverage(id, jobId, explored && !a.active);
+    const explores = explored && projectShape(project.data).testingModes.includes("agent");
+    // Stop only for a person who may run tests here (the server refuses anyone else); a viewer sees the run without it.
+    const canStop = project.data !== undefined && (!project.data.access || project.data.access.permissions.includes("ai_studio.tests.run"));
     useDocumentTitle(a ? `${runTitle(a.job)} · ${name ?? "Runs"}` : "Run");
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Runs", href: routes.runs(id) }, { label: "Run" }], nav: "projects" });
 
@@ -71,7 +78,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                         <span>{relativeTime(job.startedAt ?? job.createdAt)}</span>
                     </>
                 }
-                actions={active ? <StopRun job={{ jobId, projectId: id, mode: job.mode }} size="md" onRequested={announceRunsChanged} /> : undefined}
+                actions={active && canStop ? <StopRun job={{ jobId, projectId: id, mode: job.mode }} size="md" onRequested={announceRunsChanged} /> : undefined}
             />
             <ProjectTabs id={id} active="runs" count={project.data?.test_count} />
 
@@ -162,7 +169,9 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                 {/* What it found and what it reused from the last exploration, and why (sheet #8). */}
                 {exploration && !(job.targets?.includes("mobile") ?? false) && <ExplorerKnowledge projectId={id} jobId={job.jobId} active={active} />}
 
-                {followsRunner(job) && <LiveRunPanel projectId={id} job={job} active={active} live={runner.live} loaded={runner.loaded} planned={c.planned} answer={a} />}
+                {followsRunner(job) && <LiveRunPanel projectId={id} job={job} active={active} live={runner.live} loaded={runner.loaded} planned={c.planned} answer={a} objectives={explored ? { explores, canStop, ...(coverage.data ? { coverage: coverage.data } : {}) } : undefined} />}
+
+                {explored && !active && <RunCoverage coverage={coverage} explores={explores} />}
 
                 {!job.cancelled && problems.map((e) => (
                     <Callout key={e.title + e.body} tone={nothingRan(job) ? "info" : job.status === "FAILED" ? "danger" : "warning"} title={e.title}>
