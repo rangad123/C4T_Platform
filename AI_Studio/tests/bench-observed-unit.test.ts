@@ -192,7 +192,7 @@ describe("bench-report --observed <folder> (read-only)", () => {
 
 /** A candidate finding as the engine stores it on the test, typed by what the benchmark reads (no engine import: src/eval tests also run on
  *  the baseline tree, whose engine has no explore/finding.ts). */
-const complete = (): Parameters<typeof evidenceGaps>[0] => ({
+const complete = () => ({
         objective: { id: "obj-1", kind: "rule", source: "R-1", operator: "invalid_input" },
         actions: { stepCount: 6 },
         expected: { text: "The total is the sum of the lines.", source: "R-1" },
@@ -203,8 +203,8 @@ const complete = (): Parameters<typeof evidenceGaps>[0] => ({
         confidence: "high",
         fingerprint: "a".repeat(64),
         modelVersion: "mv-1",
-        replays: [],
-    }) as Parameters<typeof evidenceGaps>[0];
+        replays: [] as unknown[],
+    });
 
 describe("E7: what a candidate finding carries", () => {
     it("a complete finding lacks nothing", () => {
