@@ -267,6 +267,7 @@ export default defineConfig({
             "tests/bench-understanding-run-unit.test.ts",
             "tests/explore-loop-unit.test.ts",
             "tests/explore-objectives-unit.test.ts",
+            "tests/explore-pursuits-unit.test.ts",
             "tests/explore-coverage-unit.test.ts",
             "tests/explore-perturb-unit.test.ts",
             "tests/bench-objectives-score-unit.test.ts",
