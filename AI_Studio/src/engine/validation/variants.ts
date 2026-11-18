@@ -23,6 +23,7 @@ import type { GenerationSink, GenerationSummary, TestHandle } from "../orchestra
 import type { TestSpec } from "../spec/schema.js";
 import { hasScreenshotStep } from "../visual/baseline.js";
 import type { RunEnv, RunnerProject, ScriptRun } from "./runner.js";
+import { laneRounds, sharedLaneCount, testAccountLane } from "./lanes.js";
 
 // ── The fixed set of variants ───────────────────────────────────────────────
 
@@ -268,11 +269,19 @@ export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, te
             groups.set(key, g);
         }
         const byKey = new Map<string, ScriptRun>();
-        for (const g of groups.values()) {
-            const projects: RunnerProject[] = g.variants.map((v) => ({ name: v, device: VARIANTS[v].device, viewport: VARIANTS[v].viewport, ...(VARIANTS[v].use ? { use: VARIANTS[v].use } : {}) }));
-            // Firefox and WebKit are heavy: never more than two at once on a small machine.
-            const runs = await (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts: g.tests.map(script), ...(deps.helpers?.length && g.tests.some((t) => t.custom) ? { helpers: deps.helpers } : {}) }, { run: deps.env }, { workers: Math.max(1, Math.min(deps.workers, 2)), signal: ctx.signal, projects });
+        const project = (v: ExtraVariantId): RunnerProject => ({ name: v, device: VARIANTS[v].device, viewport: VARIANTS[v].viewport, ...(VARIANTS[v].use ? { use: VARIANTS[v].use } : {}) });
+        // Firefox and WebKit are heavy: never more than two at once on a small machine.
+        const workers = Math.max(1, Math.min(deps.workers, 2));
+        const runOn = async (tests: VariantTest[], variants: ExtraVariantId[]) => {
+            const runs = await (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts: tests.map(script), ...(deps.helpers?.length && tests.some((t) => t.custom) ? { helpers: deps.helpers } : {}) }, { run: deps.env }, { workers, signal: ctx.signal, projects: variants.map(project) });
             for (const r of runs) byKey.set(`${r.testId}|${r.variant}`, r);
+        };
+        for (const g of groups.values()) {
+            // Tests that sign in as one account never run at the same time (./lanes.ts), on one browser or two: with such a test in the
+            // group, each variant runs on its own, in rounds of at most one test per account.
+            const lanes = g.tests.map((t) => testAccountLane(t));
+            if (lanes.every((l) => l === undefined) || (g.variants.length === 1 && !sharedLaneCount(lanes))) await runOn(g.tests, g.variants);
+            else for (const v of g.variants) for (const round of laneRounds(lanes, workers)) await runOn(round.map((i) => g.tests[i]!), [v]);
         }
         for (const t of eligible) {
             for (const v of runnable) {

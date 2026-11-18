@@ -48,6 +48,7 @@ import { createTestData } from "./testdata/generate.js";
 import { parseRequirements } from "./requirements/parse.js";
 import { assertCredentialsStayHome } from "./spec/credential-origin.js";
 import { TestSpecSchema, type Scenario, type TestSpec } from "./spec/schema.js";
+import { scenarioAccountLane } from "./validation/lanes.js";
 import { analyzeApplication } from "./understanding/analyzer.js";
 import type { ApiEndpointModel, AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
@@ -802,11 +803,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (scenarios.length) {
             // One lane per account: scenarios that sign in as the same account share its state on the server (cart, discount,
             // profile), so they are written one at a time; signed-out ones and other accounts' run beside them, up to CONCURRENCY.
-            const laneOf = (scenario: Scenario): string | undefined => {
-                const role = roleCredentials(scenario, req.roles);
-                if (role) return `role:${role.name.toLowerCase().replace(/-/g, "_")}`;
-                return scenario.requiresAuth && creds && authState.loggedIn ? "main" : undefined;
-            };
+            const laneOf = (scenario: Scenario): string | undefined => scenarioAccountLane(scenario, roleCredentials(scenario, req.roles)?.name, Boolean(creds && authState.loggedIn));
             const sharing = scenarios.filter((s, _, all) => laneOf(s) !== undefined && all.filter((o) => laneOf(o) === laneOf(s)).length > 1).length;
             if (sharing) ctx.emit({ stage: "generation", kind: "account_lanes", message: `${sharing} scenarios that sign in as the same account are written one at a time` });
             const results = await mapLanes(scenarios, ctx.config.CONCURRENCY, laneOf, async (scenario) => {
@@ -1189,8 +1186,6 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     // A new test that passed runs the level's number of times more; any failure makes it flaky.
                     repeatPasses: levelSettings(req).repeatPasses,
                     workers: ctx.config.CONCURRENCY,
-                    // Saved tests of one account replay one at a time, as they were written.
-                    accountLanes: true,
                     cleanup: req.cleanup,
                 },
                 pending,
