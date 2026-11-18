@@ -232,6 +232,11 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
         const { understandingMain } = await import("./understanding/run.js");
         return understandingMain(argv, deps);
     }
+    // The repeat-run benchmark (repeat/run.ts): a cold run and a repeat run per project, with reuse and caches on against off.
+    if (modeAt >= 0 && argv[modeAt + 1] === "repeat") {
+        const { repeatMain } = await import("./repeat/run.js");
+        return repeatMain(argv, deps);
+    }
     const log = deps.log ?? ((s: string) => console.log(s));
     const env = deps.env ?? process.env;
     const scripted = Boolean(deps.makeLlm);
