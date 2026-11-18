@@ -328,6 +328,21 @@ describe("runExploration: every stop reason is reachable (E6)", () => {
         expect(r.outcomes.find((o) => o.objectiveId === "b")!.reason).toMatch(/browser closed/);
     });
 
+    // Row 186: a test writer that stopped before finishing is its own outcome, not a broken environment and not a finished pursuit.
+    it("a pursuit whose test writer stopped is recorded as such, with its reason, and the session goes on", async () => {
+        const stopped = async (): Promise<ObjectiveRun> => ({ status: "writer_stopped", reason: "The test writer stopped before finishing the test." });
+        const fake = world();
+        const r = await run([obj("a", 5, { script: stopped }), obj("b", 4, { script: stopped }), obj("c", 3, { script: stopped }), obj("d", 1)], { instabilityLimit: 2 }, fake);
+        expect(r.stopReason).toBe("objectives_done");
+        expect(fake.w.order.filter((x) => x !== "reset")).toEqual(["a", "b", "c", "d"]);
+        expect(r.outcomes.map((o) => [o.objectiveId, o.status, o.reason])).toEqual([
+            ["a", "writer_stopped", "The test writer stopped before finishing the test."],
+            ["b", "writer_stopped", "The test writer stopped before finishing the test."],
+            ["c", "writer_stopped", "The test writer stopped before finishing the test."],
+            ["d", "completed", "Pursued to the end."],
+        ]);
+    });
+
     it("instability: a success in between resets the count", async () => {
         const fail = async (): Promise<ObjectiveRun> => ({ status: "environment_failure", reason: "x" });
         const r = await run([obj("a", 5, { script: fail }), obj("b", 4, { script: fail }), obj("c", 3), obj("d", 2, { script: fail }), obj("e", 1, { script: fail })], { instabilityLimit: 3 });

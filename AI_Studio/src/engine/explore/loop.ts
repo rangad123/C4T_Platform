@@ -59,9 +59,11 @@ export interface ObjectiveContext {
 export type ObjectiveRun<R = unknown> =
     | { status: "completed"; result?: R }
     | { status: "environment_failure"; reason: string }
-    | { status: "unsafe"; reason: string };
+    | { status: "unsafe"; reason: string }
+    /** The test writer stopped before it finished (a plain reply, no finish): the objective was not finished, the environment is fine. */
+    | { status: "writer_stopped"; reason: string; result?: R };
 
-export type OutcomeStatus = "completed" | "stopped" | "environment_failure" | "unsafe" | "interrupted" | "skipped" | "not_reached";
+export type OutcomeStatus = "completed" | "stopped" | "writer_stopped" | "environment_failure" | "unsafe" | "interrupted" | "skipped" | "not_reached";
 
 export interface ObjectiveOutcome<R = unknown> {
     objectiveId: string;
@@ -324,7 +326,7 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
             outcome.status = "environment_failure";
             outcome.reason = clip(run.reason);
             environmentFailure(outcome.reason);
-        } else if (run.status !== "completed") {
+        } else if (run.status !== "completed" && run.status !== "writer_stopped") {
             outcome.status = "environment_failure";
             outcome.reason = "The objective run returned no recognisable result.";
             environmentFailure(outcome.reason);
@@ -338,6 +340,9 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
             } else if (loopRefusal) {
                 outcome.status = "stopped";
                 outcome.reason = loopRefusal;
+            } else if (run.status === "writer_stopped") {
+                outcome.status = "writer_stopped";
+                outcome.reason = clip(run.reason);
             }
         }
         controller.abort();

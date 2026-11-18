@@ -27,6 +27,7 @@ import { loadConfig } from "../src/config.js";
 import { CandidateFindingSchema, findingFingerprint } from "../src/engine/explore/finding.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
+import { WRITER_STOPPED } from "../src/engine/web/author.js";
 import { AppIntelStore } from "../src/platform/app-intel-store.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -152,6 +153,16 @@ async function explore(projectId: string, objectivePursuits = 0) {
     // Every AI call of the job, counted: understanding, planning, the three scripted agent turns, the author's defect verdicts and the
     // objective stage's pursuits (see above) and the analysis after the exploration. The independence check and the finding add none.
     expect(events.filter((e) => e.kind === "objectives_planned").map((e) => e.data?.pursuits)).toEqual(objectivePursuits ? [objectivePursuits] : []);
+    // Row 186: each pursuit's test writer answered "done" without finishing, so each says the writer stopped (not that the step budget ran out).
+    expect(events.filter((e) => e.kind === "objective_not_written").map((e) => e.message.replace(/^.*?: /, ""))).toEqual(Array<string>(objectivePursuits).fill(`no test was saved (${WRITER_STOPPED}).`));
+    if (objectivePursuits) {
+        // ...and the coverage record lists their objectives as not finished for that reason, not as done.
+        const cov = await call("GET", `/api/projects/${projectId}/jobs/${queued.body.jobId}/coverage`);
+        expect(cov.status, JSON.stringify(cov.body)).toBe(200);
+        const statuses = (cov.body.coverage.unexplored as Array<{ status: string }>).map((u) => u.status);
+        expect(statuses.length).toBeGreaterThan(0);
+        for (const st of statuses) expect(st).toBe(`not finished: ${WRITER_STOPPED}`);
+    }
     expect(calls).toEqual(["object:analysis", "object:planning", "agent", "agent", "agent", "text:review", "text:review", "text:review", ...Array<string>(objectivePursuits).fill("agent"), "object:analysis"]);
     return { status: job!.status, test: tests[0]!, events };
 }
