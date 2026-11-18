@@ -86,7 +86,8 @@ export async function exploreOnRunner(
     try {
         return await waitForExplore(svc, taskId, job, mode, o.emit, signal);
     } catch (e) {
-        stopped = signal.aborted;
+        // A person's stop may reach the runner (its calls refused) before the job's signal: either way it is a stop.
+        stopped = signal.aborted || o.deps.repo.isCancelRequested(job.id);
         throw e;
     } finally {
         if (signal.aborted || svc.draining) svc.store.requestCancel(taskId);

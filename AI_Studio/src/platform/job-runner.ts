@@ -587,7 +587,9 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             await finish("PARTIALLY_COMPLETED", note);
         }
     } catch (err) {
-        const cancelled = abort.signal.aborted && repo.isCancelRequested(job.id);
+        // A runner whose calls were refused because the person stopped the job (agent-services.ts exploreTask) may end its task before the
+        // lease beat aborts the job: that is the stop too.
+        const cancelled = (abort.signal.aborted || err instanceof RunnerAgentError) && repo.isCancelRequested(job.id);
         const msg = cancelled ? "Cancelled" : (overTime ?? (err instanceof Error ? err.message : String(err)));
         emit({ stage: "orchestration", kind: cancelled ? "job_cancelled" : "job_failed", level: cancelled ? "warn" : "error", message: msg });
         // The job's writes so far, this event included, are stored before any test is put back or the status changes.

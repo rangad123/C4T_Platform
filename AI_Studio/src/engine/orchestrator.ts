@@ -578,6 +578,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 }
                 await sink.phase("PLANNING", "planning", "done");
             } catch (err) {
+                // Stopped while reading or planning: that is a stop, not a failed stage (the job ends cancelled, and a continue carries on).
+                if (ctx.signal?.aborted) throw err;
                 const msg = err instanceof Error ? err.message : String(err);
                 // A reached AI limit is reported in its own plain words (see engine/llm/usage.ts), not as a failure of the analysis.
                 if (analysed) planningFailed = msg;
@@ -623,6 +625,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         /** What each new test was created with, so later additions (its strength) keep the rest. */
         const metas = new Map<string, Record<string, unknown>>();
         const persistNew = async (spec: TestSpec, framework: Framework, validation: "PENDING" | "NEEDS_REVIEW", reason?: string, meta?: Record<string, unknown>) => {
+            // Stopped: nothing more is created (the authoring agents and the checks below all come through here).
+            throwIfAborted(ctx.signal);
             // Stored sign-in details only go to the application's own site: refused before anything is created.
             assertCredentialsStayHome(spec, renderCtx);
             // Which model version of the application the test was made from, when the exploration had one.
@@ -694,6 +698,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     throw err;
                 }
             });
+            // Stopped while writing: the ideas the stop came before were not skipped or failed, they were not reached (a continue writes them).
+            throwIfAborted(ctx.signal);
             for (const r of results) {
                 if (!r.ok) {
                     await sink.counters({ scenariosSkipped: 1 }, true);

@@ -702,6 +702,9 @@ export class AgentService {
         if (!attemptId || !t.attemptId) throw new HttpError(409, "An exploration's calls must name their attempt (x-attempt-id).", { code: SUPERSEDED });
         this.assertAttempt(t, attemptId);
         if (t.status !== "running" || t.cancelRequested) throw new HttpError(409, "The platform no longer expects this exploration. Stop it.", { code: SUPERSEDED });
+        // A person stopped the job: nothing more is asked of the AI or saved for it from the moment they did, not only once the job's next
+        // lease beat has passed the stop on to the task (until then the runner's child would go on writing tests).
+        if (this.p.repo.isCancelRequested(t.jobId)) throw new HttpError(409, "This exploration was stopped. Stop it.", { code: SUPERSEDED });
         return { taskId: t.id, attempt: t.attempt, jobId: t.jobId, projectId: t.projectId, agentId: t.agentId! };
     }
 
