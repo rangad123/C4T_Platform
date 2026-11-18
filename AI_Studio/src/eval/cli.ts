@@ -46,7 +46,7 @@ export const USAGE = `Usage: node scripts/eval.mjs [options]
   --warm                 with --compare: explore and create each entry once first, not measured, so unchanged pages can be reused
 Environment: AITP_EVAL_URL and AITP_EVAL_API_KEY to use a running platform instead of starting one (not with --compare).
 The seeded-defect benchmark: node scripts/eval.mjs bench --help
-Observed vs captured of finished results: node scripts/eval.mjs bench-report --help`;
+Observed vs fails on the seeded app, of finished results: node scripts/eval.mjs bench-report --help`;
 
 interface Args {
     corpus: string;

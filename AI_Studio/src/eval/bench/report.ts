@@ -1,6 +1,6 @@
 /** The benchmark result as a short Markdown report (written beside the JSON). Numbers only from the result itself. */
 import type { EvalRun } from "../run.js";
-import { observedOf, seriesOf, type Observed } from "./observed.js";
+import { observedOf, seriesOf, type Observed, type ObservedKind } from "./observed.js";
 import type { Benchmark } from "./schema.js";
 
 const pct = (v: number | null) => (v === null ? "n/a" : `${Math.round(v * 1000) / 10}%`);
@@ -44,25 +44,28 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
     return out.join("\n");
 }
 
+/** The bench's own kinds as the report names them: "captured" here is the bench's replay verdict, not the engine's `capture` field (row 213). */
+const KIND_LABEL: Record<ObservedKind, string> = { captured: "fails on the seeded app", observed_only: "observed only", false_positive: "false positive", unverified: "unverified" };
+
 const ofText = (r: { n: number; of: number; rate: number | null }) => `${r.n} of ${r.of}${r.rate === null ? "" : ` (${pct(r.rate)})`}`;
 
 /**
- * The "Observed vs captured" section (definitions in observed.ts): per trial the kinds, E1 and E2 with their denominators and every finding;
+ * The "Observed vs fails on the seeded app" section (definitions in observed.ts): per trial the kinds, E1 and E2 with their denominators and every finding;
  * with more than one trial, E1 and E2 as median and range.
  */
 export function observedMarkdown(trials: Array<{ name: string; observed: Observed; notes?: string[] }>): string {
-    const out: string[] = ["## Observed vs captured", ""];
+    const out: string[] = ["## Observed vs fails on the seeded app", ""];
     for (const { name, observed: o, notes } of trials) {
         if (trials.length > 1) out.push(`### ${name}`, "");
         if (notes?.length) out.push(...notes.map((n) => `- Labels: ${n}`), "");
         out.push("| Measure | Value |", "|---|---|");
-        out.push(`| Findings | ${o.rows.length} |`, `| Captured: the saved script fails on the seeded app | ${o.counts.captured} |`, `| Observed only: the author said defect, the replay passed | ${o.counts.observed_only} |`);
+        out.push(`| Findings | ${o.rows.length} |`, `| Fails on the seeded app: the saved script fails there | ${o.counts.captured} |`, `| Observed only: the author said defect, the replay passed | ${o.counts.observed_only} |`);
         out.push(`| False positive | ${o.counts.false_positive} |`, `| Not verified | ${o.counts.unverified} |`);
         out.push(`| E1 capture: author-time findings whose saved script fails on the seeded app | ${ofText(o.e1)} |`, `| E2 replay isolation: of those, scripts that pass on the clean app | ${ofText(o.e2)} |`);
         out.push(`| Clean replay not run (counted as not passing in E2) | ${o.cleanNotRun} |`, `| Author recorded: captured / observed only / not recorded | ${o.authorCapture.captured} / ${o.authorCapture.observed_only} / ${o.authorCapture.unrecorded} |`);
         out.push(`| Defects seen but not captured (person's labels) | ${o.observedDefects.length ? o.observedDefects.join(", ") : "none"}; ${o.observedUnlabelled} observed-only finding(s) unlabelled |`, "");
-        out.push("| App | Finding | Source | Author recorded | Seeded | Clean | Observed vs captured | Label | Objective | E7 missing |", "|---|---|---|---|---|---|---|---|---|---|");
-        for (const r of o.rows) out.push(`| ${r.app} | ${r.testKey} | ${r.source} | ${r.capture ?? "-"} | ${r.seeded} | ${r.clean ?? "-"} | ${r.kind.replace("_", " ")} | ${r.label ?? ""} | ${r.objective ?? "-"} | ${r.missing === undefined ? "-" : [...r.missing, ...(r.notes ?? [])].join(", ") || "none"} |`);
+        out.push("| App | Finding | Source | Author recorded | Seeded | Clean | Bench kind | Label | Objective | E7 missing |", "|---|---|---|---|---|---|---|---|---|---|");
+        for (const r of o.rows) out.push(`| ${r.app} | ${r.testKey} | ${r.source} | ${r.capture ?? "-"} | ${r.seeded} | ${r.clean ?? "-"} | ${KIND_LABEL[r.kind]} | ${r.label ?? ""} | ${r.objective ?? "-"} | ${r.missing === undefined ? "-" : [...r.missing, ...(r.notes ?? [])].join(", ") || "none"} |`);
         out.push("", ...objectivesMarkdown(o));
     }
     if (trials.length > 1) {

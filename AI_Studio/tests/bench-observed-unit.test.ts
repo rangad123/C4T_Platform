@@ -111,7 +111,11 @@ describe("what each finding is, observed vs captured", () => {
 
     it("the Markdown section names the counts and the denominators", () => {
         const md = observedMarkdown([{ name: "trial-1", observed: observedOf(bench(FINDINGS)) }]);
-        expect(md).toContain("## Observed vs captured");
+        // The bench's own kind is named for what it measured, not the engine's capture field (row 213); "Author recorded" keeps that.
+        expect(md).toContain("## Observed vs fails on the seeded app");
+        expect(md).not.toMatch(/Captured/);
+        expect(md).toContain("| Fails on the seeded app: the saved script fails there | 2 |");
+        expect(md).toMatch(/\| bench-shop \| WEB-001 \| authoring \| captured \| failed \| passed \| fails on the seeded app \|\s+\|/);
         expect(md).toContain("| E1 capture: author-time findings whose saved script fails on the seeded app | 3 of 6 (50%) |");
         expect(md).toContain("| E2 replay isolation: of those, scripts that pass on the clean app | 1 of 3 (33.3%) |");
         expect(md).toMatch(/\| bench-shop \| WEB-003 \| authoring \| observed_only \| passed \| - \| observed only \| BS-02 \|/);

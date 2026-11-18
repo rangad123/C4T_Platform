@@ -556,7 +556,7 @@ export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, dep
 
 export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --observed <results folder or file> [<more>...] [--labels <file>]
        node scripts/eval.mjs bench-report --migrate-labels <old labels file> --result <results file> --to <new file>
-  Prints the "Observed vs captured" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
+  Prints the "Observed vs fails on the seeded app" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
   Read-only: no platform, no app, no AI; nothing is written.
   --labels <file>   labels bound to their trial (src/eval/bench/labels.ts, format 2) for findings the replays could not verify;
                     a label made for another trial is ignored and the report says so
