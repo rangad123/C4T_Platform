@@ -328,9 +328,9 @@ const SLOT_STEPS: ReadonlyMap<number, (raw: DatabaseSync) => void> = new Map([[6
 
 /**
  * Slots that were reserved before their SQL existed: the slot number and a table only that slot creates (and no later slot drops: slot 42's
- * runner_access was dropped by 57, so 42 is told by device_reservations, which 57 makes again).
+ * runner_access was dropped by 57, so 42 is told by device_reservations, which 57 makes again), or with `column`, a column only it adds.
  */
-const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
+const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string; column?: string }> = [
     { slot: 14, table: "runbooks" },
     { slot: 22, table: "custom_tests" },
     { slot: 23, table: "spec_versions" },
@@ -347,6 +347,9 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
     // After 51: it may rebuild the agents table that 53 adds a column to.
     { slot: 53, table: "agent_task_events" },
     { slot: 54, table: "test_version_deps" },
+    // Adds only columns, so it is told by one of them: a database opened while 66 was reserved (Phase 3 before the merge) lacks it.
+    { slot: 66, table: "projects", column: "ai_provider" },
+    // Main recorded 67 as `-- reserved` before candidate findings joined it, so a database main opened lacks the table.
     { slot: 67, table: "candidate_findings" },
 ];
 
@@ -400,8 +403,8 @@ export class Db {
      * slots this open still runs (`recorded`: the version the database had). A slot not recorded yet runs in order anyway.
      */
     private repairSkippedMigrations(recorded: number): void {
-        for (const { slot, table } of LATE_FILLED_SLOTS) {
-            if (slot > recorded || this.dialect.tableExists(this.raw, table)) continue;
+        for (const { slot, table, column } of LATE_FILLED_SLOTS) {
+            if (slot > recorded || (column ? this.dialect.columnExists(this.raw, table, column) : this.dialect.tableExists(this.raw, table))) continue;
             this.raw.exec("BEGIN");
             try {
                 this.raw.exec(MIGRATIONS[slot - 1]!);

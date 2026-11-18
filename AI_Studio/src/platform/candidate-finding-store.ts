@@ -1,5 +1,5 @@
 /**
- * Candidate findings (testing-engine Phase 3, migration slot 66): one row per project and fingerprint, shaped like security_findings so
+ * Candidate findings (testing-engine Phase 3, migration slot 67): one row per project and fingerprint, shaped like security_findings so
  * Phase 5 can merge the two into one finding model (H2). The finding itself (engine/explore/finding.ts) is parsed again here and kept
  * whole in finding_json; the columns are what lists and later lifecycle work filter on. Status is only `candidate` in Phase 3.
  *
@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { CandidateFindingSchema, type CandidateFinding } from "../engine/explore/finding.js";
 import type { Sql } from "./sql.js";
 
-/** Migration slot 66. first/last run as security_findings has first/last assessment; a deleted run or test leaves the finding. */
+/** Migration slot 67. first/last run as security_findings has first/last assessment; a deleted run or test leaves the finding. */
 export const CANDIDATE_FINDINGS_MIGRATION = `
 CREATE TABLE candidate_findings (
     id TEXT PRIMARY KEY,
