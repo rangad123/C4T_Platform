@@ -1,5 +1,5 @@
 import { Check, X, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { api } from "../../api";
 import { Modal } from "../../components/Modal";
 import { Button, Callout } from "../../components/ui";
@@ -148,11 +148,37 @@ export function RowIconButton({ icon: Icon, name, tip, disabled, onClick, ...res
     );
 }
 
-/** The row's menu: the same look and keys as the app's Menu, named for its script without repeating the name in its tooltip. */
+/**
+ * The row's menu: the same look and keys as the app's Menu, named for its script without repeating the name in its tooltip. It is
+ * placed against the screen, not the row: the list's card hides what overflows it (so the last row's menu was cut off), and on a
+ * narrow screen the button sits at the row's left, where a menu hanging from its right edge ran off the screen.
+ */
 export function RowMenu({ icon, name, tip, children }: { icon: LucideIcon; name: string; tip: string; children: (close: () => void) => ReactNode }) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     const button = () => ref.current?.querySelector<HTMLElement>(":scope > button");
+    useLayoutEffect(() => {
+        const pop = ref.current?.querySelector<HTMLElement>(".menu-pop");
+        if (!open || !pop) return;
+        const place = () => {
+            const b = button()?.getBoundingClientRect();
+            if (!b) return;
+            const w = pop.offsetWidth;
+            const h = pop.offsetHeight;
+            const width = document.documentElement.clientWidth;
+            // Under the button, its right edge on the button's, kept 16 px inside the screen; above the button when there is no room below.
+            const left = Math.max(16, Math.min(b.right - w, width - 16 - w));
+            const top = b.bottom + 6 + h <= window.innerHeight - 8 ? b.bottom + 6 : Math.max(8, b.top - 6 - h);
+            Object.assign(pop.style, { position: "fixed", left: `${left}px`, top: `${top}px`, right: "auto" });
+        };
+        place();
+        window.addEventListener("scroll", place, true);
+        window.addEventListener("resize", place);
+        return () => {
+            window.removeEventListener("scroll", place, true);
+            window.removeEventListener("resize", place);
+        };
+    }, [open]);
     useEffect(() => {
         if (!open) return;
         const away = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);

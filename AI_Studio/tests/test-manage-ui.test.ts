@@ -34,6 +34,10 @@ let server: Awaited<ReturnType<typeof buildServer>>;
 let dataDir: string;
 let projectId: string;
 const ids: Record<string, string> = {};
+/** Set TEST_MANAGE_UI_SHOTS=<folder> to keep screenshots of the row menu for a visual check. */
+async function shot(name: string) {
+    if (process.env.TEST_MANAGE_UI_SHOTS) await page.screenshot({ path: path.join(process.env.TEST_MANAGE_UI_SHOTS, `${name}.png`) });
+}
 
 /** The titles of the scripts as the server lists them (the order everything else follows). */
 const serverOrder = () => platform.repo.listTests(projectId).map((t) => t.title);
@@ -47,6 +51,14 @@ async function signIn(p: Page, email: string, password: string) {
     await p.getByRole("button", { name: "Sign in" }).click();
     await pwExpect(p.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 }
+
+/** A menu entry is wholly on the screen and nothing covers or clips its middle (a clipped point hits what lies under it). */
+const shown = (name: string) =>
+    page.getByRole("menuitem", { name }).evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return r.left >= 0 && r.right <= document.documentElement.clientWidth && r.top >= 0 && r.bottom <= window.innerHeight && !!at && el.contains(at);
+    });
 
 async function axeBoth(p: Page) {
     for (const scheme of ["light", "dark"] as const) {
@@ -163,12 +175,65 @@ describe("the Test scripts list", () => {
         expect(browserDialog).toBe(false);
     });
 
+    it("Rename and Delete in the last row's menu are fully on screen and reachable by keyboard, on a desktop and at 375 px", async () => {
+        // The list's card clips what overflows it, and a menu hanging from a button at the row's left edge (375 px) ran off the screen.
+        for (const width of [1280, 375]) {
+            await page.setViewportSize({ width, height: width === 375 ? 740 : 900 });
+            await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
+            await pwExpect.poll(titles).toEqual(["Pay by card and see the total", "Receipt is sent", "Cart opens"]);
+            const button = page.getByRole("button", { name: "Actions for Cart opens" });
+            await button.scrollIntoViewIfNeeded();
+            await button.focus();
+            await page.keyboard.press("Enter");
+            await pwExpect(page.getByRole("menu")).toBeVisible();
+            expect([width, await shown("Rename"), await shown("Delete…")]).toEqual([width, true, true]);
+            for (const scheme of ["light", "dark"] as const) {
+                await page.emulateMedia({ colorScheme: scheme });
+                await page.waitForTimeout(300);
+                await shot(`scripts-row-menu-${width}-${scheme}`);
+            }
+            await axeBoth(page);
+            await pwExpect(page.getByRole("menu")).toBeVisible();
+            // The keyboard reaches both entries in order; Delete still asks first.
+            await page.keyboard.press("Tab");
+            await pwExpect(page.getByRole("menuitem", { name: "Rename" })).toBeFocused();
+            await page.keyboard.press("Tab");
+            await pwExpect(page.getByRole("menuitem", { name: "Delete…" })).toBeFocused();
+            await page.keyboard.press("Enter");
+            const dialog = page.getByTestId("delete-script-dialog");
+            await pwExpect(dialog.getByRole("heading", { name: "Delete “Cart opens”?" })).toBeVisible();
+            await dialog.getByRole("button", { name: "Keep it" }).click();
+            await pwExpect(dialog).toHaveCount(0);
+            expect(platform.repo.getTest(ids["Cart opens"]!)).toBeDefined();
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
+    });
+
     it("passes accessibility checks in light and dark", async () => {
         await axeBoth(page);
     });
 });
 
 describe("a script's own page", () => {
+    it("at 375 px, More actions shows Rename and Delete wholly on screen", async () => {
+        await page.setViewportSize({ width: 375, height: 740 });
+        try {
+            await page.goto(`${BASE}/#/tests/${ids["Cart opens"]}`);
+            await pwExpect(page.getByRole("heading", { name: "Cart opens" })).toBeVisible();
+            await page.getByRole("button", { name: "More actions" }).click();
+            expect([await shown("Rename"), await shown("Delete…")]).toEqual([true, true]);
+            for (const scheme of ["light", "dark"] as const) {
+                await page.emulateMedia({ colorScheme: scheme });
+                await page.waitForTimeout(300);
+                await shot(`script-page-menu-375-${scheme}`);
+            }
+            await axeBoth(page);
+            await page.keyboard.press("Escape");
+        } finally {
+            await page.setViewportSize({ width: 1280, height: 900 });
+        }
+    });
+
     it("renames and deletes from More actions", async () => {
         await page.goto(`${BASE}/#/tests/${ids["Cart opens"]}`);
         await pwExpect(page.getByRole("heading", { name: "Cart opens" })).toBeVisible();
