@@ -6,13 +6,15 @@
 import { launchChromium } from "../../src/engine/discovery/browser.js";
 import { coverSecretFields, MASK_ATTR, shootPage } from "../../src/engine/frames/shoot.js";
 import { readFrameElements } from "../../src/engine/web/frame-elements.js";
+import { runtimeData } from "../../src/engine/web/interpreter.js";
+import { targetIdentity } from "../../src/engine/web/author.js";
 
 const browser = await launchChromium();
 const out: Record<string, unknown> = {};
 try {
     const page = await browser.newPage();
     await page.setContent(
-        `<!doctype html><title>Probe</title><main><form action="/order" method="post"><label for="pw">Password</label><input id="pw" type="password" value="Hunt3r!pw22"><button>Order</button></form>` +
+        `<!doctype html><title>Probe</title><main><form action="/order" method="post"><label for="pw">Password</label><input id="pw" type="text" value="Hunt3r!pw22"><button>Order</button></form>` +
             `<iframe name="payment" srcdoc="<button>Pay now</button><a href='/terms'>Terms</a>"></iframe></main>`,
     );
     await page.frameLocator("iframe[name=payment]").getByRole("button", { name: "Pay now" }).waitFor();
@@ -26,6 +28,7 @@ try {
     }
     out.picture = (await shootPage(page, [])) !== null;
     out.frameElements = (await readFrameElements(page)).map((c) => `${c.role} ${c.name} in ${c.frame.map((f) => `${f.by}=${f.value}`).join(">")}`);
+    out.identity = (await targetIdentity(page, { by: "role", role: "button", value: "Order" } as never, runtimeData({}))) ?? null;
 } finally {
     await browser.close();
 }

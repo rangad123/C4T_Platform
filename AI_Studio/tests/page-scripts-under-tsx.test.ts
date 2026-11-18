@@ -5,7 +5,8 @@
  *
  * 1. The probe (tests/fixtures/page-scripts-probe.ts) runs in a tsx child process:
  *    - the picture cover (frames/shoot.ts) covers a password field and a picture is taken (Watch live, finding screenshots);
- *    - the discovery crawl reads the elements inside a page's frames (web/frame-elements.ts: a payment form, an embedded widget).
+ *    - the discovery crawl reads the elements inside a page's frames (web/frame-elements.ts: a payment form, an embedded widget);
+ *    - the element identity the exploration keys actions by (web/author.ts targetIdentity) resolves, so a repeat is found by the element.
  * 2. Every function the engine sends to a page (evaluate, evaluateAll, evaluateHandle, addInitScript, $eval, $$eval, waitForFunction),
  *    compiled the way tsx compiles it, has no `__name(...)` inside, so a new helper in page-side code is caught without a browser.
  *
@@ -60,15 +61,16 @@ const sourceFiles = (dir: string): string[] =>
     fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sourceFiles(path.join(dir, e.name)) : /\.tsx?$/.test(e.name) && !e.name.endsWith(".d.ts") ? [path.join(dir, e.name)] : []));
 
 describe("page-side scripts loaded through tsx", () => {
-    it("cover secret fields, take the picture and read the elements inside frames", () => {
+    it("cover secret fields, take the picture, read the elements inside frames and resolve an element's identity", () => {
         const out = execFileSync(TSX, ["tests/fixtures/page-scripts-probe.ts"], { encoding: "utf8", timeout: 120_000, env: { ...process.env } });
         const line = out.split("\n").find((l) => l.startsWith("PROBE "));
         expect(line, out).toBeDefined();
-        const probe = JSON.parse(line!.slice("PROBE ".length)) as { cover: string; covered: number; picture: boolean; frameElements: string[] };
+        const probe = JSON.parse(line!.slice("PROBE ".length)) as { cover: string; covered: number; picture: boolean; frameElements: string[]; identity: string | null };
         expect(probe.cover).toBe("ok");
         expect(probe.covered).toBe(1);
         expect(probe.picture).toBe(true);
         expect(probe.frameElements).toEqual(["button Pay now in name=payment", "link Terms in name=payment"]);
+        expect(probe.identity).toMatch(/^button "Order" @[0-9a-f]{12}$/);
     }, 150_000);
 
     it("no function sent to a page declares a named helper once compiled the way tsx compiles it", () => {
