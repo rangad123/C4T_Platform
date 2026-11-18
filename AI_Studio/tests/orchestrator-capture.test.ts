@@ -12,7 +12,8 @@
  *   - a defect whose failing check is of the planner's own expected result (tied to nothing stated, queue row 172): the same, observed only;
  *   - an observed-only defect whose saved test cannot pass a replay of its own steps (a check bound to what the authoring session saw,
  *     as C1c's WEB-046, or steps leaning on state the session left, as WEB-030/033): not reported, no candidate finding, saved as a failed test;
- *   - every AI call of each job is counted: the independence check and the finding add none.
+ *   - every AI call of each job is counted: the independence check and the finding add none (a project with a model also runs the
+ *     objective stage, P3-21, whose pursuits are counted on their own).
  * Fixture site: port 9764. Run under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/orchestrator-capture.test.ts
  */
@@ -124,7 +125,15 @@ const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
 };
 
 type Event = { kind: string; message: string; data: Record<string, unknown> | null };
-async function explore(projectId: string) {
+/**
+ * `objectivePursuits`: since P3-21 (6edcd9e, before rows 180-183) every exploration of a project with the "agent" testing mode (a new
+ * project's default) also explores by objectives after the scenarios. A project with an analysed model (statedRule, or the rule case's
+ * own) gets objectives from it: the cart workflow and R-TOTAL give 2 objectives as 4 pursuits, and each pursuit asks the test writer once
+ * (the queue is empty, so it answers "done" and no test is saved). Those 4 agent calls are the objective stage's, not the defect path's;
+ * a project without a model gets no objectives and no calls. The independence check, the own-steps replay (row 180) and the finding
+ * still add none.
+ */
+async function explore(projectId: string, objectivePursuits = 0) {
     calls.length = toolQueue.length = 0;
     onceVisits = driftVisits = 0;
     const queued = await call("POST", `/api/projects/${projectId}/test-generation`, {
@@ -141,8 +150,9 @@ async function explore(projectId: string) {
     expect(tests, `job ${job!.status}`).toHaveLength(1);
     const events = platform.repo.listEvents(queued.body.jobId) as Event[];
     // Every AI call of the job, counted: understanding, planning, the three scripted agent turns, the author's defect verdicts and the
-    // analysis after the exploration. The independence check and the finding add none.
-    expect(calls).toEqual(["object:analysis", "object:planning", "agent", "agent", "agent", "text:review", "text:review", "text:review", "object:analysis"]);
+    // objective stage's pursuits (see above) and the analysis after the exploration. The independence check and the finding add none.
+    expect(events.filter((e) => e.kind === "objectives_planned").map((e) => e.data?.pursuits)).toEqual(objectivePursuits ? [objectivePursuits] : []);
+    expect(calls).toEqual(["object:analysis", "object:planning", "agent", "agent", "agent", "text:review", "text:review", "text:review", ...Array<string>(objectivePursuits).fill("agent"), "object:analysis"]);
     return { status: job!.status, test: tests[0]!, events };
 }
 
@@ -164,6 +174,8 @@ async function statedRule(projectId: string): Promise<string> {
 const TIED = "The total is $25.00 (source: R-TOTAL)";
 const tiedScenario = (startPath: string) => ({ ...cartScenario(startPath), expectedResults: ["The cart page is shown", TIED] });
 
+/** The objective stage's pursuits for a project with the cart workflow and R-TOTAL (see explore). */
+const OBJECTIVE_PURSUITS = 4;
 const metaOf = (t: { generationMeta: unknown }) => t.generationMeta as Record<string, unknown>;
 const defectEvent = (events: Event[]) => {
     const found = events.filter((e) => e.kind === "possible_defect");
@@ -177,7 +189,7 @@ describe("a defect test carries its candidate finding", () => {
         const version = await statedRule(projectId);
         plan = tiedScenario("/cart");
         script = [heading, total("expected:2"), finishDefect];
-        const { test, events } = await explore(projectId);
+        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS);
 
         expect(test.validationStatus).toBe("NEEDS_REVIEW");
         const meta = metaOf(test);
@@ -216,7 +228,7 @@ describe("a defect test carries its candidate finding", () => {
         // The planner's model writes an objective of its own: the planner drops it, so it never reaches the test or its finding.
         plan = { ...cartScenario("/cart"), objective: { id: "obj-total", kind: "rule", source: "R-TOTAL" } };
         script = [heading, total("R-TOTAL"), finishDefect];
-        const { test, events } = await explore(projectId);
+        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS);
 
         const finding = CandidateFindingSchema.parse(metaOf(test).finding);
         expect((metaOf(test).scenario as Record<string, unknown>).objective).toBeUndefined();
@@ -238,7 +250,7 @@ describe("a defect test carries its candidate finding", () => {
         await statedRule(projectId);
         plan = tiedScenario("/once");
         script = [heading, total("expected:2"), finishDefect];
-        const { test, events } = await explore(projectId);
+        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS);
 
         const finding = CandidateFindingSchema.parse(metaOf(test).finding);
         expect(finding).toMatchObject({ capture: "captured", independence: "state_dependent", confidence: "medium" });
@@ -270,7 +282,7 @@ describe("a defect test carries its candidate finding", () => {
         await statedRule(projectId);
         plan = cartScenario("/cart");
         script = [heading, total("expected:2"), finishDefect];
-        const { test, events } = await explore(projectId);
+        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS);
 
         expect(test.validationStatus).toBe("NEEDS_REVIEW");
         const meta = metaOf(test);
