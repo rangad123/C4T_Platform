@@ -177,6 +177,7 @@ export default defineConfig({
             "tests/operator-spend-unit.test.ts",
             "tests/prompt-cache.test.ts",
             "tests/prompt-cache-prefix.test.ts",
+            "tests/planner-retrieval-unit.test.ts",
             "tests/snapshot-compact.test.ts",
             "tests/det-repair-unit.test.ts",
             "tests/users-unit.test.ts",
