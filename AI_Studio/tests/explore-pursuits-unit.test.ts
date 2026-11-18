@@ -4,11 +4,13 @@
  *   - The level's `objectives` caps objectives when the list is built; the loop then runs every pursuit built from them (one objective
  *     with one operator each), still bounded by the session's time, AI-call, token and action budgets.
  *   - Workflow steps name the model's page ids ("page:/cart"); a pursuit starts at that page's address, and a direct URL opens one.
+ *   - A pursuit ended by its own time or token limit is not finished, and says that its steps so far were not saved; one ended by the
+ *     session or the loop stays a completed pursuit with the reason (the loop records the session's stop itself).
  */
 import { describe, expect, it } from "vitest";
 import { runExploration } from "../src/engine/explore/loop.js";
 import { LEVEL_SETTINGS } from "../src/engine/levels.js";
-import { objectivePursuits, sessionBudgets } from "../src/engine/orchestrator.js";
+import { endedPursuit, ExplorationStopped, ObjectiveLimitReached, objectivePursuits, sessionBudgets } from "../src/engine/orchestrator.js";
 import { c1eKnowledge } from "./fixtures/bench-shop-c1e.js";
 
 describe("the session's pursuit budget", () => {
@@ -83,5 +85,22 @@ describe("workflow pages are addresses, not model page ids", () => {
         const checkout = pursuits.filter((p) => p.objective.source.ref.startsWith("journey-10"));
         expect(checkout.length).toBeGreaterThan(0);
         for (const p of checkout) expect(p.scenario.startPath).toBe("/cart");
+    });
+});
+
+describe("a pursuit ended by its own limit", () => {
+    it("is not finished, and says the steps so far were not saved", () => {
+        const limit = new ObjectiveLimitReached("The objective's limit of 750000 AI tokens was reached.");
+        for (const err of [limit, new Error("The model call failed.", { cause: limit })]) {
+            const run = endedPursuit(err, false);
+            expect(run).toMatchObject({ status: "writer_stopped" });
+            expect(run && "reason" in run ? run.reason : "").toMatch(/^The objective's limit of 750000 AI tokens was reached before its test was finished; the steps done so far were not saved\.$/);
+        }
+    });
+
+    it("one ended by the session or the loop is a completed pursuit with the reason; anything else is not an ended pursuit", () => {
+        expect(endedPursuit(new ExplorationStopped("The session stopped (tokens)."), false)).toEqual({ status: "completed", result: { ended: "The session stopped (tokens)." } });
+        expect(endedPursuit(new Error("boom"), true)).toEqual({ status: "completed", result: { ended: "The exploration ended this pursuit." } });
+        expect(endedPursuit(new Error("boom"), false)).toBeUndefined();
     });
 });

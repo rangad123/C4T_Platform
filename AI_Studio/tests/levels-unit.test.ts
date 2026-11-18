@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { effectiveLimits, firstN, LEVEL_SETTINGS, levelOf, levelSettings } from "../src/engine/levels.js";
+import { effectiveLimits, firstN, LEVEL_SETTINGS, LEVELS, levelOf, levelSettings } from "../src/engine/levels.js";
+import { AGENT_LIMITS } from "../src/engine/agent/objective.js";
 import { planFamilies, type StoredPlan } from "../src/engine/planning/preview.js";
 import { exploreOffer } from "../src/platform/explore-task.js";
 import { planOptionsOf } from "../src/platform/plan-store.js";
@@ -84,5 +85,17 @@ describe("an exploration on the runner carries its level", () => {
         });
         expect(JSON.stringify(offer)).toContain('"level":"deep"');
         expect(JSON.stringify(offer)).toContain('"maxPages":120');
+    });
+});
+
+describe("each objective's token share fits its steps (row 205)", () => {
+    // Row 204: page snapshots run 10-18k tokens a step, so 300k ended checkout pursuits mid-check. About 25k per step, inside the session's budget.
+    it("every level gives a pursuit at least its steps x 25k tokens, inside the session's tokens and the agent's limit", () => {
+        for (const level of LEVELS) {
+            const s = LEVEL_SETTINGS[level];
+            expect(s.exploration.perObjective.tokens, level).toBeGreaterThanOrEqual(s.authoringMaxSteps * 25_000);
+            expect(s.exploration.perObjective.tokens, level).toBeLessThanOrEqual(s.exploration.tokens);
+            expect(s.exploration.perObjective.tokens, level).toBeLessThanOrEqual(AGENT_LIMITS.tokens.max);
+        }
     });
 });

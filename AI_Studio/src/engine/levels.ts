@@ -69,6 +69,12 @@ export interface ExplorationBudgets {
     perObjective: { minutes: number; tokens: number };
 }
 
+/**
+ * AI tokens one step of a pursuit may use: a page snapshot is 10-18k tokens a step (row 204), so a pursuit's share is its steps times
+ * this (300k ended checkout pursuits mid-check). Always inside the session's token budget.
+ */
+export const PER_STEP_TOKENS = 25_000;
+
 export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSettings>>> = {
     thorough: {
         maxPages: 60,
@@ -88,7 +94,7 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         strengthTests: 15,
         repeatPasses: 3,
         conditionVariants: [],
-        exploration: { objectives: 25, actions: 25 * 30, aiCalls: 25 * 30, tokens: 25 * 300_000, minutes: 90, depth: 8, perObjective: { minutes: 10, tokens: 300_000 } },
+        exploration: { objectives: 25, actions: 25 * 30, aiCalls: 25 * 30, tokens: 25 * 300_000, minutes: 90, depth: 8, perObjective: { minutes: 10, tokens: 30 * PER_STEP_TOKENS } },
     },
     deep: {
         maxPages: 120,
@@ -108,7 +114,7 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         strengthTests: 40,
         repeatPasses: 3,
         conditionVariants: ["dark", "locale"],
-        exploration: { objectives: 50, actions: 50 * 40, aiCalls: 50 * 40, tokens: 50 * 300_000, minutes: 150, depth: 10, perObjective: { minutes: 10, tokens: 300_000 } },
+        exploration: { objectives: 50, actions: 50 * 40, aiCalls: 50 * 40, tokens: 50 * 300_000, minutes: 150, depth: 10, perObjective: { minutes: 10, tokens: 40 * PER_STEP_TOKENS } },
     },
     everything: {
         maxPages: 250,
@@ -128,7 +134,7 @@ export const LEVEL_SETTINGS: Readonly<Record<ExploreLevel, Readonly<LevelSetting
         strengthTests: Infinity,
         repeatPasses: 5,
         conditionVariants: ["dark", "locale"],
-        exploration: { objectives: 100, actions: 100 * 50, aiCalls: 100 * 50, tokens: 100 * 300_000, minutes: 180, depth: 12, perObjective: { minutes: 10, tokens: 300_000 } },
+        exploration: { objectives: 100, actions: 100 * 50, aiCalls: 100 * 50, tokens: 100 * 300_000, minutes: 180, depth: 12, perObjective: { minutes: 10, tokens: 50 * PER_STEP_TOKENS } },
     },
 };
 
