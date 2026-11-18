@@ -43,6 +43,7 @@ import { knowledgeBlock, usableRules, type KnowledgeRule } from "../planning/pla
 import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
 import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
+import { findLeftoverUse, LEFTOVER_REDO, leftoverReason } from "./leftovers.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -64,6 +65,14 @@ export interface AuthorInput {
     review?: boolean;
     /** A blocked scenario is tried once more in a fresh browser context before it is reported as not authored. */
     retryBlocked?: boolean;
+    /**
+     * The leftover check (web/leftovers.ts): a finished test that acts on or checks an item its own earlier steps never added or opened
+     * is written once more from the start, told why. A test still doing so is returned as it is (the caller saves it for review) and its
+     * defect, if any, is not put to the verdict reviews.
+     */
+    leftoverCheck?: boolean;
+    /** Why an earlier version of this test was not kept (the leftover check's second try): said in the prompt of a fresh authoring run. */
+    redo?: string;
     /** The project's notes for the AI (memory/notes.ts): those for the current page go into the prompt, and a "never" note refuses its control. */
     notes?: SiteNote[];
     /** Generated test data for the run (data-changing tests on): the agent gets a testValue tool, and the spec records the run tag. */
@@ -180,6 +189,7 @@ Every action you perform successfully is recorded into a reusable Playwright tes
   application that may have been reset. It never relies on what another test or an earlier attempt left (items already in a cart, an order or
   record that exists, a setting already changed): set that up with the test's own steps (add the item before checking the cart, create the
   order before checking the Orders list). Make each of the scenario's preconditions true with your first steps; never assume one holds.
+  Leftovers you did not add are not yours: work around them, and never remove, change or check them by name (a fresh run will not have them).
 - Use {{unique}} in every new record the test creates (names, titles, emails, usernames), so it never clashes with records an earlier run
   or another test made, and {{credentials.username}} / {{credentials.password}} for the provided test account. Never invent real people's
   data; example.com addresses only.
@@ -294,6 +304,18 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
             out = await authorScenario(input);
         }
         if (out.status === "complete" && input.review && !input.resume) out = await reviewAndFix(input, out);
+        if (input.leftoverCheck && !input.resume && out.status !== "blocked") {
+            const uses = findLeftoverUse(out.steps);
+            if (uses.length) {
+                const redo = `${leftoverReason(uses)} ${LEFTOVER_REDO}`;
+                input.ctx.emit({ stage: "generation", kind: "leftover_redo", level: "warn", message: `${input.scenario.scenarioId}: written again from the start: ${leftoverReason(uses)}`, data: { steps: uses.map((u) => u.step) } });
+                let again = await authorScenario({ ...input, redo });
+                if (again.status === "complete" && input.review) again = await reviewAndFix({ ...input, redo }, again);
+                // A second try that could not finish keeps the first test (still flagged: the caller saves it for review).
+                if (again.status !== "blocked") out = again;
+                if (findLeftoverUse(out.steps).length) return out;
+            }
+        }
         if (out.status === "defect") out = await confirmDefect(input, out);
         return out;
     });
@@ -734,7 +756,7 @@ ${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}
 Test account: ${credentials ? "available as {{credentials.username}} / {{credentials.password}}" : "NOT available"}
 ${pageHint(model, scenario)}
 ${notesFor(input.notes, page.url()) ?? ""}${rulesNote ? `\n${rulesNote}` : ""}
-${
+${input.redo && !resume ? `A previous version of this test was not kept. ${input.redo}\nWrite the test again from the start.\n` : ""}${
     resume?.review
         ? `A review of this test against its scenario asked for these changes:\n${resume.failure}\nThe test's steps so far have been replayed (${resume.prefix.length - 1} steps). Continue from the current page state: apply the changes, then assert every expected result.\n`
         : resume
