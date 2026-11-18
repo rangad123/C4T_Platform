@@ -4,8 +4,8 @@
  * replays under Playwright. CONCURRENCY 3; two scenarios sign in as the project's account and open a slow page, two signed-out
  * scenarios open another slow page. The site records every session's span (from sign-in, or the first signed-out page, to its last
  * slow page):
- *   - no two sessions of the account are ever open at the same time, while authoring or validating (the strength check after
- *     validation has a pool of its own and is not counted);
+ *   - no two sessions of the account are ever open at the same time: while authoring, validating, in the browser / condition
+ *     checks (two asked for) or in the strength check (deliberate faults) after them;
  *   - signed-out sessions still overlap each other;
  *   - the job says it wrote the account's scenarios one at a time; every test is validated.
  * The job's wall clock is printed (lanes cost time: the account's scenarios no longer run side by side).
@@ -186,37 +186,40 @@ describe("one lane per account", () => {
         const projectId = (await call("POST", "/api/projects", { name: "Lanes" })).body.id as string;
         const started = performance.now();
         const queued = await call("POST", `/api/projects/${projectId}/test-generation`, {
-            url: URL, targets: ["web"], maxPages: 5, credentials: { username: USER, password: PASSWORD },
+            url: URL, targets: ["web"], maxPages: 5, credentials: { username: USER, password: PASSWORD }, variants: ["dark", "locale"],
             accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false,
         });
         expect(queued.status, JSON.stringify(queued.body)).toBe(202);
         let job: { status: string } | undefined;
-        for (let i = 0; i < 900; i++) {
+        for (let i = 0; i < 4000; i++) {
             job = (await call("GET", `/api/test-generation/${queued.body.jobId}`)).body;
             if (["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(job!.status)) break;
             await new Promise((r) => setTimeout(r, 200));
         }
         const wallMs = Math.round(performance.now() - started);
         const events = platform.repo.listEvents(queued.body.jobId) as Array<{ kind: string; message: string; createdAt: string }>;
-        // Authoring and validation only: the strength check after them (deliberate faults, mutation/strength.ts) replays tests in a pool of
-        // its own, which this row leaves as it is.
-        const strength = events.find((e) => e.kind === "strength_started");
-        const until = strength ? Date.parse(strength.createdAt.includes("T") ? strength.createdAt : `${strength.createdAt.replace(" ", "T")}Z`) : Infinity;
+        // Every session of the job counts: authoring, validation, the browser / condition checks and the strength check after them.
+        const at = (kind: string) => {
+            const e = events.find((x) => x.kind === kind);
+            return e ? Date.parse(e.createdAt.includes("T") ? e.createdAt : `${e.createdAt.replace(" ", "T")}Z`) : Infinity;
+        };
+        const later = Math.min(at("variants_started"), at("strength_started"));
         const spans: Span[] = [...sessions].map(([id, s]) => ({ id, ...s }));
-        const account = spans.filter((s) => s.who === USER && s.end > s.start && s.at < until);
-        const anon = spans.filter((s) => s.who === "anon" && s.at < until);
-        const later = spans.filter((s) => s.who === USER && s.end > s.start && s.at >= until);
-        console.log(`[r181a] job ${job!.status} in ${wallMs} ms (strength check from ${strength?.createdAt ?? "-"}); account sessions ${account.length} (overlapping pairs: ${pairs(account).join(", ") || "none"}); signed-out sessions ${anon.length} (overlapping pairs: ${pairs(anon).length}); account sessions of the strength check ${later.length} (overlapping pairs: ${pairs(later).length})`);
+        const account = spans.filter((s) => s.who === USER && s.end > s.start);
+        const anon = spans.filter((s) => s.who === "anon");
+        console.log(`[r189] job ${job!.status} in ${wallMs} ms; account sessions ${account.length}, ${account.filter((s) => s.at >= later).length} of them in the browser and strength checks (overlapping pairs: ${pairs(account).join(", ") || "none"}); signed-out sessions ${anon.length} (overlapping pairs: ${pairs(anon).length})`);
 
         expect(events.some((e) => e.kind === "auth_succeeded"), events.filter((e) => /auth/.test(e.kind)).map((e) => e.message).join("; ")).toBe(true);
         const tests = platform.repo.listTests(projectId).filter((t) => (t.generationMeta as { scenario?: unknown } | null)?.scenario);
         expect(tests.map((t) => `${t.title}: ${t.validationStatus}`).sort()).toEqual(["Account work A: VALIDATED", "Account work B: VALIDATED", "Open page C: VALIDATED", "Open page D: VALIDATED"]);
 
-        // Authoring, the replays while authoring, and validation all opened sessions of the account: none of them at the same time.
-        expect(account.length).toBeGreaterThanOrEqual(4);
+        // Authoring, the replays while authoring, validation, the browser / condition checks and the strength check all opened
+        // sessions of the account: none of them at the same time.
+        expect(account.filter((s) => s.at < later).length).toBeGreaterThanOrEqual(4);
+        expect(account.filter((s) => s.at >= later).length).toBeGreaterThanOrEqual(4);
         expect(pairs(account)).toEqual([]);
         // The signed-out pages are not held back by the lane: their sessions overlap.
         expect(pairs(anon).length).toBeGreaterThan(0);
         expect(events.find((e) => e.kind === "account_lanes" && /^2 scenarios that sign in as the same account are written one at a time$/.test(e.message))).toBeDefined();
-    }, 600_000);
+    }, 1_200_000);
 });

@@ -4,7 +4,8 @@
  * version is kept only when it still passes against the real application and catches more faults than before.
  */
 import type { Browser } from "playwright";
-import { mapLimit, throwIfAborted, type EngineContext } from "../context.js";
+import { mapLanes, throwIfAborted, type EngineContext } from "../context.js";
+import { runInLanes, testAccountLane } from "../validation/lanes.js";
 import { localExecutor, renderWithAdapter } from "../frameworks/index.js";
 import { firstN } from "../levels.js";
 import type { Scenario, TestSpec } from "../spec/schema.js";
@@ -55,7 +56,7 @@ export async function checkStrength(ctx: EngineContext, deps: StrengthDeps, test
     // Tests that missed a fault: once through the review path, in the authoring browser.
     const weak = ctx.llm.modelName === "unavailable" ? [] : chosen.filter((t) => (scores.get(t.spec.testId)?.missed.length ?? 0) > 0 && t.scenario && deps.browser);
     const proposals = (
-        await mapLimit(weak, Math.max(1, ctx.config.CONCURRENCY), async (t) => {
+        await mapLanes(weak, Math.max(1, ctx.config.CONCURRENCY), (t) => testAccountLane(t), async (t) => {
             throwIfAborted(ctx.signal);
             const note = strengthenNote(scores.get(t.spec.testId)!.missed);
             try {
@@ -76,7 +77,9 @@ export async function checkStrength(ctx: EngineContext, deps: StrengthDeps, test
             const s = renderWithAdapter(p.spec, "playwright", deps.render);
             return { testId: p.spec.testId, filename: s.filename, content: s.content, framework: "playwright" };
         });
-        const runs = await (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts }, { run: deps.env }, { workers: Math.max(1, deps.workers), signal: ctx.signal });
+        const runs = await runInLanes(scripts, proposals.map((p) => testAccountLane(p)), deps.workers, (batch) =>
+            (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts: batch }, { run: deps.env }, { workers: Math.max(1, deps.workers), signal: ctx.signal }),
+        );
         const passing = proposals.filter((_, i) => runs[i]?.status === "passed");
         const again = await scoreTests(ctx, deps, passing.map((p) => p.spec));
         passing.forEach((p) => {
