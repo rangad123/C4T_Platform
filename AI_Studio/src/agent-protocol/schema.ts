@@ -101,6 +101,11 @@ export const Capabilities = z.object({
      * told to update.
      */
     exploreModes: z.array(z.enum(["plain", "agent", "mobile", "assessment"])).max(8).optional(),
+    /**
+     * Row 208 (additive, optional): an exploration on this agent carries on from a stopped one (the request's `resume` and `carry`). The platform
+     * continues a stopped exploration only on an agent that reports this; an older one would start from the beginning and make checks twice.
+     */
+    exploreResume: z.boolean().optional(),
     /** Additive, optional: while someone watches, an exploration on this agent sends pictures of its browser (explore-frame.ts). An older agent sends none. */
     explorerFrames: z.boolean().optional(),
     /**

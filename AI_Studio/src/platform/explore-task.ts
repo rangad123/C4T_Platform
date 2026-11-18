@@ -47,12 +47,26 @@ const MODE_WORDS: Record<Exclude<ExploreMode, "generate">, string> = {
 };
 export const modeNeedsUpdate = (runner: string, mode: Exclude<ExploreMode, "generate">): string => `Your runner “${runner}” is too old to ${MODE_WORDS[mode]}. Update your runner in Settings, Your runner, then try again.`;
 
+/**
+ * Row 208: continuing a stopped exploration or creation needs a runner that carries on (`exploreResume`): an older one ignores the request's
+ * `carry` and `resume` and starts from the beginning, which can make the same checks twice.
+ */
+export const continueNeedsUpdate = (runner: string): string => `Your runner “${runner}” is too old to continue an exploration; download the runner again, or choose Start over.`;
+
 /** Why this computer cannot do this kind of job (its runner program is older than round 51, or round 52 for the other modes), or undefined. */
 export function exploreProblem(agent: { name: string; capabilities: { explore?: boolean; exploreModes?: string[] } }, mode: ExploreMode = "generate"): string | undefined {
     if (agent.capabilities.explore !== true) return mode === "generate" ? exploreNeedsUpdate(agent.name) : modeNeedsUpdate(agent.name, mode);
     if (mode === "generate" || agent.capabilities.exploreModes?.includes(mode)) return undefined;
     return modeNeedsUpdate(agent.name, mode);
 }
+
+/** Why this runner cannot continue a stopped exploration or creation (its runner program is older than row 208), or undefined. */
+export function continueProblem(agent: { name: string; capabilities: { exploreResume?: boolean } }): string | undefined {
+    return agent.capabilities.exploreResume === true ? undefined : continueNeedsUpdate(agent.name);
+}
+
+/** Does this job continue a stopped one (explore-resume.ts: `resumeFrom` an exploration, `carryFrom` a creation)? */
+export const continuesStopped = (options: { resumeFrom?: string; carryFrom?: string[] } | undefined): boolean => Boolean(options?.resumeFrom || options?.carryFrom?.length);
 
 /** An exploration job's mode on a runner: "mobile" when its targets include a phone app (the request's own targets), else the job's. */
 export const exploreModeOfRequest = (mode: ExploreMode | undefined, request: { targets?: unknown }): ExploreMode =>

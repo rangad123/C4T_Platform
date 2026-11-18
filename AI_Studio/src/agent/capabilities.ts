@@ -293,6 +293,8 @@ export class CapabilityProbe {
         // Also a phone app's exploration (on this computer's phone; whether one is attached is `android`) and a security assessment.
         caps.exploreModes = ["plain", "agent", "mobile", "assessment"];
         caps.explorerFrames = true;
+        // Row 208: and carries on from a stopped one (the request's `resume` and `carry`, explore-child.ts), so a Continue makes nothing twice.
+        caps.exploreResume = true;
 
         const parsed = Capabilities.safeParse(caps);
         // A value the protocol cannot carry is a bug here, not a reason to stop: fall back to the part that is certainly valid.

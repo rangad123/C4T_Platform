@@ -38,7 +38,7 @@ import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecret
 import { DeviceHub, deviceAgentOf, isDeviceAdapter } from "./agent-device.js";
 import { isRecordAdapter, RecordHub, RemoteDriver, recordAdapterId, recordAgentOf, recordJobId, type RemoteInit } from "./agent-record.js";
 import { IdentityStore } from "./identity-store.js";
-import { exploreProblem, isExploreAdapter, isExploreMode, offerMode, type ExploreMode, type ExploreTaskRef } from "./explore-task.js";
+import { continueProblem, continuesStopped, exploreProblem, isExploreAdapter, isExploreMode, offerMode, type ExploreMode, type ExploreTaskRef } from "./explore-task.js";
 import { CleanupStore } from "./cleanup-store.js";
 import { HttpError } from "./http-error.js";
 import { hashObject, keyOfStoredFile, localCopyIn, validKey } from "./object-store.js";
@@ -345,7 +345,7 @@ export class AgentService {
             // address only where they are allowed. It holds no phone.
             if (isExploreAdapter(t.adapterId)) {
                 // Its calls are fenced by attempt, so only a protocol-2 agent (every one that reports `explore` speaks it).
-                if (exploreProblem(agent, this.exploreModeOf(t.jobId, t.payloadEnc)) || this.store.agentProtocol(agent.id) < 2 || !this.targetAllowed(token, t)) continue;
+                if (this.exploreTaskProblem(agent, t.jobId, this.exploreModeOf(t.jobId, t.payloadEnc)) || this.store.agentProtocol(agent.id) < 2 || !this.targetAllowed(token, t)) continue;
                 const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000);
                 if (claimed) return this.handOut(agent, claimed);
                 continue;
@@ -675,6 +675,19 @@ export class AgentService {
      * Round 52: which engine entry an explore task runs: its offer's own mode (an assessment's task has no job; a phone exploration's offer
      * says "mobile"), else its job's mode (an unreadable one: an exploration). Nothing of the offer is logged: it carries the job's secrets.
      */
+    /** Why this agent cannot take this explore task: its mode (exploreProblem), or (row 208) a continue of a stopped job on an older runner. */
+    exploreTaskProblem(agent: Parameters<typeof exploreProblem>[0] & Parameters<typeof continueProblem>[0], jobId: string | null | undefined, mode: ExploreMode): string | undefined {
+        const why = exploreProblem(agent, mode);
+        if (why || !jobId) return why;
+        let options: JobOptions | undefined;
+        try {
+            options = this.p.repo.getJob(jobId)?.options;
+        } catch {
+            options = undefined;
+        }
+        return continuesStopped(options) ? continueProblem(agent) : undefined;
+    }
+
     exploreModeOf(jobId: string, payloadEnc?: string): ExploreMode {
         if (payloadEnc) {
             try {
@@ -1058,7 +1071,7 @@ export class AgentService {
         // and an agent run likewise, each on a runner that knows that mode.
         const mode = options.mode ?? "generate";
         if (runnersOnly(this.p.config) && isExploreMode(mode)) {
-            const why = exploreProblem(agent, mode);
+            const why = exploreProblem(agent, mode) ?? (continuesStopped(options) ? continueProblem(agent) : undefined);
             if (why) throw runnerRefusal("RUNNER_CANNOT_RUN", why);
         }
         const farm = farmChosen(this.p.db, projectId);

@@ -21,6 +21,7 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import type { EngineEvent } from "../src/engine/context.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { continueNeedsUpdate } from "../src/platform/explore-task.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 
@@ -38,6 +39,7 @@ let creationJob: string;
 let stoppedPlan: string;
 const continues: string[] = [];
 let refuse: string | null = null;
+let refuseDetails: unknown;
 const consoleErrors: string[] = [];
 
 /** Events as the engine records them for a creation from a plan that is writing its second idea (orchestrator.ts, crawler.ts). */
@@ -97,7 +99,7 @@ beforeAll(async () => {
     page.on("pageerror", (e) => consoleErrors.push(String(e)));
     await page.route(`**/api/projects/${projectId}/explorations/*/continue`, async (route) => {
         continues.push(new URL(route.request().url()).pathname);
-        if (refuse) return route.fulfill({ status: 409, json: { error: refuse } });
+        if (refuse) return route.fulfill({ status: 409, json: { error: refuse, ...(refuseDetails ? { details: refuseDetails } : {}) } });
         await route.fulfill({ status: 202, json: { jobId: "continued", status: "QUEUED", from: "reading" } });
     });
 }, 120_000);
@@ -173,9 +175,17 @@ describe("Continue on a stopped exploration", () => {
         await card.getByRole("button", { name: "Continue" }).click();
         await expect.poll(() => card.innerText(), { timeout: 15_000 }).toContain(refuse);
         expect(continues).toEqual([`/api/projects/${projectId}/explorations/${stoppedPlan}/continue`]);
-        refuse = null;
+        // Row 208: a runner too old to carry on is refused with its sentence (as the server sends it); Start over stays there.
+        refuse = continueNeedsUpdate("Priya laptop");
+        refuseDetails = { code: "RUNNER_CANNOT_RUN", link: "#/settings#runner" };
         await card.getByRole("button", { name: "Continue" }).click();
-        await expect.poll(() => continues.length, { timeout: 15_000 }).toBe(2);
+        await expect.poll(() => card.innerText(), { timeout: 15_000 }).toContain("Your runner “Priya laptop” is too old to continue an exploration; download the runner again, or choose Start over.");
+        expect(await card.getByRole("link", { name: "Start over" }).isVisible()).toBe(true);
+        await shot("continue-runner-too-old.png");
+        refuse = null;
+        refuseDetails = undefined;
+        await card.getByRole("button", { name: "Continue" }).click();
+        await expect.poll(() => continues.length, { timeout: 15_000 }).toBe(3);
         expect(consoleErrors).toEqual([]);
     });
 });

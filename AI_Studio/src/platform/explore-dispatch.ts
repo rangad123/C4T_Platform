@@ -11,7 +11,7 @@ import { refusalsOf } from "./agent-store.js";
 import { parkForHandover } from "./runner-handover.js";
 import { forgetExploreLlm } from "./explore-llm.js";
 import { dropExplorePresets, exploreRepoSink, forgetExploreSink, presetExploreHandle } from "./explore-sink.js";
-import { EXPLORE_ADAPTER_ID, EXPLORE_NO_SUMMARY, EXPLORE_RUNNER_GONE, exploreModeOfRequest, exploreOffer, exploreProblem, requestSecrets, type ExploreMode, type ExploreRequest } from "./explore-task.js";
+import { EXPLORE_ADAPTER_ID, EXPLORE_NO_SUMMARY, EXPLORE_RUNNER_GONE, exploreModeOfRequest, exploreOffer, requestSecrets, type ExploreMode, type ExploreRequest } from "./explore-task.js";
 import type { JobLlmDeps } from "./job-runner.js";
 import type { JobRow } from "./repo.js";
 
@@ -123,11 +123,12 @@ export async function waitForExplore(svc: AgentService, taskId: string, job: Pic
             const own = svc.ownRunner(starter.ownerId, job.projectId);
             const a = own?.online ? own.agent : undefined;
             const refused = new Set(refusalsOf(t).map((r) => r.agentId));
-            if (a && !refused.has(a.id) && !exploreProblem(a, mode)) noAgentSince = undefined;
+            const problem = a ? svc.exploreTaskProblem(a, job.id, mode) : undefined;
+            if (a && !refused.has(a.id) && !problem) noAgentSince = undefined;
             else if (refusalsOf(t).length > 0) {
                 const reasons = [...new Map(refusalsOf(t).map((r) => [r.agentId, r.message])).values()].join(" ");
                 svc.store.failQueuedOrRunning(taskId, `Your runner did not take the ${WORDS[mode].noun}. ${reasons}`.slice(0, 1000), "rejected");
-            } else if (a && exploreProblem(a, mode)) svc.store.failQueuedOrRunning(taskId, exploreProblem(a, mode)!, "rejected");
+            } else if (a && problem) svc.store.failQueuedOrRunning(taskId, problem, "rejected");
             else {
                 noAgentSince ??= svc.clock();
                 if (svc.clock() - noAgentSince >= svc.limits.noAgentGraceMs) svc.store.failQueuedOrRunning(taskId, svc.noRunnerSentence(job.id));
