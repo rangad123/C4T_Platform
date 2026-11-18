@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { maskAction, maskActionLog, TYPED_MAX } from "../src/engine/explore/action-mask.js";
 import type { ActionLogRow } from "../src/engine/explore/loop.js";
-import { boundedActionLog } from "../src/engine/orchestrator.js";
+import { actionTracker, boundedActionLog } from "../src/engine/orchestrator.js";
 
 const KEY_LIKE = `sk-ant-api03-${"Zr4Q".repeat(10)}7`;
 const row = (action: string, extra: Partial<ActionLogRow> = {}): ActionLogRow => ({ seq: 1, objectiveId: "OBJ-1:as_stated", state: "/login?next|abcdef012345", action, atMs: 0, result: "performed", ...extra });
@@ -44,6 +44,47 @@ describe("maskAction", () => {
 
     it("masking again changes nothing", () => {
         const once = maskActionLog([row(act("fill", { target: { by: "label", value: "Bio" }, value: "y".repeat(500) })), row(act("navigate", { url: `https://a.test/?k=${KEY_LIKE}` }))]);
+        expect(maskActionLog(once)).toEqual(once);
+    });
+});
+
+describe("the action log in the shape the engine writes it (CP3 N-2)", () => {
+    const url = "https://shop.test/signup";
+    /** The key the tracker hands the loop for a fill the test writer resolved to an element (author.ts: role, name, DOM digest). */
+    const keyed = (target: string, label: string, value: string, secrets: string[] = []) =>
+        actionTracker(url, secrets).before({ tool: "fill", args: { target: { by: "label", value: label }, value }, target, url }).action;
+
+    it("a value typed into a field named like a secret one is never in the tracker's key", () => {
+        for (const [name, value] of [["Password", "Hunt3r!pw22"], ["Create password", "Tr0ub4dor&3horse"], ["One-time code", "481516"], ["PIN", "7391"], ["API token", "tok-plain-55"]] as const) {
+            const key = keyed(`textbox "${name}" @0a1b2c3d4e5f`, name, value);
+            expect(key, name).not.toContain(value);
+            expect(key, name).toContain(`textbox "${name}" @0a1b2c3d4e5f`);
+        }
+        // A field whose accessible name says nothing, but whose locator does.
+        expect(actionTracker(url).before({ tool: "fill", args: { target: { by: "css", value: "input[type=password]" }, value: "Hunt3r!pw22" }, target: "textbox @0a1b2c3d4e5f", url }).action).not.toContain("Hunt3r!pw22");
+        // The replayed step's own shape (`locator`, not `target`).
+        expect(actionTracker(url).before({ tool: "fill", args: { action: "fill", locator: { by: "label", value: "PIN" }, value: "7391" }, target: 'textbox "PIN" @0a1b2c3d4e5f', url }).action).not.toContain("7391");
+    });
+
+    it("what is left of the arguments is masked: a key pressed into a secret field, a run secret, a value that looks like a key", () => {
+        const t = (secrets: string[] = []) => actionTracker(url, secrets);
+        expect(t().before({ tool: "press", args: { key: "7", target: { by: "label", value: "PIN" } }, target: 'textbox "PIN" @aa', url }).action).toBe('press textbox "PIN" @aa {"key":"[hidden]"}');
+        expect(t().before({ tool: "press", args: { key: "Enter", target: { by: "label", value: "Quantity" } }, target: 'spinbutton "Quantity" @aa', url }).action).toBe('press spinbutton "Quantity" @aa {"key":"Enter"}');
+        expect(t(["MyRunSecret9"]).before({ tool: "wait", args: { until: "text", value: "MyRunSecret9" }, url, read: true }).action).not.toContain("MyRunSecret9");
+        expect(t().before({ tool: "wait", args: { until: "text", value: KEY_LIKE }, url, read: true }).action).not.toContain("sk-ant");
+        expect(t().before({ tool: "wait", args: { until: "text", value: "Order placed" }, url, read: true }).action).toContain("Order placed");
+    });
+
+    it("maskAction masks a row already in that shape (a runner's record, masked again by the platform)", () => {
+        const raw = (name: string, value: string) => `fill textbox ${JSON.stringify(name)} @0123456789ab ${JSON.stringify({ value })}`;
+        expect(maskAction(raw("Create password", "Tr0ub4dor&3horse"))).toBe(`fill textbox "Create password" @0123456789ab {"value":"[hidden]"}`);
+        expect(maskAction(raw("One-time code", "482913"))).not.toContain("482913");
+        expect(maskAction(raw("PIN", "7391"))).not.toContain("7391");
+        expect(maskAction(raw("Quantity", "5"))).toBe(raw("Quantity", "5"));
+        // A name with braces in it is still the element's name, and a target without a value is kept as it is.
+        expect(maskAction(raw('Pass {word}', "x-Secret-1"))).not.toContain("x-Secret-1");
+        expect(maskAction('click button "Order" @0123456789ab')).toBe('click button "Order" @0123456789ab');
+        const once = maskActionLog([row(raw("Password", "Hunt3r!pw22")), row(raw("Bio", "y".repeat(500)))]);
         expect(maskActionLog(once)).toEqual(once);
     });
 });
