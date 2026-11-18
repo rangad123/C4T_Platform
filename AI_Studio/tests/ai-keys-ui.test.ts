@@ -276,7 +276,7 @@ describe("Settings, AI keys (stand-ins)", () => {
 });
 
 describe("no project AI anywhere", () => {
-    it("the web source has no project AI setting, no /projects/:id/ai call and no old configuration routes", () => {
+    it("the web source has no project AI key setting, no /projects/:id/ai call and no old configuration routes (only the project's model choice)", () => {
         const files: string[] = [];
         const walk = (d: string) => {
             for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -286,8 +286,12 @@ describe("no project AI anywhere", () => {
             }
         };
         walk(path.join(REPO_ROOT, "web/src"));
-        const bad = files.filter((f) => /\/projects\/\$\{[^}]+\}\/ai\b|\/ai-configurations|ProjectAiSettings|AI configuration|who pays|managed AI/i.test(fs.readFileSync(f, "utf8"))).map((f) => path.relative(REPO_ROOT, f));
+        // A project may name the AI model its work uses (/projects/:id/ai-model, docs/features/ai-keys.md); it never holds a key.
+        const bad = files.filter((f) => /\/projects\/\$\{[^}]+\}\/ai(?![\w-])|\/ai-configurations|ProjectAiSettings|AI configuration|who pays|managed AI/i.test(fs.readFileSync(f, "utf8"))).map((f) => path.relative(REPO_ROOT, f));
         expect(bad).toEqual([]);
+        const modelCalls = files.filter((f) => /\/projects\/\$\{[^}]+\}\/ai-model/.test(fs.readFileSync(f, "utf8"))).map((f) => path.relative(REPO_ROOT, f));
+        expect(modelCalls).toEqual(["web/src/features/workspace/ProjectAiModel.tsx"]);
+        expect(fs.readFileSync(path.join(REPO_ROOT, "web/src/features/workspace/ProjectAiModel.tsx"), "utf8")).not.toMatch(/apiKey|secret/i);
     });
 
     it("a project's Settings has no AI section", async () => {
