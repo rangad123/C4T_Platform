@@ -9,8 +9,11 @@
 import { z } from "zod";
 import { PAGE_TYPES } from "../understanding/app-model.js";
 
-/** Bump when the stored shape changes; a record with another version is ignored, never half-read. */
-export const MEMORY_VERSION = 1;
+/**
+ * Bump when the stored shape changes; a record with another version is ignored, never half-read. Version 2 added the AI model that
+ * understood each page (`pages[].model`); a version 1 record is read as version 2 whose pages name no model (memory-store.ts).
+ */
+export const MEMORY_VERSION = 2;
 /** A stored record bigger than this is dropped (and a new one is distilled to fit under it). */
 export const MAX_MEMORY_BYTES = 64 * 1024;
 /** Memories kept per project (one per application origin). */
@@ -40,6 +43,11 @@ export const SiteKnowledgeSchema = z.object({
                  */
                 ufp: z.string().regex(/^[0-9a-f]{16}$/).optional(),
                 purpose: Short(200).optional(),
+                /**
+                 * The AI model that understood the page (its name as the job's AI client gives it). Exploration reuse keeps an understanding
+                 * only for the same model: another model reads the page again. Absent in version 1 records: such pages are read again.
+                 */
+                model: Short(100).optional(),
             }),
         )
         .max(400),

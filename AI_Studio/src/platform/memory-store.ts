@@ -4,6 +4,7 @@
  * Reading never throws: an unusable record becomes a plain warning, and a corrupted or oversized one is deleted.
  */
 import { MAX_MEMORY_BYTES, MAX_ORIGINS_PER_PROJECT, MemoryChangesSchema, MEMORY_VERSION, SiteKnowledgeSchema, type MemoryChanges, type MemoryLoad, type SiteKnowledge } from "../engine/memory/types.js";
+import { memoryPath, scrubText } from "../engine/memory/distill.js";
 import type { Db } from "./db.js";
 
 /** Migration slot 10. */
@@ -70,11 +71,13 @@ export function saveMemory(db: Db, args: { projectId: string; jobId?: string; kn
 type Parsed = { ok: true; value: StoredMemory } | { ok: false; reason: "version" | "corrupt" };
 
 function parse(row: Row): Parsed {
-    // Check the version before the shape: a newer release may have changed the shape.
-    if (row.version !== MEMORY_VERSION) return { ok: false, reason: "version" };
+    // Check the version before the shape: a newer release may have changed the shape. Version 1 differs only by naming no AI model per
+    // page, so it is read as version 2 whose pages name none (their understanding is not reused; reuse.ts).
+    if (row.version !== MEMORY_VERSION && row.version !== 1) return { ok: false, reason: "version" };
     if (row.size_bytes > MAX_MEMORY_BYTES || Buffer.byteLength(row.knowledge_json, "utf8") > MAX_MEMORY_BYTES) return { ok: false, reason: "corrupt" };
     try {
-        const knowledge = SiteKnowledgeSchema.parse(JSON.parse(row.knowledge_json));
+        const raw = JSON.parse(row.knowledge_json) as Record<string, unknown>;
+        const knowledge = SiteKnowledgeSchema.parse(row.version === 1 && raw.version === 1 ? { ...raw, version: MEMORY_VERSION } : raw);
         const changes = row.changes_json ? MemoryChangesSchema.safeParse(JSON.parse(row.changes_json)) : null;
         return { ok: true, value: { knowledge, changes: changes?.success ? changes.data : null, updatedAt: row.updated_at, jobId: row.job_id } };
     } catch {
@@ -113,4 +116,53 @@ export function latestMemory(db: Db, projectId: string): StoredMemory | null {
 /** Forget everything remembered about a project's applications. Returns how many records were removed. */
 export function forgetMemory(db: Db, projectId: string): number {
     return Number(db.run("DELETE FROM site_memory WHERE project_id = ?", projectId).changes);
+}
+
+/** One test of a person's Run that belongs to a planned journey, and how it ended in that Run. */
+export interface RunJourneyResult {
+    /** The test idea's title (as the plan named it). */
+    title: string;
+    journey?: string;
+    startPath: string;
+    passed: boolean;
+}
+
+/**
+ * A person's Run of saved tests updates what is remembered about which journeys have tests that pass: a journey test that passed in the
+ * Run is added to its journey's validated tests, one that failed is taken off. Tests that did not run in it change nothing. Pages,
+ * endpoints and the change summary stay as the last exploration left them. Returns what changed, or null when nothing is remembered
+ * for this application (a Run never creates a memory).
+ */
+export function noteRunInMemory(
+    db: Db,
+    args: { projectId: string; origin: string; jobId: string; results: RunJourneyResult[]; secrets?: string[]; now?: string },
+): { validated: number; noLonger: number } | null {
+    const row = db.get<Row>("SELECT origin, version, updated_at, job_id, size_bytes, knowledge_json, changes_json FROM site_memory WHERE project_id = ? AND origin = ?", args.projectId, args.origin);
+    if (!row || !args.results.length) return null;
+    const p = parse(row);
+    if (!p.ok) return null;
+    const k = p.value.knowledge;
+    const key = (s: string) => s.trim().toLowerCase();
+    let validated = 0;
+    let noLonger = 0;
+    const journeys = k.journeys.map((j) => {
+        const mine = args.results.filter((r) => (r.journey ? key(r.journey) === key(j.name) : j.pages.includes(memoryPath(r.startPath, args.secrets))));
+        if (!mine.length) return j;
+        let list = [...j.validated];
+        for (const r of mine) {
+            const title = scrubText(r.title, args.secrets, 120);
+            const had = list.some((t) => key(t) === key(title));
+            if (r.passed && !had) {
+                list = [title, ...list].slice(0, 12);
+                validated++;
+            } else if (!r.passed && had) {
+                list = list.filter((t) => key(t) !== key(title));
+                noLonger++;
+            }
+        }
+        return { ...j, validated: list };
+    });
+    if (!validated && !noLonger) return { validated, noLonger };
+    saveMemory(db, { projectId: args.projectId, jobId: args.jobId, knowledge: { ...k, journeys, validationKnown: true }, changes: p.value.changes, ...(args.now ? { now: args.now } : {}) });
+    return { validated, noLonger };
 }

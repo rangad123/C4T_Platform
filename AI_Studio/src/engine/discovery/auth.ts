@@ -24,6 +24,8 @@ export interface LoginResult {
     /** Where a successful login landed (e.g. /inventory.html). Often the real entry point of the app. */
     landingUrl?: string;
     mechanisms: string[];
+    /** With LoginOptions.loginPath: signed in there ("used"), no sign-in form there ("not-found"), or the sign-in failed there ("failed"). */
+    remembered?: "used" | "not-found" | "failed";
 }
 
 /** A link or button that leads to the sign-in form. */
@@ -155,15 +157,47 @@ async function navigateToLogin(page: Page): Promise<boolean> {
     return false;
 }
 
-export async function login(session: BrowserSession, startUrl: string, creds: Credentials, frames?: FrameSink): Promise<LoginResult> {
+export interface LoginOptions {
+    /**
+     * Reuse earlier runs: the sign-in page the last exploration found. It is opened first; the form is still filled and the result still
+     * checked. No sign-in form there, or the sign-in failed there while the usual search finds another page: the usual search is used.
+     */
+    loginPath?: string;
+}
+
+export async function login(session: BrowserSession, startUrl: string, creds: Credentials, frames?: FrameSink, opts: LoginOptions = {}): Promise<LoginResult> {
     const { page } = session;
+    let remembered: LoginResult["remembered"];
+    if (opts.loginPath) {
+        const res = await page.goto(new URL(opts.loginPath, startUrl).toString(), { waitUntil: "domcontentloaded" }).catch(() => null);
+        await settle(page);
+        if (res && res.status() < 400 && (await hasPasswordField(page))) {
+            const r = await signInHere(page, creds, frames);
+            if (r.ok) return { ...r, remembered: "used" };
+            remembered = "failed";
+            // The usual search, and a second try only on another page (the same form twice would only fail twice).
+            const other = await findSignIn(page, startUrl);
+            if (!other.ok || new URL(page.url()).pathname === r.loginPath) return { ...r, remembered };
+            return { ...(await signInHere(page, creds, frames)), remembered };
+        }
+        remembered = "not-found";
+    }
+    const found = await findSignIn(page, startUrl);
+    if (!found.ok) return { ...found.result, ...(remembered ? { remembered } : {}) };
+    return { ...(await signInHere(page, creds, frames)), ...(remembered ? { remembered } : {}) };
+}
+
+/** Open the start page and find the sign-in form from there (links, buttons, the usual addresses). */
+async function findSignIn(page: Page, startUrl: string): Promise<{ ok: true } | { ok: false; result: LoginResult }> {
     await page.goto(startUrl, { waitUntil: "domcontentloaded" });
     await settle(page);
+    if (await navigateToLogin(page)) return { ok: true };
+    const captcha = await detectCaptcha(page);
+    return { ok: false, result: { ok: false, error: captcha ? captchaMessage(captcha, new URL(page.url()).pathname) : "No login form found", mechanisms: captcha ? ["captcha"] : [] } };
+}
 
-    if (!(await navigateToLogin(page))) {
-        const captcha = await detectCaptcha(page);
-        return { ok: false, error: captcha ? captchaMessage(captcha, new URL(page.url()).pathname) : "No login form found", mechanisms: captcha ? ["captcha"] : [] };
-    }
+/** Fill and send the sign-in form on the page now open, and check that it worked. */
+async function signInHere(page: Page, creds: Credentials, frames?: FrameSink): Promise<LoginResult> {
     const loginPath = new URL(page.url()).pathname;
     // A captcha is never solved: the sign-in stops with a plain finding (hard sign-ins, ../auth/captcha.ts).
     const captcha = await detectCaptcha(page);

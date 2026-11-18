@@ -178,6 +178,7 @@ export default defineConfig({
             "tests/prompt-cache.test.ts",
             "tests/prompt-cache-prefix.test.ts",
             "tests/planner-retrieval-unit.test.ts",
+            "tests/probe-reuse-unit.test.ts",
             "tests/snapshot-compact.test.ts",
             "tests/det-repair-unit.test.ts",
             "tests/users-unit.test.ts",

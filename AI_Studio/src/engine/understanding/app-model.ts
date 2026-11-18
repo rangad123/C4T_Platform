@@ -95,6 +95,14 @@ export interface PageModel {
     tables?: Array<{ name: string; headers: string[] }>;
     /** Requests a safe interaction (opening a menu, tab or dialog, "Load more") caused: the control, method and path template. */
     interactions?: Array<{ control: string; method: string; path: string }>;
+    /** Links that showed only once a menu, tab or "Load more" was opened. Absent on older models. */
+    revealedLinks?: Array<{ text: string; href: string }>;
+    /** When this page's probes (menus, conditional fields, validation messages) last really ran (ISO). Absent on older models. */
+    probedAt?: string;
+    /** How many explorations in a row took the probe results without probing (memory/probe-reuse.ts). */
+    reuses?: number;
+    /** This exploration took the page's probe results from the exploration of `at` (the page had not changed); they were not tried again. */
+    reusedFrom?: { at: string };
 }
 
 export interface ApiEndpointModel {

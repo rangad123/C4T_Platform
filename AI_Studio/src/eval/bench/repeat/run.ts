@@ -48,7 +48,7 @@ export const ARMS: Record<Arm, { env: Record<string, string>; repeat: Record<str
 };
 
 /** Events that say a run reused something (site memory, unchanged pages, probes, cached answers). */
-export const REUSE_EVENTS = new Set(["memory_used", "understanding_reused", "probes_reused", "response_cache_hit"]);
+export const REUSE_EVENTS = new Set(["memory_used", "understanding_reused", "probes_reused", "pages_from_memory", "signin_reused", "response_cache_hit"]);
 
 export const REPEAT_USAGE = `Usage: node scripts/eval.mjs bench --mode repeat [options]
   --apps <id,id>             benchmark apps (default: ${BENCH_APPS.map((a) => a.id).join(", ")})

@@ -15,7 +15,7 @@ import { isBudgetExceeded } from "./llm/usage.js";
 import { LlmNotConfiguredError } from "./llm/provider.js";
 import { login, type Credentials } from "./discovery/auth.js";
 import { BrowserSession, launchChromium, settle } from "./discovery/browser.js";
-import { addSignedOutPages, crawl } from "./discovery/crawler.js";
+import { addSignedOutPages, crawl, normalizeUrl } from "./discovery/crawler.js";
 import { documentedApiModels, scrapeDocumentationPages } from "./discovery/docs.js";
 import type { Framework, RenderedScript } from "./generators/index.js";
 import { renderWithAdapter } from "./frameworks/index.js";
@@ -38,6 +38,7 @@ import { planScenarios, requirementsCoverage, rulesForScenario } from "./plannin
 import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
 import { reuseMessage } from "./memory/reuse.js";
+import { ProbeReuse, type KnownPages } from "./memory/probe-reuse.js";
 import { EVENT_PAGES_REUSED, explorationReuseOn } from "./llm/without-ai.js";
 import { levelSettings, visionOn, type ExploreLevel } from "./levels.js";
 import { buildScreenMap, coverWithTests, type CrawlTransition, type RoleCrawl } from "./screenmap/map.js";
@@ -133,8 +134,17 @@ export interface GenerationRequest {
     pageUnderstanding?: boolean;
     /** What is known about the application (its latest model version): the plan and the test writers read its usable rules and workflows. */
     appKnowledge?: import("./planning/planner.js").AppKnowledge;
-    /** Send every page to the AI again, even those unchanged since the last exploration (exploration reuse off for this job). Default false. */
+    /**
+     * Explore everything again: nothing is reused from earlier explorations (no page skips the AI, its probes or the usual sign-in search,
+     * and the crawl does not start from the known pages). Default false.
+     */
     fullExploration?: boolean;
+    /**
+     * Reuse earlier runs (memory/probe-reuse.ts): this project's latest application model, as known pages. The crawl starts from them and
+     * an unchanged page takes its probe results instead of being probed again. Used only with memory and exploration reuse on, and only
+     * for the same origin. The host hands over its own project's model only.
+     */
+    knownPages?: KnownPages;
     /** Remove the records data-changing API tests create once the run ends (see ./cleanup). Absent: scripts remove their own records. */
     cleanup?: CleanupRequest;
     /** A saved signed-in session (hard sign-ins, see ./auth/*): exploration starts signed in with it and does not fill the sign-in form. */
@@ -330,6 +340,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         /** What each account is answered by privileged-looking API endpoints (access-control checks of the API). */
         let apiAccess: ApiAccessRow[] = [];
         const from = req.plan ?? req.resume;
+        // Site memory informs the prompts below and the change summary, and (reuse on) where the sign-in page is.
+        const memory = await openMemory(ctx, sink, { origin, enabled: req.useMemory !== false, secrets: secretValues(req), modelName: ctx.llm.modelName });
+        // Reuse earlier runs: switched off per run by "explore everything again", by memory off, or by the exploration reuse setting.
+        const reuseOn = !from && wantWeb && req.useMemory !== false && !req.fullExploration && explorationReuseOn(ctx.config) && req.pageUnderstanding !== false;
+        const known = reuseOn && req.knownPages?.origin === origin && req.knownPages.pages.length ? new ProbeReuse(req.knownPages, (u) => normalizeUrl(u, req.url)) : undefined;
+        const rememberedLogin = reuseOn && memory.loginPath && !/[{}]/.test(memory.loginPath.path) ? memory.loginPath : undefined;
         if (from) {
             // The exploration was done and approved earlier (a plan), or a stopped one had got this far (a checkpoint): start from what it
             // found (nothing is explored again).
@@ -370,8 +386,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     landingUrl = req.savedSession.landingUrl;
                     ctx.emit({ stage: "discovery", kind: "auth_succeeded", message: "Exploring signed in with the saved sign-in" });
                 } else if (creds) {
-                    const r = await login(session, req.url, creds, ctx.frames);
+                    const r = await login(session, req.url, creds, ctx.frames, rememberedLogin ? { loginPath: rememberedLogin.path } : {});
                     authState = { required: true, loginPath: r.loginPath, mechanisms: r.mechanisms, loggedIn: r.ok, loginError: r.error };
+                    if (r.remembered === "used") ctx.emit({ stage: "discovery", kind: "signin_reused", message: `reused: went straight to the sign-in page known since ${rememberedLogin!.since.slice(0, 10)} (${rememberedLogin!.path}); the form was filled and the sign-in checked as usual.`, data: { path: rememberedLogin!.path, since: rememberedLogin!.since } });
+                    else if (r.remembered) ctx.emit({ stage: "discovery", kind: "signin_reuse_failed", level: "warn", message: `The sign-in page known since ${rememberedLogin!.since.slice(0, 10)} (${rememberedLogin!.path}) ${r.remembered === "not-found" ? "no longer shows a sign-in form" : "did not sign in"}, so the sign-in page was looked for as usual.` });
                     landingUrl = r.ok ? r.landingUrl : undefined;
                     ctx.emit({ stage: "discovery", kind: r.ok ? "auth_succeeded" : "auth_failed", level: r.ok ? "info" : "warn", message: r.ok ? `Logged in via ${r.loginPath}` : `Login failed: ${r.error}` });
                 }
@@ -385,9 +403,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         includePaths: req.includePaths,
                         seedUrls: landingUrl ? [landingUrl] : undefined,
                         // Signed in with the project's credentials: a session that ends mid-crawl is renewed once.
-                        ...(creds && authState.loggedIn ? { relogin: async () => (await login(session, req.url, creds)).ok } : {}),
+                        ...(creds && authState.loggedIn ? { relogin: async () => (await login(session, req.url, creds, undefined, authState.loginPath ? { loginPath: authState.loginPath } : {})).ok } : {}),
                         ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
                         ...(req.pageUnderstanding === false ? { pageUnderstanding: false } : {}),
+                        ...(known ? { known } : {}),
                     });
                     // Signed in: the sign-in page and the public pages are read in one short pass signed out, within the same page cap.
                     if (authState.loggedIn) {
@@ -474,6 +493,15 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     // The API description document itself is not an endpoint under test.
                     (a) => a.path !== specPath && !/\/(openapi|swagger)(\.json|\.ya?ml)?$|\/api-docs$/i.test(a.path),
                 );
+                // Pages whose probes were reused did not call what their menus and tabs call: those endpoints come from the last exploration.
+                if (known?.reused.length) {
+                    const have = new Set(apis.map((a) => templateKey(a.method, a.path)));
+                    for (const a of known.reusedApis()) {
+                        if (!allowed.has(a.origin) || have.has(templateKey(a.method, a.path))) continue;
+                        have.add(templateKey(a.method, a.path));
+                        apis.push(a);
+                    }
+                }
                 // Who is answered by privileged-looking endpoints: one GET each as a visitor and per account with an API token.
                 if (wantApi && req.accessChecks !== false && req.roles?.some((r) => r.apiToken)) {
                     try {
@@ -540,9 +568,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // ── 2-3. UNDERSTANDING + PLANNING (LLM, web) ──────────────────────────
         let scenarios: Scenario[] = [];
         let model: AppModel = summary.model!;
-        // Site memory informs the prompts below and the change summary; the crawl above already ran in full.
-        const memory = await openMemory(ctx, sink, { origin, enabled: req.useMemory !== false, secrets: secretValues(req) });
         const validatedScenarioIds = new Set<string>();
+        /** Planned scenarios whose test ran in this job (passed or not). */
+        const ranScenarioIds = new Set<string>();
         /** Whether the AI understanding step ran (site memory is only updated after it). */
         let analysed = Boolean(req.plan?.analysed);
         /** A stopped exploration whose AI reading of the application had finished: that reading is used again. */
@@ -658,6 +686,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         }
 
         if (req.planOnly) {
+            // What was learned is saved now: a plan run explores and understands as fully as any. Nothing was run, so journeys keep the
+            // validated tests known before (a creation from this plan, or a person's Run, updates them).
+            await memory.remember([]);
             // The person looks at the plan and chooses; nothing is generated or run until they do.
             await sink.phase("GENERATING", "generation", "skipped");
             await sink.phase("VALIDATING", "validation", "skipped");
@@ -1048,6 +1079,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             );
             for (const o of outcomes) {
                 if (o.status === "NOT_RUN") continue;
+                const ranFor = pending.find((t) => t.spec.testId === o.spec.testId)?.scenario;
+                if (ranFor) ranScenarioIds.add(ranFor.scenarioId);
                 if (o.status === "VALIDATED") {
                     const planned = pending.find((t) => t.spec.testId === o.spec.testId)?.scenario;
                     if (planned) validatedScenarioIds.add(planned.scenarioId);
@@ -1121,7 +1154,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         throwIfAborted(ctx.signal);
         // Site memory: save what this analysis learned (and what changed since the last one). A cancelled run saved nothing
         // (its validation was partial); never fails the job.
-        await memory.remember(scenarios.map((s) => ({ title: s.title, journey: s.journey, startPath: s.startPath, validated: validatedScenarioIds.has(s.scenarioId) })));
+        await memory.remember(scenarios.map((s) => ({ title: s.title, journey: s.journey, startPath: s.startPath, validated: validatedScenarioIds.has(s.scenarioId), ran: ranScenarioIds.has(s.scenarioId) })));
         ctx.emit({
             stage: "orchestration",
             kind: "job_summary",

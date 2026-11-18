@@ -89,6 +89,11 @@ export interface ScenarioResult {
     journey?: string;
     startPath: string;
     validated: boolean;
+    /**
+     * Whether its test ran in this analysis (absent: it did). A test that was written and not run measured nothing: its journey keeps what
+     * was known before, rather than losing its validated tests.
+     */
+    ran?: boolean;
 }
 
 export interface DistillOptions {
@@ -99,6 +104,8 @@ export interface DistillOptions {
     /** Memory from the previous analysis: carries journey validation forward when this run measured none. */
     previous?: SiteKnowledge | null;
     now?: Date;
+    /** The AI model that understood the pages (kept per page, so another model reads them again; see reuse.ts). */
+    modelName?: string;
 }
 
 const MAX_PAGES = 300;
@@ -117,7 +124,7 @@ export function distillKnowledge(model: AppModel, opts: DistillOptions = {}): Si
         if (seen.has(path)) continue;
         seen.add(path);
         const purpose = p.purpose ? scrubText(p.purpose, secrets, 200) : "";
-        pages.push({ path, type: p.type, title: scrubText(p.title, secrets, 80), fp: pageFingerprint(p), ufp: understandingFingerprint(p), ...(purpose ? { purpose } : {}) });
+        pages.push({ path, type: p.type, title: scrubText(p.title, secrets, 80), fp: pageFingerprint(p), ufp: understandingFingerprint(p), ...(purpose ? { purpose } : {}), ...(opts.modelName ? { model: opts.modelName.slice(0, 100) } : {}) });
     }
     pages.sort((a, b) => a.path.localeCompare(b.path));
 
@@ -132,16 +139,18 @@ export function distillKnowledge(model: AppModel, opts: DistillOptions = {}): Si
     }
     apis.sort((a, b) => `${a.path} ${a.method}`.localeCompare(`${b.path} ${b.method}`));
 
-    const known = opts.scenarios !== undefined && opts.scenarios.length > 0;
+    const ran = (opts.scenarios ?? []).filter((s) => s.ran !== false);
+    const known = ran.length > 0;
     const previousByName = new Map((opts.previous?.journeys ?? []).map((j) => [key(j.name), j]));
     const journeys: SiteKnowledge["journeys"] = model.journeys.slice(0, MAX_JOURNEYS).map((j) => {
         const jpages = j.pages.map((x) => memoryPath(x, secrets));
         const name = scrubText(j.name, secrets, 120);
         let validated: string[];
-        if (known) {
-            // A scenario belongs to a journey by the planner's link, or else by starting on one of the journey's pages.
-            const mine = opts.scenarios!.filter((s) => (s.journey ? key(s.journey) === key(j.name) : jpages.includes(memoryPath(s.startPath, secrets))));
-            validated = mine.filter((s) => s.validated).map((s) => scrubText(s.title, secrets, 120));
+        // A scenario belongs to a journey by the planner's link, or else by starting on one of the journey's pages. A journey whose tests
+        // were all written and none run this time keeps what was known before.
+        const mine = (opts.scenarios ?? []).filter((s) => (s.journey ? key(s.journey) === key(j.name) : jpages.includes(memoryPath(s.startPath, secrets))));
+        if (known && !(mine.length && mine.every((s) => s.ran === false))) {
+            validated = mine.filter((s) => s.ran !== false && s.validated).map((s) => scrubText(s.title, secrets, 120));
         } else {
             validated = previousByName.get(key(j.name))?.validated ?? [];
         }

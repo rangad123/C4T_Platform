@@ -23,6 +23,8 @@ export interface MemoryStorage {
 export interface MemorySession {
     /** True when a usable record from an earlier analysis was loaded. */
     readonly hasPrevious: boolean;
+    /** The sign-in page the earlier analysis found (a memory path), and when that analysis ran. Undefined without one. */
+    readonly loginPath?: { path: string; since: string };
     /** Compare the fresh crawl with memory (pages and endpoints only) so the prompts can say what looks new. */
     noteCrawl(model: AppModel): void;
     /** The "previously known" section for a prompt, or undefined when there is nothing (or memory is off). */
@@ -67,7 +69,7 @@ const OFF: MemorySession = {
     changes: null,
 };
 
-export async function openMemory(ctx: EngineContext, storage: MemoryStorage, opts: { origin: string; enabled: boolean; secrets: string[] }): Promise<MemorySession> {
+export async function openMemory(ctx: EngineContext, storage: MemoryStorage, opts: { origin: string; enabled: boolean; secrets: string[]; modelName?: string }): Promise<MemorySession> {
     if (!opts.enabled || !storage.loadMemory) return OFF;
 
     let previous: SiteKnowledge | null = null;
@@ -91,6 +93,7 @@ export async function openMemory(ctx: EngineContext, storage: MemoryStorage, opt
     let model: AppModel | undefined;
     const session: MemorySession & { changes: MemoryChanges | null } = {
         hasPrevious: Boolean(previous),
+        ...(previous?.loginPath ? { loginPath: { path: previous.loginPath, since: previous.analysedAt } } : {}),
         changes: null,
         noteCrawl(m) {
             if (!previous) return;
@@ -106,7 +109,7 @@ export async function openMemory(ctx: EngineContext, storage: MemoryStorage, opt
         reusable(m) {
             if (!previous) return undefined;
             try {
-                return planReuse(previous, m, opts.secrets);
+                return planReuse(previous, m, opts.secrets, opts.modelName);
             } catch {
                 return undefined;
             }
@@ -117,7 +120,7 @@ export async function openMemory(ctx: EngineContext, storage: MemoryStorage, opt
         async remember(scenarios) {
             if (!model) return;
             try {
-                const knowledge = distillKnowledge(model, { secrets: opts.secrets, scenarios, previous });
+                const knowledge = distillKnowledge(model, { secrets: opts.secrets, scenarios, previous, ...(opts.modelName ? { modelName: opts.modelName } : {}) });
                 const changes = previous ? diffKnowledge(previous, knowledge) : null;
                 await storage.saveMemory?.(knowledge, changes);
                 session.changes = changes;

@@ -5,7 +5,7 @@
  *
  * "Not changed" is strict: the same address, the same structural fingerprint (headings and form fields, as the change summary uses) AND the
  * same understanding fingerprint (title, every control's role and name, the API calls the page makes; see distill.ts). A page saved by an
- * older version without the second fingerprint is sent again. The crawl itself always runs in full: reuse only changes what the AI is shown.
+ * older version without the second fingerprint, or understood by another AI model than this exploration's, is sent again. The crawl itself always runs in full: reuse only changes what the AI is shown.
  * Pure; the orchestrator decides whether it applies (setting on, memory on, no "explore every page again").
  */
 import type { AppModel, PageType } from "../understanding/app-model.js";
@@ -24,12 +24,17 @@ export interface ReusePlan {
     pages: Map<string, ReusedPage>;
 }
 
-export function planReuse(previous: SiteKnowledge, model: Pick<AppModel, "pages">, secrets: string[] = []): ReusePlan {
+/**
+ * `modelName`: the AI model of this exploration. An understanding written by another model (or by one memory did not record) is not
+ * reused: that page is read again.
+ */
+export function planReuse(previous: SiteKnowledge, model: Pick<AppModel, "pages">, secrets: string[] = [], modelName?: string): ReusePlan {
     const known = new Map(previous.pages.map((p) => [p.path, p]));
     const pages = new Map<string, ReusedPage>();
     for (const p of model.pages) {
         const before = known.get(memoryPath(p.path, secrets));
         if (!before?.ufp) continue;
+        if (!modelName || before.model !== modelName.slice(0, 100)) continue;
         if (before.fp !== pageFingerprint(p) || before.ufp !== understandingFingerprint(p)) continue;
         pages.set(p.path, { type: before.type, ...(before.purpose ? { purpose: before.purpose } : {}) });
     }

@@ -25,6 +25,7 @@ import { readFrameElements } from "../web/frame-elements.js";
 import { captchaMessage, detectCaptcha } from "../auth/captcha.js";
 import type { CrawlTransition } from "../screenmap/map.js";
 import { redactText } from "../../shared/redact-text.js";
+import { clearProbes, type ProbeReuse } from "../memory/probe-reuse.js";
 
 export interface CrawlOptions {
     startUrl: string;
@@ -52,6 +53,11 @@ export interface CrawlOptions {
      * returns what older runners send.
      */
     pageUnderstanding?: boolean;
+    /**
+     * Reuse earlier runs (memory/probe-reuse.ts): start from the pages the last exploration knew, and take the probe results of a page
+     * that has not changed since instead of probing it again (with spot checks). Only with page understanding on.
+     */
+    known?: ProbeReuse;
 }
 
 type Refuse = (c: { name?: string; url: string }) => unknown;
@@ -741,7 +747,7 @@ async function replayClickPath(page: Page, via: ClickPath, target: string): Prom
 export async function crawl(session: BrowserSession, ctx: EngineContext, opts: CrawlOptions): Promise<CrawlResult> {
     const { page } = session;
     const origin = new URL(opts.startUrl).origin;
-    type Source = "sitemap" | "revealed";
+    type Source = "sitemap" | "revealed" | "known";
     const queue: Array<{ url: string; depth: number; from?: string; label?: string; via?: ClickPath; source?: Source }> = [];
     const seen = new Set<string>();
     /** Normalised URLs actually rendered (after redirects), so a redirect target isn't recorded twice. */
@@ -755,9 +761,26 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
     const landed = new Map<string, string>();
     let skipped = 0;
     /** Pages visited that only one source led to (one plain event each at the end). */
-    const foundBy: Record<Source, number> = { sitemap: 0, revealed: 0 };
+    const foundBy: Record<Source, number> = { sitemap: 0, revealed: 0, known: 0 };
     let reloginUsed = false;
     const understand = opts.pageUnderstanding !== false;
+    const known = understand ? opts.known : undefined;
+    let offSaid = false;
+    /** Known pages that answered with an error now (removed since the last exploration). */
+    let knownGone = 0;
+    /** Reuse was switched off for the rest of the run (spot check or too many changed pages): said once, as a warning. */
+    const sayOff = () => {
+        if (!known?.off || offSaid) return;
+        offSaid = true;
+        const n = known.reused.length;
+        ctx.emit({
+            stage: "discovery",
+            kind: "reuse_off",
+            level: "warn",
+            message: `Reuse of the last exploration is off for the rest of this run: ${known.off}. Every page is tried again${n ? `, including the ${n} whose results were already taken` : ""}.`,
+            data: { reason: known.off, changed: known.changedPaths.length, spotChecked: known.spotChecked },
+        });
+    };
 
     const enqueue = (raw: string, depth: number, from?: string, label?: string, via?: ClickPath, source?: Source): boolean => {
         const url = normalizeUrl(raw, opts.startUrl);
@@ -779,6 +802,8 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
 
     enqueue(opts.startUrl, 0);
     for (const seed of opts.seedUrls ?? []) enqueue(seed, 0);
+    // The pages the last exploration knew, at the depth it found them: deep pages without walking the menus again.
+    for (const k of known?.seeds() ?? []) enqueue(k.url, k.depth, k.via?.from, k.via?.label, undefined, "known");
     // Half the budget at most, so a big sitemap (a blog, a catalogue) cannot crowd out what the app links to.
     for (const u of await sitemapUrls(session, origin, Math.max(15, Math.floor(opts.maxPages / 2)))) enqueue(u, 1, undefined, undefined, undefined, "sitemap");
 
@@ -818,6 +843,14 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
                     ctx.emit({ stage: "discovery", kind: "session_lost", level: "warn", message: "The session ended and signing in again did not work; the rest is explored signed out" });
                 }
             }
+            // A page the last exploration knew that is gone now is left out: it is a broken link only when a page links to it now, and then
+            // that link brings it back (and it is recorded as any broken page is).
+            if (status >= 400 && next.source === "known") {
+                seen.delete(next.url);
+                skipped++;
+                knownGone++;
+                continue;
+            }
             if (status >= 400 && next.via) {
                 // Typical SPA on a static host: the route only exists client-side, so click to it instead.
                 const replayed = await replayClickPath(page, next.via, next.url);
@@ -848,9 +881,15 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
             const captcha = await detectCaptcha(page);
             if (captcha) ctx.emit({ stage: "discovery", kind: "captcha_found", level: "warn", message: captchaMessage(captcha, new URL(page.url()).pathname), data: { url: page.url(), captcha } });
             let hidden: Array<{ text: string; href: string }> = [];
-            if (model.type !== "error" && !captcha) ({ revealed: model.revealed, links: hidden } = await exploreSafeInteractions(page, page.url(), model.links, opts.refuse, understand ? { structures: model as PageModel & PageStructures, network: session.network, interactions: (model.interactions = []) } : undefined));
-            if (model.type !== "error" && !captcha) await probeConditionalFields(page, model.forms, opts.refuse);
-            if (understand && model.type !== "error" && !captcha) await probeValidation(session, page.url(), model.forms, opts.refuse);
+            const probing = model.type !== "error" && !captcha;
+            // An unchanged known page takes its earlier probe results (a spot check probes it anyway and compares); every other is probed.
+            const decision = probing && known ? known.decide(model) : ({ kind: "probe" } as const);
+            if (decision.kind === "reuse") hidden = known!.take(model, decision.known);
+            else if (probing) {
+                hidden = await probePage(session, model, opts.refuse, understand);
+                if (decision.kind === "spot") known!.check(model, decision.known);
+            }
+            sayOff();
             await ctx.frames?.capture(page, { note: activityLine({ kind: "read", links: model.links.length }), phase: "exploring", pagesSeen: pages.length + 1 });
 
             if (opts.screenshotsDir) {
@@ -868,8 +907,8 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
             ctx.emit({
                 stage: "discovery",
                 kind: "page_visited",
-                message: `Visited ${model.path} (${model.type}, ${model.forms.length} forms, ${model.components.length} controls)`,
-                data: { url: model.url, status, depth: next.depth, type: model.type },
+                message: `Visited ${model.path} (${model.type}, ${model.forms.length} forms, ${model.components.length} controls)${model.reusedFrom ? `; unchanged since ${model.reusedFrom.at.slice(0, 10)}, so its menus, conditional fields and validation messages were taken from then` : ""}`,
+                data: { url: model.url, status, depth: next.depth, type: model.type, ...(model.reusedFrom ? { reusedFrom: model.reusedFrom.at } : {}) },
             });
 
             const here = normalizeUrl(model.url, opts.startUrl) ?? next.url;
@@ -912,10 +951,70 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
         }
     }
     skipped += queue.length;
+    // Reuse was switched off after some pages had taken earlier results: those are probed now, so nothing in this run rests on them.
+    if (known?.off && known.reused.length) {
+        const again = known.reused.splice(0);
+        let done = 0;
+        for (const p of again) {
+            throwIfAborted(ctx.signal);
+            try {
+                session.network.setCurrentPage(p.url);
+                const status = await load(page, p.url);
+                if (status >= 400 || normalizeUrl(page.url(), opts.startUrl) !== normalizeUrl(p.url, opts.startUrl)) throw new Error(`it answered ${status} or moved to ${page.url()}`);
+                clearProbes(p);
+                delete p.reusedFrom;
+                const links = await probePage(session, p, opts.refuse, understand);
+                const here = normalizeUrl(p.url, opts.startUrl)!;
+                for (const l of links) {
+                    const to = normalizeUrl(l.href, opts.startUrl);
+                    if (to && to !== here && new URL(to).origin === origin && transitions.length < MAX_TRANSITIONS) transitions.push({ from: here, to, label: l.text, via: "menu" });
+                }
+                done++;
+            } catch (err) {
+                // Not probed again: it keeps the earlier results and says so (reusedFrom), never shown as tried this run.
+                known.reused.push(p);
+                ctx.emit({ stage: "discovery", kind: "page_failed", level: "warn", message: `Could not try ${p.path} again: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}; it keeps the results of ${p.reusedFrom?.at.slice(0, 10) ?? "the last exploration"}` });
+            }
+        }
+        if (done) ctx.emit({ stage: "discovery", kind: "reuse_reprobed", message: `Tried again the ${done} ${done === 1 ? "page" : "pages"} whose earlier results were taken before reuse was switched off.`, data: { pages: done } });
+    }
+    if (known?.reused.length) {
+        const n = known.reused.length;
+        const since = known.since()!.slice(0, 10);
+        const list = known.reused.slice(0, 8).map((p) => p.path).join(", ");
+        ctx.emit({
+            stage: "discovery",
+            kind: "probes_reused",
+            message: `reused: ${n} ${n === 1 ? "page" : "pages"} unchanged since ${since}. Their menus, tabs, conditional fields and validation messages were taken from then, not tried again this run (${list}${n > 8 ? ` and ${n - 8} more` : ""}). ${known.spotChecked} ${known.spotChecked === 1 ? "page was" : "pages were"} spot-checked and matched.`,
+            data: { pages: n, since: known.since(), spotChecked: known.spotChecked, expired: known.expired, changed: known.changedPaths.length, paths: known.reused.slice(0, 50).map((p) => p.path) },
+        });
+    }
+    if (foundBy.known || knownGone) {
+        const gone = knownGone ? `; ${knownGone} ${knownGone === 1 ? "is" : "are"} gone now and ${knownGone === 1 ? "was" : "were"} left out` : "";
+        ctx.emit({ stage: "discovery", kind: "pages_from_memory", message: `Started from ${foundBy.known} ${foundBy.known === 1 ? "page" : "pages"} the last exploration knew${gone}`, data: { pages: foundBy.known, gone: knownGone } });
+    }
     if (foundBy.sitemap) ctx.emit({ stage: "discovery", kind: "pages_from_sitemap", message: `Found ${foundBy.sitemap} ${foundBy.sitemap === 1 ? "page" : "pages"} from the sitemap` });
     if (foundBy.revealed) ctx.emit({ stage: "discovery", kind: "pages_from_menus", message: `Found ${foundBy.revealed} ${foundBy.revealed === 1 ? "page" : "pages"} behind menus, tabs and "Load more"` });
     for (const t of transitions) t.to = landed.get(t.to) ?? t.to;
     return { pages, navigation, transitions, skipped };
+}
+
+/**
+ * The probes of a page as read now: open its menus, tabs and dialogs, try its choices for fields that appear and (with page understanding)
+ * read its validation messages. Returns the links the menus revealed. With page understanding, the page records them and when it was probed.
+ */
+async function probePage(session: BrowserSession, model: PageModel, refuse: Refuse | undefined, understand: boolean): Promise<Array<{ text: string; href: string }>> {
+    const { page } = session;
+    const { revealed, links } = await exploreSafeInteractions(page, page.url(), model.links, refuse, understand ? { structures: model as PageModel & PageStructures, network: session.network, interactions: (model.interactions = []) } : undefined);
+    model.revealed = revealed;
+    await probeConditionalFields(page, model.forms, refuse);
+    if (understand) {
+        await probeValidation(session, page.url(), model.forms, refuse);
+        model.revealedLinks = links.slice(0, 60);
+        model.probedAt = new Date().toISOString();
+        model.reuses = 0;
+    }
+    return links;
 }
 
 const SITEMAP_FILES = 6;

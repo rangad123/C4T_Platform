@@ -63,6 +63,9 @@ import { exploreOnRunner } from "./explore-dispatch.js";
 import { handOverExploreLlm } from "./explore-llm.js";
 import { handOverExploreSinks } from "./explore-sink.js";
 import { EXPLORE_ADAPTER_ID } from "./explore-task.js";
+import { knownPagesOf } from "../engine/memory/probe-reuse.js";
+import { secretValues } from "../engine/memory/session.js";
+import { noteRunInMemory, type RunJourneyResult } from "./memory-store.js";
 import { runnersOnly } from "./runner-only.js";
 import { LEASE_LOST, onHandover } from "./runner-handover.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
@@ -477,6 +480,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 });
             }
             summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}), ...knownBugsOf(repo.db, tests), ...(await siteNotesOf(repo, job.projectId)) }, tests, engineSink);
+            // A person's Run of journey tests tells the site memory which journeys have tests that pass (an exploration writes them only).
+            if (!abort.signal.aborted && o.useMemory !== false) await noteRunForMemory(repo, sink, { job, url: app.url, tests, secrets: secretValues({ credentials: app.credentials, roles }), emit });
         } else {
             // Creating from a plan the person approved: the plan is read back here, so a missing one fails before anything is touched.
             const fromPlan = o.fromPlan ? await requireStoredPlan(repo, store, o.fromPlan) : undefined;
@@ -522,6 +527,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 // The application's rules and workflows, read as they are now: the plan and the test writers read them.
                 ...(await appKnowledgeOf(repo, job.projectId)),
                 ...(o.fullExploration ? { fullExploration: true } : {}),
+                // Reuse earlier runs: this project's own latest model, as known pages (the engine uses them only for the same origin).
+                ...(!fromPlan && !o.resumeFrom && !o.fullExploration && o.useMemory !== false && !o.understandingBaseline ? knownPagesRequest(repo.getLatestAppModel(job.projectId)) : {}),
                 ...(o.understandingBaseline ? { pageUnderstanding: false } : {}),
                 cleanup,
                 ...(signIn.savedSession ? { savedSession: signIn.savedSession } : {}),
@@ -710,6 +717,39 @@ async function cleanScratch(dir: string): Promise<void> {
 }
 
 /** The checkpoint a stopped exploration kept, for the job that continues it; without one it starts from the beginning and says so. */
+/** After a Run: each journey test that ran in it, passed or failed, goes into the site memory (memory-store.ts noteRunInMemory). Never fails the Run. */
+async function noteRunForMemory(
+    repo: Repo,
+    sink: { writes: { flush(): Promise<void> } },
+    o: { job: JobRow; url: string; tests: Array<{ handle: { id: string }; scenario?: Scenario }>; secrets: string[]; emit: (e: EngineEvent) => void },
+): Promise<void> {
+    try {
+        const journeyTests = o.tests.filter((t) => t.scenario?.title);
+        if (!journeyTests.length) return;
+        await sink.writes.flush();
+        const ran = new Set(repo.db.all<{ id: string }>("SELECT DISTINCT test_case_id AS id FROM test_executions WHERE job_id = ?", o.job.id).map((r) => r.id));
+        const results: RunJourneyResult[] = [];
+        for (const t of journeyTests) {
+            if (!ran.has(t.handle.id)) continue;
+            const status = repo.getTest(t.handle.id)?.validationStatus;
+            if (status !== "VALIDATED" && status !== "FAILED_VALIDATION") continue;
+            results.push({ title: t.scenario!.title, ...(t.scenario!.journey ? { journey: t.scenario!.journey } : {}), startPath: t.scenario!.startPath, passed: status === "VALIDATED" });
+        }
+        const noted = noteRunInMemory(repo.db, { projectId: o.job.projectId, origin: new URL(o.url).origin, jobId: o.job.id, results, secrets: o.secrets });
+        if (noted && (noted.validated || noted.noLonger)) {
+            o.emit({ stage: "validation", kind: "memory_run_noted", message: `Site memory updated from this run: ${noted.validated} journey test${noted.validated === 1 ? "" : "s"} now known to pass${noted.noLonger ? `, ${noted.noLonger} no longer` : ""}.`, data: { ...noted } });
+        }
+    } catch (e) {
+        o.emit({ stage: "validation", kind: "memory_warning", level: "warn", message: `What this run showed about the journeys could not be remembered (${e instanceof Error ? e.message : String(e)}).` });
+    }
+}
+
+/** The project's latest model as the known pages an exploration may start from (none when nothing was explored with the probes dated). */
+function knownPagesRequest(model: Parameters<typeof knownPagesOf>[0]): Pick<GenerationRequest, "knownPages"> {
+    const knownPages = knownPagesOf(model);
+    return knownPages ? { knownPages } : {};
+}
+
 async function resumeOf(repo: Repo, store: ArtifactStore, stoppedJobId: string, emit: (e: EngineEvent) => void): Promise<{ resume?: ExploreCheckpoint }> {
     const checkpoint = await loadCheckpoint(repo, store, stoppedJobId);
     if (checkpoint) return { resume: checkpoint };
