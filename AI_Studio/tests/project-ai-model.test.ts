@@ -306,7 +306,13 @@ describe("AI started from a route tells the person when the project's model was 
             replyText = JSON.stringify({ cases: [{ requirement: "REQ-1", title: `Check sign in ${token}`, priority: "high", type: "automated", steps: [{ action: "Open the page", expected: "The form shows" }] }] });
             const cases = await as(token, "POST", `/api/projects/${pid}/requirements/generate-cases`, { requirementIds: [req.body.id] });
             replyText = "OK";
+            // A web case's script is built by a run in the browser (src/platform/case-scripts.ts), whose AI the job says; the route
+            // itself asks the AI for phone scripts only, so the project is an Android app for this one call.
+            platform.repo.updateProject(pid, { platforms: ["android"] });
+            const phoneApp = platform.repo.createApplication(pid, "android-app://com.example.shop", { ...DEFAULT_JOB_OPTIONS, mobile: { appPackage: "com.example.shop" } });
             const scripts = await as(token, "POST", `/api/projects/${pid}/manual-cases/generate-scripts`, { caseIds: [kase.body.id] });
+            platform.db.run("DELETE FROM applications WHERE id = ?", phoneApp);
+            platform.repo.updateProject(pid, { platforms: ["web"] });
             const refine = await as(token, "POST", `/api/projects/${pid}/requirements/import/refine`, { text: "- People can sign in" });
             replyText = JSON.stringify({ suites: [{ name: `Smoke ${token}`, description: "Quick.", scripts: ["API-001"] }] });
             const suites = await as(token, "POST", `/api/projects/${pid}/test-suites/propose`, {});

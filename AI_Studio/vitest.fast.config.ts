@@ -217,7 +217,6 @@ export default defineConfig({
             "tests/generate-scripts.test.ts",
             "tests/project-ai-model.test.ts",
             "tests/ai-key-address-unit.test.ts",
-            "tests/case-script-guards.test.ts",
             "tests/generate-phone-scripts.test.ts",
             "tests/inner-call-auth.test.ts",
             "tests/ai-writing-permissions.test.ts",
