@@ -22,6 +22,7 @@ import { memoryLogger } from "../src/agent/log.js";
 import { loadConfig } from "../src/config.js";
 import { llmClientFromModel } from "../src/engine/llm/provider.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
+import { sampleExploration } from "./fixtures/exploration-record.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CapabilityProbe } from "../src/agent/capabilities.js";
@@ -313,6 +314,59 @@ describe("an exploration goes to its starter's runner", () => {
         expect(loadConfig({ DATA_DIR: dataDir }).EXPLORE_DATA_OPERATORS).toBe(false);
         expect(loadConfig({ DATA_DIR: dataDir, EXPLORE_DATA_OPERATORS: "1" }).EXPLORE_DATA_OPERATORS).toBe(false);
         expect(loadConfig({ DATA_DIR: dataDir, EXPLORE_DATA_OPERATORS: "true" }).EXPLORE_DATA_OPERATORS).toBe(true);
+    });
+
+    // Row 184: the coverage record of an exploration by objectives comes back in the runner's result and is kept for the coverage route.
+    describe("the runner's coverage record", () => {
+        // One test written and validated (counts only: the job's outcome follows them), so the job completes unless the record fails it.
+        const summary = { testsGenerated: 1, testsValidated: 1, testsFailedValidation: 0, testsNeedingReview: 0, errors: [] };
+        /** An exploration on a hand-driven runner that answers `explore`, then the job, its events and its coverage route. */
+        async function exploredWith(name: string, answer: Record<string, unknown>) {
+            const p = await person(name);
+            const a = await rawAgent(p.id, `${name} laptop`, true, ["plain", "agent", "mobile", "assessment", "objectives"]);
+            const started = await explore(p);
+            expect(started.status, started.text).toBe(202);
+            const offer = await poll(a);
+            expect((await agentApi(a.token, "POST", `/api/agent/tasks/${offer.taskId}/accept`, { attemptId: offer.attemptId })).status).toBe(200);
+            const posted = await agentApi(a.token, "POST", `/api/agent/tasks/${offer.taskId}/result`, { ok: true, runs: [], explore: { ...summary, ...answer }, attemptId: offer.attemptId });
+            expect(posted.status, JSON.stringify(posted.body)).toBe(200);
+            const job = await jobDone(started.body.jobId);
+            const coverage = await call("GET", `/api/projects/${p.project}/jobs/${started.body.jobId}/coverage`, undefined, p.token);
+            expect(coverage.status, coverage.text).toBe(200);
+            return { job, coverage: coverage.body, events: platform.repo.listEvents(started.body.jobId) };
+        }
+
+        it("a runner's record is kept: the coverage route answers its stop reason, budgets, usage, coverage and action log", async () => {
+            const record = sampleExploration();
+            const { job, coverage, events } = await exploredWith("Coverage kept", { exploration: record });
+            expect(job.status, job.error).toBe("COMPLETED");
+            expect(coverage).toEqual({ available: true, stopReason: record.stopReason, stopDetail: record.stopDetail, budgets: record.budgets, usage: record.usage, coverage: record.coverage, actionLog: record.actionLog, actionLogOmitted: 0 });
+            expect(events.map((e) => e.kind)).not.toContain("exploration_record_dropped");
+        }, 60_000);
+
+        it("an older runner sends none: the run has no coverage record, and nothing is said about it", async () => {
+            const { job, coverage, events } = await exploredWith("Coverage none", {});
+            expect(job.status, job.error).toBe("COMPLETED");
+            expect(coverage).toMatchObject({ available: false, message: expect.stringContaining("no coverage record") });
+            expect(events.map((e) => e.kind)).not.toContain("exploration_record_dropped");
+        }, 60_000);
+
+        it("a malformed or oversized record is dropped with a warning, and the run still completes", async () => {
+            const huge = sampleExploration({ actionLog: Array.from({ length: 2_000 }, (_, i) => ({ seq: i, objectiveId: "OBJ-0123456789abcdef:as_stated", state: "/p|abc", action: "x".repeat(1_100), atMs: i, result: "performed" as const })) });
+            for (const [name, exploration, why] of [
+                ["Coverage malformed", { ...sampleExploration(), stopReason: "bored" }, /\(stopReason: /],
+                ["Coverage oversized", huge, /\(it is larger than 2 MB\)/],
+            ] as const) {
+                const { job, coverage, events } = await exploredWith(name, { exploration });
+                expect(job.status, `${name}: ${job.error}`).toBe("COMPLETED");
+                expect(coverage, name).toMatchObject({ available: false });
+                const dropped = events.filter((e) => e.kind === "exploration_record_dropped");
+                expect(dropped, name).toHaveLength(1);
+                expect(dropped[0]).toMatchObject({ level: "warn" });
+                expect(dropped[0]!.message).toMatch(why);
+                expect(dropped[0]!.message).toMatch(/^Your runner's coverage record for this exploration could not be kept \(.*\), so the run has no coverage record\.$/);
+            }
+        }, 120_000);
     });
 
     it("fences the explore routes to the running attempt; a cancel stops the task", async () => {
