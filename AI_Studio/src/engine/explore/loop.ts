@@ -2,8 +2,9 @@
  * The bounded exploration loop (Phase 3, P3-06). Pure: the browser, the model, the clock and the AI usage counter are all injected.
  *
  * One session pursues objectives by priority under fixed budgets. The loop, not the model, decides when to stop:
- * - every action goes through `ctx.act`, which the loop counts and refuses once a budget is spent, when the same action is tried again
- *   on the same state, or when one state is visited more often than the depth allows (both tracked per pursuit, after the safe reset);
+ * - every action goes through `ctx.act` before it reaches the application, which the loop counts and refuses once a budget is spent,
+ *   when the same action is tried again on the same state, or when one state is visited more often than the depth allows (both tracked
+ *   per pursuit, after the safe reset);
  * - AI calls and tokens are read from the injected usage counter (relative to the session start), never from what a pursuit reports;
  * - time is read from the injected clock, and a pursuit that never returns is abandoned when the time is up or the session is cancelled;
  * - N consecutive environment failures (a failed run, a thrown error, a failed reset) stop the session as unstable;
@@ -48,7 +49,7 @@ export interface LoopAction {
 export type ActVerdict = { allowed: true } | { allowed: false; reason: string };
 
 export interface ObjectiveContext {
-    /** Ask before every action; a refusal means the pursuit must end (its signal is aborted too). */
+    /** Ask before every action, before it reaches the application; a refusal means it is not performed and the pursuit must end (its signal is aborted too). */
     act(action: LoopAction): ActVerdict;
     /** The session stop reason if a budget is spent now (call it before an AI call), else null. */
     check(): StopReason | null;

@@ -54,7 +54,7 @@ import type { ApiEndpointModel, AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
 import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
-import { authorWebSpec, statedSource, toSpec, WRITER_STOPPED, type AuthorOutcome } from "./web/author.js";
+import { authorWebSpec, statedSource, toSpec, WRITER_STOPPED, type ActionGate, type AuthorOutcome } from "./web/author.js";
 import { findLeftoverUse, leftoverReason } from "./web/leftovers.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
@@ -905,7 +905,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         calls.n += 1;
                     };
                     const signal = ctx.signal ? AbortSignal.any([ctx.signal, loop.signal]) : loop.signal;
-                    const state = actionTracker(new URL(p.scenario.startPath, origin).href);
+                    const tracker = actionTracker(new URL(p.scenario.startPath, origin).href);
+                    // Asked before each action reaches the application (CP2 H-2): a refused one is not performed.
+                    const actionGate: ActionGate = {
+                        before: (a) => loop.act(tracker.before(a)),
+                        after: (a) => tracker.after(a),
+                    };
                     const rules = p.objective.kind === "rule" ? usableRules(knowledge.rules).filter((r) => r.ref === p.objective.source.ref) : rulesForScenario(p.scenario, knowledge);
                     const runId = await sink.startAgentRun("web-authoring", `${p.scenario.scenarioId} ${p.scenario.title}`);
                     let outcome: AuthorOutcome;
@@ -917,11 +922,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                             model,
                             scenario: p.scenario,
                             credentials: requiresAuth ? creds : undefined,
-                            onAction: (a) => {
-                                sink.agentAction(runId, a);
-                                // Told after the action ran (the test writer has no hook before it): a refusal ends the pursuit before its next model call.
-                                if (a.tool !== "finish") loop.act(state(a));
-                            },
+                            onAction: (a) => sink.agentAction(runId, a),
+                            gate: actionGate,
                             vision: wantVision,
                             maxSteps: Math.min(lv.authoringMaxSteps, p.objective.budget.steps),
                             review: true,
@@ -1517,27 +1519,36 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
 }
 
 /**
- * The loop's view of the test writer's actions: each as a stable key on a state. The test writer reports an action after it ran, with
- * the address it left the page on, and never the page's outline, so a state here is the address pattern with what was done since the
- * page was last loaded (the values typed, the action before). The same click twice in a row is two states (a double submit); the same
- * action again on the same state is a repeat the loop refuses.
+ * The loop's view of the test writer's actions, asked before each one runs (CP2 H-2): each as a stable key on a state. The state is the
+ * address pattern of the page with what was done since the page was last loaded (the values typed, the action before). The same click
+ * twice in a row is two states (a double submit); the same action again on the same state is a repeat the loop refuses.
  */
-export function actionTracker(startUrl: string): (a: { tool: string; args: unknown; ok: boolean; observation: string }) => { state: string; action: string } {
+export function actionTracker(startUrl: string): {
+    before(a: { tool: string; args: unknown; url?: string }): { state: string; action: string };
+    after(a: { tool: string; args: unknown; ok: boolean; url?: string }): void;
+} {
     let url = startUrl;
     let typed: string[] = [];
     let previous = "";
-    return (a) => {
-        const action = `${a.tool} ${JSON.stringify(a.args ?? null) ?? ""}`;
-        const digest = createHash("sha256").update(JSON.stringify([typed, previous])).digest("hex").slice(0, 12);
-        const state = `${pathPattern(url)}|${digest}`;
-        previous = action;
-        const args = (a.args ?? {}) as { value?: unknown };
-        if (a.ok && (a.tool === "fill" || a.tool === "select") && typeof args.value === "string") typed = [...typed, args.value].slice(-50);
-        const moved = a.ok ? /^url=(\S+)/.exec(a.observation)?.[1] : undefined;
-        if (moved && (moved !== url || a.tool === "navigate")) {
-            url = moved;
+    const moveTo = (to: string | undefined): void => {
+        if (to && to !== url) {
+            url = to;
             typed = [];
         }
-        return { state, action };
+    };
+    return {
+        before: (a) => {
+            moveTo(a.url);
+            const action = `${a.tool} ${JSON.stringify(a.args ?? null) ?? ""}`;
+            const digest = createHash("sha256").update(JSON.stringify([typed, previous])).digest("hex").slice(0, 12);
+            previous = action;
+            return { state: `${pathPattern(url)}|${digest}`, action };
+        },
+        after: (a) => {
+            const args = (a.args ?? {}) as { value?: unknown };
+            if (a.ok && (a.tool === "fill" || a.tool === "select") && typeof args.value === "string") typed = [...typed, args.value].slice(-50);
+            if (a.ok && a.tool === "navigate") typed = [];
+            if (a.ok) moveTo(a.url);
+        },
     };
 }
