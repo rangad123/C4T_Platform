@@ -15,6 +15,8 @@
 export interface RunMetrics {
     wallMs: number;
     aiCalls: number;
+    /** Calls answered from the AI response cache instead of the model (not in aiCalls). */
+    cachedCalls: number;
     inputTokens: number;
     outputTokens: number;
     cacheReadTokens: number;
@@ -82,7 +84,7 @@ export function median(xs: number[]): number | null {
 
 const spread = (xs: number[]): Spread => (xs.length ? { median: median(xs)!, min: Math.min(...xs), max: Math.max(...xs) } : { median: 0, min: 0, max: 0 });
 
-const MEASURES: Measure[] = ["wallMs", "aiCalls", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cost", "pages", "scenarios", "requirementsCovered", "reuseEvents", "cacheReadShare"];
+const MEASURES: Measure[] = ["wallMs", "aiCalls", "cachedCalls", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cost", "pages", "scenarios", "requirementsCovered", "reuseEvents", "cacheReadShare"];
 
 function summary(runs: RunMetrics[]): ArmSummary {
     const value = (r: RunMetrics, m: Measure): number => (m === "cacheReadShare" ? (r.inputTokens ? r.cacheReadTokens / r.inputTokens : 0) : m === "cost" ? (r.cost ?? 0) : r[m]);
@@ -170,6 +172,7 @@ export function renderRepeatMd(r: RepeatReport): string {
             "| Measure | On | Off | Saving |",
             "|---|---|---|---|",
             `| AI calls | ${cell(on.aiCalls)} | ${cell(off.aiCalls)} | ${savedCell(a.savings.aiCalls, "fewer")} |`,
+            `| Answers from the AI response cache | ${cell(on.cachedCalls)} | ${cell(off.cachedCalls)} | |`,
             `| Time (ms) | ${cell(on.wallMs)} | ${cell(off.wallMs)} | ${savedCell(a.savings.wallMs, "less")} |`,
             `| Input tokens | ${cell(on.inputTokens)} | ${cell(off.inputTokens)} | ${savedCell(a.savings.inputTokens, "fewer")} |`,
             `| Cache-read share | ${cell(on.cacheReadShare, 2)} | ${cell(off.cacheReadShare, 2)} | |`,

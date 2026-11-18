@@ -13,13 +13,14 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Config } from "../src/config.js";
 import { ExtractionAnswerSchema } from "../src/engine/intel/extract/rules.js";
+import { NormalisedSchema } from "../src/engine/requirements/parse.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import { benchMain } from "../src/eval/bench/cli.js";
 import { ChangeProxy, PAGE_CHANGES } from "../src/eval/bench/repeat/change-proxy.js";
 import { ARMS, repeatMain } from "../src/eval/bench/repeat/run.js";
 
 const PORT = 9890;
-const KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "LLM_MODEL_FAST", "LLM_PROMPT_CACHE", "LLM_EXPLORATION_REUSE", "CONCURRENCY"];
+const KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "LLM_MODEL_FAST", "LLM_PROMPT_CACHE", "LLM_EXPLORATION_REUSE", "LLM_RESPONSE_CACHE", "CONCURRENCY"];
 const saved: Record<string, string | undefined> = {};
 let tmp = "";
 const lines: string[] = [];
@@ -37,6 +38,7 @@ const scriptedFor = (config: Config): LlmClient => {
         object: (async (args: { system: string; schema: unknown }) => {
             calls.push(arm);
             if (args.schema === ExtractionAnswerSchema) return { rules: [], workflows: [], roles: [], transitions: [], entities: [] };
+            if (args.schema === NormalisedSchema) return { requirements: [] };
             if (/analysing a web application/.test(args.system)) return { siteType: "ecommerce", purpose: "A small shop", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] };
             return { scenarios: [] };
         }) as LlmClient["object"],
@@ -87,8 +89,8 @@ describe("before anything starts", () => {
     });
 
     it("the off arm switches every saving off and explores its repeat as new; the on arm switches them on", () => {
-        expect(ARMS.off.env).toEqual({ LLM_PROMPT_CACHE: "false", LLM_EXPLORATION_REUSE: "false" });
-        expect(ARMS.off.repeat).toEqual({ fullExploration: true, useMemory: false });
+        expect(ARMS.off.env).toEqual({ LLM_PROMPT_CACHE: "false", LLM_EXPLORATION_REUSE: "false", LLM_RESPONSE_CACHE: "false" });
+        expect(ARMS.off.repeat).toEqual({ fullExploration: true, useMemory: false, responseCache: false });
         expect(Object.keys(ARMS.on.env).sort()).toEqual(Object.keys(ARMS.off.env).sort());
         expect(Object.values(ARMS.on.env).every((v) => v === "true")).toBe(true);
     });
@@ -152,6 +154,14 @@ describe("a scripted series", () => {
         const off = result.trials.find((t: { arm: string }) => t.arm === "off");
         expect(on.repeat.reuseEvents).toBeGreaterThan(0);
         expect(off.repeat.reuseEvents).toBe(0);
+        // The AI response cache: the on arm's repeat run asked the model less, answering the same questions from the cold run's answers;
+        // the off arm's kept and used none. Nothing was lost for it.
+        expect(on.repeat.cachedCalls).toBeGreaterThan(0);
+        expect(off.cold.cachedCalls + off.repeat.cachedCalls).toBe(0);
+        expect(on.repeat.aiCalls).toBeLessThan(off.repeat.aiCalls);
+        expect(on.repeat.pages).toBeGreaterThanOrEqual(off.repeat.pages);
+        expect(on.repeat.scenarios).toBeGreaterThanOrEqual(off.repeat.scenarios);
+        expect(on.repeat.requirementsCovered).toBeGreaterThanOrEqual(off.repeat.requirementsCovered);
         // Each arm's model calls came from its own platform.
         expect(calls.filter((c) => c === "on").length).toBe(on.cold.aiCalls + on.repeat.aiCalls);
         expect(calls.filter((c) => c === "off").length).toBe(off.cold.aiCalls + off.repeat.aiCalls);

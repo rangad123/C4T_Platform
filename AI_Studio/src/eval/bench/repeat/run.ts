@@ -42,9 +42,9 @@ import { buildRepeatReport, renderRepeatMd, type Arm, type RepeatTrial, type Run
  * response cache, retrieval) adds its switch here, so the off arm keeps measuring everything off.
  */
 export const ARMS: Record<Arm, { env: Record<string, string>; repeat: Record<string, unknown> }> = {
-    on: { env: { LLM_PROMPT_CACHE: "true", LLM_EXPLORATION_REUSE: "true" }, repeat: {} },
+    on: { env: { LLM_PROMPT_CACHE: "true", LLM_EXPLORATION_REUSE: "true", LLM_RESPONSE_CACHE: "true" }, repeat: {} },
     // Site memory is left out of the off arm's repeat as well: it explores as if the application were new.
-    off: { env: { LLM_PROMPT_CACHE: "false", LLM_EXPLORATION_REUSE: "false" }, repeat: { fullExploration: true, useMemory: false } },
+    off: { env: { LLM_PROMPT_CACHE: "false", LLM_EXPLORATION_REUSE: "false", LLM_RESPONSE_CACHE: "false" }, repeat: { fullExploration: true, useMemory: false, responseCache: false } },
 };
 
 /** Events that say a run reused something (site memory, unchanged pages, probes, cached answers). */
@@ -181,6 +181,7 @@ const JOB_DONE = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
 
 interface ProjectUsage {
     calls: number;
+    cachedCalls: number;
     inputTokens: number;
     outputTokens: number;
     cacheReadTokens: number;
@@ -192,7 +193,7 @@ interface ProjectUsage {
 async function projectUsage(client: PlatformClient, projectId: string): Promise<ProjectUsage> {
     const d = today();
     const t = ok(await client.call("GET", `/api/usage?from=${d}&to=${d}&projectId=${encodeURIComponent(projectId)}`), "Reading the AI usage")?.totals ?? {};
-    return { calls: Number(t.calls ?? 0), inputTokens: Number(t.inputTokens ?? 0), outputTokens: Number(t.outputTokens ?? 0), cacheReadTokens: Number(t.cacheReadTokens ?? 0), cacheWriteTokens: Number(t.cacheWriteTokens ?? 0), cost: typeof t.cost === "number" ? t.cost : null };
+    return { calls: Number(t.calls ?? 0), cachedCalls: Number(t.cachedCalls ?? 0), inputTokens: Number(t.inputTokens ?? 0), outputTokens: Number(t.outputTokens ?? 0), cacheReadTokens: Number(t.cacheReadTokens ?? 0), cacheWriteTokens: Number(t.cacheWriteTokens ?? 0), cost: typeof t.cost === "number" ? t.cost : null };
 }
 
 async function platformTotals(sides: Side[]): Promise<{ calls: number; cost: number }> {
@@ -248,7 +249,7 @@ async function exploreOnce(side: Side, projectId: string, body: Record<string, u
     for (let i = 0; i < 20; i++) {
         await sleep(Math.min(deps.pollMs ?? 1000, 500));
         const again = await projectUsage(client, projectId);
-        if (again.calls === after.calls) break;
+        if (again.calls === after.calls && again.cachedCalls === after.cachedCalls) break;
         after = again;
     }
     const row = platform.repo.getJob(jobId);
@@ -264,6 +265,7 @@ async function exploreOnce(side: Side, projectId: string, body: Record<string, u
         metrics: {
             wallMs,
             aiCalls: after.calls - before.calls,
+            cachedCalls: after.cachedCalls - before.cachedCalls,
             inputTokens: after.inputTokens - before.inputTokens,
             outputTokens: after.outputTokens - before.outputTokens,
             cacheReadTokens: after.cacheReadTokens - before.cacheReadTokens,
