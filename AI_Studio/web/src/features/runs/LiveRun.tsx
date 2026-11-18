@@ -6,6 +6,8 @@ import { mergeEvents, type JobStream } from "../../lib/stream";
 import { RelTime } from "./RunTime";
 import { useMyRunner } from "../runners/my-runner";
 import { currentLine, foldLiveRun, isRunnerEvent, liveShotUrl, LIVE_STEPS, PHASE_STEP_WORD, phaseEnded, phaseSentence, runnerIdOf, stepOf, runPhase, shotCaption, type LiveRun, type TaskPhase } from "./live-run";
+import { LiveObjectives } from "./ObjectivesPanel";
+import type { CoverageAnswer } from "./objectives";
 import "./runs.css";
 
 const PAGE = 500;
@@ -284,7 +286,7 @@ export function liveCounts(live: Pick<LiveRun, "passed" | "failed" | "skipped" |
  * run's facts (which runner, when, how long, results) are said once, in About this run. Everything comes from the run's stored
  * events (useLiveRun, called by the page so its list of tests shares the same picture).
  */
-export function LiveRunPanel({ job, active, live, loaded, planned, answer, projectId }: { projectId: string; job: Job; active: boolean; /** From useLiveRun. */ live: LiveRun; loaded: boolean; planned: number; /** The run's answer, which may name the task's phase. */ answer?: object }) {
+export function LiveRunPanel({ job, active, live, loaded, planned, answer, projectId, objectives }: { projectId: string; job: Job; active: boolean; /** From useLiveRun. */ live: LiveRun; loaded: boolean; planned: number; /** The run's answer, which may name the task's phase. */ answer?: object; /** An exploration: its objectives (ObjectivesPanel.tsx). */ objectives?: { explores: boolean; canStop: boolean; coverage?: CoverageAnswer } }) {
     const onRunner = job.ranOn?.kind === "agent";
     const mine = useIsMine(job);
     if (!onRunner && !live.detailed && live.phase === null) return null;
@@ -316,6 +318,7 @@ export function LiveRunPanel({ job, active, live, loaded, planned, answer, proje
                     Now: <span data-testid="run-live-current">{live.current ? currentLine(live.current) : live.detailed ? "between tests" : phase === "running" ? "the runner reports progress as text lines, below" : "nothing yet"}</span>
                 </p>
             )}
+            {objectives && <LiveObjectives projectId={projectId} job={job} active={active} {...objectives} />}
             {!live.detailed && onRunner && (
                 <p className="t-meta" data-testid="run-live-text-only">
                     This runner reports its progress as text lines only, so steps and screenshots appear when the results arrive.
