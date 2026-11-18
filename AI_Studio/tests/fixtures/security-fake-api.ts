@@ -279,6 +279,8 @@ export class SecurityFake {
         if (method === "GET" && p === "/me/ai") return { body: { chosen: null, problem: null, personal: [], organisational: [], canManageOrganisational: false, openServer: { configured: true, provider: "anthropic", model: "scripted" } } };
         // Round 37's places that a project's General settings ask for: no agents listed, none applying, and no app details yet.
         if (method === "GET" && p === "/testing-agents") return { body: { agents: [], canRun: { ok: false, reason: "Not in this fake." }, ai: { configured: true } } };
+        // What the agents need (the Explore by objectives switch in General asks too): no agent applies here, so the switch is not shown.
+        if (method === "GET" && (m = p.match(/^\/projects\/([^/]+)\/agent-inputs$/)) && m[1]) return { body: { applies: false, application: null, signIn: { username: null, hasPassword: false, hasTotpSecret: false }, apiAccess: { hasToken: false, oauth2: null }, openApiUrl: null, allowMutatingApiTests: false, exploreByObjectives: true, cleanupAfter: false, requirements: { active: 0 }, agents: null, missing: [] } };
         if (method === "GET" && p === "/projects") return { body: [...this.projects.values()].map((x) => this.publicProject(x)) };
         if (method === "POST" && p === "/projects") {
             const proj = this.addProject(String(body?.name ?? "Untitled"));
