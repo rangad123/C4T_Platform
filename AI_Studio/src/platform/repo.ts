@@ -158,6 +158,10 @@ export interface JobOptions {
     fromPlan?: string;
     /** With `fromPlan`: test ideas (scenarioIds) the person left out of the plan. */
     excludeIdeas?: string[];
+    /** planOnly: this job continues that stopped exploration (its checkpoint, explore-resume.ts), instead of starting from the beginning. */
+    resumeFrom?: string;
+    /** With `fromPlan`: the stopped creations from the same plan this one continues; their tests are kept and never made again (explore-resume.ts). */
+    carryFrom?: string[];
 }
 
 /**
@@ -215,6 +219,8 @@ export interface JobCounters {
     faultsInjected?: number;
     faultsCaught?: number;
     testsStrengthened?: number;
+    /** A creation that continued a stopped one: the tests the stopped one made that this one ran (never counted in testsGenerated). */
+    testsCarried?: number;
 }
 
 export const emptyCounters = (): JobCounters => ({

@@ -24,7 +24,7 @@ export const wasCancelled = (job: Pick<JobRow, "status" | "error">): boolean => 
 export function cancelSummary(job: Pick<JobRow, "status" | "error" | "counters" | "options">): CancelSummary | undefined {
     if (!wasCancelled(job)) return undefined;
     const c = job.counters;
-    const planned = Math.max(c.testsGenerated, c.testsValidated + c.testsFailedValidation + c.testsNeedingReview, 0);
+    const planned = Math.max(c.testsGenerated + (c.testsCarried ?? 0), c.testsValidated + c.testsFailedValidation + c.testsNeedingReview, 0);
     const ran = Math.min(planned, c.testsValidated + c.testsFailedValidation + c.testsNeedingReview);
     const notRun = planned - ran;
     // An analysis creates its tests as it goes; the ones the cancel came before exist, but have never been run.

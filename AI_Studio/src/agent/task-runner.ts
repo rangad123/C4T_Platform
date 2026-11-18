@@ -785,6 +785,7 @@ export class TaskRunner {
             testsValidated: sum.testsValidated,
             testsFailedValidation: sum.testsFailedValidation,
             testsNeedingReview: sum.testsNeedingReview,
+            ...(sum.testsCarried ? { testsCarried: sum.testsCarried } : {}),
             errors: sum.errors.slice(0, 200).map((e) => log.redact(String(e)).slice(0, 2000)),
             ...(sum.model ? { model: sum.model } : {}),
             ...(sum.plan ? { plan: sum.plan } : {}),

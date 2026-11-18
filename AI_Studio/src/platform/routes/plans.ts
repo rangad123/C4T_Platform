@@ -7,6 +7,8 @@ import { permissionTitle } from "../../engine/mobile/state/permission-step.js";
 import { HttpError } from "../http-error.js";
 import { loadTargetProblem } from "../load-guard.js";
 import { discardStoredPlan, loadStoredPlan, planOptionsOf, PLAN_GONE } from "../plan-store.js";
+import { wasCancelled } from "../cancel-summary.js";
+import { carriedTests, ideasDealtWith, loadCheckpoint } from "../explore-resume.js";
 import { ACTIVE_STATES, type JobOptions, type JobRow } from "../repo.js";
 import { EXPLORING_OFF_MESSAGE, refuseUnlessRunsStart } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
@@ -152,13 +154,12 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         };
     });
 
-    app.post("/api/projects/:id/plans/:jobId/create", async (req, reply) => {
-        const { id, jobId } = req.params as { id: string; jobId: string };
+    /** Create the tests of a plan (the create route), or continue a stopped creation of it (`carryFrom`: the continue route). */
+    const createFromPlan = async (id: string, jobId: string, body: z.infer<typeof CreateBody>, carryFrom?: string[]): Promise<JobRow> => {
         const job = planJob(id, jobId);
         if (ACTIVE_STATES.includes(job.status) || job.status === "QUEUED") throw new HttpError(409, "This exploration has no plan to create tests from.");
         // A failed exploration has no plan to use, unless it was cancelled after its plan was kept (while the application was being read).
         if (job.status === "FAILED" && !(job.error === "Cancelled" && (await loadStoredPlan(repo, p.store, jobId)).ok)) throw new HttpError(409, "This exploration has no plan to create tests from.");
-        const body = CreateBody.parse(req.body ?? {});
         const earlier = repo.listJobs(id).filter((j) => j.options.fromPlan === jobId);
         if (earlier.length) {
             if (!body.continueStopped) throw new HttpError(409, "The tests for this plan were already created. Explore again to get a new plan.");
@@ -189,6 +190,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
             targets,
             fromPlan: jobId,
             ...(body.excludeIdeas?.length ? { excludeIdeas: [...new Set(body.excludeIdeas)] } : {}),
+            ...(carryFrom?.length ? { carryFrom } : {}),
         };
         // The project's current testing agents decide the checks, by narrowing: a check whose agent was removed since the plan was made is
         // left out (the job's events say which), never refused.
@@ -211,14 +213,59 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         refuseUnlessRunsStart(ctx.p, EXPLORING_OFF_MESSAGE); // tests switched off on this server: nothing is queued
         await ctx.assertNoActiveJob(id);
         // The application keeps the generation settings and the sign-in details of the plan, minus the one-off plan fields.
-        const { fromPlan: _a, excludeIdeas: _b, startedBy: _c, runTestCases: _rt, ...config } = options;
+        const { fromPlan: _a, excludeIdeas: _b, startedBy: _c, runTestCases: _rt, carryFrom: _d, ...config } = options;
         const keptMobile = planned.config.mobile;
         const appId = repo.createApplication(id, planned.url, keptMobile ? { ...config, mobile: keptMobile } : config, planned.credentials);
         // The Test Case Generation Agent only writes the test cases: they are run when the person runs them (POST /runs), not here
         // unless the caller asks (runTestCases). The checks of the other agents run as part of the creation.
         const created = await repo.createJob(id, appId, { ...options, ...(runCases ? { runTestCases: true } : {}) });
         if (narrowed.dropped.length) repo.addEvent(created.id, { stage: "planning", kind: "agent_checks_dropped", level: "warn", message: droppedChecksNote(narrowed.dropped), data: { dropped: narrowed.dropped } });
+        return created;
+    };
+
+    app.post("/api/projects/:id/plans/:jobId/create", async (req, reply) => {
+        const { id, jobId } = req.params as { id: string; jobId: string };
+        const created = await createFromPlan(id, jobId, CreateBody.parse(req.body ?? {}));
         return reply.code(202).send({ jobId: created.id, status: created.status });
+    });
+
+    /**
+     * Continue a stopped exploration from where it stopped (explore-resume.ts), instead of starting it again:
+     *   - one that stops at a plan: a new plan-only job that starts from the stopped one's newest checkpoint;
+     *   - a creation from a plan: a new creation of the same plan, with the same choices, that makes only what is missing.
+     * Answers `{ jobId, status, from }`, where `from` says where it carries on: "pages" (the crawl is kept), "reading" (the AI's reading is
+     * kept too), "start" (nothing was kept yet) or "tests" (a creation).
+     */
+    app.post("/api/projects/:id/explorations/:jobId/continue", async (req, reply) => {
+        const { id, jobId } = req.params as { id: string; jobId: string };
+        ctx.project(id);
+        const job = repo.getJob(jobId);
+        if (!job || job.projectId !== id || (job.options.mode ?? "generate") !== "generate") throw new HttpError(404, "Exploration not found");
+        if (!wasCancelled(job)) throw new HttpError(409, ACTIVE_STATES.includes(job.status) || job.status === "QUEUED" ? "This exploration is still going." : "Only a stopped exploration can be continued. Explore again to start a new one.");
+        const later = repo.listJobs(id).find((j) => j.options.resumeFrom === jobId || (j.options.carryFrom ?? []).includes(jobId));
+        if (later) throw new HttpError(409, "This exploration was already continued. Continue the newer one, or explore again.");
+        if (job.options.fromPlan) {
+            const planId = job.options.fromPlan;
+            const earlier = repo.listJobs(id).filter((j) => j.options.fromPlan === planId).map((j) => j.id);
+            const dealt = ideasDealtWith(repo, id, earlier);
+            const exclude = [...new Set([...(job.options.excludeIdeas ?? []), ...dealt])];
+            const carried = carriedTests(repo, id, earlier);
+            const loaded = await loadStoredPlan(repo, p.store, planId);
+            const ideas = loaded.ok ? loaded.plan.scenarios.map((x) => x.scenarioId).filter((x) => !/^M-\d+$/.test(x)) : [];
+            // Every idea dealt with, every check made (the creation got past making them) and every test run: nothing is left.
+            if (job.progress.generation === "done" && ideas.every((x) => exclude.includes(x)) && carried.every((c) => c.hasResult)) throw new HttpError(409, "Everything in this plan was already created and run, so there is nothing to continue. Explore again for a new plan.");
+            const o = job.options;
+            const pick = Object.fromEntries((["targets", "accessibility", "healthChecks", "securityChecks", "performanceChecks", "loadChecks", "inputChecks", "visionChecks", "contractChecks", "accessChecks", "visual"] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+            const created = await createFromPlan(id, planId, { ...pick, excludeIdeas: exclude.filter((x) => ideas.includes(x)), continueStopped: true }, earlier);
+            return reply.code(202).send({ jobId: created.id, status: created.status, from: "tests" });
+        }
+        if (!job.options.planOnly) throw new HttpError(409, "Only an exploration that stops at a plan, or a creation of tests from a plan, can be continued. Explore again to start a new one.");
+        refuseUnlessRunsStart(ctx.p, EXPLORING_OFF_MESSAGE);
+        await ctx.assertNoActiveJob(id);
+        const checkpoint = await loadCheckpoint(repo, p.store, jobId);
+        const { startedBy: _s, ...kept } = job.options;
+        const created = await repo.createJob(id, job.applicationId, { ...kept, resumeFrom: jobId });
+        return reply.code(202).send({ jobId: created.id, status: created.status, from: !checkpoint ? "start" : checkpoint.stage === "understood" ? "reading" : "pages" });
     });
 
     app.delete("/api/projects/:id/plans/:jobId", async (req) => {

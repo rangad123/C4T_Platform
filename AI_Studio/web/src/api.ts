@@ -20,6 +20,8 @@ export interface Counters {
     faultsInjected?: number;
     faultsCaught?: number;
     testsStrengthened?: number;
+    /** A creation that continued a stopped one: the stopped one's tests it ran (not counted in testsGenerated). */
+    testsCarried?: number;
     /** Phone exploration (additive, present only for a phone job): screens the AI has seen and actions it has taken so far. */
     screensSeen?: number;
     actionsTaken?: number;
@@ -37,6 +39,10 @@ export interface Job {
     planOnly?: boolean;
     /** Creation that starts from the plan an earlier exploration kept (that plan job's id). */
     fromPlan?: string;
+    /** A stopped exploration, or a stopped creation from a plan, that can carry on from where it stopped (POST /projects/:id/explorations/:jobId/continue). */
+    canContinue?: true;
+    /** This job carries on the stopped one with this id. */
+    continues?: string;
     /** Name of the environment (staging, production...) a run in "environment" mode targeted. */
     environment?: string | null;
     /** Who started the run: a person, a schedule, or a deploy pipeline. */

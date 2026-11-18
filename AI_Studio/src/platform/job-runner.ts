@@ -6,7 +6,7 @@ import type { EngineContext, EngineEvent } from "../engine/context.js";
 import type { JobMeter } from "../engine/llm/metered.js";
 import { executorFor, isBuiltInAdapterId } from "../engine/frameworks/index.js";
 import { createLlmClientOrUnavailable, type LlmClient } from "../engine/llm/provider.js";
-import { runGeneration, type GenerationRequest, type GenerationSummary } from "../engine/orchestrator.js";
+import { runGeneration, type ExploreCheckpoint, type GenerationRequest, type GenerationSummary } from "../engine/orchestrator.js";
 import type { Scenario } from "../engine/spec/schema.js";
 import { runValidationOnly, type TestToValidate } from "../engine/validate-only.js";
 import { runVariantsJob, type VariantTest } from "../engine/validation/variants.js";
@@ -36,6 +36,7 @@ import { blocksFor, blockView } from "./block-store.js";
 import { LocatorStore } from "./locator-store.js";
 import { tryResolveSpecRefs } from "../engine/locators/refs.js";
 import { cancelSummary } from "./cancel-summary.js";
+import { carriedTests, loadCheckpoint } from "./explore-resume.js";
 import { createFrameSink } from "../engine/frames/sink.js";
 import { frameHub } from "./frame-hub.js";
 import { PLAN_ARTIFACT, PLAN_FILE, planOptionsOf, requireStoredPlan } from "./plan-store.js";
@@ -482,6 +483,9 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             const request: GenerationRequest = {
                 ...(o.planOnly ? { planOnly: true } : {}),
                 ...(fromPlan ? { plan: fromPlan, excludeIdeas: o.excludeIdeas } : {}),
+                // Continuing a stopped exploration or creation (explore-resume.ts): what it had found and made is used, not done again.
+                ...(fromPlan && o.carryFrom?.length ? { carry: carriedTests(repo, job.projectId, o.carryFrom) } : {}),
+                ...(!fromPlan && o.planOnly && o.resumeFrom ? await resumeOf(repo, store, o.resumeFrom, emit) : {}),
                 url: app.url,
                 // The level's numbers (engine/levels), never below thorough's: a job stored before levels existed runs as thorough.
                 level: levelOf(o),
@@ -572,7 +576,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             else await finish(summary.errors.length ? "PARTIALLY_COMPLETED" : "COMPLETED", summary.errors.length ? summary.errors.join(" | ").slice(0, 900) : undefined);
             return;
         }
-        const total = summary.testsGenerated;
+        // A creation that continued a stopped one also ran the tests the stopped one had made (GenerationRequest.carry).
+        const total = summary.testsGenerated + (summary.testsCarried ?? 0);
         // Test cases this generation job wrote and did not run (runTestCases not true): still "Not run yet", here or on a runner.
         const leftToRun = () => ((o.mode ?? "generate") === "generate" && o.runTestCases !== true ? repo.listTests(job.projectId, { jobId: job.id, validationStatus: "PENDING" }).length : 0);
         if (total === 0) {
@@ -702,4 +707,12 @@ async function cleanScratch(dir: string): Promise<void> {
     }
     // Blocked authoring traces: the same hour, and a cap on their total size.
     await pruneAuthoringTraces(dir);
+}
+
+/** The checkpoint a stopped exploration kept, for the job that continues it; without one it starts from the beginning and says so. */
+async function resumeOf(repo: Repo, store: ArtifactStore, stoppedJobId: string, emit: (e: EngineEvent) => void): Promise<{ resume?: ExploreCheckpoint }> {
+    const checkpoint = await loadCheckpoint(repo, store, stoppedJobId);
+    if (checkpoint) return { resume: checkpoint };
+    emit({ stage: "discovery", kind: "resume_from_start", message: "The stopped exploration was still crawling the application, and a half-finished crawl is not kept, so it starts again from the beginning." });
+    return {};
 }

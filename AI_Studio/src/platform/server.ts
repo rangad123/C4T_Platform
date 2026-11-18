@@ -33,7 +33,7 @@ import { ReviewStore } from "./review-store.js";
 import { quarantineGate } from "./quarantine-store.js";
 import type { QuarantineGate } from "../engine/quarantine/rules.js";
 import { DEFAULT_JOB_OPTIONS, unreadableTestSentence, type JobRow, type JobOptions } from "./repo.js";
-import { cancelSummary } from "./cancel-summary.js";
+import { cancelSummary, wasCancelled } from "./cancel-summary.js";
 import { asExecutions, failureSummary, withFailureFacts } from "./failure-view.js";
 import { assessProjectQuality } from "../engine/quality/rules.js";
 import { HttpError } from "./http-error.js";
@@ -235,6 +235,9 @@ const publicJob = (j: JobRow) => ({
     // Only for an exploration that stops at a plan, and for creation that starts from one (see routes/plans.ts).
     ...(j.options.planOnly ? { planOnly: true } : {}),
     ...(j.options.fromPlan ? { fromPlan: j.options.fromPlan } : {}),
+    // A stopped exploration or creation from a plan can carry on from where it stopped (routes/plans.ts, explore-resume.ts); a job that did is marked.
+    ...((j.options.mode ?? "generate") === "generate" && (j.options.planOnly || j.options.fromPlan) && wasCancelled(j) ? { canContinue: true } : {}),
+    ...(j.options.resumeFrom || j.options.carryFrom?.length ? { continues: j.options.resumeFrom ?? j.options.carryFrom!.at(-1)! } : {}),
     ranOn: jobRanOn(j),
     // Whether a person can watch the browser of this job right now (the Explorer view, see routes/explorer.ts).
     canWatch: watchState(j).canWatch,

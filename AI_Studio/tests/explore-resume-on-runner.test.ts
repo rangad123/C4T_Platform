@@ -1,9 +1,10 @@
 /**
- * Sheet #5 on a runner (docs/features/explore-on-runner.md): a real platform in runners mode with the REAL runner from source
+ * Sheet #5 and #6 on a runner (docs/features/explore-on-runner.md): a real platform in runners mode with the REAL runner from source
  * explores a small local site, every model call answered on the platform by a scripted model double.
  *
- * Explore (a plan), create its tests, stop the creation while it writes the second idea: from the stop on, the platform answers no AI call
- * and takes no save for the job, so the runner's child stops and nothing more is made (no further idea, no checks).
+ * Explore (a plan), create its tests, stop the creation while it writes the second idea: the runner's child stops and nothing more is made
+ * (no checks after the stop). Continue: the kept test is not made again but run on the runner (through a handle of the new task), the other
+ * ideas and the checks are made once, and the server opened no browser.
  *
  * Browser-launching: node scripts/with-lock.mjs browser -- npx vitest run tests/explore-resume-on-runner.test.ts
  * Ports: platform 6741, sample site 6742. No real model, no network beyond 127.0.0.1.
@@ -157,8 +158,8 @@ afterAll(async () => {
     for (const d of work) fs.rmSync(d, { recursive: true, force: true });
 });
 
-describe("stop on the runner", () => {
-    it("a stopped creation makes nothing more, by AI or without it", async () => {
+describe("stop and continue on the runner", () => {
+    it("a stopped creation makes nothing more; Continue runs the kept test on the runner and makes only the rest", async () => {
         const who = testPerson(platform);
         const projectId = (await call("POST", "/api/projects", { name: "Runner resume" }, who.token)).body.id as string;
         const { secret } = personalRunner(platform, { ownerId: who.id, label: "Resume laptop" });
@@ -187,13 +188,27 @@ describe("stop on the runner", () => {
             await new Promise((r) => setTimeout(r, 4000));
             release();
             const stopped = await jobDone(c.body.jobId);
-            expect(stopped).toMatchObject({ status: "FAILED", error: "Cancelled" });
+            expect(stopped).toMatchObject({ status: "FAILED", error: "Cancelled", canContinue: true });
             // Nothing is made after the stop, by AI or without it: no further idea and no check (the AI's and the saving calls are refused).
             await new Promise((r) => setTimeout(r, 3000));
             const made = (await tests()).map((t) => t.title).sort();
             expect(made).toEqual(atStop);
             expect(made.every((t) => IDEAS.some((i) => i.title === t))).toBe(true);
             expect(made).not.toContain(IDEAS[1].title);
+
+            authored.length = 0;
+            const r = await call("POST", `/api/projects/${projectId}/explorations/${c.body.jobId}/continue`, undefined, who.token);
+            expect(r.status, r.text).toBe(202);
+            const j = await jobDone(r.body.jobId);
+            expect(["COMPLETED", "PARTIALLY_COMPLETED"], JSON.stringify(j)).toContain(j.status);
+            // Only the ideas without a test are written again.
+            expect([...new Set(authored)].sort()).toEqual(IDEAS.map((i) => i.title).filter((t) => !made.includes(t)).sort());
+            const after = await tests();
+            expect(new Set(after.map((t) => t.title)).size).toBe(after.length);
+            expect(after.map((t) => t.title)).toEqual(expect.arrayContaining(IDEAS.map((i) => i.title)));
+            // The kept test was run on the runner, through the new task's handle.
+            expect(after.find((t) => t.title === IDEAS[0].title)!.validationStatus).toBe("VALIDATED");
+            expect(j.counters.testsCarried).toBe(made.length);
             expect(serverRunRefusals()).toBe(refusedBefore);
         } finally {
             release();

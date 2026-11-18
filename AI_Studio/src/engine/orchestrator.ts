@@ -148,7 +148,45 @@ export interface GenerationRequest {
     plan?: StoredPlan;
     /** With `plan`: test ideas (scenarioIds) the person left out. */
     excludeIdeas?: string[];
+    /**
+     * Continue an exploration that was stopped: start from what it had already found (its last checkpoint), so the pages it crawled are not
+     * crawled again and, when its AI reading of the application had finished, that is not repeated either. Planning is one AI pass whose
+     * partial answer is not kept, so it starts again from its beginning.
+     */
+    resume?: ExploreCheckpoint;
+    /**
+     * With `plan`: the tests earlier creations from the same plan made before they were stopped. None is made a second time; the ones that
+     * have no result yet are run by this creation.
+     */
+    carry?: CarriedTest[];
 }
+
+/** Where an exploration had got to, saved as it goes (artifact CHECKPOINT_ARTIFACT of its job) so a stopped one can continue. */
+export interface ExploreCheckpoint {
+    version: 1;
+    /** "discovered": the crawl and the API discovery had finished. "understood": the AI's reading of the application had finished too. */
+    stage: "discovered" | "understood";
+    model: AppModel;
+    specBaseTrusted: boolean;
+    accessReach: Reach[];
+    apiAccess: ApiAccessRow[];
+}
+export const CHECKPOINT_ARTIFACT = "explore-checkpoint";
+export const CHECKPOINT_FILE = "explore-checkpoint.json";
+
+/** A test an earlier, stopped creation from the same plan made (see GenerationRequest.carry). */
+export interface CarriedTest {
+    handle: TestHandle;
+    spec: TestSpec;
+    framework: Framework;
+    /** It has a result already (passed, failed or needs a look): it is kept as it is. Otherwise this creation runs it. */
+    hasResult: boolean;
+    /** The plan's test idea it was written for (functional tests only). */
+    scenario?: Scenario;
+}
+
+/** What makes two checks the same check: the generators make the same kind, category and title from the same plan (a repair changes steps only). */
+export const checkIdentity = (s: Pick<TestSpec, "kind" | "title" | "category">): string => JSON.stringify([s.kind, s.category, s.title]);
 
 export interface TestHandle {
     id: string;
@@ -212,6 +250,8 @@ export interface GenerationSummary {
     errors: string[];
     /** Set by a `planOnly` run. */
     plan?: StoredPlan;
+    /** Tests an earlier, stopped creation made that this one ran (GenerationRequest.carry); counted with testsValidated and the rest, never with testsGenerated. */
+    testsCarried?: number;
 }
 
 const NOISE_PATH = /^\/(_next|static|assets|cdn-cgi|__|favicon|sockjs|hot-update)/i;
@@ -289,22 +329,25 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         let accessReach: Reach[] = [];
         /** What each account is answered by privileged-looking API endpoints (access-control checks of the API). */
         let apiAccess: ApiAccessRow[] = [];
-        if (req.plan) {
-            // The exploration was done and approved earlier: start from what it found (nothing is explored again).
-            const stored = req.plan.model;
+        const from = req.plan ?? req.resume;
+        if (from) {
+            // The exploration was done and approved earlier (a plan), or a stopped one had got this far (a checkpoint): start from what it
+            // found (nothing is explored again).
+            const stored = from.model;
             pages = stored.pages;
             navigation = stored.navigation;
             apis = stored.apis;
             openApiInfo = stored.openApi;
             authState = stored.authentication;
-            specBaseTrusted = req.plan.specBaseTrusted;
-            accessReach = req.plan.accessReach;
-            apiAccess = req.plan.apiAccess;
+            specBaseTrusted = from.specBaseTrusted;
+            accessReach = from.accessReach;
+            apiAccess = from.apiAccess;
             await sink.counters({ pagesDiscovered: pages.length, apisDiscovered: apis.length });
             await sink.saveModel(stored);
             summary.model = stored;
             await sink.phase("DISCOVERING", "discovery", "done");
-            ctx.emit({ stage: "discovery", kind: "plan_reused", message: `Starting from the plan you approved: ${pages.length} pages and ${apis.length} API endpoints (nothing is explored again)` });
+            if (req.plan) ctx.emit({ stage: "discovery", kind: "plan_reused", message: `Starting from the plan you approved: ${pages.length} pages and ${apis.length} API endpoints (nothing is explored again)` });
+            else ctx.emit({ stage: "discovery", kind: "exploration_resumed", message: `Continuing the stopped exploration: the ${pages.length} pages and ${apis.length} API endpoints it found are not explored again.`, data: { pages: pages.length, apis: apis.length, stage: req.resume!.stage } });
         } else {
             // ── 1. DISCOVERY ───────────────────────────────────────────────────────
             await sink.phase("DISCOVERING", "discovery", "running");
@@ -489,6 +532,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             } finally {
                 await session.close();
             }
+            // Checkpoint: a stop from here on keeps what the crawl found (GenerationRequest.resume).
+            if (summary.model && req.planOnly) await saveCheckpoint(ctx, sink, { version: 1, stage: "discovered", model: summary.model, specBaseTrusted, accessReach, apiAccess });
         }
         throwIfAborted(ctx.signal);
 
@@ -500,6 +545,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         const validatedScenarioIds = new Set<string>();
         /** Whether the AI understanding step ran (site memory is only updated after it). */
         let analysed = Boolean(req.plan?.analysed);
+        /** A stopped exploration whose AI reading of the application had finished: that reading is used again. */
+        const understood = !req.plan && req.resume?.stage === "understood";
         /** Why planning failed, when it did after the understanding step answered. */
         let planningFailed: string | undefined;
         /** Why the AI could not read the application, when an AI model is set up but the understanding call failed. */
@@ -521,13 +568,17 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         } else if (wantWeb && pages.length > 0) {
             try {
                 await sink.phase("ANALYZING", "understanding", "running");
-                const { siteType: _s, purpose: _p, features: _f, journeys: _j, ...base } = model;
                 memory.noteCrawl(model);
-                // Exploration reuse (memory/reuse.ts): pages unchanged since the last exploration are not sent to the AI again.
-                const reuse = explorationReuseOn(ctx.config) && !req.fullExploration ? memory.reusable(model) : undefined;
-                if (req.fullExploration && memory.hasPrevious) ctx.emit({ stage: "analysis", kind: "full_exploration", message: "Exploring every page again, as asked: nothing is reused from the last exploration." });
-                if (reuse?.pages.size) ctx.emit({ stage: "analysis", kind: EVENT_PAGES_REUSED, message: reuseMessage(reuse, model.pages.length), data: { pages: reuse.pages.size, of: model.pages.length } });
-                model = await analyzeApplication(ctx, base, { memory: memory.context("understanding"), notes: req.siteNotes, digestElementsPerPage: levelSettings(req).digestElementsPerPage, ...(reuse?.pages.size ? { reuse } : {}), ...(req.pageUnderstanding === false ? { linkSteps: false } : {}) });
+                if (understood) {
+                    ctx.emit({ stage: "analysis", kind: "understanding_resumed", message: `The stopped exploration had already read the application (${model.journeys.length} user journeys): that reading is used, not asked for again.` });
+                } else {
+                    const { siteType: _s, purpose: _p, features: _f, journeys: _j, ...base } = model;
+                    // Exploration reuse (memory/reuse.ts): pages unchanged since the last exploration are not sent to the AI again.
+                    const reuse = explorationReuseOn(ctx.config) && !req.fullExploration ? memory.reusable(model) : undefined;
+                    if (req.fullExploration && memory.hasPrevious) ctx.emit({ stage: "analysis", kind: "full_exploration", message: "Exploring every page again, as asked: nothing is reused from the last exploration." });
+                    if (reuse?.pages.size) ctx.emit({ stage: "analysis", kind: EVENT_PAGES_REUSED, message: reuseMessage(reuse, model.pages.length), data: { pages: reuse.pages.size, of: model.pages.length } });
+                    model = await analyzeApplication(ctx, base, { memory: memory.context("understanding"), notes: req.siteNotes, digestElementsPerPage: levelSettings(req).digestElementsPerPage, ...(reuse?.pages.size ? { reuse } : {}), ...(req.pageUnderstanding === false ? { linkSteps: false } : {}) });
+                }
                 memory.analysed(model);
                 analysed = true;
                 summary.model = model;
@@ -535,6 +586,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 await sink.counters({ journeysIdentified: model.journeys.length });
                 await sink.phase("ANALYZING", "understanding", "done");
                 throwIfAborted(ctx.signal);
+                // Checkpoint: a stop during planning keeps the AI's reading of the application too.
+                if (!understood && req.planOnly) await saveCheckpoint(ctx, sink, { version: 1, stage: "understood", model, specBaseTrusted, accessReach, apiAccess });
 
                 await sink.phase("PLANNING", "planning", "running");
                 const warningsBefore = summary.errors.length;
@@ -641,6 +694,35 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             return h;
         };
 
+        // Continuing a stopped creation (req.carry): what it made is used, never made again. A functional test it wrote is run here when it has
+        // no result yet; a check is matched by its identity below, as the check generators come to it.
+        const carriedChecks = new Map<string, CarriedTest[]>();
+        let carriedRun = 0;
+        const runCarried = async (c: CarriedTest, extra: Partial<TestUnderValidation> = {}) => {
+            if (c.hasResult) return;
+            handles.set(c.spec.testId, c.handle);
+            scriptIds.set(c.spec.testId, await sink.saveScript(c.handle, renderWithAdapter(c.spec, c.framework, renderCtx), true));
+            pending.push({ spec: c.spec, framework: c.framework, ...(c.scenario ? { scenario: c.scenario } : {}), ...extra });
+            carriedRun++;
+        };
+        for (const c of req.carry ?? []) {
+            if (c.scenario) await runCarried(c);
+            else carriedChecks.set(checkIdentity(c.spec), [...(carriedChecks.get(checkIdentity(c.spec)) ?? []), c]);
+        }
+        /** A check the stopped creation already made: true, and it is run when it has no result yet; false: create it. */
+        const carried = async (d: object, extra: Partial<TestUnderValidation> = {}): Promise<boolean> => {
+            if (!carriedChecks.size) return false;
+            // The draft as a spec (its defaults filled in), as the stopped creation stored it.
+            const same = carriedChecks.get(checkIdentity(TestSpecSchema.parse({ ...d, testId: "X-000" })));
+            const c = same?.shift();
+            if (!c) return false;
+            await runCarried(c, extra);
+            return true;
+        };
+        if (req.carry?.length) {
+            const kept = req.carry.filter((c) => c.hasResult).length;
+            ctx.emit({ stage: "generation", kind: "creation_resumed", message: `Continuing the stopped creation: its ${req.carry.length} test(s) are kept and not made again${req.carry.length - kept ? `; the ${req.carry.length - kept} without a result yet are run now` : ""}.`, data: { carried: req.carry.length, toRun: req.carry.length - kept } });
+        }
         // The ideas this job writes, for the progress tree (web/src/features/explore/explore-tree.ts): each then starts and ends with an event.
         if (scenarios.length) ctx.emit({ stage: "generation", kind: "scenarios_queued", message: `${scenarios.length} test idea(s) to write`, data: { scenarios: scenarios.slice(0, 500).map((x) => ({ scenarioId: x.scenarioId, title: x.title })) } });
 
@@ -728,12 +810,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
             const docs = new Map(apis.map((a) => [`${a.method} ${a.path}`, a]));
             for (const d of specs as DraftSpec[]) {
-                const key = await sink.nextTestKey("API");
-                const spec = TestSpecSchema.parse({ ...d, testId: key });
                 const endpointKey = d.title.split(":")[0]!;
                 const ep = docs.get(endpointKey);
+                const endpointDoc = ep ? { method: ep.method, path: ep.path, statuses: ep.statuses, requiresAuth: ep.requiresAuth, summary: ep.summary, spec: ep.spec } : undefined;
+                if (await carried(d, { endpointDoc })) continue;
+                const key = await sink.nextTestKey("API");
+                const spec = TestSpecSchema.parse({ ...d, testId: key });
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { endpoint: endpointKey });
-                pending.push({ spec, framework: "playwright-api", endpointDoc: ep ? { method: ep.method, path: ep.path, statuses: ep.statuses, requiresAuth: ep.requiresAuth, summary: ep.summary, spec: ep.spec } : undefined });
+                pending.push({ spec, framework: "playwright-api", endpointDoc });
             }
             ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
 
@@ -741,6 +825,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             if (req.accessChecks !== false && apiAccess.length) {
                 const access = generateApiAccessSpecs(apiAccess);
                 for (const d of access) {
+                    if (await carried(d)) continue;
                     const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                     await persistNew(spec, "playwright-api", "PENDING", undefined, { access: true });
                     pending.push({ spec, framework: "playwright-api" });
@@ -752,6 +837,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             if (req.performanceChecks === true) {
                 const lat = generateLatencySpecs(apis, { maxEndpoints: levelSettings(req).apiEndpoints, budgets: req.performanceBudgets });
                 for (const d of lat) {
+                    if (await carried(d)) continue;
                     const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                     await persistNew(spec, "playwright-api", "PENDING", undefined, { performance: true, endpoint: d.title.split(":")[0]! });
                     pending.push({ spec, framework: "playwright-api" });
@@ -764,6 +850,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const c = req.credentials;
                 const load = generateLoadSpecs(apis, { maxEndpoints: LOAD_MAX_ENDPOINTS, budgets: req.loadBudgets, hasCredential: Boolean(c?.apiToken || c?.apiAuthHeader || c?.oauth2) });
                 for (const d of load) {
+                    if (await carried(d)) continue;
                     const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                     await persistNew(spec, "playwright-api", "PENDING", undefined, { performance: true, load: true, endpoint: d.title.split(":")[0]! });
                     pending.push({ spec, framework: "playwright-api" });
@@ -775,6 +862,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             // 4c. Multi-request workflows (list → detail, create → read → delete, login → secured call).
             const wf = generateApiWorkflowSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxWorkflows: levelSettings(req).apiEndpoints });
             for (const d of wf.specs) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { workflow: true });
                 pending.push({ spec, framework: "playwright-api" });
@@ -792,6 +880,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantWeb && req.accessibility !== false && model.pages.length) {
             const a11y = generateA11ySpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale });
             for (const d of a11y) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { accessibility: true });
                 pending.push({ spec, framework: "playwright" });
@@ -803,6 +892,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantWeb && req.healthChecks !== false && model.pages.length) {
             const health = generateHealthSpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale });
             for (const d of health) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { health: true });
                 pending.push({ spec, framework: "playwright" });
@@ -815,6 +905,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantWeb && req.accessChecks !== false && accessReach.length > 1) {
             const access = generateAccessSpecs(accessReach, { maxSpecs: 8, maxOrdinary: 3, appUrl: req.url, ...(req.apiBaseUrl ? { apiHosts: [req.apiBaseUrl] } : {}) });
             for (const d of access) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { access: true });
                 pending.push({ spec, framework: "playwright" });
@@ -826,6 +917,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantWeb && req.inputChecks !== false && model.pages.length) {
             const inputs = generateInputSpecs(model, { maxPages: levelSettings(req).inputPages, allowMutating: req.allowMutatingApiTests });
             for (const d of inputs) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { input: true });
                 pending.push({ spec, framework: "playwright" });
@@ -838,6 +930,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantWeb && wantVision && model.pages.length) {
             const vision = generateVisionSpecs(model, { maxPages: levelSettings(req).visionPages, perTypeScale: levelSettings(req).perTypeScale });
             for (const d of vision) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { vision: true });
                 pending.push({ spec, framework: "playwright" });
@@ -866,6 +959,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantWeb && req.performanceChecks === true && model.pages.length) {
             const perf = [...generatePerformanceSpecs(model, { maxPages: levelSettings(req).speedPages, perTypeScale: levelSettings(req).perTypeScale, budgets: req.performanceBudgets, excludePaths: signedIn?.gated }), ...(signedIn ? generateSignedInPerformanceSpecs(signedIn, { budgets: req.performanceBudgets }) : [])];
             for (const d of perf) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { performance: true, ...(d.tags.includes("signed-in") ? { signedIn: true } : {}) });
                 pending.push({ spec, framework: "playwright" });
@@ -876,6 +970,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (req.securityChecks !== false) {
             const security = generateSecuritySpecs(model);
             for (const d of security) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { security: true });
                 pending.push({ spec, framework: "playwright-api" });
@@ -887,13 +982,18 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantWeb && req.visual && model.pages.length) {
             const visual = [...generateVisualSpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale, excludePaths: signedIn?.gated }), ...(signedIn ? generateSignedInVisualSpecs(signedIn) : [])];
             for (const d of visual) {
+                if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
                 await persistNew(spec, "playwright", "PENDING", undefined, { visual: true, ...(d.tags.includes("signed-in") ? { signedIn: true } : {}) });
                 pending.push({ spec, framework: "playwright" });
             }
             if (visual.length) ctx.emit({ stage: "generation", kind: "visual_tests_generated", message: `${visual.length} visual baseline tests generated` });
         }
-        await sink.phase("GENERATING", "generation", summary.testsGenerated > 0 ? "done" : "failed");
+        if (carriedRun) {
+            summary.testsCarried = carriedRun;
+            await sink.counters({ testsCarried: carriedRun });
+        }
+        await sink.phase("GENERATING", "generation", summary.testsGenerated + carriedRun > 0 ? "done" : "failed");
         if (notRun) ctx.emit({ stage: "generation", kind: TEST_CASES_NOT_RUN, message: testCasesNotRun(notRun) });
         throwIfAborted(ctx.signal);
 
@@ -1028,6 +1128,18 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         return summary;
     } finally {
         await closeBrowser(browser);
+    }
+}
+
+/**
+ * Keep where an exploration that stops at a plan has got to, so a stop can continue from there (GenerationRequest.resume). Never fails
+ * the exploration: without a checkpoint a continue starts from the beginning, as before.
+ */
+async function saveCheckpoint(ctx: EngineContext, sink: GenerationSink, c: ExploreCheckpoint): Promise<void> {
+    try {
+        await sink.saveTextArtifact(CHECKPOINT_ARTIFACT, CHECKPOINT_FILE, JSON.stringify(c));
+    } catch (e) {
+        ctx.emit({ stage: "orchestration", kind: "checkpoint_failed", level: "warn", message: `Where the exploration got to could not be kept, so a stop now means starting again: ${e instanceof Error ? e.message : String(e)}` });
     }
 }
 

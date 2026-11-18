@@ -7,6 +7,7 @@ import { ProjectHead } from "../components/ProjectKind";
 import { ExplorerWatch } from "../features/explorer/ExplorerView";
 import { NextSteps } from "../features/onboarding/NextSteps";
 import { PlanPreview } from "../features/onboarding/PlanPreview";
+import { ContinueExploring, continueNote } from "../features/explore/ContinueExploring";
 import { exploreAgainHref, phoneJobOf } from "../features/phone/phone";
 import { HelpPlace } from "../features/guide/HelpContext";
 import { ApiChangesCard } from "../features/contracts/ApiChangesCard";
@@ -228,9 +229,9 @@ export function ProjectOverview({ id }: { id: string }) {
                 {/* The last picture of the Explorer view stays on screen after the exploration (only when this tab was watching). */}
                 {job && !active && <ExplorerWatch job={job} />}
 
-                {job && !active && planStage && (job.status === "FAILED" ? <Result job={job} total={list.length} validated={validated} attention={attention.length} notRun={notRun} projectId={id} code={code} /> : <><HelpPlace place="plan-preview" /><PlanPreview key={job.jobId} projectId={id} job={job} onChanged={project.reload} /></>)}
+                {job && !active && planStage && (job.status === "FAILED" ? <Result job={job} total={list.length} validated={validated} attention={attention.length} notRun={notRun} projectId={id} code={code} onChanged={project.reload} /> : <><HelpPlace place="plan-preview" /><PlanPreview key={job.jobId} projectId={id} job={job} onChanged={project.reload} /></>)}
 
-                {job && settled && <Result job={job} total={list.length} validated={validated} attention={attention.length} notRun={notRun} projectId={id} code={code} />}
+                {job && settled && <Result job={job} total={list.length} validated={validated} attention={attention.length} notRun={notRun} projectId={id} code={code} onChanged={project.reload} />}
 
                 {job && settled && (list.length > 0 || job.status !== "FAILED") && (
                     <div className="card divided" style={{ overflow: "hidden" }}>
@@ -321,7 +322,7 @@ export function ProjectOverview({ id }: { id: string }) {
 
 const notRunLine = (n: number) => `${plural(n, "test case")} ${n === 1 ? "is" : "are"} written and not run yet: run ${n === 1 ? "it" : "them"} when you choose.`;
 
-function Result({ job, total, validated, attention, notRun = 0, projectId, code }: { job: NonNullable<ProjectDetail["latestJob"]>; total: number; validated: number; attention: number; /** Tests written and not run yet. */ notRun?: number; projectId: string; /** A code project: nothing offers exploring. */ code: boolean }) {
+function Result({ job, total, validated, attention, notRun = 0, projectId, code, onChanged }: { job: NonNullable<ProjectDetail["latestJob"]>; total: number; validated: number; attention: number; /** Tests written and not run yet. */ notRun?: number; projectId: string; /** A code project: nothing offers exploring. */ code: boolean; /** A Continue started a job: the page reads the project again. */ onChanged?: () => void }) {
     if (job.mode === "variants") return <VariantsResult job={job} projectId={projectId} />;
     if (job.mode === "environment") return <EnvironmentResult job={job} projectId={projectId} />;
     if (job.mode === "plain") return <PlainResult job={job} projectId={projectId} />;
@@ -336,9 +337,9 @@ function Result({ job, total, validated, attention, notRun = 0, projectId, code 
     }
     if (job.status === "FAILED" && job.planOnly && job.error === "Cancelled" && !code) {
         return (
-            <div className="card card-pad">
-                <Callout tone="neutral" title="Exploring was stopped" actions={<LinkButton size="sm" variant="primary" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>Explore again</LinkButton>}>
-                    No plan was made and nothing was created. Tests you already had are unchanged.
+            <div className="card card-pad" data-testid="exploring-stopped">
+                <Callout tone="neutral" title="Exploring was stopped" actions={job.canContinue ? <ContinueExploring job={job} projectId={projectId} onStarted={onChanged} /> : <LinkButton size="sm" variant="primary" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>Explore again</LinkButton>}>
+                    No plan was made and nothing was created. Tests you already had are unchanged.{job.canContinue ? ` ${continueNote(job)}` : ""}
                 </Callout>
             </div>
         );
@@ -363,7 +364,8 @@ function Result({ job, total, validated, attention, notRun = 0, projectId, code 
                     actions={
                         <>
                             {job.cancelled && <LinkButton size="sm" href={routes.run(projectId, job.jobId)}>See each test</LinkButton>}
-                            {!code && (!job.cancelled || job.mode === "generate" || job.mode === undefined) && (
+                            {!code && job.canContinue && <ContinueExploring job={job} projectId={projectId} onStarted={onChanged} />}
+                            {!code && !job.canContinue && (!job.cancelled || job.mode === "generate" || job.mode === undefined) && (
                                 <LinkButton size="sm" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>
                                     Try again
                                 </LinkButton>
@@ -373,6 +375,7 @@ function Result({ job, total, validated, attention, notRun = 0, projectId, code 
                     }
                 >
                     {job.cancelled?.note ?? e.body}
+                    {!code && job.canContinue && ` ${continueNote(job)}`}
                 </Callout>
             </div>
         );

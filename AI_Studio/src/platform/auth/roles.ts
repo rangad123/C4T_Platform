@@ -222,6 +222,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/plans/:jobId": "read",
     "DELETE /api/projects/:id/plans/:jobId": "ai_studio.tests.delete",
     "POST /api/projects/:id/plans/:jobId/create": "ai_studio.tests.generate",
+    "POST /api/projects/:id/explorations/:jobId/continue": "ai_studio.tests.generate",
     "GET /api/projects/:id/framework-settings": "read",
     "PUT /api/projects/:id/framework-settings": "ai_studio.project.settings",
     "DELETE /api/projects/:id/restore-needs": "ai_studio.project.settings",

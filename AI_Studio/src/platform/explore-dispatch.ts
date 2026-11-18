@@ -64,6 +64,9 @@ export async function exploreOnRunner(
         // A test the work changes but did not create (a described test being rebuilt) goes to the runner as a handle of this task, never its id.
         const replace = (o.request as { replace?: { handle: { id: string; testId: string } } }).replace;
         let request = (replace ? { ...o.request, replace: { ...replace, handle: presetExploreHandle(taskId, replace.handle) } } : o.request) as ExploreRequest;
+        // Continuing a stopped creation: the tests it carries on are named the same way, by handles of this task.
+        const carry = (request as { carry?: Array<{ handle: { id: string; testId: string } }> }).carry;
+        if (carry?.length) request = { ...request, carry: carry.map((c) => ({ ...c, handle: presetExploreHandle(taskId, c.handle) })) } as unknown as ExploreRequest;
         // The app file uploaded to the platform is a path on the platform's disk: the runner's phone uses the app installed on it.
         const mobile = (request as { mobile?: { apkPath?: string } }).mobile;
         if (mode === "mobile" && mobile?.apkPath) request = { ...request, mobile: { ...mobile, apkPath: undefined } } as unknown as ExploreRequest;
@@ -139,7 +142,7 @@ export async function waitForExplore(svc: AgentService, taskId: string, job: Pic
             const result = svc.decrypt<ResultRequest>(t.resultEnc!);
             const s = result.explore;
             if (!s) throw new RunnerAgentError(EXPLORE_NO_SUMMARY);
-            return { model: (s.model ?? null) as GenerationSummary["model"], testsGenerated: s.testsGenerated, testsValidated: s.testsValidated, testsFailedValidation: s.testsFailedValidation, testsNeedingReview: s.testsNeedingReview, errors: s.errors, ...(s.plan ? { plan: s.plan as GenerationSummary["plan"] } : {}) };
+            return { model: (s.model ?? null) as GenerationSummary["model"], testsGenerated: s.testsGenerated, testsValidated: s.testsValidated, testsFailedValidation: s.testsFailedValidation, testsNeedingReview: s.testsNeedingReview, ...(s.testsCarried ? { testsCarried: s.testsCarried } : {}), errors: s.errors, ...(s.plan ? { plan: s.plan as GenerationSummary["plan"] } : {}) };
         } else if (t.status === "cancelled") {
             throw new Error("Job cancelled");
         } else {

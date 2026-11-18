@@ -1,10 +1,12 @@
 /**
- * Sheet #7 in a real browser against a real platform (no worker: the jobs, their events and their tests are recorded in the
+ * Sheet #6 and #7 in a real browser against a real platform (no worker: the jobs, their events and their tests are recorded in the
  * database as an exploration records them).
  *
  * - The run page of a creation that is writing its tests shows the progress tree: the stages with their state in words, the running stage
  *   open, its test ideas (written, being written, waiting) with their tests under them, the checks in one group, and every branch a button
  *   that says what it holds. On a phone-sized screen every branch starts folded. No accessibility violations in the tree.
+ * - A stopped plan-only exploration offers Continue and Start over on the project page. Continue asks the platform to carry on, and a refusal
+ *   shows the platform's sentence.
  *
  * Requires web/dist: node scripts/with-lock.mjs build,browser -- sh -c "npx vite build web && npx vitest run tests/explore-tree-ui.test.ts"
  * Screenshots: $SHOTS_DIR (when set). Ports: platform 6735.
@@ -34,6 +36,8 @@ let page: Page;
 let projectId: string;
 let creationJob: string;
 let stoppedPlan: string;
+const continues: string[] = [];
+let refuse: string | null = null;
 const consoleErrors: string[] = [];
 
 /** Events as the engine records them for a creation from a plan that is writing its second idea (orchestrator.ts, crawler.ts). */
@@ -91,6 +95,11 @@ beforeAll(async () => {
         if (m.type() === "error" && !/Failed to load resource/.test(m.text())) consoleErrors.push(m.text());
     });
     page.on("pageerror", (e) => consoleErrors.push(String(e)));
+    await page.route(`**/api/projects/${projectId}/explorations/*/continue`, async (route) => {
+        continues.push(new URL(route.request().url()).pathname);
+        if (refuse) return route.fulfill({ status: 409, json: { error: refuse } });
+        await route.fulfill({ status: 202, json: { jobId: "continued", status: "QUEUED", from: "reading" } });
+    });
 }, 120_000);
 
 afterAll(async () => {
@@ -149,5 +158,24 @@ describe("the progress tree on a run's page", () => {
         await toggle.click();
         expect(await page.getByTestId("xt-idea:S-002").isVisible()).toBe(true);
         await page.setViewportSize({ width: 1280, height: 900 });
+    });
+});
+
+describe("Continue on a stopped exploration", () => {
+    it("the project page offers Continue and Start over; Continue asks the platform to carry on; a refusal shows its sentence", async () => {
+        await page.goto(`${BASE}/#/projects/${projectId}`);
+        const card = page.getByTestId("exploring-stopped");
+        await card.waitFor();
+        expect(await card.innerText()).toMatch(/Continue carries on from where it stopped/);
+        expect(await card.getByRole("link", { name: "Start over" }).getAttribute("href")).toContain(`#/new?project=${projectId}`);
+        await shot("stopped-continue.png");
+        refuse = "This exploration was already continued. Continue the newer one, or explore again.";
+        await card.getByRole("button", { name: "Continue" }).click();
+        await expect.poll(() => card.innerText(), { timeout: 15_000 }).toContain(refuse);
+        expect(continues).toEqual([`/api/projects/${projectId}/explorations/${stoppedPlan}/continue`]);
+        refuse = null;
+        await card.getByRole("button", { name: "Continue" }).click();
+        await expect.poll(() => continues.length, { timeout: 15_000 }).toBe(2);
+        expect(consoleErrors).toEqual([]);
     });
 });

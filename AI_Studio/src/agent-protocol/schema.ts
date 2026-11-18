@@ -891,6 +891,8 @@ export const ResultRequest = z.object({
             testsValidated: z.number().int().min(0),
             testsFailedValidation: z.number().int().min(0),
             testsNeedingReview: z.number().int().min(0),
+            /** A creation that continued a stopped one (round of sheet #6): the earlier creation's tests it ran. Older runners leave it out. */
+            testsCarried: z.number().int().min(0).optional(),
             errors: z.array(z.string().max(2000)).max(200),
             model: z.unknown().optional(),
             plan: z.unknown().optional(),

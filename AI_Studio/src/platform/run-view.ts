@@ -119,6 +119,13 @@ function plannedTests(repo: Repo, job: JobRow): TestRow[] {
         return out.sort((a, b) => a.testKey.localeCompare(b.testKey, undefined, { numeric: true }));
     }
     const made = repo.listTests(job.projectId, { jobId: job.id });
+    // A creation that continued stopped ones also runs the tests they made and had not run yet (explore-resume.ts): those are this run's too.
+    for (const earlier of job.options.carryFrom ?? []) {
+        for (const t of repo.listTests(job.projectId, { jobId: earlier })) {
+            const ranHere = repo.db.get("SELECT 1 AS x FROM test_executions WHERE job_id = ? AND test_case_id = ? LIMIT 1", job.id, t.id);
+            if (ranHere || t.validationStatus === "PENDING" || t.validationStatus === "VALIDATING") made.push(t);
+        }
+    }
     const rewritten = job.options.rewriteTestId ? repo.getTest(job.options.rewriteTestId) : undefined;
     return (rewritten && rewritten.projectId === job.projectId && !made.some((t) => t.id === rewritten.id) ? [...made, rewritten] : made).slice(0, MAX_TESTS);
 }

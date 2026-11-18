@@ -6,11 +6,12 @@ import { Badge, Callout, EmptyState, ErrorState, ListSkeleton, PageHeader } from
 import { duration, plural, relativeTime } from "../../lib/format";
 import { friendlyJobErrors, friendlyError, isActive, nothingRan, phaseText } from "../../lib/labels";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
-import { routes } from "../../lib/router";
+import { go, routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
 import { browserSentence } from "../runners/runners";
 import { versionHref } from "../review/review";
 import { RunMenu } from "./RunMenu";
+import { ContinueExploring, continueNote } from "../explore/ContinueExploring";
 import { JobExploreTree } from "../explore/ExploreTree";
 import { RunStrip } from "./RunStrip";
 import { RunTestList } from "./RunStrip";
@@ -133,6 +134,12 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                             <RunMenu projectId={id} scope="fixed" label={`Run failing tests again${failing.length ? ` (${failing.length})` : ""}`} fixed={{ ids: failing.map((t) => t.id), description: `The ${plural(failing.length, "failing test")} of this run.`, ...sameEnvironment }} variant="primary" />
                             <RunMenu projectId={id} scope="fixed" label="Run these tests again" fixed={{ ids: a.tests.map((t) => t.id), description: `The ${plural(a.tests.length, "test")} of this run.`, ...sameEnvironment }} />
                         </div>
+                    )}
+                    {!active && exploration && job.canContinue && (
+                        <>
+                            <p className="t-secondary">{continueNote(job)}</p>
+                            <ContinueExploring job={job} projectId={id} size="md" onStarted={() => go(routes.project(id))} />
+                        </>
                     )}
                     {!active && exploration && c.planned > 0 && (
                         <div className="row">
