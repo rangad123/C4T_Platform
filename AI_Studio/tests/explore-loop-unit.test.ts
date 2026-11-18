@@ -579,7 +579,7 @@ describe("runExploration: a cancel after a budget already stopped the session (C
     });
 });
 
-describe("runExploration: reads (CP2 M-1)", () => {
+describe("runExploration: reads, passes and replays (CP2 M-1, M-5)", () => {
     it("a read is counted and refused on a repeat, but is not a new visit of its state for the depth", async () => {
         let verdicts: boolean[] = [];
         const r = await run([
@@ -595,5 +595,55 @@ describe("runExploration: reads (CP2 M-1)", () => {
         expect(verdicts).toEqual([true, true, true, true, true, false]);
         expect(r.usage.actions).toBe(5);
         expect(r.outcomes[0]).toMatchObject({ status: "stopped", reason: expect.stringMatching(/^The same action on the same state/) });
+    });
+
+    it("a fresh pass starts repeat and depth tracking again, and keeps the session's totals", async () => {
+        const seen: boolean[] = [];
+        const r = await run(
+            [
+                obj("a", 1, {
+                    script: async (ctx) => {
+                        for (let pass = 0; pass < 3; pass++) {
+                            ctx.freshPass();
+                            seen.push(ctx.act({ state: "s", action: "click" }).allowed);
+                        }
+                        return done();
+                    },
+                }),
+            ],
+            { budgets: { ...BUDGETS, actions: 2 } },
+        );
+        // The repeat is allowed again in a new pass, but the actions budget is the session's: the third is refused.
+        expect(seen).toEqual([true, true, false]);
+        expect(r.stopReason).toBe("actions");
+        expect(r.usage.actions).toBe(2);
+    });
+
+    it("a replay is counted against the session's actions and refused (without ending the pursuit) when it would go past them", async () => {
+        const verdicts: boolean[] = [];
+        const r = await run(
+            [
+                obj("a", 1, {
+                    script: async (ctx) => {
+                        verdicts.push(ctx.act({ state: "s", action: "click" }).allowed);
+                        verdicts.push(ctx.replay(6, "two fresh replays").allowed);
+                        verdicts.push(ctx.replay(4, "one more").allowed);
+                        verdicts.push(ctx.signal.aborted);
+                        verdicts.push(ctx.act({ state: "t", action: "click" }).allowed);
+                        return done();
+                    },
+                }),
+            ],
+            { budgets: { ...BUDGETS, actions: 8 } },
+        );
+        expect(verdicts).toEqual([true, true, false, false, true]);
+        expect(r.usage.actions).toBe(8);
+        expect(r.outcomes[0]!.actions).toBe(8);
+        expect(r.actionLog.map((a) => [a.action, a.result])).toEqual([
+            ["click", "performed"],
+            ["replay: two fresh replays (6 steps)", "performed"],
+            ["replay: one more (4 steps)", "refused"],
+            ["click", "performed"],
+        ]);
     });
 });

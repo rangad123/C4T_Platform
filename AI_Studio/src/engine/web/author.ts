@@ -93,6 +93,11 @@ export interface AuthorInput {
      * action is not performed and the model is told so. Absent outside objective-driven exploration.
      */
     gate?: ActionGate;
+    /**
+     * Model steps left for this scenario across every pass it takes (the first one, a review's fix, the leftover redo and its review):
+     * shared and counted down, so the objective's step budget holds for the whole pursuit. Absent: each pass has `maxSteps` of its own.
+     */
+    stepBudget?: { left: number };
 }
 
 /** An action as the gate sees it before it runs. */
@@ -112,6 +117,10 @@ export interface ActionGate {
     before(a: GateAction): { allowed: true } | { allowed: false; reason: string };
     /** Told after an action that was allowed ran (with the address the page is on afterwards). */
     after(a: { tool: string; args: unknown; target?: string; ok: boolean; url: string; read: boolean }): void;
+    /** A new browser pass from the start page begins (the first try, a review's fix, the leftover redo): per-pass tracking starts again. */
+    freshPass(startUrl: string): void;
+    /** Asked before saved steps are replayed in a fresh browser without the AI (`steps` actions): false means the replay is not run. */
+    replay(steps: number, what: string): boolean;
 }
 
 /** Tools that only read the page: they do not count as a new visit of the state they run on (explore/loop.ts depth). */
@@ -476,6 +485,9 @@ async function reviewAndFix(input: AuthorInput, out: AuthorOutcome): Promise<Aut
 
 async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     const { ctx, browser, baseUrl, model, scenario, credentials, resume } = input;
+    // The objective's step budget is shared by every pass of the scenario: a pass that finds it spent does not start (CP2 M-5).
+    if (input.stepBudget && input.stepBudget.left <= 0) return { status: "blocked", steps: [], testData: {}, explanation: STEP_BUDGET_SPENT };
+    input.gate?.freshPass(new URL(scenario.startPath || "/", baseUrl).href);
     const session = await BrowserSession.launch(browser, { startUrl: baseUrl, secrets: runSecretsOf(input), ...(input.notes?.length ? { notes: input.notes } : {}) });
     const { page } = session;
     page.setDefaultTimeout(6_000);
@@ -538,7 +550,16 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         // Repair mode: replay the already-working prefix (minus its own opening navigate).
         if (resume) {
             for (const step of resume.prefix.slice(1)) {
+                // Replayed steps reach the application too: the exploration's bound counts them like the model's own (CP2 M-5).
+                const { description: _d, ...args } = step as Step & { description?: string };
+                const read = READ_TOOLS.has(step.action);
+                const target = input.gate ? await stepTarget(here(), step, data) : undefined;
+                const verdict = input.gate?.before({ tool: step.action, args, url: here().url(), read, ...(target ? { target } : {}) });
+                if (verdict && !verdict.allowed) {
+                    return { status: "blocked", steps: recorded, testData, explanation: `Replay of previous steps was refused at "${describeStep(step)}": ${verdict.reason}` };
+                }
                 const r = await run(step);
+                input.gate?.after({ tool: step.action, args, ok: r.ok, url: here().url(), read, ...(target ? { target } : {}) });
                 if (!r.ok) {
                     return { status: "blocked", steps: recorded, testData, explanation: `Replay of previous steps failed at "${describeStep(step)}": ${r.error}` };
                 }
@@ -857,9 +878,10 @@ ${snapshot}`;
             maxRetries: LLM_MAX_RETRIES,
             maxOutputTokens: AGENT_STEP_MAX_OUTPUT_TOKENS,
             // Ends when finish was accepted (a pushed-back finish lets the agent go on).
-            stopWhen: [stepCountIs(input.maxSteps ?? 28), () => outcome !== undefined],
+            stopWhen: [stepCountIs(Math.min(input.maxSteps ?? 28, input.stepBudget?.left ?? Infinity)), () => outcome !== undefined],
             // Each step's tokens, prompt-cache reads and writes included (the instructions, tools and earlier steps are cached: llm/prompt-cache.ts).
             onStepFinish: (e) => {
+                if (input.stepBudget) input.stepBudget.left -= 1;
                 addUsage(ctx.llm.usage, e.usage);
                 view?.modelStep();
                 // A fast model that keeps failing, repeats itself or makes no progress hands the rest of this scenario to the main model (llm/routing.ts).
@@ -884,7 +906,7 @@ ${snapshot}`;
         }
         if (result.status === "complete" || result.status === "defect") {
             // Only a captured defect test may end on a failing check (the captured one, its last step); an observed-only one passed every step while authoring.
-            const pruned = await pruneByReplay(browser, baseUrl, result.steps, credentials, result.status === "complete" || result.capture !== "captured");
+            const pruned = await pruneByReplay(browser, baseUrl, result.steps, credentials, result.status === "complete" || result.capture !== "captured", input.gate);
             if (pruned.dropped > 0) {
                 ctx.emit({
                     stage: "generation",
@@ -962,7 +984,10 @@ export async function pruneByReplay(
     steps: Step[],
     credentials: { username: string; password: string } | undefined,
     requireAllAssertsPass: boolean,
+    /** The exploration's bound (CP2 M-5): the replay's steps are counted against the session's actions; refused, nothing is pruned. */
+    gate?: Pick<ActionGate, "replay">,
 ): Promise<{ steps: Step[]; dropped: number }> {
+    if (gate && !gate.replay(steps.length, "the replay that drops stale steps")) return { steps, dropped: 0 };
     const session = await BrowserSession.launch(browser, { startUrl: baseUrl, ...(credentials ? { secrets: [credentials.password] } : {}) });
     session.page.setDefaultTimeout(5_000);
     const data = runtimeData({}, credentials);

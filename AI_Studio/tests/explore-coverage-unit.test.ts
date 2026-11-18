@@ -76,6 +76,8 @@ function session(): CoverageInput {
             row(R1.id, "/cart|aaaaaaaaaaaaaaaa", "click button Remove", "refused"),
             row(cInvalid, "/register|cccccccccccccccc", "fill Email"),
             row(T.id, "/orders/:id|dddddddddddddddd", "click button Cancel order", "refused"),
+            // A finding's replays without AI (CP2 M-5): counted by the loop, but no page, state or control of their own.
+            row(wAsStated, "", "replay: the two fresh replays of the independence check (6 steps) Remove Shop"),
         ],
         tests: [
             {

@@ -4,7 +4,7 @@
  * One session pursues objectives by priority under fixed budgets. The loop, not the model, decides when to stop:
  * - every action goes through `ctx.act` before it reaches the application, which the loop counts and refuses once a budget is spent,
  *   when the same action is tried again on the same state, or when one state is visited more often than the depth allows (both tracked
- *   per pursuit, after the safe reset);
+ *   per pass of a pursuit: after the safe reset and after `ctx.freshPass`); a replay without AI is counted through `ctx.replay`;
  * - AI calls and tokens are read from the injected usage counter (relative to the session start), never from what a pursuit reports;
  * - time is read from the injected clock, and a pursuit that never returns is abandoned when the time is up or the session is cancelled;
  * - N consecutive environment failures (a failed run, a thrown error, a failed reset) stop the session as unstable;
@@ -53,6 +53,13 @@ export type ActVerdict = { allowed: true } | { allowed: false; reason: string };
 export interface ObjectiveContext {
     /** Ask before every action, before it reaches the application; a refusal means it is not performed and the pursuit must end (its signal is aborted too). */
     act(action: LoopAction): ActVerdict;
+    /** A new pass of the same pursuit from its start page (a review's fix, a redo): repeat and depth tracking start again; budgets do not. */
+    freshPass(): void;
+    /**
+     * Ask before saved steps are replayed without the AI (`steps` actions, for example a finding's fresh replays): counted against the
+     * session's actions; refused (and logged) when they would go past the actions budget or the pursuit has ended. A refusal does not end the pursuit.
+     */
+    replay(steps: number, what: string): ActVerdict;
     /** The session stop reason if a budget is spent now (call it before an AI call), else null. */
     check(): StopReason | null;
     /** Aborted when the loop ends this pursuit. */
@@ -270,6 +277,27 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
                 actions += 1;
                 pursuitActions += 1;
                 actionLog.push({ seq: actionLog.length + 1, objectiveId, state, action, atMs: now() - startedAt, result: "performed" });
+                return { allowed: true };
+            },
+            freshPass: () => {
+                seen.clear();
+                visits.clear();
+            },
+            replay: (steps, what) => {
+                const n = Math.max(0, Math.floor(Number(steps) || 0));
+                const action = clip(`replay: ${what} (${n} steps)`);
+                const row = (result: "performed" | "refused", reason?: string) =>
+                    actionLog.push({ seq: actionLog.length + 1, objectiveId, state: "", action, atMs: now() - startedAt, result, ...(reason ? { reason } : {}) });
+                const ended = controller.signal.aborted ? (loopRefusal ?? session.stop?.detail ?? "This pursuit has ended.") : budgetStop() ? session.stop!.detail : null;
+                const over = !ended && actions + n > budgets.actions ? `It would go past the session's limit of ${budgets.actions} actions (${actions} used).` : null;
+                const reason = ended ?? over;
+                if (reason) {
+                    row("refused", reason);
+                    return { allowed: false, reason };
+                }
+                actions += n;
+                pursuitActions += n;
+                row("performed");
                 return { allowed: true };
             },
         };
