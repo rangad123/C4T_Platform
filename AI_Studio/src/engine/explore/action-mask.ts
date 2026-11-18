@@ -12,6 +12,7 @@
  */
 import { maskSecrets } from "../frameworks/plugin.js";
 import { clip, HIDDEN, redactText } from "../../shared/redact-text.js";
+import { namesSecretField as namesSecretFieldName } from "../../shared/secret-field.js";
 import type { ActionLogRow } from "./loop.js";
 
 /** Longest typed value kept in the log (characters). */
@@ -20,8 +21,6 @@ export const TYPED_MAX = 80;
 export const ROW_TEXT_MAX = 1_000;
 
 const PLACEHOLDER = /^\{\{[\w.-]{1,80}\}\}$/;
-/** A field named like one that takes a secret: its value is hidden whatever it looks like. */
-const SECRET_FIELD = /pass(?:word|wd|code|phrase)?|pwd|\bpin\b|otp|one[ -]?time|totp|2fa|mfa|secret|token|api[ _-]?key|private[ _-]?key|credential|\bcvv\b|\bcvc\b|security code|card ?number|\bssn\b/i;
 /** Argument names that hold a typed value. */
 const TYPED_KEYS = new Set(["value", "promptText", "text", "key"]);
 /** Argument names that hold an address. */
@@ -74,7 +73,8 @@ const LOCATOR_KEYS = new Set(["target", "locator", "has", "hasNot", "filter", "f
 /** Whether a field, given as a locator or as the element it resolved to (`textbox "Password" @digest`), is named like a secret one. */
 function namesSecretField(field: unknown): boolean {
     if (field === undefined || field === null) return false;
-    return SECRET_FIELD.test(typeof field === "string" ? field : JSON.stringify(field));
+    // The shared rule (shared/secret-field.ts), the one the pictures' cover uses too: its value is hidden whatever it looks like.
+    return namesSecretFieldName(typeof field === "string" ? field : JSON.stringify(field));
 }
 
 /**
