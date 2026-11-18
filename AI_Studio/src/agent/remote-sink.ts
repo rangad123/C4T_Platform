@@ -60,9 +60,11 @@ export function remoteGenerationSink(o: {
         (sending ??= (async () => {
             // Let the calls made in the same turn join this batch.
             await new Promise<void>((r) => setImmediate(r));
+            // The batch being built or sent: its calls are out of the queue, so a refusal must reach them here (row 202).
+            let batch: Array<{ e: Entry; c: SinkCall }> = [];
             try {
                 while (queue.length && failed === undefined) {
-                    const batch: Array<{ e: Entry; c: SinkCall }> = [];
+                    batch = [];
                     let size = 0;
                     while (queue.length && batch.length < EXPLORE_SINK_MAX_CALLS && (batch.length === 0 || size < BATCH_BYTES)) {
                         const c = await queue[0]!.call;
@@ -75,10 +77,14 @@ export function remoteGenerationSink(o: {
                         break;
                     }
                     const answer = SinkResponse.parse(await post("sink", { calls: batch.map((b) => b.c), seq: ++seq }, { signal: o.signal }));
-                    batch.forEach((b, i) => b.e.done?.(answer.results[i] ?? null));
+                    const answered = batch;
+                    batch = [];
+                    answered.forEach((b, i) => b.e.done?.(answer.results[i] ?? null));
                 }
             } catch (e) {
                 fail(e);
+                // A refused (or unsent) batch: every call in it gets the platform's sentence, as the queued ones just did.
+                for (const b of batch.splice(0)) b.e.fail?.(failed);
             } finally {
                 sending = undefined;
             }
