@@ -222,12 +222,35 @@ function cites(text: string, ref: string): boolean {
     return new RegExp(`(?<![\\w-]|\\w\\.)${escaped}(?![\\w-]|\\.\\w)`).test(normRef(text));
 }
 
+/** A requirement id that is only a number ("1", "1.1", "8.10"), as the requirements parser gives for a numbered list. */
+const NUMERIC_ID = /^\d+(?:\.\d+)*$/;
+const NUM = String.raw`\d+(?:\.\d+)*(?![\w-]|\.\w)`;
+const REQ_WORD = String.raw`\b(?:requirements?|req)\b\.?`;
+/** "requirement 1.1", "requirements 2.3 and 1.1", "req 1.1", "REQ-1.1". */
+const REQ_LISTED = new RegExp(String.raw`${REQ_WORD}\s*[-#:]?\s*(${NUM}(?:\s*(?:,|and|or|&|/)\s*${NUM})*)`, "gi");
+/** "[1.1]" or "(1.1)" with "requirement" at most three words before it ("per requirement [1.1]", "as the requirements say (1.1)"). */
+const REQ_BRACKETED = new RegExp(String.raw`${REQ_WORD}(?:\W+\w+){0,3}?\W*?[[(](${NUM})[\])]`, "gi");
+
+/**
+ * `text` cites requirement `id`. An id with letters ("REQ-1", "FR-2.3") is cited by naming it as a whole token (`cites`). A purely numeric
+ * id is cited only in an explicit citation form ("requirement 1.1", "req 1.1", "REQ-1.1", "requirement [1.1]"), never as a bare number:
+ * "the mug costs 1.1 kg" or "the badge shows 2 items" cite nothing (CP3 N-4).
+ */
+export function citesRequirement(text: string, id: string): boolean {
+    const want = normRef(id);
+    if (!NUMERIC_ID.test(want)) return cites(text, id);
+    const t = normRef(text);
+    const listed = [...t.matchAll(REQ_LISTED)].flatMap((m) => m[1]!.split(/\s*(?:,|and|or|&|\/)\s*/i));
+    const bracketed = [...t.matchAll(REQ_BRACKETED)].map((m) => m[1]!);
+    return [...listed, ...bracketed].some((n) => n === want);
+}
+
 /**
  * Whether a check's source (as `sourceOf` returns it) is STATED, so a failing check of it captures a defect (queue row 172). A usable rule's
  * ref is. `expected:<n>` is only when the scenario's n-th expected result is itself tied to a stated source: an objective scenario
  * (explore/perturb.ts scenarioFor: a stated objective, and its expected result cites the objective's source as "(source: <ref>)"), or an
- * expected result that names a usable rule given to the scenario by its ref, or that names a requirement id the scenario covers which is
- * also one of the project's requirements (`requirementIds`: the ids of the job's requirements document, as the planner keeps them; the
+ * expected result that names a usable rule given to the scenario by its ref, or that cites a requirement id the scenario covers which is
+ * also one of the project's requirements (`citesRequirement`: a numeric id only as "requirement 1.1", never as a bare number) (`requirementIds`: the ids of the job's requirements document, as the planner keeps them; the
  * scenario's own list is not enough). A planner's own expected result is not: the AI wrote it, not the application or its documents, so
  * a check of it failing on the clean app too is the planner's guess, not a defect.
  */
@@ -246,7 +269,7 @@ export function statedSource(
     if (o && o.kind !== "coverage-gap" && normRef(text).includes(`(source: ${normRef(o.source).replace(/…$/, "")}`)) return true;
     if (usable.some((r) => cites(text, r.ref))) return true;
     const known = new Set(requirementIds ?? []);
-    return (scenario.requirements ?? []).some((id) => known.has(id) && cites(text, id));
+    return (scenario.requirements ?? []).some((id) => known.has(id) && citesRequirement(text, id));
 }
 
 const SYSTEM_TEMPLATE = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
@@ -277,6 +300,7 @@ Every action you perform successfully is recorded into a reusable Playwright tes
 - When every expected result is verified, call finish(result="complete").
 - If an assertion fails because the application genuinely behaves differently from the expected result, call finish(result="defect") and explain what was observed.
   Give each assertion that checks an expected result or a rule its source, so a failing one is kept as the check that shows the bug.
+  An expected result that cites a requirement ("(requirement 1.1)") is checked with source expected:<n>, never with the requirement id.
 - If you cannot make progress (element missing, blocked), call finish(result="blocked") and explain.
 - Be efficient: do not explore unrelated pages. Do not repeat failed actions unchanged.
 - Stay in the UI: do not navigate to API/JSON endpoints; verify what a user sees in the pages.

@@ -6,10 +6,12 @@
  * its documents did not (C1b: all 13 "captured" defects failed on the clean app for that reason). Such a defect stays observed only,
  * confidence low, with no source.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { objectivesFrom } from "../src/engine/explore/objectives.js";
 import { scenarioFor } from "../src/engine/explore/perturb.js";
 import { defectFinding } from "../src/engine/orchestrator.js";
+import { parseRequirementsDeterministic } from "../src/engine/requirements/parse.js";
 import type { KnowledgeRule } from "../src/engine/planning/planner.js";
 import { ScenarioSchema, type Scenario } from "../src/engine/spec/schema.js";
 import { statedSource, type AuthorOutcome } from "../src/engine/web/author.js";
@@ -89,6 +91,65 @@ describe("statedSource: an expected result naming a requirement id", () => {
         }
         expect(statedSource("expected:2", covering(["1.2"], "The total is $25.00 (section 1.2.3)"), undefined, PROJECT)).toBe(false);
         expect(statedSource("expected:2", covering(["1.2"], "The total is $25.00 (section 11.2)"), undefined, PROJECT)).toBe(false);
+    });
+});
+
+describe("statedSource: a numeric requirement id counts only when cited as a requirement (CP3 N-4)", () => {
+    // The bench requirements documents number their requirements 1.1 to 8.x; a planner's quantity or price can equal one.
+    const covering = (requirements: string[], expected: string): Scenario =>
+        ScenarioSchema.parse({ scenarioId: "S-NUM", title: "Mug", description: "d", category: "Cart", startPath: "/cart", requirements, expectedResults: [expected] });
+    const PROJECT = ["1", "2", "1.1", "2.3", "8.10"];
+    const stated = (requirements: string[], expected: string) => statedSource("expected:1", covering(requirements, expected), undefined, PROJECT);
+
+    it("a bare number equal to a covered id is not a citation", () => {
+        expect(stated(["1.1"], "The mug costs 1.1 kg")).toBe(false);
+        expect(stated(["1.1"], "The weight shows 1.1.")).toBe(false);
+        expect(stated(["2"], "The cart badge shows 2 items")).toBe(false);
+        expect(stated(["1.1"], "The page shows [1.1]")).toBe(false);
+        expect(stated(["2.3"], "Section (2.3) is shown")).toBe(false);
+    });
+
+    it("an explicit citation of a covered id that the project has is stated", () => {
+        for (const text of [
+            "requirement 1.1: the total is $25.00",
+            "Requirement 1.1: the total is $25.00",
+            "The total is $25.00 (requirement 1.1).",
+            "The total is $25.00 (req 1.1)",
+            "The total is $25.00 (REQ-1.1)",
+            "The total is $25.00 per requirement [1.1]",
+            "The total is $25.00, as the requirements say (1.1)",
+            "The total is $25.00 (requirements 2.3 and 1.1)",
+        ])
+            expect(stated(["1.1"], text), text).toBe(true);
+        expect(stated(["2.3"], "The product page says how many one customer may order (see requirement 2.3)")).toBe(true);
+        expect(stated(["8.10"], "The order is listed (requirement 8.10)")).toBe(true);
+    });
+
+    it("a cited id the scenario does not cover, or the project does not have, is not stated", () => {
+        expect(stated(["2.3"], "The total is $25.00 (requirement 1.1)")).toBe(false);
+        expect(stated([], "The total is $25.00 (requirement 1.1)")).toBe(false);
+        expect(stated(["9.9"], "The total is $25.00 (requirement 9.9)")).toBe(false);
+        expect(statedSource("expected:1", covering(["1.1"], "The total is $25.00 (requirement 1.1)"), undefined, undefined)).toBe(false);
+    });
+
+    it("a citation of a longer or different number is not one of the covered id", () => {
+        for (const text of ["(requirement 1.10)", "(requirement 11.1)", "(requirement 1.1.2)", "(REQ-1.12)", "(requirement 21.1)", "(requirement 1.1a)"])
+            expect(stated(["1.1"], `The total is $25.00 ${text}`), text).toBe(false);
+        expect(stated(["8.10"], "The order is listed (requirement 8.1)")).toBe(false);
+        // "requirement" too far before the bracketed number.
+        expect(stated(["1.1"], "The requirement page lists every product with its price and weight (1.1)")).toBe(false);
+    });
+
+    it("every id of the bench requirements documents is stated when cited as the planner is told to, and never as a bare number", () => {
+        for (const bench of ["bench-shop", "bench-rbac"]) {
+            const ids = parseRequirementsDeterministic(readFileSync(new URL(`../examples/${bench}/requirements/requirements.md`, import.meta.url), "utf8")).map((r) => r.id);
+            expect(ids.length, bench).toBeGreaterThan(40);
+            for (const id of ids) {
+                const s = ScenarioSchema.parse({ scenarioId: "S-B", title: "t", description: "d", category: "c", requirements: [id], expectedResults: [`The cart shows ${id} items`, `The total is ${id} kg (requirement ${id})`] });
+                expect(statedSource("expected:1", s, undefined, ids), `${bench} ${id} bare`).toBe(false);
+                expect(statedSource("expected:2", s, undefined, ids), `${bench} ${id} cited`).toBe(true);
+            }
+        }
     });
 });
 
