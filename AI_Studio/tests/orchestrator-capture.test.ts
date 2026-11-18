@@ -12,6 +12,7 @@
  *   - a defect whose failing check is of the planner's own expected result (tied to nothing stated, queue row 172): the same, observed only;
  *   - an observed-only defect whose saved test cannot pass a replay of its own steps (a check bound to what the authoring session saw,
  *     as C1c's WEB-046, or steps leaning on state the session left, as WEB-030/033): not reported, no candidate finding, saved as a failed test;
+ *   - an observed-only defect whose replay of its own steps throws (N-9): it did not pass, so not reported either, and the reason says so;
  *   - every AI call of each job is counted: the independence check and the finding add none (a project with a model also runs the
  *     objective stage, P3-21, whose pursuits are counted on their own).
  * Fixture site: port 9764. Run under the browser lock:
@@ -22,7 +23,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { MockLanguageModelV3 } from "ai/test";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { CandidateFindingSchema, findingFingerprint } from "../src/engine/explore/finding.js";
 import { SKIP_REASONS } from "../src/engine/explore/perturb.js";
@@ -34,6 +35,16 @@ import { CandidateFindingStore } from "../src/platform/candidate-finding-store.j
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
+
+/** N-9: while set, the replay of an observed-only defect's own steps throws instead of returning an outcome. */
+const replayThrows = vi.hoisted(() => ({ on: false }));
+vi.mock("../src/engine/explore/independence.js", async (importOriginal) => {
+    const real = await importOriginal<typeof import("../src/engine/explore/independence.js")>();
+    return {
+        ...real,
+        replayOwnSteps: (...args: Parameters<typeof real.replayOwnSteps>) => (replayThrows.on ? Promise.reject(new Error("the replay browser went away")) : real.replayOwnSteps(...args)),
+    };
+});
 
 const PORT = 9764;
 const URL = `http://127.0.0.1:${PORT}`;
@@ -332,5 +343,30 @@ describe("a defect test carries its candidate finding", () => {
         expect(test.validationReason).toMatch(/^Not reported as a finding: the saved test did not pass a replay of its own steps/);
         expect(test.validationReason).toContain(`step ${test.spec.steps.length}`);
         expect(test.validationReason).toContain("The cart badge is missing");
+    }, 300_000);
+
+    it("an observed-only defect whose replay of its own steps throws: it did not pass, so not reported, and the reason says why (N-9)", async () => {
+        const projectId = (await call("POST", "/api/projects", { name: "Thrown" })).body.id as string;
+        plan = cartScenario("/cart");
+        script = [heading, total(), finishDefect];
+        replayThrows.on = true;
+        let explored: Awaited<ReturnType<typeof explore>>;
+        try {
+            explored = await explore(projectId);
+        } finally {
+            replayThrows.on = false;
+        }
+        const { test, events } = explored;
+
+        expect(test.validationStatus).toBe("FAILED_VALIDATION");
+        const meta = metaOf(test);
+        expect(meta.capture).toBe("observed_only");
+        expect(meta).not.toHaveProperty("finding");
+        expect(await new CandidateFindingStore(platform.db.sql).list(projectId)).toEqual([]);
+        expect(events.filter((e) => e.kind === "possible_defect")).toEqual([]);
+        expect(events.filter((e) => e.kind === "defect_unverified")).toHaveLength(1);
+        expect(test.validationReason).toMatch(/^Not reported as a finding: the replay of the saved test's own steps could not be run/);
+        expect(test.validationReason).toContain("the replay browser went away");
+        expect(test.validationReason).toContain("The total shows $30.00, not $25.00");
     }, 300_000);
 });

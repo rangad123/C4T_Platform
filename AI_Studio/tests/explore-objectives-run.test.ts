@@ -139,11 +139,16 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         const a = [step(track, fill("0")), step(track, click), step(track, click), step(track, click)];
         expect(a[1]!.state).not.toBe(a[2]!.state);
         expect(a[3]).toEqual(a[2]);
-        // A different value typed before the same submit is a new state.
+        // A different value typed before the same submit is not a new state, nor a new action (N-3): the second submit is a repeat.
         const b = actionTracker(url);
         const c = [step(b, fill("0")), step(b, click), step(b, fill("11")), step(b, click)];
-        expect(c[1]!.state).not.toBe(c[3]!.state);
+        expect(c[3]).toEqual(c[1]);
+        expect(c[2]!.action).toBe(c[0]!.action);
         expect(c[0]!.state.startsWith("/order|")).toBe(true);
+        // No value typed is kept in a state or an action (a password typed is never in the loop's log).
+        const p = actionTracker(url);
+        const typedSecret = [step(p, fill("hunter2-secret")), step(p, click)];
+        expect(JSON.stringify(typedSecret)).not.toContain("hunter2");
     });
 
     it("the action tracker keys an action by the element it resolves to, not by the locator's spelling (CP2 M-1)", () => {
@@ -154,12 +159,17 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         const two = t.before({ tool: "click", args: { by: "role", role: "button", value: "Continue" }, target, url });
         expect(two.action).toBe(one.action);
         expect(one.action).not.toContain("form button");
-        // The value typed stays part of a fill's key; its locator's spelling does not.
+        // Neither the value typed nor its locator's spelling is part of a fill's key (N-3).
         const f1 = t.before({ tool: "fill", args: { target: { by: "label", value: "Qty" }, value: "5" }, target: 'spinbutton "Qty" @aa', url });
         const f2 = t.before({ tool: "fill", args: { target: { by: "css", value: "input[name=qty]" }, value: "5" }, target: 'spinbutton "Qty" @aa', url });
         const f3 = t.before({ tool: "fill", args: { target: { by: "label", value: "Qty" }, value: "6" }, target: 'spinbutton "Qty" @aa', url });
         expect(f2.action).toBe(f1.action);
-        expect(f3.action).not.toBe(f1.action);
+        expect(f3.action).toBe(f1.action);
+        expect(f1.action).not.toContain("5");
+        // A select's choice and a dialog's typed answer are not either; a key pressed still is.
+        expect(t.before({ tool: "select", args: { value: "Large" }, target: 'combobox "Size" @bb', url }).action).toBe(t.before({ tool: "select", args: { value: "Small" }, target: 'combobox "Size" @bb', url }).action);
+        expect(t.before({ tool: "dialog", args: { response: "accept", promptText: "a" }, url }).action).toBe(t.before({ tool: "dialog", args: { response: "accept", promptText: "b" }, url }).action);
+        expect(t.before({ tool: "press", args: { key: "Enter" }, target: 'textbox "Q" @cc', url }).action).not.toBe(t.before({ tool: "press", args: { key: "Tab" }, target: 'textbox "Q" @cc', url }).action);
         // Two spellings of one address are one navigation.
         expect(t.before({ tool: "navigate", args: { url: "/cart" }, url }).action).toBe(t.before({ tool: "navigate", args: { url: "http://shop.test/cart" }, url }).action);
     });
