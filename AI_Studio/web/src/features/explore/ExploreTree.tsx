@@ -170,8 +170,9 @@ export function ExploreTree({ job, active, tests, events, stageText }: { job: Pi
  * The tree for a job of its own: reads the job's events (useTreeEvents) and, for one that creates tests, the run's tests (the same answer
  * the Runs page reads).
  */
-export function JobExploreTree({ job, active, stream, stageText, tests }: { job: Pick<Job, "jobId" | "projectId" | "progress" | "planOnly" | "cancelled" | "error">; active: boolean; stream: Pick<JobStream, "events" | "live">; stageText: (phase: PhaseKey, state: PhaseState) => { title: string; detail?: string }; /** Already read by the page; else read here. */ tests?: readonly RunTest[] }) {
+export function JobExploreTree({ job, active, stream, stageText, tests }: { job: Pick<Job, "jobId" | "projectId" | "progress" | "planOnly" | "cancelled" | "error">; active: boolean; stream: JobStream; stageText: (phase: PhaseKey, state: PhaseState) => { title: string; detail?: string }; /** Already read by the page; else read here. */ tests?: readonly RunTest[] }) {
     const events = useTreeEvents(job.jobId, active, stream);
-    const own = useRunAnswer(job.projectId, tests || job.planOnly ? null : job.jobId, active);
+    // The page's own live stream of this job, never a second one (useRunAnswer's `shared`).
+    const own = useRunAnswer(job.projectId, tests || job.planOnly ? null : job.jobId, active, stream);
     return <ExploreTree job={job} active={active} tests={tests ?? own.data?.tests ?? []} events={events} stageText={stageText} />;
 }

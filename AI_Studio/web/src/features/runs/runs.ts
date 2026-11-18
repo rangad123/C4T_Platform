@@ -92,10 +92,15 @@ export function useActiveRun(projectId: string): { job: Job | undefined; reload:
  * One run, test by test, kept fresh. While the live connection works it asks again whenever the platform says something changed (at
  * most about once a second) and checks every few seconds as a safety net; without it, it polls every couple of seconds, as the other pages do.
  */
-export function useRunAnswer(projectId: string, jobId: string | null, following: boolean): Fetched<RunAnswer> & { stream: JobStream } {
+/**
+ * `shared`: the job's live stream the page already has open (JobProgress). It is used instead of opening a second one: each stream holds
+ * one of the browser's six connections to the server, and a few tabs with two each left none for loading a page.
+ */
+export function useRunAnswer(projectId: string, jobId: string | null, following: boolean, shared?: JobStream): Fetched<RunAnswer> & { stream: JobStream } {
     const live = useRef(false);
     const answer = useFetch<RunAnswer>(jobId ? `/projects/${projectId}/runs/${jobId}` : null, (d) => (d === undefined || d.active ? (live.current ? 6000 : 2500) : null));
-    const stream = useJobStream(jobId, following || Boolean(answer.data?.active), () => void answer.reload());
+    const own = useJobStream(jobId, !shared && (following || Boolean(answer.data?.active)), () => void answer.reload());
+    const stream = shared ?? own;
     live.current = stream.live;
     const reload = useRef(answer.reload);
     reload.current = answer.reload;
