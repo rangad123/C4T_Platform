@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint } from "../src/engine/explore/finding.js";
-import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
+import { CANDIDATE_FINDINGS_LIST_MAX, CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import { Db } from "../src/platform/db.js";
 
 const at = "2026-11-17T10:00:00.000Z";
@@ -124,6 +124,24 @@ describe("CandidateFindingStore", () => {
         expect(again.finding.lastSeenAt > first.finding.lastSeenAt).toBe(true);
         expect(again.finding.finding.observed).toBe("Now 41.00");
         expect(await store.list("p1")).toHaveLength(1);
+    });
+
+    it("lists at most CANDIDATE_FINDINGS_LIST_MAX findings, newest seen first, and a smaller limit when asked (CP2 L-6)", async () => {
+        const { db } = setup();
+        let t = 0;
+        const store = new CandidateFindingStore(db.sql, () => new Date(Date.UTC(2026, 10, 17) + 1000 * t++).toISOString());
+        const fp = (i: number) => i.toString(16).padStart(64, "0");
+        const n = CANDIDATE_FINDINGS_LIST_MAX + 3;
+        for (let i = 0; i < n; i++) await store.upsert({ projectId: "p1", jobId: "j1-p1", finding: finding({ fingerprint: fp(i) }) });
+        const all = await store.list("p1");
+        expect(all).toHaveLength(CANDIDATE_FINDINGS_LIST_MAX);
+        expect(all[0]!.fingerprint).toBe(fp(n - 1));
+        expect(all.at(-1)!.fingerprint).toBe(fp(3));
+        expect(await store.list("p1", { jobId: "j1-p1" })).toHaveLength(CANDIDATE_FINDINGS_LIST_MAX);
+        expect((await store.list("p1", { limit: 2 })).map((f) => f.fingerprint)).toEqual([fp(n - 1), fp(n - 2)]);
+        // A limit above the cap, or one that is not a positive whole number, is the cap.
+        expect(await store.list("p1", { limit: 10_000 })).toHaveLength(CANDIDATE_FINDINGS_LIST_MAX);
+        for (const bad of [0, -1, 1.5, Number.NaN]) expect(await store.list("p1", { limit: bad })).toHaveLength(CANDIDATE_FINDINGS_LIST_MAX);
     });
 
     it("lists a project's findings, or those one run found", async () => {
