@@ -91,8 +91,6 @@ export function useActiveRun(projectId: string): { job: Job | undefined; reload:
 /**
  * One run, test by test, kept fresh. While the live connection works it asks again whenever the platform says something changed (at
  * most about once a second) and checks every few seconds as a safety net; without it, it polls every couple of seconds, as the other pages do.
- */
-/**
  * `shared`: the job's live stream the page already has open (JobProgress). It is used instead of opening a second one: each stream holds
  * one of the browser's six connections to the server, and a few tabs with two each left none for loading a page.
  */
