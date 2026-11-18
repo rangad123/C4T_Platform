@@ -138,7 +138,7 @@ describe("a validation job that runs on a real agent", () => {
         expect(set.status, set.text).toBe(200);
     });
 
-    it("a passing web test and an API test are VALIDATED, run on the agent, with no artifacts", async () => {
+    it("a passing web test and an API test are VALIDATED, run on the agent; the web one keeps its proof (a screenshot and the recording), never a trace", async () => {
         for (const title of ["home", "health"]) {
             const started = await admin("POST", `/api/tests/${ids[title]}/validate`);
             expect(started.status, started.text).toBe(202);
@@ -151,7 +151,8 @@ describe("a validation job that runs on a real agent", () => {
         const tests = (await admin("GET", `/api/projects/${projectId}/tests`)).body as Array<{ id: string; validationStatus: string }>;
         expect(tests.find((t) => t.id === ids["home"])!.validationStatus).toBe("VALIDATED");
         expect(tests.find((t) => t.id === ids["health"])!.validationStatus).toBe("VALIDATED");
-        expect(platform.db.all("SELECT kind FROM artifacts WHERE project_id = ? AND kind IN ('screenshot','trace','video')", projectId)).toEqual([]);
+        // Every web run keeps proof (docs/features/failure-evidence.md); the trace is kept for failures only, and an API test has no pictures.
+        expect(platform.db.all<{ kind: string }>("SELECT kind FROM artifacts WHERE project_id = ? AND kind IN ('screenshot','trace','video')", projectId).map((a) => a.kind).sort()).toEqual(["screenshot", "video"]);
     }, 180_000);
 
     it("a failing web test is not VALIDATED and its screenshot, trace and evidence are stored like a local run's", async () => {

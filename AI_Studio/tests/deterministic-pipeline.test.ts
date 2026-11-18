@@ -92,13 +92,13 @@ describe("deterministic pipeline", () => {
         expect(by["WEB-003"]!.status).toBe("failed");
         expect(by["WEB-003"]!.failedStepIndex).toBe(1);
         expect(by["WEB-003"]!.error).toMatch(/Nonexistent button|Timeout/i);
-        // failures keep a screenshot, trace, video and the page's network/console evidence; passing runs keep none
+        // failures keep a screenshot, trace, video and the page's network/console evidence
         expect(by["WEB-003"]!.artifacts.map((a) => a.kind).sort()).toEqual(["evidence", "screenshot", "trace", "video"]);
-        // A passing web script keeps only the compact passing-run record (approved policy: about 5 KB, no bodies, credentials,
-        // cookies or pictures) and no screenshot, trace or video.
-        expect(by["WEB-001"]!.artifacts.map((a) => a.kind)).toEqual(["evidence"]);
+        // A passing web script keeps its proof (a screenshot and the recording, docs/features/failure-evidence.md) and the compact
+        // passing-run record (approved policy: about 5 KB, no bodies, credentials or cookies); never a trace.
+        expect(by["WEB-001"]!.artifacts.map((a) => a.kind).sort()).toEqual(["evidence", "screenshot", "video"]);
         {
-            const raw = fs.readFileSync(by["WEB-001"]!.artifacts[0]!.path, "utf8");
+            const raw = fs.readFileSync(by["WEB-001"]!.artifacts.find((a) => a.kind === "evidence")!.path, "utf8");
             expect(raw.length).toBeLessThanOrEqual(6 * 1024);
             const ev = JSON.parse(raw) as Record<string, unknown>;
             expect(ev.footprint).toBeTruthy();
