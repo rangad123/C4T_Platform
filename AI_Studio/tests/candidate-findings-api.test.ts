@@ -250,6 +250,46 @@ describe("GET /api/projects/:id/jobs/:jobId/coverage", () => {
     });
 });
 
+describe("GET /api/projects/:id/jobs/:jobId/coverage masks the action log", () => {
+    const KEY_LIKE = `sk-ant-api03-${"Q7xZ".repeat(10)}9`;
+    const PASSWORD = "Tr0ub4dor&3-plain";
+    let job = "";
+    beforeAll(async () => {
+        const row = (seq: number, action: string, extra: Partial<ActionLogRow> = {}): ActionLogRow => ({ seq, objectiveId: "OBJ-0123456789abcdef:as_stated", state: "/signup?next|0a1b2c3d4e5f", action, atMs: seq, result: "performed", ...extra });
+        const rows = [
+            row(1, `navigate ${JSON.stringify({ url: `https://shop.example.test/signup?invite=${KEY_LIKE}&ref=SENTINEL-QUERY#frag-SENTINEL-FRAGMENT` })}`),
+            row(2, `fill ${JSON.stringify({ target: { by: "label", value: "API key" }, value: KEY_LIKE })}`),
+            row(3, `fill ${JSON.stringify({ target: { by: "label", value: "Password" }, value: PASSWORD })}`),
+            row(4, `fill ${JSON.stringify({ target: { by: "label", value: "Notes" }, value: `note ${KEY_LIKE}` })}`, { result: "refused", reason: `The same action on the same state: fill ${KEY_LIKE}` }),
+            row(5, `fill ${JSON.stringify({ target: { by: "label", value: "Password" }, value: "{{credentials.password}}" })}`),
+            row(6, `fill ${JSON.stringify({ target: { by: "label", value: "Name" }, value: "Ada Lovelace" })}`),
+            row(7, `fill ${JSON.stringify({ target: { by: "label", value: "Bio" }, value: "x".repeat(500) })}`),
+        ];
+        const { job: j, sink } = await jobOf(A);
+        // Written as the stage hands it over, unmasked: the platform masks it when it stores it.
+        await saveExploration(sink, { ...exploration(0), actionLog: rows, actionLogOmitted: 0 });
+        await sink.writes.flush();
+        job = j.id;
+    });
+
+    it("serves no secret-looking value, typed password, query string or fragment, and keeps placeholders and ordinary values", async () => {
+        const r = await call(coverageUrl(A, job));
+        expect(r.status).toBe(200);
+        expect(r.raw).not.toContain("sk-ant-");
+        expect(r.raw).not.toContain(KEY_LIKE.slice(14, 40));
+        expect(r.raw).not.toContain(PASSWORD);
+        expect(r.raw).not.toContain("SENTINEL-QUERY");
+        expect(r.raw).not.toContain("SENTINEL-FRAGMENT");
+        const actions = (r.body.actionLog as ActionLogRow[]).map((a) => a.action);
+        expect(actions[0]).toBe(`navigate ${JSON.stringify({ url: "https://shop.example.test/signup" })}`);
+        expect(actions[4]).toContain("{{credentials.password}}");
+        expect(actions[5]).toContain("Ada Lovelace");
+        // A long literal value is cut.
+        expect(actions[6]!.length).toBeLessThan(200);
+        expect(r.body.actionLog[0].state).toBe("/signup?next|0a1b2c3d4e5f");
+    });
+});
+
 describe("GET /api/projects/:id/objectives", () => {
     let modelled: Seed;
     beforeAll(async () => {
