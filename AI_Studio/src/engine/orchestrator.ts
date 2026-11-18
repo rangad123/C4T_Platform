@@ -7,7 +7,8 @@
  * configured, deterministic OpenAPI-driven API tests can still be generated and validated.
  */
 import { resolveApiToken, type OAuth2ClientCredentials } from "./api/oauth.js";
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
+import { shootPage } from "./frames/shoot.js";
 import { fillPath as fillApiPath, generateApiSpecs, type DraftSpec } from "./api/test-specs.js";
 import { probeOpenApi } from "./api/openapi.js";
 import { mapLimit, throwIfAborted, type EngineContext } from "./context.js";
@@ -198,6 +199,11 @@ export interface GenerationSink {
     /** Store one run against a named environment (staging, production...), tagged with it, next to the test's own runs. */
     recordEnvironment?(h: TestHandle, scriptId: string | null, r: import("./environments/run.js").EnvironmentRecord, startedAt: string): Promise<void>;
     saveTextArtifact(kind: string, name: string, content: string): Promise<void>;
+    /**
+     * Store one picture of the job (a JPEG of at most FRAME_LIMITS.maxBytes, its secret fields already covered) and answer its artifact
+     * id: a candidate finding's screenshot, referenced by that id. Hosts without persistence may leave it out (no pictures are taken).
+     */
+    saveImageArtifact?(kind: "screenshot", name: string, jpeg: Uint8Array): Promise<string>;
     /** Store (or clear) the locator-repair suggestion for a test that failed because an element was missing. Suggestions only; never applied by the engine. */
     saveHealing?(h: TestHandle, result: import("./healing/heal.js").HealResult): Promise<void>;
     /** Store the ledger of records the run's tests created and what became of each (test-data cleanup). */
@@ -765,9 +771,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     });
                     return h.testId;
                 }
+                // Row 173: where a replay stops, a picture with the secret fields covered (as the Explorer view's) is kept as the finding's evidence.
+                const shoot = sink.saveImageArtifact ? findingShooter(sink.saveImageArtifact.bind(sink), authoringSecretsOf(req), key) : undefined;
                 const independence =
                     capture === "captured"
-                        ? await checkIndependence(browser, origin, replayed).catch(() => ({ independence: "not_run" as const, replays: [] }))
+                        ? await checkIndependence(browser, origin, replayed, shoot ? { shoot } : {}).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
                 const found = defectFinding({ scenario, rules: scenarioRules, requirementIds, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
                 const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
@@ -1289,7 +1297,22 @@ function authoringSecretsOf(req: Pick<GenerationRequest, "credentials" | "roles"
     return list.filter((v): v is string => typeof v === "string" && v.length >= 4);
 }
 
+/**
+ * Row 173: the `shoot` of a defect test's independence check. A picture of the page where a replay stopped, taken as the Explorer view
+ * takes one (frames/shoot.ts: secret fields and fields holding one of `secrets` covered, small JPEG), stored through `save`; the answer
+ * is the stored picture's reference, never its bytes.
+ */
+export function findingShooter(save: NonNullable<GenerationSink["saveImageArtifact"]>, secrets: readonly string[], testKey: string): (page: Page) => Promise<string | undefined> {
+    let n = 0;
+    return async (page) => {
+        const shot = await shootPage(page, secrets);
+        return shot ? await save("screenshot", `${testKey}-finding-${++n}.jpg`, shot.jpeg) : undefined;
+    };
+}
+
 const EXPECTED_SOURCE = /^expected:([1-9]\d{0,2})$/;
+/** A candidate finding keeps at most this many screenshot references (the spec names no number). */
+export const FINDING_SCREENSHOTS_MAX = 3;
 const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 /**
@@ -1331,7 +1354,7 @@ export function defectFinding(p: {
         actions: { stepCount: Math.min(p.stepCount, L.stepsMax) },
         expected: { text: expected, source },
         observed: p.outcome.explanation,
-        evidence: { screenshots: [], requests: problems.filter((l) => !isConsole(l)).slice(0, L.requestsMax), console: problems.filter(isConsole).slice(0, L.consoleMax) },
+        evidence: { screenshots: (p.independence.screenshots ?? []).slice(0, FINDING_SCREENSHOTS_MAX), requests: problems.filter((l) => !isConsole(l)).slice(0, L.requestsMax), console: problems.filter(isConsole).slice(0, L.consoleMax) },
         capture,
         independence: p.independence.independence,
         confidence,
