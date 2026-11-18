@@ -212,6 +212,31 @@ describe("the Test scripts list", () => {
         await page.setViewportSize({ width: 1280, height: 900 });
     });
 
+    it("at 375 x 740, the last row's menu is above the side navigation while it slides away (as on a slower computer)", async () => {
+        // Below 900 px the side navigation is off screen, slid there by a transition, above the page. Opened while it was still sliding
+        // (GitHub's machine, after the screen narrowed), the menu was under it: Rename under Settings, Delete under Help.
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send("Animation.enable");
+        try {
+            await page.setViewportSize({ width: 1280, height: 900 });
+            await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
+            await pwExpect.poll(titles).toEqual(["Pay by card and see the total", "Receipt is sent", "Cart opens"]);
+            await cdp.send("Animation.setPlaybackRate", { playbackRate: 0.005 });
+            await page.setViewportSize({ width: 375, height: 740 });
+            const button = page.getByRole("button", { name: "Actions for Cart opens" });
+            await button.scrollIntoViewIfNeeded();
+            await button.focus();
+            await page.keyboard.press("Enter");
+            await pwExpect(page.getByRole("menu")).toBeVisible();
+            expect([await shown("Rename"), await shown("Delete…")]).toEqual([true, true]);
+            await page.keyboard.press("Escape");
+        } finally {
+            await cdp.send("Animation.setPlaybackRate", { playbackRate: 1 });
+            await cdp.detach();
+            await page.setViewportSize({ width: 1280, height: 900 });
+        }
+    });
+
     it("passes accessibility checks in light and dark", async () => {
         await axeBoth(page);
     });
