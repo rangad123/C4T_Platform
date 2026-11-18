@@ -56,6 +56,8 @@ export interface TestUnderValidation {
     scenario?: Scenario;
     /** The scenario's rules (stated by a source or confirmed by a person): a repair keeps checking them. */
     rules?: KnowledgeRule[];
+    /** The ids of the job's requirements: a repair decides what is stated the way the author did (author.ts statedSource). */
+    requirementIds?: readonly string[];
     /** OpenAPI/observed-endpoint description handed to the API repair prompt. */
     endpointDoc?: unknown;
     /** Approved baseline screenshots (visual tests). Absent on a test's first validation. */
@@ -330,6 +332,7 @@ export async function validateBatch(
                         attempt,
                         secrets: secretsOfRun(deps.env),
                         ...(t.rules?.length ? { rules: t.rules } : {}),
+                        ...(t.requirementIds?.length ? { requirementIds: t.requirementIds } : {}),
                     });
                 } else if (t.spec.kind === "api") {
                     repair = await repairApi(ctx, t.spec, run, t.endpointDoc);

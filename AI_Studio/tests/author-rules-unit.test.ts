@@ -138,3 +138,29 @@ describe("validation hands a failing test's rules to its repair", () => {
         expect(without[0]).not.toHaveProperty("rules");
     });
 });
+
+describe("validation hands a failing test's requirement ids to its repair (queue row 182)", () => {
+    // An expected result that names a requirement of the job is stated (author.ts statedSource) only with the job's ids: the repair needs them too.
+    const scenario = ScenarioSchema.parse({ scenarioId: "S-002", title: "Pay", description: "Pay", category: "Checkout", requirements: ["REQ-1"], expectedResults: ["An order number is shown (REQ-1)"] });
+    const spec = TestSpecSchema.parse({ testId: "WEB-002", title: "Pay", kind: "web", category: "Checkout", source: { origin: "browser-agent" }, steps: [{ action: "navigate", url: "/" }], expectedResults: scenario.expectedResults });
+    const validate = async (requirementIds?: string[]) => {
+        authored.length = 0;
+        const executor = { name: "stub", execute: async (_f: string, b: { scripts: Array<{ testId: string }> }) => b.scripts.map((x) => ({ testId: x.testId, status: "failed", durationMs: 1, error: "locator not found", failedStepIndex: 0, steps: [], artifacts: [], responses: [] })) };
+        const ctx = { config: { scratchDir: "/nonexistent-scratch", LLM_DETERMINISTIC_REPAIR: "off" }, emit: () => undefined, llm: { object: async () => ({ category: "locator", fixable: true, reason: "The button was renamed" }) } } as unknown as EngineContext;
+        await validateBatch(
+            ctx,
+            { browser: {} as never, executor, scratchDir: "/nonexistent-scratch", env: { baseUrl: "http://shop.test", headless: true }, render: { baseUrl: "http://shop.test" }, model: {} as never, maxRepairAttempts: 1, workers: 1 } as never,
+            [{ spec, framework: "playwright", scenario, ...(requirementIds ? { requirementIds } : {}) }],
+            { async onAttempt() {}, async onRepaired() {}, async onFinal() {} } as never,
+        );
+        return authored;
+    };
+    it("with ids: the repair's test writer gets them; without: none", async () => {
+        const withIds = await validate(["REQ-1"]);
+        expect(withIds.length).toBeGreaterThan(0);
+        expect(withIds[0]!.requirementIds).toEqual(["REQ-1"]);
+        const without = await validate();
+        expect(without.length).toBeGreaterThan(0);
+        expect(without[0]).not.toHaveProperty("requirementIds");
+    });
+});
