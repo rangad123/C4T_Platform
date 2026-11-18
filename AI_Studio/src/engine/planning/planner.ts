@@ -48,6 +48,8 @@ export interface PlanOptions {
     roleDifferences?: string[];
     /** Data-changing tests are on: scenarios may create, edit and delete records with generated data carrying this run tag. */
     testData?: { tag?: string };
+    /** The project allows tests that change data (allowMutatingApiTests): orders and payments with test data may be planned (row 206). */
+    allowPurchases?: boolean;
     /** What is known about the application (its latest model version): usable rules and the workflows reach every planning call. */
     knowledge?: AppKnowledge;
 }
@@ -228,7 +230,7 @@ export function requirementsCoverage(reqs: Requirement[], scenarios: Scenario[])
     };
 }
 
-const SYSTEM = `You are a senior QA lead planning a web test suite for one application, from a model of what was discovered.
+const SYSTEM_TEMPLATE = `You are a senior QA lead planning a web test suite for one application, from a model of what was discovered.
 Produce meaningful, independent scenarios — NOT one test per button.
 Rules:
 - Group by feature area ("category"), e.g. Authentication, Search, Cart, Checkout, Navigation.
@@ -253,13 +255,25 @@ Rules:
   results. "The page loads" or "it works" is never an expected result.
 - These are UI tests: expected results must be visible in the browser UI. Never expect anything about API endpoints,
   JSON responses or network calls — API behaviour is covered by separate, generated API tests.
-- NEVER plan actions that cause irreversible or external effects against a live site: no real payments, no account deletion,
-  no sending emails/messages to real people, no bulk data changes. Stop one step before the irreversible action and assert on the
-  confirmation UI instead.
+@@PAYMENT_RULE@@
 - Sign-up scenarios must use unique throwaway data via "{{unique}}" (e.g. qa+{{unique}}@example.com) — say so in requiredData.
 - Scenarios that need a logged-in user set requiresAuth=true and may use credentials {{credentials.username}} / {{credentials.password}}.
 - Priority: critical = core revenue/auth journeys, high = main features, medium = secondary, low = edge polish.
 - Titles are short imperative statements ("Login fails with an incorrect password").`;
+
+const PLAN_PAYMENT_RULES = {
+    off:
+        "- NEVER plan actions that cause irreversible or external effects against a live site: no real payments, no account deletion,\n" +
+        "  no sending emails/messages to real people, no bulk data changes. Stop one step before the irreversible action and assert on the\n" +
+        "  confirmation UI instead.",
+    on:
+        "- This project allows tests that change data: placing orders and paying with the test data provided may be planned (never a real card\n" +
+        "  number). NEVER plan other irreversible or external effects: no account deletion, no sending emails/messages to real people, no bulk\n" +
+        "  data changes. Stop one step before such an action and assert on the confirmation UI instead.",
+} as const;
+
+/** The planner's instructions; `allowPurchases` (PlanOptions, from the project's allowMutatingApiTests) relaxes the payment rule. */
+export const planningSystem = (allowPurchases: boolean): string => SYSTEM_TEMPLATE.replace("@@PAYMENT_RULE@@", allowPurchases ? PLAN_PAYMENT_RULES.on : PLAN_PAYMENT_RULES.off);
 
 /** Pages per area call: an app this small or smaller is planned in one call. */
 const AREA_PAGES = 15;
@@ -493,7 +507,7 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
     /** Runs a round of calls concurrently; a failed call is said in plain words and the others are kept. */
     const round = async (batch: Array<{ prompt: string; quota: number }>) => {
         const results = await mapLimit(batch, ctx.config.CONCURRENCY, (c) =>
-            ctx.llm.object({ system: SYSTEM, schema: PlanSchema, maxOutputTokens: Math.min(16_000, 2_000 + 320 * c.quota), purpose: "planning", prompt: c.prompt }),
+            ctx.llm.object({ system: planningSystem(opts.allowPurchases === true), schema: PlanSchema, maxOutputTokens: Math.min(16_000, 2_000 + 320 * c.quota), purpose: "planning", prompt: c.prompt }),
         );
         const failed = results.flatMap((r) => (r.ok ? [] : [r.error]));
         const ok = results.flatMap((r) => (r.ok ? [r.value.scenarios] : []));

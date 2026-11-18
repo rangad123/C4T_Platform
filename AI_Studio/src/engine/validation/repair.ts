@@ -81,6 +81,8 @@ export async function repairWeb(args: {
     rules?: KnowledgeRule[];
     /** The ids of the job's requirements: an expected result naming one the scenario covers is stated (author.ts statedSource). */
     requirementIds?: readonly string[];
+    /** The project allows tests that change data: the re-written test may place orders and pay with test data (row 206). */
+    allowPurchases?: boolean;
 }): Promise<Repair> {
     const { ctx, spec, run } = args;
     const t = await triage(ctx, spec, run);
@@ -119,6 +121,7 @@ export async function repairWeb(args: {
         ...(args.secrets ? { secrets: [...args.secrets] } : {}),
         ...(args.rules?.length ? { rules: args.rules } : {}),
         ...(args.requirementIds?.length ? { requirementIds: args.requirementIds } : {}),
+        ...(args.allowPurchases ? { allowPurchases: true } : {}),
         resume: { prefix, failure: failureText(spec, run) },
     });
     if (outcome.status === "complete") {

@@ -358,6 +358,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
     // AI screen review: the request's own choice, else the level's default when the model can read images.
     const wantVision = visionOn(req, typeof ctx.llm.imageObject === "function" && ctx.llm.modelName !== "unavailable");
     // Data-changing tests on: one generator for the run, so every value it gives carries the same run tag (testdata/generate.ts).
+    // The project's "Include API tests that change data": the form-submitting checks, the data operators' first condition, and orders
+    // and payments while authoring (row 206) all follow it.
+    const dataChanges = req.allowMutatingApiTests === true;
     const testData = req.allowMutatingApiTests ? createTestData() : undefined;
     const wantApi = req.targets.includes("api");
     const creds: Credentials | undefined = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password, ...(req.credentials.totpSecret ? { totpSecret: req.credentials.totpSecret } : {}) } : undefined;
@@ -654,6 +657,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                               roleDifferences: roleDifferences(accessReach),
                               warnings: summary.errors,
                               ...(testData ? { testData: { tag: testData.tag } } : {}),
+                              allowPurchases: dataChanges,
                           });
                 // A planning call that did not finish is said as a warning when the others answered (planner.ts).
                 if (summary.errors.length > warningsBefore) planningFailed = summary.errors[summary.errors.length - 1];
@@ -841,6 +845,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         retryBlocked: true,
                         leftoverCheck: true,
                         ...(testData ? { testData } : {}),
+                        allowPurchases: dataChanges,
                         ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
                         ...(scenarioRules.length ? { rules: scenarioRules } : {}),
                         ...(requirementIds.length ? { requirementIds } : {}),
@@ -887,7 +892,6 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             } else {
                 const lv = levelSettings(req);
                 const b = lv.exploration;
-                const dataChanges = req.allowMutatingApiTests === true;
                 const dataOperators = req.dataOperators === true && dataChanges;
                 const requiresAuth = Boolean(creds && authState.loggedIn);
                 const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataChanges, dataOperators, requiresAuth, ...(req.exploredObjectives ? { explored: req.exploredObjectives } : {}) });
@@ -947,6 +951,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                             review: true,
                             leftoverCheck: true,
                             ...(testData ? { testData } : {}),
+                            allowPurchases: dataChanges,
                             ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
                             ...(rules.length ? { rules } : {}),
                             secrets: authoringSecretsOf(req),
@@ -1213,6 +1218,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     repeatPasses: levelSettings(req).repeatPasses,
                     workers: ctx.config.CONCURRENCY,
                     cleanup: req.cleanup,
+                    allowPurchases: dataChanges,
                 },
                 pending,
                 {
