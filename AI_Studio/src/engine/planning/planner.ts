@@ -282,6 +282,9 @@ ${REQS_CLOSE}
 Requirements rules:
 - Plan scenarios that verify these requirements against the application above. List the ids each scenario verifies in "requirements"
   (only ids from this list). One scenario may cover several requirements; important requirements may need a positive and a negative scenario.
+- An expected result that checks what a listed requirement states cites it in the form "(requirement <id>)", for example
+  "The total is $25.00 (requirement 1.1)". Cite only ids listed in that scenario's "requirements", and only on an expected result the
+  requirement itself states; an expected result you inferred cites nothing. Never write a bare id ("1.1") as the citation.
 - The requirements say WHAT to test; the discovered pages say HOW. Only plan a scenario when the needed UI exists in the model —
   never invent pages or controls. Requirements you cannot map to discovered UI are reported as uncovered; do not fake coverage.
 - Non-functional requirements (performance, availability...) that a UI test cannot observe should be left uncovered.`;
