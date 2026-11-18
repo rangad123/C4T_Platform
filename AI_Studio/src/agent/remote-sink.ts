@@ -199,6 +199,7 @@ export function remoteGenerationSink(o: {
         recordVariant: (x, scriptId, r, startedAt) => send(wireRun(r.run).then((run) => ({ method: "recordVariant", h: h(x), scriptId, r: { variant: r.variant, status: r.status, reason: r.reason, run }, startedAt }))),
         recordEnvironment: (x, scriptId, r, startedAt) => send(wireRun(r.run).then((run) => ({ method: "recordEnvironment", h: h(x), scriptId, r: { environment: r.environment, status: r.status, reason: r.reason, run }, startedAt }))),
         saveTextArtifact: (kind, name, content) => send({ method: "saveTextArtifact", kind, name: wireName(name), content }),
+        savePageThumbnail: (name, jpeg) => ask({ method: "savePageThumbnail", file: { name, data: Buffer.from(jpeg).toString("base64") } }, (v) => SinkAnswers.savePageThumbnail.parse(v)),
         saveHealing: (x, result) => send({ method: "saveHealing", h: h(x), result }),
         saveCleanup: (items) => send({ method: "saveCleanup", items }),
         loadMemory: (origin) => ask({ method: "loadMemory", origin }, (v) => SinkAnswers.loadMemory.parse(v)),

@@ -47,6 +47,7 @@ import { deviceOpenerFor } from "./phone-device.js";
 import { MobileTargetSchema } from "../engine/mobile/target.js";
 import type { DeviceOpener } from "../engine/mobile/explore/types.js";
 import { SecretBox } from "./secrets.js";
+import { AgentInputsStore } from "./agent-inputs-store.js";
 import { envSecrets } from "./agent-routing.js";
 import { prepareJobSignIn, type JobSignIn } from "./hard-signin-service.js";
 import { meterFor, PERSONAL_KEY_MODEL } from "./usage-store.js";
@@ -530,6 +531,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 // Reuse earlier runs: this project's own latest model, as known pages (the engine uses them only for the same origin).
                 ...(!fromPlan && !o.resumeFrom && !o.fullExploration && o.useMemory !== false && !o.understandingBaseline ? knownPagesRequest(repo.getLatestAppModel(job.projectId)) : {}),
                 ...(o.understandingBaseline ? { pageUnderstanding: false } : {}),
+                // "Keep page thumbnails" (Settings → General; never saved means on): a covered thumbnail of each page, kept with this job.
+                ...(new AgentInputsStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY)).keepThumbnails(job.projectId) ? { pageThumbnails: true } : {}),
                 cleanup,
                 ...(signIn.savedSession ? { savedSession: signIn.savedSession } : {}),
             };

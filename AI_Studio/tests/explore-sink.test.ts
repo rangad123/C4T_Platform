@@ -285,6 +285,25 @@ describe("the platform end refuses", () => {
         await forgetExploreSink(task.taskId);
     });
 
+    it("a page thumbnail travels as bytes and comes back as the platform's id; one that is not a small JPEG under a thumbnail's name is not kept", async () => {
+        const { task } = await newTask();
+        const w = wire(task);
+        const sink = remoteGenerationSink({ post: w.post });
+        const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+        const id = await sink.savePageThumbnail!("thumb-1.jpg", jpeg);
+        expect(id).toMatch(/^[0-9a-f-]{36}$/);
+        const row = platform.repo.getArtifact(id!)!;
+        expect(row).toMatchObject({ kind: "screenshot", job_id: task.jobId, project_id: task.projectId });
+        expect(fs.readFileSync(localPathOf(platform.store, row.path as string)!)).toEqual(jpeg);
+        // Not a JPEG: the platform answers null and keeps nothing.
+        expect(await sink.savePageThumbnail!("thumb-2.jpg", Buffer.from("<svg/>"))).toBeNull();
+        expect(platform.repo.listArtifacts({ jobId: task.jobId }).filter((a) => a.kind === "screenshot")).toHaveLength(1);
+        // Another name, or a picture past the size a thumbnail may have, is refused by the wire itself.
+        await refusal(handleExploreSink(platform, task, { calls: [{ method: "savePageThumbnail", file: { name: "../x.jpg", data: jpeg.toString("base64") } }] }));
+        await refusal(handleExploreSink(platform, task, { calls: [{ method: "savePageThumbnail", file: { name: "thumb-3.jpg", data: Buffer.alloc(70_000).toString("base64") } }] }));
+        await forgetExploreSink(task.taskId);
+    });
+
     it("an oversized file", async () => {
         const { task } = await newTask();
         const w = wire(task);

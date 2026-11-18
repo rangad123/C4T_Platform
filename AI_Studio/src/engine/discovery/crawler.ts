@@ -26,6 +26,7 @@ import { captchaMessage, detectCaptcha } from "../auth/captcha.js";
 import type { CrawlTransition } from "../screenmap/map.js";
 import { redactText } from "../../shared/redact-text.js";
 import { clearProbes, type ProbeReuse } from "../memory/probe-reuse.js";
+import type { Thumbnailer } from "./thumbnails.js";
 
 export interface CrawlOptions {
     startUrl: string;
@@ -34,6 +35,8 @@ export interface CrawlOptions {
     /** Max pages sharing the same URL pattern (e.g. /product/{id}) so catalogues don't eat the budget. */
     maxPerPattern: number;
     screenshotsDir?: string;
+    /** Keeps a covered thumbnail of each page it opens (thumbnails.ts); absent: none is taken. */
+    thumbnails?: Thumbnailer;
     /** Path prefixes to restrict the crawl to (testing scope). */
     includePaths?: string[];
     /**
@@ -872,6 +875,8 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
 
             const model = await extractPage(page, next.url, next.depth, status, Date.now() - t0, understand);
             model.consoleErrors = consoleErrors;
+            // Before any probe opens a menu or types into a field: the page as it opened, its secret fields covered (or no picture).
+            await opts.thumbnails?.take(page, model);
             const pathname = new URL(page.url()).pathname;
             model.apiCalls = session.network
                 .getDiscoveredEndpoints()
@@ -908,7 +913,7 @@ export async function crawl(session: BrowserSession, ctx: EngineContext, opts: C
                 stage: "discovery",
                 kind: "page_visited",
                 message: `Visited ${model.path} (${model.type}, ${model.forms.length} forms, ${model.components.length} controls)${model.reusedFrom ? `; unchanged since ${model.reusedFrom.at.slice(0, 10)}, so its menus, conditional fields and validation messages were taken from then` : ""}`,
-                data: { url: model.url, status, depth: next.depth, type: model.type, ...(model.reusedFrom ? { reusedFrom: model.reusedFrom.at } : {}) },
+                data: { url: model.url, status, depth: next.depth, type: model.type, ...(model.reusedFrom ? { reusedFrom: model.reusedFrom.at } : {}), ...(model.thumbnail ? { thumbnail: model.thumbnail } : {}) },
             });
 
             const here = normalizeUrl(model.url, opts.startUrl) ?? next.url;

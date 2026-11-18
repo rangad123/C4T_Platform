@@ -20,6 +20,7 @@ import type { EngineEvent } from "../engine/context.js";
 import { CustomScriptStore } from "./custom-script-store.js";
 import { maskOptional, maskText, maskValue } from "./redact-text.js";
 import type { VersionSource } from "./review-store.js";
+import { isJpeg, THUMBNAIL_LIMITS, THUMBNAIL_NAME, THUMBNAIL_RUN_LIMITS } from "../engine/discovery/thumbnails.js";
 
 /**
  * Stores a rendered script as the test's current version for its framework. An unchanged script
@@ -331,6 +332,22 @@ export class RepoSink implements GenerationSink {
         const rel = path.posix.join(this.job.projectId, "_artifacts", this.job.id, name);
         const saved = await putText(this.store, rel, content);
         this.repo.addArtifact({ projectId: this.job.projectId, jobId: this.job.id, kind, path: rel, size: saved.size });
+    };
+
+    /**
+     * One covered page thumbnail (engine/discovery/thumbnails.ts), kept as a job artifact of kind `screenshot` (so it follows screenshot
+     * retention, project deletion and GET /api/artifacts/:id with its project's read access). Anything that is not a JPEG within the size
+     * cap, under a thumbnail's name and within the run's caps is not kept (null).
+     */
+    savePageThumbnail: NonNullable<GenerationSink["savePageThumbnail"]> = async (name, jpeg) => {
+        if (!THUMBNAIL_NAME.test(name) || !isJpeg(jpeg) || jpeg.byteLength > THUMBNAIL_LIMITS.maxBytes) return null;
+        // The run's caps, counted from what this job already stored (a runner's pictures arrive from another machine, over many requests).
+        const rel = path.posix.join(this.job.projectId, "_artifacts", this.job.id, "thumbnails", name);
+        const had = this.repo.db.get<{ n: number; b: number | null }>("SELECT COUNT(*) AS n, SUM(size) AS b FROM artifacts WHERE job_id = ? AND kind = 'screenshot' AND path LIKE ?", this.job.id, `%/thumbnails/thumb-%`);
+        if (Number(had?.n ?? 0) >= THUMBNAIL_RUN_LIMITS.count || Number(had?.b ?? 0) + jpeg.byteLength > THUMBNAIL_RUN_LIMITS.bytes) return null;
+        if (this.repo.db.get("SELECT 1 FROM artifacts WHERE job_id = ? AND path = ?", this.job.id, rel)) return null;
+        const saved = await this.store.put(rel, Buffer.from(jpeg), { contentType: "image/jpeg" });
+        return this.repo.addArtifact({ projectId: this.job.projectId, jobId: this.job.id, kind: "screenshot", path: rel, size: saved.size });
     };
 
     startAgentRun: GenerationSink["startAgentRun"] = (role, subject) => this.writes.run(() => this.repo.startAgentRun(this.job.id, role, subject));

@@ -87,3 +87,52 @@ describe("the progress tree, from recorded events", () => {
         expect(gen.children[3]!.children[0]!.detail).toBe("Needs a look");
     });
 });
+
+// A repeat exploration as crawler.ts and orchestrator.ts record it (sheet #8 stage 4): two unchanged pages took their probe results, then a
+// spot check switched reuse off and one of them was tried again.
+const repeatEvents = () => [
+    ev("signin_reused", "reused: went straight to the sign-in page known since 2026-11-10 (/login); ...", { path: "/login", since: "2026-11-10T08:00:00.000Z" }),
+    ev("page_visited", "Visited / (home, 0 forms, 4 controls); unchanged since 2026-11-10, so ...", { url: "http://127.0.0.1:6731/", status: 200, depth: 0, type: "home", reusedFrom: "2026-11-10T08:00:00.000Z" }),
+    ev("page_visited", "Visited /about (content, 0 forms, 1 controls); unchanged since 2026-11-09, so ...", { url: "http://127.0.0.1:6731/about", status: 200, depth: 1, type: "content", reusedFrom: "2026-11-09T08:00:00.000Z" }),
+    ev("page_visited", "Visited /products (listing, 0 forms, 1 controls)", { url: "http://127.0.0.1:6731/products", status: 200, depth: 1, type: "listing" }),
+    ev("reuse_off", "Reuse of the last exploration is off for the rest of this run: a spot check of /products found ...", { reason: "a spot check of /products found it behaves differently from the last exploration", changed: 0, spotChecked: 1 }),
+    ev("reuse_reprobed", "Tried again the 1 page whose earlier results were taken before reuse was switched off.", { pages: 1 }),
+    ev("probes_reused", "reused: 1 page unchanged since 2026-11-10. ...", { pages: 1, since: "2026-11-10T08:00:00.000Z", spotChecked: 1, expired: 0, changed: 0, paths: ["/"] }),
+    ev("pages_from_memory", "Started from 3 pages the last exploration knew", { pages: 3, gone: 1 }),
+    ev("understanding_reused", "2 unchanged pages were not sent to the AI again", { pages: 2, of: 3 }),
+];
+
+describe("what an exploration reused, in the progress tree", () => {
+    it("a reused page carries the badge with its date; one tried again after reuse went off loses it and says so", () => {
+        const tree = foldExploreTree({ phases: ["discovery", "understanding", "planning"], progress: progress({ discovery: "done", understanding: "done", planning: "done" }), events: repeatEvents(), tests: [], active: false, stopped: false });
+        const disc = stage(tree, "discovery");
+        const page = (label: string) => disc.children.find((c) => c.label === label)!;
+        expect(page("/").badge).toEqual({ text: "Reused 2026-11-10", tone: "info" });
+        expect(page("/").detail).toMatch(/^Unchanged since 2026-11-10: its menus, conditional fields and validation messages were taken from then/);
+        expect(page("/about").badge).toBeUndefined();
+        expect(page("/about").detail).toBe("Tried again after reuse was switched off");
+        expect(page("/products").badge).toBeUndefined();
+        expect(page("/products").detail).toBeUndefined();
+    });
+
+    it("the crawl says what it reused and, as a warning, that reuse was switched off and why; the reading says what it did not resend", () => {
+        const tree = foldExploreTree({ phases: ["discovery", "understanding", "planning"], progress: progress({ discovery: "done", understanding: "done", planning: "done" }), events: repeatEvents(), tests: [], active: false, stopped: false });
+        const notes = stage(tree, "discovery").children.filter((c) => c.id.startsWith("note:"));
+        expect(notes.map((n) => [n.label, n.badge?.text ?? null, n.detail ?? null])).toEqual([
+            ["Went straight to the sign-in page /login", "Reused 2026-11-10", "The form was still filled and the sign-in checked."],
+            ["Reuse of the last exploration was switched off for the rest of this run", "Reuse off", "Why: a spot check of /products found it behaves differently from the last exploration."],
+            ["1 page was tried again after reuse was switched off", null, null],
+            ["1 page unchanged since 2026-11-10: not tried again", "Reused 2026-11-10", "1 page was tried anyway as a spot check and matched."],
+            ["Started from 3 pages the last exploration knew", "Reused", "1 known page is gone now and was left out."],
+        ]);
+        expect(notes.find((n) => n.badge?.text === "Reuse off")!.badge!.tone).toBe("warning");
+        expect(stage(tree, "understanding").children.map((c) => [c.label, c.badge?.text])).toEqual([["2 unchanged pages were not sent to the AI again", "Reused"]]);
+    });
+
+    it("explore everything again is said as reuse off; without reuse events nothing carries a badge", () => {
+        const asked = foldExploreTree({ phases: ["discovery"], progress: progress({ discovery: "done" }), events: [ev("full_exploration", "Exploring every page again, as asked: nothing is reused from the last exploration."), ...planEvents], tests: [], active: false, stopped: false });
+        expect(stage(asked, "discovery").children[0]).toMatchObject({ label: "Everything was explored again, as asked: nothing was reused", badge: { text: "Reuse off", tone: "warning" } });
+        const plain = foldExploreTree({ phases: ["discovery"], progress: progress({ discovery: "done" }), events: planEvents, tests: [], active: false, stopped: false });
+        expect(stage(plain, "discovery").children.some((c) => c.badge)).toBe(false);
+    });
+});

@@ -57,6 +57,7 @@ import { authorWebSpec, toSpec } from "./web/author.js";
 import { checkStrength } from "./mutation/strength.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
+import { createThumbnailer } from "./discovery/thumbnails.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
 export const TEST_CASES_NOT_RUN = "test_cases_not_run";
@@ -145,6 +146,11 @@ export interface GenerationRequest {
      * for the same origin. The host hands over its own project's model only.
      */
     knownPages?: KnownPages;
+    /**
+     * Keep a covered thumbnail of each page the crawl opens (discovery/thumbnails.ts), stored through `GenerationSink.savePageThumbnail`.
+     * The host decides (the project's "Keep page thumbnails" switch); absent or false: none is taken. A host without that method keeps none.
+     */
+    pageThumbnails?: boolean;
     /** Remove the records data-changing API tests create once the run ends (see ./cleanup). Absent: scripts remove their own records. */
     cleanup?: CleanupRequest;
     /** A saved signed-in session (hard sign-ins, see ./auth/*): exploration starts signed in with it and does not fill the sign-in form. */
@@ -227,6 +233,8 @@ export interface GenerationSink {
     /** Store one run against a named environment (staging, production...), tagged with it, next to the test's own runs. */
     recordEnvironment?(h: TestHandle, scriptId: string | null, r: import("./environments/run.js").EnvironmentRecord, startedAt: string): Promise<void>;
     saveTextArtifact(kind: string, name: string, content: string): Promise<void>;
+    /** Store one covered page thumbnail (a JPEG named `thumb-<n>.jpg`) with this job; answers its id, or null when the host did not keep it. */
+    savePageThumbnail?(name: string, jpeg: Uint8Array): Promise<string | null>;
     /** Store (or clear) the locator-repair suggestion for a test that failed because an element was missing. Suggestions only; never applied by the engine. */
     saveHealing?(h: TestHandle, result: import("./healing/heal.js").HealResult): Promise<void>;
     /** Store the ledger of records the run's tests created and what became of each (test-data cleanup). */
@@ -407,6 +415,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ...(req.siteNotes?.length ? { refuse: refusedBy(req.siteNotes) } : {}),
                         ...(req.pageUnderstanding === false ? { pageUnderstanding: false } : {}),
                         ...(known ? { known } : {}),
+                        ...(req.pageThumbnails && sink.savePageThumbnail ? { thumbnails: createThumbnailer({ save: (name, jpeg) => sink.savePageThumbnail!(name, jpeg), secrets: authoringSecretsOf(req) }) } : {}),
                     });
                     // Signed in: the sign-in page and the public pages are read in one short pass signed out, within the same page cap.
                     if (authState.loggedIn) {

@@ -6,7 +6,8 @@
  * added later is covered without a change here). For every stored file, the first rule that applies decides:
  *   1. kind        approved visual baselines are never removed (they are the project's reference, not a run's evidence)
  *   2. no run      a file that does not belong to a run (plans, app models, reports...) is never removed, except the screenshots
- *                  an agent run takes (`vision-shot` without a test run): those are a run's media too and count as a failed run's,
+ *                  an agent run takes (`vision-shot` without a test run) and the page thumbnails an exploration keeps (`screenshot`
+ *                  without a test run, engine/discovery/thumbnails.ts): those are a run's media too and count as a failed run's,
  *                  removed after `keepFailedDays` from the agent run's job (the platform passes the job's start as `at`; a row with no
  *                  job, or whose job is gone, counts from its own creation time)
  *   3. passed run  traces and recordings: removed at the next pass (passed runs keep no full trace or recording);
@@ -51,8 +52,11 @@ export const isPrunableKind = (k: string): k is PrunableKind => (PRUNABLE_KINDS 
 
 /** Never removed, whatever run they belong to. */
 const NEVER_REMOVED = new Set(["baseline"]);
-/** Kinds whose files without a test run still expire: an agent run's screenshots (agent-run.ts, agent-on-runner.ts), as a failed run's media. */
-const RUNLESS_MEDIA = new Set(["vision-shot"]);
+/**
+ * Kinds whose files without a test run still expire, as a failed run's media: an agent run's screenshots (agent-run.ts, agent-on-runner.ts)
+ * and an exploration's page thumbnails (screenshots kept with the job, repo-sink.ts savePageThumbnail).
+ */
+const RUNLESS_MEDIA = new Set(["vision-shot", "screenshot"]);
 /** Full traces: a passed run keeps none. */
 const FULL_MEDIA = new Set(["trace"]);
 /** Recordings of every run, passed or failed, are kept this many days (whatever the run periods say), then removed. */

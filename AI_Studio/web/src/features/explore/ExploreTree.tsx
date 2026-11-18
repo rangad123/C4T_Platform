@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Circle, LoaderCircle, Minus, X } from "lucide-react";
+import { Check, ChevronRight, Circle, History, LoaderCircle, Minus, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, type EventRow, type Job, type PhaseKey, type PhaseState } from "../../api";
 import { mergeEvents, type JobStream } from "../../lib/stream";
@@ -14,7 +14,7 @@ const SHOWN = 40;
 const NARROW = "(max-width: 640px)";
 
 /** Kinds the tree reads (explore-tree.ts); the rest of a job's events are not kept here. */
-const TREE_KINDS = new Set(["page_visited", "page_failed", "exploration_resumed", "plan_reused", "understanding_resumed", "creation_resumed", "scenario_planned", "scenarios_queued", "scenario_started", "script_generated", "possible_defect", "scenario_skipped", "scenario_failed"]);
+const TREE_KINDS = new Set(["page_visited", "page_failed", "exploration_resumed", "plan_reused", "understanding_resumed", "creation_resumed", "scenario_planned", "scenarios_queued", "scenario_started", "script_generated", "possible_defect", "scenario_skipped", "scenario_failed", "probes_reused", "pages_from_memory", "signin_reused", "reuse_reprobed", "reuse_off", "full_exploration", "understanding_reused"]);
 
 /**
  * A job's events the tree reads: all of them read once from the platform (pages of 500), then the new ones as the live stream brings them, and
@@ -101,6 +101,12 @@ function Node({ node, label, detail, open: startOpen, level, phaseState }: { nod
                 <span className="xt-what">
                     <span className={level === 0 ? "xt-name xt-stage" : "xt-name"}>{label ?? node.label}</span>
                     <span className="xt-state">{STATE_LABEL[node.state]}</span>
+                    {node.badge && (
+                        <span className={`xt-badge is-${node.badge.tone}`} data-testid="xt-badge">
+                            {node.badge.tone === "warning" ? <TriangleAlert size={12} aria-hidden /> : <History size={12} aria-hidden />}
+                            {node.badge.text}
+                        </span>
+                    )}
                     {text && <span className="t-meta xt-detail">{text}</span>}
                 </span>
             </div>
@@ -134,6 +140,8 @@ function Node({ node, label, detail, open: startOpen, level, phaseState }: { nod
 
 const itemWord = (n: TreeNode, count: number): string => {
     const one = count === 1;
+    // Notes beside the pages (what was kept or reused): the count is of both, so it says items.
+    if (n.children.some((c) => c.id.startsWith("note:"))) return one ? "item" : "items";
     switch (n.id) {
         case "stage:discovery":
             return one ? "page" : "pages";

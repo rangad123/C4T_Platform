@@ -103,6 +103,8 @@ export const SinkCall = z.discriminatedUnion("method", [
     z.object({ method: z.literal("recordVariant"), h: WireHandle, scriptId: ScriptId, r: z.object({ variant: z.enum(EXTRA_VARIANT_IDS), status: z.enum(["passed", "failed", "unavailable", "skipped"]), reason: Text(2000).optional(), run: WireSinkRun.optional() }), startedAt: Started }),
     z.object({ method: z.literal("recordEnvironment"), h: WireHandle, scriptId: ScriptId, r: z.object({ environment: Text(100), status: z.enum(["passed", "failed", "finding", "skipped"]), reason: Text(2000).optional(), run: WireSinkRun.optional() }), startedAt: Started }),
     z.object({ method: z.literal("saveTextArtifact"), kind: Id, name: SafeName, content: Text(4_000_000) }),
+    // Sheet #8: one covered page thumbnail (a small JPEG); the platform checks its name, kind and size again and answers its id or null.
+    z.object({ method: z.literal("savePageThumbnail"), file: z.object({ name: z.string().regex(/^thumb-\d{1,4}\.jpg$/), data: Base64.max(80_000) }) }),
     z.object({ method: z.literal("saveHealing"), h: WireHandle, result: z.discriminatedUnion("status", [z.object({ status: z.literal("proposed"), proposal: HealProposal }), z.object({ status: z.literal("none"), reason: Text(2000) })]) }),
     z.object({ method: z.literal("saveCleanup"), items: z.array(FinishedItem).max(5000) }),
     z.object({ method: z.literal("loadMemory"), origin: Text(500) }),
@@ -149,4 +151,5 @@ export const SinkAnswers = {
     loadBaselines: z.array(WireFile).max(200),
     agentApproval: Id,
     approvalState: z.enum(["pending", "approved", "refused", "timed_out", "stopped"]),
+    savePageThumbnail: Id.nullable(),
 } as const;

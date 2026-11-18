@@ -25,6 +25,8 @@ export interface AgentInputs {
     apiAccess: { hasToken: boolean; oauth2: { tokenUrl: string; clientId: string; scope: string | null; hasClientSecret: boolean } | null };
     openApiUrl: string | null;
     allowMutatingApiTests: boolean;
+    /** "Keep page thumbnails" (Settings → General): never saved means on. */
+    keepThumbnails?: boolean;
     cleanupAfter: boolean;
     requirements: { active: number };
     agents: { ids: string[]; names: string[]; source: "chosen" | "matched" } | null;

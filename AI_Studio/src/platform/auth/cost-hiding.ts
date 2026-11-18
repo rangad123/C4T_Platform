@@ -32,6 +32,10 @@ export const COST_FIELDS: ReadonlySet<string> = new Set([
     "baselineTokens",
     "sentTokens",
     "snapshotSavings",
+    // what the prompt cache and the response cache saved in one exploration (routes/knowledge.ts)
+    "cacheSavings",
+    "aiCallsSaved",
+    "cacheReadPercent",
     "cost",
     "costs",
     "costUsd",

@@ -14,6 +14,7 @@ import { registerCustomScriptRoutes } from "./custom-scripts.js";
 import { registerEnvironmentRoutes } from "./environments.js";
 import { registerEvidenceRoutes } from "./evidence.js";
 import { registerExplorerRoutes } from "./explorer.js";
+import { registerKnowledgeRoutes } from "./knowledge.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerUserRoutes } from "./users.js";
 import { registerProjectAccessRoutes } from "./project-access.js";
@@ -145,6 +146,7 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerReviewRoutes(ctx);
     registerPlanRoutes(ctx);
     registerExplorerRoutes(ctx);
+    registerKnowledgeRoutes(ctx);
     // People and access: signing in, a person's own account, people, activity, single sign-on (routes/auth.ts, routes/users.ts).
     registerAuthRoutes(ctx);
     registerUserRoutes(ctx);

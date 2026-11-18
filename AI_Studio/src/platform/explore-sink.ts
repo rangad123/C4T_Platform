@@ -353,6 +353,12 @@ async function apply(p: Platform, task: ExploreTaskRef, s: TaskSink, c: SinkCall
         }
         case "saveTextArtifact":
             return k.saveTextArtifact(c.kind, c.name, c.content);
+        case "savePageThumbnail": {
+            const jpeg = Buffer.from(c.file.data, "base64");
+            if (s.bytes + jpeg.length > EXPLORE_TASK_MAX_BYTES) refuse("This exploration has sent more files than the platform accepts for one job.");
+            s.bytes += jpeg.length;
+            return k.savePageThumbnail(c.file.name, jpeg);
+        }
         case "saveHealing":
             return k.saveHealing(handle(p, task, s, c.h), c.result);
         case "saveCleanup":

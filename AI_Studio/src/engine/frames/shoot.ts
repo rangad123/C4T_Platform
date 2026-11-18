@@ -176,13 +176,26 @@ function sessionFor(page: Page): Promise<CDPSession> {
     return s;
 }
 
-async function captureScaled(page: Page): Promise<Uint8Array | null> {
+/** How wide, how large and at which qualities a picture is taken (the Explorer view's FRAME_LIMITS, or THUMBNAIL_LIMITS). */
+export interface ShotLimits {
+    maxWidth: number;
+    maxBytes: number;
+    qualities: readonly number[];
+}
+
+/**
+ * A page thumbnail kept with an exploration (sheet #8, "Keep page thumbnails"): 320 px wide at most and at most 40 KB, with the same covering
+ * as the Explorer view's pictures.
+ */
+export const THUMBNAIL_LIMITS: ShotLimits = { maxWidth: 320, maxBytes: 40 * 1024, qualities: [50, 36, 24] };
+
+async function captureScaled(page: Page, limits: ShotLimits = FRAME_LIMITS): Promise<Uint8Array | null> {
     try {
         const cdp = await sessionFor(page);
         const m = (await cdp.send("Page.getLayoutMetrics")) as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
         const v = m.cssVisualViewport;
-        const scale = frameScale(v.clientWidth);
-        return await firstThatFits(FRAME_LIMITS.qualities, async (quality) => {
+        const scale = frameScale(v.clientWidth, limits.maxWidth);
+        return await firstThatFits(limits.qualities, async (quality) => {
             const r = (await cdp.send("Page.captureScreenshot", {
                 format: "jpeg",
                 quality,
@@ -191,7 +204,7 @@ async function captureScaled(page: Page): Promise<Uint8Array | null> {
                 clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale },
             })) as { data: string };
             return Buffer.from(r.data, "base64");
-        });
+        }, limits.maxBytes);
     } catch {
         sessions.delete(page);
         return null;
@@ -199,14 +212,14 @@ async function captureScaled(page: Page): Promise<Uint8Array | null> {
 }
 
 /** A covered, scaled-down picture of the page, or null when none could be taken within the size cap. */
-export async function shootPage(page: Page, secrets: readonly string[] = []): Promise<Shot | null> {
+export async function shootPage(page: Page, secrets: readonly string[] = [], limits: ShotLimits = FRAME_LIMITS): Promise<Shot | null> {
     if (page.isClosed()) return null;
     let uncover: (() => Promise<void>) | undefined;
     try {
         // Not covered means not shown: a failure here ends in no picture at all.
         uncover = await coverSecretFields(page, secrets).catch(() => undefined);
         if (!uncover) return null;
-        const jpeg = await captureScaled(page);
+        const jpeg = await captureScaled(page, limits);
         if (!jpeg) return null;
         const title = (await page.title().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 200);
         return { jpeg, url: safeAddress(page.url()), title };

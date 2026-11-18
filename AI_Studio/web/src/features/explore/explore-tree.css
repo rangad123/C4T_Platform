@@ -18,6 +18,8 @@
 .xt-state { font-family: var(--font-mono); font-size: var(--type-caption-size); line-height: var(--type-caption-line); color: var(--text-secondary); }
 .is-failed > .xt-row .xt-state { color: var(--status-error-fg); }
 .xt-detail { flex-basis: 100%; }
+.xt-badge { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: var(--radius-xs); font-size: var(--type-caption-size); line-height: var(--type-caption-line); font-weight: var(--fw-medium); background: var(--status-info-bg); color: var(--status-info-fg); }
+.xt-badge.is-warning { background: var(--status-warning-bg); color: var(--status-warning-fg); }
 .xt-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: 34px; padding: 0 4px; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--type-body-sm-size); font-weight: var(--fw-medium); cursor: pointer; border-radius: var(--radius-xs); }
 .xt-toggle:hover { color: var(--text-primary); }
 .xt-toggle .chev { transition: rotate var(--duration-base) var(--ease-standard); color: var(--text-muted); }

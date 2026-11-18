@@ -7,6 +7,11 @@
  * (the plan), scenarios_queued, scenario_started, script_generated, possible_defect, scenario_skipped, scenario_failed (writing each idea),
  * creation_resumed (tests kept from a stopped creation). Older jobs lack the `data` some of these carry; their messages are read instead.
  *
+ * What the exploration reused from the last one (sheet #8): a page whose earlier probe results were taken (page_visited with `reusedFrom`)
+ * carries a "Reused" badge with the date; one tried again after reuse was switched off (reuse_reprobed) loses it and says so. The crawl
+ * stage also says what was reused (probes_reused, pages_from_memory, signin_reused) and, as a warning, that reuse was switched off and why
+ * (reuse_off, full_exploration); the reading stage says how many unchanged pages were not sent to the AI again (understanding_reused).
+ *
  * A later kind of stage (for example exploring by objectives) adds its own node to `stages` with the same shape.
  */
 import type { EventRow, PhaseKey, PhaseState } from "../../api.js";
@@ -20,8 +25,13 @@ export interface TreeNode {
     state: NodeState;
     /** A short second line: why it failed or was skipped, or what it holds. */
     detail?: string;
+    /** A word beside the label: "Reused 2026-11-10" (taken from an earlier exploration) or a warning ("Reuse off"). */
+    badge?: { text: string; tone: "info" | "warning" };
     children: TreeNode[];
 }
+
+const day = (iso: unknown): string | undefined => (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : undefined);
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export interface StageNode extends TreeNode {
     phase: PhaseKey;
@@ -84,7 +94,14 @@ export function foldExploreTree(input: TreeInput): StageNode[] {
     const ideas = new Map<string, TreeNode>();
     const ideaOfTest = new Map<string, string>();
     const notes: Partial<Record<PhaseKey, TreeNode[]>> = {};
-    const note = (phase: PhaseKey, id: string, label: string) => (notes[phase] ??= []).push({ id, label, state: "done", children: [] });
+    const note = (phase: PhaseKey, id: string, label: string, extra: Pick<TreeNode, "badge" | "detail"> = {}) => (notes[phase] ??= []).push({ id, label, state: "done", ...extra, children: [] });
+    const REUSED = (since?: string): TreeNode["badge"] => ({ text: since ? `Reused ${since}` : "Reused", tone: "info" });
+    const OFF: TreeNode["badge"] = { text: "Reuse off", tone: "warning" };
+    /** The crawl's pages by path (the last visit of each), for the badges a later event changes. */
+    const pageByPath = new Map<string, TreeNode>();
+    /** The paths the crawl's last probes_reused names as reused, when it names them all. */
+    let finalReused: Set<string> | undefined;
+    let reprobed = false;
     const idea = (id: string, title?: string): TreeNode => {
         let n = ideas.get(id);
         if (!n) {
@@ -99,7 +116,45 @@ export function foldExploreTree(input: TreeInput): StageNode[] {
         switch (e.kind) {
             case "page_visited": {
                 const path = /^Visited (\S+)/.exec(e.message)?.[1] ?? str(d.url) ?? e.message;
-                pages.push({ id: `page:${e.id}`, label: path, state: "done", children: [] });
+                const since = day(d.reusedFrom);
+                const n: TreeNode = { id: `page:${e.id}`, label: path, state: "done", ...(since ? { badge: REUSED(since), detail: `Unchanged since ${since}: its menus, conditional fields and validation messages were taken from then, not tried again` } : {}), children: [] };
+                pages.push(n);
+                pageByPath.set(path, n);
+                break;
+            }
+            case "probes_reused": {
+                const n = typeof d.pages === "number" ? d.pages : 0;
+                const since = day(d.since);
+                const paths = Array.isArray(d.paths) ? (d.paths as unknown[]).filter((p): p is string => typeof p === "string") : [];
+                if (paths.length >= n) finalReused = new Set(paths);
+                const checked = typeof d.spotChecked === "number" ? d.spotChecked : 0;
+                note("discovery", `note:${e.id}`, `${count(n, "page", "pages")} unchanged${since ? ` since ${since}` : ""}: not tried again`, { badge: REUSED(since), detail: `${count(checked, "page was", "pages were")} tried anyway as a spot check and matched.` });
+                break;
+            }
+            case "pages_from_memory": {
+                const n = typeof d.pages === "number" ? d.pages : 0;
+                const gone = typeof d.gone === "number" ? d.gone : 0;
+                note("discovery", `note:${e.id}`, `Started from ${count(n, "page", "pages")} the last exploration knew`, { badge: REUSED(), ...(gone ? { detail: `${count(gone, "known page is", "known pages are")} gone now and ${gone === 1 ? "was" : "were"} left out.` } : {}) });
+                break;
+            }
+            case "signin_reused": {
+                const since = day(d.since);
+                note("discovery", `note:${e.id}`, `Went straight to the sign-in page${str(d.path) ? ` ${d.path}` : ""}`, { badge: REUSED(since), detail: "The form was still filled and the sign-in checked." });
+                break;
+            }
+            case "reuse_reprobed":
+                reprobed = true;
+                note("discovery", `note:${e.id}`, `${count(typeof d.pages === "number" ? d.pages : 0, "page was", "pages were")} tried again after reuse was switched off`);
+                break;
+            case "reuse_off":
+                note("discovery", `note:${e.id}`, "Reuse of the last exploration was switched off for the rest of this run", { badge: OFF, detail: str(d.reason) ? `Why: ${d.reason}.` : e.message });
+                break;
+            case "full_exploration":
+                note("discovery", `note:${e.id}`, "Everything was explored again, as asked: nothing was reused", { badge: OFF });
+                break;
+            case "understanding_reused": {
+                const n = typeof d.pages === "number" ? d.pages : Number(/(\d+)/.exec(e.message)?.[1] ?? 0);
+                note("understanding", `note:${e.id}`, `${count(n, "unchanged page was", "unchanged pages were")} not sent to the AI again`, { badge: REUSED() });
                 break;
             }
             case "page_failed":
@@ -157,6 +212,16 @@ export function foldExploreTree(input: TreeInput): StageNode[] {
                 }
                 break;
             }
+        }
+    }
+
+    // Pages tried again after reuse went off keep none of the earlier results: no badge (only the ones the crawl still names stay reused).
+    if (reprobed || finalReused) {
+        for (const [path, n] of pageByPath) {
+            if (!n.badge || finalReused?.has(path)) continue;
+            delete n.badge;
+            n.detail = reprobed ? "Tried again after reuse was switched off" : undefined;
+            if (!n.detail) delete n.detail;
         }
     }
 

@@ -13,6 +13,7 @@ import { versionHref } from "../review/review";
 import { RunMenu } from "./RunMenu";
 import { ContinueExploring, continueNote } from "../explore/ContinueExploring";
 import { JobExploreTree } from "../explore/ExploreTree";
+import { ExplorerKnowledge } from "../explore/ExplorerKnowledge";
 import { RunStrip } from "./RunStrip";
 import { RunTestList } from "./RunStrip";
 import { followsRunner, liveCounts, LiveRunPanel, useIsMine, useLiveRun } from "./LiveRun";
@@ -157,6 +158,9 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                         <JobExploreTree job={job} active={active} stream={run.stream} tests={a.tests} stageText={(p, state) => phaseText(p, state, job.counters)} />
                     </section>
                 )}
+
+                {/* What it found and what it reused from the last exploration, and why (sheet #8). */}
+                {exploration && !(job.targets?.includes("mobile") ?? false) && <ExplorerKnowledge projectId={id} jobId={job.jobId} active={active} />}
 
                 {followsRunner(job) && <LiveRunPanel projectId={id} job={job} active={active} live={runner.live} loaded={runner.loaded} planned={c.planned} answer={a} />}
 

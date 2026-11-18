@@ -20,6 +20,7 @@ import { ProjectStorage } from "../storage/ProjectStorage";
 import { type ProjectStorage as ProjectStorageData } from "../storage/storage";
 import { TestingTypeSetting } from "../security/TestingType";
 import { ExploreLevelSetting } from "../explore/ExploreLevel";
+import { KeepThumbnailsSetting } from "../explore/KeepThumbnails";
 import { NotesCard } from "../notes/NotesCard";
 import { MembersPanel } from "../workspace/MembersPanel";
 import { ReviewPolicyCard } from "../review/ReviewCards";
@@ -95,6 +96,8 @@ function GeneralSetting({ id }: { id: string }) {
             <ExploreLevelSetting id={id} />
             {/* Which AI model the project's AI work uses, from the asking person's own AI keys (features/workspace/ProjectAiModel.tsx). */}
             <ProjectAiModelSetting id={id} />
+            {/* Whether explorations keep a covered thumbnail of each page (sheet #8; on unless switched off). */}
+            <KeepThumbnailsSetting id={id} />
             {/* Hints people write for the AI, by page; "never ..." notes are rules (features/notes/NotesCard.tsx). */}
             <NotesCard projectId={id} />
             <Part id="frameworks">

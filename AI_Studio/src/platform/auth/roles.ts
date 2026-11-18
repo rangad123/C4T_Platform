@@ -170,6 +170,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/flaky": "read",
     "GET /api/projects/:id/jobs": "read",
     "GET /api/projects/:id/jobs/:jobId/frame": "read",
+    // What the explorer knows (routes/knowledge.ts): its cost and cache figures are left out without ai_studio.usage.view.
+    "GET /api/projects/:id/jobs/:jobId/knowledge": "read",
     "GET /api/projects/:id/stream": "read",
     "GET /api/projects/:id/storage": "read",
     "GET /api/projects/:id/performance": "read",

@@ -13,6 +13,7 @@ import { HelpPlace } from "../features/guide/HelpContext";
 import { ApiChangesCard } from "../features/contracts/ApiChangesCard";
 import { SiteMemoryCard } from "../features/memory/SiteMemoryCard";
 import { ScreenMapCard } from "../features/explore/ScreenMapCard";
+import { ExplorerKnowledge } from "../features/explore/ExplorerKnowledge";
 import { CleanupCard } from "../features/cleanup/CleanupCard";
 import { SlowestPages } from "../features/performance/SlowestPages";
 import { VariantsResult } from "../features/variants/VariantsResult";
@@ -272,6 +273,9 @@ export function ProjectOverview({ id }: { id: string }) {
                 {job && settled && <ApiChangesCard projectId={id} />}
 
                 {job && settled && !code && <ScreenMapCard key={`screens-${job.jobId}`} projectId={id} />}
+
+                {/* The latest exploration's site map and what it reused (sheet #8), a plan-only one too; nothing for a run of tests. */}
+                {job && !active && !code && (job.mode ?? "generate") === "generate" && !(job.targets?.includes("mobile") ?? false) && <ExplorerKnowledge key={`knows-${job.jobId}`} projectId={id} jobId={job.jobId} active={false} />}
 
                 {job && settled && <SiteMemoryCard key={`memory-${job.jobId}`} projectId={id} />}
 

@@ -103,6 +103,8 @@ export interface PageModel {
     reuses?: number;
     /** This exploration took the page's probe results from the exploration of `at` (the page had not changed); they were not tried again. */
     reusedFrom?: { at: string };
+    /** The id of this exploration's covered thumbnail of the page (discovery/thumbnails.ts), when the project keeps them. */
+    thumbnail?: string;
 }
 
 export interface ApiEndpointModel {
