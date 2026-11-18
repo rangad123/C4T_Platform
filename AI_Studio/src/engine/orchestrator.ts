@@ -55,7 +55,7 @@ import type { ScriptRun } from "./validation/runner.js";
 import { authorWebSpec, statedSource, toSpec, type AuthorOutcome } from "./web/author.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
-import { checkIndependence, type IndependenceCheck } from "./explore/independence.js";
+import { checkIndependence, replayOwnSteps, type IndependenceCheck } from "./explore/independence.js";
 import type { KnowledgeRule } from "./planning/planner.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { createHash } from "node:crypto";
@@ -725,9 +725,30 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             if (outcome.status === "defect") {
                 // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
                 const capture = outcome.capture ?? "observed_only";
+                const replayed = { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) };
+                // An observed-only defect test holds only steps that passed while authoring: replayed once (no AI), a step it stops at means
+                // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
+                const own = capture === "observed_only" ? await replayOwnSteps(browser, origin, replayed).catch(() => undefined) : undefined;
+                if (own?.outcome === "failed") {
+                    const h = await persistNew(spec, "playwright", "PENDING", undefined, { ...meta, capture, ownReplay: own });
+                    await sink.updateTest(h, {
+                        validation: "FAILED_VALIDATION",
+                        reason: `Not reported as a finding: the saved test did not pass a replay of its own steps (${own.summary.replace(/\.+$/, "")}), so it does not show the problem the test writer reported: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.`,
+                    });
+                    summary.testsFailedValidation++;
+                    await sink.counters({ testsFailedValidation: 1 }, true);
+                    ctx.emit({
+                        stage: "generation",
+                        kind: "defect_unverified",
+                        level: "warn",
+                        message: `${h.testId} ${spec.title}: not reported as a finding; its saved test stopped at step ${own.failedStep} when replayed on its own`,
+                        data: { testKey: h.testId, capture, failedStep: own.failedStep ?? null },
+                    });
+                    return h.testId;
+                }
                 const independence =
                     capture === "captured"
-                        ? await checkIndependence(browser, origin, { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
+                        ? await checkIndependence(browser, origin, replayed).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
                 const found = defectFinding({ scenario, rules: scenarioRules, requirementIds, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
                 const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
