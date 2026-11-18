@@ -1702,31 +1702,52 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
 
 /**
  * The loop's view of the test writer's actions, asked before each one runs (CP2 H-2): each as a stable key on a state. The state is the
- * address pattern of the page with what was done since the page was last loaded (the values typed, the action before). The same click
- * twice in a row is two states (a double submit); the same action again on the same state is a repeat the loop refuses.
+ * address pattern of the page with what was done since the page was last loaded (the values typed, the last action that was not a read).
+ * The action key names the element the action resolves to on the page (role, accessible name and a digest of its DOM path, when the test
+ * writer found it), not the locator text, so the same button spelled another way is the same action (M-1); a read (a wait, a check)
+ * does not change the state, so alternating no-ops does not make a repeat look new. The same click twice in a row is two states (a
+ * double submit); the same action again on the same state is a repeat the loop refuses.
  */
 export function actionTracker(startUrl: string): {
-    before(a: { tool: string; args: unknown; url?: string }): { state: string; action: string };
-    after(a: { tool: string; args: unknown; ok: boolean; url?: string }): void;
+    before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean }): { state: string; action: string; read: boolean };
+    after(a: { tool: string; args: unknown; ok: boolean; url?: string; read?: boolean }): void;
 } {
     let url = startUrl;
     let typed: string[] = [];
     let previous = "";
+    let pending = "";
     const moveTo = (to: string | undefined): void => {
         if (to && to !== url) {
             url = to;
             typed = [];
         }
     };
+    const keyOf = (a: { tool: string; args: unknown; target?: string }): string => {
+        const args = (a.args ?? null) as Record<string, unknown> | null;
+        if (a.tool === "navigate" && typeof args?.url === "string") {
+            try {
+                return `navigate ${new URL(args.url, url).href}`;
+            } catch {
+                /* not an address: keyed as given */
+            }
+        }
+        if (a.target) {
+            // What the action does beyond its target (the value typed, the key pressed); click and hover are given the locator itself.
+            const rest = a.tool === "click" || a.tool === "hover" || !args ? {} : Object.fromEntries(Object.entries(args).filter(([k]) => k !== "target" && k !== "to" && k !== "locator"));
+            return `${a.tool} ${a.target}${Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : ""}`;
+        }
+        return `${a.tool} ${JSON.stringify(a.args ?? null) ?? ""}`;
+    };
     return {
         before: (a) => {
             moveTo(a.url);
-            const action = `${a.tool} ${JSON.stringify(a.args ?? null) ?? ""}`;
+            const action = keyOf(a);
+            pending = action;
             const digest = createHash("sha256").update(JSON.stringify([typed, previous])).digest("hex").slice(0, 12);
-            previous = action;
-            return { state: `${pathPattern(url)}|${digest}`, action };
+            return { state: `${pathPattern(url)}|${digest}`, action, read: a.read === true };
         },
         after: (a) => {
+            if (!a.read) previous = pending;
             const args = (a.args ?? {}) as { value?: unknown };
             if (a.ok && (a.tool === "fill" || a.tool === "select") && typeof args.value === "string") typed = [...typed, args.value].slice(-50);
             if (a.ok && a.tool === "navigate") typed = [];

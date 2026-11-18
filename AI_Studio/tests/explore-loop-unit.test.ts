@@ -578,3 +578,22 @@ describe("runExploration: a cancel after a budget already stopped the session (C
         expect(waits).toBeLessThanOrEqual(1);
     });
 });
+
+describe("runExploration: reads (CP2 M-1)", () => {
+    it("a read is counted and refused on a repeat, but is not a new visit of its state for the depth", async () => {
+        let verdicts: boolean[] = [];
+        const r = await run([
+            obj("a", 1, {
+                script: async (ctx) => {
+                    // More checks on one state than the depth of 3 allows: all performed.
+                    verdicts = [1, 2, 3, 4, 5].map((i) => ctx.act({ state: "s", action: `assert ${i}`, read: true }).allowed);
+                    verdicts.push(ctx.act({ state: "s", action: "assert 1", read: true }).allowed);
+                    return done();
+                },
+            }),
+        ]);
+        expect(verdicts).toEqual([true, true, true, true, true, false]);
+        expect(r.usage.actions).toBe(5);
+        expect(r.outcomes[0]).toMatchObject({ status: "stopped", reason: expect.stringMatching(/^The same action on the same state/) });
+    });
+});

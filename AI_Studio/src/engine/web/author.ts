@@ -11,6 +11,7 @@
  *     (autospec's replay files contain no assertions);
  *   - the loop can resume from a replayed spec prefix with a failure description (repair).
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { generateText, stepCountIs, tool } from "ai";
@@ -98,17 +99,57 @@ export interface AuthorInput {
 export interface GateAction {
     tool: string;
     args: unknown;
+    /** The element(s) the action resolves to on the page now (role and accessible name, plus a digest of its DOM path); absent when it has no target or none is found. */
+    target?: string;
     /** The address of the page the action is taken on. */
     url: string;
+    /** The action only reads the page (a wait or a check). */
+    read: boolean;
 }
 
 export interface ActionGate {
     /** Asked before each action reaches the application, in the order the model asked for them; a refusal means it is not performed. */
     before(a: GateAction): { allowed: true } | { allowed: false; reason: string };
     /** Told after an action that was allowed ran (with the address the page is on afterwards). */
-    after(a: { tool: string; args: unknown; ok: boolean; url: string }): void;
+    after(a: { tool: string; args: unknown; target?: string; ok: boolean; url: string; read: boolean }): void;
 }
 
+/** Tools that only read the page: they do not count as a new visit of the state they run on (explore/loop.ts depth). */
+const READ_TOOLS = new Set(["assert", "wait", "remember"]);
+
+/** What a target resolves to on `page` now: role and accessible name of the first match and a digest of its DOM path; undefined when nothing matches quickly. */
+async function targetIdentity(page: Page, l: Locator, data: RuntimeData): Promise<string | undefined> {
+    try {
+        const el = locate(page, l, data).first();
+        const [aria, domPath] = await Promise.all([
+            el.ariaSnapshot({ timeout: 1_000 }),
+            el.evaluate((node) => {
+                const parts: string[] = [];
+                for (let e: Element | null = node; e && e.parentElement; e = e.parentElement) {
+                    const tag = e.tagName.toLowerCase();
+                    const same = Array.from(e.parentElement.children).filter((c) => c.tagName === e!.tagName);
+                    parts.unshift(same.length > 1 ? `${tag}:${same.indexOf(e) + 1}` : tag);
+                }
+                return parts.join(">");
+            }, undefined, { timeout: 1_000 }),
+        ]);
+        // `- button "Continue"` or `- textbox "Email": typed value`: role and name only, never a value.
+        const m = /^- ([\w-]+)(?: "((?:[^"\\]|\\.)*)")?/.exec(aria.split("\n")[0] ?? "");
+        const digest = createHash("sha256").update(domPath).digest("hex").slice(0, 12);
+        return `${m?.[1] ?? "element"}${m?.[2] !== undefined ? ` ${JSON.stringify(m[2].slice(0, 120))}` : ""} @${digest}`;
+    } catch {
+        return undefined;
+    }
+}
+
+/** A step's own target(s), as the gate names them. */
+async function stepTarget(page: Page, step: Step, data: RuntimeData): Promise<string | undefined> {
+    const loc = "locator" in step ? (step.locator as Locator | undefined) : undefined;
+    if (!loc) return undefined;
+    const own = await targetIdentity(page, loc, data);
+    const to = step.action === "drag" ? await targetIdentity(page, step.target as Locator, data) : undefined;
+    return own && step.action === "drag" ? `${own} -> ${to ?? JSON.stringify(step.target)}` : own;
+}
 
 const AUTHORING_USE = " Where this scenario reaches what a rule describes, assert the expected behaviour it states; when the application genuinely does otherwise, call finish(result=\"defect\").";
 
@@ -527,9 +568,11 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             // Ended (the job was cancelled, or the exploration ended this pursuit): nothing more reaches the application, so the
             // calls the model made in the same reply after a refusal are not performed either.
             if (ctx.signal?.aborted) return { success: false, error: `${NOT_PERFORMED} This test writer's work was ended. Call finish.`, url: here().url() };
-            // The exploration's bound is asked before the action runs (CP2 H-2).
+            // The exploration's bound is asked before the action runs (CP2 H-2), with the element it resolves to now (M-1).
+            const read = READ_TOOLS.has(step.action);
+            const target = input.gate ? await stepTarget(here(), step, data) : undefined;
             if (input.gate) {
-                const verdict = input.gate.before({ tool: toolName, args, url: here().url() });
+                const verdict = input.gate.before({ tool: toolName, args, url: here().url(), read, ...(target ? { target } : {}) });
                 if (!verdict.allowed) {
                     input.onAction?.({ tool: toolName, args, ok: false, observation: `${NOT_PERFORMED} ${verdict.reason}` });
                     return { success: false, error: `${NOT_PERFORMED} ${verdict.reason} Do not try it again; call finish.`, url: here().url() };
@@ -539,7 +582,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             if (tab && !tab.isClosed() && POPUP_STEPS.has(step.action)) step = { ...step, inPopup: true } as Step;
             session.takeEvents();
             const r = await run(step);
-            input.gate?.after({ tool: toolName, args, ok: r.ok, url: here().url() });
+            input.gate?.after({ tool: toolName, args, ok: r.ok, url: here().url(), read, ...(target ? { target } : {}) });
             await session.quiet();
             // A new tab whose page answers slowly is handed out late: waited for here, so the click that opened it is the one told and recorded.
             await session.newTab();

@@ -118,7 +118,7 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         const track = actionTracker("http://shop.test/order");
         const url = "http://shop.test/order";
         /** Asked before, told after (CP2 H-2): what the loop is asked for one action that runs. */
-        const step = (t: ReturnType<typeof actionTracker>, a: { tool: string; args: unknown }) => {
+        const step = (t: ReturnType<typeof actionTracker>, a: { tool: string; args: unknown; target?: string; read?: boolean }) => {
             const asked = t.before({ ...a, url });
             t.after({ ...a, ok: true, url });
             return asked;
@@ -133,6 +133,44 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         const c = [step(b, fill("0")), step(b, click), step(b, fill("11")), step(b, click)];
         expect(c[1]!.state).not.toBe(c[3]!.state);
         expect(c[0]!.state.startsWith("/order|")).toBe(true);
+    });
+
+    it("the action tracker keys an action by the element it resolves to, not by the locator's spelling (CP2 M-1)", () => {
+        const t = actionTracker("http://shop.test/cart");
+        const url = "http://shop.test/cart";
+        const target = 'button "Continue" @0123456789ab';
+        const one = t.before({ tool: "click", args: { by: "css", value: "form button" }, target, url });
+        const two = t.before({ tool: "click", args: { by: "role", role: "button", value: "Continue" }, target, url });
+        expect(two.action).toBe(one.action);
+        expect(one.action).not.toContain("form button");
+        // The value typed stays part of a fill's key; its locator's spelling does not.
+        const f1 = t.before({ tool: "fill", args: { target: { by: "label", value: "Qty" }, value: "5" }, target: 'spinbutton "Qty" @aa', url });
+        const f2 = t.before({ tool: "fill", args: { target: { by: "css", value: "input[name=qty]" }, value: "5" }, target: 'spinbutton "Qty" @aa', url });
+        const f3 = t.before({ tool: "fill", args: { target: { by: "label", value: "Qty" }, value: "6" }, target: 'spinbutton "Qty" @aa', url });
+        expect(f2.action).toBe(f1.action);
+        expect(f3.action).not.toBe(f1.action);
+        // Two spellings of one address are one navigation.
+        expect(t.before({ tool: "navigate", args: { url: "/cart" }, url }).action).toBe(t.before({ tool: "navigate", args: { url: "http://shop.test/cart" }, url }).action);
+    });
+
+    it("the action tracker: a read between two clicks does not make the second look new", () => {
+        const t = actionTracker("http://shop.test/cart");
+        const url = "http://shop.test/cart";
+        const target = 'button "Continue" @0123456789ab';
+        const run = (a: { tool: string; args: unknown; target?: string; read?: boolean }) => {
+            const asked = t.before({ ...a, url });
+            t.after({ ...a, ok: true, url });
+            return asked;
+        };
+        const click = { tool: "click", args: {}, target };
+        const first = run(click);
+        const second = run(click);
+        run({ tool: "wait", args: { ms: 1 }, read: true });
+        const third = run(click);
+        run({ tool: "wait", args: { ms: 2 }, read: true });
+        expect(second.state).not.toBe(first.state);
+        expect(third).toEqual(second);
+        expect(run({ tool: "wait", args: { ms: 3 }, read: true }).read).toBe(true);
     });
 });
 
