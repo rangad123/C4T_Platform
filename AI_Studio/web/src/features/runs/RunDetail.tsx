@@ -4,13 +4,14 @@ import { usePage } from "../../components/Shell";
 import { TechnicalDetails } from "../../components/TechnicalDetails";
 import { Badge, Callout, EmptyState, ErrorState, ListSkeleton, PageHeader } from "../../components/ui";
 import { duration, plural, relativeTime } from "../../lib/format";
-import { friendlyJobErrors, friendlyError, isActive, nothingRan } from "../../lib/labels";
+import { friendlyJobErrors, friendlyError, isActive, nothingRan, phaseText } from "../../lib/labels";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
 import { browserSentence } from "../runners/runners";
 import { versionHref } from "../review/review";
 import { RunMenu } from "./RunMenu";
+import { JobExploreTree } from "../explore/ExploreTree";
 import { RunStrip } from "./RunStrip";
 import { RunTestList } from "./RunStrip";
 import { followsRunner, liveCounts, LiveRunPanel, useIsMine, useLiveRun } from "./LiveRun";
@@ -139,6 +140,16 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                         </div>
                     )}
                 </section>
+
+                {/* An exploration: its stages, pages, test ideas and tests as a tree (features/explore). Phone explorations keep their own view. */}
+                {exploration && !(job.targets?.includes("mobile") ?? false) && (
+                    <section className="card card-pad stack-sm" aria-labelledby="run-tree-h" data-testid="run-explore-tree">
+                        <h2 className="t-section" id="run-tree-h">
+                            Progress
+                        </h2>
+                        <JobExploreTree job={job} active={active} stream={run.stream} tests={a.tests} stageText={(p, state) => phaseText(p, state, job.counters)} />
+                    </section>
+                )}
 
                 {followsRunner(job) && <LiveRunPanel projectId={id} job={job} active={active} live={runner.live} loaded={runner.loaded} planned={c.planned} answer={a} />}
 

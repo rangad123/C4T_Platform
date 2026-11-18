@@ -579,6 +579,8 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
             stage: "planning",
             kind: "scenario_planned",
             message: `${s.scenarioId} [${s.category}/${s.priority}] ${s.title}`,
+            // The progress tree on the exploration's page lists the ideas by these (web/src/features/explore/explore-tree.ts).
+            data: { scenarioId: s.scenarioId, title: s.title },
         });
     }
     return scenarios;

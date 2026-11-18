@@ -1,0 +1,27 @@
+/* The exploration's progress tree (ExploreTree.tsx). Design tokens only; the marks follow the checklist's (.step .mark). */
+.xtree, .xt-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.xt-list { padding-left: 28px; margin-top: 2px; border-left: 1px solid var(--border-default); margin-left: 11.5px; }
+.xt-list[hidden] { display: none; }
+.xt-node { padding: 4px 0; min-width: 0; }
+.xt-row { display: flex; gap: 10px; align-items: flex-start; }
+.xt-mark { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--surface-raised); color: var(--text-muted); }
+.xt-list .xt-mark { width: 20px; height: 20px; }
+.xt-mark.is-done { background: var(--action-primary-bg); border-color: var(--action-primary-bg); color: var(--text-on-brand); }
+.xt-mark.is-running { border-color: var(--action-primary-bg); color: var(--text-brand); }
+.xt-mark.is-failed { background: var(--status-error-fg); border-color: var(--status-error-fg); color: var(--surface-canvas); }
+.xt-mark.is-skipped { opacity: 0.5; }
+.xt-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; padding-top: 2px; }
+.xt-name { overflow-wrap: anywhere; }
+.xt-stage { font-weight: var(--fw-medium); }
+.is-running > .xt-row .xt-name { color: var(--text-brand); }
+.is-waiting > .xt-row .xt-name, .is-skipped > .xt-row .xt-name { color: var(--text-muted); }
+.xt-state { font-family: var(--font-mono); font-size: var(--type-caption-size); line-height: var(--type-caption-line); color: var(--text-secondary); }
+.is-failed > .xt-row .xt-state { color: var(--status-error-fg); }
+.xt-detail { flex-basis: 100%; }
+.xt-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: 34px; padding: 0 4px; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--type-body-sm-size); font-weight: var(--fw-medium); cursor: pointer; border-radius: var(--radius-xs); }
+.xt-toggle:hover { color: var(--text-primary); }
+.xt-toggle .chev { transition: rotate var(--duration-base) var(--ease-standard); color: var(--text-muted); }
+.xt-toggle[aria-expanded="true"] .chev { rotate: 90deg; }
+.xt-more .xt-toggle { margin-left: 0; }
+@media (max-width: 640px) { .xt-list { padding-left: 16px; } .xt-toggle { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { .xt-toggle .chev { transition: none; } }

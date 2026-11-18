@@ -641,12 +641,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             return h;
         };
 
+        // The ideas this job writes, for the progress tree (web/src/features/explore/explore-tree.ts): each then starts and ends with an event.
+        if (scenarios.length) ctx.emit({ stage: "generation", kind: "scenarios_queued", message: `${scenarios.length} test idea(s) to write`, data: { scenarios: scenarios.slice(0, 500).map((x) => ({ scenarioId: x.scenarioId, title: x.title })) } });
+
         // 4a. Web: author every scenario in a real browser, one agent run per scenario.
         /** Journeys written and left for a person to run (runTestCases not true). */
         let notRun = 0;
         if (scenarios.length) {
             const results = await mapLimit(scenarios, ctx.config.CONCURRENCY, async (scenario) => {
                 throwIfAborted(ctx.signal);
+                ctx.emit({ stage: "generation", kind: "scenario_started", message: `${scenario.scenarioId} ${scenario.title}`, data: { scenarioId: scenario.scenarioId } });
                 const runId = await sink.startAgentRun("web-authoring", `${scenario.scenarioId} ${scenario.title}`);
                 try {
                     // A role scenario is written signed in as its own test account, and its script runs as that account.
@@ -675,7 +679,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         await sink.counters({ scenariosSkipped: 1 }, true);
                         // Planned coverage was not delivered, so the job must not report COMPLETED.
                         summary.errors.push(`Scenario ${scenario.scenarioId} "${scenario.title}" could not be authored`);
-                        ctx.emit({ stage: "generation", kind: "scenario_skipped", level: "warn", message: `${scenario.scenarioId} "${scenario.title}" could not be authored: ${outcome.explanation}` });
+                        ctx.emit({ stage: "generation", kind: "scenario_skipped", level: "warn", message: `${scenario.scenarioId} "${scenario.title}" could not be authored: ${outcome.explanation}`, data: { scenarioId: scenario.scenarioId } });
                         return;
                     }
                     const key = await sink.nextTestKey("WEB");
@@ -686,13 +690,13 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation}`, meta);
                         summary.testsNeedingReview++;
                         await sink.counters({ testsNeedingReview: 1 }, true);
-                        ctx.emit({ stage: "generation", kind: "possible_defect", level: "warn", message: `${key} ${spec.title}: ${outcome.explanation}` });
+                        ctx.emit({ stage: "generation", kind: "possible_defect", level: "warn", message: `${key} ${spec.title}: ${outcome.explanation}`, data: { scenarioId: scenario.scenarioId, testId: key } });
                         return;
                     }
                     await persistNew(spec, "playwright", "PENDING", undefined, meta);
                     if (!runsTestCases(req)) notRun++;
                     else pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
-                    ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (${spec.steps.length} steps)` });
+                    ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (${spec.steps.length} steps)`, data: { scenarioId: scenario.scenarioId, testId: key } });
                 } catch (err) {
                     await sink.finishAgentRun(runId, "error", err instanceof Error ? err.message : String(err));
                     throw err;
@@ -707,11 +711,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     if (isBudgetExceeded(r.error)) {
                         // One line for the whole job, however many scenarios were still waiting when the limit was reached.
                         if (!summary.errors.includes(msg)) summary.errors.push(msg);
-                        ctx.emit({ stage: "generation", kind: "scenario_skipped", level: "warn", message: `${r.item.scenarioId} was not authored: ${msg}` });
+                        ctx.emit({ stage: "generation", kind: "scenario_skipped", level: "warn", message: `${r.item.scenarioId} was not authored: ${msg}`, data: { scenarioId: r.item.scenarioId } });
                         continue;
                     }
                     summary.errors.push(`Authoring "${r.item.title}": ${msg}`);
-                    ctx.emit({ stage: "generation", kind: "scenario_failed", level: "error", message: `${r.item.scenarioId}: ${msg}` });
+                    ctx.emit({ stage: "generation", kind: "scenario_failed", level: "error", message: `${r.item.scenarioId}: ${msg}`, data: { scenarioId: r.item.scenarioId } });
                 }
             }
         }

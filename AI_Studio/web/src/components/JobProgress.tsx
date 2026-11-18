@@ -12,6 +12,7 @@ import { ExplorerWatch } from "../features/explorer/ExplorerView";
 import { PhoneProgress } from "../features/phone/PhoneProgress";
 import { isPhoneJob, isPhoneOnly, phoneCounts, phonePhase } from "../features/phone/phone";
 import { useExecutionMode, workingOn } from "../features/runs/runs-here";
+import { JobExploreTree } from "../features/explore/ExploreTree";
 
 /** Live "what is happening" for a running analysis: a checklist, one progress bar, no jargon. */
 export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: () => void }) {
@@ -37,6 +38,8 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
     // Runners mode (round 51): an exploration runs on the runner of the person who started it, which the job names once it is handed out.
     // Round 52: so do a described test and an agent run.
     const explores = job.mode === undefined || job.mode === "generate" || job.mode === "plain" || job.mode === "agent";
+    // A web or API exploration (a plan, or tests made from one) shows its progress as a tree: stages, pages, test ideas, tests (features/explore).
+    const treeFits = (job.mode === undefined || job.mode === "generate") && !phoneJob;
     const onRunner = useExecutionMode() === "runners" && explores && isActive(job.status) ? workingOn(job.mode, job.ranOn?.kind === "agent" ? job.ranOn.name : undefined) : null;
 
     return (
@@ -65,6 +68,9 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
 
             <LiveLine state={stream.state} latest={stream.latest} />
 
+            {treeFits ? (
+                <JobExploreTree job={job} active={isActive(job.status)} stream={stream} stageText={(p, state) => phaseText(p, state, job.counters)} />
+            ) : (
             <ol className="steps">
                 {phases.map((p) => {
                     const state = job.progress[p];
@@ -83,6 +89,7 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
                     );
                 })}
             </ol>
+            )}
 
             <ExplorerWatch job={job} onPanel={setExplorerOpen} />
 
