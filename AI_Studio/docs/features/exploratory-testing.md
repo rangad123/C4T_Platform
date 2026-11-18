@@ -153,7 +153,8 @@ The test's review reason says this in words, for example: "The application did n
 after the quantity changed. The failing check is of rule R-3; both fresh replays failed at it (confidence high)."
 
 Each candidate finding records the objective and operator it came from, the steps (the saved test is the way to reproduce it), the
-expected result and its source, what was observed, the request and console lines noted as evidence, the two replays, its confidence
+expected result and its source, what was observed, the request and console lines noted as evidence, up to three screenshots of
+the page where a fresh replay stopped (password fields and stored secrets covered), the two replays, its confidence
 and the analysis version the objective came from. Text is cleaned of secrets and cut to a fixed length before it is stored. The same
 source, expected result and scenario make the same finding, so a project keeps one record for it across runs.
 
@@ -183,9 +184,10 @@ The job also keeps the session's limits, each objective with its priority, the s
 - People who may only look at the project see the same list without **Stop**.
 - **On the run's results**, the stop reason, the limits used and the coverage record, then **Findings to check**: each candidate
   finding with what was observed, its objective (kind and source), how many actions its test takes, the expected result and its
-  source, its confidence in words with what that means, its evidence (requests and console lines) and a link to the saved test. Each
-  is labelled "Needs a person to check" ("Found by the AI, needs a person to check"). Screenshots are not saved with findings yet, and
-  the page says so. Captured findings come first; an observed-only finding is labelled "Seen only, not kept as a check" and has a
+  source, its confidence in words with what that means, its evidence (screenshots, requests and console lines) and a link to the saved test. Each
+  is labelled "Needs a person to check" ("Found by the AI, needs a person to check"). Up to three screenshots
+  (where a fresh replay stopped, with password fields and stored secrets covered) show as thumbnails that open larger; a finding
+  without one says "No screenshot was saved for this finding." Captured findings come first; an observed-only finding is labelled "Seen only, not kept as a check" and has a
   dashed border. An older run without findings says so in one sentence.
 - With an older runner, the view says in one sentence that the runner needs downloading again.
 - A refusal from the server is shown as its sentence.
@@ -214,3 +216,6 @@ Under `/api/projects/:id`; reading needs access to the project.
 | `GET /candidate-findings?job=` | `{ findings }`, newest seen first; with `job`, the findings that run found first or last (404 for another project's run) |
 | `GET /objectives` | the objectives the latest analysis gives, with priority and reason, without AI; one sentence when there is no analysis yet |
 | `GET /jobs/:jobId/coverage` | the run's stop reason, limits, usage, coverage record and action log; one sentence for a run without a record (404 for another project's run) |
+
+A finding's screenshots are job files read with `GET /api/artifacts/:id` (the ids in `evidence.screenshots`; JPEG; reading needs
+access to the project, and another project's file answers 404).

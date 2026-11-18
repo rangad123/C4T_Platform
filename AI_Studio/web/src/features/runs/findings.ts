@@ -83,3 +83,6 @@ const OUTCOME_WORD = { failed: "failed", passed: "passed", error: "could not run
 /** One replay from a fresh start, in a sentence. */
 export const replayText = (r: CandidateFinding["replays"][number]): string =>
     `Replayed from a fresh start: ${OUTCOME_WORD[r.outcome] ?? r.outcome}${r.outcome === "failed" && r.failedStep ? ` at step ${r.failedStep}` : ""}.${r.summary ? ` ${r.summary}` : ""}`;
+
+/** What a finding's picture shows: the page where a fresh replay of its test stopped (row 173, findingShooter). */
+export const shotAlt = (i: number, n: number): string => `Screenshot ${i + 1} of ${n}: the page where a fresh replay of this finding’s test stopped`;

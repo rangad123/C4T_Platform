@@ -9,6 +9,7 @@ export default defineConfig({
     test: {
         include: [
             "tests/levels-unit.test.ts",
+            "tests/finding-screenshot-access.test.ts",
             "tests/stated-source-unit.test.ts",
             "tests/leftovers-unit.test.ts",
             "tests/account-lanes-unit.test.ts",

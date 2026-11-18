@@ -1,13 +1,13 @@
 /**
  * Phase 3 (P3-25): candidate findings on a finished exploration's run page. In a real browser against a real platform: each finding
  * shows its objective (kind and source), how many actions its test takes, the expected result with its source, what was observed, its
- * evidence (requests and console lines; screenshots are not saved yet, and the page says so), its confidence in words with what that
+ * evidence (screenshots as thumbnails that open larger, or a sentence when none was saved; requests and console lines), its confidence in words with what that
  * means, and a link to its saved test. Every finding is labelled as found by the AI and needing a person to check; the page never calls
  * one confirmed or a bug. An observed-only finding looks different from a captured one. A person who may only look reads the same; a
  * refusal from the server is shown as its sentence; an older run without findings says so. Axe in light and dark, no sideways scroll
  * at phone width. Also the pure rules.
  *
- * The findings, the run and its tests are real (CandidateFindingStore on the platform's database, GET /api/projects/:id/candidate-findings);
+ * The findings, their screenshots (job artifacts read through GET /api/artifacts/:id), the run and its tests are real (CandidateFindingStore on the platform's database, GET /api/projects/:id/candidate-findings);
  * the stand-ins are the person's access to the project (as in explore-objectives-ui) and the refusal.
  *
  * Requires web/dist (build inside the browser lock):
@@ -29,7 +29,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
-import { confidenceMeaning, findingOrder, sourceText, type FindingRecord } from "../web/src/features/runs/findings.js";
+import { confidenceMeaning, findingOrder, shotAlt, sourceText, type FindingRecord } from "../web/src/features/runs/findings.js";
 
 const PORT = 9908;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -40,7 +40,8 @@ const CAPTURED = {
     actions: { stepCount: 6 },
     expected: { text: "The total is the items plus the delivery fee.", source: "R-checkout-total" },
     observed: "The total shows 40.00 for two items of 15.00 and a delivery fee of 5.00.",
-    evidence: { screenshots: [], requests: ["POST /api/orders answered 500"], console: ["Console error: TypeError: total is undefined"] },
+    // Two pictures, filled in once they are stored (beforeAll).
+    evidence: { screenshots: [] as string[], requests: ["POST /api/orders answered 500"], console: ["Console error: TypeError: total is undefined"] },
     capture: "captured",
     independence: "independent",
     confidence: "high",
@@ -125,14 +126,22 @@ beforeAll(async () => {
         platform.repo.insertTest({ projectId, suiteId, jobId: run, spec: TestSpecSchema.parse({ testId, title, kind: "web", category: "Exploration", priority: "high", steps: [{ action: "navigate", url: "/checkout" }] }), framework: "playwright", validationStatus: "NEEDS_REVIEW" });
     capturedTest = newTest("WEB-001", "Order total includes the delivery fee");
     observedTest = newTest("WEB-002", "Submit the order twice");
+    browser = await chromium.launch();
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    page = await context.newPage();
+    // Two small JPEG pictures, stored the way RepoSink.saveImageArtifact stores a finding's (row 173).
+    for (const n of [1, 2]) {
+        await page.setContent(`<h1 style="font:32px sans-serif">Checkout total ${n}</h1>`);
+        const jpeg = await page.screenshot({ type: "jpeg", quality: 60, clip: { x: 0, y: 0, width: 320, height: 200 } });
+        const rel = path.posix.join(projectId, "_artifacts", run, `WEB-001-finding-${n}.jpg`);
+        const saved = await platform.store.put(rel, jpeg, { contentType: "image/jpeg" });
+        CAPTURED.evidence.screenshots.push(platform.repo.addArtifact({ projectId, jobId: run, kind: "screenshot", path: rel, size: saved.size }));
+    }
     const store = new CandidateFindingStore(platform.sql);
     // The observed-only one is stored last, so the platform lists it first; the page still puts the captured one first.
     await store.upsert({ projectId, jobId: run, testId: capturedTest, finding: CAPTURED });
     await store.upsert({ projectId, jobId: run, testId: observedTest, finding: OBSERVED });
 
-    browser = await chromium.launch();
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    page = await context.newPage();
     page.on("console", (m) => {
         if (m.type() === "error" && !/Failed to load resource/.test(m.text())) consoleErrors.push(m.text());
     });
@@ -207,6 +216,19 @@ describe("a finished exploration with findings", () => {
         await pwExpect(ev.getByTestId("finding-requests")).toHaveText(CAPTURED.evidence.requests[0]!);
         await pwExpect(ev.getByTestId("finding-console")).toHaveText(CAPTURED.evidence.console[0]!);
         await pwExpect(ev).toContainText("Replayed from a fresh start: failed at step 6. Stopped at the total check.");
+        // Its two screenshots, as thumbnails with what they show, each opening larger from the keyboard.
+        const shots = ev.getByTestId("finding-screenshots").getByRole("img");
+        await pwExpect(shots).toHaveCount(2);
+        await pwExpect(shots.nth(0)).toHaveAttribute("alt", shotAlt(0, 2));
+        await pwExpect(shots.nth(1)).toHaveAttribute("alt", shotAlt(1, 2));
+        await pwExpect.poll(() => shots.nth(1).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(320);
+        const open = ev.getByRole("link", { name: `${shotAlt(0, 2)} Open larger` });
+        await open.focus();
+        const [larger] = await Promise.all([page.context().waitForEvent("page"), page.keyboard.press("Enter")]);
+        await larger.waitForLoadState();
+        expect(larger.url()).toContain(`/api/artifacts/${CAPTURED.evidence.screenshots[0]}`);
+        expect(await larger.evaluate(() => document.contentType)).toBe("image/jpeg");
+        await larger.close();
         await neverSettled();
         await shot("findings-captured");
         await axeBoth();
@@ -231,14 +253,13 @@ describe("a finished exploration with findings", () => {
         await neverSettled();
     }, 60_000);
 
-    it("says plainly that screenshots are not saved with findings yet", async () => {
+    it("a finding without a screenshot says so plainly", async () => {
         await visit(run);
-        for (const n of [0, 1]) {
-            const f = findings().nth(n);
-            await f.getByText(/^Evidence/).click();
-            await pwExpect(f.getByTestId("finding-screenshots")).toHaveText("Screenshots are not saved with findings yet.");
-        }
-        await pwExpect(section().getByRole("img")).toHaveCount(0);
+        const f = findings().nth(1);
+        await f.getByText(/^Evidence/).click();
+        await pwExpect(f.getByTestId("finding-screenshots")).toHaveText("No screenshot was saved for this finding.");
+        await pwExpect(f.getByRole("img")).toHaveCount(0);
+        await pwExpect(findings().first().getByText(/^Evidence/)).toHaveText("Evidence (2 screenshots, 1 request, 1 console line)");
     }, 60_000);
 
     it("a person who may only look reads the same findings, with no action to take on them", async () => {
@@ -249,6 +270,10 @@ describe("a finished exploration with findings", () => {
             await pwExpect(findings().first().getByTestId("finding-observed")).toHaveText(CAPTURED.observed);
             await pwExpect(section().getByRole("link", { name: /Open the saved test/ })).toHaveCount(2);
             await pwExpect(section().getByRole("button")).toHaveCount(0);
+            // The pictures too: reading them needs only read access to the project (finding-screenshot-access.test.ts).
+            await findings().first().getByText(/^Evidence/).click();
+            const pic = findings().first().getByTestId("finding-screenshots").getByRole("img").first();
+            await pwExpect.poll(() => pic.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(320);
             await shot("findings-viewer");
         } finally {
             fake.access = null;
