@@ -58,7 +58,7 @@ import { authorWebSpec, statedSource, toSpec, WRITER_STOPPED, type ActionGate, t
 import { findLeftoverUse, leftoverReason } from "./web/leftovers.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
-import { checkIndependence, replayOwnSteps, type IndependenceCheck } from "./explore/independence.js";
+import { checkIndependence, replayOwnSteps, type IndependenceCheck, type IndependenceReplay } from "./explore/independence.js";
 import type { KnowledgeRule } from "./planning/planner.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { createHash } from "node:crypto";
@@ -771,12 +771,22 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const replayed = { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) };
                 // An observed-only defect test holds only steps that passed while authoring: replayed once (no AI), a step it stops at means
                 // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
-                const own = capture === "observed_only" && replayAllowed(written.steps.length, "the replay of the test's own steps") ? await replayOwnSteps(browser, origin, replayed).catch(() => undefined) : undefined;
-                if (own?.outcome === "failed") {
+                // A replay that throws or cannot start did not pass either (N-9): the test is not reported as a finding, and the reason says why.
+                const replaySecrets = [replayed.credentials?.password ?? "", replayed.credentials?.totpSecret ?? ""].filter(Boolean);
+                const own: IndependenceReplay | undefined =
+                    capture === "observed_only" && replayAllowed(written.steps.length, "the replay of the test's own steps")
+                        ? await replayOwnSteps(browser, origin, replayed).catch((e: unknown) => {
+                              let m = (e instanceof Error ? e.message : String(e)).split("\n")[0]!.trim().slice(0, 300);
+                              for (const s of replaySecrets) m = m.split(s).join("***");
+                              return { label: "Replay of the saved test in a fresh browser", outcome: "error" as const, summary: `the replay threw: ${m}` };
+                          })
+                        : undefined;
+                if (own && own.outcome !== "passed") {
+                    const why = own.outcome === "failed" ? `the saved test did not pass a replay of its own steps (${own.summary.replace(/\.+$/, "")})` : `the replay of the saved test's own steps could not be run (${own.summary.replace(/\.+$/, "")})`;
                     const h = await persistNew(spec, "playwright", "PENDING", undefined, { ...meta, capture, ownReplay: own });
                     await sink.updateTest(h, {
                         validation: "FAILED_VALIDATION",
-                        reason: `Not reported as a finding: the saved test did not pass a replay of its own steps (${own.summary.replace(/\.+$/, "")}), so it does not show the problem the test writer reported: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.`,
+                        reason: `Not reported as a finding: ${why}, so it does not show the problem the test writer reported: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.`,
                     });
                     summary.testsFailedValidation++;
                     await sink.counters({ testsFailedValidation: 1 }, true);
@@ -784,7 +794,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         stage: "generation",
                         kind: "defect_unverified",
                         level: "warn",
-                        message: `${h.testId} ${spec.title}: not reported as a finding; its saved test stopped at step ${own.failedStep} when replayed on its own`,
+                        message: `${h.testId} ${spec.title}: not reported as a finding; ${own.outcome === "failed" ? `its saved test stopped at step ${own.failedStep} when replayed on its own` : "the replay of its own steps could not be run"}`,
                         data: { testKey: h.testId, capture, failedStep: own.failedStep ?? null },
                     });
                     return h.testId;
@@ -1586,9 +1596,10 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
 
 /**
  * The loop's view of the test writer's actions, asked before each one runs (CP2 H-2): each as a stable key on a state. The state is the
- * address pattern of the page with what was done since the page was last loaded (the values typed, the last action that was not a read).
- * The action key names the element the action resolves to on the page (role, accessible name and a digest of its DOM path, when the test
- * writer found it), not the locator text, so the same button spelled another way is the same action (M-1); a read (a wait, a check)
+ * address pattern of the page with the last action that was not a read. The action key names the element the action resolves to on the
+ * page (role, accessible name and a digest of its form and landmark ancestry, when the test writer found it), not the locator text, so the
+ * same button spelled another way is the same action (M-1). Neither holds a value typed or chosen (N-3): the same submit after another
+ * quantity is the same action on the same state, so it is a repeat, and no typed value (a password) is kept in the log. A read (a wait, a check)
  * does not change the state, so alternating no-ops does not make a repeat look new. The same click twice in a row is two states (a
  * double submit); the same action again on the same state is a repeat the loop refuses. `freshPass` starts again from a start page.
  */
@@ -1598,17 +1609,17 @@ export function actionTracker(startUrl: string): {
     freshPass(startUrl: string): void;
 } {
     let url = startUrl;
-    let typed: string[] = [];
     let previous = "";
     let pending = "";
     const moveTo = (to: string | undefined): void => {
-        if (to && to !== url) {
-            url = to;
-            typed = [];
-        }
+        if (to) url = to;
     };
+    /** What an action carries that is not its identity (N-3): the value typed or chosen (fill, select, a prompt's answer) and the model's own wording. */
+    const notIdentity = (tool: string): string[] => ["why", "description", "promptText", ...(tool === "fill" || tool === "select" ? ["value"] : [])];
+    const without = (args: Record<string, unknown>, drop: readonly string[]) => Object.fromEntries(Object.entries(args).filter(([k]) => !drop.includes(k)));
     const keyOf = (a: { tool: string; args: unknown; target?: string }): string => {
         const args = (a.args ?? null) as Record<string, unknown> | null;
+        const TYPED = notIdentity(a.tool);
         if (a.tool === "navigate" && typeof args?.url === "string") {
             try {
                 return `navigate ${new URL(args.url, url).href}`;
@@ -1617,10 +1628,11 @@ export function actionTracker(startUrl: string): {
             }
         }
         if (a.target) {
-            // What the action does beyond its target (the value typed, the key pressed); click and hover are given the locator itself.
-            const rest = a.tool === "click" || a.tool === "hover" || !args ? {} : Object.fromEntries(Object.entries(args).filter(([k]) => k !== "target" && k !== "to" && k !== "locator"));
+            // What the action does beyond its target (the key pressed, the box checked; never the value typed); click and hover are given the locator itself.
+            const rest = a.tool === "click" || a.tool === "hover" || !args ? {} : without(args, [...TYPED, "target", "to", "locator"]);
             return `${a.tool} ${a.target}${Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : ""}`;
         }
+        if (args && typeof args === "object" && !Array.isArray(args)) return `${a.tool} ${JSON.stringify(without(args, TYPED))}`;
         return `${a.tool} ${JSON.stringify(a.args ?? null) ?? ""}`;
     };
     return {
@@ -1628,19 +1640,15 @@ export function actionTracker(startUrl: string): {
             moveTo(a.url);
             const action = keyOf(a);
             pending = action;
-            const digest = createHash("sha256").update(JSON.stringify([typed, previous])).digest("hex").slice(0, 12);
+            const digest = createHash("sha256").update(previous).digest("hex").slice(0, 12);
             return { state: `${pathPattern(url)}|${digest}`, action, read: a.read === true };
         },
         after: (a) => {
             if (!a.read) previous = pending;
-            const args = (a.args ?? {}) as { value?: unknown };
-            if (a.ok && (a.tool === "fill" || a.tool === "select") && typeof args.value === "string") typed = [...typed, args.value].slice(-50);
-            if (a.ok && a.tool === "navigate") typed = [];
             if (a.ok) moveTo(a.url);
         },
         freshPass: (start) => {
             url = start;
-            typed = [];
             previous = "";
             pending = "";
         },

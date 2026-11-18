@@ -214,12 +214,12 @@ describe("the test writer honours an ended run", () => {
         let asked = 0;
         const gate = { ...allow, before: () => {
             asked += 1;
-            // The person presses Stop while the first click is asked for: it still runs, the seven behind it must not.
-            if (asked === 1) job.abort();
+            // The person presses Stop while the first click is asked for (the opening load is asked first, N-8): it still runs, the seven behind it must not.
+            if (asked === 2) job.abort();
             return { allowed: true as const };
         } };
         await authorWebSpec({ ctx: authorCtx([Array.from({ length: 8 }, () => continueBtn)], job.signal), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate }).catch(() => undefined);
-        expect(asked).toBe(1);
+        expect(asked).toBe(2);
         expect(site.posts).toBe(1);
     }, 120_000);
 });
@@ -303,7 +303,8 @@ describe("the objective's step budget and the replays of a pursuit (CP2 M-5)", (
         } as unknown as ActionGate;
         const out = await authorWebSpec({ ctx: authorCtx([]), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate, resume: { prefix: [open, clickStep], failure: "x", review: true } });
         expect(out).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/^Replay of previous steps was refused/) });
-        expect(asked).toEqual(["click"]);
+        // The opening load (N-8), then the replayed click, which is refused.
+        expect(asked).toEqual(["navigate", "click"]);
         expect(passes).toEqual([`${site.url}/cart`]);
         expect(site.posts).toBe(0);
     }, 120_000);

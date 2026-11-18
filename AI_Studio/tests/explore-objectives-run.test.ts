@@ -240,15 +240,19 @@ describe("exploring the seeded shop by objectives", () => {
         expect(ex.usage.aiCalls).toBe(calls.filter((c) => !c.startsWith("object:")).length);
         // The test writer's own five actions, and the replays without AI that reached the application (CP2 M-5): each pursuit's prune
         // replay of its saved steps (3: open, navigate, check; 4: open, fill, click, check) and its finding's two fresh replays.
+        // Each of the 3 pursuits' passes also begins with its opening page load, asked and counted like any action (N-8).
         const performed = ex.actionLog.filter((r) => r.result === "performed");
-        expect(performed.filter((r) => !r.action.startsWith("replay: "))).toHaveLength(5);
+        const opening = [...new Set(performed.map((r) => r.objectiveId))].map((id) => performed.find((r) => r.objectiveId === id)!);
+        expect(opening).toHaveLength(3);
+        for (const r of opening) expect(r.action).toMatch(/^navigate http:\/\/127\.0\.0\.1:\d+\//);
+        expect(performed.filter((r) => !r.action.startsWith("replay: ") && !opening.includes(r))).toHaveLength(5);
         expect(performed.filter((r) => r.action.startsWith("replay: ")).map((r) => r.action)).toEqual([
             "replay: the replay that drops stale steps (3 steps)",
             "replay: the two fresh replays of the independence check (6 steps)",
             "replay: the replay that drops stale steps (4 steps)",
             "replay: the two fresh replays of the independence check (8 steps)",
         ]);
-        expect(ex.usage.actions).toBe(5 + 3 + 6 + 4 + 8);
+        expect(ex.usage.actions).toBe(3 + 5 + 3 + 6 + 4 + 8);
         // The action log (every row, under the 2,000-row cap) and the coverage record built from it and the saved tests.
         expect(ex.actionLogOmitted).toBe(0);
         expect(ex.coverage.rules).toMatchObject({ total: 1, exercised: 1 });

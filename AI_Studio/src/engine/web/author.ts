@@ -109,7 +109,7 @@ export interface AuthorInput {
 export interface GateAction {
     tool: string;
     args: unknown;
-    /** The element(s) the action resolves to on the page now (role and accessible name, plus a digest of its DOM path); absent when it has no target or none is found. */
+    /** The element(s) the action resolves to on the page now (role and accessible name, plus a digest of its form and landmark ancestry); absent when it has no target or none is found. */
     target?: string;
     /** The address of the page the action is taken on. */
     url: string;
@@ -131,25 +131,56 @@ export interface ActionGate {
 /** Tools that only read the page: they do not count as a new visit of the state they run on (explore/loop.ts depth). */
 const READ_TOOLS = new Set(["assert", "wait", "remember"]);
 
-/** What a target resolves to on `page` now: role and accessible name of the first match and a digest of its DOM path; undefined when nothing matches quickly. */
+/**
+ * What a target resolves to on `page` now: role and accessible name of the first match, and a digest of its stable anchor (N-3): the form
+ * and landmark ancestry it sits in (each named by its label, or a form by where it posts) and its own tag, type and name. Never its
+ * position among siblings, so a page that adds a section before it is the same element, and never a value. Undefined when nothing matches quickly.
+ */
 async function targetIdentity(page: Page, l: Locator, data: RuntimeData): Promise<string | undefined> {
     try {
         const el = locate(page, l, data).first();
-        const [aria, domPath] = await Promise.all([
+        const [aria, anchor] = await Promise.all([
             el.ariaSnapshot({ timeout: 1_000 }),
             el.evaluate((node) => {
+                const LANDMARK_TAGS = new Set(["form", "main", "nav", "header", "footer", "aside", "dialog", "search", "fieldset"]);
+                const LANDMARK_ROLES = new Set(["form", "main", "navigation", "banner", "contentinfo", "complementary", "dialog", "alertdialog", "search", "region", "group", "tabpanel", "list", "table", "grid", "menu", "toolbar"]);
+                const clip = (t: string | null | undefined) => (t ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+                const labelOf = (e: Element): string => {
+                    const own = e.getAttribute("aria-label");
+                    if (own) return clip(own);
+                    const by = e.getAttribute("aria-labelledby");
+                    if (by) return clip(by.split(/\s+/).map((id) => e.ownerDocument.getElementById(id)?.textContent ?? "").join(" "));
+                    const legend = e.tagName === "FIELDSET" ? e.querySelector(":scope > legend") : null;
+                    return legend ? clip(legend.textContent) : "";
+                };
                 const parts: string[] = [];
-                for (let e: Element | null = node; e && e.parentElement; e = e.parentElement) {
+                for (let e: Element | null = node.parentElement; e; e = e.parentElement) {
                     const tag = e.tagName.toLowerCase();
-                    const same = Array.from(e.parentElement.children).filter((c) => c.tagName === e!.tagName);
-                    parts.unshift(same.length > 1 ? `${tag}:${same.indexOf(e) + 1}` : tag);
+                    const role = e.getAttribute("role") ?? "";
+                    const label = labelOf(e);
+                    // An unnamed section or region is no landmark: a page may add any number of them around the element.
+                    if (!LANDMARK_TAGS.has(tag) && !LANDMARK_ROLES.has(role) && !((tag === "section" || tag === "article") && label)) continue;
+                    let name = label;
+                    if (tag === "form") {
+                        const action = e.getAttribute("action");
+                        let to = "";
+                        try {
+                            to = action ? new URL(action, e.ownerDocument.baseURI).pathname : "";
+                        } catch {
+                            to = clip(action);
+                        }
+                        name = [label, e.getAttribute("name") ?? "", (e.getAttribute("method") ?? "get").toLowerCase(), to].join("|");
+                    }
+                    parts.unshift(`${tag}${role ? `[${role}]` : ""}${name ? `(${name})` : ""}`);
                 }
+                const self = node as Element;
+                parts.push([self.tagName.toLowerCase(), self.getAttribute("type") ?? "", self.getAttribute("name") ?? ""].join(":"));
                 return parts.join(">");
             }, undefined, { timeout: 1_000 }),
         ]);
         // `- button "Continue"` or `- textbox "Email": typed value`: role and name only, never a value.
         const m = /^- ([\w-]+)(?: "((?:[^"\\]|\\.)*)")?/.exec(aria.split("\n")[0] ?? "");
-        const digest = createHash("sha256").update(domPath).digest("hex").slice(0, 12);
+        const digest = createHash("sha256").update(anchor).digest("hex").slice(0, 12);
         return `${m?.[1] ?? "element"}${m?.[2] !== undefined ? ` ${JSON.stringify(m[2].slice(0, 120))}` : ""} @${digest}`;
     } catch {
         return undefined;
@@ -576,11 +607,21 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
 
         // Fixed first step: open the scenario's start page.
         const open: Step = { action: "navigate", url: scenario.startPath || "/", description: `Open ${scenario.startPath || "/"}` };
+        // The opening load reaches the application like any action (N-8): not once the run has ended, and asked of the exploration's
+        // bound first (counted against the session's actions); each retry is asked again as a replay of one step.
+        const openArgs = { url: open.url };
+        const notOpened = (why: string): AuthorOutcome => ({ status: "blocked", steps: [], testData, explanation: `${NOT_PERFORMED} the opening load of ${open.url}: ${why}` });
+        if (ctx.signal?.aborted) return notOpened("this test writer's work was ended.");
+        const opening = input.gate?.before({ tool: "navigate", args: openArgs, url: new URL(open.url, baseUrl).href, read: false });
+        if (opening && !opening.allowed) return notOpened(opening.reason);
         let first = await run(open);
+        input.gate?.after({ tool: "navigate", args: openArgs, ok: first.ok, url: here().url(), read: false });
         // A flaky connection (timeouts, ERR_NETWORK_CHANGED, DNS) on the very first load should not cost the
         // whole scenario: retry the opening navigation a couple of times before giving up.
         for (let retry = 1; !first.ok && retry <= 2 && /timeout|net::|ERR_|ENOTFOUND|ECONN/i.test(first.error ?? ""); retry++) {
             await new Promise((r) => setTimeout(r, 2_000 * retry));
+            if (ctx.signal?.aborted) return notOpened("this test writer's work was ended.");
+            if (input.gate && !input.gate.replay(1, "a retry of the opening page load")) return notOpened(`the retry after "${first.error}" was refused.`);
             first = await run(open);
         }
         if (!first.ok) {
