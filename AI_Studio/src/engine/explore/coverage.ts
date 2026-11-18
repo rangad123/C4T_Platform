@@ -8,7 +8,7 @@
  * - a workflow step: with a page, that page was acted on during a pursuit of the workflow's objective; without one, the workflow's
  *   objective was pursued to its end;
  * - a transition, an input class (a constraint objective's input operator), a rule: a pursuit of its objective ended `completed` or
- *   `stopped`, or a saved test belongs to it (for a rule also: a saved check whose `source` is the rule's ref);
+ *   `stopped` (never `writer_stopped`: the test writer stopped before finishing, so the objective is "not finished"), or a saved test belongs to it (for a rule also: a saved check whose `source` is the rule's ref);
  * - an endpoint: a saved test's request to it, a performed action naming a control the model saw call it on that page, or an exercised
  *   workflow step that names it.
  *
@@ -130,7 +130,7 @@ function tally(all: ReadonlyArray<readonly [string, boolean]>): Tally {
     return { total: all.length, exercised: all.filter(([, hit]) => hit).length, notExercised: missed.slice(0, LIST_CAP), more: Math.max(0, missed.length - LIST_CAP) };
 }
 
-const STATUS_ORDER: OutcomeStatus[] = ["completed", "stopped", "interrupted", "unsafe", "environment_failure", "skipped", "not_reached"];
+const STATUS_ORDER: OutcomeStatus[] = ["completed", "stopped", "writer_stopped", "interrupted", "unsafe", "environment_failure", "skipped", "not_reached"];
 
 export function coverageOf(input: CoverageInput): CoverageRecord {
     const pages = input.model.pages ?? [];

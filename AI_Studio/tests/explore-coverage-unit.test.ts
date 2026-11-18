@@ -186,6 +186,16 @@ describe("coverageOf", () => {
         expect(bareAndTest.uniqueScenarios).toBe(1);
     });
 
+    // Row 186: a pursuit whose test writer stopped before finishing exercised nothing of its objective; it is "not finished" with that reason.
+    it("lists an objective whose test writer stopped as not finished, with that reason, and does not count it exercised", () => {
+        const why = "The test writer stopped before finishing the test.";
+        const c = coverageOf({ model: {}, objectives: [R1], outcomes: R1.operators.map((op) => outcome(pursuitKey(R1.id, op), "writer_stopped", why, 0)), actionLog: [] });
+        expect([c.rules.total, c.rules.exercised]).toEqual([1, 0]);
+        expect(c.uniqueScenarios).toBe(0);
+        expect(c.unexplored.map((u) => [u.objectiveId, u.status])).toEqual([[R1.id, `not finished: ${why}`]]);
+        for (const op of R1.operators) expect(c.notRun.find((n) => n.objectiveId === R1.id && n.operator === op)?.reason).toBe(`not finished: ${why}`);
+    });
+
     it("keeps an explicitly skipped operator even when nothing else about the session is known", () => {
         const c = coverageOf({ model: {}, objectives: [W], outcomes: [], actionLog: [], skipped: [{ objectiveId: W.id, operator: "double_submit", reason: "not run: data changes off" }] });
         expect(c.notRun.filter((n) => n.operator === "double_submit")).toEqual([{ objectiveId: W.id, operator: "double_submit", reason: "not run: data changes off" }]);

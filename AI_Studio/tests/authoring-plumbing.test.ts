@@ -16,7 +16,7 @@ import { renderScript } from "../src/engine/generators/index.js";
 import { ScenarioSchema, TestSpecSchema } from "../src/engine/spec/schema.js";
 import type { AppModel } from "../src/engine/understanding/app-model.js";
 import { runScripts } from "../src/engine/validation/runner.js";
-import { authorWebSpec, pruneByReplay, toSpec } from "../src/engine/web/author.js";
+import { authorWebSpec, pruneByReplay, toSpec, WRITER_STOPPED } from "../src/engine/web/author.js";
 
 const PORT = 5073;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -127,6 +127,20 @@ describe("authoring agent plumbing", () => {
         const out = await authorWebSpec({ ctx: ctxFor(model), browser, baseUrl: BASE, model: emptyModel, scenario });
         expect(out.status).toBe("blocked");
         expect(out.explanation).toMatch(/without recording any assertion/);
+    }, 60_000);
+
+    // Row 186: a writer that replies with plain text (no tool call, no finish) stopped on its own; the step budget was not spent.
+    it("a writer that stops with a plain reply is told apart from one that runs out of steps", async () => {
+        const stopped = await authorWebSpec({ ctx: ctxFor(scripted([]).model), browser, baseUrl: BASE, model: emptyModel, scenario, maxSteps: 5 });
+        expect(stopped.status).toBe("blocked");
+        expect(stopped.explanation).toBe(WRITER_STOPPED);
+        expect(stopped.explanation).toMatch(/test writer stopped/i);
+        expect(stopped.explanation).not.toMatch(/budget/i);
+
+        const busy = Array.from({ length: 6 }, () => ({ tool: "hover", input: { target: { by: "label", value: "Email" } } }));
+        const spent = await authorWebSpec({ ctx: ctxFor(scripted(busy).model), browser, baseUrl: BASE, model: emptyModel, scenario, maxSteps: 3 });
+        expect(spent.status).toBe("blocked");
+        expect(spent.explanation).toBe("Step budget exhausted before finishing");
     }, 60_000);
 
     it("does not record a failing assertion and reports a defect when the model says so", async () => {
