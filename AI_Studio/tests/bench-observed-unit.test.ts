@@ -12,7 +12,6 @@ import { categorize } from "../src/eval/bench/metrics.js";
 import { candidateOf, EVIDENCE_FIELDS, evidenceGaps, NO_SCREENSHOTS, observedKind, observedOf, overBudget, seriesOf, sessionsFromEvents, trialProblem, withLabels } from "../src/eval/bench/observed.js";
 import { e8Lines, observedMarkdown } from "../src/eval/bench/report.js";
 import { BenchmarkSchema, type BenchFinding, type Benchmark, type ExplorationSession } from "../src/eval/bench/schema.js";
-import { CandidateFindingSchema } from "../src/engine/explore/finding.js";
 
 const f = (testKey: string, source: BenchFinding["source"], replay: BenchFinding["replay"], over: Partial<BenchFinding> = {}): BenchFinding => {
     const { category, defects } = categorize(replay);
@@ -191,9 +190,9 @@ describe("bench-report --observed <folder> (read-only)", () => {
 
 // ── Per-objective counts, stop reasons, E6–E8 (P3-23) ────────────────────────────────────────────────────────────────────────────────
 
-/** A candidate finding as the engine stores it on the test (parsed with the engine's own contract, so the field names are the real ones). */
-const complete = () =>
-    CandidateFindingSchema.parse({
+/** A candidate finding as the engine stores it on the test, typed by what the benchmark reads (no engine import: src/eval tests also run on
+ *  the baseline tree, whose engine has no explore/finding.ts). */
+const complete = (): Parameters<typeof evidenceGaps>[0] => ({
         objective: { id: "obj-1", kind: "rule", source: "R-1", operator: "invalid_input" },
         actions: { stepCount: 6 },
         expected: { text: "The total is the sum of the lines.", source: "R-1" },
@@ -205,7 +204,7 @@ const complete = () =>
         fingerprint: "a".repeat(64),
         modelVersion: "mv-1",
         replays: [],
-    });
+    }) as Parameters<typeof evidenceGaps>[0];
 
 describe("E7: what a candidate finding carries", () => {
     it("a complete finding lacks nothing", () => {
