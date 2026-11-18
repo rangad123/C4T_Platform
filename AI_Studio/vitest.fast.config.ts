@@ -262,6 +262,7 @@ export default defineConfig({
             "tests/candidate-findings-migration-66.test.ts",
             "tests/candidate-finding-store.test.ts",
             "tests/candidate-findings-api.test.ts",
+            "tests/explore-explored-unit.test.ts",
             "tests/repair-web-guard-unit.test.ts",
         ],
         testTimeout: 60_000,

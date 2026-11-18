@@ -212,7 +212,12 @@ describe("exploring the seeded shop by objectives", () => {
         // The invalid-input pursuit types an allowed value: the operator was not applied.
         const notApplied = { ...COMPLIANT, "Invalid input": COMPLIANT["Invalid input"]!.map((c) => (c.tool === "fill" ? { ...c, input: { ...c.input, value: "5" } } : c)) };
         const { llm } = scriptedShopModel(() => notApplied);
-        const { summary, events, tests } = await exploreShop(site, llm, { objectives: true });
+        // Row 173: the request says the rule was explored last time, so only the quantity's objective is "not explored yet".
+        const { summary, events, tests } = await exploreShop(site, llm, { objectives: true, exploredObjectives: ["R-TOTAL"] });
+        expect(summary.exploration!.objectives.map((o) => [o.kind, /not explored yet/.test(o.reason)])).toEqual([
+            ["constraint", true],
+            ["rule", false],
+        ]);
         expect(tests.map((t) => (t.meta.finding as { objective: { operator: string } }).objective.operator)).toEqual(["as_stated"]);
         expect(events.filter((e) => e.kind === "operator_not_applied").map((e) => e.message)).toEqual([expect.stringContaining('the recorded steps do not apply the operator "invalid_input"')]);
         expect(summary.exploration!.outcomes.find((o) => o.objectiveId.endsWith(":invalid_input"))!.result).toMatchObject({ applied: false });
