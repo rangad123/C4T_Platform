@@ -13,6 +13,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { parseExploration, type ExplorationRecord } from "../agent-protocol/exploration.js";
 import { ResultRequest, type AgentPhase, type HelloResponse, type RejectRequest, type RunnerConfigPush, type TaskOffer, type WebBrowserUsed, type WireRun } from "../agent-protocol/schema.js";
 import { enginesOf, type BrowserInUse, type BrowserLaunch, type BrowserSetup } from "./browser-setup.js";
 import { withDeviceLock } from "../engine/mobile/emulator.js";
@@ -788,6 +789,9 @@ export class TaskRunner {
             errors: sum.errors.slice(0, 200).map((e) => log.redact(String(e)).slice(0, 2000)),
             ...(sum.model ? { model: sum.model } : {}),
             ...(sum.plan ? { plan: sum.plan } : {}),
+            // Row 184: how an exploration by objectives went, its text masked like the errors; left out (and said in the log) when it is
+            // not a record the platform can keep, so a bad record never costs the run its result.
+            ...explorationForResult(sum.exploration, log, short),
         };
         const checked = ResultRequest.safeParse({ ok: true, runs: [], explore });
         if (!checked.success) return fail(`The agent could not describe the exploration in the platform's format (${checked.error.issues[0]?.message ?? "unknown problem"}).`);
@@ -1048,4 +1052,24 @@ export class TaskRunner {
             }
         }
     }
+}
+
+/**
+ * Row 184: the `exploration` part of an explore result: the engine's record with its text masked like the errors, or nothing when there is
+ * none or it is not a record the platform can keep (said in the runner's log), so a bad record never costs the run its result.
+ */
+export function explorationForResult(exploration: unknown, log: Pick<Logger, "redact" | "warn">, short: string): { exploration?: ExplorationRecord } {
+    if (exploration === undefined) return {};
+    const record = parseExploration(exploration);
+    if (record.ok) return { exploration: masked(record.value, (t) => log.redact(t)) };
+    log.warn(`Task ${short}: the coverage record was left out (${record.problem}).`);
+    return {};
+}
+
+/** Row 184: the same value with every text in it passed through `mask` (the runner's log masking of stored sign-ins). */
+function masked<T>(v: T, mask: (t: string) => string): T {
+    if (typeof v === "string") return mask(v) as T;
+    if (Array.isArray(v)) return v.map((x) => masked(x, mask)) as T;
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, masked(x, mask)])) as T;
+    return v;
 }
