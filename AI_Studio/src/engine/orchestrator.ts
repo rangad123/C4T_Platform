@@ -65,6 +65,7 @@ import { createHash } from "node:crypto";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { LlmClient } from "./llm/provider.js";
 import { inputClassesFor } from "./explore/input-classes.js";
+import { maskActionLog } from "./explore/action-mask.js";
 import { runExploration, type ActionLogRow, type Budgets, type ExplorationResult, type LoopObjective, type ObjectiveContext, type ObjectiveOutcome, type ObjectiveRun, type StopReason } from "./explore/loop.js";
 import { MAX_EXPLORED, OBJECTIVE_REF_MAX, objectivesFrom, type Objective, type ObjectiveField, type ObjectiveOperator } from "./explore/objectives.js";
 import { operatorApplied, scenariosFor, type OperatorCheck, type PerturbOptions } from "./explore/perturb.js";
@@ -266,9 +267,12 @@ export interface ExplorationSummary {
 /** At most this many action-log rows are kept in the job summary. */
 export const ACTION_LOG_CAP = 2_000;
 
-/** The action log as the job summary keeps it: the first ACTION_LOG_CAP rows and how many were left out. */
-export function boundedActionLog(rows: readonly ActionLogRow[]): { actionLog: ActionLogRow[]; actionLogOmitted: number } {
-    return { actionLog: rows.slice(0, ACTION_LOG_CAP), actionLogOmitted: Math.max(0, rows.length - ACTION_LOG_CAP) };
+/**
+ * The action log as the job summary keeps it: the first ACTION_LOG_CAP rows, masked (explore/action-mask.ts: typed values, addresses'
+ * query strings, the run's `secrets`), and how many were left out.
+ */
+export function boundedActionLog(rows: readonly ActionLogRow[], secrets: readonly string[] = []): { actionLog: ActionLogRow[]; actionLogOmitted: number } {
+    return { actionLog: maskActionLog(rows.slice(0, ACTION_LOG_CAP), secrets), actionLogOmitted: Math.max(0, rows.length - ACTION_LOG_CAP) };
 }
 
 /**
@@ -977,7 +981,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     outcomes: session.outcomes,
                     usage: session.usage,
                     coverage: coverageOf({ model: coverageModelOf(model, knowledge.objectiveInputs, apis), objectives: built.objectives, outcomes: session.outcomes, actionLog: session.actionLog, tests: saved, skipped: built.skipped }),
-                    ...boundedActionLog(session.actionLog),
+                    ...boundedActionLog(session.actionLog, authoringSecretsOf(req)),
                 };
                 ctx.emit({
                     stage: "generation",
