@@ -25,7 +25,7 @@ broken tests (a test that cannot pass any more) are both reported, with a severi
 | You pass | What happens | Needs |
 | --- | --- | --- |
 | `--specs <file.json> --url <app>` | **Replay**: imports the saved tests into a throwaway platform inside the command (its own temporary data folder, never your `./data`), runs them in a real browser, reports. | Chromium (`npx playwright install chromium`). No AI key. |
-| `--analyze --url <app>` | **Generate**: runs the full analysis in-process (explore the app, plan, write tests), then validates them. | Chromium and an AI key, set like for the server (`ANTHROPIC_API_KEY` or `LLM_API_KEY`…). Without a key only the parts that need no AI run (API tests from an OpenAPI document, the built-in page checks). |
+| `--analyze --url <app>` | **Generate**: runs the full analysis in-process (explore the app, plan, write tests). The checks run; the test cases it writes are not run and are reported as not run (with `--server`, run them later without `--analyze`). | Chromium and an AI key, set like for the server (`ANTHROPIC_API_KEY` or `LLM_API_KEY`…). Without a key only the parts that need no AI run (API tests from an OpenAPI document, the built-in page checks). |
 | `--server <url> --project <name> [--specs … \| --analyze] --url <app>` | **Remote**: drives a platform that is already running, over its REST API. The CI runner needs no browser. | A running platform; `--api-key-env NAME` (or the `AI_TEST_API_KEY` variable) when the server is protected by an API key. |
 
 With `--server` and neither `--specs` nor `--analyze`, the command re-runs the existing tests of `--project`.

@@ -177,7 +177,8 @@ const analyzeApplication = defineTool({
     description:
         "Start analyzing a running application and generating tests for it. Creates the project if needed (or reuses the one with the same name or the projectId you give) and returns a job id; then call wait_for_job. " +
         "Safe by default: data-changing API tests and load checks stay OFF unless you set allowMutatingApiTests or loadChecks to true, and the answer says exactly what was switched on. " +
-        "The platform refuses addresses it may not call and refuses to start a second job while one is active.",
+        "The platform refuses addresses it may not call and refuses to start a second job while one is active. " +
+        "The checks run in the job; the test cases it writes are not run (they stay Not run yet): run them with run_tests when the user asks.",
     shape: {
         url: z.string().url().max(2000).describe("Address of the application to test, e.g. http://localhost:3000. It must be reachable by the platform."),
         name: z.string().min(1).max(120).optional().describe("Project name. Defaults to the host name of the url. A project with this name is reused."),
@@ -243,6 +244,7 @@ const analyzeApplication = defineTool({
             const config = await ctx.client.json("GET", "/config").catch(() => null);
             if (config && config.llm && config.llm.configured === false) lines.push("Note: the platform has no AI model configured, so browser tests cannot be generated; API tests from an OpenAPI description still work.");
         }
+        lines.push("The test cases it writes are not run by this job: run them with run_tests when the user asks.");
         lines.push("Next: call wait_for_job with this job id.");
         return lines.join("\n");
     },

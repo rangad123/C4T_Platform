@@ -8,7 +8,7 @@
 import { throwIfAborted, type EngineContext } from "../../context.js";
 import { renderWithAdapter } from "../../frameworks/index.js";
 import { LlmNotConfiguredError } from "../../llm/provider.js";
-import { TEST_CASES_NOT_RUN, testCasesNotRun, type GenerationRequest, type GenerationSink, type GenerationSummary, type TestHandle } from "../../orchestrator.js";
+import { runsTestCases, TEST_CASES_NOT_RUN, testCasesNotRun, type GenerationRequest, type GenerationSink, type GenerationSummary, type TestHandle } from "../../orchestrator.js";
 import { TestSpecSchema } from "../../spec/schema.js";
 import { secretProblems } from "../../builder/index.js";
 import { phoneMemoryOf, resolveMobile, stubModel } from "../../validate-only.js";
@@ -200,7 +200,7 @@ export async function runMobileGeneration(ctx: EngineContext, req: GenerationReq
     throwIfAborted(ctx.signal);
 
     // ── run them on the phone ───────────────────────────────────────────────
-    if (pending.length && req.runTestCases === false) {
+    if (pending.length && !runsTestCases(req)) {
         // Written and kept for a person to run when they choose: not a failure, and never reported as passing.
         ctx.emit({ stage: "generation", kind: TEST_CASES_NOT_RUN, message: testCasesNotRun(pending.length) });
         await sink.phase("VALIDATING", "validation", "skipped");

@@ -154,6 +154,8 @@ const GenerateSchema = z.object({
     fullExploration: z.boolean().optional(),
     /** Benchmark only (Baseline-U): explore the way an older runner does (no field constraints, page structures or requests per interaction) and analyse afterwards without AI. */
     understandingBaseline: z.literal(true).optional(),
+    /** Evaluation only: also run the journeys' test cases in this job. Absent: they are written and not run (every product caller). */
+    runTestCases: z.literal(true).optional(),
     /** Remove the records that data-changing API tests create once the run ends (default true; also becomes the project's switch). */
     cleanupAfter: z.boolean().optional(),
     /** Budget overrides, e.g. "lcp:3000 weight:5000000 slow-4g". */
@@ -481,7 +483,9 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             }
         }
         // The application keeps the generation settings, minus the (possibly large) requirements text.
-        const { requirementsText: _text, ...appConfig } = options;
+        // Evaluation only, for this job only: never kept on the application, so no later job inherits it.
+        if (body.runTestCases) options.runTestCases = true;
+        const { requirementsText: _text, runTestCases: _run, ...appConfig } = options;
         const keptMobile = latestMobile(id);
         adoptSignIn(p, id, body.url, body0.credentials);
         const appId = repo.createApplication(id, body.url, keptMobile ? { ...appConfig, mobile: keptMobile } : appConfig, body.credentials);

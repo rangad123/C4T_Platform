@@ -120,6 +120,8 @@ async function explore(projectId: string) {
     toolQueue.length = planningPrompts.length = writing.length = repairing.length = 0;
     const queued = await call("POST", `/api/projects/${projectId}/test-generation`, {
         url: URL, targets: ["web"], maxPages: 10, accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false,
+        // The repair and validation of new test cases is what this file checks: asked for as the evaluation asks (product callers never do).
+        runTestCases: true,
     });
     expect(queued.status, JSON.stringify(queued.body)).toBe(202);
     let job: { status: string } | undefined;

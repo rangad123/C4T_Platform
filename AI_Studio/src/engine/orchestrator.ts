@@ -59,6 +59,8 @@ import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
 export const TEST_CASES_NOT_RUN = "test_cases_not_run";
+/** Whether a request also runs the test cases it writes: only when it says so (runTestCases true, evaluation only). */
+export const runsTestCases = (req: Pick<GenerationRequest, "runTestCases">): boolean => req.runTestCases === true;
 export const testCasesNotRun = (n: number) => `${n} test case${n === 1 ? " was" : "s were"} written and not run. Run ${n === 1 ? "it" : "them"} from Test scripts when you choose.`;
 
 export type JobStatusName = "DISCOVERING" | "ANALYZING" | "PLANNING" | "GENERATING" | "VALIDATING";
@@ -88,9 +90,9 @@ export interface GenerationRequest {
     /** Plan and write functional test cases for the journeys (web target). Default true; false: only the checks are generated. */
     functionalTests?: boolean;
     /**
-     * Run the journeys' test cases (web and phone) once they are written. Default true; false: they are saved as written, "Not run yet",
-     * and a person runs them when they choose (the platform's plan confirmation: the Test Case Generation Agent only writes them).
-     * The checks of the other kinds still run: running them is what makes them checks.
+     * true (evaluation only): also run the journeys' test cases (web and phone) once they are written, with repair and flakiness checks.
+     * Absent or false, for every product caller: they are saved as written, "Not run yet", and a person runs them when they choose;
+     * repair and flakiness checks happen on that first run. The checks of the other kinds still run: running them is what makes them checks.
      */
     runTestCases?: boolean;
     /** Generate axe-core accessibility audits for key pages (web target). Default true. */
@@ -636,7 +638,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         };
 
         // 4a. Web: author every scenario in a real browser, one agent run per scenario.
-        /** Journeys written and, as asked (runTestCases false), left for a person to run. */
+        /** Journeys written and left for a person to run (runTestCases not true). */
         let notRun = 0;
         if (scenarios.length) {
             const results = await mapLimit(scenarios, ctx.config.CONCURRENCY, async (scenario) => {
@@ -684,7 +686,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         return;
                     }
                     await persistNew(spec, "playwright", "PENDING", undefined, meta);
-                    if (req.runTestCases === false) notRun++;
+                    if (!runsTestCases(req)) notRun++;
                     else pending.push({ spec, framework: "playwright", scenario, ...(scenarioRules.length ? { rules: scenarioRules } : {}) });
                     ctx.emit({ stage: "generation", kind: "script_generated", message: `${key} ${spec.title} (${spec.steps.length} steps)` });
                 } catch (err) {

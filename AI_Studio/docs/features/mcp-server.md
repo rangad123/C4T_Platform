@@ -79,7 +79,7 @@ Each tool has a strict input schema (a misspelled argument is an error, not sile
 |---|---|---|
 | `list_projects` | Projects with test counts and the latest job state | no |
 | `get_project` | Address, readiness (from the dashboard when the platform has one), test counts by status, latest job | no |
-| `analyze_application` | `{ url, name?, projectId?, includeWebTests?, includeApiTests?, openApiUrl?, apiBaseUrl?, maxPages?, ... }`. Creates the project if needed (or reuses the one with that name), starts generation, returns the job id and **echoes exactly what was switched on** | starts a job |
+| `analyze_application` | `{ url, name?, projectId?, includeWebTests?, includeApiTests?, openApiUrl?, apiBaseUrl?, maxPages?, ... }`. Creates the project if needed (or reuses the one with that name), starts generation, returns the job id and **echoes exactly what was switched on**. The checks run; the test cases it writes are not run until `run_tests` | starts a job |
 | `get_job` | Status, progress steps, counts, problem, latest messages | no |
 | `wait_for_job` | Polls until the job ends or `timeoutSeconds` (default 60, at most 120) passes, then returns the summary or the current state; call again with the same id to keep waiting | no |
 | `list_tests` | `{ projectId, status?, q?, limit? }` with ids, keys, status, severity | no |

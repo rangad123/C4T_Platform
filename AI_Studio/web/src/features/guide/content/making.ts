@@ -35,7 +35,7 @@ export const making: Topic[] = [
             step("Type the address of your application. To steer the plan, fill in Focus (optional).", "Focus (optional)"),
             step("Choose Explore again, then read the plan. Choose Create the tests, or Discard the plan.", "Explore again", "Create the tests", "Discard the plan"),
         ],
-        goodToKnow: ["Pages behind a sign-in are planned only if the Requirements tab has the sign-in details.", "Stop exploring keeps the tests already created."],
+        goodToKnow: ["Pages behind a sign-in are planned only if the Requirements tab has the sign-in details.", "Stop exploring keeps the tests already created.", "The checks run while the tests are created. The test cases are written, not run: approve them, then choose Run when you are ready."],
         open: { label: "Start a project", to: { place: "new-project" } },
         words: ["exploration", "plan", "test-account"],
         related: ["describe-a-test", "first-steps", "test-accounts"],

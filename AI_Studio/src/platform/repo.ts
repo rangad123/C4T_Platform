@@ -85,7 +85,7 @@ export interface JobOptions {
     testIds?: string[];
     /** Plan and write the functional test cases of the journeys (web target). Default true; false when the project's testing agents leave out the Test Case Generation Agent (testing-agents.ts). */
     functionalTests?: boolean;
-    /** false: the journeys' test cases are written and not run (a plan confirmed in the web app; see engine GenerationRequest.runTestCases). Absent: they run, as before. */
+    /** true (evaluation only): the journeys' test cases also run in the job. Absent or false: they are written and not run (engine GenerationRequest.runTestCases). */
     runTestCases?: boolean;
     /** Generate axe-core accessibility audits (web target). Default true. */
     accessibility?: boolean;

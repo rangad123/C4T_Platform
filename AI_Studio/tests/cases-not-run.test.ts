@@ -3,8 +3,10 @@
  * discovery of a local site -> planning and authoring with a scripted model double -> the plan confirmed (the path the web app takes).
  *
  * Checks that the journeys the plan creates are saved as written test cases with steps and are not run (no execution, no run job,
- * status "Not run yet"), that the job says so, and that the person's own Run (POST /api/projects/:id/runs) still runs them. The
- * requirements route (POST /requirements/generate-cases) is covered in tests/generate-cases.test.ts.
+ * status "Not run yet"), that the job says so, and that the person's own Run (POST /api/projects/:id/runs) still runs them. Every
+ * other product entry point writes only too: a scheduled "Explore again" and the MCP server's analyze_application (which, like the
+ * CLI's --analyze, uses the plain start route). A request that does not say runTestCases: true (evaluation only) never runs them.
+ * The requirements route (POST /requirements/generate-cases) is covered in tests/generate-cases.test.ts.
  *
  * Fixture site: port 6493 (tests/fixtures/memory-site.ts). The platform is driven through `server.inject`.
  * Run under the browser lock:
@@ -17,9 +19,12 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
+import { runsTestCases } from "../src/engine/orchestrator.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { PlatformClient } from "../src/mcp/client.js";
+import { TOOLS } from "../src/mcp/tools.js";
 import { Worker } from "../src/platform/worker.js";
 import { startMemorySite, type MemorySite } from "./fixtures/memory-site.js";
 
@@ -110,6 +115,19 @@ async function finished(jobId: string): Promise<any> {
     throw new Error("the job did not finish");
 }
 const executionsOf = (projectId: string) => platform.db.all("SELECT e.id FROM test_executions e JOIN test_cases t ON t.id = e.test_case_id WHERE t.project_id = ?", projectId);
+const executionsOfJobTests = (jobId: string) => platform.db.all("SELECT e.id, e.test_case_id FROM test_executions e JOIN test_cases t ON t.id = e.test_case_id WHERE t.job_id = ?", jobId);
+/** The journeys a generation job wrote: written with steps, "Not run yet", never executed; the job ends COMPLETED and says so. */
+async function expectWrittenNotRun(jobId: string) {
+    const job = await finished(jobId);
+    expect(["COMPLETED", "PARTIALLY_COMPLETED"], JSON.stringify(job)).toContain(job.status);
+    const journeys = platform.repo.listTests(job.projectId, { jobId }).filter((t) => t.generationMeta?.scenario);
+    expect(journeys.map((t) => t.title).sort()).toEqual(IDEAS.map((i) => i.title).sort());
+    expect(journeys.map((t) => t.validationStatus)).toEqual(journeys.map(() => "PENDING"));
+    const ran = new Set(executionsOfJobTests(jobId).map((e) => String(e.test_case_id)));
+    expect(journeys.filter((t) => ran.has(t.id))).toEqual([]);
+    const kinds = ((await call("GET", `/api/test-generation/${jobId}/events`)).body as Array<{ kind: string }>).map((e) => e.kind);
+    expect(kinds).toContain("test_cases_not_run");
+}
 /** A Project Admin approves the AI's draft (drafts never run until approved, review-store.ts). */
 const approve = async (testId: string) => {
     const v = await call("GET", `/api/tests/${testId}/review/1`);
@@ -166,5 +184,43 @@ describe("the Test Case Generation Agent only writes the test cases", () => {
         expect(executionsOf(projectId).length).toBeGreaterThanOrEqual(2);
         const after = (await testsOf(projectId)).filter((t) => t.testId.startsWith("WEB-"));
         expect(after.map((t) => t.validationStatus)).toEqual(["VALIDATED", "VALIDATED"]);
+    }, 240_000);
+});
+
+describe("every other product entry point writes only, too", () => {
+    it("a request that does not ask to run them never runs them (evaluation alone passes runTestCases: true)", () => {
+        expect(runsTestCases({})).toBe(false);
+        expect(runsTestCases({ runTestCases: false })).toBe(false);
+        expect(runsTestCases({ runTestCases: true })).toBe(true);
+    });
+
+    it("the MCP server's analyze_application (the plain start route the CLI's --analyze uses too)", async () => {
+        const inject: typeof fetch = async (input, init) => {
+            const u = new globalThis.URL(String(input));
+            const res = await server.inject({ method: (init?.method ?? "GET") as "GET", url: u.pathname + u.search, headers: (init?.headers ?? {}) as Record<string, string>, ...(init?.body ? { payload: String(init.body) } : {}) });
+            return new Response(res.statusCode === 204 ? null : res.body, { status: res.statusCode, headers: { "content-type": String(res.headers["content-type"] ?? "application/json") } });
+        };
+        const config = { baseUrl: "http://platform.test", host: "platform.test", pollMs: 50 };
+        const ctx = { client: new PlatformClient(config, inject), config, waits: new Map<string, number>() };
+        const tool = TOOLS.find((t) => t.name === "analyze_application")!;
+        const text = String(await tool.run({ url: URL, name: "Through MCP", includeApiTests: false, maxPages: 10, securityChecks: false, accessibility: false }, ctx as never));
+        expect(text).toMatch(/not run by this job/);
+        const jobId = /Job id: ([\w-]+)/.exec(text)![1]!;
+        await expectWrittenNotRun(jobId);
+    }, 240_000);
+
+    it("a scheduled Explore again", async () => {
+        const projectId = (await call("POST", "/api/projects", { name: "Scheduled" })).body.id as string;
+        // A first exploration, so the project has an application the schedule explores again (the way a schedule needs one).
+        const first = (await call("POST", `/api/projects/${projectId}/test-generation`, { url: URL, maxPages: 10, targets: ["web"], accessibility: false, healthChecks: false, inputChecks: false, securityChecks: false })).body.jobId as string;
+        await expectWrittenNotRun(first);
+        // The schedule's "Run now": the same start a due schedule makes (schedule-services.ts startRun, scheduler.ts startScheduledJob).
+        const made = await call("POST", `/api/projects/${projectId}/schedules`, { kind: "generate", cadence: { type: "daily", time: "03:00" }, enabled: false });
+        expect(made.status, JSON.stringify(made.body)).toBe(201);
+        const started = await call("POST", `/api/projects/${projectId}/schedules/${made.body.id}/run`);
+        expect(started.status, JSON.stringify(started.body)).toBe(202);
+        expect(platform.repo.getJob(started.body.jobId)!.options).toMatchObject({ trigger: "schedule" });
+        expect(platform.repo.getJob(started.body.jobId)!.options.runTestCases).toBeUndefined();
+        await expectWrittenNotRun(started.body.jobId);
     }, 240_000);
 });

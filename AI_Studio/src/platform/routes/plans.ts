@@ -21,9 +21,10 @@ import { testingAgentsOf } from "./testing-agents.js";
  *   GET    /api/projects/:id/plans/:jobId          what was found, the test ideas, and how many tests each kind of check would create
  *   POST   /api/projects/:id/plans/:jobId/create   create the tests from the plan with the choices made (a normal generation job that starts
  *                                                  from the plan: nothing is explored again). The journeys' test cases are written and
- *                                                  not run (runTestCases false); the checks run.
+ *                                                  not run (unless runTestCases, evaluation only); the checks run.
  *   DELETE /api/projects/:id/plans/:jobId          forget a plan that will not be used
- * Callers that never pass `plan` (the CLI, the MCP server, schedules, the old form) behave exactly as before.
+ * Callers that never pass `plan` (the CLI, the MCP server, schedules, the old form) explore and create in one job, as before; like a
+ * confirmed plan, that job writes the journeys' test cases without running them.
  */
 
 /** What may change when the person confirms: which kinds of check to create and which test ideas to leave out. Nothing that widens what the exploration was allowed to touch. */
@@ -215,7 +216,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         const appId = repo.createApplication(id, planned.url, keptMobile ? { ...config, mobile: keptMobile } : config, planned.credentials);
         // The Test Case Generation Agent only writes the test cases: they are run when the person runs them (POST /runs), not here
         // unless the caller asks (runTestCases). The checks of the other agents run as part of the creation.
-        const created = await repo.createJob(id, appId, { ...options, runTestCases: runCases === true });
+        const created = await repo.createJob(id, appId, { ...options, ...(runCases ? { runTestCases: true } : {}) });
         if (narrowed.dropped.length) repo.addEvent(created.id, { stage: "planning", kind: "agent_checks_dropped", level: "warn", message: droppedChecksNote(narrowed.dropped), data: { dropped: narrowed.dropped } });
         return reply.code(202).send({ jobId: created.id, status: created.status });
     });

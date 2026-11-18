@@ -318,10 +318,10 @@ describe("the real runner explores; the AI and what it saves stay on the platfor
             const job = await jobDone(started.body.jobId, 240_000);
             const events = platform.repo.listEvents(started.body.jobId);
             expect(job.status, JSON.stringify(events.filter((e) => e.level !== "info").map((e) => e.message))).toMatch(/COMPLETED/);
-            // The tests are the platform's, made through the sink, and the authored one was validated on the runner.
+            // The tests are the platform's, made through the sink; the authored one is written, not run (a person runs it).
             const tests = (await call("GET", `/api/projects/${p.project}/tests`, undefined, p.token)).body as Array<{ title: string; validationStatus: string }>;
             expect(tests.map((t) => t.title)).toContain("Browse the product list");
-            expect(tests.find((t) => t.title === "Browse the product list")!.validationStatus).toBe("VALIDATED");
+            expect(tests.find((t) => t.title === "Browse the product list")!.validationStatus).toBe("PENDING");
             // Every model call was answered here by the job's model; the engine's events are the job's own.
             expect(modelCalls).toBeGreaterThan(callsBefore);
             expect(kinds(started.body.jobId)).toEqual(expect.arrayContaining(["explore_on_runner"]));

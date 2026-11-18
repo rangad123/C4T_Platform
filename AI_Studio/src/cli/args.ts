@@ -165,7 +165,8 @@ Try “ai-test run --help”.
 
 What to run (pick one):
   --specs <file.json> --url <app>      Replay saved tests against the app. No AI, fast, repeatable: the usual CI mode.
-  --analyze --url <app>                Generate new tests with AI first (needs an AI key, like the server), then validate.
+  --analyze --url <app>                Generate new tests with AI first (needs an AI key, like the server): the checks run, the
+                                       test cases it writes are not run (with --server, run them later without --analyze).
   --server <url> --project <name>      Drive a running platform instead of running locally (add --specs or --analyze,
                                        or neither to re-run the project's existing tests). --url is the app to test.
   --api-key <key> | --api-key-env NAME The platform's API key (default: the AI_TEST_API_KEY variable). Prefer the variable.

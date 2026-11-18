@@ -1,8 +1,9 @@
 # AI Testing Platform — Architecture
 
 A standalone platform that takes an application URL, autonomously explores and understands the
-application, plans tests, generates executable scripts, **runs them to validate them**, and stores
-the validated suite. There is no chat or copilot surface: the AI is an internal backend service.
+application, plans tests, generates executable scripts, and stores the suite. The checks run in the
+job; the test cases it writes are **not run until a person runs them** (`runTestCases`, evaluation only, runs them in the job),
+and that first run validates and repairs them. There is no chat or copilot surface: the AI is an internal backend service.
 
 ## 1. Overall architecture
 

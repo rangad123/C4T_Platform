@@ -1,8 +1,9 @@
 # AI Testing Platform
 
 Give it an application URL. It explores the app, understands it, plans tests, generates
-executable Playwright / API test scripts from a framework-independent specification, **runs them to
-validate them**, and stores the validated suite. No chat interface — the AI is a backend worker.
+executable Playwright / API test scripts from a framework-independent specification, and stores the
+suite. The checks run straight away; the test cases it writes are **not run until you run them**, and that first run
+validates and repairs them. No chat interface — the AI is a backend worker.
 
 ```
 URL → discover → understand → plan → author specs → render scripts → execute → repair → validated suite

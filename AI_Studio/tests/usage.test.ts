@@ -170,6 +170,8 @@ async function analyse(projectId: string) {
         url: SITE,
         targets: ["web"],
         maxPages: 6,
+        // The AI calls of validating and repairing new test cases are counted here: their run is asked for as the evaluation asks.
+        runTestCases: true,
         accessibility: false,
         healthChecks: false,
         securityChecks: false,

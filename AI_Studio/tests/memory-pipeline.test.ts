@@ -141,6 +141,8 @@ async function analyse(projectId: string, v: 1 | 2, options: Record<string, unkn
         url: URL,
         targets: ["web"],
         maxPages: 10,
+        // What validated tests teach the site memory is checked here: their run is asked for as the evaluation asks (product callers never do).
+        runTestCases: true,
         credentials: { username: MEMORY_SITE_USER.email, password: MEMORY_SITE_USER.password },
         accessibility: false,
         healthChecks: false,

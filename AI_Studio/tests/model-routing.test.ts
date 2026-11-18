@@ -140,7 +140,8 @@ const call = async (method: "GET" | "PUT" | "POST", url: string, payload?: unkno
 };
 const TERMINAL = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
 async function generate(projectId: string) {
-    const queued = await call("POST", `/api/projects/${projectId}/test-generation`, { url: SITE, targets: ["web"], maxPages: 6, accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false });
+    const queued = await call("POST", `/api/projects/${projectId}/test-generation`, { url: SITE, targets: ["web"], maxPages: 6, accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false, runTestCases: true });
+    // runTestCases: the repair of a fumbled scenario happens while new test cases run, asked for as the evaluation asks (product callers never do).
     expect(queued.status, JSON.stringify(queued.body)).toBe(202);
     const jobId = queued.body.jobId as string;
     const end = Date.now() + 200_000;
