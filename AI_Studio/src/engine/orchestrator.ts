@@ -1468,23 +1468,23 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
         get model() {
             if (wrapped === undefined) {
                 const m = base.model;
-                wrapped =
-                    typeof m === "object" && m?.specificationVersion === "v3"
-                        ? wrapLanguageModel({
-                              model: m,
-                              middleware: {
-                                  specificationVersion: "v3",
-                                  wrapGenerate: async ({ doGenerate }) => {
-                                      gate();
-                                      return doGenerate();
-                                  },
-                                  wrapStream: async ({ doStream }) => {
-                                      gate();
-                                      return doStream();
-                                  },
-                              },
-                          })
-                        : m;
+                // Only an AI SDK v3 model can be wrapped so each call passes the gate; any other (an older interface, a bare model id)
+                // would make calls the session never counts, so it is refused instead of handed out ungated.
+                if (typeof m !== "object" || m?.specificationVersion !== "v3") throw new Error(`The AI model "${base.modelName}" cannot be counted against the exploration's limits, so it is not used for exploring by objectives.`);
+                wrapped = wrapLanguageModel({
+                    model: m,
+                    middleware: {
+                        specificationVersion: "v3",
+                        wrapGenerate: async ({ doGenerate }) => {
+                            gate();
+                            return doGenerate();
+                        },
+                        wrapStream: async ({ doStream }) => {
+                            gate();
+                            return doStream();
+                        },
+                    },
+                });
             }
             return wrapped;
         },
