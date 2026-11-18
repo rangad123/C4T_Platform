@@ -4,12 +4,17 @@
  * reading it again at the full price. Nothing about what is asked changes: the same text, in the same order, reaches the model.
  *
  * Who caches how:
- *   - Anthropic (direct): explicit markers. The instructions (system) get a breakpoint, which also covers the tool definitions because
- *     Anthropic renders tools before the system text. A call with tools (an agent loop that resends everything each step) also gets the
- *     request-level automatic marker, which caches the whole conversation up to its last block, so each step reads the previous step's prefix.
+ *   - Anthropic (direct, and gateways speaking its Messages API such as MiniMax's): explicit markers. Every instruction (system) message
+ *     gets a breakpoint, which also covers the tool definitions because Anthropic renders tools before the system text; instructions in two
+ *     parts (the same text every run, then a part of this run only) are still read from the cache up to the first. A text part tagged as
+ *     the shared prefix of a series of calls (`SHARED_PREFIX_TAG`, provider.ts `cachePrefix`: the application summary of every planning
+ *     call) gets one too, so the next call of the series reads it. A call with tools (an agent loop that resends everything each step) also
+ *     gets the request-level automatic marker, which caches the whole conversation up to its last block, so each step reads the previous
+ *     step's prefix. At most MAX_BREAKPOINTS markers per request, as Anthropic allows.
  *   - OpenRouter (or another OpenAI-compatible gateway) asked for an Anthropic model (`anthropic/...` or a `claude` name): Anthropic's
  *     `cache_control` passed through in the Chat Completions body, on the system message and, for agent loops, on the first user message
- *     (the long scenario + first page snapshot that every later step repeats). The SDK has no option for this, so a `fetch` wrapper adds it.
+ *     (the long scenario + first page snapshot that every later step repeats); without tools, a first user message of several text parts
+ *     only (the shared prefix, then the rest) gets it on its first part. The SDK has no option for this, so a `fetch` wrapper adds it.
  *   - OpenAI, Google (Gemini 2.5 and later) and OpenRouter's other models cache repeated prefixes on their own: nothing is sent.
  *   - Other OpenAI-compatible endpoints (local servers): nothing is sent (unknown fields could be refused).
  *
@@ -29,6 +34,13 @@ export type CacheStyle = "anthropic" | "anthropic-passthrough" | "automatic" | "
 
 /** The marker Anthropic understands; 5 minutes, the default and cheapest write. */
 export const EPHEMERAL = { type: "ephemeral" } as const;
+
+/** Anthropic accepts at most this many cache markers in one request (the request-level marker counts as one). */
+export const MAX_BREAKPOINTS = 4;
+
+/** The provider options of the text part that is the shared prefix of a series of calls (provider.ts `promptWithPrefix`). No provider reads this key. */
+export const SHARED_PREFIX_TAG = { aitp: { sharedPrefix: true } } as const;
+const isSharedPrefix = (po: unknown): boolean => (po as { aitp?: { sharedPrefix?: unknown } } | undefined)?.aitp?.sharedPrefix === true;
 
 /** An OpenAI-compatible model name that is an Anthropic model behind a gateway (OpenRouter `anthropic/claude-...`, LiteLLM `anthropic/...`). */
 export function isAnthropicBehindGateway(modelName: string): boolean {
@@ -95,20 +107,33 @@ export function promptCacheSetting(cfg: Pick<Config, "LLM_PROMPT_CACHE">): { ena
 const withAnthropicCache = (po: CallOptions["providerOptions"]): NonNullable<CallOptions["providerOptions"]> => ({ ...po, anthropic: { ...po?.anthropic, cacheControl: EPHEMERAL } });
 
 /**
- * The Anthropic markers for one request: the last system message, and for calls with tools the request-level automatic marker. Pure, and
- * the prompt's text is never touched (only `providerOptions` of a message are added), so the model sees the same request as without it.
+ * The Anthropic markers for one request: every system message, a text part tagged as a shared prefix (SHARED_PREFIX_TAG), and for calls
+ * with tools the request-level automatic marker; at most MAX_BREAKPOINTS in all: the request-level marker and the last system message
+ * come first (as before), then shared prefixes, then earlier system messages. Pure, and the prompt's text is never touched (only `providerOptions` are added), so the model sees the same
+ * request as without it.
  */
 export function markAnthropicRequest(params: CallOptions): CallOptions {
     const prompt = [...params.prompt];
-    let lastSystem = -1;
-    prompt.forEach((m, i) => {
-        if (m.role === "system") lastSystem = i;
-    });
-    if (lastSystem >= 0) {
-        const m = prompt[lastSystem]!;
-        prompt[lastSystem] = { ...m, providerOptions: withAnthropicCache(m.providerOptions) } as PromptMessage;
-    }
     const loop = (params.tools?.length ?? 0) > 0;
+    let left = MAX_BREAKPOINTS - (loop ? 1 : 0);
+    const systems = prompt.flatMap((m, i) => (m.role === "system" ? [i] : []));
+    const markSystem = (i: number) => {
+        const m = prompt[i]!;
+        prompt[i] = { ...m, providerOptions: withAnthropicCache(m.providerOptions) } as PromptMessage;
+        left--;
+    };
+    // The last instructions (they hold the most), then the shared prefixes, then earlier instructions: a read point at each stable part.
+    if (systems.length && left > 0) markSystem(systems[systems.length - 1]!);
+    prompt.forEach((m, i) => {
+        if (m.role !== "user" || left <= 0) return;
+        const content = m.content.map((part) => {
+            if (left <= 0 || part.type !== "text" || !isSharedPrefix(part.providerOptions)) return part;
+            left--;
+            return { ...part, providerOptions: withAnthropicCache(part.providerOptions) };
+        });
+        prompt[i] = { ...m, content } as PromptMessage;
+    });
+    for (const i of systems.slice(0, -1).reverse()) if (left > 0) markSystem(i);
     return { ...params, prompt, ...(loop ? { providerOptions: withAnthropicCache(params.providerOptions) } : {}) };
 }
 
@@ -136,17 +161,22 @@ function markChatMessage(m: ChatMessage): ChatMessage {
 
 /**
  * Anthropic's `cache_control` in an OpenAI Chat Completions body (OpenRouter passes it to Anthropic): on the system message (the
- * instructions; tools render before it) and, when the request has tools, on the first user message. At most two breakpoints, under
- * Anthropic's four. Returns the body unchanged when it is not a chat request.
+ * instructions; tools render before it) and, when the request has tools, on the first user message; without tools, on the first part
+ * of a first user message made of several text parts (a shared prefix). At most two breakpoints, under Anthropic's four. Returns the
+ * body unchanged when it is not a chat request.
  */
 export function markChatCompletionsBody(body: { messages?: ChatMessage[]; tools?: unknown[]; [k: string]: unknown }): typeof body {
     if (!Array.isArray(body.messages)) return body;
     const messages = [...body.messages];
     const sys = messages.findIndex((m) => m?.role === "system" || m?.role === "developer");
     if (sys >= 0) messages[sys] = markChatMessage(messages[sys]!);
+    const user = messages.findIndex((m) => m?.role === "user");
     if (Array.isArray(body.tools) && body.tools.length > 0) {
-        const user = messages.findIndex((m) => m?.role === "user");
         if (user >= 0) messages[user] = markChatMessage(messages[user]!);
+    } else if (user >= 0) {
+        // A shared prefix and the rest (provider.ts promptWithPrefix): several parts, all text. The first is what the next call repeats.
+        const m = messages[user]!;
+        if (Array.isArray(m.content) && m.content.length > 1 && m.content.every((p) => p?.type === "text")) messages[user] = { ...m, content: m.content.map((p, i) => (i === 0 ? { ...p, cache_control: EPHEMERAL } : p)) };
     }
     return { ...body, messages };
 }

@@ -8,9 +8,7 @@
  *     an agent loop and a phone exploration send with caching on and off.
  * Ports: 7290 fake provider, 7291 cache simulator. Starts no browser.
  */
-import crypto from "node:crypto";
 import fs from "node:fs";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { generateText, stepCountIs, tool } from "ai";
@@ -27,6 +25,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { UsageStore } from "../src/platform/usage-store.js";
+import { startCacheSimulator } from "./fixtures/anthropic-cache-simulator.js";
 import { startFakeProvider, type FakeProvider } from "./fixtures/fake-llm-provider.js";
 
 const fast = { baseDelayMs: 5, maxDelayMs: 20, attemptTimeoutMs: 5000, deadlineMs: 20_000 };
@@ -377,53 +376,7 @@ describe("Settings and the usage routes", () => {
     });
 });
 
-// ── the measured effect, on a simulated Anthropic prompt cache ───────────────
-
-/**
- * A fake Anthropic Messages endpoint that bills like Anthropic's prompt cache as documented: blocks in the order tools, system,
- * messages; a prefix is cached at each breakpoint (block cache_control, or the request-level marker on the last block) once it is at
- * least MIN tokens; a later request reads the longest cached prefix found at or up to 20 blocks before one of its breakpoints. Tokens
- * are characters / 4. The answers are scripted, so the same conversation runs with caching on and off.
- */
-async function startCacheSimulator(port: number, answer: (body: any, n: number) => unknown) {
-    const MIN = 512;
-    const cache = new Set<string>();
-    const strip = (b: unknown) => JSON.stringify(b, (k, v) => (k === "cache_control" ? undefined : v));
-    let n = 0;
-    const server = http.createServer((req, res) => {
-        const chunks: Buffer[] = [];
-        req.on("data", (c: Buffer) => chunks.push(c));
-        req.on("end", () => {
-            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            const blocks: any[] = [...(body.tools ?? []), ...(Array.isArray(body.system) ? body.system : body.system ? [{ type: "text", text: body.system }] : [])];
-            for (const m of body.messages) for (const c of typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content) blocks.push({ role: m.role, ...c });
-            const tokens = blocks.map((b) => Math.ceil(strip(b).length / 4));
-            const cum: number[] = [];
-            tokens.reduce((s, t, i) => (cum[i] = s + t), 0);
-            const key = (i: number) => crypto.createHash("sha1").update(blocks.slice(0, i + 1).map(strip).join("\u0001")).digest("hex");
-            const bps = blocks.map((b, i) => (b.cache_control ? i : -1)).filter((i) => i >= 0);
-            if (body.cache_control) bps.push(blocks.length - 1);
-            let read = 0;
-            for (const bp of [...new Set(bps)].sort((a, b) => b - a)) {
-                for (let j = bp; j >= Math.max(0, bp - 20) && !read; j--) if (cache.has(key(j))) read = cum[j]!;
-                if (read) break;
-            }
-            let write = 0;
-            for (const bp of bps) {
-                if (cum[bp]! < MIN) continue;
-                if (!cache.has(key(bp))) write = Math.max(write, cum[bp]! - read);
-                cache.add(key(bp));
-            }
-            const total = cum[cum.length - 1] ?? 0;
-            const out: any = answer(body, n++);
-            out.usage = { input_tokens: total - read - write, output_tokens: 20, cache_read_input_tokens: read, cache_creation_input_tokens: write };
-            res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify(out));
-        });
-    });
-    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
-    return { url: `http://127.0.0.1:${port}`, reset: () => ((n = 0), cache.clear()), close: () => new Promise<void>((r) => server.close(() => r())) };
-}
+// ── the measured effect, on a simulated Anthropic prompt cache (tests/fixtures/anthropic-cache-simulator.ts) ───────────────
 
 describe("measured: tokens with caching on and off (simulated Anthropic cache)", () => {
     // A page snapshot of about 2,400 characters, like the sample shop's product list.

@@ -414,7 +414,8 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
     /** Runs a round of calls concurrently; a failed call is said in plain words and the others are kept. */
     const round = async (batch: Array<{ prompt: string; quota: number }>) => {
         const results = await mapLimit(batch, ctx.config.CONCURRENCY, (c) =>
-            ctx.llm.object({ system: SYSTEM, schema: PlanSchema, maxOutputTokens: Math.min(16_000, 2_000 + 320 * c.quota), purpose: "planning", prompt: c.prompt }),
+            // Every planning prompt starts with the same summary: sent as the shared prefix, the provider's prompt cache serves it to the next call.
+            ctx.llm.object({ system: SYSTEM, schema: PlanSchema, maxOutputTokens: Math.min(16_000, 2_000 + 320 * c.quota), purpose: "planning", prompt: c.prompt, cachePrefix: summary }),
         );
         const failed = results.flatMap((r) => (r.ok ? [] : [r.error]));
         const ok = results.flatMap((r) => (r.ok ? [r.value.scenarios] : []));

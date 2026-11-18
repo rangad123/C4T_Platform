@@ -11,14 +11,14 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, Output, type LanguageModel } from "ai";
+import { generateText, Output, type LanguageModel, type ModelMessage } from "ai";
 import type { z } from "zod";
 import type { Config } from "../../config.js";
 import type { EngineEvent } from "../context.js";
 import { classifyLlmError, LlmCallError, scrubDetail } from "./errors.js";
 import { isResilientModel, ResilientModel, type ChainEntry, type ModelV3, type OwnKeyHandling, type ResiliencePolicy, type ResilientOptions } from "./resilience.js";
 import type { LlmPurpose } from "./usage.js";
-import { addUsage, cachePlan, promptCacheSetting } from "./prompt-cache.js";
+import { addUsage, cachePlan, promptCacheSetting, SHARED_PREFIX_TAG } from "./prompt-cache.js";
 
 export type LlmProviderId = Config["LLM_PROVIDER"];
 export const LLM_PROVIDERS: readonly LlmProviderId[] = ["anthropic", "openai", "google", "openai-compatible"];
@@ -73,6 +73,12 @@ export interface LlmClient {
     object<T extends z.ZodTypeAny>(args: {
         system: string;
         prompt: string;
+        /**
+         * The leading part of `prompt` that a series of calls of one job shares (the application summary of every planning call, say). It
+         * is sent as a block of its own before the rest, so a provider's prompt cache can serve it to the next call (prompt-cache.ts). The
+         * model reads the same text in the same order; when it is not a prefix of `prompt`, it is ignored.
+         */
+        cachePrefix?: string;
         schema: T;
         maxOutputTokens?: number;
         /** What the call is for; only used to label AI usage (see usage.ts). Never changes what is sent to the model. */
@@ -359,6 +365,25 @@ export function describeBadOutput(err: unknown): string {
 
 const isBadOutput = (err: unknown): boolean => classifyLlmError(err).cls === "bad_output";
 
+/**
+ * The prompt as one user message: a shared prefix of it (see `LlmClient.object`'s `cachePrefix`) becomes a text part of its own, tagged
+ * for the prompt cache (prompt-cache.ts marks it while caching is on), followed by the rest. Without a usable prefix, the plain prompt.
+ */
+export function promptWithPrefix(prompt: string, cachePrefix: string | undefined): { prompt: string } | { messages: ModelMessage[] } {
+    if (!cachePrefix || cachePrefix.length >= prompt.length || !prompt.startsWith(cachePrefix)) return { prompt };
+    return {
+        messages: [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: cachePrefix, providerOptions: SHARED_PREFIX_TAG },
+                    { type: "text", text: prompt.slice(cachePrefix.length) },
+                ],
+            },
+        ],
+    };
+}
+
 /** The client around an already-built model (also how tests wrap a scripted model double). */
 export function llmClientFromModel(model: LanguageModel, modelName: string): LlmClient {
     const usage: Usage = { inputTokens: 0, outputTokens: 0 };
@@ -401,13 +426,13 @@ export function llmClientFromModel(model: LanguageModel, modelName: string): Llm
         modelName,
         model,
         usage,
-        async object({ system, prompt, schema, maxOutputTokens }) {
+        async object({ system, prompt, cachePrefix, schema, maxOutputTokens }) {
             const res = await structured((note) =>
                 retry(() =>
                     generateText({
                         model,
                         system,
-                        prompt: note ? `${prompt}\n\n${repairNote(note)}` : prompt,
+                        ...promptWithPrefix(note ? `${prompt}\n\n${repairNote(note)}` : prompt, cachePrefix),
                         maxOutputTokens,
                         providerOptions: PROVIDER_OPTIONS,
                         maxRetries,
