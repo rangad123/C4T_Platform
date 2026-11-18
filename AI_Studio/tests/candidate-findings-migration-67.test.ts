@@ -1,7 +1,10 @@
 /**
- * Migration 66 (candidate findings, testing-engine Phase 3): a database left by the release before it keeps every row; it gains the
+ * Migration 67 (candidate findings, testing-engine Phase 3): a database left by the release before it keeps every row; it gains the
  * candidate findings table (one per project and fingerprint, removed with the project; a deleted run or test leaves the finding without
  * it); a fresh database and an upgraded one end with the same schema; opening again re-runs nothing.
+ *
+ * Slot 66 is a project's AI model (sheet #4), which reaches main first: a database main left at 66 (its SQL copied below) goes to 67
+ * too and keeps the AI model on its projects, and so does one left at 65.
  */
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -11,7 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { createDatabaseAtVersion, Db, knownSchemaVersion } from "../src/platform/db.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-cand66-"));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-cand67-"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const at = "2026-11-17T10:00:00.000Z";
@@ -34,10 +37,24 @@ function seed(raw: Exec): void {
     ins("INSERT INTO app_workflow_decisions (project_id, fingerprint, status, decided_name, decided_steps_json, decided_by, decided_at) VALUES (?,?,?,?,?,?,?)", "p1", "f".repeat(64), "confirmed", "Checkout", "[]", "u-1", at);
 }
 
+/** Main's slot 66, as sheet #4 ships it (AI_Studio/src/platform/db.ts on branch sheet-push). */
+const MAIN_SLOT_66 = `ALTER TABLE projects ADD COLUMN ai_provider TEXT;
+ALTER TABLE projects ADD COLUMN ai_model TEXT;`;
+
 function oldDatabase(file: string): void {
     createDatabaseAtVersion(file, 65);
     const raw = new DatabaseSync(file);
     seed(raw);
+    raw.close();
+}
+
+/** A database main left at 66: slots 1-65, main's 66 recorded as run, a project with its AI model. */
+function mainDatabaseAt66(file: string): void {
+    oldDatabase(file);
+    const raw = new DatabaseSync(file);
+    raw.exec(MAIN_SLOT_66);
+    raw.prepare("INSERT INTO schema_version (version) VALUES (?)").run(66);
+    raw.prepare("UPDATE projects SET ai_provider = ?, ai_model = ? WHERE id = ?").run("anthropic", "claude-sonnet", "p1");
     raw.close();
 }
 
@@ -47,9 +64,9 @@ const addFinding = (db: Db, fingerprint: string, project = "p1") =>
         `cf-${fingerprint.slice(0, 4)}-${project}`, project, "j1", "j1", "t1", fingerprint, "candidate", "medium", "captured", "{}", 1, at, at, at, at,
     );
 
-describe("migration 66", () => {
+describe("migration 67", () => {
     it("is known to this code", () => {
-        expect(knownSchemaVersion()).toBeGreaterThanOrEqual(66);
+        expect(knownSchemaVersion()).toBeGreaterThanOrEqual(67);
     });
 
     it("keeps every row of a slot-65 database and adds the candidate findings empty", () => {
@@ -57,6 +74,7 @@ describe("migration 66", () => {
         oldDatabase(file);
         const db = new Db(file);
         expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(knownSchemaVersion());
+        expect(db.all("SELECT version FROM schema_version WHERE version >= 66 ORDER BY version")).toEqual([{ version: 66 }, { version: 67 }]);
         expect(db.all("SELECT id FROM projects")).toEqual([{ id: "p1" }]);
         expect(db.all("SELECT id, status FROM generation_jobs")).toEqual([{ id: "j1", status: "done" }]);
         expect(db.all("SELECT id, validation_status FROM test_cases")).toEqual([{ id: "t1", validation_status: "NEEDS_REVIEW" }]);
@@ -76,7 +94,27 @@ describe("migration 66", () => {
         upgraded.close();
         fresh.close();
         const again = new Db(file);
-        expect(again.all("SELECT version FROM schema_version WHERE version = 66")).toHaveLength(1);
+        expect(again.all("SELECT version FROM schema_version WHERE version = 67")).toHaveLength(1);
+        again.close();
+    });
+
+    it("takes a database main left at 66 to 67, keeping its projects' AI model and adding the candidate findings", () => {
+        const file = path.join(dir, "main66.db");
+        mainDatabaseAt66(file);
+        const db = new Db(file);
+        expect(db.all("SELECT version FROM schema_version ORDER BY version").map((r) => r.version).slice(-3)).toEqual([65, 66, 67]);
+        expect(db.all("SELECT id, ai_provider, ai_model FROM projects")).toEqual([{ id: "p1", ai_provider: "anthropic", ai_model: "claude-sonnet" }]);
+        expect(db.all("SELECT status, decided_name FROM app_workflow_decisions")).toEqual([{ status: "confirmed", decided_name: "Checkout" }]);
+        expect(db.all("SELECT * FROM candidate_findings")).toEqual([]);
+        const fresh = new Db(":memory:");
+        expect(schemaOf(db)).toEqual(schemaOf(fresh));
+        fresh.close();
+        addFinding(db, "b".repeat(64));
+        expect(db.all("SELECT fingerprint FROM candidate_findings")).toEqual([{ fingerprint: "b".repeat(64) }]);
+        db.close();
+        const again = new Db(file);
+        expect(again.all("SELECT version FROM schema_version WHERE version >= 66")).toHaveLength(2);
+        expect(again.all("SELECT ai_model FROM projects")).toEqual([{ ai_model: "claude-sonnet" }]);
         again.close();
     });
 

@@ -268,7 +268,7 @@ export default defineConfig({
             "tests/bench-objectives-score-unit.test.ts",
             "tests/explore-input-classes-unit.test.ts",
             "tests/explore-long-values-unit.test.ts",
-            "tests/candidate-findings-migration-66.test.ts",
+            "tests/candidate-findings-migration-67.test.ts",
             "tests/candidate-finding-store.test.ts",
             "tests/candidate-findings-api.test.ts",
             "tests/explore-explored-unit.test.ts",

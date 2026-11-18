@@ -314,7 +314,10 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 63: the authoring agents' tool-call records are gone: nothing has written or read them since M1, and retention deleted what was left (agent_actions had no index of its own; agent_runs stays) */ `DROP TABLE IF EXISTS agent_actions;`,
     /* 64: application intelligence sources, the application version and source fingerprints of each model version, and a fingerprint per rule (schema lives in app-intel-store.ts; existing versions and rules keep every row, the new columns start empty) */ APP_INTEL_V2_MIGRATION,
     /* 65: people's decisions about workflows (confirmed or rejected), one per project and workflow fingerprint, with the name and steps they decided about (schema lives in app-intel-store.ts; existing projects have none) */ APP_WORKFLOW_DECISIONS_MIGRATION,
-    /* 66: candidate findings from exploration, one per project and fingerprint, shaped like security_findings, status candidate only (schema lives in candidate-finding-store.ts; existing projects have none) */ CANDIDATE_FINDINGS_MIGRATION,
+    // 66 is the AI model on projects (sheet #4), which reaches main before Phase 3; on this branch it is reserved, and the merge takes main's SQL.
+    // A database this branch opened records 66 without that SQL, so 66 is also in LATE_FILLED_SLOTS (told by its column).
+    /* 66: reserved for a project's AI model (sheet #4, on main) */ `-- reserved`,
+    /* 67: candidate findings from exploration, one per project and fingerprint, shaped like security_findings, status candidate only (schema lives in candidate-finding-store.ts; existing projects have none) */ CANDIDATE_FINDINGS_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */
@@ -322,9 +325,9 @@ const SLOT_STEPS: ReadonlyMap<number, (raw: DatabaseSync) => void> = new Map([[6
 
 /**
  * Slots that were reserved before their SQL existed: the slot number and a table only that slot creates (and no later slot drops: slot 42's
- * runner_access was dropped by 57, so 42 is told by device_reservations, which 57 makes again).
+ * runner_access was dropped by 57, so 42 is told by device_reservations, which 57 makes again), or with `column`, a column only it adds.
  */
-const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
+const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string; column?: string }> = [
     { slot: 14, table: "runbooks" },
     { slot: 22, table: "custom_tests" },
     { slot: 23, table: "spec_versions" },
@@ -341,6 +344,8 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
     // After 51: it may rebuild the agents table that 53 adds a column to.
     { slot: 53, table: "agent_task_events" },
     { slot: 54, table: "test_version_deps" },
+    // Adds only columns, so it is told by one of them: a database opened while 66 was reserved (Phase 3 before the merge) lacks it.
+    { slot: 66, table: "projects", column: "ai_provider" },
 ];
 
 export type Row = Record<string, any>;
@@ -393,8 +398,8 @@ export class Db {
      * slots this open still runs (`recorded`: the version the database had). A slot not recorded yet runs in order anyway.
      */
     private repairSkippedMigrations(recorded: number): void {
-        for (const { slot, table } of LATE_FILLED_SLOTS) {
-            if (slot > recorded || this.dialect.tableExists(this.raw, table)) continue;
+        for (const { slot, table, column } of LATE_FILLED_SLOTS) {
+            if (slot > recorded || (column ? this.dialect.columnExists(this.raw, table, column) : this.dialect.tableExists(this.raw, table))) continue;
             this.raw.exec("BEGIN");
             try {
                 this.raw.exec(MIGRATIONS[slot - 1]!);
