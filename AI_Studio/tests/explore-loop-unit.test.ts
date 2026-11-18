@@ -646,4 +646,10 @@ describe("runExploration: reads, passes and replays (CP2 M-1, M-5)", () => {
             ["click", "performed"],
         ]);
     });
+
+    it("the objectives budget's stop sentence names what it counts: objective pursuits (CP2 M-6)", async () => {
+        const r = await run([obj("a", 3), obj("b", 2), obj("c", 1)], { budgets: { ...BUDGETS, objectives: 2 } });
+        expect(r.stopReason).toBe("objectives_done");
+        expect(r.stopDetail).toBe("The session's limit of 2 objective pursuits was reached.");
+    });
 });
