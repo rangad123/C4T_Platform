@@ -140,7 +140,7 @@ describe("bench-report --labels", () => {
         const r = await cli(["--observed", one, "--labels", labels]);
         expect(r.code).toBe(2);
         expect(r.out).toMatch(/old labels file/);
-        expect(r.out).not.toMatch(/Observed vs captured/);
+        expect(r.out).not.toMatch(/Observed vs fails on the seeded app/);
     });
 
     it("--migrate-labels writes the bound copy next to the original and leaves the original untouched", async () => {

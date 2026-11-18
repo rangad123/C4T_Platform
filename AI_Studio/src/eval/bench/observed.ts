@@ -1,5 +1,5 @@
 /**
- * "Observed vs captured" (pure; unit-tested in tests/bench-observed-unit.test.ts): of the findings a benchmark reported, which ones the saved
+ * "Observed vs fails on the seeded app" (pure; unit-tested in tests/bench-observed-unit.test.ts): of the findings a benchmark reported, which ones the saved
  * script kept and which ones were seen while the test was written but lost on replay. Read from a benchmark result alone (schema.ts); no
  * app, platform or model. Definitions, each finding in exactly one kind, checked in this order:
  *
