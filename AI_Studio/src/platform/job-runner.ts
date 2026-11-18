@@ -37,7 +37,7 @@ import { tryResolveSpecRefs } from "../engine/locators/refs.js";
 import { cancelSummary } from "./cancel-summary.js";
 import { createFrameSink } from "../engine/frames/sink.js";
 import { frameHub } from "./frame-hub.js";
-import { saveExploration } from "./exploration-store.js";
+import { exploredObjectivesOf, saveExploration } from "./exploration-store.js";
 import { PLAN_ARTIFACT, PLAN_FILE, planOptionsOf, requireStoredPlan } from "./plan-store.js";
 import { planFamilies, planTotal } from "../engine/planning/preview.js";
 import { RepoSink } from "./repo-sink.js";
@@ -522,6 +522,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 // Phase 3 (P3-21): explore by objectives in an AI agent project; data operators only with EXPLORE_DATA_OPERATORS=true. On a
                 // runner too old for it, explore-dispatch.ts takes it off again and the job says why.
                 ...((project) => (project ? objectivesOf(projectSetupOf(project), config.EXPLORE_DATA_OPERATORS) : {}))(repo.getProject(job.projectId)),
+                // What the project's last exploration by objectives explored: the others rank higher ("not explored yet", priority.ts).
+                ...(await exploredObjectivesOf(repo, store, job.projectId)),
                 ...(o.fullExploration ? { fullExploration: true } : {}),
                 ...(o.understandingBaseline ? { pageUnderstanding: false } : {}),
                 cleanup,
