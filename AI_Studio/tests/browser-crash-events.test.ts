@@ -108,7 +108,9 @@ describe("a crash is an observed event", () => {
 describe("every session whose observed text can reach a prompt, a record or evidence gets the run's secrets", () => {
     const src = (f: string) => fs.readFileSync(path.join(import.meta.dirname, "..", "src", f), "utf8");
     it("discovery, authoring, the replay check and agent runs pass secrets to the session", () => {
-        for (const [file, count] of [["engine/orchestrator.ts", 1], ["engine/web/author.ts", 2], ["engine/agent/objective.ts", 1]] as const) {
+        // orchestrator.ts has two: discovery's session and, since 151113c (2026-11-16, before rows 180-183), the signed-out pass's fresh
+        // session (crawler.ts addSignedOutPages). That one goes through crawl() like discovery, so a crash there is the same observed event.
+        for (const [file, count] of [["engine/orchestrator.ts", 2], ["engine/web/author.ts", 2], ["engine/agent/objective.ts", 1]] as const) {
             const text = src(file);
             const launches = text.split("BrowserSession.launch(").slice(1).map((rest) => rest.slice(0, rest.indexOf("});") >= 0 && rest.indexOf("});") < rest.indexOf(";") + 400 ? rest.indexOf("});") : rest.indexOf(";")));
             expect(launches.length, file).toBe(count);
