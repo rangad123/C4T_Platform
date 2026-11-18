@@ -25,3 +25,22 @@ export async function loadExploration(repo: Repo, store: ArtifactStore, jobId: s
         return undefined;
     }
 }
+
+/**
+ * The source refs of the objectives a session explored: an objective one of whose pursuits ran (completed, or stopped by the loop), as
+ * the coverage record counts exercised (engine/explore/coverage.ts). Sorted, without repeats.
+ */
+export function exploredSources(e: Pick<ExplorationSummary, "objectives" | "outcomes">): string[] {
+    const ran = new Set(e.outcomes.filter((o) => o.status === "completed" || o.status === "stopped").map((o) => String(o.objectiveId).split(":")[0]));
+    return [...new Set(e.objectives.filter((o) => ran.has(o.id)).map((o) => o.source))].sort();
+}
+
+/**
+ * GenerationRequest.exploredObjectives for a new exploration of the project: what its last exploration by objectives explored. Nothing
+ * when the project has no such record (none yet, or pruned): then no objective is marked "not explored yet".
+ */
+export async function exploredObjectivesOf(repo: Repo, store: ArtifactStore, projectId: string): Promise<{ exploredObjectives?: string[] }> {
+    const row = repo.db.get<{ job_id: string }>(`SELECT job_id FROM artifacts WHERE project_id = ? AND kind = ? AND job_id IS NOT NULL AND pruned_at IS NULL ORDER BY created_at DESC, ${repo.db.dialect.insertionOrder()} DESC LIMIT 1`, projectId, EXPLORATION_ARTIFACT);
+    const last = row ? await loadExploration(repo, store, row.job_id) : undefined;
+    return last && Array.isArray(last.objectives) && Array.isArray(last.outcomes) ? { exploredObjectives: exploredSources(last) } : {};
+}

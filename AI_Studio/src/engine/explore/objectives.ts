@@ -45,8 +45,12 @@ const KIND_OPERATORS: Record<ObjectiveKind, readonly ObjectiveOperator[]> = {
 const QUESTION_MAX = 1000;
 const EXPECTED_MAX = 1000;
 const REF_MAX = 500;
+/** The longest source ref an objective has. */
+export const OBJECTIVE_REF_MAX = REF_MAX;
 /** No level asks for more objectives in one session than this. */
 export const MAX_OBJECTIVES = 500;
+/** At most this many explored source refs are read (`ObjectiveOptions.explored`). */
+export const MAX_EXPLORED = 5000;
 
 const limit = (l: { min: number; max: number }) => z.number().int().min(l.min).max(l.max);
 export const ObjectiveBudgetSchema = z.object({ steps: limit(AGENT_LIMITS.steps), minutes: limit(AGENT_LIMITS.minutes), tokens: limit(AGENT_LIMITS.tokens) }).strict();
@@ -84,7 +88,7 @@ export const ObjectiveOptionsSchema = z
         /** Only these operators may run (e.g. without the data-changing ones); default: each kind's own. */
         operators: z.array(z.enum(OBJECTIVE_OPERATORS)).max(OBJECTIVE_OPERATORS.length).optional(),
         /** Source refs whose state was explored before (raises the priority of the others). */
-        explored: z.array(z.string().max(REF_MAX)).max(5000).optional(),
+        explored: z.array(z.string().max(REF_MAX)).max(MAX_EXPLORED).optional(),
     })
     .strict();
 export type ObjectiveOptions = z.input<typeof ObjectiveOptionsSchema>;

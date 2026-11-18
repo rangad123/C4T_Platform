@@ -87,7 +87,7 @@ export function objectivesProblem(agent: { name: string; capabilities: { explore
 
 /** The request without exploring by objectives: exactly what an exploration asked before Phase 3. */
 export function withoutObjectives<T extends object>(request: T): T {
-    const { objectives: _o, dataOperators: _d, ...rest } = request as T & { objectives?: unknown; dataOperators?: unknown };
+    const { objectives: _o, dataOperators: _d, exploredObjectives: _x, ...rest } = request as T & { objectives?: unknown; dataOperators?: unknown; exploredObjectives?: unknown };
     return rest as T;
 }
 

@@ -65,7 +65,7 @@ import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { LlmClient } from "./llm/provider.js";
 import { inputClassesFor } from "./explore/input-classes.js";
 import { runExploration, type ActionLogRow, type Budgets, type ExplorationResult, type LoopObjective, type ObjectiveContext, type ObjectiveOutcome, type ObjectiveRun, type StopReason } from "./explore/loop.js";
-import { objectivesFrom, type Objective, type ObjectiveField, type ObjectiveOperator } from "./explore/objectives.js";
+import { MAX_EXPLORED, OBJECTIVE_REF_MAX, objectivesFrom, type Objective, type ObjectiveField, type ObjectiveOperator } from "./explore/objectives.js";
 import { operatorApplied, scenariosFor, type OperatorCheck, type PerturbOptions } from "./explore/perturb.js";
 import { coverageOf, pursuitKey, type CoverageModel, type CoverageRecord, type CoverageTest, type SkippedOperator } from "./explore/coverage.js";
 import { pathPattern } from "./explore/state.js";
@@ -200,6 +200,12 @@ export interface GenerationRequest {
      * `allowMutatingApiTests` both true; otherwise they are skipped with the reason "data changes off".
      */
     dataOperators?: boolean;
+    /**
+     * With `objectives`: the source refs of the objectives the project's last exploration by objectives pursued (the platform reads them
+     * from that job's record, exploration-store.ts `exploredSources`). The others get priority.ts's "not explored yet" points. Absent:
+     * nothing is known about earlier sessions, so no objective gets them.
+     */
+    exploredObjectives?: string[];
 }
 
 /** Where an exploration had got to, saved as it goes (artifact CHECKPOINT_ARTIFACT of its job) so a stopped one can continue. */
@@ -1004,7 +1010,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const b = lv.exploration;
                 const dataOperators = req.dataOperators === true && req.allowMutatingApiTests === true;
                 const requiresAuth = Boolean(creds && authState.loggedIn);
-                const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataOperators, requiresAuth });
+                const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataOperators, requiresAuth, ...(req.exploredObjectives ? { explored: req.exploredObjectives } : {}) });
                 const budgets: Budgets = { objectives: b.objectives, actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
                 ctx.emit({
                     stage: "generation",
@@ -1546,10 +1552,12 @@ const refOf = (t: string) => {
  */
 export function objectivePursuits(
     k: Pick<AppKnowledge, "rules" | "workflows" | "objectiveInputs">,
-    opts: { maxObjectives: number; steps: number; perObjective: { minutes: number; tokens: number }; dataOperators: boolean; requiresAuth: boolean },
+    opts: { maxObjectives: number; steps: number; perObjective: { minutes: number; tokens: number }; dataOperators: boolean; requiresAuth: boolean; /** GenerationRequest.exploredObjectives. */ explored?: readonly string[] },
 ): { objectives: Objective[]; overCap: number; pursuits: ObjectivePursuit[]; skipped: SkippedOperator[] } {
     const inputs = k.objectiveInputs ?? { pages: [], transitions: [], workflowSteps: [] };
-    const { objectives, overCap } = objectivesFrom(inputs, k.rules, k.workflows, { maxObjectives: opts.maxObjectives, budget: { steps: opts.steps, minutes: opts.perObjective.minutes, tokens: opts.perObjective.tokens } });
+    // From the request: only refs an objective could have (a longer one names nothing), at most MAX_EXPLORED.
+    const explored = opts.explored ? { explored: opts.explored.filter((r) => typeof r === "string" && r.length <= OBJECTIVE_REF_MAX).slice(0, MAX_EXPLORED) } : {};
+    const { objectives, overCap } = objectivesFrom(inputs, k.rules, k.workflows, { maxObjectives: opts.maxObjectives, budget: { steps: opts.steps, minutes: opts.perObjective.minutes, tokens: opts.perObjective.tokens }, ...explored });
     const fields = new Map<string, ObjectiveField>();
     for (const page of inputs.pages) for (const form of page.forms) for (const field of form.fields) fields.set(refOf(`${page.id}/${form.name?.trim() || "form"}/${field.name}`), field);
     const pursuits: ObjectivePursuit[] = [];
