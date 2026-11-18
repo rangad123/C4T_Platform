@@ -87,7 +87,28 @@ export interface AuthorInput {
      * it, and the kept trace of a blocked attempt is cleaned with them.
      */
     secrets?: string[];
+    /**
+     * The exploration loop's bound (explore/loop.ts; CP2 H-2, M-1, M-5): asked before each action reaches the application. A refused
+     * action is not performed and the model is told so. Absent outside objective-driven exploration.
+     */
+    gate?: ActionGate;
 }
+
+/** An action as the gate sees it before it runs. */
+export interface GateAction {
+    tool: string;
+    args: unknown;
+    /** The address of the page the action is taken on. */
+    url: string;
+}
+
+export interface ActionGate {
+    /** Asked before each action reaches the application, in the order the model asked for them; a refusal means it is not performed. */
+    before(a: GateAction): { allowed: true } | { allowed: false; reason: string };
+    /** Told after an action that was allowed ran (with the address the page is on afterwards). */
+    after(a: { tool: string; args: unknown; ok: boolean; url: string }): void;
+}
+
 
 const AUTHORING_USE = " Where this scenario reaches what a rule describes, assert the expected behaviour it states; when the application genuinely does otherwise, call finish(result=\"defect\").";
 
@@ -355,6 +376,8 @@ const NO_OUTCOME = "Authoring finished without recording any assertion on the ex
 export const WRITER_STOPPED = "The test writer stopped before finishing the test";
 /** Why a test was not written when the test writer was still acting when its steps ran out. */
 const STEP_BUDGET_SPENT = "Step budget exhausted before finishing";
+/** The start of what the model is told about an action the exploration refused: it did not reach the application. */
+const NOT_PERFORMED = "Not performed:";
 const NO_OUTCOME_HINT =
     "Not finished: the test has no assertion on the scenario's expected outcome after the last action. Assert what the user should now observe (text, value, URL or count), not only that the element you used is visible, then call finish again.";
 const INTERACTIONS = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "download"]);
@@ -501,10 +524,22 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 input.onAction?.({ tool: toolName, args, ok: false, observation: refusalText(banned) });
                 return { success: false, error: `${refusalText(banned)} Do not use this control; find another way or finish.`, url: here().url() };
             }
+            // Ended (the job was cancelled, or the exploration ended this pursuit): nothing more reaches the application, so the
+            // calls the model made in the same reply after a refusal are not performed either.
+            if (ctx.signal?.aborted) return { success: false, error: `${NOT_PERFORMED} This test writer's work was ended. Call finish.`, url: here().url() };
+            // The exploration's bound is asked before the action runs (CP2 H-2).
+            if (input.gate) {
+                const verdict = input.gate.before({ tool: toolName, args, url: here().url() });
+                if (!verdict.allowed) {
+                    input.onAction?.({ tool: toolName, args, ok: false, observation: `${NOT_PERFORMED} ${verdict.reason}` });
+                    return { success: false, error: `${NOT_PERFORMED} ${verdict.reason} Do not try it again; call finish.`, url: here().url() };
+                }
+            }
             // Working in a new tab: the step is recorded "in the popup" (the schema's popup support), as the script will run it.
             if (tab && !tab.isClosed() && POPUP_STEPS.has(step.action)) step = { ...step, inPopup: true } as Step;
             session.takeEvents();
             const r = await run(step);
+            input.gate?.after({ tool: toolName, args, ok: r.ok, url: here().url() });
             await session.quiet();
             // A new tab whose page answers slowly is handed out late: waited for here, so the click that opened it is the one told and recorded.
             await session.newTab();

@@ -116,14 +116,21 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
 
     it("the action tracker: a double submit is two states, the same action again on that state is a repeat", () => {
         const track = actionTracker("http://shop.test/order");
-        const click = { tool: "click", args: { by: "role", value: "Order" }, ok: true, observation: "url=http://shop.test/order" };
-        const fill = (value: string) => ({ tool: "fill", args: { target: { by: "label", value: "Quantity" }, value }, ok: true, observation: "url=http://shop.test/order" });
-        const a = [track(fill("0")), track(click), track(click), track(click)];
+        const url = "http://shop.test/order";
+        /** Asked before, told after (CP2 H-2): what the loop is asked for one action that runs. */
+        const step = (t: ReturnType<typeof actionTracker>, a: { tool: string; args: unknown }) => {
+            const asked = t.before({ ...a, url });
+            t.after({ ...a, ok: true, url });
+            return asked;
+        };
+        const click = { tool: "click", args: { by: "role", value: "Order" } };
+        const fill = (value: string) => ({ tool: "fill", args: { target: { by: "label", value: "Quantity" }, value } });
+        const a = [step(track, fill("0")), step(track, click), step(track, click), step(track, click)];
         expect(a[1]!.state).not.toBe(a[2]!.state);
         expect(a[3]).toEqual(a[2]);
         // A different value typed before the same submit is a new state.
-        const b = actionTracker("http://shop.test/order");
-        const c = [b(fill("0")), b(click), b(fill("11")), b(click)];
+        const b = actionTracker(url);
+        const c = [step(b, fill("0")), step(b, click), step(b, fill("11")), step(b, click)];
         expect(c[1]!.state).not.toBe(c[3]!.state);
         expect(c[0]!.state.startsWith("/order|")).toBe(true);
     });
