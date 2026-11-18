@@ -86,6 +86,9 @@ const toRecord = (r: FindingRow): CandidateFindingRecord => {
     };
 };
 
+/** The most findings one list answers (newest seen first). */
+export const CANDIDATE_FINDINGS_LIST_MAX = 500;
+
 export class CandidateFindingStore {
     constructor(
         private readonly sql: Sql,
@@ -126,11 +129,15 @@ export class CandidateFindingStore {
         });
     }
 
-    /** A project's findings, newest seen first; with `jobId`, those that run found first or last. */
-    async list(projectId: string, opts: { jobId?: string } = {}): Promise<CandidateFindingRecord[]> {
+    /**
+     * A project's findings, newest seen first; with `jobId`, those that run found first or last. At most `limit` of them, and never more
+     * than CANDIDATE_FINDINGS_LIST_MAX (a limit that is not a positive whole number is the cap).
+     */
+    async list(projectId: string, opts: { jobId?: string; limit?: number } = {}): Promise<CandidateFindingRecord[]> {
+        const limit = Number.isInteger(opts.limit) && opts.limit! > 0 ? Math.min(opts.limit!, CANDIDATE_FINDINGS_LIST_MAX) : CANDIDATE_FINDINGS_LIST_MAX;
         const rows = opts.jobId
-            ? await this.sql.all<FindingRow>("SELECT * FROM candidate_findings WHERE project_id = ? AND (first_job_id = ? OR last_job_id = ?) ORDER BY last_seen_at DESC, id", projectId, opts.jobId, opts.jobId)
-            : await this.sql.all<FindingRow>("SELECT * FROM candidate_findings WHERE project_id = ? ORDER BY last_seen_at DESC, id", projectId);
+            ? await this.sql.all<FindingRow>("SELECT * FROM candidate_findings WHERE project_id = ? AND (first_job_id = ? OR last_job_id = ?) ORDER BY last_seen_at DESC, id LIMIT ?", projectId, opts.jobId, opts.jobId, limit)
+            : await this.sql.all<FindingRow>("SELECT * FROM candidate_findings WHERE project_id = ? ORDER BY last_seen_at DESC, id LIMIT ?", projectId, limit);
         return rows.map(toRecord);
     }
 
