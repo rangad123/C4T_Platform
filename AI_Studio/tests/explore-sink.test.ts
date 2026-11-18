@@ -187,6 +187,21 @@ describe("the remote generation sink", () => {
         await forgetExploreSink(task.taskId);
     });
 
+    it("stores a finding's screenshot as a job artifact and answers its id, never a path (row 173)", async () => {
+        const { task } = await newTask();
+        const w = wire(task);
+        const sink = remoteGenerationSink({ post: w.post, dir: path.join(scratch, "img-task") });
+        const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9]);
+        const id = await sink.saveImageArtifact!("screenshot", "../WEB-001-finding-1.jpg", jpeg);
+        await sink.flush();
+        expect(w.methods()).toEqual(["saveImageArtifact"]);
+        const art = platform.repo.getArtifact(id) as { kind: string; path: string; job_id: string; project_id: string };
+        expect(art).toMatchObject({ kind: "screenshot", job_id: task.jobId, project_id: task.projectId });
+        expect(path.posix.basename(art.path)).toBe("WEB-001-finding-1.jpg");
+        expect(fs.readFileSync(localPathOf(platform.store, art.path)!)).toEqual(jpeg);
+        await forgetExploreSink(task.taskId);
+    });
+
     it("batches what returns nothing and keeps the order under many calls", async () => {
         const { task } = await newTask();
         const w = wire(task);

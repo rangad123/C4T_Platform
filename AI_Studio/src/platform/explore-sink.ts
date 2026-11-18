@@ -353,6 +353,15 @@ async function apply(p: Platform, task: ExploreTaskRef, s: TaskSink, c: SinkCall
         }
         case "saveTextArtifact":
             return k.saveTextArtifact(c.kind, c.name, c.content);
+        case "saveImageArtifact": {
+            // Counted against the attempt's file cap like every file a runner sends.
+            const got = await receive(s, [c.file]);
+            try {
+                return await k.saveImageArtifact(c.kind, c.file.name, await fs.readFile(got.paths[0]!));
+            } finally {
+                await fs.rm(got.dir, { recursive: true, force: true }).catch(() => undefined);
+            }
+        }
         case "saveHealing":
             return k.saveHealing(handle(p, task, s, c.h), c.result);
         case "saveCleanup":
