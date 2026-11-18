@@ -276,6 +276,7 @@ export default defineConfig({
             "tests/candidate-finding-store.test.ts",
             "tests/candidate-findings-api.test.ts",
             "tests/explore-explored-unit.test.ts",
+            "tests/remote-sink-refusal-unit.test.ts",
             "tests/repair-web-guard-unit.test.ts",
         ],
         testTimeout: 60_000,
