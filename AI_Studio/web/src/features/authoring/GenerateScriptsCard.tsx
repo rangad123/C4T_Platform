@@ -1,4 +1,5 @@
 import { ClipboardList, Sparkles, X } from "lucide-react";
+import { AiModelNote } from "../../components/AiModelNote";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, api, projectShape, type ProjectDetail, type TestSummary } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
@@ -27,6 +28,8 @@ interface GenerateAnswer {
     eligible?: string[];
     /** Web: the scripts are built one case after the other in a real browser, from this job on (src/platform/case-scripts.ts). */
     started?: { jobId: string; caseIds: string[] };
+    /** Set when the project's AI model is not one of this person's own and their default AI was used (components/AiModelNote.tsx). */
+    aiNote?: string;
 }
 /** What the endpoint answers for an iOS-only project and an Android one without its app (src/platform/routes/generate-scripts.ts), said before the click. */
 export const IOS_PROJECT = "The AI writes phone test scripts for Android apps only for now. This project tests an iOS app: write its scripts by hand or import them.";
@@ -75,7 +78,7 @@ type State =
     | { step: "confirm"; eligible: string[]; manual: number; scripted: number }
     | { step: "writing"; done: number; total: number }
     | { step: "building"; caseIds: string[]; done: number }
-    | { step: "done"; made: number; failed: Array<{ caseId: string; detail: string }> };
+    | { step: "done"; made: number; failed: Array<{ caseId: string; detail: string }>; aiNote?: string };
 
 /** The dry run, then the writing in chunks: one flow for the card under Test cases and the dialog on Test scripts. */
 function useGenerateScripts(projectId: string, onDone?: () => void) {
@@ -144,6 +147,7 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
         setError(null);
         const failed: Array<{ caseId: string; detail: string }> = [];
         let made = 0;
+        let aiNote: string | undefined;
         setState({ step: "writing", done: 0, total: eligible.length });
         try {
             for (let i = 0; i < eligible.length; i += chunk) {
@@ -155,6 +159,7 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
                     return setState({ step: "building", caseIds: r.started.caseIds, done: 0 });
                 }
                 made += r.created.length;
+                aiNote ??= r.aiNote;
                 failed.push(...r.skipped.filter((s) => s.reason === "ai-failed" || s.reason === "refused"));
                 setState({ step: "writing", done: Math.min(i + chunk, eligible.length), total: eligible.length });
             }
@@ -162,7 +167,7 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
             if (made === 0) return fail(e);
             failed.push({ caseId: "", detail: describeApiError(e) });
         }
-        setState({ step: "done", made, failed });
+        setState({ step: "done", made, failed, ...(aiNote ? { aiNote } : {}) });
         if (made > 0) {
             // The Test scripts tab's count follows at once.
             announceProjectChanged(projectId);
@@ -223,6 +228,7 @@ function Outcome({ state, form, projectId, onClose }: { state: Extract<State, { 
                     )}
                 </div>
             )}
+            <AiModelNote note={state.aiNote} />
             {state.failed.length > 0 && (
                 <Callout tone="warning" title={`${plural(state.failed.length, "test case")} got no script`}>
                     <ul className="gen-fails">

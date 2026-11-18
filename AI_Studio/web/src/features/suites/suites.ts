@@ -124,6 +124,8 @@ export interface SuiteProposal {
     scripts: Array<{ id: string; testId: string; title: string; kind: string; area: string }>;
     notes: string[];
     limits: { suites: number; nameLength: number };
+    /** Set when the project's AI model is not one of this person's own and their default AI was used (components/AiModelNote.tsx). */
+    aiNote?: string;
 }
 
 /** What generating by requirement will do, or did: "Create 2 suites and update 1", "Made 1 suite and added scripts to 2". */

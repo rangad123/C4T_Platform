@@ -45,6 +45,8 @@ export interface GenerateCasesResult {
     failed: string[];
     note: string | null;
     total: number;
+    /** Set when the project's AI model is not one of this person's own and their default AI was used (components/AiModelNote.tsx). */
+    aiNote?: string;
 }
 
 export interface CoverageSummary {
@@ -97,6 +99,8 @@ export interface ImportPreview {
     usedAi: boolean;
     /** Said when the AI was asked and the list came from the rules instead. */
     note: string | null;
+    /** Set when the project's AI model is not one of this person's own and their default AI was used (components/AiModelNote.tsx). */
+    aiNote?: string;
     max: number;
 }
 

@@ -1,4 +1,5 @@
 import { useAiBlock } from "../aiconfig/aiconfig";
+import { AiModelNote } from "../../components/AiModelNote";
 import { useState } from "react";
 import { Sparkles, X } from "lucide-react";
 import { api } from "../../api";
@@ -114,6 +115,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
             ) : (
                 <>
                     {preview.note && <Callout tone="warning">{preview.note}</Callout>}
+                    <AiModelNote note={preview.aiNote} />
                     <p className="t-secondary" data-testid="import-preview-summary">
                         Found {plural(preview.total, "requirement")}
                         {preview.usedAi ? " with the AI" : ""}.{preview.existing > 0 && ` ${plural(preview.existing, "reference")} already ${preview.existing === 1 ? "exists" : "exist"} in this project and ${preview.existing === 1 ? "is" : "are"} left out.`}

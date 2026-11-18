@@ -3,7 +3,7 @@ import { z } from "zod";
 import { clean, MAX_CASES } from "../../engine/manual/cases.js";
 import { batchesOf, generateCasesForBatch, MAX_GENERATE_REQUIREMENTS, NO_MODEL_FOR_CASES, type GeneratedCase, type RequirementForCases } from "../../engine/manual/generate.js";
 import { classifyLlmError, describeLlmError } from "../../engine/llm/errors.js";
-import { aiOwnerOfActor, personLlm } from "../ai-config.js";
+import { aiNoteOf, aiOwnerOfActor, personLlm } from "../ai-config.js";
 import { currentActor } from "../auth/actor.js";
 import { JobMeter } from "../../engine/llm/metered.js";
 import { ManualCaseStore } from "../manual-case-store.js";
@@ -159,7 +159,7 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
         const pid = projectId(req);
         const text = await sourceText(req.body);
         // The asking person's chosen AI key and who pays for it (ai-config.ts): a signed-in person never reaches the server's key.
-        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
+        const { llm, billing, blocked, note: aiNote } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         const skip = aiSkipReason(usage, pid);
@@ -167,7 +167,7 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
         // Counted against the AI budgets like a job's calls, under an id of its own (ai_usage keeps no foreign key on it).
         const meter = new JobMeter({ backend: usage, jobId: `requirements-${randomUUID()}`, projectId: pid, billing });
         const r = await candidatesWithAi({ config: p.config, llm: meter.wrap(llm) }, text).finally(() => meter.finish());
-        return preview(pid, r.candidates, r.usedAi, r.note);
+        return { ...(await preview(pid, r.candidates, r.usedAi, r.note)), ...aiNoteOf(aiNote) };
     });
 
     app.post("/api/projects/:id/requirements/import", async (req, reply) => {
@@ -196,7 +196,7 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
         const room = MAX_CASES - cases.countCases(pid);
         if (room <= 0) throw new HttpError(409, `This project already has ${MAX_CASES} test cases, the most it can have. Delete some before writing more.`);
         // The asking person's chosen AI key and who pays for it (ai-config.ts), as the import refinement does.
-        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
+        const { llm, billing, blocked, note: aiNote } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_CASES, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         if (aiSkipReason(usage, pid)) throw new HttpError(409, "The AI token limit was reached, so the AI cannot write test cases now. You can still add test cases by hand.");
@@ -246,7 +246,7 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
             gone.length ? `${gone.join(", ")} ${gone.length === 1 ? "was" : "were"} deleted while the AI was writing, so ${gone.length === 1 ? "its" : "their"} test cases were not saved.` : "",
             saved.limited ? `${saved.limited} more did not fit: a project can have at most ${MAX_CASES} test cases.` : "",
         ].filter(Boolean);
-        return reply.code(saved.created.length ? 201 : 200).send({ created: saved.created.length, cases: saved.created, perRequirement, duplicates: saved.duplicates, limited: saved.limited > 0, failed, note: notes.join(" ") || null, total: cases.countCases(pid) });
+        return reply.code(saved.created.length ? 201 : 200).send({ created: saved.created.length, cases: saved.created, perRequirement, duplicates: saved.duplicates, limited: saved.limited > 0, failed, note: notes.join(" ") || null, total: cases.countCases(pid), ...aiNoteOf(aiNote) });
     });
 
     app.get("/api/projects/:id/requirements/:rid", async (req) => {

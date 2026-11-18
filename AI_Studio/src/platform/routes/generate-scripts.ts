@@ -7,7 +7,7 @@ import { refusalFor } from "../../engine/authoring/describe.js";
 import { caseDescription, caseHasScript, linkScriptsToCase } from "../case-scripts.js";
 import { plainStarter } from "./authoring.js";
 import { JobMeter } from "../../engine/llm/metered.js";
-import { aiOwnerOfActor, personLlm } from "../ai-config.js";
+import { aiNoteOf, aiOwnerOfActor, personLlm } from "../ai-config.js";
 import { isAppUri } from "../../engine/desktop/target.js";
 import { MobileTargetSchema } from "../../engine/mobile/target.js";
 import type { TestSpec } from "../../engine/spec/schema.js";
@@ -179,7 +179,7 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
     /** Android: the AI writes each case as a phone test without the app, saved as its draft (case-phone-script.ts). */
     async function writeScripts(req: FastifyRequest, pid: string, now: string[], byId: Map<string, ManualCase>, skipped: Array<{ caseId: string; reason: SkipReason; detail: string }>, target: Extract<Target, { form: "phone" }>) {
         // The project's AI and who pays for it (ai-config.ts), as the other AI routes do.
-        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
+        const { llm, billing, blocked, note: aiNote } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_SCRIPTS, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         if (aiSkipReason(usage, pid)) throw new HttpError(409, "The AI token limit was reached, so the AI cannot write test scripts now. You can still write them by hand.");
@@ -247,7 +247,7 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
         // In the order the cases were chosen, whatever order the model answered in.
         created.sort((a, b) => now.indexOf(a.caseId) - now.indexOf(b.caseId));
         // A phone script was written without the app: the answer says so too (the draft's description says it as well).
-        return { form: target.form, created, skipped, ...(target.form === "phone" && created.length ? { note: CHECK_ON_DEVICE } : {}) };
+        return { form: target.form, created, skipped, ...(target.form === "phone" && created.length ? { note: CHECK_ON_DEVICE } : {}), ...aiNoteOf(aiNote) };
     }
 }
 

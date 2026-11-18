@@ -11,7 +11,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig, type Config } from "../src/config.js";
-import { modelChoicesOf, personLlm, PROJECT_MODEL_FALLBACK, PROJECT_MODEL_NOT_YOURS, resolveAiFor } from "../src/platform/ai-config.js";
+import { modelChoicesOf, personLlm, PROJECT_MODEL_FALLBACK, PROJECT_MODEL_FALLBACK_YOU, PROJECT_MODEL_NOT_YOURS, resolveAiFor } from "../src/platform/ai-config.js";
+import { defaultFramework } from "../src/engine/generators/index.js";
+import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { runJob } from "../src/platform/job-runner.js";
@@ -29,7 +31,8 @@ const CORA_B = "CORA-key-b-sentinel-2222";
 const DAN_KEY = "DAN-key-sentinel-3333";
 const SAM_OWN = "SAM-own-key-sentinel-4444";
 const ORG_KEY = "ORG-key-sentinel-5555";
-const ALL_KEYS = [CORA_A, CORA_B, DAN_KEY, SAM_OWN, ORG_KEY];
+const SAM_ORG_MODEL = "SAM-own-org-model-sentinel-6666";
+const ALL_KEYS = [CORA_A, CORA_B, DAN_KEY, SAM_OWN, ORG_KEY, SAM_ORG_MODEL];
 const PAGE = { "x-requested-with": "ai-studio" };
 
 const me = (id: string, role: string, permissions: readonly string[], organisationId: string | null = null) => ({
@@ -51,6 +54,8 @@ let app: Awaited<ReturnType<typeof buildServer>>;
 let dir = "";
 /** The key and model of every call the stand-in provider received. */
 let seen: Array<{ key: string; model: string }> = [];
+/** What the stand-in provider answers. */
+let replyText = "OK";
 const ids: Record<string, string> = {};
 let pid = "";
 let appId = "";
@@ -96,7 +101,7 @@ beforeAll(async () => {
         req.on("end", () => {
             seen.push({ key: String(req.headers.authorization ?? "").replace(/^Bearer /, ""), model: (JSON.parse(body || "{}") as { model?: string }).model ?? "" });
             res.setHeader("content-type", "application/json");
-            res.end(JSON.stringify({ id: "x", object: "chat.completion", created: 1, model: "stand-in", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "OK" } }], usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 } }));
+            res.end(JSON.stringify({ id: "x", object: "chat.completion", created: 1, model: "stand-in", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: replyText } }], usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 } }));
         });
     });
     await new Promise<void>((r) => fakeProvider.listen(PROVIDER_PORT, "127.0.0.1", r));
@@ -137,6 +142,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
     seen = [];
+    replyText = "OK";
     resetKeyTests();
     platform.db.run("UPDATE projects SET ai_provider = NULL, ai_model = NULL WHERE id = ?", pid);
     platform.db.run("DELETE FROM ai_configurations WHERE owner_kind = 'organisational'");
@@ -210,7 +216,7 @@ describe("choosing a project's AI model", () => {
         expect((await choose("t-cora", "model-b")).status).toBe(200);
         // Another person runs the project's work: their own key, never Cora's.
         const r = await ask(ids["t-dan"]!);
-        expect(r.note).toBe(PROJECT_MODEL_FALLBACK);
+        expect(r.note).toBe(PROJECT_MODEL_FALLBACK_YOU);
         expect(seen).toEqual([{ key: DAN_KEY, model: "model-dan" }]);
         const job = await runAs(ids["t-dan"]!, "w-dan");
         expect(job.cfgs[0]).toMatchObject({ LLM_API_KEY: DAN_KEY, LLM_MODEL: "model-dan" });
@@ -219,7 +225,7 @@ describe("choosing a project's AI model", () => {
         const b = platform.db.get<{ id: string }>("SELECT id FROM ai_configurations WHERE label = 'Cora B'")!;
         expect((await as("t-cora", "DELETE", `/api/me/ai/keys/${b.id}`)).status).toBe(204);
         seen = [];
-        expect((await ask(ids["t-cora"]!)).note).toBe(PROJECT_MODEL_FALLBACK);
+        expect((await ask(ids["t-cora"]!)).note).toBe(PROJECT_MODEL_FALLBACK_YOU);
         expect(seen).toEqual([{ key: CORA_A, model: "model-a" }]);
         await personalKey("t-cora", "Cora B", "model-b", CORA_B);
         // The assignment was taken away: Sam's work goes back to his own key, never the organisational one.
@@ -227,13 +233,13 @@ describe("choosing a project's AI model", () => {
         expect((await choose("t-sam", "model-org")).status).toBe(200);
         expect((await as("t-admin", "PUT", `/api/admin/ai-keys/${org}/assignees`, { personIds: [] })).status).toBe(200);
         seen = [];
-        expect((await ask(ids["t-sam"]!)).note).toBe(PROJECT_MODEL_FALLBACK);
+        expect((await ask(ids["t-sam"]!)).note).toBe(PROJECT_MODEL_FALLBACK_YOU);
         expect(seen).toEqual([{ key: SAM_OWN, model: "model-sam" }]);
         const samJob = await runAs(ids["t-sam"]!, "w-sam");
         expect(samJob.cfgs[0]).toMatchObject({ LLM_API_KEY: SAM_OWN });
         expect(samJob.events.some((e) => e.kind === "ai_model_fallback")).toBe(true);
         // The sentence names no key, label, provider or person.
-        for (const word of ["Cora", "Sam", "Shared", "model-org", "openai", ...ALL_KEYS]) expect(PROJECT_MODEL_FALLBACK).not.toContain(word);
+        for (const word of ["Cora", "Sam", "Shared", "model-org", "openai", ...ALL_KEYS]) for (const sentence of [PROJECT_MODEL_FALLBACK, PROJECT_MODEL_FALLBACK_YOU]) expect(sentence).not.toContain(word);
         expect((await resolveAiFor(deps(), ids["t-dan"]!, pid)).configuration?.ownerPersonId).toBe(ids["t-dan"]);
     });
 
@@ -257,5 +263,70 @@ describe("choosing a project's AI model", () => {
         // Nor any key's id: the project names a model, not a key.
         const keyIds = platform.db.all<{ id: string }>("SELECT id FROM ai_configurations").map((r) => r.id);
         for (const k of keyIds) expect(row).not.toContain(k);
+    });
+
+    it("with several keys of the model: the chosen key first, then an organisational key assigned to the person, then a personal one", async () => {
+        const org = await orgKeyForSam();
+        const own = await personalKey("t-sam", "Sam org model", "model-org", SAM_ORG_MODEL);
+        expect((await choose("t-sam", "model-org")).status).toBe(200);
+        // Sam's chosen key is his first one (model-sam): of the two with the project's model, Crowd4Test's is used, so Sam does not pay.
+        let r = await ask(ids["t-sam"]!);
+        expect(r.billing).toEqual({ owner: "crowd4test" });
+        expect(seen).toEqual([{ key: ORG_KEY, model: "model-org" }]);
+        expect((await resolveAiFor(deps(), ids["t-sam"]!, pid)).configuration?.id).toBe(org);
+        // His own key of that model chosen: the chosen key is used.
+        expect((await as("t-sam", "PUT", "/api/me/ai/chosen", { keyId: own.id })).status).toBe(200);
+        seen = [];
+        r = await ask(ids["t-sam"]!);
+        expect(r.billing).toEqual({ owner: "personal", personId: ids["t-sam"] });
+        expect(seen).toEqual([{ key: SAM_ORG_MODEL, model: "model-org" }]);
+        // Back to his first key and the assignment taken away: with no organisational key of the model left, his personal one is used.
+        expect((await as("t-sam", "PUT", "/api/me/ai/chosen", { keyId: platform.db.get<{ id: string }>("SELECT id FROM ai_configurations WHERE label = 'Sam'")!.id })).status).toBe(200);
+        expect((await as("t-admin", "PUT", `/api/admin/ai-keys/${org}/assignees`, { personIds: [] })).status).toBe(200);
+        seen = [];
+        r = await ask(ids["t-sam"]!);
+        expect(r.note).toBeUndefined();
+        expect(seen).toEqual([{ key: SAM_ORG_MODEL, model: "model-org" }]);
+        expect((await as("t-sam", "DELETE", `/api/me/ai/keys/${own.id}`)).status).toBe(204);
+    });
+});
+
+describe("AI started from a route tells the person when the project's model was not theirs", () => {
+    it("writing test cases, test scripts and suites and reading requirements: the answer carries the sentence, only when it applies", async () => {
+        platform.repo.updateProject(pid, { platforms: ["web"], testingModes: ["code"] });
+        platform.db.run("UPDATE applications SET url = 'http://127.0.0.1:9/' WHERE project_id = ?", pid);
+        const req = await as("t-cora", "POST", `/api/projects/${pid}/requirements`, { ref: "REQ-1", title: "People can sign in" });
+        expect(req.status, req.text).toBe(201);
+        const kase = await as("t-cora", "POST", `/api/projects/${pid}/manual-cases`, { title: "Sign in works", priority: "high", automation: "automated", steps: [{ action: "Sign in", expected: "The dashboard shows" }] });
+        expect(kase.status, kase.text).toBe(201);
+        const spec = TestSpecSchema.parse({ testId: "API-001", title: "A script", kind: "api", category: "X", steps: [{ action: "request", method: "GET", path: "/" }] });
+        platform.repo.insertTest({ projectId: pid, suiteId: platform.repo.getOrCreateSuite(pid, "X", "x"), jobId: null, spec, framework: defaultFramework("api"), validationStatus: "PENDING" });
+        expect((await choose("t-cora", "model-b")).status).toBe(200);
+        const routes = async (token: string) => {
+            replyText = JSON.stringify({ cases: [{ requirement: "REQ-1", title: `Check sign in ${token}`, priority: "high", type: "automated", steps: [{ action: "Open the page", expected: "The form shows" }] }] });
+            const cases = await as(token, "POST", `/api/projects/${pid}/requirements/generate-cases`, { requirementIds: [req.body.id] });
+            replyText = "OK";
+            const scripts = await as(token, "POST", `/api/projects/${pid}/manual-cases/generate-scripts`, { caseIds: [kase.body.id] });
+            const refine = await as(token, "POST", `/api/projects/${pid}/requirements/import/refine`, { text: "- People can sign in" });
+            replyText = JSON.stringify({ suites: [{ name: `Smoke ${token}`, description: "Quick.", scripts: ["API-001"] }] });
+            const suites = await as(token, "POST", `/api/projects/${pid}/test-suites/propose`, {});
+            return { cases, scripts, refine, suites };
+        };
+        // Dan may not use Cora's model: each answer says so, and his own key did the work.
+        const dan = await routes("t-dan");
+        for (const [name, r] of Object.entries(dan)) {
+            expect(r.status, `${name}: ${r.text}`).toBeLessThan(300);
+            expect(r.body.aiNote, name).toBe(PROJECT_MODEL_FALLBACK_YOU);
+        }
+        expect(seen.length).toBeGreaterThan(0);
+        expect(seen.every((s) => s.key === DAN_KEY)).toBe(true);
+        // Cora may: no sentence.
+        seen = [];
+        const cora = await routes("t-cora");
+        for (const [name, r] of Object.entries(cora)) {
+            expect(r.status, `${name}: ${r.text}`).toBeLessThan(300);
+            expect(r.body.aiNote, name).toBeUndefined();
+        }
+        expect(seen.every((s) => s.key === CORA_B)).toBe(true);
     });
 });

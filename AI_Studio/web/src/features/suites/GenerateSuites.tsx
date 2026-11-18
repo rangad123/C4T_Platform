@@ -1,4 +1,5 @@
 import { ListTree, Sparkles, Trash2, X } from "lucide-react";
+import { AiModelNote } from "../../components/AiModelNote";
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../../api";
 import { Button, Callout, ListSkeleton } from "../../components/ui";
@@ -157,7 +158,7 @@ interface Draft {
     description: string;
     testIds: string[];
 }
-type AiState = { step: "proposing" } | { step: "review"; drafts: Draft[]; notes: string[]; scripts: SuiteProposal["scripts"]; nameLength: number } | { step: "done"; saved: number } | { step: "failed"; error: string };
+type AiState = { step: "proposing" } | { step: "review"; drafts: Draft[]; notes: string[]; aiNote?: string; scripts: SuiteProposal["scripts"]; nameLength: number } | { step: "done"; saved: number } | { step: "failed"; error: string };
 
 /** The AI proposes suites; the person renames, removes suites, moves or removes scripts, then saves. Nothing is saved before that. */
 export function AiSuites({ projectId, existingNames, onClose, onSaved }: { projectId: string; existingNames: string[]; onClose: () => void; onSaved: () => void }) {
@@ -168,7 +169,7 @@ export function AiSuites({ projectId, existingNames, onClose, onSaved }: { proje
     useEffect(() => {
         let live = true;
         api<SuiteProposal>(`/projects/${projectId}/test-suites/propose`, { method: "POST", body: {} }).then(
-            (p) => live && setState({ step: "review", drafts: p.suites.map((s, i) => ({ key: `s${i}`, name: s.name, description: s.description, testIds: s.testIds })), notes: p.notes, scripts: p.scripts, nameLength: p.limits.nameLength }),
+            (p) => live && setState({ step: "review", drafts: p.suites.map((s, i) => ({ key: `s${i}`, name: s.name, description: s.description, testIds: s.testIds })), notes: p.notes, ...(p.aiNote ? { aiNote: p.aiNote } : {}), scripts: p.scripts, nameLength: p.limits.nameLength }),
             (e) => live && setState({ step: "failed", error: errorWords(e) }),
         );
         return () => {
@@ -213,6 +214,7 @@ export function AiSuites({ projectId, existingNames, onClose, onSaved }: { proje
                 <ProposalEditor
                     drafts={state.drafts}
                     notes={state.notes}
+                    aiNote={state.aiNote}
                     scripts={state.scripts}
                     nameLength={state.nameLength}
                     existingNames={existingNames}
@@ -242,6 +244,7 @@ export function AiSuites({ projectId, existingNames, onClose, onSaved }: { proje
 function ProposalEditor({
     drafts,
     notes,
+    aiNote,
     scripts,
     nameLength,
     existingNames,
@@ -253,6 +256,7 @@ function ProposalEditor({
 }: {
     drafts: Draft[];
     notes: string[];
+    aiNote?: string;
     scripts: SuiteProposal["scripts"];
     nameLength: number;
     existingNames: string[];
@@ -270,6 +274,7 @@ function ProposalEditor({
     return (
         <>
             <p className="t-secondary">Check the suites before saving them: change their names, remove suites, and move or remove scripts. Each suite is saved with the usual settings; open it afterwards to change how it runs.</p>
+            <AiModelNote note={aiNote} />
             {notes.map((n) => (
                 <p key={n} className="t-meta">
                     {n}

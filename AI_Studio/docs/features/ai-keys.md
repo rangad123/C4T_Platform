@@ -51,9 +51,12 @@ assigned to you, uses it." Changing it needs "Change project settings" (`GET`/`P
 
 The project stores the provider and the model name only (`projects.ai_provider`, `projects.ai_model`), never a key or a key's id. Each
 piece of AI work checks again for the person doing it (`resolveAiFor` in `src/platform/ai-config.ts`): when one of the keys they may use
-has that model (their chosen key first), that key is used and its owner pays as usual. When none has it (another person runs the work, a
+has that model, that key is used and its owner pays as usual: their chosen key first, then an organisational key assigned to them
+(Crowd4Test pays), then one of their personal keys. When none has it (another person runs the work, a
 key was removed, an assignment was taken away), the work uses their chosen key and a job says so: "The project's AI model is not one the
-person who started this work may use, so this work uses their default AI instead." A key the person may not use is never used.
+person who started this work may use, so this work uses their default AI instead." A key the person may not use is never used. AI
+started from a page (writing test cases, test scripts or suites, reading requirements with AI) tells the person in its answer (`aiNote`)
+and the page shows it with the result: "The project's AI model is not one you may use, so this used your default AI instead."
 
 ## Who pays
 

@@ -1,4 +1,5 @@
 import { ArrowRight, Sparkles, X } from "lucide-react";
+import { AiModelNote } from "../../components/AiModelNote";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "../../api";
 import { Button, Callout, LinkButton } from "../../components/ui";
@@ -104,6 +105,7 @@ function OutcomeBody({ projectId, state, onClose }: { projectId: string; state: 
                 {r.created > 0 ? `${plural(r.created, "test case")} ${r.created === 1 ? "has" : "have"} been created from your requirements.` : "The AI wrote nothing new for these requirements."}
                 {r.note && ` ${r.note}`}
             </Callout>
+            <AiModelNote note={r.aiNote} />
         </div>
     );
 }

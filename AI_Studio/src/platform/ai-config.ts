@@ -151,6 +151,10 @@ export interface AiModelPick {
 export const PROJECT_MODEL_NOT_YOURS = "You cannot choose this AI model: none of the AI keys you may use, your own or assigned to you, uses it.";
 /** Said on a job (read by everyone on the project) when its person may not use the project's model: names no key and no person. */
 export const PROJECT_MODEL_FALLBACK = "The project's AI model is not one the person who started this work may use, so this work uses their default AI instead.";
+/** The same, said to the person themselves in the answer of an AI route (writing test cases, scripts, suites, reading requirements). */
+export const PROJECT_MODEL_FALLBACK_YOU = "The project's AI model is not one you may use, so this used your default AI instead.";
+/** The field an AI route adds to its answer when it used the person's default instead of the project's model (the page shows it). */
+export const aiNoteOf = (note: string | undefined): { aiNote?: string } => (note ? { aiNote: note } : {});
 
 /** The keys this person may use now: their personal keys, then the organisational keys assigned to them while they may hold one. */
 export async function usableKeysOf(d: AiDeps, personId: string | null): Promise<AiConfiguration[]> {
@@ -176,7 +180,8 @@ export async function projectModelOf(sql: Sql, projectId: string): Promise<AiMod
 
 /**
  * The AI this person's work uses right now. `ownerId` is from aiOwnerOfActor / aiOwnerOfJob. With `projectId`, the project's AI model when
- * this person may use it, through one of their own keys (their chosen key first); else their default with `note` set. Never throws.
+ * this person may use it, through one of their own keys: their chosen key first, then an organisational key assigned to them (Crowd4Test
+ * pays), then a personal one; else their default with `note` set. Never throws.
  */
 export async function resolveAiFor(d: AiDeps, ownerId: string | null, projectId?: string | null): Promise<WorkAi> {
     const base = await defaultAiFor(d, ownerId);
@@ -187,7 +192,8 @@ export async function resolveAiFor(d: AiDeps, ownerId: string | null, projectId?
         const store = aiConfigStore(d);
         const matching = (await usableKeysOf(d, ownerId)).filter((k) => k.provider === pick.provider && k.model === pick.model);
         const chosen = base.configuration?.id;
-        matching.sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
+        const rank = (k: AiConfiguration) => (k.id === chosen ? 0 : k.kind === "organisational" ? 1 : 2);
+        matching.sort((a, b) => rank(a) - rank(b));
         for (const k of matching) {
             const u = await usable(store, k);
             if ("key" in u) return { billing: billingOfKey(k), source: "configuration", configuration: k, key: u.key };
@@ -358,7 +364,8 @@ export function configuredLlmForJob(deps: AiDeps & { db: Db; emit?: (e: EngineEv
 /** The client for a model call outside a job (a route), for the person acting: with who pays, and the sentence when it cannot run. */
 export async function personLlm(p: AiDeps, ownerId: string | null, projectId?: string | null): Promise<{ llm: LlmClient; billing: UsageBilling; blocked?: string; note?: string }> {
     const ai = await resolveAiFor(p, ownerId, projectId);
-    const note = ai.note ? { note: ai.note } : {};
+    // Said to the person themselves: the route puts it in its answer (aiNoteOf).
+    const note = ai.note ? { note: PROJECT_MODEL_FALLBACK_YOU } : {};
     if (ai.source === "server") return { llm: createLlmClientOrUnavailable(p.config), billing: ai.billing, ...note };
     return { llm: clientOfConfiguration(p, ai), billing: ai.billing, ...(ai.blocked ? { blocked: ai.blocked } : {}), ...note };
 }

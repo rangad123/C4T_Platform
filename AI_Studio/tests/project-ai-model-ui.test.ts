@@ -12,13 +12,15 @@ import { expect as pwExpect } from "@playwright/test";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
-import { aiConfigStore, PROJECT_MODEL_NOT_YOURS } from "../src/platform/ai-config.js";
+import { aiConfigStore, PROJECT_MODEL_FALLBACK_YOU, PROJECT_MODEL_NOT_YOURS } from "../src/platform/ai-config.js";
+import { startFakeProvider, type FakeProvider } from "./fixtures/fake-llm-provider.js";
 import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 
 const PORT = 7946;
 const C4T_PORT = 7947;
+const PROVIDER_PORT = 7948;
 const BASE = `http://127.0.0.1:${PORT}`;
 const SHOTS = process.env.SHOTS_DIR;
 
@@ -34,6 +36,8 @@ let server: Awaited<ReturnType<typeof buildServer>>;
 let c4t: http.Server;
 let dir = "";
 let pid = "";
+let fake: FakeProvider;
+const ids: Record<string, string> = {};
 const contexts: BrowserContext[] = [];
 
 const pageFor = async (token: string) => {
@@ -52,6 +56,7 @@ beforeAll(async () => {
         res.end(JSON.stringify(ACCOUNTS[auth] ?? { error: { message: "Invalid access token" } }));
     });
     await new Promise<void>((r) => c4t.listen(C4T_PORT, "127.0.0.1", r));
+    fake = await startFakeProvider(PROVIDER_PORT);
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-project-ai-model-ui-"));
     platform = bootstrap(
         loadConfig({ DATA_DIR: dir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: "project-ai-model-ui-key-1", SECRET_KEY: "project-ai-model-ui-secret-0123456789", C4T_API_ORIGIN: `http://127.0.0.1:${C4T_PORT}`, C4T_SITE_URL: "https://crowd4test.example", WEB_DIST: path.join(REPO_ROOT, "web/dist") } as never),
@@ -59,7 +64,6 @@ beforeAll(async () => {
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     browser = await chromium.launch();
-    const ids: Record<string, string> = {};
     for (const t of Object.keys(ACCOUNTS)) ids[t] = JSON.parse((await server.inject({ method: "GET", url: "/api/auth/state", headers: { cookie: `c4t_access=${t}` } })).body).me.id;
     pid = JSON.parse((await server.inject({ method: "POST", url: "/api/projects", headers: { cookie: "c4t_access=t-cora", "x-requested-with": "ai-studio" }, payload: { name: "Model project" } })).body).id;
     const added = await server.inject({ method: "POST", url: `/api/projects/${pid}/members`, headers: { cookie: "c4t_access=t-cora", "x-requested-with": "ai-studio" }, payload: { personId: ids["t-vic"] } });
@@ -77,6 +81,7 @@ afterAll(async () => {
     await server?.close();
     platform?.db.close();
     await new Promise((r) => c4t?.close(r));
+    await fake?.close();
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -117,5 +122,27 @@ describe("Project Settings, General: AI model", () => {
         await pwExpect(card.getByRole("button", { name: "Save" })).toHaveCount(0);
         await pwExpect(card.getByText("You have no AI keys with a model to choose. Add one in Settings, AI keys.")).toBeVisible();
         if (SHOTS) await card.screenshot({ path: path.join(SHOTS, "project-ai-model-read-only.png") });
+    });
+
+    it("AI work from a page tells the person when the project's model is not theirs: the sentence shows with the result", async () => {
+        // Vic gets a key of their own (another model), on a stand-in provider; the project keeps Cora's model.
+        const store = aiConfigStore({ sql: platform.sql, config: platform.config });
+        const k = await store.create({ kind: "personal", ownerPersonId: ids["t-vic"]!, label: "Vic", provider: "openai-compatible", model: "model-vic", baseUrl: `${fake.url}/openai/v1`, apiKey: "UI-key-vic-0000", createdBy: "test" });
+        await store.setChosen(ids["t-vic"]!, k.id);
+        platform.repo.updateProject(pid, { platforms: ["web"], testingModes: ["code"] });
+        const added = await server.inject({ method: "POST", url: `/api/projects/${pid}/requirements`, headers: { cookie: "c4t_access=t-cora", "x-requested-with": "ai-studio" }, payload: { title: "People can sign in" } });
+        expect(added.statusCode, added.body).toBe(201);
+        fake.queue("*", { text: JSON.stringify({ cases: [{ requirement: JSON.parse(added.body).ref, title: "Verify signing in", priority: "high", type: "automated", steps: [{ action: "Sign in", expected: "The dashboard shows" }] }] }) });
+        const page = await pageFor("t-vic");
+        await page.goto(`${BASE}/#/projects/${pid}/requirements`);
+        const card = page.getByTestId("generate-cases");
+        await card.getByRole("button", { name: "Generate test cases" }).click();
+        await page.getByRole("group", { name: "Choose requirements" }).getByLabel(/Choose all/).check();
+        await card.getByRole("button", { name: /^Generate test cases for/ }).click();
+        const outcome = card.getByTestId("generate-cases-outcome");
+        await pwExpect(outcome.getByTestId("cases-generated")).toContainText("Test cases generated");
+        await pwExpect(outcome.getByTestId("ai-model-note")).toHaveText(PROJECT_MODEL_FALLBACK_YOU);
+        expect(fake.seen.map((s) => s.model)).toEqual(["model-vic"]);
+        if (SHOTS) await outcome.screenshot({ path: path.join(SHOTS, "sheet4-ai-model-note.png") });
     });
 });
