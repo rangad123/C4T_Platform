@@ -864,8 +864,10 @@ directory listings. When your admin has turned the module off, none of this show
 - **Where:** *Security assessment* in the sidebar (under its own heading; the projects you test are under *Functional testing*). Inside a
   project: the *Security assessment* tab, with Overview, Applications, New assessment, Assessments, Findings, Reports, Activity and
   Notifications.
-- **Choose what a project is for:** on *New project*, pick **Functional testing**, **Security assessment** or **Both**. An existing project
-  can include it too: open *Setup*, then *Testing type*, Change. Nothing is deleted when you change it.
+- **Choose what a project is for:** *Create a project* does not ask; a new project is for functional testing. *New security project* on
+  the *Security assessment* page makes a project for security assessment only, from a name. To change what a project is for (Functional
+  testing, Security assessment or Both), open its *Settings*, *General*, then *Functional or security testing*, Change. Nothing is deleted
+  when you change it.
 - **1. Register the application:** its name, target address, environment and anything else in scope; under *Advanced*, paths never to
   request, the most requests per second (1 to 10) and an API document address. To look at signed-in pages too, choose a **saved
   sign-in** (the project's own or a test account's; the page says whether it is ready or has expired). Under *Advanced*, list

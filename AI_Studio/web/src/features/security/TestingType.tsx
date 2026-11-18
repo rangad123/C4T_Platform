@@ -1,16 +1,16 @@
 import { FlaskConical, ShieldCheck } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { api } from "../../api";
 import { CollapsedSetting } from "../../components/ProjectHub";
 import { Button, Callout } from "../../components/ui";
 import { go, routes, useRoute } from "../../lib/router";
 import { canRun, useRole } from "./SecurityChrome";
-import { TESTING_TYPES, getPendingTestingType, includesSecurity, saveTestingType, sec, setPendingTestingType, useSecurityStatus, useTestingType, type TestingType } from "./security";
+import { TESTING_TYPES, includesSecurity, saveTestingType, sec, useSecurityStatus, useTestingType, type TestingType } from "./security";
 import "./security.css";
 import { describeApiError } from "../../lib/labels";
 
 /** Functional testing / Security assessment / Both, as three labelled radio cards. */
-export function TestingTypeChoice({ value, onChange, name = "testing-type", disabled, legend = "What kind of testing is this project for?" }: { value: TestingType; onChange: (t: TestingType) => void; name?: string; disabled?: boolean; legend?: string }) {
+export function TestingTypeChoice({ value, onChange, name = "testing-type", disabled, legend = "What is this project for?" }: { value: TestingType; onChange: (t: TestingType) => void; name?: string; disabled?: boolean; legend?: string }) {
     return (
         <fieldset className="sec-type" data-testid="testing-type">
             <legend className="t-card">{legend}</legend>
@@ -28,27 +28,13 @@ export function TestingTypeChoice({ value, onChange, name = "testing-type", disa
 }
 
 /**
- * The New project page asks the testing type first (only when the module is on). Functional and Both keep today's ways to start;
- * Both also stores the type when the project is made. Security assessment needs only a name, then opens Register application.
+ * Create a project asks no testing type: a new project is for functional testing, and Settings, General changes it. Only the Security
+ * page's New security project link (`?type=security`, module on) opens the security-only form, which needs just a name.
  */
 export function SecurityStartGate({ children }: { children: ReactNode }) {
     const status = useSecurityStatus();
-    const initial = useRoute().query.get("type");
-    // The choice survives moving between the ways to start and the full options form (two mounts of this gate).
-    const [type, setType] = useState<TestingType>(() => getPendingTestingType() ?? (TESTING_TYPES.some((t) => t.value === initial) ? (initial as TestingType) : "functional"));
-    useEffect(() => {
-        setPendingTestingType(status?.enabled ? type : undefined);
-        return () => setPendingTestingType(undefined);
-    }, [type, status?.enabled]);
-    if (!status?.enabled) return <>{children}</>;
-    return (
-        <div className="stack">
-            <div className="card card-pad">
-                <TestingTypeChoice value={type} onChange={setType} />
-            </div>
-            {type === "security" ? <NewSecurityProject /> : children}
-        </div>
-    );
+    const security = useRoute().query.get("type") === "security";
+    return status?.enabled && security ? <NewSecurityProject /> : <>{children}</>;
 }
 
 function NewSecurityProject() {
@@ -64,7 +50,6 @@ function NewSecurityProject() {
         setBusy(true);
         try {
             const id = (await api<{ id: string }>("/projects", { method: "POST", body: { name: name.trim() } })).id;
-            setPendingTestingType(undefined);
             try {
                 await saveTestingType(id, "security");
             } catch (err) {
@@ -139,7 +124,7 @@ export function TestingTypeSetting({ id }: { id: string }) {
         <div style={{ marginBottom: 16 }} data-tour="testing-type">
             <CollapsedSetting title="Functional or security testing" summary={`${label}.${info.problem ? ` ${info.problem}` : ""}`} testId="setting-testing-type" extra={includesSecurity(info.type) ? <a className="btn btn-ghost" href={sec.overview(id)}><ShieldCheck size={18} aria-hidden />Open security assessment</a> : info.type === "functional" ? undefined : <a className="btn btn-ghost" href={routes.tests(id)}><FlaskConical size={18} aria-hidden />Open tests</a>}>
                 <div className="stack-sm">
-                    <TestingTypeChoice value={current} onChange={setValue} name={`testing-type-${id}`} disabled={!canRun(role)} legend="What is this project for?" />
+                    <TestingTypeChoice value={current} onChange={setValue} name={`testing-type-${id}`} disabled={!canRun(role)} />
                     <p className="hint">Changing it never deletes anything: functional tests and security findings are kept and stay apart.{canRun(role) ? "" : " Your role can look but not change this."}</p>
                     {error && <Callout tone="danger" title="We couldn’t save the testing type">{error}</Callout>}
                     {saved && (

@@ -9,7 +9,6 @@ import { useAuth } from "../auth/auth";
 import { sideOf, useCan } from "../auth/permissions";
 import { AppDetailsFields, EMPTY_APP_DRAFT, appDraftBody, appDraftProblem, appErrorText, uploadAppFiles, type AppDraft } from "./AppDetailsFields";
 import { SecurityStartGate } from "../security/TestingType";
-import { applyPendingTestingType } from "../security/security";
 import { AgentPicker, defaultAgents, fitsPlatforms, type AgentId, type AgentList } from "../testing-agents/testing-agents";
 
 const PLATFORM_HELP: Record<Platform, string> = { web: "A website or web application, tested in browsers.", android: "An Android app, tested on emulators and phones.", ios: "An iPhone or iPad app, tested on a Mac with Xcode." };
@@ -78,8 +77,6 @@ export function CreateProjectPage() {
                 method: "POST",
                 body: { name: name.trim(), ...(description.trim() ? { description: description.trim() } : {}), platforms: [platform], testingModes: [mode!], ...(mode === "agent" && agentList.data ? { agents } : {}), ...appDraftBody(platform, app), ...(organizationId ? { organizationId } : {}) },
             });
-            // "Both" chosen above the form (security module on): the project also gets the Security assessment section.
-            await applyPendingTestingType(p.id);
             // The app file goes after the project exists. If it is refused, the project stays and Settings says how to add it.
             try {
                 await uploadAppFiles(p.id, platform, app);
@@ -100,7 +97,7 @@ export function CreateProjectPage() {
     return (
         <>
             <PageHeader title="Create a project" subtitle="One project is one application you test. You can change all of this later in the project’s Settings." />
-            {/* With the security module on, the testing type comes first; Security assessment needs only a name (TestingType.tsx). */}
+            {/* No testing type is asked; the Security page's New security project link (?type=security) gets the name-only form (TestingType.tsx). */}
             <SecurityStartGate>
             <form
                 className="card card-pad stack"

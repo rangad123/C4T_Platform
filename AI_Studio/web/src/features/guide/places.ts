@@ -552,7 +552,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "The projects that use security assessment. It is separate from functional testing: its own applications, assessments, findings and reports.",
         canDo: [
             { text: "Open a project to register an application and record the owner's permission.", button: "Open projects", to: here("projects") },
-            { text: "Start a new project for security assessment, or for both kinds of testing.", button: "Start a project", to: here("new-project") },
+            { text: "Start a new project for security assessment with New security project. To use both kinds of testing in one project, change its testing type in Settings.", button: "Open projects", to: here("projects") },
             { text: "Read how projects and their places are laid out.", button: "Read about places", to: { topic: "places" } },
         ],
         words: ["test"],

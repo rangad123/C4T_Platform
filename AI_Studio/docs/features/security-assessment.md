@@ -18,8 +18,8 @@ routes, jobs, pages and reports. Functional testing never imports `src/security`
 
 ## Overview of a project's work
 
-1. **Testing type.** A project is for functional testing, security assessment, or both (`functional` until someone chooses; Setup and
-   New project). Turning security on for an existing project works without recreating it.
+1. **Testing type.** A project is for functional testing, security assessment, or both (`functional` until someone chooses in Settings,
+   General; *New security project* on the Security page makes a security-only project). Turning security on for an existing project works without recreating it.
 2. **Register the application**: name, target address, environment (development, staging, production, other), extra origins or host
    patterns in scope, path prefixes never to request, the request rate (1-10 per second, default 2), the public API document address, notes.
 3. **Record the authorization** (owner role). The person confirms a plain, specific statement: *"I confirm that &lt;client&gt; owns
@@ -404,16 +404,16 @@ authorization).
 Code: `web/src/features/security/` (`security.ts` words, routes and data helpers; `SecurityChrome.tsx` layout, tabs, badges, emergency
 stop; `TestingType.tsx`; `Overview.tsx`; `Applications.tsx`; `Assessments.tsx`; `Findings.tsx`; `Reports.tsx`; `SecurityPage.tsx` routes,
 the top-level place and the summary card). Small hook-ins: `Shell.tsx` (sidebar), `main.tsx` (routes), `ProjectOverview.tsx` (tab and
-summary card), `SetupPage.tsx` (testing type above the sections), `NewProject.tsx` and `onboarding/Welcome.tsx` (testing type when a
-project is made).
+summary card), `SetupPage.tsx` (testing type above the sections), `CreateProjectPage.tsx` (the security-only form when it is opened
+with `?type=security`).
 
 - **The switch.** The shell reads `GET /status` once per page load. Off (or a server without the module): the sidebar is exactly as
   before ("Workspace", Projects), no testing-type choice anywhere, and `#/security` or `#/projects/:id/security` say it is turned off
   without asking anything else. On: the sidebar names the two capabilities apart ("Functional testing" with Projects; "Security" with
   Security assessment, `#/security`, which lists the projects that include it).
-- **Functional or security testing** (`GET|PUT /projects/:id/testing-type`). New project asks Functional testing / Security assessment / Both above the ways
-  to start. Security assessment needs only a project name, stores the type and opens Register application. Both keeps every way to
-  start and stores the type right after the project is made. Settings, General shows a "Functional or security testing" row. A project that includes
+- **Functional or security testing** (`GET|PUT /projects/:id/testing-type`). Create a project does not ask it (removed 2026-11): a new project is
+  functional. *New security project* on the Security page opens Create a project with `?type=security`, which shows only a project
+  name, stores the type and opens Register application. Settings, General shows a "Functional or security testing" row. A project that includes
   security gets a "Security assessment" tab after Setup and one small summary card on its Overview (open critical or high, awaiting review)
   linking to the section; a security-only project's Overview opens its security overview. A functional project's security section offers
   "Turn on security assessment" (sets Both).
@@ -440,7 +440,7 @@ project is made).
 ### Tests (screens)
 
 - `tests/security-ui.test.ts`: real browser against a fake security API (`tests/fixtures/security-fake-api.ts`, the real routes' answer
-  shapes): the switch off and on, the testing type (new project security-only and both, Setup, tab, summary card, security-only redirect,
+  shapes): the switch off and on, the testing type (Create a project asks none, new security-only project, Setup, tab, summary card, security-only redirect,
   turning it on in place, a server without the route), register and authorization (checks, statement, out of date, withdraw), assessments
   (what it does, limits, refused without authorization, progress, stop, emergency stop, coverage, retest), findings (filters, detail, state
   change with history, manual entry), overview and risk rules, reports (sandboxed HTML, CSV and PDF downloads), viewer and editor limits,

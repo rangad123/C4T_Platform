@@ -366,26 +366,6 @@ export function useTestingType(projectId: string | undefined): TestingTypeInfo |
     return info;
 }
 
-/**
- * The type chosen on the New project page before the project exists: whichever way the person then starts creates the project,
- * and the first thing done with its id is to store this type. Cleared once used.
- */
-let pendingType: TestingType | undefined;
-export const setPendingTestingType = (t: TestingType | undefined) => {
-    pendingType = t;
-};
-export const getPendingTestingType = () => pendingType;
-export async function applyPendingTestingType(projectId: string): Promise<void> {
-    const t = pendingType;
-    if (!t || t === "functional") return;
-    pendingType = undefined;
-    try {
-        await saveTestingType(projectId, t);
-    } catch {
-        // The project exists and works for functional testing; Setup shows the type and lets the person set it again.
-    }
-}
-
 // ── small helpers ─────────────────────────────────────────────────────────────
 
 export const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : "");
