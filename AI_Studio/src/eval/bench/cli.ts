@@ -18,7 +18,7 @@ import type { LlmClient } from "../../engine/llm/provider.js";
 import type { Platform } from "../../platform/bootstrap.js";
 import { inProcessClient, ok, remoteClient, type PlatformClient } from "../client.js";
 import type { EntryResult } from "../run.js";
-import { appVersion, BENCH_APPS, benchApp, type BenchApp } from "./apps.js";
+import { appVersion, BENCH_APPS, benchApp, requirementsDocument, type BenchApp } from "./apps.js";
 import { CATALOGUE_FILE, loadCatalogue } from "./catalogue.js";
 import { plannedTestsLeft, runBenchmark, runUsageSoFar } from "./controller.js";
 import { calibrationOf, estimate, estimateLines, loadPrices, tokenLimitsLeft } from "./cost.js";
@@ -53,7 +53,7 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --login <l>                how the apps' sign-in forms are sent: html (default) or js (a script-sent form; measured on its own, never part of the html baseline)
   --defects <id,id>          only these seeded behaviours (default: every one of the app)
   --level <l>                exploration level: ${LEVELS.join(", ")} (default: the platform's default)
-  --allow-data-changes       let tests change data (only ever on the benchmark's own apps)
+  --allow-data-changes       kept for older commands: tests may always change data in a benchmark trial (only its own apps)
   --all-checks               every check family on (${ALL_CHECKS.join(", ")})
   --single-model             no fast model and no separate planning model: the main model does everything
   --max                      the deepest run: --level everything --allow-data-changes --all-checks --single-model
@@ -332,7 +332,9 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
         let model: string;
         try {
             if (env.AITP_EVAL_URL?.trim() && !scripted) log("The benchmark runs on a platform of its own; the result will also be kept on AITP_EVAL_URL.");
-            const started = await startPlatform(dataDir, env, deps);
+            // Data-changing operators are on for the benchmark's own platform only (its apps reset for every exploration and replay); the
+            // platform's own default stays off.
+            const started = await startPlatform(dataDir, { ...env, EXPLORE_DATA_OPERATORS: "true" }, deps);
             stop = started.stop;
             client = started.client;
             const cfg = ok(await client.call("GET", "/api/config"), "Reading the platform's settings");
@@ -352,7 +354,11 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 targets: "web,api",
                 level: args.level ?? "platform default",
                 login: args.login,
-                allowMutatingApiTests: args.allowDataChanges,
+                // On for every benchmark trial, both sides alike: the seeded behaviours include data-changing ones, and the apps reset.
+                allowMutatingApiTests: true,
+                // What the benchmark's platform was started with, and whether its engine has data-changing operators to switch on.
+                exploreDataOperators: true,
+                dataOperatorsInEngine: (started.platform.config as unknown as Record<string, unknown>).EXPLORE_DATA_OPERATORS === true,
                 checks: args.allChecks ? "all" : "platform defaults",
                 singleModel: args.singleModel,
                 repeat: args.repeat,
@@ -365,7 +371,10 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 prompts: promptFingerprints(deps.root),
                 model: { provider: scripted ? "scripted" : String(cfg.llm.provider ?? "unknown").slice(0, 80), model: model.slice(0, 200), fastModel, planningModel, temperature: "not set by the engine (provider default)" },
                 catalogueVersion: `${catalogue.version} (${catalogue.sha256.slice(0, 12)})`,
-                apps: apps.map((x) => ({ id: x.id, version: appVersion(x, deps.root) })),
+                apps: apps.map((x) => {
+                    const doc = requirementsDocument(x, deps.root);
+                    return { id: x.id, version: appVersion(x, deps.root), ...(doc ? { requirements: { file: doc.file, sha256: doc.sha256 } } : {}) };
+                }),
                 options,
                 prices: prices ?? null,
                 approvedBudget: args.budget ?? null,
@@ -421,7 +430,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
         const exploration: Record<string, unknown> = {
             targets: ["web", "api"],
             ...(args.level ? { level: args.level } : {}),
-            ...(args.allowDataChanges ? { allowMutatingApiTests: true } : {}),
+            allowMutatingApiTests: true,
             ...(args.allChecks ? Object.fromEntries(ALL_CHECKS.map((c) => [c, true])) : {}),
             ...(deps.exploration ?? {}),
         };
@@ -448,6 +457,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             signal: ac.signal,
             log,
             pollMs: deps.pollMs,
+            ...(deps.root ? { root: deps.root } : {}),
             ...configLimits(args).run,
         });
 

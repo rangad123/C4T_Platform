@@ -197,7 +197,18 @@ export const BenchConfigSchema = z
             })
             .strict(),
         catalogueVersion: Text(40),
-        apps: z.array(z.object({ id: Id, version: Text(80) }).strict()).max(20),
+        apps: z
+            .array(
+                z
+                    .object({
+                        id: Id,
+                        version: Text(80),
+                        /** The requirements document imported into the app's project before exploring it: file and sha256 (absent: none). */
+                        requirements: z.object({ file: Text(300), sha256: z.string().regex(/^[0-9a-f]{64}$/) }).strict().optional(),
+                    })
+                    .strict(),
+            )
+            .max(20),
         /** The exploration options sent to the platform (the same for every app). */
         options: z.record(z.string().max(60), Scalar),
         prices: z.array(PriceRowSchema).max(20).nullable(),
