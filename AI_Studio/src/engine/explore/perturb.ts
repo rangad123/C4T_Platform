@@ -9,19 +9,22 @@
  * - No new step action (Phase 3 plan, decision 3): refresh is a `navigate` to the current address, back is a `navigate` to the previous
  *   address ("back (by address)"; the browser's history back is not covered), direct URL is a `navigate`, double submit is two recorded
  *   clicks, repeat is the steps again.
- * - Data-changing operators, the form-submitting "as stated" and "invalid input" among them, run only when data changes are allowed
- *   (`dataOperators`: the server's EXPLORE_DATA_OPERATORS and the run's "Include API tests that change data"; decision 6); otherwise
- *   they are skipped with the reason "data changes off". An objective that needs a second account is skipped with "needs a second
- *   account" (Q2: two-account checks are Phase 4).
+ * - Every data-changing operator needs the project's "Include API tests that change data" (`dataChanges`). The two that only submit a
+ *   form ("as stated", "invalid input"; owner, 2026-11-21) need nothing more; the others (boundary input, double submit, repeat,
+ *   cancel) also need the server's EXPLORE_DATA_OPERATORS (`dataOperators`, decision 6). A skipped one names the setting that is off.
+ *   An objective that needs a second account is skipped with "needs a second account" (Q2: two-account checks are Phase 4).
  * Pure: no AI, no browser, no clock.
  */
 import { expandRepeats, REPEAT_MAX, ScenarioSchema, type Scenario, type Step } from "../spec/schema.js";
 import type { InputClass } from "./input-classes.js";
 import { OBJECTIVE_OPERATORS, type Objective, type ObjectiveOperator } from "./objectives.js";
 
-/** Why an operator did not become a scenario. Coverage (P3-16) shows the first two as "not run: data changes off" and "needs a second account". */
+/** Why an operator did not become a scenario. Coverage (P3-16) lists each under "not run" with this reason. */
 export const SKIP_REASONS = {
-    dataOff: "data changes off",
+    /** The project's own switch is off: no data-changing operator runs. */
+    dataOff: "data changes off: the project's “Include API tests that change data” is off",
+    /** The project allows data changes, but the server does not allow the operators beyond submitting a form. */
+    serverDataOff: "data changes off: this server does not allow this operator (EXPLORE_DATA_OPERATORS)",
     secondAccount: "needs a second account",
     notAllowed: "not an operator of this objective",
     noLaterPage: "no page for a later step",
@@ -45,6 +48,22 @@ export const DATA_CHANGING: Readonly<Record<ObjectiveOperator, boolean>> = {
     back: false,
     refresh: false,
     cancel: true,
+};
+
+/**
+ * The data-changing operators that only submit a form the way the source describes (as stated) or with a value it must refuse (invalid
+ * input): the project's "Include API tests that change data" alone allows them (owner, 2026-11-21). The rest also need the server's setting.
+ */
+export const SUBMITS_FORM: Readonly<Record<ObjectiveOperator, boolean>> = {
+    as_stated: true,
+    invalid_input: true,
+    boundary_input: false,
+    double_submit: false,
+    repeat: false,
+    direct_url: false,
+    back: false,
+    refresh: false,
+    cancel: false,
 };
 
 /**
@@ -91,7 +110,9 @@ export interface PerturbWorkflow {
 }
 
 export interface PerturbOptions {
-    /** Data-changing operators are allowed (EXPLORE_DATA_OPERATORS=true and the run allows data changes; orchestrator.ts). Absent: off. */
+    /** The project's "Include API tests that change data" is on: the form-submitting operators may run. Absent: off. */
+    dataChanges?: boolean;
+    /** Every data-changing operator is allowed (EXPLORE_DATA_OPERATORS=true and the project allows data changes; orchestrator.ts). Absent: off. */
     dataOperators?: boolean;
     /** For a workflow objective: its stated steps and preconditions. */
     workflow?: PerturbWorkflow;
@@ -219,7 +240,11 @@ export function scenarioFor(o: Objective, op: ObjectiveOperator, options: Pertur
     const skip = (reason: SkipReason): PerturbResult => ({ status: "skipped", operator: op, reason });
     if (!o.operators.includes(op) || !OBJECTIVE_OPERATORS.includes(op)) return skip(SKIP_REASONS.notAllowed);
     if (needsSecondAccount(o, options.workflow)) return skip(SKIP_REASONS.secondAccount);
-    if (DATA_CHANGING[op] && options.dataOperators !== true) return skip(SKIP_REASONS.dataOff);
+    if (DATA_CHANGING[op]) {
+        // `dataOperators` is only ever true with the project's switch on (orchestrator.ts), so it allows the form-submitting ones too.
+        if (options.dataChanges !== true && options.dataOperators !== true) return skip(SKIP_REASONS.dataOff);
+        if (!SUBMITS_FORM[op] && options.dataOperators !== true) return skip(SKIP_REASONS.serverDataOff);
+    }
 
     const steps = sortedSteps(options.workflow);
     const check: OperatorCheck = {};

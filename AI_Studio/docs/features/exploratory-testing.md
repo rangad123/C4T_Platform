@@ -60,8 +60,8 @@ agent gets fixed instructions for it, and the objective's expected result, wrapp
 
 | Operator | What is done | Used for | Changes data |
 |---|---|---|---|
-| As stated | do the preconditions, follow the stated steps, check the expected result | rules, workflows, state changes | yes (submits forms) |
-| Invalid input | type each value the field's limits say must be refused, and submit | form fields | yes (submits forms) |
+| As stated | do the preconditions, follow the stated steps, check the expected result | rules, workflows, state changes | submits forms |
+| Invalid input | type each value the field's limits say must be refused, and submit | form fields | submits forms |
 | Boundary input | type values at and one step past each declared limit, and submit | form fields | yes |
 | Double submit | click the final submit twice in a row | workflows | yes |
 | Repeat | do the same steps again with the same values | workflows, state changes | yes |
@@ -82,12 +82,18 @@ same control in a row for a double submit). If it was not, no test is saved for 
 
 An operator that does not run is listed with its reason, never left out silently:
 
-- **"data changes off"**: operators that change data run only when the project's **Include API tests that change data** switch
-  (Requirements tab) is on **and** the server setting `EXPLORE_DATA_OPERATORS=true` is set. Both are off by default. The setting is
-  meant for the benchmark and test applications; a production platform does not set it. Submitting a form is a data change, so this
-  covers the two operators that submit forms (as stated and invalid input) as well as boundary input, double submit, repeat and cancel.
-  With data changes off, only direct address, back and refresh run: rules and form fields get no pursuit, and every skipped operator
-  is listed under "not run" in the coverage record.
+- **"data changes off"**, with the setting that is off. Submitting a form is a data change, so:
+  - the two operators that submit forms (as stated, invalid input) run when the project's **Include API tests that change data**
+    switch (Requirements tab) is on. With it off they are skipped with "data changes off: the project's “Include API tests that
+    change data” is off";
+  - the other data-changing operators (boundary input, double submit, repeat, cancel) need that switch **and** the server setting
+    `EXPLORE_DATA_OPERATORS=true`. With the switch on and the setting missing they are skipped with "data changes off: this server
+    does not allow this operator (EXPLORE_DATA_OPERATORS)". The setting is meant for the benchmark and test applications; a
+    production platform does not set it.
+
+  Both are off by default. With the project's switch off, only direct address, back and refresh run: rules and form fields get no
+  pursuit. Every skipped operator is listed under "not run" in the coverage record, and an objective none of whose operators ran shows
+  the same reason.
 - **"needs a second account"**: an objective about another user's data (for example "can a customer see someone else's order?") needs
   two accounts, which is a later phase.
 - **"no page for a later step"**: direct address needs a workflow step on a different page than the first one.
@@ -205,7 +211,7 @@ The job also keeps the session's limits, each objective with its priority, the s
   objectives.
 - Objectives are only as good as the analysis: a requirement nobody wrote down, or a rule waiting for a person, gives no objective.
   Confirming rules and workflows on the Requirements tab adds them.
-- With data changes off (the default), nothing that submits a form is tried: no rule or workflow as stated, no invalid or boundary
+- With the project's "Include API tests that change data" off (the default), nothing that submits a form is tried: no rule or workflow as stated, no invalid or boundary
   values, no double submits, repeats or cancels.
 - The browser's back button is not tested.
 - Confirming a finding (more clean replays, merging the same finding across runs) is not part of this; findings stay candidates.

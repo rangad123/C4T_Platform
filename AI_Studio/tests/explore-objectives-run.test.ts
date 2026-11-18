@@ -1,7 +1,7 @@
 /**
  * The objective stage of an exploration (testing-engine Phase 3, P3-19), with a scripted model double (never a real model):
  *   - without a browser: each operator of an objective is its own pursuit (its fingerprint includes the operator, so the loop does not
- *     skip the second as a duplicate); a data-changing operator is skipped with "data changes off" unless the server allows it and the
+ *     skip the second as a duplicate); a data-changing operator is skipped with "data changes off" (naming the setting) unless the server allows it and the
  *     run allows data changes; every level's session budgets sit inside its own limits; the gated AI client counts each call and refuses
  *     one once a budget is spent; the action tracker tells a double submit from a repeat;
  *   - a real browser on a local shop with two seeded defects (tests/fixtures/objectives-shop.ts, port 9853): both become captured
@@ -23,8 +23,8 @@ import { actionTracker, boundedActionLog, coverageModelOf, ExplorationStopped, g
 import { COMPLIANT, exploreShop, OBJECTIVES_WITH_DATA, scriptedShopModel, shopKnowledge, startShop, type ShopSite } from "./fixtures/objectives-shop.js";
 
 const thorough = LEVEL_SETTINGS.thorough;
-const pursuitsOf = (dataOperators: boolean) =>
-    objectivePursuits(shopKnowledge(), { maxObjectives: thorough.exploration.objectives, steps: thorough.authoringMaxSteps, perObjective: thorough.exploration.perObjective, dataOperators, requiresAuth: false });
+const pursuitsOf = (dataOperators: boolean, dataChanges = dataOperators) =>
+    objectivePursuits(shopKnowledge(), { maxObjectives: thorough.exploration.objectives, steps: thorough.authoringMaxSteps, perObjective: thorough.exploration.perObjective, dataChanges, dataOperators, requiresAuth: false });
 
 describe("objective pursuits, budgets and bounds (no browser)", () => {
     it("each operator of an objective is a pursuit of its own, and the loop pursues both", async () => {
@@ -59,6 +59,10 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
             { objectiveId: constraint.id, operator: "boundary_input", reason: SKIP_REASONS.dataOff },
         ]);
         expect(off.pursuits).toEqual([]);
+        // The project allows data changes, the server does not: the form-submitting ones run, the boundary value says the server's setting is off.
+        const project = pursuitsOf(false, true);
+        expect(project.pursuits.map((p) => p.operator).sort()).toEqual(["as_stated", "invalid_input"]);
+        expect(project.skipped).toEqual([{ objectiveId: constraint.id, operator: "boundary_input", reason: SKIP_REASONS.serverDataOff }]);
         const on = pursuitsOf(true);
         expect(on.skipped).toEqual([]);
         expect(on.pursuits.map((p) => p.operator).sort()).toEqual(["as_stated", "boundary_input", "invalid_input"]);
@@ -295,7 +299,10 @@ describe("exploring the seeded shop by objectives", () => {
         const notApplied = { ...COMPLIANT, "Invalid input": COMPLIANT["Invalid input"]!.map((c) => (c.tool === "fill" ? { ...c, input: { ...c.input, value: "5" } } : c)) };
         const { llm } = scriptedShopModel(() => notApplied);
         // Row 173: the request says the rule was explored last time, so only the quantity's objective is "not explored yet".
-        const { summary, events, tests } = await exploreShop(site, llm, { ...OBJECTIVES_WITH_DATA, exploredObjectives: ["R-TOTAL"] });
+        // The project allows data changes and the server does not (no dataOperators): the two form-submitting operators run, and the
+        // boundary value is skipped naming the server's setting (owner, 2026-11-21).
+        const { summary, events, tests } = await exploreShop(site, llm, { objectives: true, allowMutatingApiTests: true, exploredObjectives: ["R-TOTAL"] });
+        expect(summary.exploration!.skipped).toEqual([{ objectiveId: expect.stringMatching(/^OBJ-/), operator: "boundary_input", reason: SKIP_REASONS.serverDataOff }]);
         expect(summary.exploration!.objectives.map((o) => [o.kind, /not explored yet/.test(o.reason)])).toEqual([
             ["constraint", true],
             ["rule", false],

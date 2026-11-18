@@ -180,7 +180,7 @@ describe("explore by objectives", () => {
         const box = card.getByRole("checkbox", { name: "Explore by objectives" });
         await pwExpect(box).toBeChecked();
         await pwExpect(card).toContainText("takes longer and uses more AI");
-        await pwExpect(card).toContainText("Checks that submit forms run only when “Include API tests that change data” is on");
+        await pwExpect(card).toContainText("Checks that submit forms need “Include API tests that change data”");
         await pwExpect(card.getByRole("button", { name: "Save" })).toBeDisabled();
         expect(await axeClean(page)).toEqual([]);
         // A save the server refuses: its sentence, and nothing saved.

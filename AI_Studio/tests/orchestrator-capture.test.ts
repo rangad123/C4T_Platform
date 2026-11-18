@@ -25,6 +25,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { CandidateFindingSchema, findingFingerprint } from "../src/engine/explore/finding.js";
+import { SKIP_REASONS } from "../src/engine/explore/perturb.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
 import { WRITER_STOPPED } from "../src/engine/web/author.js";
@@ -159,12 +160,12 @@ async function explore(projectId: string, objectivePursuits = 0) {
     expect(events.filter((e) => e.kind === "objective_not_written").map((e) => e.message.replace(/^.*?: /, ""))).toEqual(Array<string>(objectivePursuits).fill(`no test was saved (${WRITER_STOPPED}).`));
     if (objectivePursuits) {
         // ...and the coverage record lists the workflow as not finished for that reason, not as done, and R-TOTAL (its only operator,
-        // as stated, submits forms) as not run because data changes are off.
+        // as stated, submits forms) as not run because the project's "Include API tests that change data" is off.
         const cov = await call("GET", `/api/projects/${projectId}/jobs/${queued.body.jobId}/coverage`);
         expect(cov.status, JSON.stringify(cov.body)).toBe(200);
         const statuses = (cov.body.coverage.unexplored as Array<{ kind: string; status: string }>).map((u) => [u.kind, u.status]).sort();
         expect(statuses).toEqual([
-            ["rule", "not run: data changes off"],
+            ["rule", `not run: ${SKIP_REASONS.dataOff}`],
             ["workflow", `not finished: ${WRITER_STOPPED}`],
         ]);
     }
