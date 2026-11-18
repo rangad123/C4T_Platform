@@ -39,6 +39,7 @@ import { cancelSummary } from "./cancel-summary.js";
 import { carriedTests, loadCheckpoint } from "./explore-resume.js";
 import { createFrameSink } from "../engine/frames/sink.js";
 import { frameHub } from "./frame-hub.js";
+import { saveExploration } from "./exploration-store.js";
 import { PLAN_ARTIFACT, PLAN_FILE, planOptionsOf, requireStoredPlan } from "./plan-store.js";
 import { planFamilies, planTotal } from "../engine/planning/preview.js";
 import { RepoSink } from "./repo-sink.js";
@@ -600,6 +601,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
 
         // What the exploration produced is kept before the analysis below runs: a cancel during the analysis ends the job, never this.
         if (summary.plan) await sink.saveTextArtifact(PLAN_ARTIFACT, PLAN_FILE, JSON.stringify(summary.plan));
+        // How an objective-driven exploration went (coverage, stop reason, capped action log), for GET …/jobs/:jobId/coverage.
+        if (summary.exploration) await saveExploration(sink, summary.exploration);
 
         if (summary.model) {
             await sink.saveTextArtifact("app-model", "application-model.json", JSON.stringify(summary.model, null, 2));
