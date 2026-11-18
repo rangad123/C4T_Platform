@@ -773,8 +773,23 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
                 // A replay that throws or cannot start did not pass either (N-9): the test is not reported as a finding, and the reason says why.
                 const replaySecrets = [replayed.credentials?.password ?? "", replayed.credentials?.totpSecret ?? ""].filter(Boolean);
+                const ownAllowed = capture !== "observed_only" || replayAllowed(written.steps.length, "the replay of the test's own steps");
+                // Row 213: the exploration's limits refused the replay that checks it, so it is unverified: saved for review, not a finding.
+                if (!ownAllowed) {
+                    const h = await persistNew(spec, "playwright", "NEEDS_REVIEW", "Not reported as a finding: the exploration's limits did not allow the replay that checks it", { ...meta, capture });
+                    summary.testsNeedingReview++;
+                    await sink.counters({ testsNeedingReview: 1 }, true);
+                    ctx.emit({
+                        stage: "generation",
+                        kind: "defect_unverified",
+                        level: "warn",
+                        message: `${h.testId} ${spec.title}: not reported as a finding; the exploration's limits did not allow the replay of its own steps`,
+                        data: { testKey: h.testId, capture, failedStep: null },
+                    });
+                    return h.testId;
+                }
                 const own: IndependenceReplay | undefined =
-                    capture === "observed_only" && replayAllowed(written.steps.length, "the replay of the test's own steps")
+                    capture === "observed_only"
                         ? await replayOwnSteps(browser, origin, replayed).catch((e: unknown) => {
                               let m = (e instanceof Error ? e.message : String(e)).split("\n")[0]!.trim().slice(0, 300);
                               for (const s of replaySecrets) m = m.split(s).join("***");
