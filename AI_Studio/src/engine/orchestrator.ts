@@ -1674,10 +1674,11 @@ export function objectivePursuits(
 /**
  * The loop's budgets for one objective session. The level's `objectives` caps the objectives when the list is built (objectivePursuits);
  * the loop then runs every pursuit built from them (one objective with one operator each), so its pursuit count is the number built.
- * Time, actions, AI calls and tokens are the level's own and still bound the session.
+ * Time, actions, AI calls and tokens are the level's own and still bound the session. No pursuit built (every operator skipped, for
+ * example with data changes off) still gives a budget of 1, which the loop requires: the empty session then ends at once.
  */
 export function sessionBudgets(b: Omit<ExplorationBudgets, "perObjective">, pursuits: number): Budgets {
-    return { objectives: pursuits, actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
+    return { objectives: Math.max(1, pursuits), actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
 }
 
 /** A model call refused because the session or the objective has spent its budget. */
