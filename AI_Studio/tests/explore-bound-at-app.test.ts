@@ -1,8 +1,9 @@
 /**
- * The exploration's bound is real at the application (CP2 H-2; from the CP2 review's doubt fixture D1-D2): a local page whose
+ * The exploration's bound is real at the application (CP2 H-2, M-1; from the CP2 review's doubt fixture D1-D3): a local page whose
  * Continue button is a form POST the server counts, so what really reached the application is compared with the loop's action log.
  *   - the loop is asked before each action runs: a refused click never reaches the application, so the POSTs it received equal the
  *     clicks the log calls performed, also when one model reply holds several clicks (each is checked in order);
+ *   - a repeat is the same element, however its locator is spelled, and reads in between (waits) do not make it look new.
  *   - the test writer performs nothing once its run has ended (the calls left in one reply after a cancel).
  * The page also tells the AI to keep clicking Continue; a scripted model double obeys it. Real model calls are never made.
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/explore-bound-at-app.test.ts
@@ -113,6 +114,26 @@ describe("the exploration's bound at the application", () => {
         expect(clicks(r)).toBe(2);
         expect(r.posts).toBe(clicks(r));
         expect(r.ex.usage.actions).toBeLessThanOrEqual(r.ex.budgets.actions);
+    }, 300_000);
+
+    it("D3: the same button spelled twelve ways is one action, so it is a repeat", async () => {
+        const variants = ["button", "main button", "form button", "button[type=submit]", "form > button", "main form button", "body button", "main > form > button", "button:first-of-type", "form button[type=submit]", "html button", "button:only-of-type"];
+        const r = await run([[{ tool: "navigate", input: { url: "/cart" } }], ...variants.map((v) => [click({ by: "css", value: v })])]);
+        say("D3", r);
+        expect(r.rule.status).toBe("stopped");
+        expect(r.rule.reason).toMatch(/^The same action on the same state was tried again/);
+        expect(r.posts).toBe(2);
+        expect(r.posts).toBe(clicks(r));
+    }, 300_000);
+
+    it("D3b: a wait between the clicks, each with another value, does not make the same click new", async () => {
+        const steps: Call[][] = [[{ tool: "navigate", input: { url: "/cart" } }]];
+        for (let i = 1; i <= 6; i++) steps.push([continueBtn], [{ tool: "wait", input: { ms: i } }]);
+        const r = await run(steps);
+        say("D3b", r);
+        expect(r.rule.status).toBe("stopped");
+        expect(r.posts).toBe(2);
+        expect(r.posts).toBe(clicks(r));
     }, 300_000);
 });
 

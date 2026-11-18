@@ -44,6 +44,8 @@ export interface LoopAction {
     state: string;
     /** What is done, as a stable key (for example "click button Add" or "fill Email"). */
     action: string;
+    /** It only reads the page (a wait, a check): counted and refused on a repeat, but not a new visit of its state for the depth. */
+    read?: boolean;
 }
 
 export type ActVerdict = { allowed: true } | { allowed: false; reason: string };
@@ -258,7 +260,7 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
                     loopRefusal = `The same action on the same state was tried again (${action}); it is not repeated.`;
                     return refuse(state, action, loopRefusal);
                 }
-                const visitsHere = (visits.get(state) ?? 0) + 1;
+                const visitsHere = (visits.get(state) ?? 0) + (a?.read ? 0 : 1);
                 if (visitsHere > budgets.depth) {
                     loopRefusal = `The state ${state} was visited more often than the depth of ${budgets.depth} allows.`;
                     return refuse(state, action, loopRefusal);
