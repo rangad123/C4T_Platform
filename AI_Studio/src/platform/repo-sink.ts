@@ -39,6 +39,18 @@ export async function storeScript(repo: Repo, store: ArtifactStore, projectId: s
     return repo.addScript(testDbId, { framework: script.framework, filename: script.filename, content: script.content, hash: stored.hash, storagePath: rel, executable, current: makeCurrent });
 }
 
+
+/**
+ * Why a finding's screenshot is not kept, or undefined when it is: it must be a JPEG (its first bytes say so, whatever the name), under a
+ * .jpg/.jpeg name (so it cannot take the place of the job's other files in the same folder), and within the size a finding keeps.
+ */
+export function screenshotProblem(name: string, bytes: Uint8Array): string | undefined {
+    if (bytes.byteLength > FRAME_LIMITS.maxBytes) return "A screenshot larger than a finding keeps was not saved.";
+    if (!/\.jpe?g$/i.test(path.posix.basename(name))) return "A finding's screenshot is saved only under a .jpg name.";
+    if (bytes.byteLength < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return "A finding's screenshot that is not a JPEG picture was not saved.";
+    return undefined;
+}
+
 /**
  * Persists engine output for one job into SQLite + the artifact store. The engine's events, its agents' actions and the methods that only
  * touch the database go through one ordered queue (job-write-queue.ts), so they land in the order they were made whether the stores behind
@@ -387,7 +399,8 @@ export class RepoSink implements GenerationSink {
 
     /** A finding's screenshot (row 173): stored next to the job's other artifacts; the answer is its artifact id. */
     saveImageArtifact: NonNullable<GenerationSink["saveImageArtifact"]> = async (kind, name, jpeg) => {
-        if (jpeg.byteLength > FRAME_LIMITS.maxBytes) throw new Error("A screenshot larger than a finding keeps was not saved.");
+        const problem = screenshotProblem(name, jpeg);
+        if (problem) throw new Error(problem);
         const rel = path.posix.join(this.job.projectId, "_artifacts", this.job.id, path.posix.basename(name));
         const saved = await this.store.put(rel, jpeg, { contentType: "image/jpeg" });
         return this.repo.addArtifact({ projectId: this.job.projectId, jobId: this.job.id, kind, path: rel, size: saved.size });

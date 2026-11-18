@@ -1020,7 +1020,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             if (actor) access.users.addActivity({ actorKind: actor.kind, actorId: actor.id ?? null, actorName: actor.name, action: "GET /api/artifacts/:id", path: `/api/artifacts/${a.id as string}`, projectId: (a.project_id as string | null) ?? null, status: 302, detail: String(a.kind) });
             return reply.code(302).header("location", signed).header("cache-control", "no-store").send();
         }
-        return reply.header("content-type", type).send(await p.store.getBytes(a.path));
+        // The browser keeps the stated type and never guesses another from the bytes (a stored file is never run as a page).
+        return reply.header("content-type", type).header("x-content-type-options", "nosniff").send(await p.store.getBytes(a.path));
     });
 
     /**
