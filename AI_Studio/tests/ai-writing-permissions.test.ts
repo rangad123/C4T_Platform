@@ -34,7 +34,6 @@ const ACCOUNTS: Record<string, unknown> = {
     "t-gail": me("gail", [...BASE, "ai_studio.tests.generate"]),
     "t-both": me("both", [...BASE, "ai_studio.tests.write", "ai_studio.tests.generate"]),
 };
-const SCRIPT = `Test: Verify search\nCategory: Search\n\nGo to /\nExpect the page to contain the text "Boots"\n`;
 
 let api: http.Server;
 let fake: FakeProvider;
@@ -65,7 +64,8 @@ beforeAll(async () => {
         loadConfig({
             DATA_DIR: dir,
             SCHEDULER_ENABLED: "false",
-            WORKER_EMBEDDED: "false",
+            // Runs may start (a web case's script is built in a run); no worker is started, so nothing runs here.
+            WORKER_EMBEDDED: "true",
             SECRET_KEY: "ai-writing-secret-key-0123456789ab",
             C4T_API_ORIGIN: `http://127.0.0.1:${API_PORT}`,
             C4T_SITE_URL: "https://crowd4test.example",
@@ -141,10 +141,9 @@ describe("the AI routes that write and save", () => {
         const c = await as("t-both", "POST", cases(), { requirementIds: [reqId] });
         expect(c.status, JSON.stringify(c.body)).toBe(201);
         expect(c.body.created).toBe(1);
-        fake.reset();
-        fake.queue("*", { text: SCRIPT }, { text: SCRIPT });
         const s = await as("t-both", "POST", scripts(), {});
         expect(s.status, JSON.stringify(s.body)).toBe(200);
-        expect(s.body.created.length).toBeGreaterThan(0);
+        // A web project: the scripts are built in a real browser, one case after the other, from the job this starts.
+        expect(s.body.started.caseIds.length).toBeGreaterThan(0);
     });
 });

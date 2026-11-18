@@ -140,6 +140,10 @@ export interface JobOptions {
     /** plain mode: the test described in the person's own words (see engine/authoring/plain.ts). `environment` (above) is the project environment it is built on, if any. */
     plainDescription?: string;
     plainKind?: "web" | "api";
+    /** plain mode: the written test case (manual_cases.id) the test is built from; the test becomes the case's script (case-scripts.ts). */
+    plainCaseId?: string;
+    /** plain mode, with `plainCaseId`: the test cases still to build after this one, each in the next job (case-scripts.ts). */
+    plainCaseQueue?: string[];
     /** agent mode: the agent run this job carries out (agent-run.ts). */
     agentRunId?: string;
     /** plain mode: rebuild this existing test (test_cases.id) from the new description instead of adding one. */

@@ -1,9 +1,9 @@
 import { ClipboardList, Sparkles, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError, api, projectShape, type ProjectDetail, type TestSummary } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
 import { plural } from "../../lib/format";
-import { describeApiError, friendlyError } from "../../lib/labels";
+import { describeApiError, friendlyError, isActive } from "../../lib/labels";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { NO_AI_KEY, useAiBlock } from "../aiconfig/aiconfig";
@@ -12,6 +12,8 @@ import { useHere } from "../auth/project-access";
 import { Modal } from "../../components/Modal";
 import { AUTOMATION_HINT, AUTOMATION_WORDS, type CaseList, type ManualCase } from "../manual/manual";
 import type { RequirementList } from "../requirements/requirements";
+import { BUILDS_ON_RUNNER, useRunsHere } from "../runs/runs-here";
+import { useReadiness } from "../runners/my-runner";
 import "../manual/manual.css";
 import "./authoring.css";
 
@@ -23,11 +25,15 @@ interface GenerateAnswer {
     created: Array<{ caseId: string; testId: string; key: string }>;
     skipped: Array<{ caseId: string; reason: SkipReason; detail: string }>;
     eligible?: string[];
+    /** Web: the scripts are built one case after the other in a real browser, from this job on (src/platform/case-scripts.ts). */
+    started?: { jobId: string; caseIds: string[] };
 }
 /** What the endpoint answers for an iOS-only project and an Android one without its app (src/platform/routes/generate-scripts.ts), said before the click. */
 export const IOS_PROJECT = "The AI writes phone test scripts for Android apps only for now. This project tests an iOS app: write its scripts by hand or import them.";
 export const NO_APP_FOR_SCRIPTS = "This project has no Android app yet, and a phone test script is saved for the app it tests. Add the app under Settings, Mobile app, then generate the test scripts.";
 export const NO_ADDRESS_FOR_SCRIPTS = "This project has no application address yet, and a test script is saved for the address it tests. Add the address in Settings → General, then generate the test scripts.";
+/** How a web script is made from a test case: as Test scripts, Describe it makes one (src/platform/case-scripts.ts). */
+const BUILT_LIVE = "The AI does each test case's steps in a real browser on the application, signed in with the project's sign-in, keeps the steps that worked and checks what the page really shows, then runs the script.";
 const ON_DEVICE = "The AI has not seen the app: it finds each button and field by its visible text or accessibility label, so check each script on the device before approving it.";
 
 /** Cases sent per request, so the page can say how far it got (the server takes at most 20). */
@@ -68,6 +74,7 @@ type State =
     | { step: "checking" }
     | { step: "confirm"; eligible: string[]; manual: number; scripted: number }
     | { step: "writing"; done: number; total: number }
+    | { step: "building"; caseIds: string[]; done: number }
     | { step: "done"; made: number; failed: Array<{ caseId: string; detail: string }> };
 
 /** The dry run, then the writing in chunks: one flow for the card under Test cases and the dialog on Test scripts. */
@@ -96,17 +103,60 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
         }
     }
 
-    async function write(eligible: string[]) {
+    // Web: the server builds the scripts one after the other; the page follows the cases until each has its script or the runs have ended.
+    const building = state.step === "building" ? state.caseIds : null;
+    useEffect(() => {
+        if (!building) return;
+        let stop = false;
+        let timer: number | undefined;
+        let idle = 0;
+        const tick = async () => {
+            try {
+                const [list, project] = await Promise.all([api<CaseList>(`/projects/${projectId}/manual-cases`), api<ProjectDetail>(`/projects/${projectId}`)]);
+                if (stop) return;
+                const linked = new Set(list.cases.filter((c) => c.linkedTestIds.length > 0).map((c) => c.id));
+                const done = building.filter((id) => linked.has(id)).length;
+                // Ended twice in a row: the next case's job starts right after one ends, so one look between them is not the end.
+                idle = isActive(project.latestJob?.status) ? 0 : idle + 1;
+                if (done === building.length || idle >= 2) {
+                    const failed = building.filter((id) => !linked.has(id)).map((id) => ({ caseId: id, detail: `${list.cases.find((c) => c.id === id)?.ref ?? "A test case"} got no script. Its run on the Runs tab says why; generate again to try it once more.` }));
+                    setState({ step: "done", made: done, failed });
+                    announceProjectChanged(projectId);
+                    onDone?.();
+                    return;
+                }
+                setState({ step: "building", caseIds: building, done });
+            } catch {
+                // A missed look: the next one tries again.
+            }
+            if (!stop) timer = window.setTimeout(() => void tick(), 3000);
+        };
+        timer = window.setTimeout(() => void tick(), 3000);
+        return () => {
+            stop = true;
+            clearTimeout(timer);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [building?.join(",")]);
+
+    async function write(eligible: string[], form: Form | null) {
+        const chunk = form === "text" ? eligible.length : CHUNK;
         setError(null);
         const failed: Array<{ caseId: string; detail: string }> = [];
         let made = 0;
         setState({ step: "writing", done: 0, total: eligible.length });
         try {
-            for (let i = 0; i < eligible.length; i += CHUNK) {
-                const r = await send({ caseIds: eligible.slice(i, i + CHUNK) });
+            for (let i = 0; i < eligible.length; i += chunk) {
+                const r = await send({ caseIds: eligible.slice(i, i + chunk) });
+                if (r.started) {
+                    // Web: one call starts them all (the server builds them one after the other); the page follows from here.
+                    const refused = r.skipped.filter((s) => s.reason === "refused");
+                    if (refused.length) setError(refused.map((s) => s.detail).join(" "));
+                    return setState({ step: "building", caseIds: r.started.caseIds, done: 0 });
+                }
                 made += r.created.length;
                 failed.push(...r.skipped.filter((s) => s.reason === "ai-failed" || s.reason === "refused"));
-                setState({ step: "writing", done: Math.min(i + CHUNK, eligible.length), total: eligible.length });
+                setState({ step: "writing", done: Math.min(i + chunk, eligible.length), total: eligible.length });
             }
         } catch (e) {
             if (made === 0) return fail(e);
@@ -135,6 +185,20 @@ function Writing({ state }: { state: Extract<State, { step: "writing" }> }) {
     );
 }
 
+/** "Building test scripts: 1 of 3", while the server builds them one after the other in a real browser. */
+function Building({ state }: { state: Extract<State, { step: "building" }> }) {
+    const total = state.caseIds.length;
+    return (
+        <div className="stack-sm" role="status" aria-live="polite" data-testid="generate-scripts-building">
+            <p className="t-card">
+                Building test scripts: {state.done} of {total}
+            </p>
+            <progress className="gen-progress" max={total} value={state.done} aria-label="Test scripts built" />
+            <p className="t-meta">{BUILT_LIVE} One test case at a time; you can leave this page, and each script shows on its test case when it is ready.</p>
+        </div>
+    );
+}
+
 /** How many were made (and that phone scripts need the device), and the cases that got none, with why. */
 function Outcome({ state, form, projectId, onClose }: { state: Extract<State, { step: "done" }>; form: Form | null; projectId: string; /** Closes the banner. */ onClose?: () => void }) {
     const them = state.made === 1 ? "it" : "them";
@@ -146,7 +210,7 @@ function Outcome({ state, form, projectId, onClose }: { state: Extract<State, { 
                         <p className="t-card">Test scripts generated</p>
                         <p className="t-secondary">
                             {plural(state.made, form === "phone" ? "phone test script" : "test script")} {state.made === 1 ? "has" : "have"} been created from your test cases.{" "}
-                            {form === "phone" ? `The AI wrote ${them} without seeing the app: check ${them} on the device, then approve ${them} to run ${them}.` : `Review and approve ${them} to run ${them}.`}
+                            {form === "phone" ? `The AI wrote ${them} without seeing the app: check ${them} on the device, then approve ${them} to run ${them}.` : `${state.made === 1 ? "It was" : "Each was"} built on the application and run once: open ${them} to see whether ${state.made === 1 ? "it" : "they"} passed.`}
                         </p>
                     </div>
                     <LinkButton size="sm" variant="primary" href={routes.tests(projectId)}>
@@ -183,8 +247,13 @@ export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId:
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
     const can = useHere(projectId, project).may;
     const form = scriptFormOf(project.data);
-    const block = generateScriptsBlock(project.data, noAi);
+    const block0 = generateScriptsBlock(project.data, noAi);
     const { state, setState, error, check, write } = useGenerateScripts(projectId, onDone);
+    // Web scripts are built in a real browser in a run, as Describe it builds a test (NewTestMenu.tsx): the same reasons it cannot here.
+    const runsHere = useRunsHere();
+    const ready = useReadiness({ can: ["web", "plain"] });
+    const buildWhy = form !== "text" ? null : ready.mode === "runners" ? (ready.ready ? null : (ready.reason ?? BUILDS_ON_RUNNER)) : runsHere ? null : "Tests are switched off on this server, and test scripts are built in a real browser in a run.";
+    const block = block0 ?? buildWhy;
     // The AI writes and saves the scripts: both permissions in this project, as the server asks.
     if (!project.data || !mayGenerateScripts(project.data, can)) return null;
     const chosen = caseIds?.length ? caseIds : undefined;
@@ -225,7 +294,7 @@ export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId:
                         title={`Generate ${plural(state.eligible.length, form === "phone" ? "phone test script" : "test script")}?`}
                         actions={
                             <>
-                                <Button size="sm" variant="primary" icon={Sparkles} onClick={() => void write(state.eligible)}>
+                                <Button size="sm" variant="primary" icon={Sparkles} onClick={() => void write(state.eligible, form)}>
                                     Generate {plural(state.eligible.length, "script")}
                                 </Button>
                                 <Button size="sm" variant="ghost" onClick={() => setState({ step: "idle" })}>
@@ -234,11 +303,12 @@ export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId:
                             </>
                         }
                     >
-                        The AI writes one script for each {chosen ? "chosen " : ""}Automated test case that has none yet. {skipLine(state.manual, state.scripted)} The scripts are drafts: they run once they are approved. {form === "phone" ? `${ON_DEVICE} ` : ""}Uses the AI model.
+                        The AI writes one script for each {chosen ? "chosen " : ""}Automated test case that has none yet. {skipLine(state.manual, state.scripted)} {form === "phone" ? `The scripts are drafts: they run once they are approved. ${ON_DEVICE} ` : `${BUILT_LIVE} `}Uses the AI model.
                     </Callout>
                 ))}
 
             {state.step === "writing" && <Writing state={state} />}
+            {state.step === "building" && <Building state={state} />}
             {state.step === "done" && <Outcome state={state} form={form} projectId={projectId} onClose={() => setState({ step: "idle" })} />}
         </section>
     );

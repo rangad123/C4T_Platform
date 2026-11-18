@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { CHECK_ON_DEVICE, writePhoneCaseScript } from "../../engine/authoring/case-phone-script.js";
-import { MAX_SCRIPTS_PER_CALL, NO_MODEL_FOR_SCRIPTS, pageFactsOf, scriptTitleOf, withSignInPlaceholders, writeCaseScript, type CaseForScript, type SavedAccount } from "../../engine/authoring/case-script.js";
-import { AppIntelStore } from "../app-intel-store.js";
+import { MAX_SCRIPTS_PER_CALL, NO_MODEL_FOR_SCRIPTS, scriptTitleOf, type CaseForScript } from "../../engine/authoring/case-script.js";
+import { refusalFor } from "../../engine/authoring/describe.js";
+import { caseDescription, caseHasScript, linkScriptsToCase } from "../case-scripts.js";
+import { plainStarter } from "./authoring.js";
 import { JobMeter } from "../../engine/llm/metered.js";
 import { aiOwnerOfActor, personLlm } from "../ai-config.js";
 import { isAppUri } from "../../engine/desktop/target.js";
@@ -11,12 +13,8 @@ import { MobileTargetSchema } from "../../engine/mobile/target.js";
 import type { TestSpec } from "../../engine/spec/schema.js";
 import { assertHoldsHere, callerCredentials } from "../auth/access.js";
 import { currentActor } from "../auth/actor.js";
-import { DslRefusal, DslService } from "../dsl-service.js";
 import { FrameworkSettingsStore, turnedOffForSpecs } from "../framework-settings-store.js";
 import { HttpError } from "../http-error.js";
-import { IdentityStore } from "../identity-store.js";
-import { SecretBox } from "../secrets.js";
-import { latestApplicationOf } from "./project-sign-in.js";
 import type { ManualCase } from "../../engine/manual/cases.js";
 import { ManualCaseStore } from "../manual-case-store.js";
 import { projectSetupOf } from "../project-setup.js";
@@ -26,24 +24,27 @@ import { aiSkipReason, usageStoreFor } from "../usage-store.js";
 import type { RouteCtx } from "./types.js";
 
 /**
- * "Generate test scripts using AI" (Test cases and Test scripts places, code-based projects): each chosen written case of type
- * Automated that has no script yet is written by the project's AI, saved as the AI's draft (drafts never run until approved), and
- * linked to its case (`linkedTestIds`, one script per case) and to the case's requirement. What the AI writes follows the project's
+ * "Generate test scripts using AI" (Test cases, code-based projects): each chosen written case of type Automated that has no script yet
+ * gets one, linked to its case (`linkedTestIds`, one script per case) and to the case's requirements. How follows the project's
  * platform:
- *  - web (also a project from before round 37 with web and a phone app): a text script, saved through the path "Write it as text" uses;
+ *  - web (also a project from before round 37 with web and a phone app): built exactly as Test scripts, Describe it builds a test
+ *    (plainStarter in ./authoring.ts, ../case-scripts.ts): the case's words go to the authoring agent, which signs in with the project's
+ *    sign-in and does the steps in a real browser against the application, so every check is something it saw on the page. One plain
+ *    job per case, one after the other; the answer names the first job (`started`) and the cases queued after it;
  *  - Android: a phone test (a `mobile` spec, engine/authoring/case-phone-script.ts), saved through the platform's spec import (the
  *    path an imported phone test takes), its elements found by visible text or accessibility label and the draft saying it needs
  *    checking on the device;
  *  - iOS only: refused in plain words (the AI does not write iOS scripts yet).
  *
  *   POST /api/projects/:id/manual-cases/generate-scripts   { caseIds?: string[], dryRun?: boolean }
- *        → { form: "text" | "phone", created: [{ caseId, testId, key }], skipped: [{ caseId, reason, detail }], eligible?: string[], note?: string }
+ *        → { form: "text" | "phone", created: [{ caseId, testId, key }], skipped: [{ caseId, reason, detail }], eligible?: string[],
+ *            started?: { jobId, caseIds }, note?: string }
  *
- * No case ids means every case of the project. At most MAX_SCRIPTS_PER_CALL scripts are written per call; the rest are skipped with
+ * No case ids means every case of the project. At most MAX_SCRIPTS_PER_CALL scripts are made per call; the rest are skipped with
  * reason "later" (the page sends them in the next call). `dryRun` writes nothing and calls no AI: it says which cases would get a
  * script, so the page can say how many before it starts. A web project without an application address, an Android project without
  * its app, and a project whose engine is switched off are refused before anything (the AI would be paid for scripts that cannot be
- * saved), and one call per project writes at a time: a second answers 409 until the first has finished.
+ * saved). One call per project at a time: a second answers 409 until the first has finished (web: while its jobs run).
  */
 
 const Body = z.object({
@@ -62,6 +63,7 @@ const SKIP_WORDS: Record<Exclude<SkipReason, "ai-failed" | "refused">, string> =
 const AGENT_PROJECT = "Test scripts are made for code-based projects. In an AI agent project the agents decide what to check.";
 export const NO_ADDRESS_FOR_SCRIPTS = "This project has no application address yet, and a test script is saved for the address it tests. Add the address in Settings → General, then generate the test scripts.";
 export const SCRIPTS_BEING_WRITTEN = "Test scripts are already being written for this project. Wait until that has finished, then generate the rest.";
+export const ANOTHER_RUN = "Another run of this project is going on, and test scripts are built in a real browser one at a time. Wait until it has finished, then generate the test scripts.";
 export const IOS_PROJECT = "The AI writes phone test scripts for Android apps only for now. This project tests an iOS app: write its scripts by hand or import them.";
 export const NO_APP_FOR_SCRIPTS = "This project has no Android app yet, and a phone test script is saved for the app it tests. Add the app under Settings, Mobile app, then generate the test scripts.";
 /** What the AI writes for this project: text steps (web and API) or a phone test (Android). */
@@ -74,11 +76,11 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
     const { app, p, repo } = ctx;
     const cases = new ManualCaseStore(p.db);
     const requirements = new RequirementStore(p.sql);
-    const dsl = new DslService(ctx);
     /** Projects a call is writing scripts for right now (this server runs one process). */
     const writing = new Set<string>();
+    const plain = plainStarter(ctx);
     /** One script per case: a linked test that still exists in this project is its script. */
-    const hasScript = (pid: string, linkedTestIds: readonly string[]) => linkedTestIds.some((t) => repo.getTest(t)?.projectId === pid);
+    const hasScript = (pid: string, linkedTestIds: readonly string[]) => caseHasScript(repo, pid, { linkedTestIds: [...linkedTestIds] });
 
     app.post("/api/projects/:id/manual-cases/generate-scripts", async (req) => {
         const { id: pid } = req.params as { id: string };
@@ -109,6 +111,7 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
         const now = eligible.slice(0, MAX_SCRIPTS_PER_CALL);
         for (const caseId of eligible.slice(MAX_SCRIPTS_PER_CALL)) skip(caseId, "later");
         if (now.length === 0) return { form, created: [], skipped };
+        if (target.form === "text") return await buildWebScripts(pid, now, byId, skipped);
         // Two calls at once could each write a script for the same case: the second waits its turn (taken before anything is awaited).
         if (writing.has(pid)) throw new HttpError(409, SCRIPTS_BEING_WRITTEN);
         writing.add(pid);
@@ -139,6 +142,28 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
         return { form: "phone", appPackage: app.data.appPackage ?? null };
     }
 
+    /**
+     * Web: each case is built the way Test scripts, Describe it builds a test, one plain job after the other (../case-scripts.ts). A case
+     * whose words would be refused there (a payment, an attack...) is skipped with that sentence; the first job is started here, with
+     * every refusal said before it exists (no AI, tests switched off, another run going on).
+     */
+    async function buildWebScripts(pid: string, now: string[], byId: Map<string, ManualCase>, skipped: Array<{ caseId: string; reason: SkipReason; detail: string }>) {
+        const allowChanges = repo.getLatestApplicationPublic(pid)?.config?.allowMutatingApiTests === true;
+        const queued: string[] = [];
+        for (const caseId of now) {
+            const refused = refusalFor(caseDescription(byId.get(caseId)!), { allowChanges });
+            if (refused) skipped.push({ caseId, reason: "refused", detail: refused });
+            else queued.push(caseId);
+        }
+        if (!queued.length) return { form: "text" as const, created: [], skipped };
+        // Said in the page's words before the shared start refuses with the job's id: scripts still being built, or another run.
+        const active = repo.listJobs(pid).find((j) => !["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status));
+        if (active) throw new HttpError(409, active.options.plainCaseId ? SCRIPTS_BEING_WRITTEN : ANOTHER_RUN);
+        const [first, ...rest] = queued;
+        const { job } = await plain.start(pid, { description: caseDescription(byId.get(first!)!) }, { plainCaseId: first!, plainCaseQueue: rest });
+        return { form: "text" as const, created: [], skipped, started: { jobId: job.id, caseIds: queued } };
+    }
+
     /** A phone script saved the way an imported phone test is (POST /specs: every import rule), without running it. */
     async function savePhone(pid: string, spec: TestSpec, headers: Record<string, string>): Promise<{ testId: string; key: string }> {
         const { testId: _draft, ...rest } = spec;
@@ -151,7 +176,8 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
         return { testId: made.id, key: made.testId };
     }
 
-    async function writeScripts(req: FastifyRequest, pid: string, now: string[], byId: Map<string, ManualCase>, skipped: Array<{ caseId: string; reason: SkipReason; detail: string }>, target: Target) {
+    /** Android: the AI writes each case as a phone test without the app, saved as its draft (case-phone-script.ts). */
+    async function writeScripts(req: FastifyRequest, pid: string, now: string[], byId: Map<string, ManualCase>, skipped: Array<{ caseId: string; reason: SkipReason; detail: string }>, target: Extract<Target, { form: "phone" }>) {
         // The project's AI and who pays for it (ai-config.ts), as the other AI routes do.
         const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_SCRIPTS, { modelMissing: true });
@@ -164,27 +190,18 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
         const actor = currentActor();
         const starter = actor.kind === "user" || actor.kind === "key" || actor.kind === "open" ? { kind: actor.kind, ...(actor.id ? { id: actor.id } : {}) } : undefined;
 
-        // What the project's application knowledge says about its pages (forms, fields, buttons), once for every case; none yet, none sent.
-        const pages = target.form === "text" ? pageFactsOf((await new AppIntelStore(p.sql).latest(pid))?.model) : "";
-        // The project's saved sign-in and named accounts: a value of theirs the AI copied from a case is written as its placeholder.
-        const accounts: SavedAccount[] = [
-            { placeholder: "credentials", ...(latestApplicationOf(repo, pid)?.credentials ?? {}) },
-            ...new IdentityStore(p.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).get(pid).map((r) => ({ placeholder: `credentials.${r.name}`, username: r.username, password: r.password, ...(r.totpSecret ? { totpSecret: r.totpSecret } : {}) })),
-        ];
         const created: Array<{ caseId: string; testId: string; key: string }> = [];
         const one = async (caseId: string) => {
             const c = byId.get(caseId)!;
             const linkedReqs = await requirements.forTest(pid, c.id);
-            const reqIds = [...new Set([...(c.requirementId ? [c.requirementId] : []), ...linkedReqs.map((r) => r.id)])];
             const reqWords = c.requirement || linkedReqs.map((r) => `${r.ref} ${r.title}`).join("; ");
             const own = c.requirementId && !linkedReqs.some((r) => r.id === c.requirementId) ? await requirements.get(pid, c.requirementId) : undefined;
             const reqRefs = [...new Set([...(own ? [own.ref] : []), ...linkedReqs.map((r) => r.ref)])];
             // A title too short for a test is made whole here (with the case's reference), never left for the AI to fix.
             const input: CaseForScript = { ref: c.ref ?? c.title, title: scriptTitleOf({ ref: c.ref ?? "", title: c.title }), area: c.area, priority: c.priority, steps: c.steps, requirement: reqWords, requirementRefs: reqRefs };
-            // The AI's work for this case: a text script (web) or a phone test spec (Android).
-            let written: { text: string } | { spec: TestSpec };
+            let written: TestSpec;
             try {
-                written = target.form === "phone" ? { spec: (await writePhoneCaseScript(model, input, { appPackage: target.appPackage })).spec } : { text: withSignInPlaceholders((await writeCaseScript(model, input, { address: target.address, ...(pages ? { pages } : {}) })).text, accounts) };
+                written = (await writePhoneCaseScript(model, input, { appPackage: target.appPackage })).spec;
             } catch (e) {
                 skipped.push({ caseId, reason: "ai-failed", detail: e instanceof Error ? e.message : "The AI did not write a script." });
                 return;
@@ -195,26 +212,17 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
             if (hasScript(pid, current.linkedTestIds)) return void skipped.push({ caseId, reason: "has-script", detail: SKIP_WORDS["has-script"] });
             let made: { testId: string; key: string };
             try {
-                made = await withJobStarter(starter, () => withVersionSource("ai", () => ("spec" in written ? savePhone(pid, written.spec, headers) : dsl.create(pid, written.text, headers, { run: false }))));
+                made = await withJobStarter(starter, () => withVersionSource("ai", () => savePhone(pid, written, headers)));
             } catch (e) {
-                // The save path's own rules (shared elements, reusable steps, secrets typed in, addresses) refused the text.
-                if (e instanceof DslRefusal || e instanceof HttpError) {
+                // The import's own rules (secrets typed in, the engine switched off) refused the test.
+                if (e instanceof HttpError) {
                     skipped.push({ caseId, reason: "refused", detail: e.message });
                     return;
                 }
                 throw e;
             }
-            // One script per case: the case points at it, and the script covers the case's requirement.
-            const fresh = cases.getCase(pid, caseId);
-            const linked = [...new Set([...(fresh?.linkedTestIds ?? c.linkedTestIds), made.testId])];
-            p.db.run("UPDATE manual_cases SET linked_json = ?, updated_at = ? WHERE id = ? AND project_id = ?", JSON.stringify(linked), new Date().toISOString(), caseId, pid);
-            for (const rid of reqIds) {
-                try {
-                    await requirements.link(pid, rid, { automated: [made.testId], manual: [] }, "generated");
-                } catch {
-                    // A requirement deleted meanwhile: the script stays, without that link.
-                }
-            }
+            // One script per case: the case points at it, and the script covers the case's requirements.
+            await linkScriptsToCase(repo, pid, caseId, [made.testId]);
             created.push({ caseId, testId: made.testId, key: made.key });
         };
         /** One case's work never rejects: an unexpected error is that case's failure, so the answer (and the meter) waits for all of them. */

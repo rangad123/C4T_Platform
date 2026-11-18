@@ -6,7 +6,7 @@ import { detectKind, NO_MODEL_MESSAGE, PLAIN_MAX_LENGTH, PLAIN_MIN_LENGTH, PLAIN
 import { HttpError } from "../http-error.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import { environmentFor } from "../plain-run.js";
-import { DEFAULT_JOB_OPTIONS } from "../repo.js";
+import { DEFAULT_JOB_OPTIONS, type JobOptions } from "../repo.js";
 import { PLAIN_OFF_MESSAGE, refuseUnlessRunsStart } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
 
@@ -28,8 +28,21 @@ const CreateBody = z.object({
 });
 const RewriteBody = z.object({ description: Description, environment: EnvironmentName.optional() });
 
-export function registerAuthoringRoutes(ctx: RouteCtx): void {
-    const { app, p, repo } = ctx;
+/** What a described test is built from: the person's words (Describe it), or a written test case's (case-scripts.ts). */
+export interface PlainStartBody {
+    description: string;
+    kind?: "web" | "api";
+    environment?: string;
+    baseUrl?: string;
+}
+
+/**
+ * Starting a described test, shared by Test scripts (Describe it, POST /plain-tests) and Test cases (Generate test scripts,
+ * routes/generate-scripts.ts), so a test case is built exactly as a described test is: every refusal said before a job exists, then
+ * one plain job. `extra` adds job options (the test case it is built from).
+ */
+export function plainStarter(ctx: RouteCtx) {
+    const { p, repo } = ctx;
 
     /** Everything that can be refused before a job exists, with plain words. Returns what the job needs. */
     async function prepare(projectId: string, body: { description: string; kind?: "web" | "api"; environment?: string; baseUrl?: string }, fixedKind?: "web" | "api") {
@@ -60,22 +73,36 @@ export function registerAuthoringRoutes(ctx: RouteCtx): void {
         return { application, kind, allowChanges };
     }
 
-    app.post("/api/projects/:id/plain-tests", async (req, reply) => {
-        const { id } = req.params as { id: string };
-        ctx.project(id);
-        const body = CreateBody.parse(req.body);
-        refuseUnlessRunsStart(ctx.p, PLAIN_OFF_MESSAGE); // tests switched off on this server: nothing is queued
-        const { application, kind, allowChanges } = await prepare(id, body);
+    /** Queue the plain job, or refuse in plain words before anything is queued. */
+    async function start(projectId: string, body: PlainStartBody, extra: Partial<JobOptions> = {}) {
+        refuseUnlessRunsStart(p, PLAIN_OFF_MESSAGE); // tests switched off on this server: nothing is queued
+        const { application, kind, allowChanges } = await prepare(projectId, body);
         // Right before creating the job, with no await in between (one active job per project).
-        await ctx.assertNoActiveJob(id);
-        const job = await repo.createJob(id, application.id, {
+        await ctx.assertNoActiveJob(projectId);
+        const job = await repo.createJob(projectId, application.id, {
             ...DEFAULT_JOB_OPTIONS,
             mode: "plain",
             plainDescription: body.description,
             plainKind: kind,
             allowMutatingApiTests: allowChanges,
             ...(body.environment ? { environment: body.environment } : {}),
+            ...extra,
         });
+        return { job, kind };
+    }
+
+    return { prepare, start };
+}
+
+export function registerAuthoringRoutes(ctx: RouteCtx): void {
+    const { app, p, repo } = ctx;
+    const { prepare, start } = plainStarter(ctx);
+
+    app.post("/api/projects/:id/plain-tests", async (req, reply) => {
+        const { id } = req.params as { id: string };
+        ctx.project(id);
+        const body = CreateBody.parse(req.body);
+        const { job, kind } = await start(id, body);
         return reply.code(202).send({ jobId: job.id, status: job.status, kind });
     });
 

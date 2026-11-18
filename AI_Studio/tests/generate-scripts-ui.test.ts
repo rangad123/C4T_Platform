@@ -19,6 +19,7 @@ import { ManualCaseInputSchema } from "../src/engine/manual/cases.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { hashPassword } from "../src/platform/auth/password.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { afterCaseJob } from "../src/platform/case-scripts.js";
 import { ManualCaseStore } from "../src/platform/manual-case-store.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { RequirementStore } from "../src/platform/requirement-store.js";
@@ -43,6 +44,7 @@ let phone = "";
 let iphone = "";
 let noApp = "";
 let noAddress = "";
+let web = "";
 const cases: Record<string, { id: string; ref: string }> = {};
 const shots = process.env.UI_REVIEW_SHOTS;
 
@@ -61,7 +63,7 @@ beforeAll(async () => {
     fake = await startFakeProvider(8522);
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-genscripts-ui-"));
     platform = bootstrap(
-        loadConfig({ DATA_DIR: dataDir, API_KEY: KEY, HOST: "127.0.0.1", PORT: String(PORT), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: `${fake.url}/openai/v1`, LLM_MODEL: MODEL, LLM_API_KEY: "fake-key" }),
+        loadConfig({ DATA_DIR: dataDir, API_KEY: KEY, HOST: "127.0.0.1", PORT: String(PORT), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "true", LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: `${fake.url}/openai/v1`, LLM_MODEL: MODEL, LLM_API_KEY: "fake-key" }),
     );
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
@@ -72,6 +74,10 @@ beforeAll(async () => {
     const store = new ManualCaseStore(platform.db);
     const add = (title: string, automation: "automated" | "manual", extra: Record<string, unknown> = {}) => store.createCase(phone, ManualCaseInputSchema.parse({ title, automation, area: "Accounts", steps: [{ action: "Sign in with the test account", expected: "Welcome is shown" }], ...extra }));
     for (const [k, c] of Object.entries({ signIn: add("Verify sign in on the phone", "automated", { requirementId: req.id }), splash: add("Verify the splash screen looks right", "manual"), search: add("Verify search finds boots", "automated") })) cases[k] = { id: c.id, ref: c.ref };
+    // A web project (its application is never opened here: no worker runs the jobs, the test plays their end).
+    web = repo.createProject({ name: "Web shop", platforms: ["web"], testingModes: ["code"] }).id as string;
+    repo.createApplication(web, "http://127.0.0.1:8523", { ...DEFAULT_JOB_OPTIONS });
+    cases.webSignIn = (({ id, ref }) => ({ id, ref }))(store.createCase(web, ManualCaseInputSchema.parse({ title: "Sign in with valid credentials", automation: "automated", area: "Accounts", steps: [{ action: "Sign in with the saved account", expected: "The user is signed in" }] })));
     iphone = repo.createProject({ name: "iPhone shop", platforms: ["ios"], testingModes: ["code"] }).id as string;
     noApp = repo.createProject({ name: "Phone shop without its app", platforms: ["android"], testingModes: ["code"] }).id as string;
     noAddress = repo.createProject({ name: "Web shop without its address", platforms: ["web"], testingModes: ["code"] }).id as string;
@@ -146,6 +152,32 @@ describe("Generate test scripts, on Test cases", () => {
         expect(made.spec).toMatchObject({ kind: "mobile", platform: "android", description: CHECK_ON_DEVICE });
         expect(new ReviewStore(platform.db).latest(made.id)).toMatchObject({ source: "ai", state: "draft" });
         expect(platform.repo.listJobs(phone)).toHaveLength(0);
+    });
+
+    it("builds a web project's scripts as Describe it builds a test, and follows them until each case has its script", async () => {
+        await page.goto(`${BASE}/#/projects/${web}/tests`);
+        const card = page.getByTestId("generate-scripts");
+        await card.getByRole("button", { name: "Generate test scripts", exact: true }).click();
+        await pwExpect(card.getByText("Generate 1 test script?")).toBeVisible();
+        await pwExpect(card).toContainText("The AI does each test case's steps in a real browser on the application, signed in with the project's sign-in");
+        fake.reset();
+        await card.getByRole("button", { name: "Generate 1 script", exact: true }).click();
+        await pwExpect(card.getByTestId("generate-scripts-building")).toContainText("Building test scripts: 0 of 1");
+        if (shots) await page.screenshot({ path: path.join(shots, "generate-web-scripts-building.png") });
+        // Nothing was written without the application: the job builds it.
+        expect(fake.seen).toHaveLength(0);
+        const [job] = platform.repo.listJobs(web);
+        expect(job!.options).toMatchObject({ mode: "plain", plainCaseId: cases.webSignIn!.id });
+
+        // The job's end, played here: it made a test, and that test becomes the case's script.
+        const imported = await server.inject({ method: "POST", url: `/api/projects/${web}/specs`, headers: { "x-api-key": KEY }, payload: { validate: false, specs: [{ title: "Sign in with valid credentials", kind: "web", category: "Plain English", steps: [{ action: "navigate", url: "/" }] }] } });
+        expect(imported.statusCode, imported.body).toBe(202);
+        platform.db.run("UPDATE test_cases SET job_id = ? WHERE id = ?", job!.id, JSON.parse(imported.body).tests[0].id);
+        platform.repo.setJobStatus(job!.id, "COMPLETED");
+        expect(await afterCaseJob(platform.repo, job!)).toBeNull();
+        await pwExpect(card.getByText("Test scripts generated")).toBeVisible({ timeout: 15_000 });
+        await pwExpect(card).toContainText("1 test script has been created from your test cases. It was built on the application and run once: open it to see whether it passed.");
+        if (shots) await page.screenshot({ path: path.join(shots, "generate-web-scripts-done.png") });
     });
 
     it("says before the click why it cannot write here: an iOS-only project, an Android project without its app", async () => {

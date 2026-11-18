@@ -24,6 +24,7 @@ import { isLoadSpec } from "../engine/performance/load.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { prepareEnvironmentRun } from "./environment-run.js";
 import { plainRequestOf, runPlainJob } from "./plain-run.js";
+import { afterCaseJob } from "./case-scripts.js";
 import { takeAgentOutcome } from "./agent-on-runner.js";
 import type { AgentOnRunnerRequest } from "../agent/agent-mode.js";
 import { runAgentJob } from "./agent-run.js";
@@ -618,6 +619,14 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             new ReviewStore(repo.db).finishRun(job.id);
         } catch (e) {
             console.warn(`[job ${job.id.slice(0, 8)}] could not record the test versions this run ran: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        // A test case's job (case-scripts.ts): its test becomes the case's script, and the next case's job starts.
+        if (o.mode === "plain" && o.plainCaseId) {
+            try {
+                await afterCaseJob(repo, job);
+            } catch (e) {
+                console.warn(`[job ${job.id.slice(0, 8)}] could not link the test script to its test case or start the next one: ${e instanceof Error ? e.message : String(e)}`);
+            }
         }
         await cleanScratch(config.scratchDir).catch(() => undefined);
         await notifyFinished(deps, job.id);
