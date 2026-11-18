@@ -576,7 +576,15 @@ describe("end to end: a really flaky endpoint", () => {
         expect(status).toMatchObject({ state: "passed", passed: true, failures: [], summary: { total: 3, passed: 2, failed: 1, passRate: 100 } });
         expect(status.quarantined).toEqual([expect.objectContaining({ title: "Flaky endpoint" })]);
         expect(status.message).toBe("Passed (1 quarantined test ignored)");
-        const summary = (await call("GET", `/api/projects/${projectId}/runs/${run.body.jobId}/summary`)).body;
+        // The run's summary is written once the job has finished (schedule-services.ts onJobFinished), which can be a moment after the
+        // trigger's status says so on a slower machine: asked again until it is there.
+        let summary: any;
+        for (let i = 0; i < 50; i++) {
+            const got = await call("GET", `/api/projects/${projectId}/runs/${run.body.jobId}/summary`);
+            summary = got.body;
+            if (got.status !== 404) break;
+            await sleep(200);
+        }
         expect(summary).toMatchObject({ validated: 2, failed: 1, passRate: 100, quarantined: { tests: 1, failed: 1 } });
         await idle(projectId);
     }, 240_000);
