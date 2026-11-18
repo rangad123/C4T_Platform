@@ -49,7 +49,8 @@ Objectives run highest priority first. The priority is a fixed score, not a lear
 explains it, for example "Priority 9: stated by a source, mentions order, a workflow of 4 steps, a workflow check." What raises it:
 
 - how firmly the expectation is stated (confirmed by a person, then stated by a source);
-- words that mark something critical: money, order, account, payment, delete;
+- words that mark something critical: money (price, subtotal, total, discount, coupon, shipping, tax, refund, charge or a dollar
+  amount, which counts one point more than the others), order, account, payment, delete;
 - a longer workflow;
 - the kind: rule and state-change checks first, coverage gaps last.
 
@@ -105,15 +106,17 @@ An operator that does not run is listed with its reason, never left out silently
 
 Every limit is counted by the platform, not asked of the AI, and is fixed before the first page of the session is read.
 
-| Level | Objectives and pursuits | Browser actions | AI calls | Time | Visits to one screen in one pursuit |
+| Level | Objectives | Browser actions | AI calls | Time | Visits to one screen in one pursuit |
 |---|---|---|---|---|---|
-| Thorough | 25 | 750 | 750 | 90 minutes | 8 |
-| Deep | 50 | 2,000 | 2,000 | 150 minutes | 10 |
-| Everything | 100 | 5,000 | 5,000 | 180 minutes | 12 |
+| Thorough | 50 | 750 | 750 | 90 minutes | 8 |
+| Deep | 100 | 2,000 | 2,000 | 150 minutes | 10 |
+| Everything | 200 | 5,000 | 5,000 | 180 minutes | 12 |
 
-AI tokens are limited too: 300,000 per objective in the session's count (7.5, 15 or 30 million for the session). Each pursuit also has
-its own limits: the level's step limit for writing a test (30, 40 or 50 steps), 10 minutes and 300,000 tokens. Objectives beyond the
-session's limit are counted and listed as not reached.
+The objectives limit is on objectives: every pursuit of the objectives inside it is run (an objective with five operators is five
+pursuits), until the session's actions, AI calls, tokens or time run out. AI tokens are limited to 7.5, 15 or 30 million for the
+session. Each pursuit also has its own limits: the level's step limit for writing a test (30, 40 or 50 steps), 10 minutes, and 25,000
+tokens a step (750,000, 1 million or 1.25 million). A pursuit that reaches its own limit before its test is finished is listed as not
+finished, saying the steps done so far were not saved. Objectives beyond the session's limit are counted and listed as not reached.
 
 The session also avoids going round in circles:
 
@@ -130,7 +133,7 @@ Every session ends with exactly one stop reason, the first that applied:
 | Stop reason | Meaning |
 |---|---|
 | Every objective done | each objective was pursued or skipped |
-| Objectives limit | the level's number of pursuits was reached |
+| Objectives limit | every pursuit of the objectives inside the level's limit was run |
 | Time | the session's time ran out; a pursuit still running is abandoned |
 | Actions, AI calls, AI tokens | the session's limit of that was reached |
 | Instability | three environment failures in a row (a browser that stopped, an error the run could not recover from) |

@@ -98,8 +98,8 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         expect(m.transitions).toEqual([{ entity: "order", from: "new", to: "paid" }]);
     });
 
-    it("every level's session budgets sit inside its own limits; thorough pursues at most 25 objectives", () => {
-        expect(thorough.exploration.objectives).toBeLessThanOrEqual(25);
+    it("every level's session budgets sit inside its own limits; thorough explores 50 objectives (owner, 2026-11-21)", () => {
+        expect(thorough.exploration.objectives).toBe(50);
         for (const level of LEVELS) {
             const s = LEVEL_SETTINGS[level];
             const e = s.exploration;
