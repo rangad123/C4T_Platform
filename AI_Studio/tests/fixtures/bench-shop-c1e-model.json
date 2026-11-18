@@ -1,0 +1,1432 @@
+{
+ "note": "Row 205: the bench-shop model and rules analysed in the C1e candidate trial (phase3 75f947d, job f43d51af): pages (id, path, forms), workflows (steps carry page ids), transitions, and the rules. No credentials, no page text beyond form fields.",
+ "model": {
+  "pages": [
+   {
+    "id": "page:/",
+    "path": "/",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     }
+    ]
+   },
+   {
+    "id": "page:/cart",
+    "path": "/cart",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     }
+    ]
+   },
+   {
+    "id": "page:/orders",
+    "path": "/orders",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     }
+    ]
+   },
+   {
+    "id": "page:/account",
+    "path": "/account",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     },
+     {
+      "name": "checkout",
+      "fields": [
+       {
+        "name": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false
+       },
+       {
+        "name": "address",
+        "label": "Default delivery address 12 Harbour Street, Leeds",
+        "type": "textarea",
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/products/p1",
+    "path": "/products/p1",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     },
+     {
+      "name": "other",
+      "fields": [
+       {
+        "name": "quantity",
+        "label": "Quantity",
+        "type": "number",
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/products/p2",
+    "path": "/products/p2",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     },
+     {
+      "name": "other",
+      "fields": [
+       {
+        "name": "quantity",
+        "label": "Quantity",
+        "type": "number",
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/products/p3",
+    "path": "/products/p3",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     },
+     {
+      "name": "other",
+      "fields": [
+       {
+        "name": "quantity",
+        "label": "Quantity",
+        "type": "number",
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/products/p4",
+    "path": "/products/p4",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     },
+     {
+      "name": "other",
+      "fields": [
+       {
+        "name": "quantity",
+        "label": "Quantity",
+        "type": "number",
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/products/p5",
+    "path": "/products/p5",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     },
+     {
+      "name": "other",
+      "fields": [
+       {
+        "name": "quantity",
+        "label": "Quantity",
+        "type": "number",
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/orders/ord-1000",
+    "path": "/orders/ord-1000",
+    "forms": [
+     {
+      "name": "other",
+      "fields": []
+     }
+    ]
+   },
+   {
+    "id": "page:/login",
+    "path": "/login",
+    "forms": [
+     {
+      "name": "login",
+      "fields": [
+       {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "message": "Please include an '@' in the email address. '...' is missing an '@'."
+       },
+       {
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "required": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/login?next=%2Fcart",
+    "path": "/login?next=%2Fcart",
+    "forms": [
+     {
+      "name": "login",
+      "fields": [
+       {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "message": "Please include an '@' in the email address. '...' is missing an '@'."
+       },
+       {
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "required": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "page:/register",
+    "path": "/register",
+    "forms": [
+     {
+      "name": "login",
+      "fields": [
+       {
+        "name": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false
+       },
+       {
+        "name": "email",
+        "label": "Email",
+        "type": "text",
+        "required": false
+       },
+       {
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "required": false
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "workflows": [
+   {
+    "id": "journey-1-register-a-new-account",
+    "name": "Register a new account",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the registration page",
+      "page": "page:/register"
+     },
+     {
+      "order": 1,
+      "action": "Enter name, email and password and submit Create account",
+      "page": "page:/register",
+      "endpoint": "POST /api/register"
+     }
+    ],
+    "preconditions": [],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "1.5#L1",
+      "excerpt": "The name is required; an empty name is refused with \"Enter your name.\""
+     },
+     {
+      "kind": "quote",
+      "ref": "1.6#L1",
+      "excerpt": "The email address must be a valid email address"
+     },
+     {
+      "kind": "quote",
+      "ref": "1.7#L1",
+      "excerpt": "The password must have at least 8 characters"
+     },
+     {
+      "kind": "quote",
+      "ref": "1.8#L1",
+      "excerpt": "An email address can belong to one account only"
+     },
+     {
+      "kind": "quote",
+      "ref": "1.9#L1",
+      "excerpt": "Email addresses are not case-sensitive and spaces around them are ignored"
+     },
+     {
+      "kind": "quote",
+      "ref": "1.10#L1",
+      "excerpt": "A new account is signed in straight away"
+     },
+     {
+      "kind": "page",
+      "ref": "/register"
+     }
+    ]
+   },
+   {
+    "id": "journey-2-sign-in-and-sign-out",
+    "name": "Sign in and sign out",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the sign-in page",
+      "page": "page:/login"
+     },
+     {
+      "order": 1,
+      "action": "Enter email and password and submit Sign in",
+      "page": "page:/login",
+      "endpoint": "POST /api/login"
+     },
+     {
+      "order": 2,
+      "action": "Click Sign out in the navigation",
+      "page": "page:/",
+      "endpoint": "POST /api/logout"
+     }
+    ],
+    "preconditions": [],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "1.2#L2",
+      "excerpt": "The cart, checkout, orders and account pages are for signed-in customers"
+     },
+     {
+      "kind": "quote",
+      "ref": "1.9#L1",
+      "excerpt": "Email addresses are not case-sensitive and spaces around them are ignored"
+     },
+     {
+      "kind": "quote",
+      "ref": "1.11#L1",
+      "excerpt": "a wrong combination is refused with \"Email or password is wrong.\""
+     },
+     {
+      "kind": "quote",
+      "ref": "1.12#L1",
+      "excerpt": "Signing out ends the session; the person is then a visitor again."
+     },
+     {
+      "kind": "page",
+      "ref": "/login"
+     },
+     {
+      "kind": "page",
+      "ref": "/"
+     }
+    ]
+   },
+   {
+    "id": "journey-3-browse-product-catalogue",
+    "name": "Browse product catalogue",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the home page showing all products",
+      "page": "page:/",
+      "endpoint": "GET /api/products"
+     }
+    ],
+    "preconditions": [],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "1.1#L1",
+      "excerpt": "Anyone can browse the product list and every product page without signing in."
+     },
+     {
+      "kind": "quote",
+      "ref": "2.2#L1",
+      "excerpt": "shipping is free on orders of $50.00 or more"
+     },
+     {
+      "kind": "page",
+      "ref": "/"
+     }
+    ]
+   },
+   {
+    "id": "journey-4-view-product-details",
+    "name": "View product details",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open a product detail page from the product list",
+      "page": "page:/products/p1",
+      "endpoint": "GET /api/products/{id}"
+     }
+    ],
+    "preconditions": [],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "2.5#L1",
+      "excerpt": "A visitor on a product page is invited to sign in to buy."
+     },
+     {
+      "kind": "quote",
+      "ref": "2.6#L1",
+      "excerpt": "A product that does not exist shows \"Product not found\""
+     },
+     {
+      "kind": "page",
+      "ref": "/"
+     },
+     {
+      "kind": "page",
+      "ref": "/products/p1"
+     }
+    ]
+   },
+   {
+    "id": "journey-5-add-a-product-to-the-cart",
+    "name": "Add a product to the cart",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open a product detail page",
+      "page": "page:/products/p1",
+      "endpoint": "GET /api/products/{id}"
+     },
+     {
+      "order": 1,
+      "action": "Set quantity and click Add to cart",
+      "page": "page:/products/p1",
+      "endpoint": "POST /api/cart/items"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "3.3#L1",
+      "excerpt": "increases that line's quantity by the quantity added"
+     },
+     {
+      "kind": "quote",
+      "ref": "3.5#L1",
+      "excerpt": "A quantity must be a whole number of at least 1"
+     },
+     {
+      "kind": "quote",
+      "ref": "3.6#L2",
+      "excerpt": "A customer can have at most 10 of each item in the cart"
+     },
+     {
+      "kind": "page",
+      "ref": "/products/p1"
+     },
+     {
+      "kind": "page",
+      "ref": "/cart"
+     }
+    ]
+   },
+   {
+    "id": "journey-6-view-the-cart-contents",
+    "name": "View the cart contents",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the cart page",
+      "page": "page:/cart",
+      "endpoint": "GET /api/cart"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "3.1#L1",
+      "excerpt": "Each customer has one cart; it starts empty"
+     },
+     {
+      "kind": "quote",
+      "ref": "3.9#L1",
+      "excerpt": "The cart's subtotal is the sum of its line totals."
+     },
+     {
+      "kind": "quote",
+      "ref": "3.10#L1",
+      "excerpt": "the total is the subtotal minus the discount plus the shipping charge"
+     },
+     {
+      "kind": "quote",
+      "ref": "4.4#L1",
+      "excerpt": "Shipping costs $5.00 per order."
+     },
+     {
+      "kind": "quote",
+      "ref": "4.5#L1",
+      "excerpt": "Shipping is free when the subtotal after the discount is $50.00 or more."
+     },
+     {
+      "kind": "quote",
+      "ref": "4.6#L1",
+      "excerpt": "An empty cart has no shipping charge."
+     },
+     {
+      "kind": "page",
+      "ref": "/cart"
+     }
+    ]
+   },
+   {
+    "id": "journey-7-change-cart-item-quantity",
+    "name": "Change cart item quantity",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the cart page",
+      "page": "page:/cart",
+      "endpoint": "GET /api/cart"
+     },
+     {
+      "order": 1,
+      "action": "Change the quantity of a cart item",
+      "page": "page:/cart",
+      "endpoint": "PATCH /api/cart/items/{productId}"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "3.5#L1",
+      "excerpt": "A quantity must be a whole number of at least 1"
+     },
+     {
+      "kind": "quote",
+      "ref": "3.6#L2",
+      "excerpt": "A customer can have at most 10 of each item in the cart"
+     },
+     {
+      "kind": "page",
+      "ref": "/cart"
+     }
+    ]
+   },
+   {
+    "id": "journey-8-remove-an-item-from-the-cart",
+    "name": "Remove an item from the cart",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the cart page",
+      "page": "page:/cart",
+      "endpoint": "GET /api/cart"
+     },
+     {
+      "order": 1,
+      "action": "Remove the item from the cart",
+      "page": "page:/cart",
+      "endpoint": "DELETE /api/cart/items/{productId}"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "inferred",
+    "evidence": [
+     {
+      "kind": "page",
+      "ref": "/cart"
+     }
+    ]
+   },
+   {
+    "id": "journey-9-apply-a-discount-code",
+    "name": "Apply a discount code",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the cart page",
+      "page": "page:/cart",
+      "endpoint": "GET /api/cart"
+     },
+     {
+      "order": 1,
+      "action": "Enter a discount code and apply it",
+      "page": "page:/cart",
+      "endpoint": "POST /api/cart/discount"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "3.11#L1",
+      "excerpt": "appear only when the cart has at least one line"
+     },
+     {
+      "kind": "quote",
+      "ref": "4.1#L1",
+      "excerpt": "takes 10% off the order subtotal, rounded to the nearest cent"
+     },
+     {
+      "kind": "quote",
+      "ref": "4.2#L1",
+      "excerpt": "Codes are accepted in any letter case and with spaces around them"
+     },
+     {
+      "kind": "page",
+      "ref": "/cart"
+     }
+    ]
+   },
+   {
+    "id": "journey-10-check-out-with-delivery-address-and-place-order",
+    "name": "Check out with delivery address and place order",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the cart page with items",
+      "page": "page:/cart",
+      "endpoint": "GET /api/cart"
+     },
+     {
+      "order": 1,
+      "action": "Save the delivery address for checkout",
+      "page": "page:/cart",
+      "endpoint": "POST /api/checkout/address"
+     },
+     {
+      "order": 2,
+      "action": "Place the order",
+      "page": "page:/cart",
+      "endpoint": "POST /api/orders"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "5.3#L1",
+      "excerpt": "A delivery address needs at least 5 characters"
+     },
+     {
+      "kind": "quote",
+      "ref": "5.4#L1",
+      "excerpt": "a customer who opens the review step before giving a delivery address in the current checkout is sent to step 1."
+     },
+     {
+      "kind": "quote",
+      "ref": "5.5#L2",
+      "excerpt": "An order needs a delivery address given in step 1 of the current checkout"
+     },
+     {
+      "kind": "quote",
+      "ref": "5.6#L1",
+      "excerpt": "The review step shows the delivery address"
+     },
+     {
+      "kind": "quote",
+      "ref": "5.7#L1",
+      "excerpt": "Placing an order with an empty cart is refused"
+     },
+     {
+      "kind": "quote",
+      "ref": "5.8#L1",
+      "excerpt": "Placing an order turns the cart into the order"
+     },
+     {
+      "kind": "quote",
+      "ref": "5.10#L1",
+      "excerpt": "After placing an order the customer sees the new order's page."
+     },
+     {
+      "kind": "page",
+      "ref": "/cart"
+     },
+     {
+      "kind": "page",
+      "ref": "/orders"
+     }
+    ]
+   },
+   {
+    "id": "journey-11-view-order-history",
+    "name": "View order history",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the orders page",
+      "page": "page:/orders",
+      "endpoint": "GET /api/orders"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "6.3#L1",
+      "excerpt": "lists all of the customer's orders, newest first"
+     },
+     {
+      "kind": "quote",
+      "ref": "6.4#L1",
+      "excerpt": "A customer without orders sees"
+     },
+     {
+      "kind": "page",
+      "ref": "/orders"
+     }
+    ]
+   },
+   {
+    "id": "journey-12-view-order-details",
+    "name": "View order details",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the orders page",
+      "page": "page:/orders",
+      "endpoint": "GET /api/orders"
+     },
+     {
+      "order": 1,
+      "action": "Open order ord-1000",
+      "page": "page:/orders/ord-1000",
+      "endpoint": "GET /api/orders/{id}"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "6.6#L1",
+      "excerpt": "Customers can see only their own orders"
+     },
+     {
+      "kind": "quote",
+      "ref": "6.5#L1",
+      "excerpt": "An order page shows the order's status, lines, total and delivery address."
+     },
+     {
+      "kind": "page",
+      "ref": "/orders"
+     },
+     {
+      "kind": "page",
+      "ref": "/orders/ord-1000"
+     }
+    ]
+   },
+   {
+    "id": "journey-13-pay-for-an-order",
+    "name": "Pay for an order",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the order detail page",
+      "page": "page:/orders/ord-1000",
+      "endpoint": "GET /api/orders/{id}"
+     },
+     {
+      "order": 1,
+      "action": "Click pay for the order",
+      "page": "page:/orders/ord-1000",
+      "endpoint": "POST /api/orders/{id}/pay"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "6.7#L1",
+      "excerpt": "Only a Placed order can be paid"
+     },
+     {
+      "kind": "page",
+      "ref": "/orders/ord-1000"
+     }
+    ]
+   },
+   {
+    "id": "journey-14-cancel-an-order",
+    "name": "Cancel an order",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the order detail page",
+      "page": "page:/orders/ord-1000",
+      "endpoint": "GET /api/orders/{id}"
+     },
+     {
+      "order": 1,
+      "action": "Click Cancel order",
+      "page": "page:/orders/ord-1000",
+      "endpoint": "POST /api/orders/{id}/cancel"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "6.8#L1",
+      "excerpt": "A customer can cancel an order until it ships"
+     },
+     {
+      "kind": "quote",
+      "ref": "6.9#L1",
+      "excerpt": "A Cancelled order cannot be cancelled again"
+     },
+     {
+      "kind": "page",
+      "ref": "/orders/ord-1000"
+     }
+    ]
+   },
+   {
+    "id": "journey-15-view-account-profile",
+    "name": "View account profile",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the account page",
+      "page": "page:/account",
+      "endpoint": "GET /api/profile"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "7.1#L1",
+      "excerpt": "the email address cannot be changed"
+     },
+     {
+      "kind": "page",
+      "ref": "/account"
+     }
+    ]
+   },
+   {
+    "id": "journey-16-update-account-profile",
+    "name": "Update account profile",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Open the account page",
+      "page": "page:/account",
+      "endpoint": "GET /api/profile"
+     },
+     {
+      "order": 1,
+      "action": "Edit name or delivery address and click Save",
+      "page": "page:/account",
+      "endpoint": "PUT /api/profile"
+     }
+    ],
+    "preconditions": [
+     "Signed in"
+    ],
+    "postconditions": [],
+    "roles": [],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "7.2#L1",
+      "excerpt": "the name is required"
+     },
+     {
+      "kind": "quote",
+      "ref": "7.3#L2",
+      "excerpt": "the saved name and address are the account's from then on"
+     },
+     {
+      "kind": "page",
+      "ref": "/account"
+     }
+    ]
+   },
+   {
+    "id": "wf-fb24913b2b9fa5a2",
+    "name": "Check out with delivery address and place order",
+    "steps": [
+     {
+      "order": 0,
+      "action": "Delivery address"
+     },
+     {
+      "order": 1,
+      "action": "Review and pay"
+     }
+    ],
+    "preconditions": [],
+    "postconditions": [],
+    "roles": [
+     "customer"
+    ],
+    "sourceType": "requirement",
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "5.1#L1",
+      "excerpt": "Checkout has two steps, in this order: 1. Delivery address, 2. Review and pay."
+     }
+    ]
+   }
+  ],
+  "transitions": [
+   {
+    "entity": "session",
+    "from": "signed in",
+    "to": "visitor",
+    "trigger": "Signing out",
+    "sourceType": "requirement",
+    "expectation": true,
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "1.12#L1",
+      "excerpt": "Signing out ends the session; the person is then a visitor again."
+     }
+    ]
+   },
+   {
+    "entity": "Order",
+    "from": "Placed",
+    "to": "Paid",
+    "trigger": "paying",
+    "sourceType": "requirement",
+    "expectation": true,
+    "evidence": [
+     {
+      "kind": "quote",
+      "ref": "6.7#L1",
+      "excerpt": "Only a Placed order can be paid; paying makes it Paid"
+     }
+    ]
+   }
+  ]
+ },
+ "rules": [
+  {
+   "ref": "R-023750e4f263",
+   "kind": "other",
+   "description": "Saving shows 'Saved.'; the saved name and address become the account's from then on, including the starting address of the next checkout.",
+   "expected": "Shows 'Saved.' and the saved values are used everywhere after.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-0241ead951ce",
+   "kind": "workflow",
+   "description": "Product page allows adding the product to the cart with a quantity",
+   "expected": "Quantity is entered and the item is added to the cart",
+   "explicitness": "inferred",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-0a0015255301",
+   "kind": "constraint",
+   "description": "Request bodies larger than 64 KB are ignored.",
+   "expected": "Bodies over 64 KB are ignored.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-128ab161e01b",
+   "kind": "invariant",
+   "description": "Each customer has one cart that starts empty.",
+   "expected": "One cart per customer, starting empty.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-1d25dd734d2c",
+   "kind": "invariant",
+   "description": "An order is Placed, Paid, Shipped or Cancelled; a new order is Placed.",
+   "expected": "Order status is one of Placed, Paid, Shipped, Cancelled; new orders start as Placed.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-229f555d6725",
+   "kind": "workflow",
+   "description": "Review step requires a delivery address in the current checkout.",
+   "expected": "A customer who opens the review step before giving a delivery address in the current checkout is sent to step 1.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-2687b4a64d85",
+   "kind": "permission",
+   "description": "Discount code form and Check out button appear only with at least one cart line.",
+   "expected": "They are shown only when the cart has at least one line.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-28473a1cfa42",
+   "kind": "calculation",
+   "description": "Free shipping on orders of $50.00 or more is stated on the product list.",
+   "expected": "The product list states that shipping is free on orders of $50.00 or more.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-2c4f11c0e1f8",
+   "kind": "constraint",
+   "description": "The email address must be valid.",
+   "expected": "Anything other than a valid email address is refused with \"Enter a valid email address.\"",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-304f2e4e84a8",
+   "kind": "calculation",
+   "description": "Email addresses are not case-sensitive and surrounding spaces are ignored.",
+   "expected": "Email addresses are matched ignoring letter case and surrounding spaces, when registering and signing in.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-321009339ecc",
+   "kind": "transition",
+   "description": "Placing an order turns the cart into the order; afterwards the cart is empty and the next checkout starts at step 1.",
+   "expected": "The cart is empty and the next checkout starts again at step 1.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-378785fd6285",
+   "kind": "constraint",
+   "description": "Email address must include an @ sign",
+   "expected": "Form rejects an email address without an @",
+   "explicitness": "inferred",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-381720d0ce7a",
+   "kind": "constraint",
+   "description": "A product that does not exist is reported as not found.",
+   "expected": "Shows \"Product not found\" (page and API: 404).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-3996b6002042",
+   "kind": "transition",
+   "description": "A Cancelled order cannot be cancelled again.",
+   "expected": "Cancelling a Cancelled order is refused (API 409).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-4b566a94910a",
+   "kind": "constraint",
+   "description": "Price display format.",
+   "expected": "Prices are shown in dollars with two decimals; the API gives every amount in cents.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-4e985560a0cb",
+   "kind": "transition",
+   "description": "A customer can cancel an order until it ships; cancelling makes it Cancelled.",
+   "expected": "A Shipped order cannot be cancelled (API 409).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-53660a54da9d",
+   "kind": "constraint",
+   "description": "The password must have at least 8 characters.",
+   "expected": "A shorter password is refused with a message that states the minimum.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-5cb9a4ce968e",
+   "kind": "calculation",
+   "description": "Cart total calculation.",
+   "expected": "The total is the subtotal minus the discount plus the shipping charge.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-5d137b469d3d",
+   "kind": "constraint",
+   "description": "Maximum of 10 of each item in the cart.",
+   "expected": "A change making an item's quantity more than 10 is refused with \"You can order up to 10 of each item.\" and the cart stays as it was.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-5ed117feea46",
+   "kind": "permission",
+   "description": "User can edit name and default delivery address on the account page",
+   "expected": "Name and default delivery address are editable by the user",
+   "explicitness": "inferred",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-61c967e54764",
+   "kind": "calculation",
+   "description": "Shipping is free when the discounted subtotal reaches $50.00.",
+   "expected": "Shipping is free when the subtotal after the discount is $50.00 or more.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-648b109a4600",
+   "kind": "constraint",
+   "description": "Placing an order with an empty cart is refused.",
+   "expected": "Refused with 'Your cart is empty.' (API 409).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-7636edfc87ab",
+   "kind": "other",
+   "description": "The Orders page lists all of the customer's orders, newest first, each with its number, date, status and total.",
+   "expected": "Orders are listed newest first with number, date, status and total.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-7b8a31e6c2a4",
+   "kind": "permission",
+   "description": "Customers can see only their own orders.",
+   "expected": "Other order numbers show 'Order not found' (page and API 404).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-7da7984f7410",
+   "kind": "workflow",
+   "description": "A new account is signed in straight away.",
+   "expected": "A new account is signed in immediately and has no default delivery address yet.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-8bd89be7451f",
+   "kind": "constraint",
+   "description": "Wrong email and password combination is refused at sign-in.",
+   "expected": "A wrong combination is refused with \"Email or password is wrong.\" (API: 401).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-8c5abe7ea9bb",
+   "kind": "other",
+   "description": "An order page shows the order's status, lines, total and delivery address.",
+   "expected": "The order page shows status, lines, total and delivery address.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-91d935984c8a",
+   "kind": "calculation",
+   "description": "Adding a product already in the cart increases that line's quantity.",
+   "expected": "The line's quantity increases by the quantity added.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-96bfeab4d887",
+   "kind": "constraint",
+   "description": "An order needs a delivery address given in step 1 of the current checkout; without one, placing the order is refused.",
+   "expected": "Placing an order without a delivery address is refused with 'Add a delivery address first.' (API 409).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-97c42fa8c865",
+   "kind": "constraint",
+   "description": "The review step shows the delivery address, the cart with its prices, and a Place order button.",
+   "expected": "The review step shows the delivery address, the cart with its prices, and a Place order button.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-97db2d3a88c2",
+   "kind": "constraint",
+   "description": "The email address the customer signs in with cannot be changed.",
+   "expected": "The Account page shows the email address, which cannot be changed.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-a3938ceec371",
+   "kind": "invariant",
+   "description": "An order keeps a copy of the cart's lines, subtotal, discount, shipping charge, total, delivery address and time placed, and gets a number of the form ord-NNNN.",
+   "expected": "Each order stores a copy of these values and a number of the form ord-NNNN.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-a3e2f8d5ee85",
+   "kind": "other",
+   "description": "Product list notes a shipping threshold alongside prices",
+   "expected": "Shipping threshold note is shown with product prices",
+   "explicitness": "inferred",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-a6c110968f14",
+   "kind": "constraint",
+   "description": "Discount codes are case-insensitive and ignore surrounding spaces.",
+   "expected": "Accepted in any letter case with spaces around them; unknown code refused with \"That code is not valid.\" (API: 400).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-a7a96a316692",
+   "kind": "calculation",
+   "description": "Cart subtotal is the sum of line totals.",
+   "expected": "The subtotal equals the sum of its line totals.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-ab8c918ce503",
+   "kind": "other",
+   "description": "After placing an order the customer sees the new order's page.",
+   "expected": "The customer is shown the new order's page.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-ad470c14006f",
+   "kind": "workflow",
+   "description": "Signing out ends the session.",
+   "expected": "After signing out the person is a visitor again.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-b13a9b4d67be",
+   "kind": "transition",
+   "description": "Only a Placed order can be paid; paying makes it Paid.",
+   "expected": "Paying a non-Placed order is refused (API 409).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-b80e5e3c3d9f",
+   "kind": "permission",
+   "description": "Cart page shows the signed-in user's cart contents",
+   "expected": "Cart contents are shown to the signed-in user",
+   "explicitness": "inferred",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-bf911686074a",
+   "kind": "constraint",
+   "description": "On the Account page the customer can change name and default delivery address; the name is required.",
+   "expected": "Saving requires a name.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-c28810afe0b1",
+   "kind": "permission",
+   "description": "A visitor on a product page is invited to sign in to buy.",
+   "expected": "A visitor sees an invitation to sign in to buy.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-c87d400f2202",
+   "kind": "permission",
+   "description": "Cart, checkout, orders and account pages are for signed-in customers.",
+   "expected": "A visitor who opens one is taken to the sign-in page and, after signing in, back to the page they asked for.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-ca3dbf7743b5",
+   "kind": "constraint",
+   "description": "Order can be cancelled before shipment",
+   "expected": "Cancel order is allowed before shipment",
+   "explicitness": "inferred",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-d409c4151db0",
+   "kind": "permission",
+   "description": "Anyone can browse the product list and product pages without signing in.",
+   "expected": "Visitors can view the product list and every product page.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-d94a3ac53f55",
+   "kind": "calculation",
+   "description": "SAVE10 takes 10% off the order subtotal.",
+   "expected": "10% off the subtotal, rounded to the nearest cent.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-dd54beb3eae7",
+   "kind": "constraint",
+   "description": "A quantity must be a whole number of at least 1.",
+   "expected": "Anything else is refused with \"Choose a quantity of at least 1.\"",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-de8a0599abf7",
+   "kind": "constraint",
+   "description": "A delivery address needs at least 5 characters.",
+   "expected": "A shorter address is refused with \"Enter a delivery address.\"",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-e99e58ef8f0f",
+   "kind": "calculation",
+   "description": "Shipping costs $5.00 per order.",
+   "expected": "Shipping charge is $5.00 per order.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-ebc2695b2b3e",
+   "kind": "constraint",
+   "description": "The name is required on registration.",
+   "expected": "An empty name is refused with \"Enter your name.\"",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-f34cbebf79ee",
+   "kind": "calculation",
+   "description": "An empty cart has no shipping charge.",
+   "expected": "Empty cart shipping charge is zero.",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-fba990278c59",
+   "kind": "invariant",
+   "description": "An email address can belong to one account only.",
+   "expected": "Registering again with the same email address is refused (API: 409).",
+   "explicitness": "explicit",
+   "status": "unverified"
+  },
+  {
+   "ref": "R-fcfae8857c2c",
+   "kind": "other",
+   "description": "A customer without orders sees a 'No orders yet.' message.",
+   "expected": "Shows 'No orders yet.'",
+   "explicitness": "explicit",
+   "status": "unverified"
+  }
+ ]
+}
