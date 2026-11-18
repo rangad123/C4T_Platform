@@ -19,6 +19,7 @@ import { RunTestList } from "./RunStrip";
 import { followsRunner, liveCounts, LiveRunPanel, useIsMine, useLiveRun } from "./LiveRun";
 import { StopRun } from "./StopDialog";
 import { RunCoverage, useCoverage } from "./ObjectivesPanel";
+import { CandidateFindings } from "./CandidateFindings";
 import { Elapsed, RelTime } from "./RunTime";
 import { announceRunsChanged, ranSentence, runTitle, startedByText, STATE_WORD, stoppedLine, useRunAnswer, whereOf, type RunState } from "./runs";
 import { BadgeKey, keyEntries } from "../../components/Tooltip";
@@ -170,6 +171,8 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                 {exploration && !(job.targets?.includes("mobile") ?? false) && <ExplorerKnowledge projectId={id} jobId={job.jobId} active={active} />}
 
                 {followsRunner(job) && <LiveRunPanel projectId={id} job={job} active={active} live={runner.live} loaded={runner.loaded} planned={c.planned} answer={a} objectives={explored ? { explores, canStop, ...(coverage.data ? { coverage: coverage.data } : {}) } : undefined} />}
+
+                {explored && !active && <CandidateFindings projectId={id} jobId={jobId} explores={explores} />}
 
                 {explored && !active && <RunCoverage coverage={coverage} explores={explores} />}
 
