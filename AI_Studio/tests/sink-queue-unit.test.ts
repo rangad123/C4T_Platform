@@ -175,6 +175,18 @@ describe("a job's writes through the sink and the job runner", () => {
         platform.repo.setJobStatus(job.id, "FAILED", "test over");
     });
 
+    it("hands out a new test key each time, also to ideas written side by side before either is saved", async () => {
+        // Two journeys written at once each ask for their key before either test is stored (orchestrator.ts; on a runner both asks can come
+        // in one batch, explore-sink.ts): the second key must not be the first one again, or saving the second test fails.
+        const job = await claimed([]);
+        const sink = new RepoSink(platform.repo, platform.store, job);
+        const [a, b] = await Promise.all([sink.nextTestKey("WEB"), sink.nextTestKey("WEB")]);
+        const c = await sink.nextTestKey("WEB");
+        expect(new Set([a, b, c]).size).toBe(3);
+        expect(await sink.nextTestKey("API")).toBe("API-001");
+        platform.repo.setJobStatus(job.id, "FAILED", "test over");
+    });
+
     it("stores no agent actions, and an agent run is still finished in order", async () => {
         const job = await claimed([]);
         const { repo } = platform;
