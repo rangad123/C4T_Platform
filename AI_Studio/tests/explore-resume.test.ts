@@ -176,7 +176,8 @@ const _dump = async (label: string, jobId: string, projectId: string) => {
     return { j, ev, tests };
 };
 
-const create = (projectId: string, planJob: string, body: unknown = {}) => call("POST", `/api/projects/${projectId}/plans/${planJob}/create`, body);
+// The creation also runs its test cases (runTestCases, which a Continue keeps): what is checked here is which tests are run again.
+const create = (projectId: string, planJob: string, body: unknown = { runTestCases: true }) => call("POST", `/api/projects/${projectId}/plans/${planJob}/create`, body);
 const cont = (projectId: string, jobId: string) => call("POST", `/api/projects/${projectId}/explorations/${jobId}/continue`);
 const kinds = async (jobId: string) => (await events(jobId)).map((e) => e.kind);
 async function planned(name: string): Promise<{ projectId: string; planJob: string }> {

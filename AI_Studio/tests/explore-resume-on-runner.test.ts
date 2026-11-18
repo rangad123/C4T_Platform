@@ -177,7 +177,8 @@ describe("stop and continue on the runner", () => {
             expect(["COMPLETED", "PARTIALLY_COMPLETED"], JSON.stringify(plan)).toContain(plan.status);
 
             holdAt = IDEAS[1].heading;
-            const c = await call("POST", `/api/projects/${projectId}/plans/${s.body.jobId}/create`, {}, who.token);
+            // The creation also runs its test cases (runTestCases, which the Continue keeps), so the kept test is run on the runner.
+            const c = await call("POST", `/api/projects/${projectId}/plans/${s.body.jobId}/create`, { runTestCases: true }, who.token);
             expect(c.status, c.text).toBe(202);
             const tests = async () => (await call("GET", `/api/projects/${projectId}/tests`, undefined, who.token)).body as Array<{ title: string; validationStatus: string }>;
             // The runner writes ideas side by side: the stop comes once the first one is saved, while the second is held in the AI.

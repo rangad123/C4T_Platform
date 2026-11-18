@@ -292,6 +292,8 @@ export class SecurityFake {
             if (method === "GET" && (rest === "tests" || rest === "jobs")) return { body: [] };
             if (method === "GET" && rest === "testing-agents") return { body: { applies: false, agents: [], source: "matched", chosenBy: null, chosenAt: null, switches: {}, platforms: ["web"] } };
             if (method === "GET" && rest === "notes") return { body: { notes: [], max: 50 } };
+            // The project's AI model (General settings): none chosen and no models of this person's keys (routes/project-ai-model.ts).
+            if (method === "GET" && rest === "ai-model") return { body: { selected: null, selectedYours: true, choices: [] } };
             if (method === "GET" && rest === "app-details") return { body: { webUrl: null, android: { apk: null, appPackage: null, playStoreUrl: null }, ios: { ipa: null, bundleId: null, appStoreUrl: null } } };
             if (method === "GET" && rest === "schedules") return { body: { serverTime: new Date().toISOString(), timezone: { name: "UTC", utcOffsetMinutes: 0 }, schedulerEnabled: false, schedules: [] } };
             // Frameworks is a part of Settings > General (shown as its summary row): the platform's standard settings.
