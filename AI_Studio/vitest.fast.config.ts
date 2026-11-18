@@ -46,6 +46,7 @@ export default defineConfig({
             "tests/run-live-unit.test.ts",
             "tests/runner-protocol2-unit.test.ts",
             "tests/exploration-record-unit.test.ts",
+            "tests/explore-action-mask-unit.test.ts",
             "tests/runner-sessions-personal.test.ts",
             "tests/runner-stop-file-unit.test.ts",
             "tests/live-hardening.test.ts",
