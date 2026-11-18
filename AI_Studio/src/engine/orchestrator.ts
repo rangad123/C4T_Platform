@@ -952,6 +952,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         if (!browser.isConnected()) throw new Error("The browser is no longer running.");
                     },
                     ...(ctx.signal ? { cancel: ctx.signal } : {}),
+                    // Row 173: the run page's live list. Ids and operator names only: no page text, no prompts.
+                    onPursuit: (p, done) => {
+                        const data = { objectiveId: p.objective.id, operator: p.operator, ...(done ? { outcome: done.status } : {}) };
+                        ctx.emit({ stage: "generation", kind: done ? "objective_finished" : "objective_started", message: `${p.objective.id} ${p.operator}: ${done ? `finished (${done.status})` : "started"}`, data });
+                    },
                 });
                 summary.exploration = {
                     stopReason: session.stopReason,

@@ -10,7 +10,7 @@ import type { Fetched } from "../../lib/hooks";
 import { useFetch } from "../../lib/hooks";
 import { StopRun } from "./StopDialog";
 import { announceRunsChanged } from "./runs";
-import { explorationNote, kindWord, OBJECTIVE_EVENT_KINDS, objectiveRows, operatorWord, STATE_WORD, stopWord, tallyText, type CoverageAnswer, type ObjectiveRow, type ObjectivesAnswer, type ObjectiveState } from "./objectives";
+import { explorationNote, kindWord, OBJECTIVE_EVENT_KINDS, objectiveRows, operatorWord, pursuitOf, STATE_WORD, stopWord, tallyText, type CoverageAnswer, type ObjectiveRow, type ObjectivesAnswer, type ObjectiveState } from "./objectives";
 import "./objectives.css";
 
 const PAGE = 500;
@@ -28,7 +28,8 @@ function useObjectiveEvents(jobId: string, active: boolean): EventRow[] {
             for (let i = 0; i < 200; i++) {
                 const page = await api<EventRow[]>(`/test-generation/${jobId}/events?after=${last.current}`);
                 for (const e of page) last.current = Math.max(last.current, e.id);
-                got.push(...page.filter((e) => OBJECTIVE_EVENT_KINDS.has(e.kind)).map((e) => ({ ...e, data: undefined })));
+                // Facts are kept only for a pursuit's start and end, and only its ids and operator (pursuitOf).
+                got.push(...page.filter((e) => OBJECTIVE_EVENT_KINDS.has(e.kind)).map((e) => ({ ...e, data: pursuitOf(e) ?? undefined })));
                 if (page.length < PAGE) break;
             }
             if (got.length) setRows((prev) => mergeEvents(prev, got));
