@@ -138,24 +138,28 @@ const needsSecondAccount = (o: Objective, wf?: PerturbWorkflow) => SECOND_ACCOUN
 
 const sortedSteps = (wf?: PerturbWorkflow) => [...(wf?.steps ?? [])].sort((a, b) => a.order - b.order || (a.action < b.action ? -1 : a.action > b.action ? 1 : 0));
 
-/** Fixed wording around the source's expected result, citing the source. */
+/**
+ * Fixed wording around the source's expected result, citing the source. The expected text is quoted as data (one JSON string): it comes
+ * from documents or the page, and it reaches the test writer's prompt.
+ */
 function expectedFor(o: Objective, op: ObjectiveOperator, stepName?: string): string {
-    const cite = ` (source: ${o.source.ref})`;
+    const cite = ` (source: ${norm(o.source.ref)})`;
+    const expected = JSON.stringify(norm(o.expected));
     switch (op) {
         case "double_submit":
-            return `Submitting twice has the effect of submitting once: ${o.expected}${cite}`;
+            return `Submitting twice has the effect of submitting once: ${expected}${cite}`;
         case "repeat":
-            return `Done again, it still holds as stated: ${o.expected}${cite}`;
+            return `Done again, it still holds as stated: ${expected}${cite}`;
         case "direct_url":
-            return `Opening a later step's address directly does not skip the earlier steps; this holds only after every stated step: ${o.expected}${cite}`;
+            return `Opening a later step's address directly does not skip the earlier steps; this holds only after every stated step: ${expected}${cite}`;
         case "back":
-            return `After going back to the previous page by its address, nothing is lost or done twice: ${o.expected}${cite}`;
+            return `After going back to the previous page by its address, nothing is lost or done twice: ${expected}${cite}`;
         case "refresh":
-            return `After reloading the page, it still holds: ${o.expected}${cite}`;
+            return `After reloading the page, it still holds: ${expected}${cite}`;
         case "cancel":
-            return `Cancelling at ${stepName ? `the step ${quote(stepName, 100)}` : "a stated step"} leaves nothing half-done; this happens only when every step is completed: ${o.expected}${cite}`;
+            return `Cancelling at ${stepName ? `the step ${quote(stepName, 100)}` : "a stated step"} leaves nothing half-done; this happens only when every step is completed: ${expected}${cite}`;
         default:
-            return `${o.expected}${cite}`;
+            return `${expected}${cite}`;
     }
 }
 
@@ -249,12 +253,13 @@ export function scenarioFor(o: Objective, op: ObjectiveOperator, options: Pertur
 
     const scenario = ScenarioSchema.parse({
         scenarioId: `${o.id}-${op}${op === "cancel" && cancelAt ? `-${cancelAt.order}` : ""}`,
-        title: `${TITLES[op]}: ${o.kind} ${clip(o.source.ref, 120)}`,
+        title: `${TITLES[op]}: ${o.kind} ${quote(o.source.ref, 120)}`,
         description,
         category: "Exploration",
         type: op === "invalid_input" ? "negative" : "functional",
         startPath,
-        preconditions: (options.workflow?.preconditions ?? []).map((p) => clip(p, 500)).filter(Boolean),
+        // Quoted as data: the workflow's preconditions come from documents or analysis.
+        preconditions: (options.workflow?.preconditions ?? []).map((p) => clip(p, 500)).filter(Boolean).map((p) => JSON.stringify(p)),
         expectedResults: [expectedFor(o, op, cancelAt?.action)],
         requiresAuth: options.requiresAuth ?? false,
         requiredData: values?.map((c) => `${clip(c.name, 60)}: ${shownValue(c)}`) ?? [],

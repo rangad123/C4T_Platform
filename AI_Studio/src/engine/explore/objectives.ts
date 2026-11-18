@@ -128,7 +128,8 @@ const clip = (t: string, n: number) => {
     const s = norm(t);
     return s.length <= n ? s : `${s.slice(0, n - 1).trimEnd()}…`;
 };
-const quote = (t: string, n = 200) => `"${clip(t, n)}"`;
+/** Text from a source or a page as data: one JSON string, so a quote inside it cannot end it (as the planner quotes knowledge). */
+const quote = (t: string, n = 200) => JSON.stringify(clip(t, n));
 
 /** sha256 of the kind, the source ref and the expected result, ignoring only spacing. */
 export function objectiveFingerprint(o: { kind: ObjectiveKind; source: { ref: string }; expected: string }): string {
@@ -185,7 +186,7 @@ function constraintsOf(f: ObjectiveField): string[] {
     if (f.minLength !== undefined) out.push(`at least ${f.minLength} characters`);
     if (f.maxLength !== undefined) out.push(`at most ${f.maxLength} characters`);
     if (f.pattern) out.push(`it must match the pattern ${quote(f.pattern)}`);
-    if (f.options?.length) out.push(`one of ${[...new Set(f.options.map((o) => clip(o, 60)))].sort().slice(0, 20).map((o) => `"${o}"`).join(", ")}`);
+    if (f.options?.length) out.push(`one of ${[...new Set(f.options.map((o) => clip(o, 60)))].sort().slice(0, 20).map((o) => JSON.stringify(o)).join(", ")}`);
     return out;
 }
 

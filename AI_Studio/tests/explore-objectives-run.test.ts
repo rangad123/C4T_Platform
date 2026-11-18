@@ -203,7 +203,7 @@ describe("exploring the seeded shop by objectives", () => {
             expect(sc.expectedResults).toEqual([expect.stringMatching(new RegExp(`\\(source: ${sc.objective.source}\\)$`))]);
         }
         expect(findings.find((f) => f.objective?.kind === "constraint")!.expected.text).toBe(
-            'The field "Quantity" accepts a value only when the value must be a valid number; at least 1; at most 10; any other value is refused. (source: page-order/order/qty)',
+            `${JSON.stringify('The field "Quantity" accepts a value only when the value must be a valid number; at least 1; at most 10; any other value is refused.')} (source: page-order/order/qty)`,
         );
 
         // Each saved test fails on the seeded shop and passes once the defect is fixed (no AI).
