@@ -127,6 +127,8 @@ export interface ValidationDeps {
      * among them makes it flaky. Default 0.
      */
     repeatPasses?: number;
+    /** The project allows tests that change data: a web repair may place orders and pay with test data, as the test writer could (row 206). */
+    allowPurchases?: boolean;
     /** Re-run a failing script this many times before analysing/repairing it (scheduled runs). Default 0. */
     retryFailures?: number;
     /** Where Taqwright (mobile) scripts run. Absent: such scripts report an error instead of running. */
@@ -341,6 +343,7 @@ export async function validateBatch(
                         secrets: secretsOfRun(deps.env),
                         ...(t.rules?.length ? { rules: t.rules } : {}),
                         ...(t.requirementIds?.length ? { requirementIds: t.requirementIds } : {}),
+                        ...(deps.allowPurchases ? { allowPurchases: true } : {}),
                     });
                 } else if (t.spec.kind === "api") {
                     repair = await repairApi(ctx, t.spec, run, t.endpointDoc);

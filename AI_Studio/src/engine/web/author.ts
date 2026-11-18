@@ -80,6 +80,11 @@ export interface AuthorInput {
     testData?: TestData;
     /** The scenario's rules (stated by a source or confirmed by a person): the test checks them where the scenario reaches them. */
     rules?: KnowledgeRule[];
+    /**
+     * The project allows tests that change data (allowMutatingApiTests): the writer may place orders and make payments, with test data
+     * only (owner decision 2026-11-21, row 206). Absent or false: it stops before paying.
+     */
+    allowPurchases?: boolean;
     /** The ids of the project's requirements (the job's requirements document): an expected result naming one the scenario covers is stated (statedSource). */
     requirementIds?: readonly string[];
     /**
@@ -244,7 +249,7 @@ export function statedSource(
     return (scenario.requirements ?? []).some((id) => known.has(id) && cites(text, id));
 }
 
-const SYSTEM = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
+const SYSTEM_TEMPLATE = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
 Every action you perform successfully is recorded into a reusable Playwright test, so be deliberate:
 - Perform the scenario step by step; after each action you receive the page's accessibility snapshot. Look before you act.
 - Locate elements the way a user would: by="role" (role + accessible name) first, then "label", "placeholder", "text". Use "css" only as a last resort.
@@ -268,7 +273,7 @@ Every action you perform successfully is recorded into a reusable Playwright tes
   A test without assertions is worthless. Assert on what the user would observe, after the final action, and wait via assertions (they auto-retry) rather than fixed sleeps.
   Assert the OUTCOME, not only that what you clicked is still visible: the confirmation text, the new URL, the changed value or count.
   When an outcome depends on an earlier step, assert that link (the value typed in a form shows in the list or summary afterwards).
-- Never perform irreversible/destructive real-world actions (payment, deleting accounts, sending messages). Stop before them and assert on the UI.
+@@PAYMENT_RULE@@
 - When every expected result is verified, call finish(result="complete").
 - If an assertion fails because the application genuinely behaves differently from the expected result, call finish(result="defect") and explain what was observed.
   Give each assertion that checks an expected result or a rule its source, so a failing one is kept as the check that shows the bug.
@@ -277,6 +282,24 @@ Every action you perform successfully is recorded into a reusable Playwright tes
 - Stay in the UI: do not navigate to API/JSON endpoints; verify what a user sees in the pages.
 - Dialogs (confirm "Delete?") are dismissed unless you call dialog(response="accept") right before the action that opens one. A new tab a click opens is where your next actions go.
 - Tool results tell you what happened (dialogs, new tabs, downloads, console errors, failed requests). A server error (HTTP 5xx) after an action is a defect to report, not a reason to test something else.`;
+
+/** The writer's rule on payments: off (the default), it stops before paying; on, the project allows tests that change data. */
+const PAYMENT_RULES = {
+    off: "- Never perform irreversible/destructive real-world actions (payment, deleting accounts, sending messages). Stop before them and assert on the UI.",
+    on:
+        "- This project allows tests that change data, so placing orders and making payments in the application under test is allowed when the scenario needs it.\n" +
+        "  Other irreversible real-world actions (deleting accounts, sending messages to real people) are still never performed: stop before them and assert on the UI.",
+} as const;
+const NO_REAL_CARDS = "- Never type a real card number: pay only with test data you were given (the test account, test card values in the test data or notes, or the application's own test-mode values shown on the page).";
+
+/**
+ * The writer's instructions. `allowPurchases` (AuthorInput, from the project's allowMutatingApiTests) relaxes the payment rule; the
+ * no-real-card-numbers rule holds either way. The vision, test-data and compact-snapshot notes are added when those are on.
+ */
+export function authoringSystem(o: { allowPurchases?: boolean; vision?: boolean; testData?: boolean; compact?: boolean }): string {
+    const base = SYSTEM_TEMPLATE.replace("@@PAYMENT_RULE@@", `${o.allowPurchases === true ? PAYMENT_RULES.on : PAYMENT_RULES.off}\n${NO_REAL_CARDS}`);
+    return base + (o.vision ? VISION_AUTHORING_NOTE : "") + (o.testData ? TEST_DATA_AUTHORING_NOTE : "") + (o.compact ? COMPACT_SNAPSHOT_NOTE : "");
+}
 
 const target = LocatorSchema.describe("How to find the element");
 /** The longest fixed pause the agent may record (a wait for something is the better step; the review flags fixed ones). */
@@ -871,7 +894,7 @@ ${snapshot}`;
 
         const generated = await generateText({
             model: ctx.llm.model,
-            system: (input.vision ? SYSTEM + VISION_AUTHORING_NOTE : SYSTEM) + (input.testData ? TEST_DATA_AUTHORING_NOTE : "") + (view ? COMPACT_SNAPSHOT_NOTE : ""),
+            system: authoringSystem({ allowPurchases: input.allowPurchases, vision: input.vision, testData: Boolean(input.testData), compact: Boolean(view) }),
             prompt,
             tools,
             providerOptions: PROVIDER_OPTIONS,
