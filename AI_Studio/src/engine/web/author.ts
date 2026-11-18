@@ -1001,6 +1001,10 @@ export async function pruneByReplay(
                 await settle(session.page, 1_500);
                 kept.push(step);
             } catch {
+                if (step.action !== "assert" && !replayMayDrop(steps, i)) {
+                    // A step the later ones depend on failed on the replay: pruning cannot tell a leftover here, so the steps stay as recorded.
+                    return { steps, dropped: 0 };
+                }
                 if (step.action === "assert") {
                     // A captured defect test is expected to fail on its final assertion (the captured check); any other failing assertion
                     // rejects the pruned list, as for a complete test.
@@ -1020,6 +1024,17 @@ export async function pruneByReplay(
         return { steps, dropped: 0 };
     }
     return { steps: kept, dropped };
+}
+
+/**
+ * Whether a clean replay may drop step `i` as a leftover when it fails there. A `navigate` the next step acts on is never dropped (C1e's
+ * WEB-050 lost `navigate /cart`, and its "Check out" click then failed on the product page); one followed by another navigate, or the
+ * last step, is a leftover. Any other failing action may be dropped (the pruned list must still pass its checks).
+ */
+export function replayMayDrop(steps: readonly Step[], i: number): boolean {
+    if (steps[i]?.action !== "navigate") return true;
+    const next = steps[i + 1];
+    return next === undefined || next.action === "navigate";
 }
 
 /** Assemble a full canonical spec from a finished authoring outcome. */
