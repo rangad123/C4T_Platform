@@ -24,6 +24,8 @@ const PORT = 9800;
 const BASE = `http://127.0.0.1:${PORT}`;
 /** The seeded app shows a wrong total (10 + 15 = 30); the fixed one the right one. */
 let seeded = true;
+/** /qty shows its quantity form while open: the authoring session saw it, a later fresh browser does not (state the session left). */
+let qtyOpen = true;
 let server: http.Server;
 let browser: Browser;
 
@@ -31,6 +33,7 @@ beforeAll(async () => {
     server = http.createServer((req, res) => {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         // /recalc shows the wrong total until "Recalculate" is pressed.
+        if (req.url === "/qty") return void res.end(qtyOpen ? `<!doctype html><title>Cart</title><h1>Cart</h1><label>Quantity <input aria-label="Quantity"></label><button onclick="document.querySelector('#msg').textContent='Quantity must be at most 99'">Update</button><p id="msg" role="alert"></p>` : `<!doctype html><title>Cart</title><h1>Cart</h1><p>Your cart is empty</p><p id="msg" role="alert"></p>`);
         if (req.url === "/recalc") return void res.end(`<!doctype html><title>Cart</title><h1>Cart</h1><p>Total: <output aria-label="Total">$30.00</output></p><button onclick="document.querySelector('output').textContent='$25.00'">Recalculate</button>`);
         res.end(`<!doctype html><title>Cart</title><h1>Cart</h1><ul><li>Mug $10.00</li><li>Plate $15.00</li></ul><p>Total: <output id="total" aria-label="Total">${seeded ? "$30.00" : "$25.00"}</output></p>`);
     });
@@ -42,13 +45,15 @@ afterAll(async () => {
     server?.close();
 });
 
-type Call = { tool: string; input: Record<string, unknown> };
+/** `then` runs when the model makes this call (before the tool runs). */
+type Call = { tool: string; input: Record<string, unknown>; then?: () => void };
 const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
 function scripted(calls: Call[]) {
     let i = 0;
     return new MockLanguageModelV3({
         doGenerate: async () => {
             const next = calls[i++];
+            next?.then?.();
             if (!next) return { content: [{ type: "text" as const, text: "done" }], finishReason: { unified: "stop" as const, raw: "stop" }, usage, warnings: [] };
             return { content: [{ type: "tool-call" as const, toolCallId: `c${i}`, toolName: next.tool, input: JSON.stringify(next.input) }], finishReason: { unified: "tool-calls" as const, raw: "tool_calls" }, usage, warnings: [] };
         },
@@ -264,5 +269,42 @@ describe("stored tests and pruning", () => {
         expect(pruned.dropped).toBe(1);
         expect(pruned.steps.map((s) => s.action)).toEqual(["navigate", "assert", "assert"]);
         expect(pruned.steps.at(-1)).toMatchObject({ source: "R-TOTAL" });
+    }, 60_000);
+
+    // Queue row 183 (C1c's WEB-027): a defect test lost its setup steps in pruning and ended up checking an alert nothing triggers.
+    it("an observed-only defect test whose setup fails on replay keeps its steps: pruning must not leave a check that fails (WEB-027)", async () => {
+        qtyOpen = true;
+        const alert = { by: "css", value: "#msg" };
+        const out = await authorWebSpec({
+            ctx: ctxFor(scripted([
+                { tool: "fill", input: { target: { by: "role", role: "textbox", value: "Quantity" }, value: "999" } },
+                { tool: "click", input: { target: { by: "role", role: "button", value: "Update" } } },
+                { tool: "assert", input: { check: "text", target: alert, expected: "Quantity must be at most 99" } },
+                // The app moves on before the saved test is replayed: a fresh browser no longer gets the form.
+                { tool: "finish", input: { result: "defect", explanation: "999 is refused although the cart allows it" }, then: () => void (qtyOpen = false) },
+            ])),
+            browser, baseUrl: BASE, model: emptyModel, scenario: { ...scenario, startPath: "/qty" },
+        });
+        qtyOpen = true;
+        expect(out).toMatchObject({ status: "defect", capture: "observed_only" });
+        // Not ["navigate", "assert"]: the fill and the click stay, so the saved test shows what it did (and the replay of its own steps can judge it).
+        expect(out.steps.map((s) => s.action)).toEqual(["navigate", "fill", "click", "assert"]);
+    }, 90_000);
+
+    it("pruneByReplay of a captured defect test: only the final check may fail; another failing check keeps the original steps", async () => {
+        seeded = true;
+        const steps = TestSpecSchema.parse({
+            testId: "WEB-003", title: "Pruned test", kind: "web", category: "c", source: { origin: "browser-agent" },
+            steps: [
+                { action: "navigate", url: "/cart" },
+                { action: "click", locator: { by: "role", role: "button", value: "Gone already" } },
+                // A check the setup it lost made pass: it fails now, and it is not the captured check.
+                { action: "assert", check: "visible", locator: { by: "role", role: "alert", value: "Saved" } },
+                { action: "assert", check: "exactText", locator: totalLocator, expected: "$25.00", source: "R-TOTAL" },
+            ],
+        }).steps;
+        const pruned = await pruneByReplay(browser, BASE, steps, undefined, false);
+        expect(pruned.dropped).toBe(0);
+        expect(pruned.steps).toEqual(steps);
     }, 60_000);
 });
