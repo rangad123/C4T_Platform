@@ -40,6 +40,7 @@ export const making: Topic[] = [
         words: ["exploration", "plan", "test-account"],
         related: ["describe-a-test", "first-steps", "test-accounts"],
         keywords: ["start", "generate tests", "scan my site", "crawl", "no code", "new project", "explore", "first tests"],
+        moreDoc: "docs/features/exploratory-testing.md",
     },
     {
         id: "watch-the-ai",
