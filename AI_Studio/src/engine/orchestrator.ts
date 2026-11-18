@@ -1572,7 +1572,7 @@ export function defectFinding(p: {
     const independent = { independent: "both fresh replays failed at it", state_dependent: "the fresh replays did not fail at it the same way", not_run: "the fresh replays could not be run" }[p.independence.independence];
     const basis = source
         ? `The failing check is of ${named}; ${independent} (confidence ${confidence}).`
-        : `No failing check of a stated expectation was kept, so this is observed only (confidence ${confidence}).`;
+        : `No failing check of a stated expectation was kept, so it was seen, not kept as a check (confidence ${confidence}).`;
     const problems = p.outcome.evidence ?? [];
     const isConsole = (line: string) => /^(Console error|Page error):/.test(line) || !/^[A-Z]+ \S+ (answered|failed)/.test(line);
     const o = p.scenario.objective;

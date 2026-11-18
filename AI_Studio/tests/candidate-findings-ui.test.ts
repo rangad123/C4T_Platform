@@ -201,7 +201,7 @@ describe("a finished exploration with findings", () => {
         const f = findings().first();
         await pwExpect(f).toHaveAttribute("data-capture", "captured");
         await pwExpect(f.getByTestId("finding-status")).toHaveText("Needs a person to check");
-        await pwExpect(f.getByTestId("finding-capture")).toHaveText("Kept as a failing check");
+        await pwExpect(f.getByTestId("finding-capture")).toHaveText("Captured: kept as a failing check");
         await pwExpect(f.getByTestId("finding-objective")).toHaveText("Rule R-checkout-total · Invalid input");
         await pwExpect(f.getByTestId("finding-actions")).toHaveText("6 actions");
         await pwExpect(f.getByTestId("finding-expected")).toHaveText(CAPTURED.expected.text);
@@ -241,7 +241,7 @@ describe("a finished exploration with findings", () => {
         const f = findings().nth(1);
         await pwExpect(f).toHaveAttribute("data-capture", "observed_only");
         await pwExpect(f.getByTestId("finding-status")).toHaveText("Needs a person to check");
-        await pwExpect(f.getByTestId("finding-capture")).toHaveText("Seen only, not kept as a check");
+        await pwExpect(f.getByTestId("finding-capture")).toHaveText("Seen, not kept as a check");
         await pwExpect(f.getByTestId("finding-objective")).toHaveText("Workflow WF-checkout");
         await pwExpect(f.getByTestId("finding-source")).toHaveText("No stated source: the AI’s own expectation");
         await pwExpect(f.getByTestId("finding-confidence")).toHaveText(`Low confidence: ${confidenceMeaning({ confidence: "low", independence: "not_run" })}`);

@@ -289,7 +289,7 @@ describe("a defect test carries its candidate finding", () => {
         const finding = CandidateFindingSchema.parse(meta.finding);
         expect(finding).toMatchObject({ expected: { source: null }, capture: "observed_only", independence: "not_run", confidence: "low", replays: [] });
         expect(test.validationReason).toMatch(/^The application did not behave as expected: /);
-        expect(test.validationReason).toContain("observed only");
+        expect(test.validationReason).toContain("seen, not kept as a check");
         expect(test.validationReason).toContain("confidence low");
         expect(defectEvent(events).data).toMatchObject({ capture: "observed_only", confidence: "low", independence: "not_run", source: null });
     }, 300_000);
@@ -309,7 +309,7 @@ describe("a defect test carries its candidate finding", () => {
         expect(test.spec.steps.at(-1)).toMatchObject({ check: "visible", source: "expected:1" });
         const finding = CandidateFindingSchema.parse(meta.finding);
         expect(finding).toMatchObject({ expected: { source: null }, capture: "observed_only", independence: "not_run", confidence: "low", replays: [] });
-        expect(test.validationReason).toContain("observed only");
+        expect(test.validationReason).toContain("seen, not kept as a check");
         expect(defectEvent(events).data).toMatchObject({ capture: "observed_only", confidence: "low", independence: "not_run", source: null });
     }, 300_000);
 

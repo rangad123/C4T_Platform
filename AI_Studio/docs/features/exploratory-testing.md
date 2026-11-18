@@ -148,10 +148,16 @@ an environment failure, unsafe, skipped as already done, or not reached.
 When the AI agent ends a test because the application did not do what was expected, the test is saved for review with a candidate
 finding. This applies to exploration by objectives and to the planned tests written before it.
 
-- **Captured**: the test ends at a failing check of a stated expectation (a rule, or one of the scenario's expected results), and the
-  saved test keeps that failing check. Later repairs may not remove, loosen or re-point a check with a stated source.
-- **Observed only**: the AI agent said something was wrong, but no failing check of a stated expectation was kept. It is still saved
-  for review, with low confidence.
+- **Captured** (`capture: "captured"`): the test ends at a failing check of a stated expectation, and the saved test keeps that
+  failing check. A stated expectation is a rule, an objective's expected result (which names its source), or a planned expected result
+  that names a rule by its ref or cites a requirement the scenario covers ("(requirement 1.1)"; a requirement numbered only "1.1"
+  counts only in that form, never as a bare number such as "1.1 kg"). Later repairs may not remove, loosen or re-point a check with
+  a stated source.
+- **Seen, not kept as a check** (`capture: "observed_only"`): the AI agent said something was wrong, but no failing check of a stated
+  expectation was kept. It still gives a candidate finding, saved for review with low confidence, but it is not captured.
+
+"Captured" always means the first kind. A defect is captured only from a stated source; a failure the AI agent only saw is never
+called captured.
 
 A captured finding is then replayed twice, each time in a fresh browser, without AI. If both replays stop at the same failing check,
 the failure does not depend on what earlier tests left behind.
@@ -160,7 +166,7 @@ the failure does not depend on what earlier tests left behind.
 |---|---|
 | High | a stated expectation, a kept failing check, and both fresh replays failed at that check |
 | Medium | a stated expectation and a kept failing check, but the fresh replays did not fail the same way or could not run |
-| Low | observed only: no failing check of a stated expectation was kept |
+| Low | seen, not kept as a check: no failing check of a stated expectation was kept |
 
 The test's review reason says this in words, for example: "The application did not behave as expected: the cart total stayed the same
 after the quantity changed. The failing check is of rule R-3; both fresh replays failed at it (confidence high)."
@@ -200,8 +206,8 @@ The job also keeps the session's limits, each objective with its priority, the s
   source, its confidence in words with what that means, its evidence (screenshots, requests and console lines) and a link to the saved test. Each
   is labelled "Needs a person to check" ("Found by the AI, needs a person to check"). Up to three screenshots
   (where a fresh replay stopped, with password fields and stored secrets covered) show as thumbnails that open larger; a finding
-  without one says "No screenshot was saved for this finding." Captured findings come first; an observed-only finding is labelled "Seen only, not kept as a check" and has a
-  dashed border. An older run without findings says so in one sentence.
+  without one says "No screenshot was saved for this finding." Captured findings come first; each captured one is labelled "Captured: kept as a failing check" and each other one "Seen, not kept as a check",
+  which also has a dashed border. An older run without findings says so in one sentence.
 - With an older runner, the view says in one sentence that the runner needs downloading again.
 - A refusal from the server is shown as its sentence.
 
