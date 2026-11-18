@@ -64,3 +64,51 @@ export async function mapLimit<T, R>(
     await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
     return results;
 }
+
+/**
+ * mapLimit with lanes: items with the same lane key (the account they sign in as) never run at the same time and run in input order;
+ * items without one, and other lanes, run beside them, never more than `limit` at once. The lane with the most items left starts
+ * first, so a long lane does not end up running alone at the end. Results keep input order; errors are captured per item.
+ */
+export async function mapLanes<T, R>(
+    items: T[],
+    limit: number,
+    laneOf: (item: T, index: number) => string | undefined,
+    fn: (item: T, index: number) => Promise<R>,
+): Promise<Array<{ ok: true; value: R } | { ok: false; error: unknown; item: T }>> {
+    const results: Array<{ ok: true; value: R } | { ok: false; error: unknown; item: T }> = new Array(items.length);
+    const lanes = items.map((item, i) => laneOf(item, i));
+    const waiting = items.map((_, i) => i);
+    const busy = new Set<string>();
+    const left = (lane: string | undefined) => (lane === undefined ? 0 : waiting.filter((i) => lanes[i] === lane).length);
+    let running = 0;
+    return await new Promise((resolve) => {
+        const pump = () => {
+            while (running < Math.max(1, limit)) {
+                let pick = -1;
+                for (let w = 0; w < waiting.length; w++) {
+                    const lane = lanes[waiting[w]!];
+                    if (lane !== undefined && busy.has(lane)) continue;
+                    if (pick < 0 || left(lane) > left(lanes[waiting[pick]!])) pick = w;
+                }
+                if (pick < 0) break;
+                const i = waiting.splice(pick, 1)[0]!;
+                const lane = lanes[i];
+                if (lane !== undefined) busy.add(lane);
+                running++;
+                void (async () => {
+                    try {
+                        results[i] = { ok: true, value: await fn(items[i]!, i) };
+                    } catch (error) {
+                        results[i] = { ok: false, error, item: items[i]! };
+                    }
+                    running--;
+                    if (lane !== undefined) busy.delete(lane);
+                    pump();
+                })();
+            }
+            if (running === 0 && waiting.length === 0) resolve(results);
+        };
+        pump();
+    });
+}

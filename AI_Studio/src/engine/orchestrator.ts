@@ -11,7 +11,7 @@ import type { Browser, Page } from "playwright";
 import { shootPage } from "./frames/shoot.js";
 import { fillPath as fillApiPath, generateApiSpecs, type DraftSpec } from "./api/test-specs.js";
 import { probeOpenApi } from "./api/openapi.js";
-import { mapLimit, throwIfAborted, type EngineContext } from "./context.js";
+import { mapLanes, throwIfAborted, type EngineContext } from "./context.js";
 import { isBudgetExceeded } from "./llm/usage.js";
 import { LlmNotConfiguredError } from "./llm/provider.js";
 import { login, type Credentials } from "./discovery/auth.js";
@@ -800,7 +800,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4a. Web: author every scenario in a real browser, one agent run per scenario.
         if (scenarios.length) {
-            const results = await mapLimit(scenarios, ctx.config.CONCURRENCY, async (scenario) => {
+            // One lane per account: scenarios that sign in as the same account share its state on the server (cart, discount,
+            // profile), so they are written one at a time; signed-out ones and other accounts' run beside them, up to CONCURRENCY.
+            const laneOf = (scenario: Scenario): string | undefined => {
+                const role = roleCredentials(scenario, req.roles);
+                if (role) return `role:${role.name.toLowerCase().replace(/-/g, "_")}`;
+                return scenario.requiresAuth && creds && authState.loggedIn ? "main" : undefined;
+            };
+            const sharing = scenarios.filter((s, _, all) => laneOf(s) !== undefined && all.filter((o) => laneOf(o) === laneOf(s)).length > 1).length;
+            if (sharing) ctx.emit({ stage: "generation", kind: "account_lanes", message: `${sharing} scenarios that sign in as the same account are written one at a time` });
+            const results = await mapLanes(scenarios, ctx.config.CONCURRENCY, laneOf, async (scenario) => {
                 throwIfAborted(ctx.signal);
                 const runId = await sink.startAgentRun("web-authoring", `${scenario.scenarioId} ${scenario.title}`);
                 try {
@@ -1178,6 +1187,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     // A new test that passed runs the level's number of times more; any failure makes it flaky.
                     repeatPasses: levelSettings(req).repeatPasses,
                     workers: ctx.config.CONCURRENCY,
+                    // Saved tests of one account replay one at a time, as they were written.
+                    accountLanes: true,
                     cleanup: req.cleanup,
                 },
                 pending,
