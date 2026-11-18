@@ -16,6 +16,11 @@ export interface BenchApp {
     id: string;
     /** Server script, relative to the repository root. */
     script: string;
+    /**
+     * The app's requirements document (relative to the repository root): its intended behaviour as a product owner states it. The
+     * detection benchmark imports it into every project it explores, as an owner would on the Requirements tab, on both sides alike.
+     */
+    requirements?: string;
     /** The seeded account the exploration signs in with (none: the app is explored signed out). */
     credentials?: { username: string; password: string };
     /** Areas of the app by address prefix (a test reaches an area when it opens or calls an address under one of them). */
@@ -38,6 +43,7 @@ export const BENCH_APPS: BenchApp[] = [
     {
         id: "bench-shop",
         script: "examples/bench-shop/server.mjs",
+        requirements: "examples/bench-shop/requirements/requirements.md",
         credentials: { username: "alice@example.test", password: "Password1!" },
         workflows: [
             { name: "Registration", paths: ["/register", "/api/register"] },
@@ -57,6 +63,7 @@ export const BENCH_APPS: BenchApp[] = [
     {
         id: "bench-rbac",
         script: "examples/bench-rbac/server.mjs",
+        requirements: "examples/bench-rbac/requirements/requirements.md",
         credentials: { username: "ana@example.test", password: "Password1!" },
         workflows: [
             { name: "Registration", paths: ["/register", "/api/register"] },
@@ -84,6 +91,13 @@ export const benchApp = (id: string): BenchApp | undefined => BENCH_APPS.find((a
 /** The app's version: sha256 of its server script (first 16 hex digits). */
 export function appVersion(app: Pick<BenchApp, "script">, root = REPO_ROOT): string {
     return crypto.createHash("sha256").update(fs.readFileSync(path.join(root, app.script))).digest("hex").slice(0, 16);
+}
+
+/** The app's requirements document: its file (relative to the repository root), text and sha256; undefined when it has none. */
+export function requirementsDocument(app: Pick<BenchApp, "requirements">, root = REPO_ROOT): { file: string; text: string; sha256: string } | undefined {
+    if (!app.requirements) return undefined;
+    const text = fs.readFileSync(path.join(root, app.requirements), "utf8");
+    return { file: app.requirements, text, sha256: crypto.createHash("sha256").update(text).digest("hex") };
 }
 
 /** Which areas the tests reach: the workflows with an address any test opened or called. */

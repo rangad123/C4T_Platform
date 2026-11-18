@@ -13,6 +13,7 @@
  * Ports 9471 (the stand-in app). Run under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/bench-controller.test.ts
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +28,7 @@ const PORT = 9471;
 const APP: BenchApp = {
     id: "bench-standin",
     script: "tests/fixtures/bench-standin.mjs",
+    requirements: "tests/fixtures/bench-standin-requirements.md",
     workflows: [
         { name: "Home", paths: ["/"] },
         { name: "Shop", paths: ["/shop", "/api/items"] },
@@ -66,7 +68,12 @@ const lines: string[] = [];
 const log = (s: string) => lines.push(s);
 const KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "LLM_MODEL_FAST", "CONCURRENCY"];
 const saved: Record<string, string | undefined> = {};
-const deps = () => ({ log, makeLlm: () => scripted, apps: [APP], catalogueFile, pollMs: 150, exploration: ONLY_HEALTH, env: { ...process.env } });
+const deps = (apps: BenchApp[] = [APP]) => ({ log, makeLlm: () => scripted, apps, catalogueFile, pollMs: 150, exploration: ONLY_HEALTH, env: { ...process.env } });
+/**
+ * The stand-in without its requirements document, for the stop-and-resume case: reading the document is one more AI call inside the
+ * exploration, and the cap of 1 below must stop the run after the exploration made its plan (a stop before any plan cannot be resumed).
+ */
+const NO_DOC: BenchApp = { ...APP, requirements: undefined };
 
 beforeAll(() => {
     for (const k of KEYS) {
@@ -137,6 +144,15 @@ describe("the benchmark command on a stand-in app", () => {
         // Recorded: engine, prompts, model, catalogue, app version, options.
         expect(b.config).toMatchObject({ model: { provider: "scripted", model: "scripted" }, catalogueVersion: expect.stringMatching(/^test-1 \([0-9a-f]{12}\)$/), apps: [{ id: "bench-standin", version: expect.stringMatching(/^[0-9a-f]{16}$/) }], approvedBudget: null, resumes: 0 });
         expect(b.config.prompts.length).toBeGreaterThan(3);
+        // The app's requirements document was imported into its project before the exploration (all three requirements), and the result
+        // records which document it was; data-changing tests and operators were on for this benchmark platform.
+        const docSha = crypto.createHash("sha256").update(fs.readFileSync(path.join(process.cwd(), APP.requirements!), "utf8")).digest("hex");
+        expect(b.config.apps[0]!.requirements).toEqual({ file: "tests/fixtures/bench-standin-requirements.md", sha256: docSha });
+        expect(lines.join("\n")).toContain(`requirements: 3 imported from tests/fixtures/bench-standin-requirements.md (sha256 ${docSha.slice(0, 12)})`);
+        const imported = lines.findIndex((l) => l.includes("requirements: 3 imported"));
+        expect(imported).toBeGreaterThanOrEqual(0);
+        expect(imported).toBeLessThan(lines.findIndex((l) => l.includes("exploring...")));
+        expect(b.config.options).toMatchObject({ allowMutatingApiTests: true, exploreDataOperators: true, dataOperatorsInEngine: true });
         expect(b.config.options).not.toHaveProperty("jobTimeoutMin");
         expect(b.config.options).not.toHaveProperty("isolatedReplays");
         expect(run.overall.benchmark).toMatchObject({ mode: "discovery", seeded: 2, detected: 1 });
@@ -154,7 +170,7 @@ describe("the benchmark command on a stand-in app", () => {
     it("stops at the daily call cap, keeps its state, resumes on the same data and only then writes the baseline (once)", async () => {
         const out = path.join(tmp, "run2");
         delayMs = 1500;
-        const stopped = await benchMain(["--apps", "bench-standin", "--port-base", String(PORT), "--out", out, "--data-dir", path.join(tmp, "data2"), "--baseline", "--daily-call-cap", "1", "--isolated-replays", "--job-timeout-min", "180", "--yes"], deps());
+        const stopped = await benchMain(["--apps", "bench-standin", "--port-base", String(PORT), "--out", out, "--data-dir", path.join(tmp, "data2"), "--baseline", "--daily-call-cap", "1", "--isolated-replays", "--job-timeout-min", "180", "--yes"], deps([NO_DOC]));
         delayMs = 0;
         expect(stopped, lines.join("\n")).toBe(4);
         const state = readJson(path.join(out, "bench-state.json"));
@@ -163,7 +179,7 @@ describe("the benchmark command on a stand-in app", () => {
         expect(fs.existsSync(path.join(out, "baseline.json"))).toBe(false);
         expect(fs.readdirSync(out).some((f) => /-partial\.json$/.test(f))).toBe(true);
 
-        const resumed = await benchMain(["--resume", "--out", out, "--daily-call-cap", "1000", "--job-timeout-min", "30", "--yes"], deps());
+        const resumed = await benchMain(["--resume", "--out", out, "--daily-call-cap", "1000", "--job-timeout-min", "30", "--yes"], deps([NO_DOC]));
         expect(resumed, lines.join("\n")).toBe(0);
         const base = readJson(path.join(out, "baseline.json")) as EvalRun;
         expect(base.benchmark!.baseline).toBe(true);
@@ -177,7 +193,7 @@ describe("the benchmark command on a stand-in app", () => {
         expect(verifyBaseline(out)).toBe(true);
         expect(fs.existsSync(path.join(out, "bench-state.json"))).toBe(false);
         // Immutable: a second baseline in the same folder is refused before anything runs.
-        expect(await benchMain(["--apps", "bench-standin", "--out", out, "--baseline", "--yes"], deps())).toBe(2);
+        expect(await benchMain(["--apps", "bench-standin", "--out", out, "--baseline", "--yes"], deps([NO_DOC]))).toBe(2);
         expect(lines.at(-1)).toMatch(/never overwritten/);
     }, 600_000);
 });

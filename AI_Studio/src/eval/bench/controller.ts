@@ -25,7 +25,7 @@ import type { CorpusEntry } from "../corpus.js";
 import { runCorpus } from "../harness.js";
 import { overallOf } from "../metrics.js";
 import type { EntryResult, EvalRun } from "../run.js";
-import { BenchAppHost, workflowsReached, type BenchApp, type Switches } from "./apps.js";
+import { BenchAppHost, requirementsDocument, workflowsReached, type BenchApp, type Switches } from "./apps.js";
 import { defectsOf, type Catalogue } from "./catalogue.js";
 import { benchMetrics, categorize, combineMetrics } from "./metrics.js";
 import { candidateOf, sessionsFromEvents } from "./observed.js";
@@ -76,6 +76,8 @@ export interface BenchOptions {
     /** For tests: how long a stopped job gets to wind down (default WIND_DOWN_MS), and the validation run of a continued app (default CONTINUED_VALIDATION_MS). */
     windDownMs?: number;
     continuedValidationMs?: number;
+    /** Where the apps' requirements documents are read from (default the repository root). */
+    root?: string;
 }
 
 export interface BenchOutcome {
@@ -204,6 +206,7 @@ async function benchApp(
         onCreated: ({ at, tests }) => {
             collected = { at, tests: tests as TestRow[] };
         },
+        onProject: (projectId) => attachRequirements(client, projectId, app, o.root, log),
     });
     const e = run.entries[0]!;
     // Stopped by the provider's rate limit or the daily cap: judge what was made so far. A job that finished only partly because the model
@@ -227,6 +230,23 @@ async function benchApp(
             : recorded;
     if (stopped) return { result: await stoppedResult(client, app, seeded, o, projectId, jobs, usage, stopped, log) };
     return judgeApp(client, host, app, seeded, o, log, benchStart, t0, projectId, jobs, usage, e.metrics?.flaky ?? 0, e.status === "done" ? e : undefined, [], collected);
+}
+
+/**
+ * The app's requirements document, imported into the project before it is explored, the way an owner does on the Requirements tab: the
+ * platform's own reading without AI (import/preview), then every requirement it found saved (import). The project's analysis then reads
+ * them as its requirements source. Both sides of a comparison get the same document this way; a document that yields nothing, or a
+ * project that does not keep every requirement, stops the app instead of exploring it without its document.
+ */
+export async function attachRequirements(client: PlatformClient, projectId: string, app: Pick<BenchApp, "id" | "requirements">, root: string | undefined, log: (s: string) => void): Promise<void> {
+    const doc = requirementsDocument(app, root);
+    if (!doc) return;
+    const preview = ok(await client.call("POST", `/api/projects/${projectId}/requirements/import/preview`, { text: doc.text }), "Reading the requirements document") as { candidates: Array<{ ref: string; title: string; description: string }> };
+    const requirements = preview.candidates.map((c) => ({ ref: c.ref, title: c.title, description: c.description }));
+    if (!requirements.length) throw new Error(`The requirements document ${doc.file} has no requirement the platform can read.`);
+    const saved = ok(await client.call("POST", `/api/projects/${projectId}/requirements/import`, { requirements }), "Importing the requirements document") as { created: number };
+    if (saved.created !== requirements.length) throw new Error(`Only ${saved.created} of the ${requirements.length} requirements of ${doc.file} were imported.`);
+    log(`  requirements: ${saved.created} imported from ${doc.file} (sha256 ${doc.sha256.slice(0, 12)})`);
 }
 
 type Usage = Awaited<ReturnType<typeof jobsUsage>>;

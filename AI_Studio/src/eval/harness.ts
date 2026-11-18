@@ -44,6 +44,8 @@ export interface HarnessOptions {
      * benchmark collects its findings from this.
      */
     onCreated?: (created: { projectId: string; at: string; tests: Array<Record<string, unknown>> }) => void | Promise<void>;
+    /** Called once the project exists and before anything explores it (the benchmark imports the app's requirements document here). */
+    onProject?: (projectId: string) => Promise<void>;
 }
 
 const DONE = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -132,6 +134,7 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
         // The evaluation measures the tests the AI writes, by running them again: in its own throwaway project they need no review first
         // (otherwise they are drafts and drafts never run).
         await call("PUT", `/api/projects/${project.id}/review-policy`, "Letting the AI's tests run without review", { aiGenerated: false });
+        await o.onProject?.(project.id);
         const targets = targetsOf(entry);
         if (entry.kind === "android") {
             await call("PUT", `/api/projects/${project.id}/mobile-app`, "Setting the Android app", { appPackage: fixture.appPackage ?? entry.appPackage });
