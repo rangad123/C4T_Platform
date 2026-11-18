@@ -303,7 +303,8 @@ describe("exploring the seeded shop by objectives", () => {
         // boundary value is skipped naming the server's setting (owner, 2026-11-21).
         const { summary, events, tests } = await exploreShop(site, llm, { objectives: true, allowMutatingApiTests: true, exploredObjectives: ["R-TOTAL"] });
         expect(summary.exploration!.skipped).toEqual([{ objectiveId: expect.stringMatching(/^OBJ-/), operator: "boundary_input", reason: SKIP_REASONS.serverDataOff }]);
-        expect(summary.exploration!.objectives.map((o) => [o.kind, /not explored yet/.test(o.reason)])).toEqual([
+        // In any order: the rule's "$25.00" total is money (row 205), which outranks the constraint's "not explored yet".
+        expect(summary.exploration!.objectives.map((o) => [o.kind, /not explored yet/.test(o.reason)]).sort()).toEqual([
             ["constraint", true],
             ["rule", false],
         ]);
