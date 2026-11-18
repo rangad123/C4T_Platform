@@ -105,6 +105,8 @@ export const SinkCall = z.discriminatedUnion("method", [
     z.object({ method: z.literal("saveTextArtifact"), kind: Id, name: SafeName, content: Text(4_000_000) }),
     // Sheet #8: one covered page thumbnail (a small JPEG); the platform checks its name, kind and size again and answers its id or null.
     z.object({ method: z.literal("savePageThumbnail"), file: z.object({ name: z.string().regex(/^thumb-\d{1,4}\.jpg$/), data: Base64.max(80_000) }) }),
+    // Row 173: a candidate finding's screenshot (a small JPEG, secret fields covered); answered with its artifact id.
+    z.object({ method: z.literal("saveImageArtifact"), kind: z.literal("screenshot"), file: WireFile }),
     z.object({ method: z.literal("saveHealing"), h: WireHandle, result: z.discriminatedUnion("status", [z.object({ status: z.literal("proposed"), proposal: HealProposal }), z.object({ status: z.literal("none"), reason: Text(2000) })]) }),
     z.object({ method: z.literal("saveCleanup"), items: z.array(FinishedItem).max(5000) }),
     z.object({ method: z.literal("loadMemory"), origin: Text(500) }),
@@ -146,6 +148,7 @@ export const SinkAnswers = {
     nextTestKey: z.string().min(1).max(80),
     createTest: WireHandle,
     saveScript: Id,
+    saveImageArtifact: Id,
     startAgentRun: Id,
     loadMemory: z.object({ knowledge: SiteKnowledgeSchema.nullable(), warning: Text(1000).optional() }),
     loadBaselines: z.array(WireFile).max(200),

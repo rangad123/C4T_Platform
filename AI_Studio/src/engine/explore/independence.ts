@@ -6,9 +6,12 @@
  * check or a replay could not start. No AI calls.
  *
  * Bounded: each step gets at most `stepTimeoutMs` (default 5 s) and each replay at most `steps x stepTimeoutMs`, so both together take
- * at most 2 x steps x 5 s (plus opening and closing the two browser contexts).
+ * at most 2 x steps x 5 s (plus opening and closing the two browser contexts, and at most SHOT_MS per picture).
+ *
+ * `shoot` (queue row 173): where a replay stops, the page is handed to it before the browser context closes; it takes and stores a
+ * picture and returns a reference to it, which the check lists in `screenshots` (a picture that fails is simply left out).
  */
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 import { BrowserSession, settle } from "../discovery/browser.js";
 import { describeStep, type Step } from "../spec/schema.js";
 import { executeStep, runtimeData } from "../web/interpreter.js";
@@ -28,6 +31,14 @@ export interface IndependenceCheck {
     independence: IndependenceResult;
     /** The two replays (none when the check was not run for want of a sourced check), for the finding's evidence. */
     replays: IndependenceReplay[];
+    /** What `shoot` returned for the page where each replay stopped, in replay order (absent without `shoot`). */
+    screenshots?: string[];
+}
+
+export interface IndependenceOptions {
+    stepTimeoutMs?: number;
+    /** Takes and stores a picture of the page a replay stopped at; returns its reference, or undefined when none was kept. */
+    shoot?: (page: Page) => Promise<string | undefined>;
 }
 
 export interface DefectTest {
@@ -39,6 +50,8 @@ export interface DefectTest {
 const STEP_TIMEOUT_MS = 5_000;
 const SETTLE_MS = 1_000;
 const MESSAGE_MAX = 300;
+/** A picture of the stopped page gets at most this long. */
+const SHOT_MS = 10_000;
 
 const isSourcedCheck = (s: Step | undefined): boolean => s?.action === "assert" && Boolean(s.source);
 
@@ -56,7 +69,7 @@ function cleanMessage(e: unknown, secrets: string[]): string {
     return m.length > MESSAGE_MAX ? `${m.slice(0, MESSAGE_MAX - 1)}…` : m;
 }
 
-async function replay(browser: Browser, baseUrl: string, test: DefectTest, label: string, stepTimeoutMs: number): Promise<IndependenceReplay> {
+async function replay(browser: Browser, baseUrl: string, test: DefectTest, label: string, stepTimeoutMs: number, shoot?: IndependenceOptions["shoot"]): Promise<IndependenceReplay & { screenshot?: string }> {
     const secrets = [test.credentials?.password ?? "", test.credentials?.totpSecret ?? ""].filter(Boolean);
     let session: BrowserSession;
     try {
@@ -76,7 +89,8 @@ async function replay(browser: Browser, baseUrl: string, test: DefectTest, label
                 if (left() > 0) await within(settle(session.page, Math.min(SETTLE_MS, left())), left()).catch(() => undefined);
             } catch (e) {
                 const what = isSourcedCheck(step) ? `the check of ${step.action === "assert" ? step.source : ""}` : step.action === "assert" ? "a check with no stated source" : "a step that is not a check";
-                return { label, outcome: "failed", failedStep: i + 1, summary: `${label}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}` };
+                const screenshot = shoot ? await within(shoot(session.page), SHOT_MS).catch(() => undefined) : undefined;
+                return { label, outcome: "failed", failedStep: i + 1, summary: `${label}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}`, ...(screenshot ? { screenshot } : {}) };
             }
         }
         return { label, outcome: "passed", summary: `${label}: all ${test.steps.length} steps passed; the defect did not show.` };
@@ -96,14 +110,17 @@ export function replayOwnSteps(browser: Browser, baseUrl: string, test: DefectTe
 }
 
 /** Replays a defect test twice, each in a fresh browser context, and says whether its failure stands on its own. */
-export async function checkIndependence(browser: Browser, baseUrl: string, test: DefectTest, opts: { stepTimeoutMs?: number } = {}): Promise<IndependenceCheck> {
+export async function checkIndependence(browser: Browser, baseUrl: string, test: DefectTest, opts: IndependenceOptions = {}): Promise<IndependenceCheck> {
     if (!test.steps.some(isSourcedCheck)) return { independence: "not_run", replays: [] };
     const stepTimeoutMs = opts.stepTimeoutMs ?? STEP_TIMEOUT_MS;
-    const first = await replay(browser, baseUrl, test, "Replay 1 in a fresh browser", stepTimeoutMs);
-    const second = await replay(browser, baseUrl, test, "Replay 2 in a fresh browser", stepTimeoutMs);
-    const replays = [first, second];
-    if (replays.some((r) => r.outcome === "error")) return { independence: "not_run", replays };
+    const shot = [await replay(browser, baseUrl, test, "Replay 1 in a fresh browser", stepTimeoutMs, opts.shoot)];
+    shot.push(await replay(browser, baseUrl, test, "Replay 2 in a fresh browser", stepTimeoutMs, opts.shoot));
+    // The finding's replay entries carry no picture: the references are listed apart.
+    const replays: IndependenceReplay[] = shot.map(({ screenshot: _s, ...r }) => r);
+    const [first, second] = replays as [IndependenceReplay, IndependenceReplay];
+    const screenshots = opts.shoot ? { screenshots: shot.flatMap((r) => (r.screenshot ? [r.screenshot] : [])) } : {};
+    if (replays.some((r) => r.outcome === "error")) return { independence: "not_run", replays, ...screenshots };
     const same = first.outcome === "failed" && second.outcome === "failed" && first.failedStep === second.failedStep;
     const atSourcedCheck = first.failedStep !== undefined && isSourcedCheck(test.steps[first.failedStep - 1]);
-    return { independence: same && atSourcedCheck ? "independent" : "state_dependent", replays };
+    return { independence: same && atSourcedCheck ? "independent" : "state_dependent", replays, ...screenshots };
 }

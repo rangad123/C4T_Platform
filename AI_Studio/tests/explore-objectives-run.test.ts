@@ -148,7 +148,7 @@ describe("exploring the seeded shop by objectives", () => {
     it("both seeded defects become captured candidate findings that replay red on the seeded shop and green on the fixed one", async () => {
         site.fixed = false;
         const { llm, calls } = scriptedShopModel(() => COMPLIANT);
-        const { summary, events, tests } = await exploreShop(site, llm, { objectives: true });
+        const { summary, events, tests, images } = await exploreShop(site, llm, { objectives: true });
 
         // The session: one stop reason, every pursuit run, the data-changing operator skipped.
         const ex = summary.exploration!;
@@ -180,6 +180,12 @@ describe("exploring the seeded shop by objectives", () => {
         ]);
         expect(findings.find((f) => f.objective?.kind === "rule")!.expected.text).toBe("The total equals the sum of the lines: $25.00");
         expect(findings.every((f) => f.modelVersion === "mv-shop-1")).toBe(true);
+        // Row 173: each finding references the pictures of the page where its replays stopped (one per replay), stored as screenshots.
+        for (const f of findings) {
+            expect(f.evidence.screenshots).toHaveLength(2);
+            for (const ref of f.evidence.screenshots) expect(images.get(ref)).toMatchObject({ kind: "screenshot", name: expect.stringMatching(/^WEB-\d{3}-finding-[12]\.jpg$/), bytes: expect.any(Number) });
+        }
+        expect(new Set(findings.flatMap((f) => f.evidence.screenshots)).size).toBe(4);
         // Every expected result keeps its stated source end to end: the scenario cites the objective's ref, in its objective and in
         // the expected text, and the constraint's finding states that text (not a model-written expectation).
         for (const t of tests) {

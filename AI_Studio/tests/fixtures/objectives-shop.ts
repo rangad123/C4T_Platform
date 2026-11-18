@@ -154,6 +154,8 @@ export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial
     const { runGeneration } = await import("../../src/engine/orchestrator.js");
     const events: Array<{ kind: string; message: string; data?: Record<string, unknown> }> = [];
     const tests: SavedTest[] = [];
+    /** The pictures the sink was asked to store (row 173: a finding's screenshots), by the reference it answered. */
+    const images = new Map<string, { kind: string; name: string; bytes: number }>();
     let n = 0;
     const sink: import("../../src/engine/orchestrator.js").GenerationSink = {
         phase: async () => undefined,
@@ -168,6 +170,11 @@ export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial
         saveScript: async (h) => `script-${h.testId}`,
         recordExecution: async () => undefined,
         saveTextArtifact: async () => undefined,
+        saveImageArtifact: async (kind, name, jpeg) => {
+            const ref = `img-${images.size + 1}`;
+            images.set(ref, { kind, name, bytes: jpeg.byteLength });
+            return ref;
+        },
         saveBaselines: async () => undefined,
         loadBaselines: async () => [],
         startAgentRun: async (_role, subject) => `run-${subject.split(" ")[0]}`,
@@ -185,5 +192,5 @@ export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial
         },
         sink,
     );
-    return { summary, events, tests };
+    return { summary, events, tests, images };
 }

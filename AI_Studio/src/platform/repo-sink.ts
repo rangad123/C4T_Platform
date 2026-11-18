@@ -24,6 +24,7 @@ import type { VersionSource } from "./review-store.js";
 import { isJpeg, THUMBNAIL_LIMITS, THUMBNAIL_NAME, THUMBNAIL_RUN_LIMITS } from "../engine/discovery/thumbnails.js";
 import { CandidateFindingStore } from "./candidate-finding-store.js";
 import { CandidateFindingSchema } from "../engine/explore/finding.js";
+import { FRAME_LIMITS } from "../engine/frames/shoot.js";
 
 /**
  * Stores a rendered script as the test's current version for its framework. An unchanged script
@@ -382,6 +383,14 @@ export class RepoSink implements GenerationSink {
         if (this.repo.db.get("SELECT 1 FROM artifacts WHERE job_id = ? AND path = ?", this.job.id, rel)) return null;
         const saved = await this.store.put(rel, Buffer.from(jpeg), { contentType: "image/jpeg" });
         return this.repo.addArtifact({ projectId: this.job.projectId, jobId: this.job.id, kind: "screenshot", path: rel, size: saved.size });
+    };
+
+    /** A finding's screenshot (row 173): stored next to the job's other artifacts; the answer is its artifact id. */
+    saveImageArtifact: NonNullable<GenerationSink["saveImageArtifact"]> = async (kind, name, jpeg) => {
+        if (jpeg.byteLength > FRAME_LIMITS.maxBytes) throw new Error("A screenshot larger than a finding keeps was not saved.");
+        const rel = path.posix.join(this.job.projectId, "_artifacts", this.job.id, path.posix.basename(name));
+        const saved = await this.store.put(rel, jpeg, { contentType: "image/jpeg" });
+        return this.repo.addArtifact({ projectId: this.job.projectId, jobId: this.job.id, kind, path: rel, size: saved.size });
     };
 
     startAgentRun: GenerationSink["startAgentRun"] = (role, subject) => this.writes.run(() => this.repo.startAgentRun(this.job.id, role, subject));
