@@ -51,6 +51,28 @@ describe("the session's pursuit budget", () => {
         expect(calls).toBe(4);
         expect(r.stopReason).toBe("ai_calls");
     });
+
+    it("a model whose every operator is skipped (data changes off) builds no pursuit, and the session ends at once instead of failing the job", async () => {
+        const thorough = LEVEL_SETTINGS.thorough;
+        // One required email field: its as stated and invalid input checks submit the form, so with data changes off neither runs.
+        const k = { rules: [], workflows: [], objectiveInputs: { pages: [{ id: "p-signup", path: "/signup", forms: [{ name: "signup", fields: [{ name: "email", type: "email", required: true }] }] }], transitions: [], workflowSteps: [] } };
+        const built = objectivePursuits(k, { maxObjectives: thorough.exploration.objectives, steps: thorough.authoringMaxSteps, perObjective: thorough.exploration.perObjective, dataChanges: false, dataOperators: false, requiresAuth: false });
+        expect(built.objectives.length).toBeGreaterThan(0);
+        expect(built.pursuits).toEqual([]);
+        expect(built.skipped.length).toBeGreaterThan(0);
+        let ran = 0;
+        const r = await runExploration({
+            objectives: built.pursuits,
+            budgets: sessionBudgets(thorough.exploration, built.pursuits.length),
+            runObjective: async () => ((ran += 1), { status: "completed" }),
+            now: () => 0,
+            usage: () => ({ aiCalls: 0, tokens: 0 }),
+            reset: async () => undefined,
+        });
+        expect(ran).toBe(0);
+        expect(r.stopReason).toBe("objectives_done");
+        expect(r.usage.objectives).toBe(0);
+    });
 });
 
 describe("workflow pages are addresses, not model page ids", () => {
