@@ -53,11 +53,14 @@ async function signIn(p: Page, email: string, password: string) {
 }
 
 /** A menu entry is wholly on the screen and nothing covers or clips its middle (a clipped point hits what lies under it). */
+/** true when the menu item is wholly on screen and on top; otherwise where it is and what covers its middle (said in the failure). */
 const shown = (name: string) =>
     page.getByRole("menuitem", { name }).evaluate((el) => {
         const r = el.getBoundingClientRect();
         const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        return r.left >= 0 && r.right <= document.documentElement.clientWidth && r.top >= 0 && r.bottom <= window.innerHeight && !!at && el.contains(at);
+        if (r.left >= 0 && r.right <= document.documentElement.clientWidth && r.top >= 0 && r.bottom <= window.innerHeight && !!at && el.contains(at)) return true;
+        const what = at ? `${at.tagName.toLowerCase()}${at.id ? `#${at.id}` : ""}.${String(at.className).replace(/\s+/g, ".")} "${(at.textContent ?? "").trim().slice(0, 40)}"` : "nothing";
+        return `at ${Math.round(r.left)},${Math.round(r.top)}-${Math.round(r.right)},${Math.round(r.bottom)} in ${document.documentElement.clientWidth}x${window.innerHeight}; covered by ${what}`;
     });
 
 async function axeBoth(p: Page) {
