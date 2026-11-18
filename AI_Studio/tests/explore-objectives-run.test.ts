@@ -153,7 +153,7 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         expect(t.before({ tool: "navigate", args: { url: "/cart" }, url }).action).toBe(t.before({ tool: "navigate", args: { url: "http://shop.test/cart" }, url }).action);
     });
 
-    it("the action tracker: a read between two clicks does not make the second look new", () => {
+    it("the action tracker: a read between two clicks does not make the second look new, and a fresh pass starts again", () => {
         const t = actionTracker("http://shop.test/cart");
         const url = "http://shop.test/cart";
         const target = 'button "Continue" @0123456789ab';
@@ -171,6 +171,8 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         expect(second.state).not.toBe(first.state);
         expect(third).toEqual(second);
         expect(run({ tool: "wait", args: { ms: 3 }, read: true }).read).toBe(true);
+        t.freshPass("http://shop.test/cart");
+        expect(t.before({ ...click, url })).toEqual(first);
     });
 });
 
@@ -212,9 +214,18 @@ describe("exploring the seeded shop by objectives", () => {
         expect(ex.skipped).toEqual([{ objectiveId: expect.stringMatching(/^OBJ-/), operator: "boundary_input", reason: "data changes off" }]);
         expect(ex.outcomes.map((o) => o.status)).toEqual(["completed", "completed"]);
         expect(ex.usage.aiCalls).toBe(calls.filter((c) => !c.startsWith("object:")).length);
-        expect(ex.usage.actions).toBe(5);
+        // The test writer's own five actions, and the replays without AI that reached the application (CP2 M-5): each pursuit's prune
+        // replay of its saved steps (3: open, navigate, check; 4: open, fill, click, check) and its finding's two fresh replays.
+        const performed = ex.actionLog.filter((r) => r.result === "performed");
+        expect(performed.filter((r) => !r.action.startsWith("replay: "))).toHaveLength(5);
+        expect(performed.filter((r) => r.action.startsWith("replay: ")).map((r) => r.action)).toEqual([
+            "replay: the replay that drops stale steps (3 steps)",
+            "replay: the two fresh replays of the independence check (6 steps)",
+            "replay: the replay that drops stale steps (4 steps)",
+            "replay: the two fresh replays of the independence check (8 steps)",
+        ]);
+        expect(ex.usage.actions).toBe(5 + 3 + 6 + 4 + 8);
         // The action log (every row, under the 2,000-row cap) and the coverage record built from it and the saved tests.
-        expect(ex.actionLog.filter((r) => r.result === "performed")).toHaveLength(5);
         expect(ex.actionLogOmitted).toBe(0);
         expect(ex.coverage.rules).toMatchObject({ total: 1, exercised: 1 });
         expect(ex.coverage.inputClasses).toMatchObject({ exercised: 1, notExercised: ["page-order/order/qty boundary_input"] });

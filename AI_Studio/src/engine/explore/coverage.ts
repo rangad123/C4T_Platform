@@ -135,7 +135,8 @@ const STATUS_ORDER: OutcomeStatus[] = ["completed", "stopped", "writer_stopped",
 export function coverageOf(input: CoverageInput): CoverageRecord {
     const pages = input.model.pages ?? [];
     const tests = input.tests ?? [];
-    const performed = input.actionLog.filter((r) => r.result === "performed");
+    // A replay without AI (the loop's `replay` row, no state) is counted against the budget but visits no page and uses no control here.
+    const performed = input.actionLog.filter((r) => r.result === "performed" && r.state !== "");
 
     // Pursuits: what happened to each key, by the loop and by saved tests.
     const outcomesOf = new Map<string, ObjectiveOutcome[]>();

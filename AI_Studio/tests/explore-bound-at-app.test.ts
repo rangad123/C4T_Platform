@@ -3,8 +3,8 @@
  * Continue button is a form POST the server counts, so what really reached the application is compared with the loop's action log.
  *   - the loop is asked before each action runs: a refused click never reaches the application, so the POSTs it received equal the
  *     clicks the log calls performed, also when one model reply holds several clicks (each is checked in order);
- *   - a repeat is the same element, however its locator is spelled, and reads in between (waits) do not make it look new.
- *   - the test writer performs nothing once its run has ended (the calls left in one reply after a cancel).
+ *   - a repeat is the same element, however its locator is spelled, and reads in between (waits) do not make it look new;
+ *   - the test writer performs nothing once its run has ended, its step budget holds across passes, and replays ask first (M-5).
  * The page also tells the AI to keep clicking Continue; a scripted model double obeys it. Real model calls are never made.
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/explore-bound-at-app.test.ts
  */
@@ -16,9 +16,9 @@ import { loadConfig } from "../src/config.js";
 import type { EngineContext } from "../src/engine/context.js";
 import { launchChromium } from "../src/engine/discovery/browser.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
-import { ScenarioSchema } from "../src/engine/spec/schema.js";
+import { ScenarioSchema, type Step } from "../src/engine/spec/schema.js";
 import type { AppModel } from "../src/engine/understanding/app-model.js";
-import { authorWebSpec, type ActionGate } from "../src/engine/web/author.js";
+import { authorWebSpec, pruneByReplay, type ActionGate } from "../src/engine/web/author.js";
 import { exploreShop, type ShopSite } from "./fixtures/objectives-shop.js";
 
 const PORT = 9874;
@@ -184,6 +184,61 @@ describe("the test writer honours an ended run", () => {
         } };
         await authorWebSpec({ ctx: authorCtx([Array.from({ length: 8 }, () => continueBtn)], job.signal), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate }).catch(() => undefined);
         expect(asked).toBe(1);
+        expect(site.posts).toBe(1);
+    }, 120_000);
+});
+
+describe("the objective's step budget and the replays of a pursuit (CP2 M-5)", () => {
+    let browser: Browser;
+    beforeAll(async () => {
+        browser = await launchChromium(true);
+    }, 60_000);
+    afterAll(async () => {
+        await browser?.close();
+    });
+    const open = { action: "navigate", url: "/cart", description: "Open /cart" } as Step;
+    const clickStep = { action: "click", locator: { by: "role", role: "button", value: "Continue" }, description: "Continue" } as Step;
+
+    it("the step budget is shared by every pass: one that finds it spent does not start", async () => {
+        const budget = { left: 3 };
+        const waits = [1, 2, 3, 4, 5].map((ms) => [{ tool: "wait", input: { ms } }]);
+        const first = await authorWebSpec({ ctx: authorCtx(waits), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate: allow, stepBudget: budget, maxSteps: 30 });
+        expect(budget.left).toBe(0);
+        // The opening navigation and the three waits the budget allowed.
+        expect(first.steps).toHaveLength(4);
+        const second = await authorWebSpec({ ctx: authorCtx(waits), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate: allow, stepBudget: budget, maxSteps: 30 });
+        expect(second).toMatchObject({ status: "blocked", steps: [], explanation: "Step budget exhausted before finishing" });
+    }, 120_000);
+
+    it("a replayed prefix (a review's fix) is asked of the gate before each step reaches the application", async () => {
+        site.posts = 0;
+        const asked: string[] = [];
+        const passes: string[] = [];
+        const gate = {
+            ...allow,
+            freshPass: (start: string) => passes.push(start),
+            before: (a: { tool: string }) => {
+                asked.push(a.tool);
+                return a.tool === "click" ? { allowed: false as const, reason: "The session's limit of 1 actions was reached." } : { allowed: true as const };
+            },
+        } as unknown as ActionGate;
+        const out = await authorWebSpec({ ctx: authorCtx([]), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate, resume: { prefix: [open, clickStep], failure: "x", review: true } });
+        expect(out).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/^Replay of previous steps was refused/) });
+        expect(asked).toEqual(["click"]);
+        expect(passes).toEqual([`${site.url}/cart`]);
+        expect(site.posts).toBe(0);
+    }, 120_000);
+
+    it("the replay that drops stale steps is asked first; refused, nothing is replayed", async () => {
+        site.posts = 0;
+        const what: Array<[number, string]> = [];
+        const steps = [open, clickStep, { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Cart" }, description: "" } as Step];
+        const out = await pruneByReplay(browser, site.url, steps, undefined, true, { replay: (n, w) => (what.push([n, w]), false) });
+        expect(out).toEqual({ steps, dropped: 0 });
+        expect(what).toEqual([[3, "the replay that drops stale steps"]]);
+        expect(site.posts).toBe(0);
+        // Allowed, it runs (and reaches the application).
+        await pruneByReplay(browser, site.url, steps, undefined, true, { replay: () => true });
         expect(site.posts).toBe(1);
     }, 120_000);
 });

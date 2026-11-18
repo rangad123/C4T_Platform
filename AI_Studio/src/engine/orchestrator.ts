@@ -737,7 +737,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
          * Saves what the test writer made of a scenario: a defect test with its candidate finding (S1, replayed twice in fresh browsers
          * without AI) for review, or a complete test for validation. Returns the saved test's key.
          */
-        const keepAuthored = async (scenario: Scenario, outcome: Exclude<AuthorOutcome, { status: "blocked" }>, asAccount: ReturnType<typeof roleCredentials>, scenarioRules: KnowledgeRule[]): Promise<string> => {
+        const keepAuthored = async (
+            scenario: Scenario,
+            outcome: Exclude<AuthorOutcome, { status: "blocked" }>,
+            asAccount: ReturnType<typeof roleCredentials>,
+            scenarioRules: KnowledgeRule[],
+            /** In objective-driven exploration: asked before each replay without AI (counted against the session's actions, CP2 M-5); false skips it. */
+            replayAllowed: (steps: number, what: string) => boolean = () => true,
+        ): Promise<string> => {
             const key = await sink.nextTestKey("WEB");
             const written = toSpec(scenario, outcome, key);
             const spec = TestSpecSchema.parse(asAccount ? asRole(written, asAccount.name) : written);
@@ -759,7 +766,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const replayed = { steps: written.steps, testData: written.testData, ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) };
                 // An observed-only defect test holds only steps that passed while authoring: replayed once (no AI), a step it stops at means
                 // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
-                const own = capture === "observed_only" ? await replayOwnSteps(browser, origin, replayed).catch(() => undefined) : undefined;
+                const own = capture === "observed_only" && replayAllowed(written.steps.length, "the replay of the test's own steps") ? await replayOwnSteps(browser, origin, replayed).catch(() => undefined) : undefined;
                 if (own?.outcome === "failed") {
                     const h = await persistNew(spec, "playwright", "PENDING", undefined, { ...meta, capture, ownReplay: own });
                     await sink.updateTest(h, {
@@ -780,7 +787,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 // Row 173: where a replay stops, a picture with the secret fields covered (as the Explorer view's) is kept as the finding's evidence.
                 const shoot = sink.saveImageArtifact ? findingShooter(sink.saveImageArtifact.bind(sink), authoringSecretsOf(req), key) : undefined;
                 const independence =
-                    capture === "captured"
+                    // Two fresh replays of the saved steps.
+                    capture === "captured" && replayAllowed(2 * written.steps.length, "the two fresh replays of the independence check")
                         ? await checkIndependence(browser, origin, replayed, shoot ? { shoot } : {}).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
                 const found = defectFinding({ scenario, rules: scenarioRules, requirementIds, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
@@ -906,10 +914,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     };
                     const signal = ctx.signal ? AbortSignal.any([ctx.signal, loop.signal]) : loop.signal;
                     const tracker = actionTracker(new URL(p.scenario.startPath, origin).href);
-                    // Asked before each action reaches the application (CP2 H-2): a refused one is not performed.
+                    // Asked before each action reaches the application (CP2 H-2): a refused one is not performed. Every pass of the pursuit
+                    // (a review's fix, the leftover redo) starts its own repeat and depth tracking; the session's totals are shared (M-5).
                     const actionGate: ActionGate = {
                         before: (a) => loop.act(tracker.before(a)),
                         after: (a) => tracker.after(a),
+                        freshPass: (start) => {
+                            tracker.freshPass(start);
+                            loop.freshPass();
+                        },
+                        replay: (steps, what) => loop.replay(steps, what).allowed,
                     };
                     const rules = p.objective.kind === "rule" ? usableRules(knowledge.rules).filter((r) => r.ref === p.objective.source.ref) : rulesForScenario(p.scenario, knowledge);
                     const runId = await sink.startAgentRun("web-authoring", `${p.scenario.scenarioId} ${p.scenario.title}`);
@@ -924,6 +938,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                             credentials: requiresAuth ? creds : undefined,
                             onAction: (a) => sink.agentAction(runId, a),
                             gate: actionGate,
+                            // The objective's step budget holds across every pass of this pursuit, not per pass (CP2 M-5).
+                            stepBudget: { left: Math.min(lv.authoringMaxSteps, p.objective.budget.steps) },
                             vision: wantVision,
                             maxSteps: Math.min(lv.authoringMaxSteps, p.objective.budget.steps),
                             review: true,
@@ -952,7 +968,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ctx.emit({ stage: "generation", kind: "operator_not_applied", level: "warn", message: `${p.scenario.scenarioId}: the recorded steps do not apply the operator "${p.operator}", so no test was saved for it.` });
                         return { status: "completed", result: { applied: false, authoring: outcome.status } };
                     }
-                    const testKey = await keepAuthored(p.scenario, outcome, undefined, rules);
+                    const testKey = await keepAuthored(p.scenario, outcome, undefined, rules, actionGate.replay);
                     saved.push({ objective: { id: p.objective.id, operator: p.operator }, steps: outcome.steps });
                     return { status: "completed", result: { applied: true, authoring: outcome.status, testKey } };
                 };
@@ -1524,11 +1540,12 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  * The action key names the element the action resolves to on the page (role, accessible name and a digest of its DOM path, when the test
  * writer found it), not the locator text, so the same button spelled another way is the same action (M-1); a read (a wait, a check)
  * does not change the state, so alternating no-ops does not make a repeat look new. The same click twice in a row is two states (a
- * double submit); the same action again on the same state is a repeat the loop refuses.
+ * double submit); the same action again on the same state is a repeat the loop refuses. `freshPass` starts again from a start page.
  */
 export function actionTracker(startUrl: string): {
     before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean }): { state: string; action: string; read: boolean };
     after(a: { tool: string; args: unknown; ok: boolean; url?: string; read?: boolean }): void;
+    freshPass(startUrl: string): void;
 } {
     let url = startUrl;
     let typed: string[] = [];
@@ -1570,6 +1587,12 @@ export function actionTracker(startUrl: string): {
             if (a.ok && (a.tool === "fill" || a.tool === "select") && typeof args.value === "string") typed = [...typed, args.value].slice(-50);
             if (a.ok && a.tool === "navigate") typed = [];
             if (a.ok) moveTo(a.url);
+        },
+        freshPass: (start) => {
+            url = start;
+            typed = [];
+            previous = "";
+            pending = "";
         },
     };
 }
