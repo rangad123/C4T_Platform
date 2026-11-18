@@ -144,20 +144,18 @@ export async function targetIdentity(page: Page, l: Locator, data: RuntimeData):
             el.evaluate((node) => {
                 const LANDMARK_TAGS = new Set(["form", "main", "nav", "header", "footer", "aside", "dialog", "search", "fieldset"]);
                 const LANDMARK_ROLES = new Set(["form", "main", "navigation", "banner", "contentinfo", "complementary", "dialog", "alertdialog", "search", "region", "group", "tabpanel", "list", "table", "grid", "menu", "toolbar"]);
-                const clip = (t: string | null | undefined) => (t ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-                const labelOf = (e: Element): string => {
-                    const own = e.getAttribute("aria-label");
-                    if (own) return clip(own);
-                    const by = e.getAttribute("aria-labelledby");
-                    if (by) return clip(by.split(/\s+/).map((id) => e.ownerDocument.getElementById(id)?.textContent ?? "").join(" "));
-                    const legend = e.tagName === "FIELDSET" ? e.querySelector(":scope > legend") : null;
-                    return legend ? clip(legend.textContent) : "";
-                };
+                // No helper functions in here: tsx (the platform's and the runner's loader) wraps each in a `__name(…)` call the page does not
+                // have, and the identity would silently be lost (tests/page-scripts-under-tsx.test.ts).
                 const parts: string[] = [];
                 for (let e: Element | null = node.parentElement; e; e = e.parentElement) {
                     const tag = e.tagName.toLowerCase();
                     const role = e.getAttribute("role") ?? "";
-                    const label = labelOf(e);
+                    // Its name: aria-label, else the text of aria-labelledby, else a fieldset's legend.
+                    const doc = e.ownerDocument;
+                    const own = e.getAttribute("aria-label");
+                    const by = e.getAttribute("aria-labelledby");
+                    const legend = e.tagName === "FIELDSET" ? e.querySelector(":scope > legend") : null;
+                    const label = ((own || (by ? by.split(/\s+/).map((id) => doc.getElementById(id)?.textContent ?? "").join(" ") : legend?.textContent)) ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
                     // An unnamed section or region is no landmark: a page may add any number of them around the element.
                     if (!LANDMARK_TAGS.has(tag) && !LANDMARK_ROLES.has(role) && !((tag === "section" || tag === "article") && label)) continue;
                     let name = label;
@@ -167,7 +165,7 @@ export async function targetIdentity(page: Page, l: Locator, data: RuntimeData):
                         try {
                             to = action ? new URL(action, e.ownerDocument.baseURI).pathname : "";
                         } catch {
-                            to = clip(action);
+                            to = (action ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
                         }
                         name = [label, e.getAttribute("name") ?? "", (e.getAttribute("method") ?? "get").toLowerCase(), to].join("|");
                     }

@@ -66,6 +66,9 @@ export function fieldsToCover(fields: ReadonlyArray<FieldFacts & { holdsSecret?:
 // The fields are walked in the page the same way by each evaluate below (spelled out in each, since a function cannot be passed into
 // the page, and building one there would fail on a page whose content security policy forbids eval): inputs and text areas in document
 // order, each open shadow root's after its host, at most MAX_FIELDS, so the indexes of reading and covering agree.
+// The page-side code declares no helper function of its own (no `const f = () => …`, no `function f`): the platform and the runner
+// load the engine through tsx, which keeps function names by wrapping each such helper in a `__name(…)` call the page does not have
+// (tests/page-scripts-under-tsx.test.ts). Loops and inline callbacks only.
 
 // ── covering secret fields ──────────────────────────────────────────────────
 
@@ -78,20 +81,20 @@ async function readFields(frame: Frame, secrets: readonly string[]): Promise<Arr
             const held = stored as string[];
             // The field walk (see above).
             const els: Array<HTMLInputElement | HTMLTextAreaElement> = [];
-            const walk = (root: Document | ShadowRoot): void => {
-                for (const el of Array.from(root.querySelectorAll("*"))) {
-                    if (els.length >= (max as number)) return;
-                    if (el.matches("input, textarea")) els.push(el as HTMLInputElement | HTMLTextAreaElement);
-                    if (el.shadowRoot) walk(el.shadowRoot);
-                }
-            };
-            walk(document);
-            const text = (e: Element | null | undefined) => (e?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+            const stack: Element[] = Array.from(document.querySelectorAll("*")).reverse();
+            while (stack.length && els.length < (max as number)) {
+                const el = stack.pop()!;
+                if (el.matches("input, textarea")) els.push(el as HTMLInputElement | HTMLTextAreaElement);
+                if (el.shadowRoot) stack.push(...Array.from(el.shadowRoot.querySelectorAll("*")).reverse());
+            }
             return els.map((el) => {
                 const v = el.value ?? "";
                 const root = el.getRootNode() as Document | ShadowRoot;
-                const by = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean).map((id) => text(root.getElementById?.(id) ?? null));
-                const label = [...Array.from(el.labels ?? []).map(text), ...by].join(" ").slice(0, 400);
+                const by = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean).map((id) => root.getElementById?.(id) ?? null);
+                const label = [...Array.from(el.labels ?? []), ...by]
+                    .map((e) => (e?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200))
+                    .join(" ")
+                    .slice(0, 400);
                 return {
                     tag: el.tagName.toLowerCase(),
                     type: el instanceof HTMLInputElement ? el.type : "",
@@ -118,14 +121,12 @@ async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> 
         ([attr, color, idx, max]) => {
             // The field walk (see above).
             const els: HTMLElement[] = [];
-            const walk = (root: Document | ShadowRoot): void => {
-                for (const el of Array.from(root.querySelectorAll("*"))) {
-                    if (els.length >= (max as number)) return;
-                    if (el.matches("input, textarea")) els.push(el as HTMLElement);
-                    if (el.shadowRoot) walk(el.shadowRoot);
-                }
-            };
-            walk(document);
+            const stack: Element[] = Array.from(document.querySelectorAll("*")).reverse();
+            while (stack.length && els.length < (max as number)) {
+                const el = stack.pop()!;
+                if (el.matches("input, textarea")) els.push(el as HTMLElement);
+                if (el.shadowRoot) stack.push(...Array.from(el.shadowRoot.querySelectorAll("*")).reverse());
+            }
             const w = window as unknown as { __aitpMasked?: Array<{ el: HTMLElement; style: string | null }>; __aitpMaskStyle?: HTMLStyleElement };
             w.__aitpMasked = w.__aitpMasked ?? [];
             if (!w.__aitpMaskStyle) {
@@ -161,13 +162,12 @@ async function uncoverIn(frame: Frame): Promise<void> {
         w.__aitpMaskStyle?.remove();
         w.__aitpMaskStyle = undefined;
         // Belt and braces: nothing carrying the marker is left behind, in open shadow roots either.
-        const clear = (root: Document | ShadowRoot): void => {
-            for (const el of Array.from(root.querySelectorAll("*"))) {
-                if (el.hasAttribute(attr)) el.removeAttribute(attr);
-                if (el.shadowRoot) clear(el.shadowRoot);
-            }
-        };
-        clear(document);
+        const stack: Element[] = Array.from(document.querySelectorAll("*"));
+        while (stack.length) {
+            const el = stack.pop()!;
+            if (el.hasAttribute(attr)) el.removeAttribute(attr);
+            if (el.shadowRoot) stack.push(...Array.from(el.shadowRoot.querySelectorAll("*")));
+        }
     }, MASK_ATTR);
 }
 
