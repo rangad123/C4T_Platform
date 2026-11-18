@@ -158,12 +158,15 @@ async function explore(projectId: string, objectivePursuits = 0) {
     // Row 186: each pursuit's test writer answered "done" without finishing, so each says the writer stopped (not that the step budget ran out).
     expect(events.filter((e) => e.kind === "objective_not_written").map((e) => e.message.replace(/^.*?: /, ""))).toEqual(Array<string>(objectivePursuits).fill(`no test was saved (${WRITER_STOPPED}).`));
     if (objectivePursuits) {
-        // ...and the coverage record lists their objectives as not finished for that reason, not as done.
+        // ...and the coverage record lists the workflow as not finished for that reason, not as done, and R-TOTAL (its only operator,
+        // as stated, submits forms) as not run because data changes are off.
         const cov = await call("GET", `/api/projects/${projectId}/jobs/${queued.body.jobId}/coverage`);
         expect(cov.status, JSON.stringify(cov.body)).toBe(200);
-        const statuses = (cov.body.coverage.unexplored as Array<{ status: string }>).map((u) => u.status);
-        expect(statuses.length).toBeGreaterThan(0);
-        for (const st of statuses) expect(st).toBe(`not finished: ${WRITER_STOPPED}`);
+        const statuses = (cov.body.coverage.unexplored as Array<{ kind: string; status: string }>).map((u) => [u.kind, u.status]).sort();
+        expect(statuses).toEqual([
+            ["rule", "not run: data changes off"],
+            ["workflow", `not finished: ${WRITER_STOPPED}`],
+        ]);
     }
     expect(calls).toEqual(["object:analysis", "object:planning", "agent", "agent", "agent", "text:review", "text:review", "text:review", ...Array<string>(objectivePursuits).fill("agent"), "object:analysis"]);
     return { status: job!.status, test: tests[0]!, events };

@@ -204,6 +204,14 @@ describe("coverageOf", () => {
         expect(c.unexplored.map((u) => u.objectiveId)).toEqual([W.id]);
     });
 
+    // Owner, 2026-11-21: with data changes off a rule's only operator (as stated) is skipped, so nothing of it runs; it says why.
+    it("an objective nothing of which ran because its operators were skipped says the skip's reason, not 'not reached'", () => {
+        const c = coverageOf({ model: {}, objectives: [R1], outcomes: [], actionLog: [], skipped: R1.operators.map((op) => ({ objectiveId: R1.id, operator: op, reason: "data changes off" })) });
+        expect(c.unexplored.map((u) => [u.objectiveId, u.status])).toEqual([[R1.id, "not run: data changes off"]]);
+        for (const op of R1.operators) expect(c.notRun.find((n) => n.objectiveId === R1.id && n.operator === op)?.reason).toBe("data changes off");
+        expect(coverageOf({ model: {}, objectives: [R1], outcomes: [], actionLog: [] }).unexplored[0]!.status).toBe("not run: not reached in this session");
+    });
+
     it("does not depend on the order of its inputs and caps its lists with a count of the rest", () => {
         const s = session();
         const reversed: CoverageInput = { ...s, objectives: [...s.objectives].reverse(), outcomes: [...s.outcomes].reverse(), actionLog: [...s.actionLog].reverse(), skipped: [...(s.skipped ?? [])].reverse() };
