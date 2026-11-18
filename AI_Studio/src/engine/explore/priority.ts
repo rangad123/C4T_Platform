@@ -39,13 +39,16 @@ const KIND_WORDS: Record<ObjectiveKind, string> = {
 
 /** Criticality words, each with the forms it is found in; whole words only ("border" is not "order"). */
 const CRITICAL: ReadonlyArray<readonly [string, RegExp]> = [
-    ["money", /\bmoney\b/i],
+    // Money and price words (row 204: discount, subtotal and shipping rules matched no word and fell outside the cap), and an amount.
+    ["money", /\b(?:money|prices?|priced|pricing|subtotals?|totals?|discounts?|discounted|coupons?|shipping|tax|taxes|refunds?|refunded|charges?|charged)\b|\$\s?\d/i],
     ["order", /\b(?:orders?|ordered|ordering)\b/i],
     ["account", /\baccounts?\b/i],
     ["payment", /\b(?:payments?|pay|pays|paid|paying)\b/i],
     ["delete", /\b(?:delete|deletes|deleted|deleting|deletion)\b/i],
 ];
 const POINTS_PER_WORD = 2;
+/** Money is checked first: a wrong amount (a discount, a subtotal, a shipping charge) costs the customer or the shop directly. */
+const MONEY_EXTRA_POINTS = 1;
 const MAX_CRITICAL_WORDS = 3;
 const MAX_WORKFLOW_POINTS = 5;
 const UNEXPLORED_POINTS = 2;
@@ -59,7 +62,8 @@ export function priorityOf(input: PriorityInput): Priority {
 
     const words = CRITICAL.filter(([, re]) => re.test(input.sourceText)).map(([w]) => w);
     if (words.length) {
-        score += POINTS_PER_WORD * Math.min(words.length, MAX_CRITICAL_WORDS);
+        // The first MAX_CRITICAL_WORDS words count (money first, so it always does), money one point more than the others.
+        score += words.slice(0, MAX_CRITICAL_WORDS).reduce((sum, w) => sum + POINTS_PER_WORD + (w === "money" ? MONEY_EXTRA_POINTS : 0), 0);
         parts.push(`mentions ${list(words)}`);
     }
     const steps = Math.max(0, Math.floor(input.workflowSteps ?? 0));

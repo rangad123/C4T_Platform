@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { OBJECTIVE_OPERATORS, ObjectiveSchema, objectiveFingerprint, objectivesFrom, type ObjectiveOptions } from "../src/engine/explore/objectives.js";
 import { priorityOf } from "../src/engine/explore/priority.js";
 import type { KnowledgeRule, KnowledgeWorkflow } from "../src/engine/planning/planner.js";
+import { c1e, c1eRules } from "./fixtures/bench-shop-c1e.js";
 
 const rule = (ref: string, over: Partial<KnowledgeRule> = {}): KnowledgeRule => ({
     ref,
@@ -206,6 +207,23 @@ describe("priorityOf", () => {
         }
         // Part of another word is not the word.
         expect(priorityOf({ ...base, sourceText: "The border is drawn" }).score).toBe(priorityOf(base).score);
+    });
+
+    it("counts money and price words as money: subtotal, total, price, discount, coupon, shipping, tax, refund, charge, an amount", () => {
+        for (const text of ["10% off the subtotal", "The order total is shown", "Each line shows its price", "A discount code applies", "One coupon per order", "Shipping is free", "Tax is added", "A refund is issued", "Shipping charge is $5.00", "Free above $50.00"]) {
+            const p = priorityOf({ ...base, sourceText: text });
+            expect(p.reason, text).toMatch(/mentions .*money/);
+            expect(p.score, text).toBeGreaterThan(priorityOf(base).score);
+        }
+        expect(priorityOf({ ...base, sourceText: "The discounted items are listed" }).reason).toMatch(/money/);
+        // Part of another word is not the word.
+        expect(priorityOf({ ...base, sourceText: "Subtotalling widgets, the taxi rank" }).score).toBe(priorityOf(base).score);
+    });
+
+    it("on the C1e bench-shop model, the money rules (BS-01 discount, BS-02 subtotal, BS-11 free shipping) are inside thorough's cap", () => {
+        const { objectives } = objectivesFrom(c1e.model as never, c1eRules(), c1e.model.workflows as never, { maxObjectives: 25, budget: { steps: 30, minutes: 15, tokens: 300_000 } });
+        const refs = objectives.map((o) => o.source.ref);
+        for (const ref of ["R-d94a3ac53f55", "R-a7a96a316692", "R-61c967e54764"]) expect(refs, ref).toContain(ref);
     });
 
     it("raises the score for a longer workflow, an unexplored state and a checking kind over a coverage gap", () => {
