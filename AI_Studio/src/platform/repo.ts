@@ -111,6 +111,8 @@ export interface JobOptions {
     useMemory?: boolean;
     /** Send every page to the AI again, even pages unchanged since the last exploration (exploration reuse off for this job). Default false. */
     fullExploration?: boolean;
+    /** False: no answer of the AI response cache is used or kept for this run (llm-response-cache.ts). "Explore everything again" turns it off too. Default on. */
+    responseCache?: boolean;
     /** Benchmark only (Baseline-U): explore as an older runner does and analyse afterwards without AI. */
     understandingBaseline?: true;
     /** Budget overrides for the page-speed checks, e.g. "lcp:3000 weight:5000000 slow-4g". */

@@ -225,6 +225,10 @@ export interface UsageRow {
     /** Of the input tokens: read from / written to the provider's prompt cache (0 or missing when nothing was cached). */
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    /** Calls answered from the AI response cache instead of the model (platform/llm-response-cache.ts), and the tokens they saved; missing = none. */
+    cachedCalls?: number;
+    savedInputTokens?: number;
+    savedOutputTokens?: number;
     /** Who pays for these tokens; missing = Crowd4Test. */
     billingOwner?: BillingOwner;
 }
@@ -261,12 +265,16 @@ export interface Totals {
     budgetTokens: number;
     /** Times the fast model handed a step to the main model (model-routing.md). */
     escalations: number;
+    /** Calls answered from the AI response cache: not in `calls`, no tokens, nothing against the limits; and the tokens they would have used. */
+    cachedCalls: number;
+    savedInputTokens: number;
+    savedOutputTokens: number;
 }
 export interface Group extends Totals {
     key: string;
 }
 
-const emptyTotals = (): Totals => ({ calls: 0, failedCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, images: 0, estimated: false, cost: null, unpricedTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, budgetTokens: 0, escalations: 0 });
+const emptyTotals = (): Totals => ({ calls: 0, failedCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, images: 0, estimated: false, cost: null, unpricedTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, budgetTokens: 0, escalations: 0, cachedCalls: 0, savedInputTokens: 0, savedOutputTokens: 0 });
 
 function add(t: Totals, r: UsageRow, prices: ReadonlyMap<string, Price>): void {
     // An escalation row is a count, not a call (see ESCALATION_PURPOSE).
@@ -282,6 +290,9 @@ function add(t: Totals, r: UsageRow, prices: ReadonlyMap<string, Price>): void {
     t.images += r.images;
     t.cacheReadTokens += r.cacheReadTokens ?? 0;
     t.cacheWriteTokens += r.cacheWriteTokens ?? 0;
+    t.cachedCalls += r.cachedCalls ?? 0;
+    t.savedInputTokens += r.savedInputTokens ?? 0;
+    t.savedOutputTokens += r.savedOutputTokens ?? 0;
     t.budgetTokens += budgetTokens(r);
     if (r.estimatedCalls > 0) t.estimated = true;
     const price = prices.get(r.model);

@@ -141,6 +141,11 @@ export const ExploreLlmRequestSchema = z.object({
     hint: ExploreRouteHintSchema.optional(),
     /** What the engine's call is for (engine/llm/usage.ts purposes), so the usage row says so; anything else is counted as authoring. */
     purpose: z.string().max(40).optional(),
+    /**
+     * The engine's call may be answered from the platform's AI response cache (engine/llm/response-cache-calls.ts ids). Only a hint: the
+     * platform answers from its cache only for an id it allows, on a call without tools or images, and keeps only answers it can check.
+     */
+    cache: z.string().max(40).optional(),
 });
 export type ExploreLlmRequest = z.infer<typeof ExploreLlmRequestSchema>;
 

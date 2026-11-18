@@ -402,7 +402,7 @@ function finalise(all: Candidate[]): { requirements: Requirement[]; documentIds:
 
 // ── LLM normalisation ───────────────────────────────────────────────────────
 
-const NormalisedSchema = z.object({
+export const NormalisedSchema = z.object({
     requirements: z.array(
         z.object({
             id: z.string().describe('Existing id, a split suffix ("FR-2.a"), or "" for a requirement the pre-pass missed'),
@@ -465,6 +465,7 @@ export async function parseRequirements(ctx: EngineContext, text: string): Promi
                 schema: NormalisedSchema,
                 maxOutputTokens: 16_000,
                 purpose: "planning",
+                cacheAs: "requirements",
                 prompt: `Candidate requirements${batches.length > 1 ? ` (part ${b + 1} of ${batches.length})` : ""}:
 ${batches[b]!.length ? formatCandidates(batches[b]!) : "(none found by the parser)"}
 ${includeText ? `\nDocument text:\n"""\n${text}\n"""` : ""}`,

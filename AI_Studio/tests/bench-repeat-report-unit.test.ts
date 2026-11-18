@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { buildRepeatReport, median, renderRepeatMd, REPEAT_TARGETS, type RepeatTrial, type RunMetrics } from "../src/eval/bench/repeat/report.js";
 
-const run = (o: Partial<RunMetrics> = {}): RunMetrics => ({ wallMs: 10_000, aiCalls: 10, inputTokens: 50_000, outputTokens: 5_000, cacheReadTokens: 0, cacheWriteTokens: 0, cost: null, pages: 8, scenarios: 20, requirementsCovered: 6, reuseEvents: 0, ...o });
+const run = (o: Partial<RunMetrics> = {}): RunMetrics => ({ wallMs: 10_000, aiCalls: 10, cachedCalls: 0, inputTokens: 50_000, outputTokens: 5_000, cacheReadTokens: 0, cacheWriteTokens: 0, cost: null, pages: 8, scenarios: 20, requirementsCovered: 6, reuseEvents: 0, ...o });
 
 /** Five alternating trials per arm for one app: "on" repeats cost `on`, "off" repeats cost `off`. */
 function series(on: Partial<RunMetrics>, off: Partial<RunMetrics>, o: { trials?: number; change?: { on: boolean; off: boolean } } = {}): RepeatTrial[] {

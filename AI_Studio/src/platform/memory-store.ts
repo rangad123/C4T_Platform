@@ -113,9 +113,11 @@ export function latestMemory(db: Db, projectId: string): StoredMemory | null {
     return null;
 }
 
-/** Forget everything remembered about a project's applications. Returns how many records were removed. */
+/** Forget everything remembered about a project's applications, and the AI answers kept for it. Returns how many records were removed. */
 export function forgetMemory(db: Db, projectId: string): number {
-    return Number(db.run("DELETE FROM site_memory WHERE project_id = ?", projectId).changes);
+    // The AI's stored answers for the project go too (llm-response-cache.ts): the next exploration asks everything again.
+    const answers = Number(db.run("DELETE FROM llm_response_cache WHERE project_id = ?", projectId).changes);
+    return Number(db.run("DELETE FROM site_memory WHERE project_id = ?", projectId).changes) + answers;
 }
 
 /** One test of a person's Run that belongs to a planned journey, and how it ended in that Run. */

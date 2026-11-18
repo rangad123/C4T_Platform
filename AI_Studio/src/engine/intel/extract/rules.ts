@@ -260,7 +260,7 @@ export async function extractRules(llm: LlmClient, input: ExtractionInput): Prom
         if (input.signal?.aborted) return failed("The reading was cancelled.");
         try {
             // The known workflows are the same for every part of this source: the shared prefix the provider's prompt cache can serve.
-            answers.push(await untilAborted(llm.object({ system: SYSTEM, prompt: knownBlock(known) + promptOf(part), cachePrefix: knownBlock(known) || undefined, schema: ExtractionAnswerSchema, maxOutputTokens: 8000, purpose: "analysis" }), input.signal));
+            answers.push(await untilAborted(llm.object({ system: SYSTEM, prompt: knownBlock(known) + promptOf(part), cachePrefix: knownBlock(known) || undefined, schema: ExtractionAnswerSchema, maxOutputTokens: 8000, purpose: "analysis", cacheAs: "rules" }), input.signal));
         } catch (e) {
             if (input.signal?.aborted) return failed("The reading was cancelled.");
             const why = e instanceof z.ZodError ? "its answer was not in the expected form" : redactText(e instanceof Error ? e.message : String(e), 200);

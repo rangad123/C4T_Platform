@@ -100,6 +100,7 @@ export async function analyzeApplication(
         // One purpose line per page: a larger exploration needs room for all of them.
         maxOutputTokens: Math.min(16_000, 6_000 + 40 * base.pages.length),
         purpose: "analysis",
+        cacheAs: "understanding",
         prompt: `Application: ${base.url}
 Authentication: ${base.authentication.required ? "login required/available" : "no login form detected"}${base.authentication.loginPath ? ` (login page ${base.authentication.loginPath})` : ""}
 Documented tests found on site: ${base.documentedTestCases.length}

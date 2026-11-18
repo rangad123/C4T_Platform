@@ -44,6 +44,7 @@ import { SHARED_INTEGRATIONS_MIGRATION } from "./shared-integrations.js";
 import { PROJECT_APP_MIGRATION } from "./project-app.js";
 import { APP_INTEL_MIGRATION, APP_INTEL_V2_MIGRATION, APP_WORKFLOW_DECISIONS_MIGRATION } from "./app-intel-store.js";
 import { agentInputsMigration } from "./agent-inputs-store.js";
+import { RESPONSE_CACHE_MIGRATION } from "./llm-response-cache.js";
 import { sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { sqliteSql, type Sql } from "./sql.js";
 
@@ -315,6 +316,10 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 65: people's decisions about workflows (confirmed or rejected), one per project and workflow fingerprint, with the name and steps they decided about (schema lives in app-intel-store.ts; existing projects have none) */ APP_WORKFLOW_DECISIONS_MIGRATION,
     /* 66: a project's AI model, a provider and a model name its AI work uses when the person doing it may use one (never a key; ai-config.ts; existing projects have none, so each person's default) */ `ALTER TABLE projects ADD COLUMN ai_provider TEXT;
 ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
+    // 67 is held for candidate findings (Phase 3): it is replaced by its SQL when that work joins this one, and its main table goes into
+    // LATE_FILLED_SLOTS. 66 adds only columns, so it has no entry there.
+    /* 67: reserved (candidate findings) */ `-- reserved`,
+    /* 68: the AI response cache: answers of allowed reading calls per project, by a hash of the whole question, and the cached-call counts on AI usage rows (schema lives in llm-response-cache.ts; existing projects start with none, existing usage rows with 0) */ RESPONSE_CACHE_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */

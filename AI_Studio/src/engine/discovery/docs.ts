@@ -33,7 +33,7 @@ export function isDocumentationPath(pathname: string): boolean {
 const WELL_KNOWN_DOC_PATHS = ["/test_cases", "/api_list", "/test-cases", "/api-list", "/docs", "/documentation"];
 
 /** The model's answer for one page. Missing lists and fields get defaults, so a partial answer still counts. */
-const PageDocumentation = z.object({
+export const PageDocumentation = z.object({
     testCases: z
         .array(
             z.object({
@@ -179,6 +179,7 @@ export async function scrapeDocumentationPages(
                 schema: PageDocumentation,
                 maxOutputTokens: 3_000,
                 purpose: "analysis",
+                cacheAs: "docs",
             });
         } catch (err) {
             const { unavailable, reason } = modelUnavailable(err);

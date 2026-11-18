@@ -50,8 +50,9 @@ import { SecretBox } from "./secrets.js";
 import { AgentInputsStore } from "./agent-inputs-store.js";
 import { envSecrets } from "./agent-routing.js";
 import { prepareJobSignIn, type JobSignIn } from "./hard-signin-service.js";
-import { meterFor, PERSONAL_KEY_MODEL } from "./usage-store.js";
-import { routedLlmForJob } from "./llm-routing.js";
+import { meterFor, PERSONAL_KEY_MODEL, usageStoreFor } from "./usage-store.js";
+import { fastModelAnswer, routedLlmForJob } from "./llm-routing.js";
+import { JobResponseCache, ResponseCacheStore, responseCacheOn, type AiIdentity } from "./llm-response-cache.js";
 import { NotesStore } from "./notes-store.js";
 import type { SiteNote } from "../engine/memory/notes.js";
 import { aiOwnerOfJob, configuredLlmForJob, jobSentenceOf, resolveAiFor, type WorkAi } from "./ai-config.js";
@@ -159,7 +160,7 @@ export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeF
  * the usage meter (engine/llm/metered.ts). `emit` is where routing tells the job about escalations. Also used for an exploration on a runner,
  * whose model calls come back here (explore-llm.ts).
  */
-export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEvent) => void): Promise<{ ai: WorkAi; meter: JobMeter | null; rawLlm: LlmClient; llm: LlmClient }> {
+export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEvent) => void): Promise<{ ai: WorkAi; meter: JobMeter | null; rawLlm: LlmClient; llm: LlmClient; responseCache: JobResponseCache | null }> {
     const { repo, config } = deps;
     // Which AI this job uses and who pays: the project's AI model when its starter (a schedule's or trigger's maker) may use it, else their
     // chosen key, read once, here (ai-config.ts).
@@ -175,7 +176,48 @@ export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEven
         ai.source === "server"
             ? routedLlmForJob({ db: repo.db, config, emit }, job, (deps.makeLlm ?? createLlmClientOrUnavailable)(config), deps.makeFastLlm ? { fast: deps.makeFastLlm(config) } : {})
             : configuredLlmForJob({ sql: repo.db.sql, db: repo.db, config }, job, ai, deps.makeLlm);
-    return { ai, meter, rawLlm, llm: meter ? meter.wrap(rawLlm) : rawLlm };
+    const metered = meter ? meter.wrap(rawLlm) : rawLlm;
+    // The AI response cache sits outside the meter: a stored answer is no model call and counts against no limit (llm-response-cache.ts).
+    const responseCache = responseCacheFor(deps, job, ai, rawLlm, emit);
+    return { ai, meter, rawLlm, llm: responseCache ? responseCache.wrap(metered) : metered, responseCache };
+}
+
+/** The run's sign-in secrets as its events mask them (an answer holding one is never kept by the response cache). */
+function jobSecretsOf(repo: Repo, job: JobRow): string[] {
+    const c = repo.getApplication(job.applicationId)?.credentials;
+    return [...envSecrets({ credentials: c?.password ? { username: c.username ?? "", password: c.password } : undefined, apiToken: c?.apiToken, apiAuthHeader: c?.apiAuthHeader }), c?.totpSecret, c?.oauth2?.clientSecret].filter((s): s is string => typeof s === "string" && s.length >= 4);
+}
+
+/**
+ * The job's view of the AI response cache, or null when it is off: for the server (LLM_RESPONSE_CACHE), for this run (`responseCache: false`,
+ * or "Explore everything again"), or when there is no AI to answer. The AI's identity in the key names the provider, the endpoint, the models
+ * and, for a key, which one and when it last changed, so another model or key never gets this one's answers.
+ */
+function responseCacheFor(deps: JobLlmDeps, job: JobRow, ai: WorkAi, rawLlm: LlmClient, emit: (e: EngineEvent) => void): JobResponseCache | null {
+    const { repo, config } = deps;
+    if (!responseCacheOn(config) || job.options.responseCache === false || job.options.fullExploration || ai.blocked || rawLlm.modelName === "unavailable") return null;
+    try {
+        const c = ai.configuration;
+        const identity: AiIdentity =
+            ai.source === "configuration" && c
+                ? { source: "configuration", id: c.id, provider: c.provider, model: c.model, fast: c.fastModel, base: c.baseUrl, changed: c.updatedAt }
+                : { source: "server", provider: config.LLM_PROVIDER, model: rawLlm.modelName, fast: fastModelAnswer(config, rawLlm.modelName).entry || null, base: config.LLM_BASE_URL ?? null };
+        const usage = usageStoreFor(repo.db, config);
+        return new JobResponseCache({
+            store: new ResponseCacheStore(repo.db.sql),
+            projectId: job.projectId,
+            jobId: job.id,
+            ai: identity,
+            secrets: jobSecretsOf(repo, job),
+            addUsage: (d) => usage.addUsage(d),
+            billing: ai.billing,
+            emit,
+            modelName: rawLlm.modelName,
+        });
+    } catch {
+        // Without the cache the job runs as before.
+        return null;
+    }
 }
 
 async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<void> {

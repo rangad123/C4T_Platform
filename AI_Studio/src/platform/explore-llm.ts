@@ -35,6 +35,8 @@ import { AI_NO_ANSWER, AI_NOT_AVAILABLE, AI_REFUSED, type WorkAi } from "./ai-co
 import type { ExploreTaskRef } from "./explore-task.js";
 import { HttpError } from "./http-error.js";
 import { jobLlm, type JobLlmDeps } from "./job-runner.js";
+import type { JobResponseCache } from "./llm-response-cache.js";
+import { runnerCall, type RunnerCallOptions } from "./llm-response-cache-runner.js";
 
 /** Said when the server has no AI set up at all (the engine's own reason names the provider's key variable). */
 export const AI_NOT_SET_UP = "AI is not set up on this platform, so the exploration cannot use it.";
@@ -46,6 +48,8 @@ interface Built {
     ai: WorkAi;
     meter: JobMeter | null;
     llm: LlmClient;
+    /** The job's view of the AI response cache; null when it is off for this run (llm-response-cache.ts). */
+    responseCache: JobResponseCache | null;
 }
 interface TaskState {
     attempt: number;
@@ -131,7 +135,7 @@ function stateFor(p: JobLlmDeps, task: ExploreTaskRef): TaskState {
     };
     const built = jobLlm(p, job, emit).then((b) => {
         b.rawLlm.setEventSink?.(emit);
-        return { ai: b.ai, meter: b.meter, llm: b.llm };
+        return { ai: b.ai, meter: b.meter, llm: b.llm, responseCache: b.responseCache };
     });
     const s: TaskState = {
         attempt: task.attempt,
@@ -158,7 +162,7 @@ export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body
     if (!parsed.success) throw new HttpError(400, "This AI call could not be read.");
     const state = stateFor(p, task);
     if (++state.calls > EXPLORE_LLM_MAX_CALLS) throw new HttpError(429, `This exploration made more than ${EXPLORE_LLM_MAX_CALLS} AI calls, the most one exploration may make.`);
-    const { ai, llm } = await state.built;
+    const { ai, llm, responseCache } = await state.built;
     if (ai.blocked) return { ok: false, error: { kind: "unavailable", message: ai.blocked } };
     if (llm.modelName === "unavailable")
         return {
@@ -171,7 +175,15 @@ export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body
     const aliasCount = state.aliases.size;
     try {
         const model = llm.model as LanguageModel as ModelV3;
-        const generate = () => modelCallPurpose.run(purposeOf(parsed.data.purpose), () => model.doGenerate(options));
+        const purpose = purposeOf(parsed.data.purpose);
+        // An allowed reading call may be answered from the project's stored answers (llm-response-cache-runner.ts): no model call, nothing metered.
+        const { abortSignal: _signal, ...question } = options;
+        let cachedHit = false;
+        const generate = async (): Promise<Result> => {
+            const r = await runnerCall(responseCache, parsed.data.cache, purpose, question as RunnerCallOptions, async () => modelCallPurpose.run(purpose, () => model.doGenerate(options)));
+            if (r.hit) cachedHit = true;
+            return r.result as Result;
+        };
         let escalated: string | undefined;
         const result: Result = task_
             ? await withRoute({ task: task_, what: hint?.what ?? "" }, async () => {
@@ -194,7 +206,7 @@ export async function handleExploreLlm(p: JobLlmDeps, task: ExploreTaskRef, body
             : await generate();
         // The engine counts the tokens of a call it makes itself; this call's are counted here, so the job's meter sees them (metered.ts).
         const u = result.usage;
-        addUsage(llm.usage, {
+        if (!cachedHit) addUsage(llm.usage, {
             inputTokens: u.inputTokens.total ?? 0,
             outputTokens: u.outputTokens.total ?? 0,
             inputTokenDetails: {

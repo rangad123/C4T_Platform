@@ -18,6 +18,7 @@ import type { EngineEvent } from "../context.js";
 import { classifyLlmError, LlmCallError, scrubDetail } from "./errors.js";
 import { isResilientModel, ResilientModel, type ChainEntry, type ModelV3, type OwnKeyHandling, type ResiliencePolicy, type ResilientOptions } from "./resilience.js";
 import type { LlmPurpose } from "./usage.js";
+import type { ResponseCacheCall } from "./response-cache-calls.js";
 import { addUsage, cachePlan, promptCacheSetting, SHARED_PREFIX_TAG } from "./prompt-cache.js";
 
 export type LlmProviderId = Config["LLM_PROVIDER"];
@@ -83,6 +84,11 @@ export interface LlmClient {
         maxOutputTokens?: number;
         /** What the call is for; only used to label AI usage (see usage.ts). Never changes what is sent to the model. */
         purpose?: LlmPurpose;
+        /**
+         * The call may be answered from the platform's AI response cache (response-cache-calls.ts says which calls may): the same question
+         * asked in the same project within the cache's time gets the stored answer. Never changes what is sent to the model.
+         */
+        cacheAs?: ResponseCacheCall;
     }): Promise<z.infer<T>>;
     text(args: { system: string; prompt: string; maxOutputTokens?: number; purpose?: LlmPurpose }): Promise<string>;
     /**

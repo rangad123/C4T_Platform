@@ -26,7 +26,7 @@ import { BudgetExceeded, SpendLimitExceeded, budgetTokens, capDetail, capMessage
 /** What the meter needs from the store (implemented by `platform/usage-store.ts`, replaced by plain objects in unit tests). */
 export interface MeterBackend {
     /** `cacheReadTokens`/`cacheWriteTokens`: of the input tokens, prompt-cache reads and writes (prompt-cache.ts); missing = none. */
-    addUsage(d: { jobId: string; projectId: string; purpose: string; model: string; at: Date; calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number; billing?: UsageBilling }): void;
+    addUsage(d: { jobId: string; projectId: string; purpose: string; model: string; at: Date; calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number; cachedCalls?: number; savedInputTokens?: number; savedOutputTokens?: number; billing?: UsageBilling }): void;
     totalsFor(jobId: string, projectId: string, month: string): Used;
     capsFor(projectId: string, billing?: UsageBilling): { caps: Caps; warnPercent: number };
     recordStop(s: { jobId: string; projectId: string; cap: string; used: number; limit: number; at: string }): void;

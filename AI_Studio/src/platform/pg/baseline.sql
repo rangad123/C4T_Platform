@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-66 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 66;
+-- Equal to SQLite migration slots 1-68 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 68;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -723,6 +723,9 @@ CREATE TABLE ai_usage (
     cache_read_tokens BIGINT NOT NULL DEFAULT 0,
     cache_write_tokens BIGINT NOT NULL DEFAULT 0,
     billing_person_id TEXT,
+    cached_calls BIGINT NOT NULL DEFAULT 0,
+    saved_input_tokens BIGINT NOT NULL DEFAULT 0,
+    saved_output_tokens BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (job_id, purpose, model, day)
 );
 CREATE INDEX idx_ai_usage_billing ON ai_usage (billing_owner, day);
@@ -1864,3 +1867,18 @@ CREATE TABLE app_workflow_decisions (
     decided_at TEXT NOT NULL,
     PRIMARY KEY (project_id, fingerprint)
 );
+
+CREATE TABLE llm_response_cache (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    cache_key TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    answer_json TEXT NOT NULL,
+    bytes BIGINT NOT NULL,
+    input_tokens BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    hits BIGINT NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, cache_key)
+);
+CREATE INDEX idx_llm_response_cache_used ON llm_response_cache (project_id, last_used_at);

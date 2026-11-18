@@ -114,6 +114,10 @@ export interface UsageDelta {
     /** Of the input tokens: prompt-cache reads and writes (missing = none). */
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    /** Calls answered from the AI response cache (slot 68, llm-response-cache.ts): never in `calls`, and the tokens the answer took when it was made. */
+    cachedCalls?: number;
+    savedInputTokens?: number;
+    savedOutputTokens?: number;
     /** Who pays (slot 43); missing = Crowd4Test. A job has one owner, so its rows never mix two. */
     billing?: UsageBilling;
 }
@@ -153,13 +157,14 @@ export class UsageStore {
     /** Add counts to the job's row for the day of `at` (created on first use). One statement, so processes never lose an update. */
     addUsage(d: UsageDelta): void {
         this.db.run(
-            `INSERT INTO ai_usage (job_id, project_id, purpose, model, day, calls, failed_calls, input_tokens, output_tokens, images, estimated_calls, cache_read_tokens, cache_write_tokens, billing_owner, billing_person_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            `INSERT INTO ai_usage (job_id, project_id, purpose, model, day, calls, failed_calls, input_tokens, output_tokens, images, estimated_calls, cache_read_tokens, cache_write_tokens, cached_calls, saved_input_tokens, saved_output_tokens, billing_owner, billing_person_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(job_id, purpose, model, day) DO UPDATE SET
                 calls = calls + excluded.calls, failed_calls = failed_calls + excluded.failed_calls,
                 input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens,
                 images = images + excluded.images, estimated_calls = estimated_calls + excluded.estimated_calls,
-                cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens, cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens`,
+                cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens, cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+                cached_calls = cached_calls + excluded.cached_calls, saved_input_tokens = saved_input_tokens + excluded.saved_input_tokens, saved_output_tokens = saved_output_tokens + excluded.saved_output_tokens`,
             d.jobId,
             d.projectId,
             // The escalation label (routing.ts) is kept as it is; any other unknown label is "other".
@@ -174,6 +179,9 @@ export class UsageStore {
             d.estimatedCalls,
             Math.round(d.cacheReadTokens ?? 0),
             Math.round(d.cacheWriteTokens ?? 0),
+            d.cachedCalls ?? 0,
+            Math.round(d.savedInputTokens ?? 0),
+            Math.round(d.savedOutputTokens ?? 0),
             d.billing?.owner ?? "crowd4test",
             d.billing?.owner === "personal" ? (d.billing.personId ?? null) : null,
         );
@@ -249,7 +257,7 @@ export class UsageStore {
 
     /** Rows summed per day, project, purpose and model in a day range (inclusive), optionally for one project. */
     rows(from: string, to: string, projectId?: string): UsageRow[] {
-        const sql = `SELECT day, project_id, purpose, model, billing_owner, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw
+        const sql = `SELECT day, project_id, purpose, model, billing_owner, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw, SUM(cached_calls) AS cc, SUM(saved_input_tokens) AS si, SUM(saved_output_tokens) AS so
                      FROM ai_usage WHERE day >= ? AND day <= ? ${projectId ? "AND project_id = ?" : ""} GROUP BY day, project_id, purpose, model, billing_owner`;
         const found = projectId ? this.db.all(sql, from, to, projectId) : this.db.all(sql, from, to);
         return found.map(usageRowOf);
@@ -259,7 +267,7 @@ export class UsageStore {
     jobRows(jobId: string): UsageRow[] {
         return this.db
             .all(
-                `SELECT day, project_id, purpose, model, billing_owner, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw
+                `SELECT day, project_id, purpose, model, billing_owner, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw, SUM(cached_calls) AS cc, SUM(saved_input_tokens) AS si, SUM(saved_output_tokens) AS so
                  FROM ai_usage WHERE job_id = ? GROUP BY day, project_id, purpose, model, billing_owner`,
                 jobId,
             )
@@ -414,6 +422,9 @@ function usageRowOf(r: Record<string, any>): UsageRow {
     const row: UsageRow = { day: r.day, projectId: r.project_id, purpose: r.purpose, model: r.billing_owner === "personal" ? PERSONAL_KEY_MODEL : r.model, calls: r.calls, failedCalls: r.failed, inputTokens: r.i, outputTokens: r.o, images: r.img, estimatedCalls: r.est };
     if (r.cr) row.cacheReadTokens = r.cr;
     if (r.cw) row.cacheWriteTokens = r.cw;
+    if (r.cc) row.cachedCalls = r.cc;
+    if (r.si) row.savedInputTokens = r.si;
+    if (r.so) row.savedOutputTokens = r.so;
     if (r.billing_owner === "personal") row.billingOwner = "personal";
     else if (r.billing_owner === "server") row.billingOwner = "server";
     return row;

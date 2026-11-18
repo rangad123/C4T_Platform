@@ -75,6 +75,8 @@ const EnvSchema = z.object({
     LLM_DETERMINISTIC_REPAIR: z.string().optional(),
     /** Reuse the earlier understanding of pages that did not change since the last exploration (same doc): on unless "false"/"off"/"0"; Settings wins. */
     LLM_EXPLORATION_REUSE: z.string().optional(),
+    /** The AI response cache (platform/llm-response-cache.ts): an allowed reading call asked again with the same bytes gets the stored answer. On unless "false"/"off"/"0". */
+    LLM_RESPONSE_CACHE: z.string().optional(),
     /**
      * Fast model for routine steps (docs/features/model-routing.md): `[provider:]model`; empty = the main model does everything (as before).
      * A value saved in Settings wins. LLM_MODEL_FAST_IMAGES=true lets calls with images use it too. Plain strings, read by engine/llm/routing.ts.

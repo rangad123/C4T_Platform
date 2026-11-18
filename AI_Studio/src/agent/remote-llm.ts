@@ -23,6 +23,8 @@ type Result = Awaited<ReturnType<ModelV3["doGenerate"]>>;
 const purposeOf = new AsyncLocalStorage<{
     purpose?: string;
     images: boolean;
+    /** The client call may be answered from the platform's AI response cache (provider.ts `cacheAs`); the platform decides. */
+    cache?: string;
 }>();
 
 const never = (): never => {
@@ -87,7 +89,7 @@ class RemoteModel extends ResilientModel {
         const signals = [this.signal, abortSignal].filter((s): s is AbortSignal => !!s);
         const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
         signal?.throwIfAborted();
-        const raw = await this.post("llm", { options: encodeBytes(rest), ...(hint ? { hint } : {}), ...(purpose ? { purpose: purpose.slice(0, 40) } : {}) }, signal ? { signal } : {});
+        const raw = await this.post("llm", { options: encodeBytes(rest), ...(hint ? { hint } : {}), ...(purpose ? { purpose: purpose.slice(0, 40) } : {}), ...(p?.cache && !p.images ? { cache: p.cache.slice(0, 40) } : {}) }, signal ? { signal } : {});
         const answer = ExploreLlmAnswerSchema.parse(raw);
         if (!answer.ok) throw errorFromAnswer(answer.error, this.name);
         // The platform moved this work to the main model: the rest of it stays there.
@@ -127,7 +129,7 @@ export function remoteLlmClient(o: { post: ExplorePost; modelName: string; signa
         modelName: inner.modelName,
         model: inner.model,
         usage: inner.usage,
-        object: ((args: Parameters<LlmClient["object"]>[0]) => purposeOf.run({ purpose: args.purpose, images: false }, () => inner.object(args))) as LlmClient["object"],
+        object: ((args: Parameters<LlmClient["object"]>[0]) => purposeOf.run({ purpose: args.purpose, images: false, ...(args.cacheAs ? { cache: args.cacheAs } : {}) }, () => inner.object(args))) as LlmClient["object"],
         text: (args) => purposeOf.run({ purpose: args.purpose, images: false }, () => inner.text(args)),
         imageObject: ((args: Parameters<NonNullable<LlmClient["imageObject"]>>[0]) =>
             purposeOf.run({ purpose: args.purpose, images: true }, () => inner.imageObject!(args))) as NonNullable<LlmClient["imageObject"]>,

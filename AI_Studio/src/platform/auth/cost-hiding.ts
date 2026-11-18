@@ -28,6 +28,9 @@ export const COST_FIELDS: ReadonlySet<string> = new Set([
     "budgetTokens",
     "usedTokens",
     "savedTokens",
+    // what the AI response cache saved (llm-response-cache.ts)
+    "savedInputTokens",
+    "savedOutputTokens",
     // what smaller snapshots saved (engine/snapshots/compact.ts, snapshot-settings.ts); the summary sentence of a job goes with its object
     "baselineTokens",
     "sentTokens",
