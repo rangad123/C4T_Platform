@@ -252,8 +252,9 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         // I: a passed run keeps no trace or recording, however recent; a kind nobody has heard of expires with its run
         const i = addTest(platform, seed, "I passed on a retry");
         const retried = addRun(platform, seed, i, { daysAgo: 2, files: [{ kind: "trace", size: 900 }, { kind: "video", size: 900 }, { kind: "evidence", size: 90 }] }).files;
-        gone.push(...retried.filter((x) => x.kind !== "evidence"));
-        kept.push(...retried.filter((x) => x.kind === "evidence"));
+        // Its trace goes at the next pass; its recording stays for 7 days like every recording.
+        gone.push(...retried.filter((x) => x.kind === "trace"));
+        kept.push(...retried.filter((x) => x.kind !== "trace"));
         gone.push(...addRun(platform, seed, i, { daysAgo: 40, files: [{ kind: "network-footprint", size: 70 }] }).files);
 
         // an artifact without a run, and an app model: never removed
@@ -269,7 +270,7 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         const expectedBytes = gone.reduce((n, f) => n + f.size, 0);
         expect(r.body).toMatchObject({ enabled: true, files: gone.length, bytes: expectedBytes });
         expect(r.body.size).toMatch(/KB|bytes/);
-        expect(r.body.sentence).toBe(`This would remove ${gone.length} files (${r.body.size}), to keep within 30 days for passed runs and 90 days for failed runs. 7 traces or recordings of passed runs are among them: passed runs keep none.`);
+        expect(r.body.sentence).toBe(`This would remove ${gone.length} files (${r.body.size}), to keep within 30 days for passed runs, 90 days for failed runs and 7 days for recordings. 1 detailed trace of passed runs is among them: passed runs keep none.`);
         expect(new Date(r.body.oldest).getTime()).toBeLessThan(new Date(r.body.newest).getTime());
         expect(r.body.sample.length).toBe(Math.min(20, gone.length));
         expect(r.body.sample.every((s: any) => typeof s.id === "string" && !("path" in s))).toBe(true);
@@ -296,7 +297,8 @@ describe("a run removes exactly what the preview promised, and keeps everything 
             expect(exists(f), `${f.kind} should be gone`).toBe(false);
             const row = platform.db.get<any>("SELECT pruned_at, pruned_reason FROM artifacts WHERE id = ?", f.id);
             expect(row.pruned_at).toBeTruthy();
-            expect(["age", "age-failed", "passed-media"]).toContain(row.pruned_reason);
+            if (f.kind === "video") expect(row.pruned_reason).toBe("recording-age");
+            expect(["age", "age-failed", "passed-media", "recording-age"]).toContain(row.pruned_reason);
         }
         for (const k of kept) {
             if (k.abs) expect(exists(k), `${k.kind} ${k.rel} should stay`).toBe(true);
@@ -328,7 +330,7 @@ describe("a run removes exactly what the preview promised, and keeps everything 
         const removed = gone.find((f) => f.kind === "video")!;
         const r = await call("GET", `/api/artifacts/${removed.id}`);
         expect(r.status).toBe(410);
-        expect(r.body.error).toMatch(/^This recording expired and was removed on [A-Z][a-z]{2} \d{1,2}, \d{4} \(the project's retention policy\)\.$/);
+        expect(r.body.error).toMatch(/^This recording was removed after 7 days, on [A-Z][a-z]{2} \d{1,2}, \d{4}: recordings are kept for 7 days \(the project's retention policy\)\.$/);
         const ok = kept.find((f) => f.kind === "screenshot")!;
         const got = await call("GET", `/api/artifacts/${ok.id}`);
         expect(got.status).toBe(200);
@@ -509,7 +511,7 @@ describe("the platform default", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("the decided defaults remove the stored files themselves, within the server's limits (2026-11-14)", () => {
-    it("removes a failed run's trace and video after 7 days and a passed run's record after 30 days, from disk, the latest run included", async () => {
+    it("removes a failed run's trace and recording after 7 days and a passed run's record after 30 days, from disk, the latest run included", async () => {
         const seed = project("Decision defaults");
         const t = addTest(platform, seed);
         // The failed run 8 days ago is the test's latest run: it is not kept for that.
@@ -530,7 +532,7 @@ describe("the decided defaults remove the stored files themselves, within the se
         expect(rows).toEqual([
             { kind: "evidence", pruned_reason: "age" },
             { kind: "trace", pruned_reason: "age-failed" },
-            { kind: "video", pruned_reason: "age-failed" },
+            { kind: "video", pruned_reason: "recording-age" },
         ]);
         const after = (await call("GET", `/api/projects/${seed.projectId}/storage`)).body;
         expect(after.usage.bytes).toBe(before - 16_400);

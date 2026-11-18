@@ -44,15 +44,17 @@ the platform and on a person's runner (both run the same Playwright configuratio
   A test that opened a popup keeps a picture of each page.
 - **Covered while it is taken.** Fields that are secret by kind (password fields, one-time codes, card numbers and codes; the recorder's
   rule in `src/engine/recorder/act.ts`) are painted over, in frames and shadow roots too (`src/engine/evidence/proof-style.ts`). A stored
-  secret typed into an ordinary text field is not found, and a recording cannot be covered at all: a password field is drawn as dots,
-  other text shows as it was on the page.
+  secret typed into an ordinary text field is not found.
+- **Recordings are not masked**: anyone who can view the project sees what was on the screen (password fields show as dots). The Run
+  page says so under Watch the recording.
 - **Where it shows.** The Run page lists, under each test, its screenshots as thumbnails (a click opens the picture larger, with a link to
   open it in a new tab) and a Watch the recording button that plays it with the browser's controls. `GET /api/projects/:id/runs/:jobId`
   gives each test `proof: [{ id, kind: "screenshot" | "video", moment?: "end" | "failure", removedAt? }]`; the files come from
   `GET /api/artifacts/:id`, which needs read access to that project (another project's file is a 404).
-- **How long it is kept.** The retention rules decide (`storage-and-backup.md`): a passed run's recording is removed at the next daily
-  pass and its screenshots after the passed-run period; a failed run's files after the failed-run period. A removed file is said in
-  words on the Run page. The trace is still kept for failures only. A browser check (other browsers and screen sizes) keeps files only for
+- **How long it is kept.** Recordings of every run, passed or failed, are kept for 7 days and then removed by the daily retention pass
+  (`RECORDING_DAYS` in `src/engine/retention/rules.ts`), whatever the run periods are set to. Screenshots follow the run periods
+  (`storage-and-backup.md`): 30 days for a passed run, the failed-run period otherwise. A removed recording says "This recording was
+  removed after 7 days, on <date>" on the Run page, the test page and its download link (410). The trace is still kept for failures only. A browser check (other browsers and screen sizes) keeps files only for
   the browsers where the test failed; a run against a named environment keeps the screenshot and recording of a pass too.
 - A runner with an installed Chrome or Edge that has not fetched Playwright's video tool keeps screenshots without a recording, as before.
   A runner whose program is older than this change keeps proof only for failures until it updates.

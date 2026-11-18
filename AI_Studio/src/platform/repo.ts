@@ -1101,7 +1101,7 @@ export class Repo {
 
     listArtifacts(f: { executionId?: string; testId?: string; jobId?: string }): Row[] {
         const col = f.executionId ? ["execution_id", f.executionId] : f.testId ? ["test_case_id", f.testId] : ["job_id", f.jobId ?? ""];
-        return this.db.all(`SELECT id, kind, path, size, created_at, pruned_at FROM artifacts WHERE ${col[0]} = ? ORDER BY created_at`, col[1]!);
+        return this.db.all(`SELECT id, kind, path, size, created_at, pruned_at, pruned_reason FROM artifacts WHERE ${col[0]} = ? ORDER BY created_at`, col[1]!);
     }
 
     getArtifact(id: string): Row | undefined {

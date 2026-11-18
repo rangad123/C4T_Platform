@@ -33,9 +33,14 @@ export function RunProof({ proof, title }: { proof: Proof[]; title: string }) {
                     Watch the recording
                 </button>
             )}
+            {video && (
+                <p className="t-meta run-proof-note" data-testid="run-proof-unmasked">
+                    Recordings are not masked: anyone who can view this project sees what was on the screen (password fields show as dots).
+                </p>
+            )}
             {removed.map((p) => (
                 <span key={p.id} className="t-meta run-proof-gone">
-                    {prunedNote(p.kind, p.removedAt!)}
+                    {prunedNote(p.kind, p.removedAt!, p.removedReason)}
                 </span>
             ))}
             {open && (

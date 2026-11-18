@@ -39,6 +39,8 @@ export interface RunProof {
     kind: "screenshot" | "video";
     moment?: "end" | "failure";
     removedAt?: string;
+    /** Why it was removed (the row's `pruned_reason`, e.g. "recording-age" for the 7 days recordings are kept). */
+    removedReason?: string;
 }
 
 /** A test the run left out because it has no approved version, or because a shared part it uses changed after its approval. */
@@ -247,12 +249,12 @@ function changesSince(db: Db, job: JobRow, tests: TestRow[], now: Map<string, Ve
 /** The screenshots and recording of the execution a test's result comes from, in the order they were stored. */
 function proofOf(db: Db, v: Verdict): RunProof[] {
     if (!v.executionId) return [];
-    const rows = db.all<Row>("SELECT id, kind, pruned_at FROM artifacts WHERE execution_id = ? AND kind IN ('screenshot', 'video') ORDER BY created_at, id LIMIT 12", v.executionId);
+    const rows = db.all<Row>("SELECT id, kind, pruned_at, pruned_reason FROM artifacts WHERE execution_id = ? AND kind IN ('screenshot', 'video') ORDER BY created_at, id LIMIT 12", v.executionId);
     return rows.map((r) => ({
         id: String(r.id),
         kind: r.kind === "video" ? "video" : "screenshot",
         ...(r.kind === "screenshot" ? { moment: v.state === "passed" ? ("end" as const) : ("failure" as const) } : {}),
-        ...(r.pruned_at ? { removedAt: String(r.pruned_at) } : {}),
+        ...(r.pruned_at ? { removedAt: String(r.pruned_at), ...(r.pruned_reason ? { removedReason: String(r.pruned_reason) } : {}) } : {}),
     }));
 }
 

@@ -89,7 +89,7 @@ describe("storage, retention and backup in the UI", () => {
         await pwExpect(card().getByTestId("storage-summary")).toContainText("This project’s files use");
         await pwExpect(card().getByText("Old files are removed automatically", { exact: true })).toBeVisible();
         await pwExpect(card().getByLabel("Remove old files automatically")).toBeChecked();
-        await pwExpect(card().getByLabel("Keep traces, recordings and screenshots of failed runs for (days, at most 730)")).toHaveValue("7");
+        await pwExpect(card().getByLabel("Keep traces and screenshots of failed runs for (days, at most 730)")).toHaveValue("7");
         await pwExpect(card().getByLabel("Keep the records of passed runs for (days, at most 365)")).toHaveValue("30");
         // Turned off and saved, nothing can be removed until it is turned on again.
         await card().getByLabel("Remove old files automatically").uncheck();
@@ -105,7 +105,7 @@ describe("storage, retention and backup in the UI", () => {
         await card().getByRole("button", { name: "Preview", exact: true }).click();
         const sentence = card().getByText(/^This would remove 6 files \(/);
         await pwExpect(sentence).toBeVisible();
-        await pwExpect(sentence).toContainText("to keep within 30 days for passed runs. 3 traces or recordings of passed runs are among them: passed runs keep none.");
+        await pwExpect(sentence).toContainText("to keep within 30 days for passed runs and 7 days for recordings.");
         expect(old.every(exists)).toBe(true);
 
         await card().getByLabel("Keep the records of passed runs for (days, at most 365)").fill("3");
@@ -145,7 +145,7 @@ describe("storage, retention and backup in the UI", () => {
     it("a removed file answers with a plain sentence instead of a broken download", async () => {
         const res = await fetch(`${BASE}/api/artifacts/${old[0]!.id}`);
         expect(res.status).toBe(410);
-        expect(((await res.json()) as { error: string }).error).toMatch(/^This (recording|screenshot) expired and was removed on /);
+        expect(((await res.json()) as { error: string }).error).toMatch(old[0]!.kind === "video" ? /^This recording was removed after 7 days, on / : /^This screenshot expired and was removed on /);
     });
 
     it("Download backup saves a real zip with no secret in it", async () => {

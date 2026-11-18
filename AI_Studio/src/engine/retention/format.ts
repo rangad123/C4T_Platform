@@ -37,8 +37,12 @@ export const FILE_NAMES: Record<string, string> = {
     "vision-shot": "screenshot",
 };
 
-/** "This recording expired and was removed on Oct 5, 2026 (the project's retention policy)." The kind may be any stored kind. */
-export function prunedMessage(kind: string, prunedAt: string): string {
+/**
+ * "This recording expired and was removed on Oct 5, 2026 (the project's retention policy)." The kind may be any stored kind. `reason` is the
+ * row's `pruned_reason`: a recording the 7-day rule removed says it was the 7 days.
+ */
+export function prunedMessage(kind: string, prunedAt: string, reason?: string | null): string {
+    if (reason === "recording-age") return `This recording was removed after 7 days, on ${formatDate(prunedAt)}: recordings are kept for 7 days (the project's retention policy).`;
     const name = FILE_NAMES[kind] ?? "file";
     return `This ${name} expired and was removed on ${formatDate(prunedAt)} (the project's retention policy).`;
 }
@@ -54,9 +58,10 @@ export function previewSentence(plan: Pick<PrunePlan, "files" | "bytes" | "byRea
     const parts: string[] = [];
     if (plan.byReason.age > 0) parts.push(`${policy.keepDays} days for passed runs`);
     if (plan.byReason["age-failed"] > 0) parts.push(`${policy.keepFailedDays} days for failed runs`);
+    if ((plan.byReason["recording-age"] ?? 0) > 0) parts.push("7 days for recordings");
     if (plan.byReason["size-cap"] > 0) parts.push(`the ${policy.maxArtifactMB} MB size limit`);
-    const why = parts.length ? `, to keep within ${parts.join(" and ")}` : "";
+    const why = parts.length ? `, to keep within ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}` : "";
     const head = plan.byReason.age + plan.byReason["age-failed"] === plan.files && plan.byReason["passed-media"] === 0 && policy.maxArtifactMB == null ? ` older than ${policy.keepDays === policy.keepFailedDays ? `${policy.keepDays} days` : `${policy.keepDays} days (${policy.keepFailedDays} for failed runs)`}` : "";
-    const media = plan.byReason["passed-media"] > 0 ? ` ${plural(plan.byReason["passed-media"], "trace or recording", "traces or recordings")} of passed runs ${plan.byReason["passed-media"] === 1 ? "is" : "are"} among them: passed runs keep none.` : "";
+    const media = plan.byReason["passed-media"] > 0 ? ` ${plural(plan.byReason["passed-media"], "detailed trace")} of passed runs ${plan.byReason["passed-media"] === 1 ? "is" : "are"} among them: passed runs keep none.` : "";
     return `This would remove ${plural(plan.files, "file")} (${formatBytes(plan.bytes)})${head || why}.${media}`;
 }

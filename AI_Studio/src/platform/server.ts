@@ -995,7 +995,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const a = repo.getArtifact((req.params as { id: string }).id);
         if (!a) throw new HttpError(404, "Artifact not found");
         // A file the retention policy removed: say so honestly instead of failing on a missing file.
-        if (a.pruned_at) throw new HttpError(410, prunedMessage(String(a.kind), String(a.pruned_at)));
+        if (a.pruned_at) throw new HttpError(410, prunedMessage(String(a.kind), String(a.pruned_at), a.pruned_reason as string | null));
         const TYPES: Record<string, string> = {
             screenshot: "image/png",
             video: "video/webm",

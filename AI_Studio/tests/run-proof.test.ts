@@ -359,6 +359,8 @@ describe("on the platform, from a person's runner", () => {
             const failShot = failRow.getByRole("button", { name: /screenshot at the failing step/i });
             await pwExpect(passShot).toBeVisible();
             await pwExpect(failShot).toBeVisible();
+            // Under the recording, in plain words: it is not masked.
+            await pwExpect(failRow.getByText("Recordings are not masked: anyone who can view this project sees what was on the screen (password fields show as dots).")).toBeVisible();
             // The thumbnail has loaded (a picture that failed to load has no size).
             await pwExpect.poll(() => passShot.locator("img").evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBeGreaterThan(100);
             await page.screenshot({ path: path.join(SHOTS, "run-proof-run-page.png"), fullPage: true });
@@ -386,6 +388,35 @@ describe("on the platform, from a person's runner", () => {
             await pwExpect(passShot).toBeVisible();
             expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
             await page.screenshot({ path: path.join(SHOTS, "run-proof-run-page-390.png"), fullPage: true });
+        } finally {
+            await context.close();
+        }
+    }, 120_000);
+
+    it("a recording the 7-day rule removed says so on the Run page and at its link", async () => {
+        const video = (answer.tests.find((t: any) => t.id === ids.pass).proof as Array<{ id: string; kind: string }>).find((p) => p.kind === "video")!;
+        const removedOn = "2026-11-12T03:00:00.000Z";
+        platform.db.run("UPDATE artifacts SET pruned_at = ?, pruned_reason = ? WHERE id = ?", removedOn, "recording-age", video.id);
+        const SENTENCE = "This recording was removed after 7 days, on Nov 12, 2026: recordings are kept for 7 days (the project's retention policy).";
+        const proof = (await call(viewer.token, "GET", `/api/projects/${projectId}/runs/${jobId}`)).body.tests.find((t: any) => t.id === ids.pass).proof;
+        expect(proof.find((p: any) => p.id === video.id)).toMatchObject({ kind: "video", removedAt: removedOn, removedReason: "recording-age" });
+        const gone = await call(viewer.token, "GET", `/api/artifacts/${video.id}`);
+        expect(gone.status).toBe(410);
+        expect(gone.body.error).toBe(SENTENCE);
+        const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+        const page = await context.newPage();
+        try {
+            await page.goto(BASE);
+            await page.getByLabel("Email").fill("vera@example.com");
+            await page.getByLabel("Password").fill("vera@example.com long password");
+            await page.getByRole("button", { name: "Sign in" }).click();
+            await pwExpect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+            await page.goto(`${BASE}/#/projects/${projectId}/runs/${jobId}`);
+            const passRow = page.getByRole("list", { name: "Tests in this run" }).getByRole("listitem").filter({ has: page.getByRole("link", { name: "Fills the form" }) });
+            await pwExpect(passRow.getByText(SENTENCE)).toBeVisible();
+            await pwExpect(passRow.getByRole("button", { name: /recording/i })).toHaveCount(0);
+            await pwExpect(passRow.getByRole("button", { name: /screenshot at the end/i })).toBeVisible();
+            await page.screenshot({ path: path.join(SHOTS, "run-proof-removed-recording.png"), fullPage: true });
         } finally {
             await context.close();
         }

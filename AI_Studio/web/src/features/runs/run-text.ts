@@ -26,6 +26,7 @@ export interface RunProof {
     kind: "screenshot" | "video";
     moment?: "end" | "failure";
     removedAt?: string;
+    removedReason?: string;
 }
 
 export interface RunCounts {

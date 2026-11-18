@@ -219,7 +219,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
             >
                 <h3 className="t-card">Remove old files</h3>
                 <p className="t-secondary">
-                    Traces, recordings and screenshots of failed runs, and the records of passed runs, are removed after the days below. Your tests, their results and history, findings, issues and releases are never removed.
+                    Traces and screenshots of failed runs, and the records of passed runs, are removed after the days below. Recordings of every run are kept for 7 days. Your tests, their results and history, findings, issues and releases are never removed.
                     {r.source === "platform" && r.platformDefaultDays ? ` This project uses the platform default of ${r.platformDefaultDays} days for passed runs until you save your own settings.` : ""}
                     {r.heldToLimits ? " The saved periods are longer than this server allows, so its limits apply." : ""}
                 </p>
@@ -236,7 +236,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
                         <input id="st-days" className="input" type="number" inputMode="numeric" min={r.limits.keepDays.min} max={r.limits.keepDays.max} value={form.keepDays} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepDays", e.target.value)} />
                     </div>
                     <div className="field">
-                        <label htmlFor="st-failed">Keep traces, recordings and screenshots of failed runs for (days, at most {r.limits.keepFailedDays.max})</label>
+                        <label htmlFor="st-failed">Keep traces and screenshots of failed runs for (days, at most {r.limits.keepFailedDays.max})</label>
                         <input id="st-failed" className="input" type="number" inputMode="numeric" min={r.limits.keepFailedDays.min} max={r.limits.keepFailedDays.max} value={form.keepFailedDays} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepFailedDays", e.target.value)} />
                     </div>
                     <div className="field">

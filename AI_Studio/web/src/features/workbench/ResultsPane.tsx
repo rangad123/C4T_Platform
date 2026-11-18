@@ -258,7 +258,7 @@ export function LatestRun({ test: t, reload }: { test: Detail; reload: () => Pro
                     )}
                     {removedFiles.map((a) => (
                         <p key={a.id} className="t-meta" data-testid="removed-file">
-                            {prunedNote(a.kind, a.pruned_at!)}
+                            {prunedNote(a.kind, a.pruned_at!, a.pruned_reason)}
                         </p>
                     ))}
                     {trace && (

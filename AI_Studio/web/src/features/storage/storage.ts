@@ -179,8 +179,9 @@ const formatDate = (iso: string) => {
     return Number.isNaN(d.getTime()) ? "an unknown date" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 };
 
-/** "This recording expired and was removed on Oct 5, 2026 (the project's retention policy)." (the same sentence the server uses). */
-export const prunedNote = (kind: string, prunedAt: string): string => `This ${fileLabel(kind)} expired and was removed on ${formatDate(prunedAt)} (the project's retention policy).`;
+/** "This recording expired and was removed on Oct 5, 2026 (the project's retention policy)." (the same sentence the server uses; `reason` is the row's `pruned_reason`). */
+export const prunedNote = (kind: string, prunedAt: string, reason?: string | null): string =>
+    reason === "recording-age" ? `This recording was removed after 7 days, on ${formatDate(prunedAt)}: recordings are kept for 7 days (the project's retention policy).` : `This ${fileLabel(kind)} expired and was removed on ${formatDate(prunedAt)} (the project's retention policy).`;
 
 /** What a run of the cleanup did, in words, for the history list. */
 export function logLine(r: { trigger: "manual" | "scheduled"; files: number; bytes: number; errors: number }): string {

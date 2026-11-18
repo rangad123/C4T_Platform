@@ -53,8 +53,10 @@ export const isPrunableKind = (k: string): k is PrunableKind => (PRUNABLE_KINDS 
 const NEVER_REMOVED = new Set(["baseline"]);
 /** Kinds whose files without a test run still expire: an agent run's screenshots (agent-run.ts, agent-on-runner.ts), as a failed run's media. */
 const RUNLESS_MEDIA = new Set(["vision-shot"]);
-/** Full traces and recordings: a passed run keeps none. */
-const FULL_MEDIA = new Set(["trace", "video"]);
+/** Full traces: a passed run keeps none. */
+const FULL_MEDIA = new Set(["trace"]);
+/** Recordings of every run, passed or failed, are kept this many days (whatever the run periods say), then removed. */
+export const RECORDING_DAYS = 7;
 
 export interface RetentionExecution {
     id: string;
@@ -90,7 +92,7 @@ export interface RetentionInput {
 }
 
 export type KeepReason = "kind" | "no-run";
-export type PruneReason = "age" | "age-failed" | "passed-media" | "size-cap";
+export type PruneReason = "age" | "age-failed" | "passed-media" | "recording-age" | "size-cap";
 
 export interface PlannedPrune {
     id: string;
@@ -168,7 +170,7 @@ export function planPrune(input: RetentionInput): PrunePlan {
         }
         remaining += a.size; // only what the limit may remove counts towards it: held bytes must not push newer files out
         const due = (days: number) => now - a.at > days * DAY_MS; // strictly more than N whole days: a file exactly N days old stays
-        const reason: PruneReason | undefined = !exec ? (due(policy.keepFailedDays) ? "age-failed" : undefined) : exec.passed ? (FULL_MEDIA.has(a.kind) ? "passed-media" : due(policy.keepDays) ? "age" : undefined) : due(policy.keepFailedDays) ? "age-failed" : undefined;
+        const reason: PruneReason | undefined = exec && a.kind === "video" ? (due(RECORDING_DAYS) ? "recording-age" : undefined) : !exec ? (due(policy.keepFailedDays) ? "age-failed" : undefined) : exec.passed ? (FULL_MEDIA.has(a.kind) ? "passed-media" : due(policy.keepDays) ? "age" : undefined) : due(policy.keepFailedDays) ? "age-failed" : undefined;
         if (reason) prune.push({ id: a.id, kind: a.kind, size: a.size, at: a.at, reason });
         else notDue.push(a);
     }
@@ -192,7 +194,7 @@ export function planPrune(input: RetentionInput): PrunePlan {
         .map((e) => e.id)
         .sort();
     const byKind: PrunePlan["byKind"] = {};
-    const byReason: PrunePlan["byReason"] = { age: 0, "age-failed": 0, "passed-media": 0, "size-cap": 0 };
+    const byReason: PrunePlan["byReason"] = { age: 0, "age-failed": 0, "passed-media": 0, "recording-age": 0, "size-cap": 0 };
     for (const p of prune) {
         const k = (byKind[p.kind] ??= { files: 0, bytes: 0 });
         k.files++;

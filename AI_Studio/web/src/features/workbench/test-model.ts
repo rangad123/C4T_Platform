@@ -25,7 +25,7 @@ export interface Execution {
     startedAt: string;
     /** `expected` and `actual` are plain strings the platform reads from a failed check's error; absent when the error names none. */
     steps: Array<{ index: number; title: string; status: "passed" | "failed"; error: string | null; expected?: string; actual?: string }>;
-    artifacts: Array<{ id: string; kind: string; pruned_at?: string | null }>;
+    artifacts: Array<{ id: string; kind: string; pruned_at?: string | null; pruned_reason?: string | null }>;
 }
 
 export interface Detail extends TestSummary, Partial<CompatDetail>, EnvironmentDetail {

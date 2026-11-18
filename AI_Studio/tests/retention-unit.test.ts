@@ -39,7 +39,25 @@ describe("retention rules: outcome and age (fake clock)", () => {
         const go = kinds.map((k) => art(older, k));
         const p = plan([exactly, older], [...keep, ...go]);
         expect(ids(p)).toEqual(go.map((a) => a.id).sort());
-        expect(p.byReason["age-failed"]).toBe(4);
+        // The recording goes by the 7 days every recording is kept, the rest by the failed-run period.
+        expect(p.byReason["age-failed"]).toBe(3);
+        expect(p.byReason["recording-age"]).toBe(1);
+    });
+
+    it("every recording, of a passed or a failed run, stays 7 days and goes after that; screenshots keep their own periods", () => {
+        for (const passed of [true, false]) {
+            const six = exec(6, passed);
+            const eight = exec(8, passed);
+            const files = [art(six, "video"), art(eight, "video"), art(eight, "screenshot")];
+            // A longer failed-run period does not keep a recording longer.
+            const p = plan([six, eight], files, { policy: policy({ keepFailedDays: 30 }) });
+            expect(ids(p), passed ? "passed" : "failed").toEqual([files[1]!.id]);
+            expect(p.prune[0]!.reason).toBe("recording-age");
+        }
+        // Exactly 7 days stays, a moment more goes.
+        const exactly = exec(7, true);
+        const older = justOver(7, true);
+        expect(ids(plan([exactly, older], [art(exactly, "video"), art(older, "video")])).length).toBe(1);
     });
 
     it("a passed run's records (evidence, screenshots) stay exactly 30 days and go a moment later", () => {
@@ -53,12 +71,12 @@ describe("retention rules: outcome and age (fake clock)", () => {
         expect(p.byReason.age).toBe(2);
     });
 
-    it("a passed run keeps no trace or recording: they go at the next pass, whatever their age", () => {
+    it("a passed run keeps no trace: it goes at the next pass, whatever its age; its recording stays (7 days)", () => {
         const today = exec(0);
         const files = [art(today, "trace"), art(today, "video"), art(today, "evidence")];
         const p = plan([today], files);
-        expect(ids(p)).toEqual([files[0]!.id, files[1]!.id].sort());
-        expect(p.byReason["passed-media"]).toBe(2);
+        expect(ids(p)).toEqual([files[0]!.id]);
+        expect(p.byReason["passed-media"]).toBe(1);
     });
 
     it("covers every kind of file a run stores, including a kind added later (a passed run's footprint, an unknown kind)", () => {
@@ -338,12 +356,13 @@ describe("wording and size helpers", () => {
     });
 
     it("says what a preview would do", () => {
-        const base = { files: 214, bytes: 1.8 * 1024 ** 3, byReason: { age: 214, "age-failed": 0, "passed-media": 0, "size-cap": 0 } };
+        const base = { files: 214, bytes: 1.8 * 1024 ** 3, byReason: { age: 214, "age-failed": 0, "passed-media": 0, "recording-age": 0, "size-cap": 0 } };
         expect(previewSentence(base, policy({ keepFailedDays: 30 }))).toBe("This would remove 214 files (1.8 GB) older than 30 days.");
         expect(previewSentence(base, policy())).toBe("This would remove 214 files (1.8 GB) older than 30 days (7 for failed runs).");
-        expect(previewSentence({ files: 3, bytes: 3072, byReason: { age: 1, "age-failed": 0, "passed-media": 2, "size-cap": 0 } }, policy())).toBe("This would remove 3 files (3 KB), to keep within 30 days for passed runs. 2 traces or recordings of passed runs are among them: passed runs keep none.");
-        expect(previewSentence({ files: 1, bytes: 2048, byReason: { age: 0, "age-failed": 0, "passed-media": 0, "size-cap": 1 } }, policy({ maxArtifactMB: 500 }))).toContain("1 file (2 KB)");
-        expect(previewSentence({ files: 0, bytes: 0, byReason: { age: 0, "age-failed": 0, "passed-media": 0, "size-cap": 0 } }, policy())).toContain("Nothing to remove");
+        expect(previewSentence({ files: 3, bytes: 3072, byReason: { age: 1, "age-failed": 0, "passed-media": 2, "recording-age": 0, "size-cap": 0 } }, policy())).toBe("This would remove 3 files (3 KB), to keep within 30 days for passed runs. 2 detailed traces of passed runs are among them: passed runs keep none.");
+        expect(previewSentence({ files: 2, bytes: 2048, byReason: { age: 0, "age-failed": 1, "passed-media": 0, "recording-age": 1, "size-cap": 0 } }, policy())).toBe("This would remove 2 files (2 KB), to keep within 7 days for failed runs and 7 days for recordings.");
+        expect(previewSentence({ files: 1, bytes: 2048, byReason: { age: 0, "age-failed": 0, "passed-media": 0, "recording-age": 0, "size-cap": 1 } }, policy({ maxArtifactMB: 500 }))).toContain("1 file (2 KB)");
+        expect(previewSentence({ files: 0, bytes: 0, byReason: { age: 0, "age-failed": 0, "passed-media": 0, "recording-age": 0, "size-cap": 0 } }, policy())).toContain("Nothing to remove");
     });
 
     it("says plainly that a file expired, and that a finding's evidence expired while the finding stays", () => {
@@ -351,6 +370,9 @@ describe("wording and size helpers", () => {
         expect(prunedMessage("video", "2026-10-05T10:00:00Z")).toBe("This recording expired and was removed on Oct 5, 2026 (the project's retention policy).");
         expect(prunedMessage("screenshot", "2026-10-05T10:00:00Z")).toBe("This screenshot expired and was removed on Oct 5, 2026 (the project's retention policy).");
         expect(prunedMessage("whatever", "2026-10-05T10:00:00Z")).toBe("This file expired and was removed on Oct 5, 2026 (the project's retention policy).");
+        // A recording the 7-day rule removed says so; one the size limit removed does not claim the 7 days.
+        expect(prunedMessage("video", "2026-10-05T10:00:00Z", "recording-age")).toBe("This recording was removed after 7 days, on Oct 5, 2026: recordings are kept for 7 days (the project's retention policy).");
+        expect(prunedMessage("video", "2026-10-05T10:00:00Z", "size-cap")).toBe("This recording expired and was removed on Oct 5, 2026 (the project's retention policy).");
         expect(evidenceExpiredMessage("2026-10-05T10:00:00Z")).toBe("The evidence for this finding expired and was removed on Oct 5, 2026 (the project's retention policy). The finding itself is kept.");
     });
 
@@ -373,6 +395,7 @@ describe("wording and size helpers", () => {
         expect(sizeBar({ screenshot: 0, video: 0, trace: 0, evidence: 0, report: 0, apk: 0, baseline: 0, script: 0, other: 0 })).toEqual([]);
         for (const k of ["screenshot", "video", "trace", "evidence", "report", "apk", "baseline", "script", "other"]) expect(STORAGE_KIND_LABELS[k as keyof typeof STORAGE_KIND_LABELS]).toBeTruthy();
         expect(prunedNote("video", "2026-10-05T10:00:00Z")).toBe(prunedMessage("video", "2026-10-05T10:00:00Z"));
+        for (const reason of ["recording-age", "size-cap", "age", undefined]) expect(prunedNote("video", "2026-10-05T10:00:00Z", reason)).toBe(prunedMessage("video", "2026-10-05T10:00:00Z", reason));
         expect(fileLabel("trace")).toBe("detailed trace");
     });
 });
