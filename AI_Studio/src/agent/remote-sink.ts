@@ -200,7 +200,19 @@ export function remoteGenerationSink(o: {
         recordEnvironment: (x, scriptId, r, startedAt) => send(wireRun(r.run).then((run) => ({ method: "recordEnvironment", h: h(x), scriptId, r: { environment: r.environment, status: r.status, reason: r.reason, run }, startedAt }))),
         saveTextArtifact: (kind, name, content) => send({ method: "saveTextArtifact", kind, name: wireName(name), content }),
         savePageThumbnail: (name, jpeg) => ask({ method: "savePageThumbnail", file: { name, data: Buffer.from(jpeg).toString("base64") } }, (v) => SinkAnswers.savePageThumbnail.parse(v)),
-        saveImageArtifact: (kind, name, jpeg) => ask({ method: "saveImageArtifact", kind, file: { name: wireName(name), data: Buffer.from(jpeg).toString("base64") } }, (v) => SinkAnswers.saveImageArtifact.parse(v)),
+        // Row 187: a finding's screenshot is optional evidence. It goes alone, outside the numbered batches (as a file chunk does), so a
+        // platform that refuses it (one older than the method, a cap, anything) refuses only it: the answer is "no screenshot", never the job.
+        saveImageArtifact: async (kind, name, jpeg) => {
+            if (failed !== undefined) return undefined;
+            try {
+                const call: SinkCall = { method: "saveImageArtifact", kind, file: { name: wireName(name), data: Buffer.from(jpeg).toString("base64") } };
+                const answer = SinkResponse.parse(await post("sink", { calls: [call] }, { signal: o.signal }));
+                const id = SinkAnswers.saveImageArtifact.safeParse(answer.results[0]);
+                return id.success ? id.data : undefined;
+            } catch {
+                return undefined;
+            }
+        },
         saveHealing: (x, result) => send({ method: "saveHealing", h: h(x), result }),
         saveCleanup: (items) => send({ method: "saveCleanup", items }),
         loadMemory: (origin) => ask({ method: "loadMemory", origin }, (v) => SinkAnswers.loadMemory.parse(v)),

@@ -195,7 +195,7 @@ describe("the remote generation sink", () => {
         const id = await sink.saveImageArtifact!("screenshot", "../WEB-001-finding-1.jpg", jpeg);
         await sink.flush();
         expect(w.methods()).toEqual(["saveImageArtifact"]);
-        const art = platform.repo.getArtifact(id) as { kind: string; path: string; job_id: string; project_id: string };
+        const art = platform.repo.getArtifact(id!) as { kind: string; path: string; job_id: string; project_id: string };
         expect(art).toMatchObject({ kind: "screenshot", job_id: task.jobId, project_id: task.projectId });
         expect(path.posix.basename(art.path)).toBe("WEB-001-finding-1.jpg");
         expect(fs.readFileSync(localPathOf(platform.store, art.path)!)).toEqual(jpeg);
