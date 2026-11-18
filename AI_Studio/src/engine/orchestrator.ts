@@ -53,6 +53,7 @@ import { validateBatch, type TestUnderValidation, type ValidationOutcome } from 
 import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
 import { authorWebSpec, statedSource, toSpec, type AuthorOutcome } from "./web/author.js";
+import { findLeftoverUse, leftoverReason } from "./web/leftovers.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
 import { checkIndependence, replayOwnSteps, type IndependenceCheck } from "./explore/independence.js";
@@ -722,6 +723,17 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const written = toSpec(scenario, outcome, key);
             const spec = TestSpecSchema.parse(asAccount ? asRole(written, asAccount.name) : written);
             const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
+            // The leftover check (web/leftovers.ts, no AI): a test that still acts on or checks an item its own steps never added or opened,
+            // after its second try, leans on what the account held. Saved for review, never validated, and never a finding.
+            const leftovers = findLeftoverUse(written.steps);
+            if (leftovers.length) {
+                const why = leftoverReason(leftovers);
+                const h = await persistNew(spec, "playwright", "NEEDS_REVIEW", `${outcome.status === "defect" ? "Not reported as a finding" : "Not validated"}: ${why.replace(/\.$/, "")}. The test writer's account: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.`, { ...meta, leftovers });
+                summary.testsNeedingReview++;
+                await sink.counters({ testsNeedingReview: 1 }, true);
+                ctx.emit({ stage: "generation", kind: "depends_on_earlier_state", level: "warn", message: `${h.testId} ${spec.title}: saved for review; ${why}`, data: { testKey: h.testId, steps: leftovers.map((u) => u.step) } });
+                return h.testId;
+            }
             if (outcome.status === "defect") {
                 // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
                 const capture = outcome.capture ?? "observed_only";
@@ -792,6 +804,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         maxSteps: levelSettings(req).authoringMaxSteps,
                         review: true,
                         retryBlocked: true,
+                        leftoverCheck: true,
                         ...(testData ? { testData } : {}),
                         ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
                         ...(scenarioRules.length ? { rules: scenarioRules } : {}),
@@ -886,6 +899,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                             vision: wantVision,
                             maxSteps: Math.min(lv.authoringMaxSteps, p.objective.budget.steps),
                             review: true,
+                            leftoverCheck: true,
                             ...(testData ? { testData } : {}),
                             ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}),
                             ...(rules.length ? { rules } : {}),
