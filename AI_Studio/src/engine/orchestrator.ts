@@ -160,8 +160,9 @@ export interface GenerationRequest {
      */
     objectives?: boolean;
     /**
-     * The server allows data-changing operators (EXPLORE_DATA_OPERATORS=true, Decision 6). They run only with this and
-     * `allowMutatingApiTests` both true; otherwise they are skipped with the reason "data changes off".
+     * The server allows data-changing operators (EXPLORE_DATA_OPERATORS=true, Decision 6). Boundary input, double submit, repeat and
+     * cancel run only with this and `allowMutatingApiTests` both true; the form-submitting "as stated" and "invalid input" need only
+     * `allowMutatingApiTests` (owner, 2026-11-21). A skipped operator's reason names the setting that is off (explore/perturb.ts).
      */
     dataOperators?: boolean;
     /**
@@ -886,9 +887,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             } else {
                 const lv = levelSettings(req);
                 const b = lv.exploration;
-                const dataOperators = req.dataOperators === true && req.allowMutatingApiTests === true;
+                const dataChanges = req.allowMutatingApiTests === true;
+                const dataOperators = req.dataOperators === true && dataChanges;
                 const requiresAuth = Boolean(creds && authState.loggedIn);
-                const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataOperators, requiresAuth, ...(req.exploredObjectives ? { explored: req.exploredObjectives } : {}) });
+                const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataChanges, dataOperators, requiresAuth, ...(req.exploredObjectives ? { explored: req.exploredObjectives } : {}) });
                 const budgets: Budgets = { objectives: b.objectives, actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
                 ctx.emit({
                     stage: "generation",
@@ -1429,7 +1431,7 @@ const refOf = (t: string) => {
  */
 export function objectivePursuits(
     k: Pick<AppKnowledge, "rules" | "workflows" | "objectiveInputs">,
-    opts: { maxObjectives: number; steps: number; perObjective: { minutes: number; tokens: number }; dataOperators: boolean; requiresAuth: boolean; /** GenerationRequest.exploredObjectives. */ explored?: readonly string[] },
+    opts: { maxObjectives: number; steps: number; perObjective: { minutes: number; tokens: number }; /** The project's "Include API tests that change data". */ dataChanges?: boolean; dataOperators: boolean; requiresAuth: boolean; /** GenerationRequest.exploredObjectives. */ explored?: readonly string[] },
 ): { objectives: Objective[]; overCap: number; pursuits: ObjectivePursuit[]; skipped: SkippedOperator[] } {
     const inputs = k.objectiveInputs ?? { pages: [], transitions: [], workflowSteps: [] };
     // From the request: only refs an objective could have (a longer one names nothing), at most MAX_EXPLORED.
@@ -1440,7 +1442,7 @@ export function objectivePursuits(
     const pursuits: ObjectivePursuit[] = [];
     const skipped: SkippedOperator[] = [];
     for (const o of objectives) {
-        const options: PerturbOptions = { dataOperators: opts.dataOperators, requiresAuth: opts.requiresAuth };
+        const options: PerturbOptions = { dataChanges: opts.dataChanges === true, dataOperators: opts.dataOperators, requiresAuth: opts.requiresAuth };
         if (o.kind === "workflow") {
             const wf = k.workflows.find((w) => normRef(w.id) === normRef(o.source.ref));
             const paged = inputs.workflowSteps.find((w) => normRef(w.workflowId) === normRef(o.source.ref))?.steps;

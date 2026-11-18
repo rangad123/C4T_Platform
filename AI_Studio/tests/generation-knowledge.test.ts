@@ -4,9 +4,10 @@
  * every prompt (never a real model).
  *   - with an analysed application: the planning prompts, the test writer's prompt and the repair's prompt carry the rule a document
  *     states for the scenario's workflow; a guessed rule, a rejected rule and a guessed workflow never reach any prompt; the created test
- *     records the model version it was planned from. The project explores by objectives (never switched off, so on) with data changes
- *     off, so the checks that submit forms (as stated, invalid input) and the boundary value are not run: the constrained field never
- *     reaches a prompt, and the job's coverage lists its checks as not run, "data changes off" (owner, 2026-11-21);
+ *     records the model version it was planned from. The project explores by objectives (never switched off, so on) with its "Include
+ *     API tests that change data" off, so the checks that submit forms (as stated, invalid input) and the boundary value are not run:
+ *     the constrained field never reaches a prompt, and the job's coverage lists its checks as not run because of that switch
+ *     (owner, 2026-11-21);
  *   - without one: no knowledge section anywhere, and no model version on the test;
  *   - the objective inputs come from the latest model version only (constrained fields, transitions, usable workflows' steps with page
  *     and endpoint), never reach a prompt, and a project without a model version gets none.
@@ -22,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
+import { SKIP_REASONS } from "../src/engine/explore/perturb.js";
 import { workflowFingerprint } from "../src/engine/intel/model.js";
 import { AppIntelStore } from "../src/platform/app-intel-store.js";
 import { appKnowledgeOf } from "../src/platform/job-runner.js";
@@ -172,7 +174,7 @@ describe("an exploration reads what is known about the application", () => {
         const cov = await call("GET", `/api/projects/${projectId}/jobs/${r.jobId}/coverage`);
         expect(cov.status, JSON.stringify(cov.body)).toBe(200);
         const notRun = cov.body.coverage.notRun as Array<{ objectiveId: string; operator: string; reason: string }>;
-        for (const op of ["invalid_input", "boundary_input", "as_stated"]) expect(notRun.filter((n) => n.operator === op).map((n) => n.reason), op).toContainEqual("data changes off");
+        for (const op of ["invalid_input", "boundary_input", "as_stated"]) expect(notRun.filter((n) => n.operator === op).map((n) => n.reason), op).toContainEqual(SKIP_REASONS.dataOff);
         const authored = r.tests.filter((t) => (t.generationMeta as { scenario?: unknown } | null)?.scenario);
         expect(authored.length).toBeGreaterThan(0);
         for (const t of authored) expect((t.generationMeta as { modelVersion?: string }).modelVersion).toBe(version.id);

@@ -46,7 +46,7 @@ export function ExploreObjectivesSetting({ id }: { id: string }) {
                 <span>
                     <span className="title">Explore by objectives</span>
                     <span className="hint" id="explore-objectives-hint">
-                        After the planned tests, the AI checks each rule, workflow and field limit it knows about the application, one at a time; this takes longer and uses more AI. Checks that submit forms run only when “Include API tests that change data” is on in{" "}
+                        After the planned tests, the AI checks each rule, workflow and field limit it knows about the application, one at a time; this takes longer and uses more AI. Checks that submit forms need “Include API tests that change data”, in{" "}
                         <a href={routes.requirements(id)}>Requirements → What the agents need</a>.
                     </span>
                 </span>

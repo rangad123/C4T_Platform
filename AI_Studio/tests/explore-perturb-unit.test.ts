@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { OBJECTIVE_OPERATORS, objectivesFrom, type Objective } from "../src/engine/explore/objectives.js";
-import { DATA_CHANGING, SKIP_REASONS, operatorApplied, scenarioFor, scenariosFor, type PerturbOptions } from "../src/engine/explore/perturb.js";
+import { DATA_CHANGING, SKIP_REASONS, SUBMITS_FORM, operatorApplied, scenarioFor, scenariosFor, type PerturbOptions } from "../src/engine/explore/perturb.js";
 import { ScenarioSchema, type Step } from "../src/engine/spec/schema.js";
 
 const budget = { steps: 30, minutes: 10, tokens: 300_000 };
@@ -81,21 +81,42 @@ describe("scenarioFor", () => {
         expect(new Set(all.map((r) => (r.status === "ready" ? r.scenario.description : "")).values()).size).toBe(3);
     });
 
-    it("skips data-changing operators with 'data changes off' unless the server allows them, and runs the others", () => {
+    it("skips data-changing operators with 'data changes off' and the project's setting unless data changes are allowed, and runs the others", () => {
         const o = workflowObjective();
         for (const op of o.operators) {
             const r = scenarioFor(o, op, off);
-            if (DATA_CHANGING[op]) expect(r).toEqual({ status: "skipped", operator: op, reason: "data changes off" });
+            if (DATA_CHANGING[op]) expect(r).toEqual({ status: "skipped", operator: op, reason: SKIP_REASONS.dataOff });
             else expect(r.status).toBe("ready");
         }
         expect(DATA_CHANGING.double_submit && DATA_CHANGING.repeat && DATA_CHANGING.cancel && DATA_CHANGING.boundary_input).toBe(true);
         expect(DATA_CHANGING.refresh || DATA_CHANGING.back || DATA_CHANGING.direct_url).toBe(false);
         // Absent means off.
-        expect(scenarioFor(o, "double_submit", { workflow: workflowContext })).toMatchObject({ status: "skipped", reason: "data changes off" });
+        expect(scenarioFor(o, "double_submit", { workflow: workflowContext })).toMatchObject({ status: "skipped", reason: SKIP_REASONS.dataOff });
+        // Each reason names the setting that is off.
+        expect(SKIP_REASONS.dataOff).toMatch(/^data changes off: .*Include API tests that change data/);
+        expect(SKIP_REASONS.serverDataOff).toMatch(/^data changes off: .*EXPLORE_DATA_OPERATORS/);
     });
 
-    // Owner, 2026-11-21 (CP2 M-7, spec Assumption 5): the two operators that submit forms run only when data changes are allowed.
-    it("as stated and invalid input submit forms: skipped with 'data changes off' unless data changes are allowed", () => {
+    // Owner, 2026-11-21 (CP2 M-7): the two operators that submit forms run when the project allows data changes; the server's setting is
+    // not needed for them, only for the other data-changing operators.
+    it("as stated and invalid input need only the project's switch; double submit and boundary input also need the server's", () => {
+        expect(OBJECTIVE_OPERATORS.filter((op) => SUBMITS_FORM[op])).toEqual(["as_stated", "invalid_input"]);
+        for (const op of OBJECTIVE_OPERATORS) if (SUBMITS_FORM[op]) expect(DATA_CHANGING[op]).toBe(true);
+        const project: PerturbOptions = { ...off, dataChanges: true };
+        const classes = [
+            { name: "empty", value: "", accepted: false },
+            { name: "at max", value: "y".repeat(20), accepted: true, boundary: true },
+        ];
+        // Project on, server off: the form-submitting ones run, the others are skipped naming the server's setting.
+        expect(ready(scenarioFor(workflowObjective(), "as_stated", project)).operator).toBe("as_stated");
+        expect(ready(scenarioFor(constraintObjective(), "invalid_input", { ...project, inputClasses: classes })).operator).toBe("invalid_input");
+        expect(scenarioFor(workflowObjective(), "double_submit", project)).toEqual({ status: "skipped", operator: "double_submit", reason: SKIP_REASONS.serverDataOff });
+        expect(scenarioFor(constraintObjective(), "boundary_input", { ...project, inputClasses: classes })).toEqual({ status: "skipped", operator: "boundary_input", reason: SKIP_REASONS.serverDataOff });
+        // Both on: every one runs.
+        expect(ready(scenarioFor(workflowObjective(), "double_submit", { ...project, dataOperators: true })).operator).toBe("double_submit");
+    });
+
+    it("as stated and invalid input submit forms: skipped with 'data changes off' unless the project allows data changes", () => {
         const classes = [{ name: "empty", value: "", accepted: false }];
         const rule = ruleObjective("The cart total is the sum of the lines", "The total equals the sum of the lines");
         for (const [o, op, extra] of [
@@ -103,8 +124,8 @@ describe("scenarioFor", () => {
             [rule, "as_stated", {}],
             [constraintObjective(), "invalid_input", { inputClasses: classes }],
         ] as const) {
-            expect(scenarioFor(o, op, { ...off, ...extra }), `${o.kind} ${op} off`).toEqual({ status: "skipped", operator: op, reason: "data changes off" });
-            expect(scenarioFor(o, op, { workflow: workflowContext, ...extra }), `${o.kind} ${op} absent`).toMatchObject({ status: "skipped", reason: "data changes off" });
+            expect(scenarioFor(o, op, { ...off, ...extra }), `${o.kind} ${op} off`).toEqual({ status: "skipped", operator: op, reason: SKIP_REASONS.dataOff });
+            expect(scenarioFor(o, op, { workflow: workflowContext, ...extra }), `${o.kind} ${op} absent`).toMatchObject({ status: "skipped", reason: SKIP_REASONS.dataOff });
             const r = ready(scenarioFor(o, op, { ...on, ...extra }));
             expect(r).toMatchObject({ operator: op, dataChanging: true });
         }
@@ -135,7 +156,7 @@ describe("scenarioFor", () => {
         expect(inv.scenario.description).not.toContain("y".repeat(20));
         const bnd = ready(scenarioFor(o, "boundary_input", { ...on, inputClasses: classes }));
         expect(bnd.check.values).toEqual(["x".repeat(21), "y".repeat(20)]);
-        expect(scenarioFor(o, "boundary_input", { ...off, inputClasses: classes })).toMatchObject({ status: "skipped", reason: "data changes off" });
+        expect(scenarioFor(o, "boundary_input", { ...off, inputClasses: classes })).toMatchObject({ status: "skipped", reason: SKIP_REASONS.dataOff });
     });
 
     it("text read from the application stays quoted data: it never adds steps, budget or expected results of its own", () => {
