@@ -154,6 +154,15 @@ describe("exploring the seeded shop by objectives", () => {
         const ex = summary.exploration!;
         expect(ex.stopReason).toBe("objectives_done");
         expect(events.filter((e) => e.kind === "exploration_stopped")).toHaveLength(1);
+        // Row 173: each pursuit's start and end for the run page's live list, with ids and the operator only (no page text, no prompt).
+        const rule = ex.objectives.find((o) => o.kind === "rule")!.id;
+        const field = ex.objectives.find((o) => o.kind === "constraint")!.id;
+        expect(events.filter((e) => /^objective_(started|finished)$/.test(e.kind))).toEqual([
+            { kind: "objective_started", message: `${rule} as_stated: started`, data: { objectiveId: rule, operator: "as_stated" } },
+            { kind: "objective_finished", message: `${rule} as_stated: finished (completed)`, data: { objectiveId: rule, operator: "as_stated", outcome: "completed" } },
+            { kind: "objective_started", message: `${field} invalid_input: started`, data: { objectiveId: field, operator: "invalid_input" } },
+            { kind: "objective_finished", message: `${field} invalid_input: finished (completed)`, data: { objectiveId: field, operator: "invalid_input", outcome: "completed" } },
+        ]);
         expect(ex.budgets).toEqual({ objectives: 25, actions: 750, aiCalls: 750, tokens: 7_500_000, minutes: 90, depth: 8, steps: 30 });
         expect(ex.skipped).toEqual([{ objectiveId: expect.stringMatching(/^OBJ-/), operator: "boundary_input", reason: "data changes off" }]);
         expect(ex.outcomes.map((o) => o.status)).toEqual(["completed", "completed"]);

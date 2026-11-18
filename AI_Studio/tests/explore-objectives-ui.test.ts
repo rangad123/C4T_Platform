@@ -27,7 +27,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { objectivesNeedRunner } from "../src/platform/explore-task.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
-import { explorationNote, objectiveRows, type CoverageAnswer, type ObjectivePreview } from "../web/src/features/runs/objectives.js";
+import { explorationNote, objectiveRows, pursuitOf, type CoverageAnswer, type ObjectivePreview } from "../web/src/features/runs/objectives.js";
 
 const PORT = 9907;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -75,6 +75,11 @@ const A_ENDED = ev(30, "objective_not_written", `${A.id}-as_stated: no test was 
 const B_SAVED = ev(40, "script_generated", "WEB-001 Submit twice: workflow WF-checkout (4 steps)");
 const STOPPED = ev(50, "exploration_stopped", "Exploring by objectives stopped: The session was stopped by a person.");
 const TOO_OLD = objectivesNeedRunner("Office laptop");
+/** Row 173: a pursuit's start or end as the engine emits it (orchestrator.ts onPursuit): ids and the operator, and how it ended. */
+const pursuit = (id: number, o: ObjectivePreview, operator: string, outcome?: string) => ({
+    ...ev(id, outcome === undefined ? "objective_started" : "objective_finished", `${o.id} ${operator}: ${outcome === undefined ? "started" : `finished (${outcome})`}`),
+    data: { objectiveId: o.id, operator, ...(outcome === undefined ? {} : { outcome }) },
+});
 
 const COVERAGE: CoverageAnswer = {
     available: true,
@@ -120,6 +125,37 @@ describe("the rules (no browser)", () => {
         expect(rows[2]!.why).toBe("Not run: The session stopped first: The session was stopped by a person.");
         expect(rows[1]!.notRun).toEqual([{ operator: "double_submit", reason: "Not run: data changes off" }]);
     });
+    it("prefers the session's own start and end events over the estimate (row 173)", () => {
+        const startA = pursuit(31, A, "as_stated");
+        const endA = pursuit(32, A, "as_stated", "completed");
+        const startA2 = pursuit(33, A, "invalid_input");
+        const endA2 = pursuit(34, A, "invalid_input", "completed");
+        const startC = pursuit(35, C, "invalid_input");
+        expect(states([QUEUED, PLANNED, startA])).toEqual([[A.id, "running", ""], [B.id, "waiting", ""], [C.id, "waiting", ""]]);
+        // Between two operators of one objective it is done; while the next one runs, running again.
+        expect(states([QUEUED, PLANNED, startA, endA])[0]).toEqual([A.id, "done", ""]);
+        expect(states([QUEUED, PLANNED, startA, endA, startA2])[0]).toEqual([A.id, "running", ""]);
+        // C pursued before B: the estimate would call B done; the events say it still waits.
+        const live = [QUEUED, PLANNED, startA, endA, startA2, endA2, startC];
+        expect(states(live)).toEqual([[A.id, "done", ""], [B.id, "waiting", ""], [C.id, "running", ""]]);
+        expect(states([...live, pursuit(36, C, "invalid_input", "environment_failure")])[2]).toEqual([C.id, "unfinished", "Not finished: the application or the browser failed."]);
+        // The session stopped: never started is not reached, started and never ended is not finished.
+        expect(states([...live, STOPPED])).toEqual([
+            [A.id, "done", ""],
+            [B.id, "skipped", "Not reached: The session was stopped by a person."],
+            [C.id, "unfinished", "Not finished: The session was stopped by a person."],
+        ]);
+        // After the run, the coverage record still decides.
+        expect(states([...live, STOPPED], false, COVERAGE).map((r) => r[1])).toEqual(["done", "done", "skipped"]);
+    });
+    it("reads only ids and the operator from a pursuit event; one without them is not a pursuit", () => {
+        expect(pursuitOf({ ...pursuit(1, A, "as_stated", "completed"), data: { objectiveId: A.id, operator: "as_stated", outcome: "completed", page: "Welcome, Maya" } })).toEqual({ objectiveId: A.id, operator: "as_stated", outcome: "completed" });
+        expect(pursuitOf({ ...pursuit(1, A, "as_stated"), data: { objectiveId: A.id } })).toBeNull();
+        expect(pursuitOf({ ...pursuit(1, A, "as_stated"), data: undefined })).toBeNull();
+        expect(pursuitOf({ ...A_ENDED, data: { objectiveId: A.id, operator: "as_stated" } })).toBeNull();
+        // Without any, the estimate as before.
+        expect(states([QUEUED, PLANNED, { ...pursuit(31, A, "as_stated"), data: undefined }, B_SAVED])).toEqual([[A.id, "done", ""], [B.id, "running", ""], [C.id, "waiting", ""]]);
+    });
     it("an older runner or no model gets the platform's sentence instead of the list", () => {
         expect(explorationNote([QUEUED, ev(11, "objectives_need_runner", TOO_OLD, "orchestration")])).toEqual({ kind: "need_runner", text: TOO_OLD });
         expect(explorationNote([QUEUED, PLANNED])).toBeNull();
@@ -137,7 +173,7 @@ const consoleErrors: string[] = [];
 const stops: string[] = [];
 
 const fake = {
-    events: [] as ReturnType<typeof ev>[],
+    events: [] as Array<ReturnType<typeof ev> & { data?: unknown }>,
     active: true,
     /** The person's access to the project (null: as the platform answers). */
     access: null as null | { projectAdmin: boolean; permissions: string[] },
@@ -275,6 +311,16 @@ describe("while the run explores", () => {
         await pwExpect(item(C)).toHaveAttribute("data-state", "skipped", { timeout: 10_000 });
         await pwExpect(item(C).getByTestId("objective-why")).toHaveText("Not reached: The session was stopped by a person.");
     }, 120_000);
+
+    it("follows the session's start and end events when the run sends them (row 173)", async () => {
+        fake.active = true;
+        // C is pursued before B: only the events' facts can say B still waits (C's start names C, which the estimate reads as B done).
+        fake.events = [QUEUED, PLANNED, pursuit(31, A, "as_stated"), pursuit(32, A, "as_stated", "completed"), pursuit(35, C, "invalid_input")];
+        await openRun();
+        await pwExpect(item(C)).toHaveAttribute("data-state", "running", { timeout: 10_000 });
+        await pwExpect(item(A)).toHaveAttribute("data-state", "done");
+        await pwExpect(item(B)).toHaveAttribute("data-state", "waiting");
+    }, 60_000);
 
     it("Stop is the run's own stop, for a person who may run tests", async () => {
         fake.active = true;

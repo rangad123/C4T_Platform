@@ -107,6 +107,11 @@ export interface ExplorationInput<O extends LoopObjective, R = unknown> {
     cancel?: AbortSignal;
     /** Resolves after `ms` or when `signal` aborts; injected in tests. Default: a timer. */
     wait?: (ms: number, signal: AbortSignal) => Promise<void>;
+    /**
+     * Told when a pursuit starts (just before `runObjective`) and when it ends (with its outcome), for the live list of the run page.
+     * Objectives the loop skips or never reaches are not pursued, so it is not told about them. Never throws into the loop.
+     */
+    onPursuit?: (objective: O, outcome?: ObjectiveOutcome<R>) => void;
 }
 
 const TEXT_CAP = 300;
@@ -264,6 +269,15 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
             },
         };
 
+        const tell = (outcome?: ObjectiveOutcome<R>) => {
+            try {
+                input.onPursuit?.(objective, outcome);
+            } catch {
+                /* the live list is told only; it never changes the session */
+            }
+        };
+        tell();
+
         // The pursuit never rejects: a thrown error is an environment failure.
         let settled: ObjectiveRun<R> | undefined;
         const pursuit = Promise.resolve()
@@ -328,6 +342,7 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
         }
         controller.abort();
         outcomes.push(outcome);
+        tell(outcome);
         if (!session.stop) budgetStop();
     }
 

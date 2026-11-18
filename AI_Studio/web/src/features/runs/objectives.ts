@@ -5,16 +5,19 @@
  *   GET /api/projects/:id/objectives            → ObjectivesAnswer: the objectives of the project's latest analysed model.
  *   GET /api/projects/:id/jobs/:jobId/coverage  → CoverageAnswer: a finished exploration's stop reason, budgets, usage and coverage.
  *
- * While a run explores, the platform says which objective a pursuit was about only when the pursuit ends (an event whose message names
- * the objective's id or its "kind source"), and the session pursues objectives one at a time, highest priority first. So the objective
- * last named is the one being explored, those before it are done and those after it wait. Once the run is over, its coverage record
- * says what was not run and why, and that replaces the estimate.
+ * While a run explores, the session tells each pursuit's start and end (objective_started / objective_finished, row 173: the objective's
+ * id, the operator and how it ended), and the list follows them. An older run has no such events: the platform said which objective a
+ * pursuit was about only when the pursuit ended (an event whose message names the objective's id or its "kind source"), and the session
+ * pursues objectives one at a time, highest priority first, so the objective last named is the one being explored, those before it are
+ * done and those after it wait. Once the run is over, its coverage record says what was not run and why, and that replaces both.
  */
 /** The parts of a run event (api.ts EventRow) these rules read; kept here so the rules import nothing. */
 export interface EventRow {
     id: number;
     kind: string;
     message: string;
+    /** Read only for objective_started / objective_finished (`pursuitOf`). */
+    data?: unknown;
 }
 
 export const OBJECTIVE_KINDS = ["rule", "workflow", "constraint", "transition", "coverage-gap"] as const;
@@ -136,6 +139,8 @@ export interface ObjectiveRow {
 /** The events the objectives view reads: the session's own, and those that end a pursuit (they name its objective). */
 export const OBJECTIVE_EVENT_KINDS: ReadonlySet<string> = new Set([
     "objectives_planned",
+    "objective_started",
+    "objective_finished",
     "objectives_need_runner",
     "objectives_unavailable",
     "exploration_stopped",
@@ -158,6 +163,25 @@ export function explorationNote(events: readonly EventRow[]): { kind: "need_runn
     if (none) return { kind: "unavailable", text: none.message };
     return null;
 }
+
+export const PURSUIT_EVENT_KINDS: ReadonlySet<string> = new Set(["objective_started", "objective_finished"]);
+
+/** A pursuit's start or end from its event's facts (ids and names only), or null when the event is not one or its facts are not these. */
+export function pursuitOf(e: EventRow): { objectiveId: string; operator: string; outcome?: string } | null {
+    if (!PURSUIT_EVENT_KINDS.has(e.kind) || !e.data || typeof e.data !== "object") return null;
+    const d = e.data as Record<string, unknown>;
+    if (typeof d.objectiveId !== "string" || typeof d.operator !== "string") return null;
+    const outcome = e.kind === "objective_finished" ? (typeof d.outcome === "string" ? d.outcome : "") : undefined;
+    return { objectiveId: d.objectiveId, operator: d.operator, ...(outcome !== undefined ? { outcome } : {}) };
+}
+
+/** How a pursuit ended (explore/loop.ts OutcomeStatus), when it did not run to its end. */
+const OUTCOME_WORD: Record<string, string> = {
+    interrupted: "the session stopped during it",
+    environment_failure: "the application or the browser failed",
+    unsafe: "an unsafe action was reported",
+};
+const RAN = new Set(["completed", "stopped"]);
 
 /** Whether a pursuit-ending event is about this objective: its id, or the "kind source" its saved test's title carries. */
 const names = (message: string, o: ObjectivePreview) => message.includes(o.id) || (o.source.length > 0 && message.includes(`${o.kind} ${o.source.slice(0, 100)}`));
@@ -198,6 +222,19 @@ export function objectiveRows(objectives: readonly ObjectivePreview[], events: r
     }
     const over = Boolean(stopped) || !opts.active;
     const stopDetail = stopped ? stopped.message.replace(/^Exploring by objectives stopped:\s*/, "") : "the run ended first.";
+    const pursuits = after.map(pursuitOf).filter((p) => p !== null);
+    if (pursuits.length) {
+        // The session's own account of each pursuit: running while started and not finished, else done or not finished by how it ended.
+        return ordered.map((objective): ObjectiveRow => {
+            const own = pursuits.filter((p) => p.objectiveId === objective.id);
+            const open = own.filter((p) => p.outcome === undefined).length - own.filter((p) => p.outcome !== undefined).length;
+            const ends = own.flatMap((p) => (p.outcome !== undefined ? [p.outcome] : []));
+            if (open > 0) return over ? { objective, state: "unfinished", why: `Not finished: ${stopDetail}`, notRun: [] } : { objective, state: "running", notRun: [] };
+            if (ends.some((o) => RAN.has(o))) return { objective, state: "done", notRun: [] };
+            if (ends.length) return { objective, state: "unfinished", why: `Not finished: ${OUTCOME_WORD[ends[ends.length - 1]!] ?? "it did not run to its end"}.`, notRun: [] };
+            return over ? { objective, state: "skipped", why: `Not reached: ${stopDetail}`, notRun: [] } : { objective, state: "waiting", notRun: [] };
+        });
+    }
     const running = furthest >= 0 ? furthest : 0;
     return ordered.map((objective, i): ObjectiveRow => {
         if (over) return i <= furthest ? { objective, state: "done", notRun: [] } : { objective, state: "skipped", why: `Not reached: ${stopDetail}`, notRun: [] };
