@@ -89,9 +89,25 @@ describe("scenarioFor", () => {
             else expect(r.status).toBe("ready");
         }
         expect(DATA_CHANGING.double_submit && DATA_CHANGING.repeat && DATA_CHANGING.cancel && DATA_CHANGING.boundary_input).toBe(true);
-        expect(DATA_CHANGING.refresh || DATA_CHANGING.back || DATA_CHANGING.direct_url || DATA_CHANGING.as_stated).toBe(false);
+        expect(DATA_CHANGING.refresh || DATA_CHANGING.back || DATA_CHANGING.direct_url).toBe(false);
         // Absent means off.
         expect(scenarioFor(o, "double_submit", { workflow: workflowContext })).toMatchObject({ status: "skipped", reason: "data changes off" });
+    });
+
+    // Owner, 2026-11-21 (CP2 M-7, spec Assumption 5): the two operators that submit forms run only when data changes are allowed.
+    it("as stated and invalid input submit forms: skipped with 'data changes off' unless data changes are allowed", () => {
+        const classes = [{ name: "empty", value: "", accepted: false }];
+        const rule = ruleObjective("The cart total is the sum of the lines", "The total equals the sum of the lines");
+        for (const [o, op, extra] of [
+            [workflowObjective(), "as_stated", {}],
+            [rule, "as_stated", {}],
+            [constraintObjective(), "invalid_input", { inputClasses: classes }],
+        ] as const) {
+            expect(scenarioFor(o, op, { ...off, ...extra }), `${o.kind} ${op} off`).toEqual({ status: "skipped", operator: op, reason: "data changes off" });
+            expect(scenarioFor(o, op, { workflow: workflowContext, ...extra }), `${o.kind} ${op} absent`).toMatchObject({ status: "skipped", reason: "data changes off" });
+            const r = ready(scenarioFor(o, op, { ...on, ...extra }));
+            expect(r).toMatchObject({ operator: op, dataChanging: true });
+        }
     });
 
     it("skips an objective that needs a second account, whatever the operator", () => {

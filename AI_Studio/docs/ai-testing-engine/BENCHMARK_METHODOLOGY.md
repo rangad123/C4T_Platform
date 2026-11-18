@@ -207,8 +207,10 @@ rate is recomputed from the sums (rates are never averaged). A rate with a denom
 Also reported, never as quality measures: tests generated, workflow areas reached by the tests' own addresses, execution failures (tests the
 platform could not make pass), flaky tests, AI calls and tokens, execution time.
 
-**Labels.** An unreproduced finding can be labelled by a person (`--labels`, `"<app>/<testKey>": "<defect id>" | "false_positive"`). A defect
-label counts in "detected only by a person's label", never in the detection rate; a false-positive label counts as a false positive.
+**Labels.** An unreproduced finding can be labelled by a person (`--labels`, format 2: `{ "format": 2, "trials": [{ "result", "startedAt",
+"projects": { "<app>": "<projectId>" }, "labels": { "<app>/<testKey>": "<defect id>" | "false_positive" } }] }`). A label applies only to the
+trial whose app ran in that project id, since every trial numbers its tests from WEB-001 again; the old flat file is refused, and
+`bench-report --migrate-labels` binds one to its result (src/eval/bench/labels.ts). A defect label counts in "detected only by a person's label", never in the detection rate; a false-positive label counts as a false positive.
 
 **Limits of the numbers.** Attribution by replay credits a finding only when its own test fails because of the defect; a correct observation
 the AI wrote only in prose (an unreproduced finding) is not credited without a person's label. The model is not deterministic: repeat runs

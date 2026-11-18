@@ -129,8 +129,10 @@ type Event = { kind: string; message: string; data: Record<string, unknown> | nu
 /**
  * `objectivePursuits`: since P3-21 (6edcd9e, before rows 180-183) every exploration of a project with the "agent" testing mode (a new
  * project's default) also explores by objectives after the scenarios. A project with an analysed model (statedRule, or the rule case's
- * own) gets objectives from it: the cart workflow and R-TOTAL give 2 objectives as 4 pursuits, and each pursuit asks the test writer once
- * (the queue is empty, so it answers "done" and no test is saved). Those 4 agent calls are the objective stage's, not the defect path's;
+ * own) gets objectives from it: the cart workflow and R-TOTAL give 2 objectives. Data changes are off here, so the operators that submit
+ * forms or change data (R-TOTAL's and the workflow's "as stated" among them; owner, 2026-11-21) are not run, and the workflow's two
+ * read-only operators are the 2 pursuits; each pursuit asks the test writer once
+ * (the queue is empty, so it answers "done" and no test is saved). Those 2 agent calls are the objective stage's, not the defect path's;
  * a project without a model gets no objectives and no calls. The independence check, the own-steps replay (row 180) and the finding
  * still add none.
  */
@@ -186,7 +188,7 @@ const TIED = "The total is $25.00 (source: R-TOTAL)";
 const tiedScenario = (startPath: string) => ({ ...cartScenario(startPath), expectedResults: ["The cart page is shown", TIED] });
 
 /** The objective stage's pursuits for a project with the cart workflow and R-TOTAL (see explore). */
-const OBJECTIVE_PURSUITS = 4;
+const OBJECTIVE_PURSUITS = 2;
 const metaOf = (t: { generationMeta: unknown }) => t.generationMeta as Record<string, unknown>;
 const defectEvent = (events: Event[]) => {
     const found = events.filter((e) => e.kind === "possible_defect");

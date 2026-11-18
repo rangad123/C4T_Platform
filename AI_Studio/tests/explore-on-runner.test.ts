@@ -298,6 +298,16 @@ describe("an exploration goes to its starter's runner", () => {
             const offerC = await poll(newRunner);
             expect(offerC.explore.request).toMatchObject({ objectives: true, dataOperators: true });
             await stop(newer, c.body.jobId);
+            // The project's "Explore by objectives" switch turned off: the exploration asks for no objectives (and so no data operators).
+            const off = await call("PUT", `/api/projects/${newer.project}/agent-inputs`, { exploreByObjectives: false }, newer.token);
+            expect(off.status, JSON.stringify(off.body)).toBe(200);
+            expect(off.body.exploreByObjectives).toBe(false);
+            const d = await explore(newer);
+            expect(d.status, d.text).toBe(202);
+            const offerD = await poll(newRunner);
+            expect(offerD.explore.request).not.toHaveProperty("objectives");
+            expect(offerD.explore.request).not.toHaveProperty("dataOperators");
+            await stop(newer, d.body.jobId);
         } finally {
             config.EXPLORE_DATA_OPERATORS = false;
         }
@@ -310,6 +320,10 @@ describe("an exploration goes to its starter's runner", () => {
         expect(objectivesOf({ testingModes: ["agent"] }, true)).toEqual({ objectives: true, dataOperators: true });
         expect(objectivesOf({ testingModes: ["code"] }, true)).toEqual({});
         expect(objectivesOf({ testingModes: [] }, false)).toEqual({});
+        // The project's "Explore by objectives" switch (owner, 2026-11-21): off gives no objectives; on or never saved gives them.
+        expect(objectivesOf({ testingModes: ["agent"], exploreByObjectives: false }, true)).toEqual({});
+        expect(objectivesOf({ testingModes: ["agent"], exploreByObjectives: true }, false)).toEqual({ objectives: true });
+        expect(objectivesOf({ testingModes: ["code"], exploreByObjectives: true }, true)).toEqual({});
         // The server setting is read from the environment once, by the platform's config: off unless exactly "true".
         expect(loadConfig({ DATA_DIR: dataDir }).EXPLORE_DATA_OPERATORS).toBe(false);
         expect(loadConfig({ DATA_DIR: dataDir, EXPLORE_DATA_OPERATORS: "1" }).EXPLORE_DATA_OPERATORS).toBe(false);

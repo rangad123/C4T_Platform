@@ -20,7 +20,7 @@ import { SKIP_REASONS } from "../src/engine/explore/perturb.js";
 import { LEVEL_SETTINGS, LEVELS } from "../src/engine/levels.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import { actionTracker, boundedActionLog, coverageModelOf, ExplorationStopped, gatedLlm, objectivePursuits } from "../src/engine/orchestrator.js";
-import { COMPLIANT, exploreShop, scriptedShopModel, shopKnowledge, startShop, type ShopSite } from "./fixtures/objectives-shop.js";
+import { COMPLIANT, exploreShop, OBJECTIVES_WITH_DATA, scriptedShopModel, shopKnowledge, startShop, type ShopSite } from "./fixtures/objectives-shop.js";
 
 const thorough = LEVEL_SETTINGS.thorough;
 const pursuitsOf = (dataOperators: boolean) =>
@@ -49,12 +49,19 @@ describe("objective pursuits, budgets and bounds (no browser)", () => {
         ]);
     });
 
-    it("a data-changing operator is skipped with 'data changes off' unless data operators are allowed", () => {
+    it("a data-changing operator, the form-submitting as stated and invalid input among them, is skipped with 'data changes off' unless data operators are allowed", () => {
         const off = pursuitsOf(false);
         const constraint = off.objectives.find((o) => o.kind === "constraint")!;
-        expect(off.skipped).toEqual([{ objectiveId: constraint.id, operator: "boundary_input", reason: SKIP_REASONS.dataOff }]);
-        expect(off.pursuits.map((p) => p.operator).sort()).toEqual(["as_stated", "invalid_input"]);
-        expect(pursuitsOf(true).skipped).toEqual([]);
+        const rule = off.objectives.find((o) => o.kind === "rule")!;
+        expect(off.skipped).toEqual([
+            { objectiveId: rule.id, operator: "as_stated", reason: SKIP_REASONS.dataOff },
+            { objectiveId: constraint.id, operator: "invalid_input", reason: SKIP_REASONS.dataOff },
+            { objectiveId: constraint.id, operator: "boundary_input", reason: SKIP_REASONS.dataOff },
+        ]);
+        expect(off.pursuits).toEqual([]);
+        const on = pursuitsOf(true);
+        expect(on.skipped).toEqual([]);
+        expect(on.pursuits.map((p) => p.operator).sort()).toEqual(["as_stated", "boundary_input", "invalid_input"]);
     });
 
     it("the job keeps the first 2,000 rows of the action log and counts the rows it left out", () => {
@@ -195,9 +202,10 @@ describe("exploring the seeded shop by objectives", () => {
     it("both seeded defects become captured candidate findings that replay red on the seeded shop and green on the fixed one", async () => {
         site.fixed = false;
         const { llm, calls } = scriptedShopModel(() => COMPLIANT);
-        const { summary, events, tests, images } = await exploreShop(site, llm, { objectives: true });
+        const { summary, events, tests, images } = await exploreShop(site, llm, OBJECTIVES_WITH_DATA);
 
-        // The session: one stop reason, every pursuit run, the data-changing operator skipped.
+        // The session (data changes allowed, as the benchmark runs): one stop reason, every pursuit run, nothing skipped. The boundary
+        // value has no script here, so its test writer stops without a test.
         const ex = summary.exploration!;
         expect(ex.stopReason).toBe("objectives_done");
         expect(events.filter((e) => e.kind === "exploration_stopped")).toHaveLength(1);
@@ -209,10 +217,12 @@ describe("exploring the seeded shop by objectives", () => {
             { kind: "objective_finished", message: `${rule} as_stated: finished (completed)`, data: { objectiveId: rule, operator: "as_stated", outcome: "completed" } },
             { kind: "objective_started", message: `${field} invalid_input: started`, data: { objectiveId: field, operator: "invalid_input" } },
             { kind: "objective_finished", message: `${field} invalid_input: finished (completed)`, data: { objectiveId: field, operator: "invalid_input", outcome: "completed" } },
+            { kind: "objective_started", message: `${field} boundary_input: started`, data: { objectiveId: field, operator: "boundary_input" } },
+            { kind: "objective_finished", message: `${field} boundary_input: finished (writer_stopped)`, data: { objectiveId: field, operator: "boundary_input", outcome: "writer_stopped" } },
         ]);
         expect(ex.budgets).toEqual({ objectives: 25, actions: 750, aiCalls: 750, tokens: 7_500_000, minutes: 90, depth: 8, steps: 30 });
-        expect(ex.skipped).toEqual([{ objectiveId: expect.stringMatching(/^OBJ-/), operator: "boundary_input", reason: "data changes off" }]);
-        expect(ex.outcomes.map((o) => o.status)).toEqual(["completed", "completed"]);
+        expect(ex.skipped).toEqual([]);
+        expect(ex.outcomes.filter((o) => !o.objectiveId.endsWith(":boundary_input")).map((o) => o.status)).toEqual(["completed", "completed"]);
         expect(ex.usage.aiCalls).toBe(calls.filter((c) => !c.startsWith("object:")).length);
         // The test writer's own five actions, and the replays without AI that reached the application (CP2 M-5): each pursuit's prune
         // replay of its saved steps (3: open, navigate, check; 4: open, fill, click, check) and its finding's two fresh replays.
@@ -231,7 +241,7 @@ describe("exploring the seeded shop by objectives", () => {
         expect(ex.coverage.inputClasses).toMatchObject({ exercised: 1, notExercised: ["page-order/order/qty boundary_input"] });
         expect(ex.coverage.pages.notExercised).not.toContain("/cart");
         expect(ex.coverage.pages.notExercised).not.toContain("/order");
-        expect(ex.coverage.notRun).toContainEqual({ objectiveId: ex.skipped[0]!.objectiveId, operator: "boundary_input", reason: "data changes off" });
+        expect(ex.coverage.notRun).toEqual([]);
         expect(ex.coverage.unexplored).toEqual([]);
         // The rule as stated (its pursuit and the saved check citing its ref are one scenario) and the quantity's invalid input.
         expect(ex.coverage.uniqueScenarios).toBe(2);
@@ -284,7 +294,7 @@ describe("exploring the seeded shop by objectives", () => {
         const notApplied = { ...COMPLIANT, "Invalid input": COMPLIANT["Invalid input"]!.map((c) => (c.tool === "fill" ? { ...c, input: { ...c.input, value: "5" } } : c)) };
         const { llm } = scriptedShopModel(() => notApplied);
         // Row 173: the request says the rule was explored last time, so only the quantity's objective is "not explored yet".
-        const { summary, events, tests } = await exploreShop(site, llm, { objectives: true, exploredObjectives: ["R-TOTAL"] });
+        const { summary, events, tests } = await exploreShop(site, llm, { ...OBJECTIVES_WITH_DATA, exploredObjectives: ["R-TOTAL"] });
         expect(summary.exploration!.objectives.map((o) => [o.kind, /not explored yet/.test(o.reason)])).toEqual([
             ["constraint", true],
             ["rule", false],

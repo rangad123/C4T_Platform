@@ -55,12 +55,13 @@ export function exploreProblem(agent: { name: string; capabilities: { explore?: 
 }
 
 /**
- * P3-21: exploring by objectives (GenerationRequest.objectives, Phase 3). It is part of an exploration of an AI agent project; every level is
- * Thorough or above (engine/levels.ts), so the project's testing modes decide it. Data-changing operators need the server setting
- * EXPLORE_DATA_OPERATORS=true as well (Decision 6; the engine also needs the run's data-changes setting and reads no environment itself).
+ * P3-21: exploring by objectives (GenerationRequest.objectives, Phase 3). It is part of an exploration of an AI agent project whose
+ * "Explore by objectives" switch is on (Settings → General; never saved means on, agent-inputs-store.ts); every level is Thorough or
+ * above (engine/levels.ts). Data-changing operators need the server setting EXPLORE_DATA_OPERATORS=true as well (Decision 6; the engine
+ * also needs the run's data-changes setting and reads no environment itself).
  */
-export function objectivesOf(project: { testingModes: readonly string[] }, dataOperatorsAllowed: boolean): { objectives?: true; dataOperators?: true } {
-    if (!project.testingModes.includes("agent")) return {};
+export function objectivesOf(project: { testingModes: readonly string[]; exploreByObjectives?: boolean }, dataOperatorsAllowed: boolean): { objectives?: true; dataOperators?: true } {
+    if (!project.testingModes.includes("agent") || project.exploreByObjectives === false) return {};
     return { objectives: true, ...(dataOperatorsAllowed ? { dataOperators: true } : {}) };
 }
 

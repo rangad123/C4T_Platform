@@ -9,7 +9,8 @@
  * - No new step action (Phase 3 plan, decision 3): refresh is a `navigate` to the current address, back is a `navigate` to the previous
  *   address ("back (by address)"; the browser's history back is not covered), direct URL is a `navigate`, double submit is two recorded
  *   clicks, repeat is the steps again.
- * - Data-changing operators run only when the server allows them (`dataOperators`, from EXPLORE_DATA_OPERATORS; decision 6); otherwise
+ * - Data-changing operators, the form-submitting "as stated" and "invalid input" among them, run only when data changes are allowed
+ *   (`dataOperators`: the server's EXPLORE_DATA_OPERATORS and the run's "Include API tests that change data"; decision 6); otherwise
  *   they are skipped with the reason "data changes off". An objective that needs a second account is skipped with "needs a second
  *   account" (Q2: two-account checks are Phase 4).
  * Pure: no AI, no browser, no clock.
@@ -30,12 +31,13 @@ export type SkipReason = (typeof SKIP_REASONS)[keyof typeof SKIP_REASONS];
 
 /**
  * Whether an operator may change the application's data. Submitting twice, doing it again, cancelling half-way and a boundary value the
- * form accepts all write; following the source as stated is what generation does today, and a value the form must refuse, opening an
+ * form accepts all write. Following the source as stated and typing a value the form must refuse both submit forms, and a form submitted
+ * is a data change (spec Assumption 5; owner, 2026-11-21, CP2 M-7), so they run only where data changes are allowed too. Opening an
  * address, going back by address and reloading only read (a reload is a `navigate`, a GET, so it never re-posts a form).
  */
 export const DATA_CHANGING: Readonly<Record<ObjectiveOperator, boolean>> = {
-    as_stated: false,
-    invalid_input: false,
+    as_stated: true,
+    invalid_input: true,
     boundary_input: true,
     double_submit: true,
     repeat: true,
@@ -89,7 +91,7 @@ export interface PerturbWorkflow {
 }
 
 export interface PerturbOptions {
-    /** The server allows data-changing operators (EXPLORE_DATA_OPERATORS=true). Absent: off. */
+    /** Data-changing operators are allowed (EXPLORE_DATA_OPERATORS=true and the run allows data changes; orchestrator.ts). Absent: off. */
     dataOperators?: boolean;
     /** For a workflow objective: its stated steps and preconditions. */
     workflow?: PerturbWorkflow;
