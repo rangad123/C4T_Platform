@@ -1,7 +1,9 @@
 /**
  * Round 53, "How much to explore" in a real browser against a real platform (port 9200): project Settings saves the level, the Explore
  * page starts from it with "Explore every page again" off, and what the person picks reaches the queued job. Light-mode accessibility of
- * both places. Requires `web/dist` (vite build). No worker runs the job; no network beyond 127.0.0.1.
+ * both places. Beside it, the project's "Explore by objectives" switch (owner, 2026-11-21): on when never saved, an owner turns it off,
+ * a refused save shows the server's sentence, and a viewer sees it but cannot change it. Requires `web/dist` (vite build). No worker
+ * runs the job; no network beyond 127.0.0.1.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -16,6 +18,7 @@ import { hashPassword } from "../src/platform/auth/password.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
+import { agentInputsStoreOf } from "../src/platform/routes/agent-inputs.js";
 import { buildServer } from "../src/platform/server.js";
 
 const PORT = 9200;
@@ -41,6 +44,12 @@ beforeAll(async () => {
     const users = accessControlOf(server).users;
     const owner = users.create({ email: "owner@example.com", name: "Project Owner", role: "owner" });
     users.setPassword(owner.id, await hashPassword("the owner's long password"));
+    // Vic may work on the platform but only views this project.
+    const vic = users.create({ email: "vic@example.com", name: "Vic Viewer", role: "editor" });
+    users.setPassword(vic.id, await hashPassword("vic's long password"));
+    const scope = accessControlOf(server).projects.store;
+    scope.setMode(vic.id, "only");
+    scope.addMember(shop, vic.id, { role: "viewer", projectAdmin: false, source: "added", addedBy: "test" });
     browser = await chromium.launch();
 }, 60_000);
 afterAll(async () => {
@@ -149,5 +158,59 @@ describe("how much to explore", () => {
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]).toMatchObject({ level: "deep", visionChecks: false });
         await p2.close();
+    });
+});
+
+describe("explore by objectives", () => {
+    const signIn = async (email: string, password: string) => {
+        const page = await (await browser.newContext()).newPage();
+        await page.goto(BASE);
+        await page.getByLabel("Email").fill(email);
+        await page.getByLabel("Password").fill(password);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await pwExpect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+        return page;
+    };
+
+    it("is on when never saved, sits beside the level on General only, and an owner turns it off; a refused save shows its sentence", async () => {
+        expect(agentInputsStoreOf(platform).exploreByObjectives(shop)).toBe(true);
+        const page = await signIn("owner@example.com", "the owner's long password");
+        await page.goto(`${BASE}/#/projects/${shop}/settings`);
+        const card = page.getByTestId("explore-objectives-setting");
+        const box = card.getByRole("checkbox", { name: "Explore by objectives" });
+        await pwExpect(box).toBeChecked();
+        await pwExpect(card).toContainText("takes longer and uses more AI");
+        await pwExpect(card).toContainText("Checks that submit forms run only when “Include API tests that change data” is on");
+        await pwExpect(card.getByRole("button", { name: "Save" })).toBeDisabled();
+        expect(await axeClean(page)).toEqual([]);
+        // A save the server refuses: its sentence, and nothing saved.
+        await page.route("**/api/projects/*/agent-inputs", (route) =>
+            route.request().method() === "PUT" ? route.fulfill({ status: 403, json: { error: "You cannot change this project's settings." } }) : route.continue(),
+        );
+        await box.uncheck();
+        await card.getByRole("button", { name: "Save" }).click();
+        await pwExpect(card).toContainText("You cannot change this project's settings.");
+        expect(agentInputsStoreOf(platform).exploreByObjectives(shop)).toBe(true);
+        await page.unroute("**/api/projects/*/agent-inputs");
+        await card.getByRole("button", { name: "Save" }).click();
+        await pwExpect(card).toContainText("Later explorations no longer explore by objectives.");
+        await pwExpect.poll(() => agentInputsStoreOf(platform).exploreByObjectives(shop)).toBe(false);
+        await page.reload();
+        await pwExpect(page.getByTestId("explore-objectives-setting").getByRole("checkbox", { name: "Explore by objectives" })).not.toBeChecked();
+        // Only the selected tab's parts show: not on Sign-in.
+        await page.goto(`${BASE}/#/projects/${shop}/settings?section=signin`);
+        await page.waitForLoadState("networkidle");
+        await pwExpect(page.getByTestId("explore-objectives-setting")).toHaveCount(0);
+        await page.context().close();
+    });
+
+    it("a viewer sees the switch but cannot change it", async () => {
+        const page = await signIn("vic@example.com", "vic's long password");
+        await page.goto(`${BASE}/#/projects/${shop}/settings`);
+        const card = page.getByTestId("explore-objectives-setting");
+        await pwExpect(card.getByRole("checkbox", { name: "Explore by objectives" })).toBeDisabled();
+        await pwExpect(card).toContainText("Only people who may change this project’s settings can change this.");
+        await pwExpect(card.getByRole("button", { name: "Save" })).toHaveCount(0);
+        await page.context().close();
     });
 });

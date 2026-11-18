@@ -2,11 +2,13 @@
  * What a project's testing agents need, kept once on its Requirements tab (round 38) instead of being typed on every exploration:
  *
  *   GET /api/projects/:id/agent-inputs   → { applies, application, signIn, apiAccess, openApiUrl, allowMutatingApiTests, keepThumbnails,
- *                                            cleanupAfter, requirements: { active }, agents: { ids, names, source }, missing: [{ agent, agentName, input, inputName, text }] }
+ *                                            exploreByObjectives, cleanupAfter, requirements: { active }, agents: { ids, names, source },
+ *                                            missing: [{ agent, agentName, input, inputName, text }] }
  *   PUT /api/projects/:id/agent-inputs   { username?, password?, totpSecret?, apiToken?, oauth2?, openApiUrl?, allowMutatingApiTests?,
- *                                          keepThumbnails?, cleanupAfter?, clear?: ["password" | "totpSecret" | "apiToken" | "oauth2"] } → the same answer
+ *                                          keepThumbnails?, exploreByObjectives?, cleanupAfter?, clear?: ["password" | "totpSecret" | "apiToken" | "oauth2"] } → the same answer
  *
- * `keepThumbnails` is the project's "Keep page thumbnails" switch (Settings → General, sheet #8, owner 2026-11-21): never saved means on;
+ * `keepThumbnails` is the project's "Keep page thumbnails" switch (Settings → General, sheet #8, owner 2026-11-21) and `exploreByObjectives`
+ * its "Explore by objectives" switch (Settings → General, owner 2026-11-21): each, never saved, means on;
  * it belongs to the project, not to the site the other inputs were saved for.
  *
  * Storage: the project's own row (agent-inputs-store.ts), with the site it was saved for; an exploration that brings a sign-in of its own
@@ -194,6 +196,7 @@ const Body = z
         openApiUrl: z.string().max(2000).optional(),
         allowMutatingApiTests: z.boolean().optional(),
         keepThumbnails: z.boolean({ error: "Keep page thumbnails is on or off (true or false)." }).optional(),
+        exploreByObjectives: z.boolean({ error: "Explore by objectives is on or off (true or false)." }).optional(),
         cleanupAfter: z.boolean().optional(),
         clear: z.array(z.enum(SECRETS)).max(SECRETS.length).optional(),
     })
@@ -239,6 +242,7 @@ export function registerAgentInputRoutes(ctx: RouteCtx): void {
             openApiUrl,
             allowMutatingApiTests: saved.allowMutatingApiTests === true,
             keepThumbnails: store.keepThumbnails(id),
+            exploreByObjectives: store.exploreByObjectives(id),
             cleanupAfter: cleanup.getEnabled(id) ?? true,
             requirements: { active },
             agents: agents ? { ids: agents.agents, names: agents.agents.map((a) => agentById(a)?.name ?? a), source: agents.source } : null,
@@ -286,7 +290,7 @@ export function registerAgentInputRoutes(ctx: RouteCtx): void {
         const openApiUrl = body.openApiUrl === undefined ? before.openApiUrl : body.openApiUrl.trim() ? await httpUrl(body.openApiUrl, "OpenAPI document URL") : undefined;
         const allowMutatingApiTests = body.allowMutatingApiTests ?? before.allowMutatingApiTests;
         // The project's saved inputs: only this route writes them.
-        store.save(id, { site: full.url, credentials, openApiUrl, allowMutatingApiTests, keepThumbnails: body.keepThumbnails });
+        store.save(id, { site: full.url, credentials, openApiUrl, allowMutatingApiTests, keepThumbnails: body.keepThumbnails, exploreByObjectives: body.exploreByObjectives });
 
         // Runs read the latest application: a new row on the same address keeps everything else the latest one had (settings, mobile
         // app) and carries these inputs, so the next run uses them too.

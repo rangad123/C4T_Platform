@@ -274,6 +274,38 @@ describe("mandatory inputs", () => {
     });
 });
 
+// Owner, 2026-11-21 (CP2 M-3): the project's "Explore by objectives" switch, kept with these inputs. Never saved means on.
+describe("explore by objectives", () => {
+    it("is on for an agent project that never saved it; it turns off and on again, and saving the other inputs keeps it", async () => {
+        const id = await agentProject("Objectives shop");
+        expect((await as("t-cora", "GET", `/api/projects/${id}/agent-inputs`)).body.exploreByObjectives).toBe(true);
+        const off = await as("t-cora", "PUT", `/api/projects/${id}/agent-inputs`, { exploreByObjectives: false });
+        expect(off.status, JSON.stringify(off.body)).toBe(200);
+        expect(off.body.exploreByObjectives).toBe(false);
+        expect(agentInputsStoreOf(platform).exploreByObjectives(id)).toBe(false);
+        // Saving the other inputs here, or a sign-in from Settings → Sign-in (it writes the same row), leaves the switch as it is.
+        const other = await as("t-cora", "PUT", `/api/projects/${id}/agent-inputs`, { openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: true });
+        expect(other.body).toMatchObject({ exploreByObjectives: false, allowMutatingApiTests: true });
+        agentInputsStoreOf(platform).save(id, { site: SITE, credentials: { username: "qa@shop.example" } });
+        expect((await as("t-cora", "GET", `/api/projects/${id}/agent-inputs`)).body.exploreByObjectives).toBe(false);
+        expect((await as("t-cora", "PUT", `/api/projects/${id}/agent-inputs`, { exploreByObjectives: true })).body.exploreByObjectives).toBe(true);
+        expect((await as("t-cora", "PUT", `/api/projects/${id}/agent-inputs`, { exploreByObjectives: "no" })).status).toBe(400);
+        // A project that never saved anything here reads as on.
+        expect(agentInputsStoreOf(platform).exploreByObjectives("no-such-project")).toBe(true);
+    });
+
+    it("a person who may not change the project's settings sees it but cannot change it", async () => {
+        const id = await agentProject("Objectives viewer shop");
+        const tess = (await as("t-tess", "GET", "/api/auth/state")).body.me.id as string;
+        accessControlOf(app).projects.store.addMember(id, tess, { role: "editor", projectAdmin: false, source: "added", addedBy: "test" });
+        expect((await as("t-tess", "GET", `/api/projects/${id}/agent-inputs`)).body.exploreByObjectives).toBe(true);
+        const refused = await as("t-tess", "PUT", `/api/projects/${id}/agent-inputs`, { exploreByObjectives: false });
+        expect(refused.status).toBe(403);
+        expect(String(refused.body.error)).toMatch(/\.$/);
+        expect(agentInputsStoreOf(platform).exploreByObjectives(id)).toBe(true);
+    });
+});
+
 describe("who may read and change them", () => {
     it("a person who may not change settings sees what is set but cannot change it; another organisation's project answers 404", async () => {
         const id = await agentProject("Permissions shop", ["accessibility"]);

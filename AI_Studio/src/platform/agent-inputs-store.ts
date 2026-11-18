@@ -1,8 +1,8 @@
 /**
  * What a project's testing agents need, as saved on its Requirements tab (routes/agent-inputs.ts): the sign-in, the API access, the
- * OpenAPI document address, whether API tests may change data, and the project's "Keep page thumbnails" switch (sheet #8, owner
- * 2026-11-21; Settings → General; never saved means on, and a save that leaves it out keeps it, so a sign-in saved elsewhere never turns it
- * back on). One row per project. Its sign-in (user name, password, authenticator
+ * OpenAPI document address, whether API tests may change data, the project's "Keep page thumbnails" switch (sheet #8, owner
+ * 2026-11-21) and its "Explore by objectives" switch (Settings → General; never saved means on, and a save that leaves one out keeps it, so
+ * a sign-in saved elsewhere never turns it back on). One row per project. Its sign-in (user name, password, authenticator
  * secret) is the project's one sign-in: Project settings → Sign-in shows it and every run on its site signs in with it (Repo.getApplication
  * puts it on the application a run reads). Settings writes it, and so does any path that brings a sign-in of its own (an exploration, an
  * import, a CI run), with the same write (routes/project-sign-in.ts saveSignIn), never as a separate copy. Only Settings writes the rest.
@@ -27,7 +27,7 @@ CREATE TABLE project_agent_inputs (
     project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
     site TEXT NOT NULL,                   -- the application address they were saved for: used on that site only
     credentials_enc TEXT,                 -- SecretBox-encrypted {username,password,totpSecret,apiToken,apiAuthHeader,oauth2}; never returned by the API
-    settings_json TEXT NOT NULL,          -- {openApiUrl, allowMutatingApiTests, keepThumbnails}
+    settings_json TEXT NOT NULL,          -- {openApiUrl, allowMutatingApiTests, keepThumbnails, exploreByObjectives}
     updated_at TEXT NOT NULL
 );
 INSERT INTO project_agent_inputs (project_id, site, credentials_enc, settings_json, updated_at)
@@ -66,10 +66,12 @@ export interface SavedAgentInputs {
     allowMutatingApiTests?: boolean;
     /** "Keep page thumbnails" as saved; absent: never saved, which means on. Not tied to the site. */
     keepThumbnails?: boolean;
+    /** "Explore by objectives" as saved; absent: never saved, which means on. Not tied to the site. */
+    exploreByObjectives?: boolean;
     updatedAt: string;
 }
 
-const settingsOf = (json: string | undefined): { openApiUrl?: unknown; allowMutatingApiTests?: unknown; keepThumbnails?: unknown } => {
+const settingsOf = (json: string | undefined): { openApiUrl?: unknown; allowMutatingApiTests?: unknown; keepThumbnails?: unknown; exploreByObjectives?: unknown } => {
     try {
         const v = JSON.parse(json ?? "{}");
         return v && typeof v === "object" ? v : {};
@@ -100,6 +102,7 @@ export class AgentInputsStore {
             ...(typeof settings.openApiUrl === "string" && settings.openApiUrl ? { openApiUrl: settings.openApiUrl } : {}),
             ...(typeof settings.allowMutatingApiTests === "boolean" ? { allowMutatingApiTests: settings.allowMutatingApiTests } : {}),
             ...(typeof settings.keepThumbnails === "boolean" ? { keepThumbnails: settings.keepThumbnails } : {}),
+            ...(typeof settings.exploreByObjectives === "boolean" ? { exploreByObjectives: settings.exploreByObjectives } : {}),
             updatedAt: r.updated_at,
         };
     }
@@ -110,17 +113,25 @@ export class AgentInputsStore {
         return settingsOf(r?.settings_json).keepThumbnails !== false;
     }
 
+    /** Whether explorations of the project explore by objectives: only a saved "off" turns it off (no row, or never saved: on). */
+    exploreByObjectives(projectId: string): boolean {
+        const r = this.db.get<{ settings_json: string }>("SELECT settings_json FROM project_agent_inputs WHERE project_id = ?", projectId);
+        return settingsOf(r?.settings_json).exploreByObjectives !== false;
+    }
+
     /**
-     * Replaces what the project has saved (PUT /agent-inputs, and saveSignIn for the sign-in). `keepThumbnails` left out keeps the saved
-     * choice, whichever site it was saved with.
+     * Replaces what the project has saved (PUT /agent-inputs, and saveSignIn for the sign-in). `keepThumbnails` or `exploreByObjectives`
+     * left out keeps the saved choice, whichever site it was saved with.
      */
-    save(projectId: string, v: { site: string; credentials?: Credentials; openApiUrl?: string; allowMutatingApiTests?: boolean; keepThumbnails?: boolean }): void {
+    save(projectId: string, v: { site: string; credentials?: Credentials; openApiUrl?: string; allowMutatingApiTests?: boolean; keepThumbnails?: boolean; exploreByObjectives?: boolean }): void {
         const has = v.credentials && Object.values(v.credentials).some(Boolean);
         const keepThumbnails = v.keepThumbnails ?? (this.keepThumbnails(projectId) ? undefined : false);
+        const exploreByObjectives = v.exploreByObjectives ?? (this.exploreByObjectives(projectId) ? undefined : false);
         const settings = JSON.stringify({
             ...(v.openApiUrl ? { openApiUrl: v.openApiUrl } : {}),
             ...(v.allowMutatingApiTests !== undefined ? { allowMutatingApiTests: v.allowMutatingApiTests } : {}),
             ...(keepThumbnails !== undefined ? { keepThumbnails } : {}),
+            ...(exploreByObjectives !== undefined ? { exploreByObjectives } : {}),
         });
         this.db.run(
             `INSERT INTO project_agent_inputs (project_id, site, credentials_enc, settings_json, updated_at) VALUES (?,?,?,?,?)

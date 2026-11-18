@@ -15,7 +15,10 @@ expected, **candidate findings** for a person to review. A candidate finding is 
 - Only when the application has been analysed at least once. Without an analysis the exploration runs as before, and its activity says:
   "Exploring by objectives needs an analysed model of the application, and there is none yet, so this exploration ran without
   objectives."
-- On every exploration level (Thorough, Deep, Everything) of an agent project.
+- On every exploration level (Thorough, Deep, Everything) of an agent project, while the project's **Explore by objectives** switch is
+  on. It sits in Settings → General, beside "How much to explore", and is on for every agent project until an owner turns it off
+  (a project that never saved it counts as on). Exploring by objectives takes longer and uses more AI. Only people who may change the
+  project's settings can change the switch; others see it greyed out.
 - On a runner that supports it. An older runner runs the exploration as before, and the job says in one sentence that the runner is
   too old to explore by objectives and needs downloading again.
 - It runs after the planned tests are written, in the same job, on the starter's own runner and with the starter's AI key, like the
@@ -57,8 +60,8 @@ agent gets fixed instructions for it, and the objective's expected result, wrapp
 
 | Operator | What is done | Used for | Changes data |
 |---|---|---|---|
-| As stated | do the preconditions, follow the stated steps, check the expected result | rules, workflows, state changes | no |
-| Invalid input | type each value the field's limits say must be refused, and submit | form fields | no |
+| As stated | do the preconditions, follow the stated steps, check the expected result | rules, workflows, state changes | yes (submits forms) |
+| Invalid input | type each value the field's limits say must be refused, and submit | form fields | yes (submits forms) |
 | Boundary input | type values at and one step past each declared limit, and submit | form fields | yes |
 | Double submit | click the final submit twice in a row | workflows | yes |
 | Repeat | do the same steps again with the same values | workflows, state changes | yes |
@@ -79,11 +82,12 @@ same control in a row for a double submit). If it was not, no test is saved for 
 
 An operator that does not run is listed with its reason, never left out silently:
 
-- **"data changes off"**: operators that change data (boundary input, double submit, repeat, cancel) run only when the project's
-  **Include API tests that change data** switch (Requirements tab) is on **and** the server setting `EXPLORE_DATA_OPERATORS=true` is
-  set. Both are off by default. The setting is meant for the
-  benchmark and test applications; a production platform does not set it. With it off, rules are still checked as stated, workflows as
-  stated, by direct address, back and refresh, and form fields with invalid input.
+- **"data changes off"**: operators that change data run only when the project's **Include API tests that change data** switch
+  (Requirements tab) is on **and** the server setting `EXPLORE_DATA_OPERATORS=true` is set. Both are off by default. The setting is
+  meant for the benchmark and test applications; a production platform does not set it. Submitting a form is a data change, so this
+  covers the two operators that submit forms (as stated and invalid input) as well as boundary input, double submit, repeat and cancel.
+  With data changes off, only direct address, back and refresh run: rules and form fields get no pursuit, and every skipped operator
+  is listed under "not run" in the coverage record.
 - **"needs a second account"**: an objective about another user's data (for example "can a customer see someone else's order?") needs
   two accounts, which is a later phase.
 - **"no page for a later step"**: direct address needs a workflow step on a different page than the first one.
@@ -201,7 +205,8 @@ The job also keeps the session's limits, each objective with its priority, the s
   objectives.
 - Objectives are only as good as the analysis: a requirement nobody wrote down, or a rule waiting for a person, gives no objective.
   Confirming rules and workflows on the Requirements tab adds them.
-- With data changes off (the default), boundary values, double submits, repeats and cancels are not tried.
+- With data changes off (the default), nothing that submits a form is tried: no rule or workflow as stated, no invalid or boundary
+  values, no double submits, repeats or cancels.
 - The browser's back button is not tested.
 - Confirming a finding (more clean replays, merging the same finding across runs) is not part of this; findings stay candidates.
 - Exploring by objectives uses AI calls on the starter's key, within the AI budgets that apply to every exploration

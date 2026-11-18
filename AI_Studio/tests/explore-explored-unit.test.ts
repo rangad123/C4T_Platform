@@ -29,7 +29,8 @@ const knowledge = (): Pick<AppKnowledge, "rules" | "workflows" | "objectiveInput
         workflowSteps: [],
     },
 });
-const opts = { maxObjectives: 10, steps: 10, perObjective: { minutes: 5, tokens: 50_000 }, dataOperators: false, requiresAuth: false };
+// Data operators allowed: the fields' invalid-input checks submit the form, so with data changes off they would not be pursuits at all.
+const opts = { maxObjectives: 10, steps: 10, perObjective: { minutes: 5, tokens: 50_000 }, dataOperators: true, requiresAuth: false };
 
 describe("an objective not explored yet outranks an equal explored one", () => {
     it("the objective stage passes the explored refs to the objectives", () => {

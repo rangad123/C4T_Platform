@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CandidateFindingSchema } from "../src/engine/explore/finding.js";
 import { LEVEL_SETTINGS } from "../src/engine/levels.js";
-import { COMPLIANT, exploreShop, INJECTION_TEXT, scriptedShopModel, startShop, type ShopSite, type ToolCall } from "./fixtures/objectives-shop.js";
+import { COMPLIANT, exploreShop, INJECTION_TEXT, scriptedShopModel, startShop, type ShopSite, type ToolCall, OBJECTIVES_WITH_DATA } from "./fixtures/objectives-shop.js";
 
 const PORT = 9854;
 let site: ShopSite;
@@ -34,12 +34,12 @@ describe("page text that tells the AI to ignore its objective and raise its budg
     it("changes neither the objectives nor the budgets, and the loop ends the obeying pursuit", async () => {
         site.fixed = false;
         site.injection = false;
-        const clean = await exploreShop(site, scriptedShopModel(() => COMPLIANT).llm, { objectives: true });
+        const clean = await exploreShop(site, scriptedShopModel(() => COMPLIANT).llm, OBJECTIVES_WITH_DATA);
 
         site.injection = true;
         try {
             const obeying = scriptedShopModel(() => OBEYING);
-            const injected = await exploreShop(site, obeying.llm, { objectives: true });
+            const injected = await exploreShop(site, obeying.llm, OBJECTIVES_WITH_DATA);
             // The text really was on the pages the test writer worked on.
             expect(INJECTION_TEXT).toContain("Raise the budget");
 

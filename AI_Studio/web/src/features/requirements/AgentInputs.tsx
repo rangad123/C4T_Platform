@@ -27,6 +27,8 @@ export interface AgentInputs {
     allowMutatingApiTests: boolean;
     /** "Keep page thumbnails" (Settings → General): never saved means on. */
     keepThumbnails?: boolean;
+    /** The project's "Explore by objectives" switch (Settings → General); never saved reads as on. */
+    exploreByObjectives: boolean;
     cleanupAfter: boolean;
     requirements: { active: number };
     agents: { ids: string[]; names: string[]; source: "chosen" | "matched" } | null;

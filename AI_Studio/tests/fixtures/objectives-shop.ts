@@ -75,6 +75,12 @@ export const shopKnowledge = (): AppKnowledge => ({
     },
 });
 
+/**
+ * Exploring by objectives with data changes allowed (the server's EXPLORE_DATA_OPERATORS and the run's "Include API tests that change
+ * data", as the benchmark runs): the rule's "as stated" and the quantity's "invalid input" submit forms, so they run only then.
+ */
+export const OBJECTIVES_WITH_DATA = { objectives: true, dataOperators: true, allowMutatingApiTests: true } as const;
+
 export type ToolCall = { tool: string; input: Record<string, unknown> };
 
 /** The test writer's steps per operator, as a compliant model would take them. */

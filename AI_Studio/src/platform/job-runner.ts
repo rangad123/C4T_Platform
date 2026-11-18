@@ -577,9 +577,10 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 ...(await siteNotesOf(repo, job.projectId)),
                 // The application's rules and workflows, read as they are now: the plan and the test writers read them.
                 ...(await appKnowledgeOf(repo, job.projectId)),
-                // Phase 3 (P3-21): explore by objectives in an AI agent project; data operators only with EXPLORE_DATA_OPERATORS=true. On a
-                // runner too old for it, explore-dispatch.ts takes it off again and the job says why.
-                ...((project) => (project ? objectivesOf(projectSetupOf(project), config.EXPLORE_DATA_OPERATORS) : {}))(repo.getProject(job.projectId)),
+                // Phase 3 (P3-21): explore by objectives in an AI agent project whose "Explore by objectives" switch is on (never saved: on);
+                // data operators only with EXPLORE_DATA_OPERATORS=true. On a runner too old for it, explore-dispatch.ts takes it off again
+                // and the job says why.
+                ...((project) => (project ? objectivesOf({ ...projectSetupOf(project), exploreByObjectives: new AgentInputsStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY)).exploreByObjectives(job.projectId) }, config.EXPLORE_DATA_OPERATORS) : {}))(repo.getProject(job.projectId)),
                 // What the project's last exploration by objectives explored: the others rank higher ("not explored yet", priority.ts).
                 ...(await exploredObjectivesOf(repo, store, job.projectId)),
                 ...(o.fullExploration ? { fullExploration: true } : {}),
