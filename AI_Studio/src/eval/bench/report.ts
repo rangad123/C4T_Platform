@@ -50,10 +50,11 @@ const ofText = (r: { n: number; of: number; rate: number | null }) => `${r.n} of
  * The "Observed vs captured" section (definitions in observed.ts): per trial the kinds, E1 and E2 with their denominators and every finding;
  * with more than one trial, E1 and E2 as median and range.
  */
-export function observedMarkdown(trials: Array<{ name: string; observed: Observed }>): string {
+export function observedMarkdown(trials: Array<{ name: string; observed: Observed; notes?: string[] }>): string {
     const out: string[] = ["## Observed vs captured", ""];
-    for (const { name, observed: o } of trials) {
+    for (const { name, observed: o, notes } of trials) {
         if (trials.length > 1) out.push(`### ${name}`, "");
+        if (notes?.length) out.push(...notes.map((n) => `- Labels: ${n}`), "");
         out.push("| Measure | Value |", "|---|---|");
         out.push(`| Findings | ${o.rows.length} |`, `| Captured: the saved script fails on the seeded app | ${o.counts.captured} |`, `| Observed only: the author said defect, the replay passed | ${o.counts.observed_only} |`);
         out.push(`| False positive | ${o.counts.false_positive} |`, `| Not verified | ${o.counts.unverified} |`);

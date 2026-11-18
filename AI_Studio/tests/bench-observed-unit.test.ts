@@ -86,7 +86,10 @@ describe("what each finding is, observed vs captured", () => {
 
     it("a labels file applies only to findings the replays could not verify, with a seeded defect or false_positive", () => {
         const plain = FINDINGS.map(({ label: _l, ...x }) => x as BenchFinding);
-        const labelled = withLabels(bench(plain), { "bench-shop/WEB-003": "BS-02", "bench-shop/WEB-004": "false_positive", "bench-shop/WEB-001": "false_positive", "bench-shop/WEB-005": "BS-99" });
+        const own = bench(plain);
+        own.apps[0]!.projectId = "p-1";
+        const set = { format: 2 as const, trials: [{ projects: { "bench-shop": "p-1" }, labels: { "bench-shop/WEB-003": "BS-02", "bench-shop/WEB-004": "false_positive", "bench-shop/WEB-001": "false_positive", "bench-shop/WEB-005": "BS-99" } }] };
+        const labelled = withLabels(own, set).benchmark;
         const by = Object.fromEntries(labelled.apps[0]!.findings.map((x) => [x.testKey, x.label]));
         expect(by).toEqual({ "WEB-001": undefined, "WEB-002": undefined, "WEB-003": "BS-02", "WEB-004": "false_positive", "WEB-005": undefined, "WEB-006": undefined, "WEB-007": undefined, "WEB-008": undefined });
         expect(observedOf(labelled).counts).toEqual({ captured: 2, observed_only: 1, false_positive: 3, unverified: 2 });
