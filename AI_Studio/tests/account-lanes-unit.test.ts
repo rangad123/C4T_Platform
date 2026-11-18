@@ -3,7 +3,9 @@
  * state (cart, discount, profile), so they never run at the same time; signed-out ones and other accounts' ones still run in parallel,
  * and the pool never runs more than its limit at once.
  *   - mapLanes (engine/context.ts): the scheduler the authoring pool uses;
- *   - validateBatch with accountLanes: the replays of saved tests, keyed by the account the test signs in as, through a fake executor.
+ *   - validateBatch (lanes on by default): the replays of saved tests, keyed by the account the test signs in as, through a fake executor;
+ *   - the strength check's fault replays (scoreTests) and the browser / condition checks (runVariantChecks), the same way (row 189);
+ *   - scenarioAccountLane: the account a planned scenario will sign in as, read before it is written (row 189).
  * No browser, no AI.
  */
 import { describe, expect, it } from "vitest";
@@ -14,6 +16,10 @@ import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import type { AppModel } from "../src/engine/understanding/app-model.js";
 import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { testAccountLane, validateBatch } from "../src/engine/validation/validator.js";
+import { scenarioAccountLane } from "../src/engine/validation/lanes.js";
+import { runVariantChecks } from "../src/engine/validation/variants.js";
+import { scoreTests } from "../src/engine/mutation/faults.js";
+import { ScenarioSchema } from "../src/engine/spec/schema.js";
 
 type Span = { id: string; lane: string | undefined; start: number; end: number };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -110,7 +116,7 @@ describe("testAccountLane: the account a saved test signs in as", () => {
     });
 });
 
-describe("validateBatch with accountLanes: replays of one account never overlap", () => {
+describe("validateBatch: replays of one account never overlap", () => {
     const config = loadConfig({});
     const ctx: EngineContext = { config, llm: undefined as never, emit: () => undefined };
     const model = { pages: [], apis: [] } as unknown as AppModel;
@@ -154,11 +160,11 @@ describe("validateBatch with accountLanes: replays of one account never overlap"
         return { spans, runs, executor };
     }
 
-    it("same-account replays (first runs and re-runs) never overlap; other accounts and signed-out tests do; at most `workers` at once", async () => {
+    it("by default, same-account replays (first runs and re-runs) never overlap; other accounts and signed-out tests do; at most `workers` at once", async () => {
         const { spans, runs, executor } = recording();
         const outcomes = await validateBatch(
             ctx,
-            { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, model, maxRepairAttempts: 0, workers: 3, retryFailures: 1, executor, accountLanes: true },
+            { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, model, maxRepairAttempts: 0, workers: 3, retryFailures: 1, executor },
             tests.map((t) => ({ ...t })),
             { async onAttempt() {}, async onFinal() {} },
         );
@@ -176,15 +182,97 @@ describe("validateBatch with accountLanes: replays of one account never overlap"
         expect(spans.filter((s) => s.lane === "role:bob").some((r) => main.some((m) => overlaps(r, m)))).toBe(true);
     });
 
-    it("without accountLanes the batch runs as before: one call, every test at once up to the workers", async () => {
+    it("with accountLanes false the batch runs as before: one call, every test at once up to the workers", async () => {
         const { spans, executor } = recording();
         await validateBatch(
             ctx,
-            { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, model, maxRepairAttempts: 0, workers: 3, executor },
+            { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, model, maxRepairAttempts: 0, workers: 3, executor, accountLanes: false },
             tests.map((t) => ({ ...t })),
             { async onAttempt() {}, async onFinal() {} },
         );
         const main = spans.filter((s) => s.lane === "main");
         expect(main.some((a) => main.some((b) => a !== b && overlaps(a, b)))).toBe(true);
+    });
+});
+
+/**
+ * A fake Playwright: runs every script once per project, `workers` at a time, and records each run's span. The lane is read from the
+ * rendered script (TEST_USERNAME: the project's account).
+ */
+function fakePlaywright(failAll = false) {
+    const spans: Span[] = [];
+    const executor: ScriptExecutor = {
+        name: "fake",
+        async execute(_adapter, batch, _env, opts) {
+            const jobs = batch.scripts.flatMap((s) => (opts.projects?.length ? opts.projects.map((p) => ({ s, variant: p.name })) : [{ s, variant: undefined as string | undefined }]));
+            const out = new Map<object, ScriptRun>();
+            const queue = [...jobs];
+            await Promise.all(
+                Array.from({ length: Math.min(opts.workers, queue.length) }, async () => {
+                    for (let j = queue.shift(); j; j = queue.shift()) {
+                        const span: Span = { id: `${j.s.testId}${j.variant ? `@${j.variant}` : ""}`, lane: /TEST_USERNAME/.test(j.s.content) ? "main" : undefined, start: performance.now(), end: Infinity };
+                        spans.push(span);
+                        await sleep(25);
+                        span.end = performance.now();
+                        out.set(j, { testId: j.s.testId, status: failAll ? "failed" : "passed", durationMs: 25, failedStepIndex: failAll ? 1 : -1, steps: failAll ? [{ index: 1, title: "check", status: "failed" }] : [], artifacts: [], responses: [], ...(j.variant ? { variant: j.variant } : {}) } as ScriptRun);
+                    }
+                }),
+            );
+            return jobs.map((j) => out.get(j)!);
+        },
+    };
+    return { spans, executor };
+}
+const checked = (n: number, signsIn: boolean) =>
+    spec(n, [...(signsIn ? signIn() : []), { action: "navigate", url: "/cart" }, { action: "assert", check: "text", locator: { by: "css", value: "#total" }, expected: "Total: $25.00" }] as Step[]);
+const noOverlapIn = (spans: Span[]) => {
+    const main = spans.filter((s) => s.lane === "main");
+    for (const a of main) for (const b of main) if (a !== b) expect(overlaps(a, b), `${a.id} and ${b.id} ran at the same time`).toBe(false);
+    return main;
+};
+
+describe("the strength check and the browser checks keep one lane per account", () => {
+    const config = loadConfig({});
+    const ctx: EngineContext = { config, llm: undefined as never, emit: () => undefined };
+
+    it("fault replays (scoreTests): no two of the account's replays overlap, its own faults included; signed-out ones run beside them", async () => {
+        const { spans, executor } = fakePlaywright(true);
+        const specs = [checked(11, true), checked(12, false), checked(13, true), checked(14, false)];
+        const scores = await scoreTests(ctx, { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, workers: 3, executor }, specs);
+        expect([...scores.values()].every((s) => s && s.caught === s.total && s.total > 1)).toBe(true);
+        const main = noOverlapIn(spans);
+        expect(main.length).toBeGreaterThan(2);
+        expect(peak(spans)).toBeLessThanOrEqual(3);
+        const free = spans.filter((s) => s.lane === undefined);
+        expect(free.some((f) => main.some((m) => overlaps(f, m)))).toBe(true);
+    });
+
+    it("browser / condition checks (runVariantChecks): one account's tests never overlap, on one variant or across two; signed-out ones do", async () => {
+        const { spans, executor } = fakePlaywright();
+        const tests = [checked(21, true), checked(22, false), checked(23, true), checked(24, false)].map((s) => ({ handle: { id: s.testId } as never, spec: s, validationStatus: "VALIDATED" }));
+        const sink = { counters: async () => undefined, recordVariant: async () => undefined } as never;
+        const summary = await runVariantChecks(ctx, { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, workers: 3, executor, sink, detect: () => ({ chromium: true, firefox: true, webkit: true }) }, tests, ["dark", "locale"]);
+        expect(summary.cells.passed).toBe(8);
+        const main = noOverlapIn(spans);
+        expect(main).toHaveLength(4);
+        expect(peak(spans)).toBeLessThanOrEqual(2);
+        expect(spans.filter((s) => s.lane === undefined).some((f) => main.some((m) => overlaps(f, m)))).toBe(true);
+    });
+});
+
+describe("scenarioAccountLane: the account a planned scenario will sign in as", () => {
+    const plan = (o: Record<string, unknown>) => ScenarioSchema.parse({ scenarioId: "S-001", title: "A scenario", description: "Open the shop", category: "Shop", expectedResults: ["The shop is shown"], ...o });
+    it("its named account, or main when it needs the account or its plan types the account's sign-in; none otherwise", () => {
+        expect(scenarioAccountLane(plan({ role: "Bob-Admin" }), "Bob-Admin", true)).toBe("role:bob_admin");
+        expect(scenarioAccountLane(plan({ requiresAuth: true }), undefined, true)).toBe("main");
+        // A sign-in or registration test: requiresAuth is false, but its plan names the account (as C1c's WEB-001/002/006/015 did).
+        expect(scenarioAccountLane(plan({ requiredData: ["{{credentials.username}}", "{{credentials.password}}"] }), undefined, true)).toBe("main");
+        expect(scenarioAccountLane(plan({ requiredData: ["Email: {{credentials.username}}"] }), undefined, true)).toBe("main");
+        expect(scenarioAccountLane(plan({ description: "Sign in as {{ credentials.username }} and open the cart" }), undefined, true)).toBe("main");
+        // Signed out, or with throwaway data of its own.
+        expect(scenarioAccountLane(plan({ requiredData: ["Email: qa+{{unique}}@example.com", "Password: Abc1234"] }), undefined, true)).toBeUndefined();
+        expect(scenarioAccountLane(plan({}), undefined, true)).toBeUndefined();
+        // The job did not sign in: nobody shares the account.
+        expect(scenarioAccountLane(plan({ requiresAuth: true }), undefined, false)).toBeUndefined();
     });
 });

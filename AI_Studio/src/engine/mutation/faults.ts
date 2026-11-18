@@ -21,6 +21,7 @@ import type { Step, TestSpec } from "../spec/schema.js";
 import type { RunEnv, ScriptInput, ScriptRun } from "../validation/runner.js";
 import { variantEligibility } from "../validation/variants.js";
 import { isSocketFault, socketFaults, socketFaultScript, type SocketFaultKind } from "../web/socket-faults.js";
+import { runInLanes, testAccountLane } from "../validation/lanes.js";
 
 export type FaultKind = "error" | "empty" | "changed" | "hidden" | SocketFaultKind;
 
@@ -207,8 +208,11 @@ export async function scoreTests(ctx: EngineContext, deps: FaultDeps, specs: Tes
         const input = faultScript(spec, deps.render, fault);
         return input ? [{ spec, fault, input }] : [];
     }));
+    // The replays of tests that sign in as one account never overlap, a test's own faults included (./validation/lanes.ts).
     const runs = jobs.length
-        ? await (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts: jobs.map((j) => j.input) }, { run: deps.env }, { workers: Math.max(1, deps.workers), signal: ctx.signal })
+        ? await runInLanes(jobs, jobs.map((j) => testAccountLane({ spec: j.spec })), deps.workers, (batch) =>
+              (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts: batch.map((j) => j.input) }, { run: deps.env }, { workers: Math.max(1, deps.workers), signal: ctx.signal }),
+          )
         : [];
     const byId = new Map(runs.map((r) => [r.testId, r]));
     const out = new Map<string, Strength | undefined>();
