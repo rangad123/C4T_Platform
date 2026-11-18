@@ -54,6 +54,30 @@ export function exploreProblem(agent: { name: string; capabilities: { explore?: 
     return modeNeedsUpdate(agent.name, mode);
 }
 
+/**
+ * P3-21: exploring by objectives (GenerationRequest.objectives, Phase 3). It is part of an exploration of an AI agent project; every level is
+ * Thorough or above (engine/levels.ts), so the project's testing modes decide it. Data-changing operators need the server setting
+ * EXPLORE_DATA_OPERATORS=true as well (Decision 6; the engine also needs the run's data-changes setting and reads no environment itself).
+ */
+export function objectivesOf(project: { testingModes: readonly string[] }, dataOperatorsAllowed: boolean): { objectives?: true; dataOperators?: true } {
+    if (!project.testingModes.includes("agent")) return {};
+    return { objectives: true, ...(dataOperatorsAllowed ? { dataOperators: true } : {}) };
+}
+
+/** The one sentence a job gets when its runner program is older than exploring by objectives (it explores as before). */
+export const objectivesNeedRunner = (runner: string): string => `Your runner “${runner}” is too old to explore by objectives, so this exploration runs as before; download the runner again to explore by objectives.`;
+
+/** Why this runner cannot explore by objectives (it does not list "objectives" in `exploreModes`), or undefined. */
+export function objectivesProblem(agent: { name: string; capabilities: { exploreModes?: string[] } }): string | undefined {
+    return agent.capabilities.exploreModes?.includes("objectives") ? undefined : objectivesNeedRunner(agent.name);
+}
+
+/** The request without exploring by objectives: exactly what an exploration asked before Phase 3. */
+export function withoutObjectives<T extends object>(request: T): T {
+    const { objectives: _o, dataOperators: _d, ...rest } = request as T & { objectives?: unknown; dataOperators?: unknown };
+    return rest as T;
+}
+
 /** An exploration job's mode on a runner: "mobile" when its targets include a phone app (the request's own targets), else the job's. */
 export const exploreModeOfRequest = (mode: ExploreMode | undefined, request: { targets?: unknown }): ExploreMode =>
     (mode ?? "generate") === "generate" && Array.isArray(request.targets) && request.targets.includes("mobile") ? "mobile" : (mode ?? "generate");
