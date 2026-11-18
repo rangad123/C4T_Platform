@@ -85,7 +85,7 @@ const continueBtn = click({ by: "role", role: "button", value: "Continue" });
 async function run(steps: Call[][]) {
     site.posts = 0;
     const m = model(steps);
-    const r = await exploreShop(site, m.llm, { objectives: true });
+    const r = await exploreShop(site, m.llm, { objectives: true, allowMutatingApiTests: true });
     const ex = r.summary.exploration!;
     const rule = ex.outcomes.find((o) => o.objectiveId.endsWith(":as_stated"))!;
     const log = ex.actionLog.filter((a) => a.objectiveId === rule.objectiveId);

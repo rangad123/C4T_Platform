@@ -71,7 +71,7 @@ describe("a platform that refuses a finding's screenshot", () => {
         const platform = olderPlatform();
         const sink = remoteGenerationSink({ post: platform.post, retryMs: 0 });
         const { llm } = scriptedShopModel(() => COMPLIANT);
-        const { summary } = await exploreShop(site, llm, { objectives: true }, { sink });
+        const { summary } = await exploreShop(site, llm, { objectives: true, allowMutatingApiTests: true }, { sink });
         await sink.flush();
 
         expect(summary.errors).toEqual([]);

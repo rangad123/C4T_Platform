@@ -67,7 +67,7 @@ describe("a platform that refuses a save while a runner explores", () => {
         const { llm } = scriptedShopModel(() => COMPLIANT);
         const started = Date.now();
         const job = (async () => {
-            await exploreShop(site, llm, { objectives: true }, { sink });
+            await exploreShop(site, llm, { objectives: true, allowMutatingApiTests: true }, { sink });
             await sink.flush();
         })();
         await expect(job).rejects.toThrow(REFUSAL);
