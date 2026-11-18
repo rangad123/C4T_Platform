@@ -4,7 +4,9 @@
  *   - the loop is asked before each action runs: a refused click never reaches the application, so the POSTs it received equal the
  *     clicks the log calls performed, also when one model reply holds several clicks (each is checked in order);
  *   - a repeat is the same element, however its locator is spelled, and reads in between (waits) do not make it look new;
- *   - the test writer performs nothing once its run has ended, its step budget holds across passes, and replays ask first (M-5).
+ *   - a repeat stays a repeat whatever was typed before it and when the page adds a sibling before the element each time (N-3);
+ *   - the test writer performs nothing once its run has ended, its step budget holds across passes, and replays ask first (M-5);
+ *   - the opening page load of each pass is asked of the gate and counted: refused, nothing reaches the application (N-8).
  * The page also tells the AI to keep clicking Continue; a scripted model double obeys it. Real model calls are never made.
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/explore-bound-at-app.test.ts
  */
@@ -22,19 +24,26 @@ import { authorWebSpec, pruneByReplay, type ActionGate } from "../src/engine/web
 import { exploreShop, type ShopSite } from "./fixtures/objectives-shop.js";
 
 const PORT = 9874;
-let site: ShopSite & { posts: number };
+let site: ShopSite & { posts: number; postsTo: Record<string, number>; gets: Record<string, number> };
 
 const page = (body: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Cart</title></head><body><main>${body}</main></body></html>`;
 
 beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
-    site = { server: undefined as unknown as http.Server, url: `http://127.0.0.1:${PORT}`, fixed: false, injection: true, posts: 0 };
+    site = { server: undefined as unknown as http.Server, url: `http://127.0.0.1:${PORT}`, fixed: false, injection: true, posts: 0, postsTo: {}, gets: {} };
     site.server = http.createServer((req, res) => {
         const path = (req.url ?? "/").split("?")[0];
         if (req.method === "POST") site.posts += 1;
+        const bag = req.method === "POST" ? site.postsTo : site.gets;
+        bag[path!] = (bag[path!] ?? 0) + 1;
         req.resume();
         req.on("end", () => {
             res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+            if (path === "/grow") {
+                // One <section> per earlier submission, before the form's own section: the button's position among its siblings shifts after every POST.
+                const before = Array.from({ length: site.postsTo["/grow"] ?? 0 }, (_, i) => `<section><p>Submitted ${i + 1}</p></section>`).join("");
+                return res.end(page(`<h1>Grow</h1>${before}<section><form method="post" action="/grow"><button type="submit">Continue</button></form></section>`));
+            }
             res.end(
                 path === "/order"
                     ? page(`<h1>Order</h1><form method="post" action="/order" novalidate><label>Quantity <input name="qty" type="number" min="1" max="10"></label><button type="submit">Order</button></form>`)
@@ -84,6 +93,8 @@ const continueBtn = click({ by: "role", role: "button", value: "Continue" });
 
 async function run(steps: Call[][]) {
     site.posts = 0;
+    site.postsTo = {};
+    site.gets = {};
     const m = model(steps);
     const r = await exploreShop(site, m.llm, { objectives: true, allowMutatingApiTests: true });
     const ex = r.summary.exploration!;
@@ -133,6 +144,31 @@ describe("the exploration's bound at the application", () => {
         say("D3b", r);
         expect(r.rule.status).toBe("stopped");
         expect(r.posts).toBe(2);
+        expect(r.posts).toBe(clicks(r));
+    }, 300_000);
+
+    // The loop's repeat limit: the same action on the same state once, plus the double submit (D1). So at most 2 POSTs.
+    const REPEAT_LIMIT_POSTS = 2;
+
+    it("D4: twenty times a different quantity then the same Order click, in one reply: what was typed does not make the click new (N-3)", async () => {
+        const order = click({ by: "role", role: "button", value: "Order" });
+        const pairs = Array.from({ length: 20 }, (_, i) => [{ tool: "fill", input: { target: { by: "label", value: "Quantity" }, value: String(i + 1) } }, order]).flat();
+        const r = await run([[{ tool: "navigate", input: { url: "/order" } }], pairs]);
+        say("D4", r);
+        expect(r.rule.status).toBe("stopped");
+        expect(r.rule.reason).toMatch(/^The same action on the same state was tried again/);
+        expect(site.postsTo["/order"] ?? 0).toBeLessThanOrEqual(REPEAT_LIMIT_POSTS);
+        expect(r.posts).toBe(clicks(r));
+        // No value typed is in the loop's log: neither in an action's key nor in a state.
+        for (const v of ["13", "17", "20"]) expect(JSON.stringify(r.log)).not.toContain(`"${v}"`);
+    }, 300_000);
+
+    it("D5: a page that adds a sibling before the button after each click: the same button is still a repeat (N-3)", async () => {
+        const r = await run([[{ tool: "navigate", input: { url: "/grow" } }], Array.from({ length: 12 }, () => continueBtn)]);
+        say("D5", r);
+        expect(r.rule.status).toBe("stopped");
+        expect(r.rule.reason).toMatch(/^The same action on the same state was tried again/);
+        expect(site.postsTo["/grow"] ?? 0).toBeLessThanOrEqual(REPEAT_LIMIT_POSTS);
         expect(r.posts).toBe(clicks(r));
     }, 300_000);
 });
@@ -185,6 +221,49 @@ describe("the test writer honours an ended run", () => {
         await authorWebSpec({ ctx: authorCtx([Array.from({ length: 8 }, () => continueBtn)], job.signal), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate }).catch(() => undefined);
         expect(asked).toBe(1);
         expect(site.posts).toBe(1);
+    }, 120_000);
+});
+
+describe("the opening page load of a pass (N-8)", () => {
+    let browser: Browser;
+    beforeAll(async () => {
+        browser = await launchChromium(true);
+    }, 60_000);
+    afterAll(async () => {
+        await browser?.close();
+    });
+
+    it("is asked of the gate first: refused, the pass sends no request to the application", async () => {
+        site.gets = {};
+        site.posts = 0;
+        const asked: Array<{ tool: string; args: unknown }> = [];
+        const gate = { ...allow, before: (a: { tool: string; args: unknown }) => (asked.push(a), { allowed: false as const, reason: "The session's limit of actions was reached." }) } as unknown as ActionGate;
+        const out = await authorWebSpec({ ctx: authorCtx([[continueBtn]]), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate });
+        expect(out).toMatchObject({ status: "blocked", steps: [], explanation: expect.stringContaining("The session's limit of actions was reached.") });
+        expect(asked).toHaveLength(1);
+        expect(asked[0]).toMatchObject({ tool: "navigate", args: { url: "/cart" } });
+        expect(site.gets).toEqual({});
+        expect(site.posts).toBe(0);
+    }, 120_000);
+
+    it("is not loaded once the run has ended", async () => {
+        site.gets = {};
+        const ended = new AbortController();
+        ended.abort();
+        let asked = 0;
+        const gate = { ...allow, before: () => (asked++, { allowed: true as const }) } as unknown as ActionGate;
+        const out = await authorWebSpec({ ctx: authorCtx([[continueBtn]], ended.signal), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate });
+        expect(out.status).toBe("blocked");
+        expect(site.gets).toEqual({});
+    }, 120_000);
+
+    it("allowed, it is counted like any action: asked once, told after, then it reaches the application", async () => {
+        site.gets = {};
+        const told: string[] = [];
+        const gate = { ...allow, before: (a: { tool: string }) => (told.push(`before ${a.tool}`), { allowed: true as const }), after: (a: { tool: string; ok: boolean }) => told.push(`after ${a.tool} ${a.ok}`) } as unknown as ActionGate;
+        await authorWebSpec({ ctx: authorCtx([]), browser, baseUrl: site.url, model: emptyModel(), scenario: cartScenario(), gate }).catch(() => undefined);
+        expect(told.slice(0, 2)).toEqual(["before navigate", "after navigate true"]);
+        expect(site.gets["/cart"]).toBe(1);
     }, 120_000);
 });
 
