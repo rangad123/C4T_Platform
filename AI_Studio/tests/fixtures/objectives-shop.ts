@@ -149,7 +149,7 @@ export interface SavedTest {
  * One exploration of the shop through `runGeneration` with an in-memory sink: the web target only, every deterministic check and the
  * planned test cases off, so what is created comes from the objective stage alone.
  */
-export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial<import("../../src/engine/orchestrator.js").GenerationRequest>) {
+export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial<import("../../src/engine/orchestrator.js").GenerationRequest>, o: { /** Saves through this sink instead (e.g. a runner's remote sink); `tests` and `images` stay empty. */ sink?: import("../../src/engine/orchestrator.js").GenerationSink } = {}) {
     const { loadConfig } = await import("../../src/config.js");
     const { runGeneration } = await import("../../src/engine/orchestrator.js");
     const events: Array<{ kind: string; message: string; data?: Record<string, unknown> }> = [];
@@ -190,7 +190,7 @@ export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial
             appKnowledge: shopKnowledge(),
             ...extra,
         },
-        sink,
+        o.sink ?? sink,
     );
     return { summary, events, tests, images };
 }

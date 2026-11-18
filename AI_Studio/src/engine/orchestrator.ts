@@ -202,9 +202,10 @@ export interface GenerationSink {
     saveTextArtifact(kind: string, name: string, content: string): Promise<void>;
     /**
      * Store one picture of the job (a JPEG of at most FRAME_LIMITS.maxBytes, its secret fields already covered) and answer its artifact
-     * id: a candidate finding's screenshot, referenced by that id. Hosts without persistence may leave it out (no pictures are taken).
+     * id, or undefined when it was not stored (a platform that refused it: the picture is simply left out, never the job's failure).
+     * A candidate finding's screenshot, referenced by that id. Hosts without persistence may leave it out (no pictures are taken).
      */
-    saveImageArtifact?(kind: "screenshot", name: string, jpeg: Uint8Array): Promise<string>;
+    saveImageArtifact?(kind: "screenshot", name: string, jpeg: Uint8Array): Promise<string | undefined>;
     /** Store (or clear) the locator-repair suggestion for a test that failed because an element was missing. Suggestions only; never applied by the engine. */
     saveHealing?(h: TestHandle, result: import("./healing/heal.js").HealResult): Promise<void>;
     /** Store the ledger of records the run's tests created and what became of each (test-data cleanup). */
