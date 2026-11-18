@@ -895,6 +895,13 @@ export const ResultRequest = z.object({
             errors: z.array(z.string().max(2000)).max(200),
             model: z.unknown().optional(),
             plan: z.unknown().optional(),
+            /**
+             * Phase 3 (row 184, additive, optional): how an exploration by objectives went (the engine's `summary.exploration`). Checked on
+             * arrival against ExplorationRecord (exploration.ts: its shape, the action log's 2,000 rows, EXPLORATION_MAX_BYTES); a record
+             * that fails is dropped with a warning and the run carries on. An older runner sends none. An older platform strips it: the
+             * objects of this result are not strict, so an unknown field is dropped, never refused.
+             */
+            exploration: z.unknown().optional(),
         })
         .optional(),
 });
