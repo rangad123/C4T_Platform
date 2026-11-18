@@ -28,6 +28,7 @@
  *   E8 cost             the trial's AI calls and estimated cost (always), the objective sessions' own calls (null without the record);
  *                       across trials, the candidate median against the baseline median (report.ts)
  */
+import { bindLabels, type LabelSet } from "./labels.js";
 import type { BenchFinding, Benchmark, ExplorationSession, ReplayVerdict } from "./schema.js";
 
 export type ObservedKind = "captured" | "observed_only" | "false_positive" | "unverified";
@@ -248,11 +249,13 @@ export function observedOf(b: Benchmark): Observed {
 }
 
 /**
- * A person's labels (`{ "<app>/<testKey>": "<defect id>" | "false_positive" }`, the bench `--labels` format) applied as the benchmark applies
- * them: only to findings the replays could not verify, and only a defect seeded in that app or false_positive. Returns a copy.
+ * A person's labels (labels.ts: bound to the trial they were made for) applied as the benchmark applies them: only labels made for this
+ * result's projects, only to findings the replays could not verify, and only a defect seeded in that app or false_positive. Returns a copy,
+ * and notes for the report (labels for another trial ignored).
  */
-export function withLabels(b: Benchmark, labels: Record<string, string>): Benchmark {
-    return {
+export function withLabels(b: Benchmark, set: LabelSet): { benchmark: Benchmark; notes: string[] } {
+    const { labels, notes } = bindLabels(set, b.apps);
+    const benchmark = {
         ...b,
         apps: b.apps.map((a) => ({
             ...a,
@@ -262,6 +265,7 @@ export function withLabels(b: Benchmark, labels: Record<string, string>): Benchm
             }),
         })),
     };
+    return { benchmark, notes };
 }
 
 /** Why a result cannot stand for one whole trial (an app that did not finish), or undefined. */

@@ -23,6 +23,7 @@ import { CATALOGUE_FILE, loadCatalogue } from "./catalogue.js";
 import { plannedTestsLeft, runBenchmark, runUsageSoFar } from "./controller.js";
 import { calibrationOf, estimate, estimateLines, loadPrices, tokenLimitsLeft } from "./cost.js";
 import { engineVersion, promptFingerprints, writeBaseline } from "./record.js";
+import { bindLabels, migrateLabels, parseLabels } from "./labels.js";
 import { observedOf, trialProblem, withLabels } from "./observed.js";
 import { benchMarkdown, observedMarkdown } from "./report.js";
 import { BenchmarkSchema, type Benchmark, type BenchAppResult, type BenchConfig, type PriceRow } from "./schema.js";
@@ -296,7 +297,13 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             if (unknown.length) throw new Error(`The catalogue has no defect ${unknown.join(", ")}`);
         }
         if (args.prices) prices = loadPrices(args.prices);
-        if (args.labels) labels = JSON.parse(fs.readFileSync(args.labels, "utf8")) as Record<string, string>;
+        if (args.labels) {
+            // Bound to their trial (labels.ts): only a resumed app's project can match; a new run's tests are a new trial.
+            const bound = bindLabels(parseLabels(JSON.parse(fs.readFileSync(args.labels, "utf8")), args.labels), state?.apps ?? []);
+            for (const n of bound.notes) log(`Labels: ${n}`);
+            if (!state && !Object.keys(bound.labels).length) log("Labels: a new run is a new trial, so no label in the file can belong to it; all are ignored.");
+            labels = bound.labels;
+        }
         if (args.baseline && fs.existsSync(path.join(args.out, "baseline.json"))) throw new Error(`A baseline is already recorded in ${args.out}; it is never overwritten. Use another --out folder.`);
         if (!args.resume && fs.existsSync(stateFile(args.out))) throw new Error(`A stopped run is saved in ${args.out}: continue it with --resume, or use another --out folder.`);
         const other = otherKindIn(args.out, args.mode, args.login);
@@ -538,9 +545,13 @@ export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, dep
 }
 
 export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --observed <results folder or file> [<more>...] [--labels <file>]
+       node scripts/eval.mjs bench-report --migrate-labels <old labels file> --result <results file> --to <new file>
   Prints the "Observed vs captured" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
   Read-only: no platform, no app, no AI; nothing is written.
-  --labels <file>   { "<app>/<testKey>": "<defect id>" | "false_positive" } for findings the replays could not verify`;
+  --labels <file>   labels bound to their trial (src/eval/bench/labels.ts, format 2) for findings the replays could not verify;
+                    a label made for another trial is ignored and the report says so
+  --migrate-labels  binds an old labels file ({ "<app>/<testKey>": label }) to the result it was made for and writes a new file
+                    (never over an existing one); every label and note is kept as it was, the old file is left untouched`;
 
 /** The one finished result a trial stands for: the file itself, or the single non-partial `*-benchmark-*.json` in the folder. */
 function trialFile(target: string): string {
@@ -557,11 +568,17 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
     const log = deps.log ?? ((s: string) => console.log(s));
     const targets: string[] = [];
     let labelsFile: string | undefined;
+    let migrate: string | undefined;
+    let result: string | undefined;
+    let to: string | undefined;
     let observed = false;
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         if (k === "--observed") observed = true;
         else if (k === "--labels") labelsFile = argv[++i];
+        else if (k === "--migrate-labels") migrate = argv[++i];
+        else if (k === "--result") result = argv[++i];
+        else if (k === "--to") to = argv[++i];
         else if (k === "--help" || k === "-h") {
             log(BENCH_REPORT_USAGE);
             return 0;
@@ -570,13 +587,28 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
             return 2;
         } else targets.push(path.resolve(k));
     }
+    if (migrate) {
+        if (!result || !to) {
+            log(`--migrate-labels needs --result and --to.\n${BENCH_REPORT_USAGE}`);
+            return 2;
+        }
+        try {
+            const set = migrateLabels(JSON.parse(fs.readFileSync(migrate, "utf8")), JSON.parse(fs.readFileSync(result, "utf8")), result, path.basename(migrate));
+            fs.writeFileSync(to, `${JSON.stringify(set, null, 2)}\n`, { flag: "wx" });
+            log(`Wrote ${to}: ${Object.keys(set.trials[0]!.labels).length} labels bound to ${JSON.stringify(set.trials[0]!.projects)} (${result}).`);
+            return 0;
+        } catch (e) {
+            log(e instanceof Error ? e.message : String(e));
+            return 2;
+        }
+    }
     if (!observed || !targets.length) {
         log(BENCH_REPORT_USAGE);
         return 2;
     }
     try {
-        const labels = labelsFile ? (JSON.parse(fs.readFileSync(labelsFile, "utf8")) as Record<string, string>) : undefined;
-        const trials: Array<{ name: string; observed: ReturnType<typeof observedOf> }> = [];
+        const labels = labelsFile ? parseLabels(JSON.parse(fs.readFileSync(labelsFile, "utf8")), labelsFile) : undefined;
+        const trials: Array<{ name: string; observed: ReturnType<typeof observedOf>; notes?: string[] }> = [];
         for (const t of targets) {
             const file = trialFile(t);
             const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { benchmark?: unknown };
@@ -584,8 +616,9 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
             if (!parsed.success) throw new Error(`${file} is not a benchmark result: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
             const problem = trialProblem(parsed.data);
             if (problem) throw new Error(`${file}: ${problem}`);
-            const b: Benchmark = labels ? withLabels(parsed.data, labels) : parsed.data;
-            trials.push({ name: path.relative(process.cwd(), file) || file, observed: observedOf(b) });
+            const l = labels ? withLabels(parsed.data, labels) : undefined;
+            const b: Benchmark = l ? l.benchmark : parsed.data;
+            trials.push({ name: path.relative(process.cwd(), file) || file, observed: observedOf(b), ...(l?.notes.length ? { notes: l.notes } : {}) });
         }
         log(observedMarkdown(trials));
         return 0;
