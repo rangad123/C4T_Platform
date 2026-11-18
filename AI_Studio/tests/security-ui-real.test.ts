@@ -57,12 +57,13 @@ afterAll(async () => {
 
 describe("Security Assessment through the screens, against the real platform and the fixture application", () => {
     it("project, application, authorization, a real passive assessment, findings, a state change and the report", async () => {
-        await page.goto(`${BASE}/#/create`);
+        // Create a project asks no testing type any more: the Security page's New security project link (?type=security) makes one.
+        await page.goto(`${BASE}/#/create?type=security`);
         const sidebar = page.getByRole("complementary", { name: "Main navigation" });
         // Round 37: Security assessment is no longer in the left panel; the module is on, so a project can still include it.
-        await pwExpect(page.getByTestId("testing-type")).toBeVisible();
+        await pwExpect(page.getByLabel("Project name", { exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("testing-type")).toHaveCount(0);
         expect(await sidebar.getByRole("link", { name: "Security assessment", exact: true }).count()).toBe(0);
-        await page.getByTestId("testing-type").getByRole("radio", { name: /Security assessment/ }).check();
         await page.getByLabel("Project name", { exact: true }).fill("Fixture client");
         await page.getByRole("button", { name: "Create project", exact: true }).click();
 
