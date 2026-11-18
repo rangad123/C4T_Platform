@@ -92,7 +92,17 @@ export class RepoSink implements GenerationSink {
 
     saveMemory: NonNullable<GenerationSink["saveMemory"]> = (knowledge, changes) => this.writes.run(() => saveMemory(this.repo.db, { projectId: this.job.projectId, jobId: this.job.id, knowledge, changes }));
 
-    nextTestKey: GenerationSink["nextTestKey"] = (prefix) => this.writes.run(() => this.repo.db.tx(() => this.repo.nextTestKey(this.job.projectId, prefix)));
+    /** The highest number this job has handed out per prefix: ideas written side by side ask before either test is saved. */
+    private readonly handedKeys = new Map<string, number>();
+    nextTestKey: GenerationSink["nextTestKey"] = (prefix) =>
+        this.writes.run(() =>
+            this.repo.db.tx(() => {
+                const stored = Number(this.repo.nextTestKey(this.job.projectId, prefix).slice(prefix.length + 1));
+                const n = Math.max(stored, (this.handedKeys.get(prefix) ?? 0) + 1);
+                this.handedKeys.set(prefix, n);
+                return `${prefix}-${String(n).padStart(3, "0")}`;
+            }),
+        );
 
     /**
      * What a test's provenance says the model was: set when the job runs on a person's own key, whose model nobody else may learn (the same
