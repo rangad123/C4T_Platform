@@ -44,7 +44,7 @@ export interface FindingsAnswer {
 }
 
 export const CONFIDENCE_WORD: Record<Confidence, string> = { high: "High confidence", medium: "Medium confidence", low: "Low confidence" };
-export const CAPTURE_WORD: Record<CaptureState, string> = { captured: "Kept as a failing check", observed_only: "Seen only, not kept as a check" };
+export const CAPTURE_WORD: Record<CaptureState, string> = { captured: "Captured: kept as a failing check", observed_only: "Seen, not kept as a check" };
 export const NOT_SETTLED = "Needs a person to check";
 
 const SOURCED = "The expected result has a stated source";
