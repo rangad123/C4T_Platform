@@ -24,6 +24,7 @@ import { NotesCard } from "../notes/NotesCard";
 import { MembersPanel } from "../workspace/MembersPanel";
 import { ReviewPolicyCard } from "../review/ReviewCards";
 import { ProjectGeneral } from "../workspace/ProjectGeneral";
+import { ProjectAiModelSetting } from "../workspace/ProjectAiModel";
 import { CleanupCard } from "../cleanup/CleanupCard";
 import { TestDataPanel } from "../environments/TestDataPanel";
 import { SignInTab } from "../identity/SignInTab";
@@ -92,6 +93,8 @@ function GeneralSetting({ id }: { id: string }) {
             <TestingTypeSetting id={id} />
             {/* How much later explorations, "Explore again" and schedules explore (engine/levels.ts). */}
             <ExploreLevelSetting id={id} />
+            {/* Which AI model the project's AI work uses, from the asking person's own AI keys (features/workspace/ProjectAiModel.tsx). */}
+            <ProjectAiModelSetting id={id} />
             {/* Hints people write for the AI, by page; "never ..." notes are rules (features/notes/NotesCard.tsx). */}
             <NotesCard projectId={id} />
             <Part id="frameworks">
@@ -116,7 +119,7 @@ export function SetupPage({ id }: { id: string }) {
     // Mobile app only for a project that tests a phone app (or already has one saved); shown while the project loads.
     const phone = !project.data || projectShape(project.data).platforms.some((p) => p !== "web") || !!project.data.mobile;
     const sections: HubSection[] = [
-        { key: "general", label: "General", hint: "The project, its platform and testing mode, frameworks, storage and backup", render: () => <GeneralSetting id={id} /> },
+        { key: "general", label: "General", hint: "The project, its platform and testing mode, its AI model, frameworks, storage and backup", render: () => <GeneralSetting id={id} /> },
         {
             key: "members",
             label: "Members",

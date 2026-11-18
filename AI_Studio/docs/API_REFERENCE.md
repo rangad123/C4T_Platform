@@ -9,6 +9,7 @@ This is the list of the platform's web interface (API) calls, for people who wri
 | GET · PUT | `/me/ai` · `/me/ai/chosen` | Your AI keys and the one your AI work uses ([ai-keys.md](features/ai-keys.md)) |
 | POST · PATCH · DELETE | `/me/ai/keys` (`/:keyId`, `/:keyId/test`) | Your own AI keys; Test this key |
 | GET · POST · PATCH · DELETE | `/admin/ai-keys` (`/:keyId`, `/:keyId/test`, `/:keyId/assignees`) | Organisational AI keys and who they are assigned to (Crowd4Test admins) |
+| GET · PUT | `/projects/:id/ai-model` | The project's AI model, chosen from the models of your own AI keys; empty is each person's chosen key ([ai-keys.md](features/ai-keys.md)) |
 | GET | `/test-generation/:jobId` | Job status, progress, counts |
 | GET | `/test-generation/:jobId/events` | Activity log |
 | DELETE | `/test-generation/:jobId` | Cancel a job |

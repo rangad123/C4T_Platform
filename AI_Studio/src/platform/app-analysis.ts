@@ -685,7 +685,7 @@ function track(db: object, projectId: string, maxMinutes: number, work: (signal:
 export async function startAnalysis(p: Pick<Platform, "db" | "sql" | "repo" | "config" | "store">, projectId: string, ownerId: string | null, o: { now?: () => string; fetchText?: (url: string, signal?: AbortSignal) => Promise<string> } = {}): Promise<{ since: string; done: Promise<AnalysisResult | undefined> }> {
     const now = o.now ?? (() => new Date().toISOString());
     if (of(running, p.db).has(projectId)) throw new HttpError(409, ANALYSIS_RUNNING);
-    const { llm, billing, blocked } = await personLlm({ sql: p.sql, config: p.config }, ownerId);
+    const { llm, billing, blocked } = await personLlm({ sql: p.sql, config: p.config }, ownerId, projectId);
     const usage = usageStoreFor(p.db, p.config);
     const skip = aiSkipReason(usage, projectId);
     const usable = llm.modelName !== "unavailable" && !blocked && !skip;

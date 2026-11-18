@@ -42,7 +42,7 @@ const NO_KEYS_FOR_THIS = "Sign in with your own account to add and use AI keys."
 const NOT_STAFF = "Organisational keys can be assigned only to Crowd4Test admins and sub-admins.";
 const NEW_KEY_NEEDED = "Enter the key again when you change the provider or the address: a stored key is only sent where it was entered for.";
 
-const PROVIDER_WORDS: Record<LlmProviderId, string> = { anthropic: "Anthropic", openai: "OpenAI", google: "Google", "openai-compatible": "Custom endpoint" };
+export const PROVIDER_WORDS: Record<LlmProviderId, string> = { anthropic: "Anthropic", openai: "OpenAI", google: "Google", "openai-compatible": "Custom endpoint" };
 
 const Label = z.string().trim().min(1, "Give the configuration a name.").max(80, "A name is at most 80 characters.");
 const Provider = z.enum(LLM_PROVIDERS as unknown as [LlmProviderId, ...LlmProviderId[]], { message: "Choose a provider." });

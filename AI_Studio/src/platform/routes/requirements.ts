@@ -159,7 +159,7 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
         const pid = projectId(req);
         const text = await sourceText(req.body);
         // The asking person's chosen AI key and who pays for it (ai-config.ts): a signed-in person never reaches the server's key.
-        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
+        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         const skip = aiSkipReason(usage, pid);
@@ -196,7 +196,7 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
         const room = MAX_CASES - cases.countCases(pid);
         if (room <= 0) throw new HttpError(409, `This project already has ${MAX_CASES} test cases, the most it can have. Delete some before writing more.`);
         // The asking person's chosen AI key and who pays for it (ai-config.ts), as the import refinement does.
-        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
+        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_CASES, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         if (aiSkipReason(usage, pid)) throw new HttpError(409, "The AI token limit was reached, so the AI cannot write test cases now. You can still add test cases by hand.");

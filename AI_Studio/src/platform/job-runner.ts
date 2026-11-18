@@ -156,8 +156,9 @@ export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeF
  */
 export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEvent) => void): Promise<{ ai: WorkAi; meter: JobMeter | null; rawLlm: LlmClient; llm: LlmClient }> {
     const { repo, config } = deps;
-    // Which AI this job uses and who pays: its starter's chosen key (a schedule's or trigger's maker's), read once, here (ai-config.ts).
-    const resolved = await resolveAiFor({ sql: repo.db.sql, config }, aiOwnerOfJob(job.options));
+    // Which AI this job uses and who pays: the project's AI model when its starter (a schedule's or trigger's maker) may use it, else their
+    // chosen key, read once, here (ai-config.ts).
+    const resolved = await resolveAiFor({ sql: repo.db.sql, config }, aiOwnerOfJob(job.options), job.projectId);
     // A job is read by everyone on its project: a blocked job says so in words that name no key and no person.
     const ai: WorkAi = resolved.blocked ? { ...resolved, blocked: jobSentenceOf(resolved.blocked) } : resolved;
     // A client per job so its token usage is this job's alone (the shared client's counters span jobs).
@@ -328,6 +329,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             kind: "job_started",
             message: o.mode === "agent" ? `Agent run started for ${app.url}` : o.mode === "plain" ? `Building a test from your description for ${app.url}` : o.mode === "environment" ? `Run against the environment “${o.environment}” started: ${o.testIds?.length ?? 0} test(s)` : o.mode === "variants" ? `Browser and screen-size check started for ${app.url}: ${o.testIds?.length ?? 0} test(s) on ${(o.variants ?? []).join(", ")}` : validateOnly ? `Validation job started (attempt ${job.attempts}) for ${app.url}: ${o.testIds?.length ?? 0} test(s)` : `Job started (attempt ${job.attempts}) for ${app.url}`,
         });
+        // The project's AI model is not one this job's person may use: it runs on their default AI, and says so (ai-config.ts).
+        if (ai.note) ctx.emit({ stage: "orchestration", kind: "ai_model_fallback", level: "warn", message: ai.note });
         // Where the project's phone tests run (a device farm, several phones at once): before the framework settings so their time limits still apply. Defaults: nothing changes.
         applyDeviceFarm(ctx, repo, config, job);
         // The project's framework settings (Runners, Frameworks): time limits, workers, headed on an agent, switched-off frameworks. Nothing changes while they are the defaults.

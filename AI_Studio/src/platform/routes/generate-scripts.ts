@@ -179,7 +179,7 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
     /** Android: the AI writes each case as a phone test without the app, saved as its draft (case-phone-script.ts). */
     async function writeScripts(req: FastifyRequest, pid: string, now: string[], byId: Map<string, ManualCase>, skipped: Array<{ caseId: string; reason: SkipReason; detail: string }>, target: Extract<Target, { form: "phone" }>) {
         // The project's AI and who pays for it (ai-config.ts), as the other AI routes do.
-        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()));
+        const { llm, billing, blocked } = await personLlm(p, aiOwnerOfActor(currentActor()), pid);
         if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL_FOR_SCRIPTS, { modelMissing: true });
         const usage = usageStoreFor(p.db, p.config);
         if (aiSkipReason(usage, pid)) throw new HttpError(409, "The AI token limit was reached, so the AI cannot write test scripts now. You can still write them by hand.");

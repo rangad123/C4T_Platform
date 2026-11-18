@@ -1,7 +1,7 @@
 # AI keys (round 57)
 
 An AI key here is a whole AI configuration: the provider, the model (and an optional fast model), the key itself, and an address for a
-custom endpoint. There are two kinds, and projects choose nothing.
+custom endpoint. There are two kinds. A project may name the AI model its work uses (below); it never holds a key.
 
 ## The two kinds
 
@@ -41,6 +41,19 @@ runner uses it too: the AI calls stay on the platform. A schedule's or a deploy 
 
 A job is read by everyone on its project, so its messages name no key and no person: "AI is not available for this work: the person who
 started it has no AI key. ..."
+
+## A project's AI model
+
+**Project Settings, General, AI model** names the provider and model a project's AI work uses. Empty (the default) means each person's
+chosen key. The list shows only the models of the keys the person looking may use: their personal keys and the organisational keys
+assigned to them. Saving a model they may not use is refused: "You cannot choose this AI model: none of the AI keys you may use, your own or
+assigned to you, uses it." Changing it needs "Change project settings" (`GET`/`PUT /api/projects/:id/ai-model`).
+
+The project stores the provider and the model name only (`projects.ai_provider`, `projects.ai_model`), never a key or a key's id. Each
+piece of AI work checks again for the person doing it (`resolveAiFor` in `src/platform/ai-config.ts`): when one of the keys they may use
+has that model (their chosen key first), that key is used and its owner pays as usual. When none has it (another person runs the work, a
+key was removed, an assignment was taken away), the work uses their chosen key and a job says so: "The project's AI model is not one the
+person who started this work may use, so this work uses their default AI instead." A key the person may not use is never used.
 
 ## Who pays
 

@@ -76,6 +76,8 @@ export interface WorkAi {
     blocked?: string;
     /** What is wrong with the key, for its owner (and the admins, for an organisational key). */
     problem?: string;
+    /** Said on the work when the project's AI model could not be used for this person and their default AI is used instead (PROJECT_MODEL_FALLBACK). */
+    note?: string;
 }
 
 export const secretBoxOf = (config: Pick<Config, "dataDir" | "SECRET_KEY">): SecretBox => new SecretBox(config.dataDir, config.SECRET_KEY);
@@ -137,9 +139,68 @@ export function serverHasKey(config: Config): boolean {
 }
 
 /**
- * The AI this person's work uses right now. `ownerId` is from aiOwnerOfActor / aiOwnerOfJob. Never throws.
+ * A project's AI model: the provider and model its AI work uses when the person doing it may use one (a provider and a model name, never a
+ * key). Empty: each person's default, their chosen key.
  */
-export async function resolveAiFor(d: AiDeps, ownerId: string | null): Promise<WorkAi> {
+export interface AiModelPick {
+    provider: string;
+    model: string;
+}
+
+/** Refused at save: the model is not one of the saving person's own. */
+export const PROJECT_MODEL_NOT_YOURS = "You cannot choose this AI model: none of the AI keys you may use, your own or assigned to you, uses it.";
+/** Said on a job (read by everyone on the project) when its person may not use the project's model: names no key and no person. */
+export const PROJECT_MODEL_FALLBACK = "The project's AI model is not one the person who started this work may use, so this work uses their default AI instead.";
+
+/** The keys this person may use now: their personal keys, then the organisational keys assigned to them while they may hold one. */
+export async function usableKeysOf(d: AiDeps, personId: string | null): Promise<AiConfiguration[]> {
+    if (!personId || personId === ACCESS_KEY_OWNER || !(await personActive(d.sql, personId))) return [];
+    const store = aiConfigStore(d);
+    const own = await store.personalOf(personId);
+    const org = (await mayHoldOrganisational(d, personId)) ? await store.assignedTo(personId) : [];
+    return [...own, ...org];
+}
+
+/** The models this person may pick for a project: one per provider and model among the keys they may use. */
+export async function modelChoicesOf(d: AiDeps, personId: string | null): Promise<AiModelPick[]> {
+    const seen = new Map<string, AiModelPick>();
+    for (const k of await usableKeysOf(d, personId)) seen.set(`${k.provider}\n${k.model}`, { provider: k.provider, model: k.model });
+    return [...seen.values()];
+}
+
+/** The project's saved AI model, or null (none, or no such project). */
+export async function projectModelOf(sql: Sql, projectId: string): Promise<AiModelPick | null> {
+    const row = await sql.get<{ ai_provider: string | null; ai_model: string | null }>("SELECT ai_provider, ai_model FROM projects WHERE id = ?", projectId);
+    return row?.ai_provider && row.ai_model ? { provider: row.ai_provider, model: row.ai_model } : null;
+}
+
+/**
+ * The AI this person's work uses right now. `ownerId` is from aiOwnerOfActor / aiOwnerOfJob. With `projectId`, the project's AI model when
+ * this person may use it, through one of their own keys (their chosen key first); else their default with `note` set. Never throws.
+ */
+export async function resolveAiFor(d: AiDeps, ownerId: string | null, projectId?: string | null): Promise<WorkAi> {
+    const base = await defaultAiFor(d, ownerId);
+    if (!projectId) return base;
+    try {
+        const pick = await projectModelOf(d.sql, projectId);
+        if (!pick) return base;
+        const store = aiConfigStore(d);
+        const matching = (await usableKeysOf(d, ownerId)).filter((k) => k.provider === pick.provider && k.model === pick.model);
+        const chosen = base.configuration?.id;
+        matching.sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
+        for (const k of matching) {
+            const u = await usable(store, k);
+            if ("key" in u) return { billing: billingOfKey(k), source: "configuration", configuration: k, key: u.key };
+        }
+    } catch {
+        // The project's model could not be read: the default, said below.
+    }
+    // A blocked default already says why no AI runs.
+    return base.source === "blocked" ? base : { ...base, note: PROJECT_MODEL_FALLBACK };
+}
+
+/** The person's default AI: their chosen key (or the server's own key for the open server and the shared access key). */
+async function defaultAiFor(d: AiDeps, ownerId: string | null): Promise<WorkAi> {
     if (!ownerId) return { billing: CROWD4TEST, source: "blocked", blocked: NO_PERSON };
     if (ownerId === ACCESS_KEY_OWNER) return { billing: SERVER_KEY, source: "server" };
     const blocked = (sentence: string, problem?: string): WorkAi => ({ billing: CROWD4TEST, source: "blocked", blocked: sentence, ...(problem ? { problem } : {}) });
@@ -295,10 +356,11 @@ export function configuredLlmForJob(deps: AiDeps & { db: Db; emit?: (e: EngineEv
 }
 
 /** The client for a model call outside a job (a route), for the person acting: with who pays, and the sentence when it cannot run. */
-export async function personLlm(p: AiDeps, ownerId: string | null): Promise<{ llm: LlmClient; billing: UsageBilling; blocked?: string }> {
-    const ai = await resolveAiFor(p, ownerId);
-    if (ai.source === "server") return { llm: createLlmClientOrUnavailable(p.config), billing: ai.billing };
-    return { llm: clientOfConfiguration(p, ai), billing: ai.billing, ...(ai.blocked ? { blocked: ai.blocked } : {}) };
+export async function personLlm(p: AiDeps, ownerId: string | null, projectId?: string | null): Promise<{ llm: LlmClient; billing: UsageBilling; blocked?: string; note?: string }> {
+    const ai = await resolveAiFor(p, ownerId, projectId);
+    const note = ai.note ? { note: ai.note } : {};
+    if (ai.source === "server") return { llm: createLlmClientOrUnavailable(p.config), billing: ai.billing, ...note };
+    return { llm: clientOfConfiguration(p, ai), billing: ai.billing, ...(ai.blocked ? { blocked: ai.blocked } : {}), ...note };
 }
 
 /**

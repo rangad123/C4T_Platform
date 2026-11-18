@@ -19,6 +19,7 @@ import { registerUserRoutes } from "./users.js";
 import { registerProjectAccessRoutes } from "./project-access.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerProjectSettingsRoutes } from "./project-settings.js";
+import { registerProjectAiModelRoutes } from "./project-ai-model.js";
 import { registerProjectFolderRoutes } from "./project-folders.js";
 import { registerLibraryRoutes } from "./libraries.js";
 import { registerLlmHealthRoutes } from "../llm-health-routes.js";
@@ -152,6 +153,7 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     // A project's people and Project Admins (routes/members.ts, round 25: ACCESS_MODEL.md).
     registerMemberRoutes(ctx);
     registerProjectSettingsRoutes(ctx);
+    registerProjectAiModelRoutes(ctx);
     registerProjectFolderRoutes(ctx);
     // Testing agents and the agents chosen for a project (routes/testing-agents.ts, round 37).
     registerTestingAgentRoutes(ctx);

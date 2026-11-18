@@ -181,6 +181,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/selection-preview/detected-changes": "read",
     "PUT /api/projects/:id/mobile-app": "ai_studio.project.settings",
     "PUT /api/projects/:id/explore-level": "ai_studio.project.settings",
+    // A project's AI model (routes/project-ai-model.ts): the choices are the asking person's own; changing it is a project setting.
+    "GET /api/projects/:id/ai-model": "read",
+    "PUT /api/projects/:id/ai-model": "ai_studio.project.settings",
     "POST /api/projects/:id/mobile-app/apk": "ai_studio.project.settings",
     // The app by platform (round 37, routes/project-app.ts): store links and an uploaded iPhone app.
     "GET /api/projects/:id/app-details": "read",
