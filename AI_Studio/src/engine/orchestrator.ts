@@ -1605,6 +1605,16 @@ const refOf = (t: string) => {
 };
 
 /**
+ * The address of a workflow step's page: the path the objective inputs carry for it, else the path of the page with that id, else the
+ * id itself when it is a path or a "page:<path>" id. Nothing when it names no address (a pursuit then starts elsewhere).
+ */
+function pageAddressOf(step: { page?: string; path?: string }, pages: ReadonlyArray<{ id: string; path: string }>): { page?: string } {
+    const id = step.page?.trim();
+    const path = step.path?.trim() || (id ? pages.find((p) => p.id === id)?.path : undefined) || (id?.startsWith("page:/") ? id.slice("page:".length) : id?.startsWith("/") ? id : undefined);
+    return path ? { page: path } : {};
+}
+
+/**
  * The objectives of a model version and their pursuits, without AI or a browser: objectives (explore/objectives.ts) from the objective
  * inputs, rules and workflows; each allowed operator as a scenario (explore/perturb.ts), its workflow steps or its field's input classes
  * from the same inputs. A pursuit's fingerprint is the objective's with the scenario (operator, cancel step), so the loop pursues each
@@ -1628,7 +1638,8 @@ export function objectivePursuits(
         if (o.kind === "workflow") {
             const wf = k.workflows.find((w) => normRef(w.id) === normRef(o.source.ref));
             const paged = inputs.workflowSteps.find((w) => normRef(w.workflowId) === normRef(o.source.ref))?.steps;
-            if (wf) options.workflow = { preconditions: wf.preconditions ?? [], steps: paged ?? wf.steps };
+            // Steps name pages by the model's id; the scenario's start and a direct URL need the page's address.
+            if (wf) options.workflow = { preconditions: wf.preconditions ?? [], steps: paged ? paged.map((s) => ({ order: s.order, action: s.action, ...pageAddressOf(s, inputs.pages) })) : wf.steps };
         }
         if (o.kind === "constraint") {
             const field = fields.get(o.source.ref);

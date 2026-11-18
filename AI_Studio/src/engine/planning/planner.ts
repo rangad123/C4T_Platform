@@ -75,7 +75,8 @@ export interface AppKnowledge {
 export interface ObjectiveInputs extends ObjectiveModel {
     pages: Array<{ id: string; path: string; forms: Array<{ name: string; fields: ObjectiveField[] }> }>;
     transitions: Array<{ entity: string; from: string; to: string; trigger: string; sourceType: IntelModel["transitions"][number]["sourceType"]; expectation: boolean; evidence: Array<{ ref: string }> }>;
-    workflowSteps: Array<{ workflowId: string; steps: Array<{ order: number; action: string; page?: string; endpoint?: string }> }>;
+    /** `page` is the model's page id (coverage reads it); `path` is that page's address, when the model has the page. */
+    workflowSteps: Array<{ workflowId: string; steps: Array<{ order: number; action: string; page?: string; path?: string; endpoint?: string }> }>;
     /** What the caps left out, and a sentence saying so. */
     truncated?: { pages: number; fields: number; note: string };
 }
@@ -121,9 +122,16 @@ export function objectiveInputsOf(model: Pick<IntelModel, "pages" | "transitions
     const pagesLeft = withForms.length - pages.length;
     for (const p of withForms.slice(L.pages)) for (const f of p.forms) fieldsLeft += f.fields.length;
     const transitions = model.transitions.map((t) => ({ entity: t.entity, from: t.from, to: t.to, trigger: t.trigger, sourceType: t.sourceType, expectation: t.expectation, evidence: t.evidence.slice(0, L.evidencePerTransition).map((e) => ({ ref: e.ref })) }));
+    // A step names its page by the model's id ("page:/cart"); a pursuit starts at an address, so the step carries the page's path too.
+    const pathOf = new Map(model.pages.map((p) => [p.id, p.path]));
     const workflowSteps = workflows.map((w) => ({
         workflowId: w.id,
-        steps: [...w.steps].sort((a, b) => a.order - b.order || byKey(a.action, b.action)).map((s) => ({ order: s.order, action: s.action, ...(s.page ? { page: s.page } : {}), ...(s.endpoint ? { endpoint: s.endpoint } : {}) })),
+        steps: [...w.steps]
+            .sort((a, b) => a.order - b.order || byKey(a.action, b.action))
+            .map((s) => {
+                const path = s.page ? pathOf.get(s.page) : undefined;
+                return { order: s.order, action: s.action, ...(s.page ? { page: s.page } : {}), ...(path ? { path } : {}), ...(s.endpoint ? { endpoint: s.endpoint } : {}) };
+            }),
     }));
     const out: ObjectiveInputs = { pages, transitions, workflowSteps };
     if (pagesLeft || fieldsLeft)
