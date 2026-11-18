@@ -1059,8 +1059,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         const stop = loop.check();
                         if (stop) throw new ExplorationStopped(`The session stopped (${stop}).`);
                         if (loop.signal.aborted) throw new ExplorationStopped("The exploration ended this pursuit.");
-                        if (Date.now() - startedAt >= p.objective.budget.minutes * 60_000) throw new ExplorationStopped(`The objective's time limit of ${p.objective.budget.minutes} minutes was reached.`);
-                        if (tokensNow() - tokensAt >= p.objective.budget.tokens) throw new ExplorationStopped(`The objective's limit of ${p.objective.budget.tokens} AI tokens was reached.`);
+                        if (Date.now() - startedAt >= p.objective.budget.minutes * 60_000) throw new ObjectiveLimitReached(`The objective's time limit of ${p.objective.budget.minutes} minutes was reached.`);
+                        if (tokensNow() - tokensAt >= p.objective.budget.tokens) throw new ObjectiveLimitReached(`The objective's limit of ${p.objective.budget.tokens} AI tokens was reached.`);
                         calls.n += 1;
                     };
                     const signal = ctx.signal ? AbortSignal.any([ctx.signal, loop.signal]) : loop.signal;
@@ -1104,7 +1104,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         const msg = err instanceof Error ? err.message : String(err);
                         await sink.finishAgentRun(runId, "error", msg);
                         // Ended by the loop or by the objective's own limits: an ended pursuit, not a broken environment.
-                        if (loop.signal.aborted || err instanceof ExplorationStopped || (err instanceof Error && err.cause instanceof ExplorationStopped)) return { status: "completed", result: { ended: err instanceof ExplorationStopped ? msg : "The exploration ended this pursuit." } };
+                        const ended = endedPursuit(err, loop.signal.aborted);
+                        if (ended) return ended;
                         if (isBudgetExceeded(err) && !summary.errors.includes(msg)) summary.errors.push(msg);
                         return { status: "environment_failure", reason: msg };
                     }
@@ -1676,6 +1677,26 @@ export function sessionBudgets(b: Omit<ExplorationBudgets, "perObjective">, purs
 /** A model call refused because the session or the objective has spent its budget. */
 export class ExplorationStopped extends Error {
     override name = "ExplorationStopped";
+}
+
+/** The pursuit's own time or token limit was reached (not the session's): the objective is not finished. */
+export class ObjectiveLimitReached extends ExplorationStopped {
+    override name = "ObjectiveLimitReached";
+}
+
+/**
+ * The pursuit's result when the test writer threw because the pursuit was ended, else undefined. Ended by its own limit: not finished,
+ * and it says the steps so far were not saved (the writer keeps no partial test). Ended by the session or the loop: completed with the
+ * reason (the loop records the session's stop itself).
+ */
+export function endedPursuit(err: unknown, aborted: boolean): ObjectiveRun<PursuitResult> | undefined {
+    const limit = err instanceof ObjectiveLimitReached ? err : err instanceof Error && err.cause instanceof ObjectiveLimitReached ? err.cause : undefined;
+    if (limit && !aborted) {
+        const reason = `${limit.message.replace(/\.$/, "")} before its test was finished; the steps done so far were not saved.`;
+        return { status: "writer_stopped", reason, result: { ended: reason } };
+    }
+    if (aborted || err instanceof ExplorationStopped || (err instanceof Error && err.cause instanceof ExplorationStopped)) return { status: "completed", result: { ended: err instanceof ExplorationStopped ? err.message : "The exploration ended this pursuit." } };
+    return undefined;
 }
 
 /**
