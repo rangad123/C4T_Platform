@@ -10,6 +10,8 @@
  *   - a defect the replays do not show again (the page is wrong on its first visit only): state dependent, confidence medium;
  *   - a defect claimed without a failing sourced check: still saved NEEDS_REVIEW, observed only, confidence low, no replays;
  *   - a defect whose failing check is of the planner's own expected result (tied to nothing stated, queue row 172): the same, observed only;
+ *   - an observed-only defect whose saved test cannot pass a replay of its own steps (a check bound to what the authoring session saw,
+ *     as C1c's WEB-046, or steps leaning on state the session left, as WEB-030/033): not reported, no candidate finding, saved as a failed test;
  *   - every AI call of each job is counted: the independence check and the finding add none.
  * Fixture site: port 9764. Run under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/orchestrator-capture.test.ts
@@ -25,6 +27,7 @@ import { CandidateFindingSchema, findingFingerprint } from "../src/engine/explor
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
 import { AppIntelStore } from "../src/platform/app-intel-store.js";
+import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -39,6 +42,8 @@ let worker: Worker;
 let dir: string;
 /** Visits of /once since the case began: its total is wrong on the first visit only. */
 let onceVisits = 0;
+/** Visits of /drift since the case began: its total is $25.00 on the first visit only (a value the authoring session saw, and no replay sees again). */
+let driftVisits = 0;
 
 const page = (title: string, body: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title></head><body><main>${body}</main></body></html>`;
 const cart = (total: string) => page("Cart", `<h1>Cart</h1><ul><li>Mug $10.00</li><li>Plate $15.00</li></ul><p>Total: <output aria-label="Total">${total}</output></p>`);
@@ -94,6 +99,7 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         if (req.url === "/cart") return void res.end(cart("$30.00"));
         if (req.url === "/once") return void res.end(cart(++onceVisits === 1 ? "$30.00" : "$25.00"));
+        if (req.url === "/drift") return void res.end(cart(++driftVisits === 1 ? "$25.00" : "$30.00"));
         res.end(page("Shop", "<h1>Shop</h1><p>Welcome to the shop.</p>"));
     });
     await new Promise<void>((r) => site.listen(PORT, "127.0.0.1", r));
@@ -120,7 +126,7 @@ const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
 type Event = { kind: string; message: string; data: Record<string, unknown> | null };
 async function explore(projectId: string) {
     calls.length = toolQueue.length = 0;
-    onceVisits = 0;
+    onceVisits = driftVisits = 0;
     const queued = await call("POST", `/api/projects/${projectId}/test-generation`, {
         url: URL, targets: ["web"], maxPages: 5, accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false,
     });
@@ -276,5 +282,26 @@ describe("a defect test carries its candidate finding", () => {
         expect(finding).toMatchObject({ expected: { source: null }, capture: "observed_only", independence: "not_run", confidence: "low", replays: [] });
         expect(test.validationReason).toContain("observed only");
         expect(defectEvent(events).data).toMatchObject({ capture: "observed_only", confidence: "low", independence: "not_run", source: null });
+    }, 300_000);
+
+    it("an observed-only defect whose saved test fails a replay of its own steps: not reported, no candidate finding, a failed test", async () => {
+        const projectId = (await call("POST", "/api/projects", { name: "Broken" })).body.id as string;
+        plan = cartScenario("/drift");
+        // Both checks pass while authoring (the first visit shows $25.00); the defect is claimed without a failing check. Every replay shows $30.00.
+        script = [heading, total("expected:2"), { tool: "finish", input: { result: "defect", explanation: "The cart badge is missing" } }];
+        const { test, events } = await explore(projectId);
+
+        expect(test.validationStatus).toBe("FAILED_VALIDATION");
+        const meta = metaOf(test);
+        expect(meta.capture).toBe("observed_only");
+        expect(meta).not.toHaveProperty("finding");
+        expect(await new CandidateFindingStore(platform.db.sql).list(projectId)).toEqual([]);
+        expect(events.filter((e) => e.kind === "possible_defect")).toEqual([]);
+        const unverified = events.filter((e) => e.kind === "defect_unverified");
+        expect(unverified).toHaveLength(1);
+        expect(unverified[0]!.data).toMatchObject({ testKey: test.testKey, capture: "observed_only", failedStep: test.spec.steps.length });
+        expect(test.validationReason).toMatch(/^Not reported as a finding: the saved test did not pass a replay of its own steps/);
+        expect(test.validationReason).toContain(`step ${test.spec.steps.length}`);
+        expect(test.validationReason).toContain("The cart badge is missing");
     }, 300_000);
 });

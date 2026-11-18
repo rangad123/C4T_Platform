@@ -85,6 +85,16 @@ async function replay(browser: Browser, baseUrl: string, test: DefectTest, label
     }
 }
 
+/**
+ * An observed-only defect test (no failing check of a stated source was kept, so every step it saved passed while authoring) replayed
+ * once in a fresh browser context, the way the independence check replays. A replay that stops at a step means the saved test cannot
+ * pass its own steps (a check bound to a value the authoring session saw, a step leaning on state the session left): it is a broken
+ * test, not evidence of a defect (queue row 180, C1c's WEB-027/030/033/046). No AI calls.
+ */
+export function replayOwnSteps(browser: Browser, baseUrl: string, test: DefectTest, opts: { stepTimeoutMs?: number } = {}): Promise<IndependenceReplay> {
+    return replay(browser, baseUrl, test, "Replay of the saved test in a fresh browser", opts.stepTimeoutMs ?? STEP_TIMEOUT_MS);
+}
+
 /** Replays a defect test twice, each in a fresh browser context, and says whether its failure stands on its own. */
 export async function checkIndependence(browser: Browser, baseUrl: string, test: DefectTest, opts: { stepTimeoutMs?: number } = {}): Promise<IndependenceCheck> {
     if (!test.steps.some(isSourcedCheck)) return { independence: "not_run", replays: [] };
