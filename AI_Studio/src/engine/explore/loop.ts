@@ -17,7 +17,10 @@ export const STOP_REASONS = ["time", "actions", "ai_calls", "tokens", "objective
 export type StopReason = (typeof STOP_REASONS)[number];
 
 export interface Budgets {
-    /** Objectives pursued (skipped duplicates do not count). */
+    /**
+     * Objective pursuits (one objective with one operator) started in the session; skipped duplicates do not count. The cap on
+     * objectives themselves is applied when the list is built (orchestrator.ts objectivePursuits, the same number).
+     */
     objectives: number;
     actions: number;
     aiCalls: number;
@@ -208,7 +211,7 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
             outcomes.push({ objectiveId, status: "skipped", reason: "The same objective was already done in this session or an earlier one.", actions: 0 });
             continue;
         }
-        if (pursued >= budgets.objectives) stopSession("objectives_done", `The session's limit of ${budgets.objectives} objectives was reached.`);
+        if (pursued >= budgets.objectives) stopSession("objectives_done", `The session's limit of ${budgets.objectives} objective pursuits was reached.`);
         if (budgetStop()) {
             outcomes.push({ objectiveId, status: "not_reached", reason: `The session stopped first: ${session.stop!.detail}`, actions: 0 });
             continue;
