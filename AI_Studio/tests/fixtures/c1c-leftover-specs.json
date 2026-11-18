@@ -1,0 +1,968 @@
+{
+ "_source": "Saved specs of the C1c candidate trial (eval/.data-bench/p3-c1c-cand-1/platform.db, test_cases.spec_json), steps only.",
+ "WEB-028": {
+  "title": "Cart persists after sign out and sign in again",
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/products/p4",
+    "description": "Open /products/p4"
+   },
+   {
+    "action": "navigate",
+    "url": "http://127.0.0.1:5291/login",
+    "description": "Open http://127.0.0.1:5291/login"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Enter account email"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter account password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in",
+     "exact": true
+    },
+    "description": "Sign in"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Cart",
+     "exact": true
+    },
+    "description": "Open the cart to check it is empty"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove",
+     "exact": true
+    },
+    "description": "Empty the cart before the test"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Products",
+     "exact": true
+    },
+    "description": "Go to products"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Headphones",
+     "exact": true
+    },
+    "description": "Open Headphones product"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart",
+     "exact": true
+    },
+    "description": "Add Headphones (quantity 1) to the cart"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign out",
+     "exact": true
+    },
+    "description": "Sign out"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Enter account email to sign back in"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter account password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in",
+     "exact": true
+    },
+    "description": "Sign back in"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Cart",
+     "exact": true
+    },
+    "description": "Open the cart after signing back in"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "row",
+     "value": "Headphones",
+     "exact": false
+    },
+    "source": "expected:1",
+    "description": "Cart page lists Headphones"
+   }
+  ]
+ },
+ "WEB-030": {
+  "title": "Removing a cart item updates the badge and list",
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/cart",
+    "description": "Open /cart"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Sign in with the test account"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in",
+     "exact": true
+    },
+    "description": "Submit sign-in form"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove"
+    },
+    "description": "Clear leftover Trail Mug so the cart holds only the two setup products"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Products",
+     "exact": true
+    },
+    "description": "Go to products to add the setup items"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Pocket Notebook",
+     "exact": true
+    },
+    "description": "Open Pocket Notebook"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart",
+     "exact": true
+    },
+    "description": "Add Pocket Notebook to cart"
+   },
+   {
+    "action": "navigate",
+    "url": "/products/p5",
+    "description": "Open /products/p5"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart",
+     "exact": true
+    },
+    "description": "Add Water Bottle to cart"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "row",
+     "value": "Pocket Notebook"
+    },
+    "description": "Remove the Pocket Notebook line from the cart"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove",
+     "within": {
+      "by": "role",
+      "role": "row",
+      "value": "Pocket Notebook"
+     }
+    },
+    "description": "Remove the Pocket Notebook line from the cart"
+   },
+   {
+    "action": "navigate",
+    "url": "/cart",
+    "description": "Open /cart"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove",
+     "within": {
+      "by": "role",
+      "role": "row",
+      "value": "Headphones"
+     }
+    },
+    "description": "Clear unexpected Headphones line"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove",
+     "within": {
+      "by": "role",
+      "role": "row",
+      "value": "Trail Mug"
+     }
+    },
+    "description": "Clear the Trail Mug line"
+   },
+   {
+    "action": "navigate",
+    "url": "/products/p3",
+    "description": "Open /products/p3"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart",
+     "exact": true
+    },
+    "description": "Add Pocket Notebook"
+   },
+   {
+    "action": "navigate",
+    "url": "/products/p5",
+    "description": "Open /products/p5"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart",
+     "exact": true
+    },
+    "description": "Add Water Bottle"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove",
+     "within": {
+      "by": "role",
+      "role": "row",
+      "value": "Pocket Notebook"
+     }
+    },
+    "description": "Remove the Pocket Notebook line from the cart"
+   },
+   {
+    "action": "navigate",
+    "url": "/cart",
+    "description": "Open /cart"
+   }
+  ]
+ },
+ "WEB-020": {
+  "title": "Each product detail page matches its catalogue entry",
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/",
+    "description": "Open /"
+   },
+   {
+    "action": "remember",
+    "locator": {
+     "by": "role",
+     "role": "listitem",
+     "filter": {
+      "hasText": "Headphones"
+     }
+    },
+    "name": "cataloguePrice",
+    "from": "text",
+    "description": "Record the Headphones card on the catalogue before opening it"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Headphones",
+     "exact": true
+    },
+    "description": "Open the Headphones product page from the catalogue"
+   },
+   {
+    "action": "assert",
+    "check": "exactText",
+    "locator": {
+     "by": "role",
+     "role": "heading",
+     "value": "Headphones",
+     "exact": true
+    },
+    "expected": "Headphones",
+    "source": "expected:1",
+    "description": "Product page heading reads Headphones"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "text",
+     "value": "$59.99",
+     "exact": true
+    },
+    "source": "expected:2",
+    "description": "Product page shows the price $59.99"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Products",
+     "exact": true
+    },
+    "description": "Return to the catalogue to confirm the Headphones card price"
+   },
+   {
+    "action": "assert",
+    "check": "text",
+    "locator": {
+     "by": "role",
+     "role": "listitem",
+     "filter": {
+      "hasText": "Headphones"
+     }
+    },
+    "expected": "$59.99",
+    "source": "expected:2",
+    "description": "Catalogue card shows Headphones at $59.99"
+   }
+  ]
+ },
+ "WEB-021": {
+  "title": "Add to cart rejects zero and negative quantity",
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/products/p2",
+    "description": "Open /products/p2"
+   },
+   {
+    "action": "navigate",
+    "url": "/login",
+    "description": "Open /login"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Enter test account email"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter test account password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in"
+    },
+    "description": "Sign in"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "navigation",
+     "value": "Main"
+    },
+    "description": "Open the cart to confirm it is empty"
+   },
+   {
+    "action": "navigate",
+    "url": "/cart",
+    "description": "Open /cart"
+   },
+   {
+    "action": "navigate",
+    "url": "/products/p2",
+    "description": "Open /products/p2"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "role",
+     "role": "spinbutton",
+     "value": "Quantity"
+    },
+    "value": "0",
+    "description": "Enter quantity 0"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart"
+    },
+    "description": "Try adding with quantity 0"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "role",
+     "role": "spinbutton",
+     "value": "Quantity"
+    },
+    "value": "-1",
+    "description": "Enter quantity -1"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart"
+    },
+    "description": "Try adding with quantity -1"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "alert"
+    },
+    "expected": "Choose a quantity of at least 1.",
+    "source": "expected:1",
+    "description": "Validation message shows quantity must be at least 1"
+   },
+   {
+    "action": "assert",
+    "check": "notText",
+    "locator": {
+     "by": "role",
+     "role": "navigation",
+     "value": "Main"
+    },
+    "expected": 1,
+    "source": "expected:2",
+    "description": "Cart badge shows no items"
+   },
+   {
+    "action": "assert",
+    "check": "exactText",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Cart",
+     "exact": true
+    },
+    "expected": "Cart",
+    "source": "expected:2",
+    "description": "Cart link has no count badge"
+   },
+   {
+    "action": "assert",
+    "check": "notText",
+    "locator": {
+     "by": "role",
+     "role": "main"
+    },
+    "expected": "Server error",
+    "source": "expected:1",
+    "description": "Fail if the page data comes back as a server error"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "heading",
+     "value": "Desk Lamp"
+    },
+    "source": "expected:1",
+    "description": "Fail if the product data comes back empty"
+   },
+   {
+    "action": "assert",
+    "check": "value",
+    "locator": {
+     "by": "role",
+     "role": "spinbutton",
+     "value": "Quantity"
+    },
+    "expected": -1,
+    "source": "expected:1",
+    "description": "The rejected quantity stays in the field"
+   },
+   {
+    "action": "assert",
+    "check": "notText",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Cart"
+    },
+    "expected": "Cart 1",
+    "source": "expected:2",
+    "description": "Cart badge must not show an item after the rejected add"
+   },
+   {
+    "action": "assert",
+    "check": "exactText",
+    "locator": {
+     "by": "text",
+     "value": "Choose a quantity of at least 1.",
+     "exact": true
+    },
+    "expected": "Choose a quantity of at least 1.",
+    "source": "expected:1",
+    "description": "Validation message must read exactly as specified"
+   }
+  ]
+ },
+ "WEB-036": {
+  "title": "Order history lists orders newest first",
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/orders",
+    "description": "Open /orders"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Sign in with the test account"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in"
+    },
+    "description": "Submit sign in"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "ord-1000"
+    },
+    "source": "expected:2",
+    "description": "Verify visible of link \"ord-1000\""
+   },
+   {
+    "action": "assert",
+    "check": "ariaSnapshot",
+    "locator": {
+     "by": "role",
+     "role": "table",
+     "value": "Newest first"
+    },
+    "expected": "- table \"Newest first\":\n  - caption: Newest first\n  - rowgroup:\n    - row \"Order Date Status Total\":\n      - columnheader \"Order\"\n      - columnheader \"Date\"\n      - columnheader \"Status\"\n      - columnheader \"Total\"\n  - rowgroup:\n    - row /[\\w.,:/-]+ [\\w.,:/-]+ Shipped \\$[\\w.,:/-]+/:\n      - cell /[\\w.,:/-]+/:\n        - link /[\\w.,:/-]+/:\n          - /url: /\\/orders\\/[\\w.,:/-]+/\n      - cell /[\\w.,:/-]+/\n      - cell \"Shipped\"\n      - cell /\\$[\\w.,:/-]+/",
+    "source": "expected:1",
+    "description": "Verify the structure of table \"Newest first\" matches its snapshot"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "cell",
+     "value": "2026-10-02"
+    },
+    "source": "expected:1",
+    "description": "Verify visible of cell \"2026-10-02\""
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "cell",
+     "value": "Shipped"
+    },
+    "source": "expected:1",
+    "description": "Verify visible of cell \"Shipped\""
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "cell",
+     "value": "$13.50"
+    },
+    "source": "expected:1",
+    "description": "Verify visible of cell \"$13.50\""
+   }
+  ]
+ },
+ "WEB-032": {
+  "title": "Valid discount code reduces the cart total",
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/cart",
+    "description": "Open /cart"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Sign in with the test account"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter the test account password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in"
+    },
+    "description": "Submit sign in"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Products",
+     "exact": true
+    },
+    "description": "Go to products to find the Trail Mug"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Trail Mug"
+    },
+    "description": "Open the Trail Mug product"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart"
+    },
+    "description": "Add one Trail Mug to the cart"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove",
+     "nth": 0
+    },
+    "description": "Remove the leftover Water Bottle (first row) so only the Trail Mug remains"
+   },
+   {
+    "action": "navigate",
+    "url": "/cart",
+    "description": "Open /cart"
+   },
+   {
+    "action": "navigate",
+    "url": "/products/p1",
+    "description": "Open /products/p1"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Add to cart"
+    },
+    "description": "Add one Trail Mug to the cart"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Remove",
+     "nth": 0
+    },
+    "description": "Remove the Desk Lamp so the cart holds only Trail Mugs"
+   },
+   {
+    "action": "assert",
+    "check": "text",
+    "locator": {
+     "by": "text",
+     "value": "Discount (SAVE10)"
+    },
+    "expected": "Discount (SAVE10)",
+    "source": "expected:1",
+    "description": "Verify text of text \"Discount (SAVE10)\" = Discount (SAVE10)"
+   },
+   {
+    "action": "assert",
+    "check": "exactText",
+    "locator": {
+     "by": "text",
+     "value": "−$1.25"
+    },
+    "expected": "−$1.25",
+    "source": "expected:2",
+    "description": "Verify exactText of text \"−$1.25\" = −$1.25"
+   },
+   {
+    "action": "assert",
+    "check": "exactText",
+    "locator": {
+     "by": "text",
+     "value": "$16.25"
+    },
+    "expected": "$16.25",
+    "source": "expected:2",
+    "description": "Verify exactText of text \"$16.25\" = $16.25"
+   }
+  ]
+ },
+ "WEB-037": {
+  "title": "Place order flow reaches review without submitting",
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/cart",
+    "description": "Open /cart"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Sign in with the test account"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in"
+    },
+    "description": "Submit sign in"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Check out"
+    },
+    "description": "Start checkout from the cart"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Continue"
+    },
+    "description": "Continue to review step"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "row",
+     "value": "Water Bottle $18.00 Quantity 1 Update $18.00 Remove"
+    },
+    "source": "expected:1",
+    "description": "Verify visible of row \"Water Bottle $18.00 Quantity 1 Update $18.00 Remove\""
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "row",
+     "value": "Trail Mug $12.50 Quantity 1 Update $12.50 Remove"
+    },
+    "source": "expected:1",
+    "description": "Verify visible of row \"Trail Mug $12.50 Quantity 1 Update $12.50 Remove\""
+   },
+   {
+    "action": "assert",
+    "check": "text",
+    "locator": {
+     "by": "text",
+     "value": "Deliver to: 12 Harbour Street, Leeds"
+    },
+    "expected": "12 Harbour Street, Leeds",
+    "source": "expected:1",
+    "description": "Verify text of text \"Deliver to: 12 Harbour Street, Leeds\" = 12 Harbour Street, Leeds"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Place order"
+    },
+    "source": "expected:3",
+    "description": "Verify visible of button \"Place order\""
+   },
+   {
+    "action": "assert",
+    "check": "text",
+    "locator": {
+     "by": "text",
+     "value": "$33.70",
+     "exact": true
+    },
+    "expected": "$33.70",
+    "source": "expected:2",
+    "description": "Verify text of text \"$33.70\" = $33.70"
+   }
+  ]
+ }
+}
