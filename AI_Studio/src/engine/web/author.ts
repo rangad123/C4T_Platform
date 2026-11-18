@@ -351,6 +351,10 @@ async function confirmDefect(input: AuthorInput, out: Extract<AuthorOutcome, { s
 
 const OUTCOME_PUSHBACKS = 2;
 const NO_OUTCOME = "Authoring finished without recording any assertion on the expected outcome";
+/** Why a test was not written when the test writer replied without a tool call (no finish) while it still had steps left. */
+export const WRITER_STOPPED = "The test writer stopped before finishing the test";
+/** Why a test was not written when the test writer was still acting when its steps ran out. */
+const STEP_BUDGET_SPENT = "Step budget exhausted before finishing";
 const NO_OUTCOME_HINT =
     "Not finished: the test has no assertion on the scenario's expected outcome after the last action. Assert what the user should now observe (text, value, URL or count), not only that the element you used is visible, then call finish again.";
 const INTERACTIONS = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "download"]);
@@ -766,7 +770,7 @@ ${input.redo && !resume ? `A previous version of this test was not kept. ${input
 Accessibility snapshot:
 ${snapshot}`;
 
-        await generateText({
+        const generated = await generateText({
             model: ctx.llm.model,
             system: (input.vision ? SYSTEM + VISION_AUTHORING_NOTE : SYSTEM) + (input.testData ? TEST_DATA_AUTHORING_NOTE : "") + (view ? COMPACT_SNAPSHOT_NOTE : ""),
             prompt,
@@ -788,7 +792,13 @@ ${snapshot}`;
         if (view) ctx.emit(snapshotSavingsEvent(scenario.scenarioId, view.totals));
 
         const base: AuthorOutcome =
-            outcome ?? { status: "blocked", steps: recorded, testData, explanation: pushbacks ? NO_OUTCOME : "Step budget exhausted before finishing" };
+            outcome ?? {
+                status: "blocked",
+                steps: recorded,
+                testData,
+                // A last step that called tools means the writer was still at work when the steps ran out; any other ending (a plain reply) is the writer stopping.
+                explanation: pushbacks ? NO_OUTCOME : generated.finishReason === "tool-calls" ? STEP_BUDGET_SPENT : WRITER_STOPPED,
+            };
         const result: AuthorOutcome = observations.length ? { ...base, observations: [...observations] } : base;
         // A "complete" test must actually verify the scenario's outcome.
         if (result.status === "complete" && !hasOutcomeAssertion(result.steps)) {

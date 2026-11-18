@@ -21,7 +21,7 @@ const Text = z.string().max(4_000);
 const Count = z.number().int().min(0);
 const Num = z.number().min(0);
 const Tally = z.object({ total: Count, exercised: Count, notExercised: z.array(Text).max(LIST_MAX), more: Count });
-const OutcomeStatus = z.enum(["completed", "stopped", "environment_failure", "unsafe", "interrupted", "skipped", "not_reached"]);
+const OutcomeStatus = z.enum(["completed", "stopped", "writer_stopped", "environment_failure", "unsafe", "interrupted", "skipped", "not_reached"]);
 
 const Shape = z.object({
     stopReason: z.enum(STOP_REASONS),

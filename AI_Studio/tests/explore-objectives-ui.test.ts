@@ -27,7 +27,8 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { objectivesNeedRunner } from "../src/platform/explore-task.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
-import { explorationNote, objectiveRows, pursuitOf, type CoverageAnswer, type ObjectivePreview } from "../web/src/features/runs/objectives.js";
+import { WRITER_STOPPED as ENGINE_WRITER_STOPPED } from "../src/engine/web/author.js";
+import { explorationNote, objectiveRows, pursuitOf, WRITER_STOPPED, type CoverageAnswer, type ObjectivePreview } from "../web/src/features/runs/objectives.js";
 
 const PORT = 9907;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -115,6 +116,19 @@ describe("the rules (no browser)", () => {
         // A saved test names its objective by "kind source" in its title.
         expect(states([QUEUED, PLANNED, A_ENDED, B_SAVED])).toEqual([[A.id, "done", ""], [B.id, "running", ""], [C.id, "waiting", ""]]);
         expect(states([QUEUED, PLANNED, A_ENDED, B_SAVED, STOPPED])).toEqual([[A.id, "done", ""], [B.id, "done", ""], [C.id, "skipped", "Not reached: The session was stopped by a person."]]);
+    });
+    // Row 186: an objective whose every pursuit ended with the test writer stopping is "not finished" with that sentence, never "done".
+    it("an objective whose test writer stopped before finishing is not finished, live and after the run", () => {
+        expect(WRITER_STOPPED).toBe(ENGINE_WRITER_STOPPED);
+        const stoppedA = (id: number, op: string) => ev(id, "objective_not_written", `${A.id}-${op}: no test was saved (${WRITER_STOPPED}).`);
+        const live = states([QUEUED, PLANNED, stoppedA(30, "as_stated"), stoppedA(31, "invalid_input"), B_SAVED]);
+        expect(live[0]).toEqual([A.id, "unfinished", WRITER_STOPPED]);
+        expect(live[1]).toEqual([B.id, "running", ""]);
+        // One pursuit stopped, the other ended otherwise: the objective was pursued.
+        expect(states([QUEUED, PLANNED, stoppedA(30, "as_stated"), A_ENDED, B_SAVED])[0]).toEqual([A.id, "done", ""]);
+        const cov: CoverageAnswer = { ...COVERAGE, coverage: { ...(COVERAGE as Extract<CoverageAnswer, { available: true }>).coverage, unexplored: [{ objectiveId: A.id, kind: "rule", source: A.source, priority: 90, reason: A.reason, status: `not finished: ${WRITER_STOPPED}` }] } };
+        const after = objectiveRows(OBJECTIVES, [PLANNED], { active: false, coverage: cov });
+        expect([after[0]!.state, after[0]!.why]).toEqual(["unfinished", `Not finished: ${WRITER_STOPPED}`]);
     });
     it("a test saved before the objectives were planned names none of them", () => {
         expect(states([ev(5, "script_generated", "WEB-001 Submit twice: workflow WF-checkout (4 steps)"), PLANNED])[1]).toEqual([B.id, "waiting", ""]);

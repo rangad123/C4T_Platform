@@ -152,6 +152,12 @@ export const OBJECTIVE_EVENT_KINDS: ReadonlySet<string> = new Set([
     "finding_invalid",
 ]);
 
+/** The engine's reason (engine/web/author.ts, kept equal by a test) when the test writer stopped before finishing a test. */
+export const WRITER_STOPPED = "The test writer stopped before finishing the test";
+/** The events that end a pursuit, of which objective_not_written can say the test writer stopped. */
+const PURSUIT_ENDS: ReadonlySet<string> = new Set(["objective_not_written", "operator_not_applied", "script_generated", "possible_defect", "defect_unverified", "finding_invalid"]);
+const writerStopped = (e: EventRow) => e.kind === "objective_not_written" && e.message.includes(`(${WRITER_STOPPED})`);
+
 const first = (events: readonly EventRow[], kind: string) => events.find((e) => e.kind === kind);
 const sentence = (t: string) => (t ? t[0]!.toUpperCase() + t.slice(1) : t);
 
@@ -236,9 +242,14 @@ export function objectiveRows(objectives: readonly ObjectivePreview[], events: r
         });
     }
     const running = furthest >= 0 ? furthest : 0;
+    // Past an objective whose every pursuit ended with the test writer stopping, it is not finished, as the coverage record will say.
+    const ended = (o: ObjectivePreview): ObjectiveRow => {
+        const ends = after.filter((e) => PURSUIT_ENDS.has(e.kind) && names(e.message, o));
+        return ends.length > 0 && ends.every(writerStopped) ? { objective: o, state: "unfinished", why: WRITER_STOPPED, notRun: [] } : { objective: o, state: "done", notRun: [] };
+    };
     return ordered.map((objective, i): ObjectiveRow => {
-        if (over) return i <= furthest ? { objective, state: "done", notRun: [] } : { objective, state: "skipped", why: `Not reached: ${stopDetail}`, notRun: [] };
-        return { objective, state: i < running ? "done" : i === running ? "running" : "waiting", notRun: [] };
+        if (over) return i <= furthest ? ended(objective) : { objective, state: "skipped", why: `Not reached: ${stopDetail}`, notRun: [] };
+        return i < running ? ended(objective) : { objective, state: i === running ? "running" : "waiting", notRun: [] };
     });
 }
 

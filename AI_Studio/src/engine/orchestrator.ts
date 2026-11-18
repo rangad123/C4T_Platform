@@ -54,7 +54,7 @@ import type { ApiEndpointModel, AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
 import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
-import { authorWebSpec, statedSource, toSpec, type AuthorOutcome } from "./web/author.js";
+import { authorWebSpec, statedSource, toSpec, WRITER_STOPPED, type AuthorOutcome } from "./web/author.js";
 import { findLeftoverUse, leftoverReason } from "./web/leftovers.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
@@ -1089,7 +1089,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     await sink.finishAgentRun(runId, outcome.status, outcome.explanation);
                     if (outcome.status === "blocked" || loop.signal.aborted) {
                         ctx.emit({ stage: "generation", kind: "objective_not_written", message: `${p.scenario.scenarioId}: no test was saved (${loop.signal.aborted ? "the exploration ended this pursuit" : outcome.explanation}).` });
-                        return { status: "completed", result: { authoring: outcome.status, ended: loop.signal.aborted ? "The exploration ended this pursuit." : outcome.explanation } };
+                        const result = { authoring: outcome.status, ended: loop.signal.aborted ? "The exploration ended this pursuit." : outcome.explanation };
+                        // The writer stopping on its own before it finished leaves the objective not finished (explore/coverage.ts).
+                        return !loop.signal.aborted && outcome.explanation === WRITER_STOPPED ? { status: "writer_stopped", reason: WRITER_STOPPED, result } : { status: "completed", result };
                     }
                     if (!operatorApplied(outcome.steps, p.operator, p.check)) {
                         ctx.emit({ stage: "generation", kind: "operator_not_applied", level: "warn", message: `${p.scenario.scenarioId}: the recorded steps do not apply the operator "${p.operator}", so no test was saved for it.` });
