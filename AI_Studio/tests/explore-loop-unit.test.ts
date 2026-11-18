@@ -479,3 +479,36 @@ describe("runExploration: exactly one stop reason", () => {
         ]);
     });
 });
+
+describe("runExploration: the live list is told of each pursuit (row 173)", () => {
+    it("tells each pursuit's start before it runs and its end with its outcome; skipped and unreached objectives are not told", async () => {
+        const told: string[] = [];
+        const fake = world();
+        const r = await run(
+            [obj("a", 9), obj("dup", 8, { fingerprint: "fp-a" }), obj("bad", 7, { script: async () => ({ status: "environment_failure", reason: "gone" }) }), obj("c", 6)],
+            {
+                budgets: { ...BUDGETS, objectives: 2 },
+                onPursuit: (o, outcome) => {
+                    told.push(outcome ? `${o.id} finished ${outcome.status}` : `${o.id} started`);
+                    fake.w.order.push(`told ${o.id}`);
+                },
+            },
+            fake,
+        );
+        expect(told).toEqual(["a started", "a finished completed", "bad started", "bad finished environment_failure"]);
+        // Started is told before the objective runs.
+        expect(fake.w.order.slice(0, 2)).toEqual(["told a", "a"]);
+        expect(r.outcomes.map((o) => [o.objectiveId, o.status])).toEqual([
+            ["a", "completed"],
+            ["dup", "skipped"],
+            ["bad", "environment_failure"],
+            ["c", "not_reached"],
+        ]);
+    });
+
+    it("a listener that throws changes nothing", async () => {
+        const quiet = await run([obj("a", 2), obj("b", 1)]);
+        const loud = await run([obj("a", 2), obj("b", 1)], { onPursuit: () => { throw new Error("listener broke"); } });
+        expect(loud).toEqual(quiet);
+    });
+});
