@@ -283,6 +283,8 @@ export class PhoneFake {
         if (method === "GET" && p === "/me/ai") return { body: { chosen: null, problem: null, personal: [], organisational: [], canManageOrganisational: false, openServer: { configured: this.config.llm.configured, provider: this.config.llm.provider, model: this.config.llm.model } } };
         // The Security Assessment module (round 18): the shell asks whether it is on; these phone screens run with it off.
         if (method === "GET" && p === "/v1/security/status") return { body: { enabled: false } };
+        // What the agents need (Settings → General's Explore by objectives switch asks): none applies to these phone projects, so it is not shown.
+        if (method === "GET" && (m = p.match(/^\/projects\/([^/]+)\/agent-inputs$/)) && m[1]) return { body: { applies: false, application: null, signIn: { username: null, hasPassword: false, hasTotpSecret: false }, apiAccess: { hasToken: false, oauth2: null }, openApiUrl: null, allowMutatingApiTests: false, exploreByObjectives: true, cleanupAfter: false, requirements: { active: 0 }, agents: null, missing: [] } };
         if (method === "GET" && p === "/projects") return { body: [...this.projects.values()].map((x) => this.publicProject(x)) };
         // The Projects page (round 34): open access saves no preferences, and these screens use no folders.
         if (method === "GET" && p === "/me/preferences") return { body: { preferences: {}, saved: false } };
