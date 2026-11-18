@@ -773,7 +773,8 @@ ${snapshot}`;
             return { ...result, status: "blocked", explanation: NO_OUTCOME };
         }
         if (result.status === "complete" || result.status === "defect") {
-            const pruned = await pruneByReplay(browser, baseUrl, result.steps, credentials, result.status === "complete");
+            // Only a captured defect test may end on a failing check (the captured one, its last step); an observed-only one passed every step while authoring.
+            const pruned = await pruneByReplay(browser, baseUrl, result.steps, credentials, result.status === "complete" || result.capture !== "captured");
             if (pruned.dropped > 0) {
                 ctx.emit({
                     stage: "generation",
@@ -840,9 +841,10 @@ async function keepBlockedTrace(input: AuthorInput, session: BrowserSession, fin
  * Every action that succeeded while authoring is recorded, including ones from attempts the agent then
  * abandoned and redid (e.g. a second login sequence). Replayed in order those leftovers break, because
  * the app has already moved on. Replay the steps once in a clean browser and drop *non-assertion* steps
- * that fail there. The pruned list is accepted only if it still reaches every assertion it should
- * (all of them for a "complete" test), so pruning can never hide a real failure — otherwise the
- * original steps are kept and normal validation/repair applies.
+ * that fail there. The pruned list is accepted only if every assertion still passes on the replay, so pruning can never hide a real
+ * failure nor leave a check its dropped setup made pass. With `requireAllAssertsPass` false (a captured defect test) the one exception is
+ * the final step, the captured failing check: it may fail (queue row 183: C1c's WEB-027 lost its setup steps and kept a check of an
+ * alert nothing triggers). Otherwise the original steps are kept and normal validation/repair applies.
  */
 export async function pruneByReplay(
     browser: Browser,
@@ -865,10 +867,11 @@ export async function pruneByReplay(
                 kept.push(step);
             } catch {
                 if (step.action === "assert") {
-                    // A "defect" test is expected to fail on its final assertion; keep it and stop.
+                    // A captured defect test is expected to fail on its final assertion (the captured check); any other failing assertion
+                    // rejects the pruned list, as for a complete test.
                     assertFailed = true;
                     kept.push(step);
-                    if (requireAllAssertsPass) break;
+                    if (requireAllAssertsPass || i !== steps.length - 1) break;
                 } else {
                     dropped++;
                 }
