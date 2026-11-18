@@ -169,7 +169,8 @@ export function RowMenu({ icon, name, tip, children }: { icon: LucideIcon; name:
             // Under the button, its right edge on the button's, kept 16 px inside the screen; above the button when there is no room below.
             const left = Math.max(16, Math.min(b.right - w, width - 16 - w));
             const top = b.bottom + 6 + h <= window.innerHeight - 8 ? b.bottom + 6 : Math.max(8, b.top - 6 - h);
-            Object.assign(pop.style, { position: "fixed", left: `${left}px`, top: `${top}px`, right: "auto" });
+            // Above the side navigation (z-index 40 below 900 px), which slides over the page when the screen narrows: a menu someone opened is on top.
+            Object.assign(pop.style, { position: "fixed", left: `${left}px`, top: `${top}px`, right: "auto", zIndex: "45" });
         };
         place();
         window.addEventListener("scroll", place, true);
