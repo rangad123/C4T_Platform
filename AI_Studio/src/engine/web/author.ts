@@ -136,7 +136,7 @@ const READ_TOOLS = new Set(["assert", "wait", "remember"]);
  * and landmark ancestry it sits in (each named by its label, or a form by where it posts) and its own tag, type and name. Never its
  * position among siblings, so a page that adds a section before it is the same element, and never a value. Undefined when nothing matches quickly.
  */
-async function targetIdentity(page: Page, l: Locator, data: RuntimeData): Promise<string | undefined> {
+export async function targetIdentity(page: Page, l: Locator, data: RuntimeData): Promise<string | undefined> {
     try {
         const el = locate(page, l, data).first();
         const [aria, anchor] = await Promise.all([
