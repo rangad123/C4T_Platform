@@ -4,8 +4,9 @@
  * the kept copy is masked.
  *  - Addresses lose their query string and fragment (`?token=…`, `#access_token=…`): the path is what a reader needs.
  *  - Typed values (`fill`, `select`, `press`, …): a `{{…}}` placeholder stays; a literal one is hidden when it is one of the run's
- *    secrets, when the pattern masking would hide anything in it, or when the field it went into is named like a secret field;
- *    otherwise it is kept, cut to TYPED_MAX characters.
+ *    secrets, when the pattern masking would hide anything in it, or when the field it went into is named like a secret field (by the
+ *    locator, or by the element it resolved to); otherwise it is kept, cut to TYPED_MAX characters. The tracker masks the arguments
+ *    this way before it builds an action's key (`maskActionArgs`), so a raw typed secret never becomes row text at all.
  *  - Every other text passes the shared pattern masking (src/shared/redact-text.ts) and the run's secrets.
  * Masking an already masked row changes nothing, so the platform can mask again whatever a runner sent.
  */
@@ -59,12 +60,30 @@ function maskArgs(v: unknown, secrets: readonly string[], secretField: boolean, 
         const o = v as Record<string, unknown>;
         // The field the value goes into (`target`, a locator): its name says whether the value is a secret. A locator's own `value` is
         // the element's name, not something typed.
-        const field = secretField || (o.target !== undefined && SECRET_FIELD.test(JSON.stringify(o.target)));
+        const field = secretField || namesSecretField(o.target) || namesSecretField(o.locator);
         return Object.fromEntries(
-            Object.entries(o).map(([k, x]) => [k, k === "target" || k === "has" || k === "hasNot" || k === "filter" || k === "frame" ? maskLocator(x, secrets) : maskArgs(x, secrets, field, k)]),
+            Object.entries(o).map(([k, x]) => [k, LOCATOR_KEYS.has(k) ? maskLocator(x, secrets) : maskArgs(x, secrets, field, k)]),
         );
     }
     return v;
+}
+
+/** Argument names that hold a locator (an element's name, never something typed). */
+const LOCATOR_KEYS = new Set(["target", "locator", "has", "hasNot", "filter", "frame"]);
+
+/** Whether a field, given as a locator or as the element it resolved to (`textbox "Password" @digest`), is named like a secret one. */
+function namesSecretField(field: unknown): boolean {
+    if (field === undefined || field === null) return false;
+    return SECRET_FIELD.test(typeof field === "string" ? field : JSON.stringify(field));
+}
+
+/**
+ * The arguments of one action as the action log may hold them, masked before any row text is built (the tracker's key,
+ * orchestrator.ts `actionTracker`): `field` is the element the action resolved to, when the test writer found it; its name, like the
+ * arguments' own locator, says whether a typed value goes into a secret field.
+ */
+export function maskActionArgs(args: unknown, secrets: readonly string[] = [], field?: string): unknown {
+    return maskArgs(args, secrets, namesSecretField(field));
 }
 
 /** A locator: names of elements are kept (pattern-masked), they are not typed values. */
@@ -75,18 +94,33 @@ function maskLocator(v: unknown, secrets: readonly string[]): unknown {
     return v;
 }
 
-/** One action as the log writes it (`tool {json args}`), masked. Text that is not that shape is masked as free text. */
+function parsed(json: string): { ok: true; value: unknown } | { ok: false } {
+    try {
+        return { ok: true, value: JSON.parse(json) };
+    } catch {
+        return { ok: false };
+    }
+}
+
+/**
+ * One action as the log writes it, masked: `tool {json args}`, or `tool <element> {json args}` when the action resolved to an element
+ * (the element's role, name and digest, then what was done beyond it). The element's name decides, with the arguments' own locator,
+ * whether a typed value went into a secret field. Text that is neither shape is masked as free text.
+ */
 export function maskAction(action: string, secrets: readonly string[] = []): string {
     const space = action.indexOf(" ");
     const tool = space === -1 ? action : action.slice(0, space);
     const rest = space === -1 ? "" : action.slice(space + 1);
-    let args: unknown;
-    try {
-        args = JSON.parse(rest);
-    } catch {
-        return maskText(action, secrets);
+    const whole = parsed(rest);
+    if (whole.ok) return clipRow(`${maskText(tool, secrets, 80)} ${JSON.stringify(maskArgs(whole.value, secrets, false))}`);
+    // The element, then the arguments: the first " {" from which the rest is one JSON object (an element's name may hold braces).
+    for (let i = rest.indexOf(" {"); i !== -1; i = rest.indexOf(" {", i + 1)) {
+        const args = parsed(rest.slice(i + 1));
+        if (!args.ok || !args.value || typeof args.value !== "object") continue;
+        const element = rest.slice(0, i);
+        return clipRow(`${maskText(tool, secrets, 80)} ${maskText(element, secrets, 400)} ${JSON.stringify(maskActionArgs(args.value, secrets, element))}`);
     }
-    return clipRow(`${maskText(tool, secrets, 80)} ${JSON.stringify(maskArgs(args, secrets, false))}`);
+    return maskText(action, secrets);
 }
 
 const clipRow = (s: string) => clip(s, ROW_TEXT_MAX);

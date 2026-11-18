@@ -66,7 +66,7 @@ import { createHash } from "node:crypto";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { LlmClient } from "./llm/provider.js";
 import { inputClassesFor } from "./explore/input-classes.js";
-import { maskActionLog } from "./explore/action-mask.js";
+import { maskActionArgs, maskActionLog } from "./explore/action-mask.js";
 import { runExploration, type ActionLogRow, type Budgets, type ExplorationResult, type LoopObjective, type ObjectiveContext, type ObjectiveOutcome, type ObjectiveRun, type StopReason } from "./explore/loop.js";
 import { MAX_EXPLORED, OBJECTIVE_REF_MAX, objectivesFrom, type Objective, type ObjectiveField, type ObjectiveOperator } from "./explore/objectives.js";
 import { operatorApplied, scenariosFor, type OperatorCheck, type PerturbOptions } from "./explore/perturb.js";
@@ -1093,7 +1093,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         calls.n += 1;
                     };
                     const signal = ctx.signal ? AbortSignal.any([ctx.signal, loop.signal]) : loop.signal;
-                    const tracker = actionTracker(new URL(p.scenario.startPath, origin).href);
+                    const tracker = actionTracker(new URL(p.scenario.startPath, origin).href, authoringSecretsOf(req));
                     // Asked before each action reaches the application (CP2 H-2): a refused one is not performed. Every pass of the pursuit
                     // (a review's fix, the leftover redo) starts its own repeat and depth tracking; the session's totals are shared (M-5).
                     const actionGate: ActionGate = {
@@ -1799,8 +1799,10 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  * quantity is the same action on the same state, so it is a repeat, and no typed value (a password) is kept in the log. A read (a wait, a check)
  * does not change the state, so alternating no-ops does not make a repeat look new. The same click twice in a row is two states (a
  * double submit); the same action again on the same state is a repeat the loop refuses. `freshPass` starts again from a start page.
+ * The key is also the action log's row text, so what is left of its arguments is masked before it is built (explore/action-mask.ts: a
+ * key pressed into a field named like a secret one, one of the run's `secrets`, or text that looks like a key is never in it; CP3 N-2).
  */
-export function actionTracker(startUrl: string): {
+export function actionTracker(startUrl: string, secrets: readonly string[] = []): {
     before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean }): { state: string; action: string; read: boolean };
     after(a: { tool: string; args: unknown; ok: boolean; url?: string; read?: boolean }): void;
     freshPass(startUrl: string): void;
@@ -1827,10 +1829,13 @@ export function actionTracker(startUrl: string): {
         if (a.target) {
             // What the action does beyond its target (the key pressed, the box checked; never the value typed); click and hover are given the locator itself.
             const rest = a.tool === "click" || a.tool === "hover" || !args ? {} : without(args, [...TYPED, "target", "to", "locator"]);
-            return `${a.tool} ${a.target}${Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : ""}`;
+            // Masked before the key is built (CP3 N-2): the key is the action log's row text. The element's name and the locator say
+            // whether what is left (a key pressed into it) went into a secret field.
+            const field = `${a.target} ${JSON.stringify(args?.target ?? args?.locator ?? null)}`;
+            return `${a.tool} ${a.target}${Object.keys(rest).length ? ` ${JSON.stringify(maskActionArgs(rest, secrets, field))}` : ""}`;
         }
-        if (args && typeof args === "object" && !Array.isArray(args)) return `${a.tool} ${JSON.stringify(without(args, TYPED))}`;
-        return `${a.tool} ${JSON.stringify(a.args ?? null) ?? ""}`;
+        if (args && typeof args === "object" && !Array.isArray(args)) return `${a.tool} ${JSON.stringify(maskActionArgs(without(args, TYPED), secrets))}`;
+        return `${a.tool} ${JSON.stringify(maskActionArgs(a.args ?? null, secrets)) ?? ""}`;
     };
     return {
         before: (a) => {
