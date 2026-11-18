@@ -698,8 +698,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // no result yet; a check is matched by its identity below, as the check generators come to it.
         const carriedChecks = new Map<string, CarriedTest[]>();
         let carriedRun = 0;
+        /** Journeys written and left for a person to run (runTestCases not true), the carried ones included. */
+        let notRun = 0;
         const runCarried = async (c: CarriedTest, extra: Partial<TestUnderValidation> = {}) => {
             if (c.hasResult) return;
+            // A journey is written, not run, unless the creation asks (runTestCases): a carried one without a result stays "Not run yet".
+            if (c.scenario && !runsTestCases(req)) return void notRun++;
             handles.set(c.spec.testId, c.handle);
             scriptIds.set(c.spec.testId, await sink.saveScript(c.handle, renderWithAdapter(c.spec, c.framework, renderCtx), true));
             pending.push({ spec: c.spec, framework: c.framework, ...(c.scenario ? { scenario: c.scenario } : {}), ...extra });
@@ -727,8 +731,6 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (scenarios.length) ctx.emit({ stage: "generation", kind: "scenarios_queued", message: `${scenarios.length} test idea(s) to write`, data: { scenarios: scenarios.slice(0, 500).map((x) => ({ scenarioId: x.scenarioId, title: x.title })) } });
 
         // 4a. Web: author every scenario in a real browser, one agent run per scenario.
-        /** Journeys written and left for a person to run (runTestCases not true). */
-        let notRun = 0;
         if (scenarios.length) {
             const results = await mapLimit(scenarios, ctx.config.CONCURRENCY, async (scenario) => {
                 throwIfAborted(ctx.signal);

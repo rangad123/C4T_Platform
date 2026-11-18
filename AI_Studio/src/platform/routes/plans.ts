@@ -255,7 +255,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
             // Every idea dealt with, every check made (the creation got past making them) and every test run: nothing is left.
             if (job.progress.generation === "done" && ideas.every((x) => exclude.includes(x)) && carried.every((c) => c.hasResult)) throw new HttpError(409, "Everything in this plan was already created and run, so there is nothing to continue. Explore again for a new plan.");
             const o = job.options;
-            const pick = Object.fromEntries((["targets", "accessibility", "healthChecks", "securityChecks", "performanceChecks", "loadChecks", "inputChecks", "visionChecks", "contractChecks", "accessChecks", "visual"] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+            const pick = Object.fromEntries((["targets", "accessibility", "healthChecks", "securityChecks", "performanceChecks", "loadChecks", "inputChecks", "visionChecks", "contractChecks", "accessChecks", "visual", "runTestCases"] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
             const created = await createFromPlan(id, planId, { ...pick, excludeIdeas: exclude.filter((x) => ideas.includes(x)), continueStopped: true }, earlier);
             return reply.code(202).send({ jobId: created.id, status: created.status, from: "tests" });
         }
