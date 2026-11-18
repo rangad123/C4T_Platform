@@ -202,12 +202,17 @@ export class RepoSink implements GenerationSink {
         // Validation-only jobs run the same test again later; keep each run's artifacts apart so an
         // earlier execution's screenshot/trace is never overwritten by a re-validation.
         const runDir = this.job.mode === "validate" || this.job.mode === "plain" ? path.posix.join(`job-${this.job.id.slice(0, 8)}`, `attempt-${attempt}`) : `attempt-${attempt}`;
+        const named = new Set<string>();
         for (const a of run.artifacts) {
             try {
                 // Visual images keep Playwright's name (<snapshot>-actual.png / -diff.png): one test can have several
                 // screenshots, and accepting a new baseline maps each actual back to its snapshot name.
                 // The same goes for AI-judgement screenshots (one per `looksRight` step).
-                const file = a.kind.startsWith("visual-") || a.kind === "vision-shot" ? path.basename(a.path) : `${a.kind}${path.extname(a.path)}`;
+                const base = a.kind.startsWith("visual-") || a.kind === "vision-shot" ? path.basename(a.path) : `${a.kind}${path.extname(a.path)}`;
+                // A test with a popup keeps a picture of each page: the second one never overwrites the first.
+                let file = base;
+                for (let n = 2; named.has(file); n++) file = `${path.basename(base, path.extname(base))}-${n}${path.extname(base)}`;
+                named.add(file);
                 const rel = path.posix.join(this.job.projectId, "_artifacts", h.testId, runDir, file);
                 const saved = await this.store.putFile(rel, a.path);
                 this.repo.addArtifact({ projectId: this.job.projectId, jobId: this.job.id, testId: h.id, executionId, kind: a.kind, path: rel, size: saved.size });
@@ -262,8 +267,9 @@ export class RepoSink implements GenerationSink {
             startedAt,
             steps: this.maskSteps(run?.steps ?? []),
         });
-        if (r.status === "passed" || r.status === "skipped") return;
-        for (const a of run?.artifacts ?? []) {
+        if (r.status === "skipped") return;
+        // A passed run keeps its proof (the screenshot and the recording); a run that went wrong keeps everything.
+        for (const a of (run?.artifacts ?? []).filter((x) => r.status !== "passed" || x.kind === "screenshot" || x.kind === "video")) {
             try {
                 const rel = path.posix.join(this.job.projectId, "_artifacts", h.testId, `job-${this.job.id.slice(0, 8)}`, `env-${r.environment}`, `${a.kind}${path.extname(a.path)}`);
                 const saved = await this.store.putFile(rel, a.path);

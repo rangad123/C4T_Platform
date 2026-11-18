@@ -34,6 +34,29 @@ The tables stay on the test page.
    entries that matter (failed and slow requests, console errors, what happened around the failing step). A test or run without
    evidence is a normal answer with `available: false` and a message; an unknown test or a run of another test is a 404.
 
+## Proof of every run: a screenshot and the recording
+
+Every web test keeps a screenshot and its recording, whether it passed or failed, generated and hand-written (code) tests alike, on
+the platform and on a person's runner (both run the same Playwright configuration, `src/engine/validation/runner.ts`).
+
+- **When the screenshot is taken.** The moment the test's own code ends: for a passing test that is its end, for a failing test the
+  failing step (Playwright takes it before any `afterEach` hook runs, so a hook that signs out or moves away does not change it).
+  A test that opened a popup keeps a picture of each page.
+- **Covered while it is taken.** Fields that are secret by kind (password fields, one-time codes, card numbers and codes; the recorder's
+  rule in `src/engine/recorder/act.ts`) are painted over, in frames and shadow roots too (`src/engine/evidence/proof-style.ts`). A stored
+  secret typed into an ordinary text field is not found, and a recording cannot be covered at all: a password field is drawn as dots,
+  other text shows as it was on the page.
+- **Where it shows.** The Run page lists, under each test, its screenshots as thumbnails (a click opens the picture larger, with a link to
+  open it in a new tab) and a Watch the recording button that plays it with the browser's controls. `GET /api/projects/:id/runs/:jobId`
+  gives each test `proof: [{ id, kind: "screenshot" | "video", moment?: "end" | "failure", removedAt? }]`; the files come from
+  `GET /api/artifacts/:id`, which needs read access to that project (another project's file is a 404).
+- **How long it is kept.** The retention rules decide (`storage-and-backup.md`): a passed run's recording is removed at the next daily
+  pass and its screenshots after the passed-run period; a failed run's files after the failed-run period. A removed file is said in
+  words on the Run page. The trace is still kept for failures only. A browser check (other browsers and screen sizes) keeps files only for
+  the browsers where the test failed; a run against a named environment keeps the screenshot and recording of a pass too.
+- A runner with an installed Chrome or Edge that has not fetched Playwright's video tool keeps screenshots without a recording, as before.
+  A runner whose program is older than this change keeps proof only for failures until it updates.
+
 ## Expected and actual
 
 For a failed check the test-detail answer (`GET /api/tests/:id`) says what was expected and what came back, as plain strings. Each failed step in `executions[].steps[]` gets `expected` and `actual`, and a failing test has a `failure` block: `{ kind: "mismatch", step: { index, title }, expected, actual }`. They are read from the error the runner stored ("Expected: ... Received: ..."). A status check reads "HTTP 200" and "HTTP 401", a status class "2xx" and "4xx", a text check the text and what the page showed. Each is at most 200 characters. They are read from the stored errors, so older runs have them too. No such lines in the error means no fields; nothing is guessed. Passing steps have none.

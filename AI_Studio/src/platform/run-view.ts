@@ -29,6 +29,16 @@ export interface RunTestRow {
     durationMs?: number;
     /** Passed, but only on a re-run after failing in this run. */
     flaky?: true;
+    /** What the run kept to show what the test did: its screenshots and recording (web tests), for GET /api/artifacts/:id. */
+    proof?: RunProof[];
+}
+
+/** One file of a test's proof. `moment`: when the screenshot was taken. `removedAt`: the retention policy removed the file then. */
+export interface RunProof {
+    id: string;
+    kind: "screenshot" | "video";
+    moment?: "end" | "failure";
+    removedAt?: string;
 }
 
 /** A test the run left out because it has no approved version, or because a shared part it uses changed after its approval. */
@@ -113,6 +123,8 @@ function plannedTests(repo: Repo, job: JobRow): TestRow[] {
 
 interface Verdict {
     state: "passed" | "failed" | "finding" | "not_run";
+    /** The execution the verdict is read from (one per run, except a browser check, which has one per browser). */
+    executionId?: string;
     reason?: string;
     durationMs?: number;
     flaky?: boolean;
@@ -122,7 +134,7 @@ interface Verdict {
 function verdicts(db: Db, job: JobRow, tests: TestRow[]): Map<string, Verdict> {
     const mode = job.options.mode ?? "generate";
     const rows = db.all<Row>(
-        "SELECT test_case_id, attempt, status, duration_ms, error, started_at, variant, environment FROM test_executions WHERE job_id = ? ORDER BY test_case_id, COALESCE(finished_at, started_at), attempt",
+        "SELECT id, test_case_id, attempt, status, duration_ms, error, started_at, variant, environment FROM test_executions WHERE job_id = ? ORDER BY test_case_id, COALESCE(finished_at, started_at), attempt",
         job.id,
     );
     const byTest = new Map<string, Row[]>();
@@ -137,9 +149,9 @@ function verdicts(db: Db, job: JobRow, tests: TestRow[]): Map<string, Verdict> {
         if (!mine?.length) continue;
         if (mode === "environment") {
             const last = mine.at(-1)!;
-            if (last.status === "passed") out.set(t.id, { state: "passed", durationMs: last.duration_ms ?? undefined });
+            if (last.status === "passed") out.set(t.id, { state: "passed", executionId: String(last.id), durationMs: last.duration_ms ?? undefined });
             else if (last.status === "skipped") out.set(t.id, { state: "not_run", reason: oneLine(last.error) });
-            else out.set(t.id, { state: last.status === "finding" ? "finding" : "failed", reason: oneLine(last.error), durationMs: last.duration_ms ?? undefined });
+            else out.set(t.id, { state: last.status === "finding" ? "finding" : "failed", executionId: String(last.id), reason: oneLine(last.error), durationMs: last.duration_ms ?? undefined });
             continue;
         }
         if (mode === "variants") {
@@ -154,7 +166,7 @@ function verdicts(db: Db, job: JobRow, tests: TestRow[]): Map<string, Verdict> {
         const last = ran.at(-1);
         if (!last) continue;
         if (last.status === "passed") {
-            out.set(t.id, { state: "passed", durationMs: last.duration_ms ?? undefined, ...(ran.some((r) => r.status !== "passed") ? { flaky: true } : {}) });
+            out.set(t.id, { state: "passed", executionId: String(last.id), durationMs: last.duration_ms ?? undefined, ...(ran.some((r) => r.status !== "passed") ? { flaky: true } : {}) });
             continue;
         }
         // A failure is a finding when the test says so now and this run is the newest run of the test (an older run cannot know).
@@ -162,6 +174,7 @@ function verdicts(db: Db, job: JobRow, tests: TestRow[]): Map<string, Verdict> {
         const latest = newest?.job_id === job.id;
         out.set(t.id, {
             state: latest && t.validationStatus === "NEEDS_REVIEW" ? "finding" : "failed",
+            executionId: String(last.id),
             reason: oneLine(latest ? (t.validationReason ?? last.error) : last.error),
             durationMs: last.duration_ms ?? undefined,
         });
@@ -231,6 +244,18 @@ function changesSince(db: Db, job: JobRow, tests: TestRow[], now: Map<string, Ve
     return compared ? { comparedWith: compared, newlyFailing, newlyPassing } : null;
 }
 
+/** The screenshots and recording of the execution a test's result comes from, in the order they were stored. */
+function proofOf(db: Db, v: Verdict): RunProof[] {
+    if (!v.executionId) return [];
+    const rows = db.all<Row>("SELECT id, kind, pruned_at FROM artifacts WHERE execution_id = ? AND kind IN ('screenshot', 'video') ORDER BY created_at, id LIMIT 12", v.executionId);
+    return rows.map((r) => ({
+        id: String(r.id),
+        kind: r.kind === "video" ? "video" : "screenshot",
+        ...(r.kind === "screenshot" ? { moment: v.state === "passed" ? ("end" as const) : ("failure" as const) } : {}),
+        ...(r.pruned_at ? { removedAt: String(r.pruned_at) } : {}),
+    }));
+}
+
 const HELD_BACK_REASON = "Waiting for approval: only approved versions run.";
 
 /** The tests this run recorded as held back (review-store.ts `pinRun`), even after they were moved or their draft was decided. */
@@ -260,7 +285,10 @@ export function buildRunDetail(repo: Repo, job: JobRow): RunDetail {
     const rows: RunTestRow[] = tests.map((t) => {
         const v = got.get(t.id);
         const base = { id: t.id, testId: t.testKey, title: t.title, suite: t.suite };
-        if (v) return { ...base, state: v.state, ...(v.reason ? { reason: v.reason } : {}), ...(v.durationMs !== undefined ? { durationMs: v.durationMs } : {}), ...(v.flaky ? { flaky: true as const } : {}) };
+        if (v) {
+            const proof = proofOf(db, v);
+            return { ...base, state: v.state, ...(v.reason ? { reason: v.reason } : {}), ...(v.durationMs !== undefined ? { durationMs: v.durationMs } : {}), ...(v.flaky ? { flaky: true as const } : {}), ...(proof.length ? { proof } : {}) };
+        }
         if (held.has(t.id)) return { ...base, state: "not_run", reason: held.get(t.id)! };
         if (active) {
             // Scripts run together and are recorded when they finish: before that a test is waiting for the run to begin, or part of the run in progress.

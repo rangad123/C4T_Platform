@@ -16,6 +16,16 @@ export interface RunTest {
     reason?: string;
     durationMs?: number;
     flaky?: true;
+    /** The screenshots and recording this run kept of the test (src/platform/run-view.ts). */
+    proof?: RunProof[];
+}
+
+/** One kept file: `moment` says when a screenshot was taken, `removedAt` that the retention policy removed it. */
+export interface RunProof {
+    id: string;
+    kind: "screenshot" | "video";
+    moment?: "end" | "failure";
+    removedAt?: string;
 }
 
 export interface RunCounts {

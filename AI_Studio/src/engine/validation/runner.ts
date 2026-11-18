@@ -14,6 +14,7 @@ import { createdFileName } from "../cleanup/helper.js";
 import { EVIDENCE_ATTACHMENT } from "../evidence/capture.js";
 import { parseEvidence, secretsOfRun } from "../evidence/model.js";
 import { scrubRunTraces, traceSecretsOfRun } from "../evidence/trace-scrub.js";
+import { PROOF_SHOT_STYLE } from "../evidence/proof-style.js";
 import { parseCreatedLog, type CreatedLine } from "../cleanup/ledger.js";
 import { parseMetrics } from "../performance/specs.js";
 import { checkScript, describeErrors } from "../custom/guard.js";
@@ -152,13 +153,15 @@ export default defineConfig({
     snapshotPathTemplate: "{testDir}/__baselines__/{arg}{ext}",
     use: {
         headless: process.env.PW_HEADLESS !== "false",
-        screenshot: "only-on-failure",
+        // Proof of every test: a picture the moment the test's own code ends (at the failing step when it fails, before any afterEach), with
+        // secret fields covered while it is taken (../evidence/proof-style.ts).
+        screenshot: { mode: "on", style: ${JSON.stringify(PROOF_SHOT_STYLE)} },
         // Kept for a failing run (and any retry), with the accessibility tree at each action next to the page itself.
         trace: { mode: "retain-on-failure-and-retries", snapshots: { dom: true, aria: true, screen: true } },
-        // Recorded for every run but kept only when a test fails, so reviewers can watch what happened: each action is shown on the video. No step
-        // titles: Playwright draws them as markup with an inline style, which a page's strict style-src policy refuses with a console error that
-        // the page health check would report as the page's own.
-        video: { mode: "retain-on-failure", show: { actions: {} } },
+        // Kept for every test, so reviewers can watch what happened: each action is shown on the video (a passed run's recording is removed at
+        // the next retention pass). No step titles: Playwright draws them as markup with an inline style, which a page's strict style-src policy
+        // refuses with a console error that the page health check would report as the page's own.
+        video: { mode: "on", show: { actions: {} } },
         // Routes (the bearer token, deliberate faults) must see every request: a service worker would answer some itself.
         serviceWorkers: "block",
         actionTimeout: 10_000,
@@ -177,8 +180,8 @@ export function configFor(projects: RunnerProject[], testTimeoutMs?: number, bro
     const timed = testTimeoutMs !== undefined && testTimeoutMs !== 60_000 ? CONFIG.replace("    timeout: 60_000,", () => `    timeout: ${Math.round(testTimeoutMs)},`) : CONFIG;
     // A runner that uses the computer's Chrome or Edge (../browsers/choice.ts): Chromium tests run in it. Firefox and WebKit variants keep their own engine.
     const launch = browser?.channel || browser?.executablePath ? `${browser.channel ? `channel: ${JSON.stringify(browser.channel)}, ` : ""}${browser.executablePath ? `launchOptions: { executablePath: ${JSON.stringify(browser.executablePath)} }, ` : ""}`.replace(/, $/, "") : "";
-    // No video tool on this computer (a runner using an installed browser that has not fetched it yet): no failure video, rather than no test.
-    const filmed = browser?.video === false ? timed.replace(/video: \{ mode: "retain-on-failure"[^\n]*\},\n/, () => 'video: "off",\n') : timed;
+    // No video tool on this computer (a runner using an installed browser that has not fetched it yet): no recording, rather than no test.
+    const filmed = browser?.video === false ? timed.replace(/video: \{ mode: "on"[^\n]*\},\n/, () => 'video: "off",\n') : timed;
     const base = launch && projects.length === 0 ? filmed.replace("    use: {\n", () => `    use: {\n        ${launch},\n`) : filmed;
     if (projects.length === 0) return base;
     const list = projects

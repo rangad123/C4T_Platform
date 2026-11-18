@@ -212,7 +212,7 @@ describe("an agent running real tests for a fake platform", () => {
         expect(a.lines.join("\n")).toMatch(/Capabilities: .*browsers: chromium/);
     });
 
-    it("runs a web script and an API script, uploads artifacts of the failing script only, and the bytes match", async () => {
+    it("runs a web script and an API script, uploads the proof of the passing script and everything of the failing one, and the bytes match", async () => {
         fake.failUploads = 2; // the first upload fails twice: the agent retries
         const t = offer("playwright", [webPass(), webFail(), apiPass()]);
         fake.enqueue({ offer: t });
@@ -220,8 +220,8 @@ describe("an agent running real tests for a fake platform", () => {
         expect(r.ok, r.error).toBe(true);
         expect(r.runs.map((x) => [x.testId, x.status])).toEqual([["WEB-001", "passed"], ["WEB-002", "failed"], ["API-001", "passed"]]);
 
-        // a passing web script leaves only its compact passing-run record (no screenshot, trace or video); an API script nothing
-        expect(runOf(r, "WEB-001").artifacts.map((a) => a.kind)).toEqual(["evidence"]);
+        // a passing web script leaves its proof (a screenshot and the recording) and its compact passing-run record, no trace; an API script nothing
+        expect(runOf(r, "WEB-001").artifacts.map((a) => a.kind).sort()).toEqual(["evidence", "screenshot", "video"]);
         expect(runOf(r, "API-001").artifacts).toEqual([]);
 
         // the failing one has its screenshot, trace and video (and evidence) as uploaded files
@@ -245,9 +245,11 @@ describe("an agent running real tests for a fake platform", () => {
         const evidence = failed.artifacts.find((x) => x.kind === "evidence");
         if (evidence) expect(JSON.parse(bytesOf(fake, t.taskId, evidence.ref).toString("utf8"))).toBeTruthy();
 
-        // nothing but the failing script's files and the passing web script's compact record was uploaded, the record is small
-        // (no screenshot, trace or video), and no local path leaked into the result
-        expect([...uploadsOf(fake, t.taskId).keys()].every((n) => n.startsWith("WEB-002-") || n === "WEB-001-evidence.json")).toBe(true);
+        // nothing but the failing script's files and the passing web script's proof and compact record was uploaded (its picture is a
+        // real PNG, no trace), the record is small, and no local path leaked into the result
+        const passing = runOf(r, "WEB-001");
+        expect([...uploadsOf(fake, t.taskId).keys()].every((n) => n.startsWith("WEB-002-") || n === "WEB-001-evidence.json" || passing.artifacts.some((a) => a.ref === n && a.kind !== "trace"))).toBe(true);
+        expect(bytesOf(fake, t.taskId, passing.artifacts.find((x) => x.kind === "screenshot")!.ref).subarray(0, 4).equals(PNG)).toBe(true);
         expect(bytesOf(fake, t.taskId, "WEB-001-evidence.json").length).toBeLessThanOrEqual(6 * 1024);
         expect(JSON.stringify(r)).not.toContain(workDir);
 

@@ -5,6 +5,7 @@ import { Tooltip } from "../../components/Tooltip";
 import { help } from "../../lib/help";
 import { duration, plural } from "../../lib/format";
 import { routes } from "../../lib/router";
+import { RunProof } from "./RunProof";
 import { StopRun } from "./StopDialog";
 import { Elapsed } from "./RunTime";
 import { followsRunner, useLiveRun } from "./LiveRun";
@@ -37,6 +38,7 @@ export function RunTestList({ tests, onlyId, live }: { tests: RunAnswer["tests"]
                                 <span className="t-meta">{t.testId}</span>
                                 {t.step && t.state === "running" && <span className="t-meta now">{t.step}</span>}
                                 {t.reason && t.state !== "passed" && <span className="why t-meta">{t.reason}</span>}
+                                {t.proof?.length ? <RunProof proof={t.proof} title={t.title} /> : null}
                             </span>
                             {t.flaky ? (
                                 <Tooltip content={help("metric", "flakyPass")}>
