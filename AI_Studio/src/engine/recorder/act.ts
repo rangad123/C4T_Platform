@@ -86,6 +86,8 @@ export interface FieldFacts {
     id?: string;
     ariaLabel?: string;
     placeholder?: string;
+    /** The text of the field's labels (`<label>`, aria-labelledby). The recorder's rule does not read it; the pictures' cover does. */
+    label?: string;
 }
 
 export function secretKindOfField(f: FieldFacts): SecretKind | "" {

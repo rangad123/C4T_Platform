@@ -2,14 +2,17 @@
  * Taking the picture for the Explorer view (the part that touches a browser).
  *
  * Order matters: secret fields are covered first, the picture is taken, and the cover is taken off again in a `finally`, so a failed picture never leaves
- * the page changed. Which fields are secret is decided by the recorder's own rule (`secretKindOfField` in recorder/act.ts, which mirrors the recorder's
- * page script and is kept in step with it by a test), applied to the facts of every input in the page and in its frames. Besides the fields that are
- * secret by kind, any field that currently holds one of the project's stored secrets is covered, wherever the AI typed it.
+ * the page changed. A field is covered when it is secret by the recorder's own rule (`secretKindOfField` in recorder/act.ts, which mirrors the recorder's
+ * page script and is kept in step with it by a test), or when its name, id, aria-label, placeholder or label text names it like a secret field
+ * (shared/secret-field.ts: a password shown as text, a PIN, a token, an API key; CP3 N-6). The rule is applied to every input and text area in the page,
+ * in its frames and inside open shadow roots. Besides those, any field that currently holds one of the project's stored secrets is covered, wherever
+ * the AI typed it. A closed shadow root cannot be entered from the page: a field in one is not covered.
  *
  * The picture is scaled down by the browser itself (a clip with a scale), so a 1280 px page is never shipped at full size.
  */
 import type { CDPSession, Frame, Page } from "playwright";
 import { secretKindOfField, type FieldFacts } from "../recorder/act.js";
+import { namesSecretField } from "../../shared/secret-field.js";
 import { safeAddress } from "./activity.js";
 
 export const FRAME_LIMITS = {
@@ -51,14 +54,18 @@ export async function firstThatFits(qualities: readonly number[], take: (quality
     return null;
 }
 
-/** Which of a page's inputs to cover: secret by kind, or currently holding a stored secret. */
+/** Which of a page's fields to cover: secret by kind, named like a secret field (by name, id, aria-label, placeholder or label), or currently holding a stored secret. */
 export function fieldsToCover(fields: ReadonlyArray<FieldFacts & { holdsSecret?: boolean }>): number[] {
     const out: number[] = [];
     fields.forEach((f, i) => {
-        if (f.holdsSecret || secretKindOfField(f) !== "") out.push(i);
+        if (f.holdsSecret || secretKindOfField(f) !== "" || namesSecretField(f.name, f.id, f.ariaLabel, f.placeholder, f.label)) out.push(i);
     });
     return out;
 }
+
+// The fields are walked in the page the same way by each evaluate below (spelled out in each, since a function cannot be passed into
+// the page, and building one there would fail on a page whose content security policy forbids eval): inputs and text areas in document
+// order, each open shadow root's after its host, at most MAX_FIELDS, so the indexes of reading and covering agree.
 
 // ── covering secret fields ──────────────────────────────────────────────────
 
@@ -69,9 +76,22 @@ async function readFields(frame: Frame, secrets: readonly string[]): Promise<Arr
     return frame.evaluate(
         ([max, stored]) => {
             const held = stored as string[];
-            const els = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).slice(0, max as number);
+            // The field walk (see above).
+            const els: Array<HTMLInputElement | HTMLTextAreaElement> = [];
+            const walk = (root: Document | ShadowRoot): void => {
+                for (const el of Array.from(root.querySelectorAll("*"))) {
+                    if (els.length >= (max as number)) return;
+                    if (el.matches("input, textarea")) els.push(el as HTMLInputElement | HTMLTextAreaElement);
+                    if (el.shadowRoot) walk(el.shadowRoot);
+                }
+            };
+            walk(document);
+            const text = (e: Element | null | undefined) => (e?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
             return els.map((el) => {
                 const v = el.value ?? "";
+                const root = el.getRootNode() as Document | ShadowRoot;
+                const by = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean).map((id) => text(root.getElementById?.(id) ?? null));
+                const label = [...Array.from(el.labels ?? []).map(text), ...by].join(" ").slice(0, 400);
                 return {
                     tag: el.tagName.toLowerCase(),
                     type: el instanceof HTMLInputElement ? el.type : "",
@@ -80,6 +100,7 @@ async function readFields(frame: Frame, secrets: readonly string[]): Promise<Arr
                     id: el.id ?? "",
                     ariaLabel: el.getAttribute("aria-label") ?? "",
                     placeholder: el.getAttribute("placeholder") ?? "",
+                    label,
                     // A short secret must match the whole value (a part of an ordinary word is not a secret); a long one may sit inside it.
                     holdsSecret: v !== "" && held.some((s) => (s.length < 4 ? v === s : v.includes(s))),
                 };
@@ -94,8 +115,17 @@ async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> 
     const which = fieldsToCover(fields);
     if (!which.length) return;
     await frame.evaluate(
-        ([attr, color, idx]) => {
-            const els = Array.from(document.querySelectorAll<HTMLElement>("input, textarea"));
+        ([attr, color, idx, max]) => {
+            // The field walk (see above).
+            const els: HTMLElement[] = [];
+            const walk = (root: Document | ShadowRoot): void => {
+                for (const el of Array.from(root.querySelectorAll("*"))) {
+                    if (els.length >= (max as number)) return;
+                    if (el.matches("input, textarea")) els.push(el as HTMLElement);
+                    if (el.shadowRoot) walk(el.shadowRoot);
+                }
+            };
+            walk(document);
             const w = window as unknown as { __aitpMasked?: Array<{ el: HTMLElement; style: string | null }>; __aitpMaskStyle?: HTMLStyleElement };
             w.__aitpMasked = w.__aitpMasked ?? [];
             if (!w.__aitpMaskStyle) {
@@ -115,7 +145,7 @@ async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> 
                 }
             }
         },
-        [MASK_ATTR, COVER, which] as [string, string, number[]],
+        [MASK_ATTR, COVER, which, MAX_FIELDS] as [string, string, number[], number],
     );
 }
 
@@ -130,8 +160,14 @@ async function uncoverIn(frame: Frame): Promise<void> {
         w.__aitpMasked = [];
         w.__aitpMaskStyle?.remove();
         w.__aitpMaskStyle = undefined;
-        // Belt and braces: nothing carrying the marker is left behind.
-        for (const el of Array.from(document.querySelectorAll(`[${attr}]`))) el.removeAttribute(attr);
+        // Belt and braces: nothing carrying the marker is left behind, in open shadow roots either.
+        const clear = (root: Document | ShadowRoot): void => {
+            for (const el of Array.from(root.querySelectorAll("*"))) {
+                if (el.hasAttribute(attr)) el.removeAttribute(attr);
+                if (el.shadowRoot) clear(el.shadowRoot);
+            }
+        };
+        clear(document);
     }, MASK_ATTR);
 }
 

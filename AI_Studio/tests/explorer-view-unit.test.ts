@@ -134,6 +134,25 @@ describe("size and covering decisions", () => {
         // The same decision the recorder's picture uses.
         expect(secretKindOfField({ tag: "input", type: "password" })).toBe("password");
     });
+
+    it("also covers a field named like a secret one by its label, name or id: a revealed password, a PIN, a token, an API key (CP3 N-6)", () => {
+        const fields = [
+            { tag: "input", type: "text", label: "Password" },
+            { tag: "input", type: "text", name: "pin" },
+            { tag: "input", type: "tel", name: "card_pin" },
+            { tag: "input", type: "text", name: "api_token" },
+            { tag: "input", type: "text", id: "apiKey" },
+            { tag: "input", type: "text", label: "Client secret" },
+            { tag: "textarea", type: "", label: "Private key" },
+            { tag: "input", type: "text", name: "otpCode" },
+            { tag: "input", type: "text", name: "spinner", label: "Shipping" },
+            { tag: "input", type: "text", name: "passenger", label: "Compass heading" },
+        ];
+        expect(fieldsToCover(fields)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+        // It decides what a picture hides, never what may be typed: the recorder's rule still calls these ordinary fields.
+        expect(secretKindOfField({ tag: "input", type: "text", name: "pin" })).toBe("");
+        expect(secretKindOfField({ tag: "input", type: "text", label: "Password" })).toBe("");
+    });
 });
 
 describe("covering fails closed", () => {
