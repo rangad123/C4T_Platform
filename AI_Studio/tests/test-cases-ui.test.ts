@@ -159,6 +159,46 @@ describe("generating test cases from requirements", () => {
     });
 });
 
+describe("every chosen requirement in one click (sheet #12)", () => {
+    it("writes cases for all 8, shows how far it got, names the one that failed with why, and tries only that one again", async () => {
+        const eight = seedProject(platform, "Eight shop", "https://eight.example.test");
+        platform.repo.updateProject(eight.projectId, { testingModes: ["code"] });
+        const made: Array<{ id: string; ref: string }> = [];
+        for (let i = 0; i < 8; i++) made.push(await api("POST", `/api/projects/${eight.projectId}/requirements`, { title: `Rule number ${i + 1}` }));
+        const one = (r: { ref: string }) => ({ requirement: r.ref, title: `Verify ${r.ref} works`, priority: "low", type: "automated", steps: [{ action: "Do it", expected: "It works" }] });
+        const text = (rs: Array<{ ref: string }>) => JSON.stringify({ cases: rs.map(one) });
+        const refused = { status: 400, body: { error: { message: "Bad request: the prompt was refused", code: 400 } } };
+        fake.reset();
+        // Two requests (five, then three); in the second the AI leaves out the last requirement and refuses it again on its own.
+        fake.queue("*", { delayMs: 1500, text: text(made.slice(0, 5)) }, { delayMs: 1500, text: text(made.slice(5, 7)) }, refused);
+        await open(requirementsUrl(eight));
+        const card = page.getByTestId("generate-cases");
+        await card.getByRole("button", { name: "Generate test cases" }).click();
+        await page.getByRole("group", { name: "Choose requirements" }).getByLabel(/Choose all/).check();
+        await card.getByRole("button", { name: "Generate test cases for 8 requirements" }).click();
+        const progress = card.getByTestId("generate-cases-progress");
+        await pwExpect(progress).toHaveText("Writing test cases: 0 of 8 requirements done.");
+        await pwExpect(progress).toHaveText("Writing test cases: 5 of 8 requirements done.");
+        await shot("generate-cases-progress");
+        const outcome = card.getByTestId("generate-cases-outcome");
+        await pwExpect(outcome.getByTestId("cases-generated")).toContainText("7 test cases have been created from your requirements.", { timeout: 15_000 });
+        const left = outcome.getByTestId("cases-not-written");
+        await pwExpect(left).toContainText(`${made[7]!.ref}: `);
+        await pwExpect(left.getByRole("listitem")).toHaveCount(1);
+        await shot("generate-cases-not-written");
+        fake.reset();
+        fake.queue("*", { text: text([made[7]!]) });
+        await outcome.getByRole("button", { name: "Try it again" }).click();
+        await pwExpect(outcome.getByTestId("cases-generated")).toContainText("1 test case has been created from your requirements.");
+        await pwExpect(outcome.getByTestId("cases-not-written")).toHaveCount(0);
+        // Only the one left was sent again.
+        expect(fake.seen).toHaveLength(1);
+        expect(JSON.stringify(fake.seen[0]!.body)).toContain(`Reference: ${made[7]!.ref}`);
+        expect(JSON.stringify(fake.seen[0]!.body)).toContain("Requirements (1)");
+        expect((await api("GET", `/api/projects/${eight.projectId}/manual-cases`)).total).toBe(8);
+    });
+});
+
 describe("the Test cases list", () => {
     it("shows one list with type pills, the columns, and no running", async () => {
         await open(casesUrl());

@@ -39,7 +39,7 @@ export interface RequirementRow extends Requirement {
 export interface GenerateCasesResult {
     created: number;
     cases: Array<{ id: string; ref: string; title: string }>;
-    perRequirement: Array<{ id: string; ref: string; created: number; failed: boolean }>;
+    perRequirement: Array<{ id: string; ref: string; created: number; failed: boolean; /** Why it got no test case (newer servers). */ why?: string }>;
     duplicates: number;
     limited: boolean;
     failed: string[];

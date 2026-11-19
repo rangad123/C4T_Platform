@@ -148,6 +148,8 @@ export interface JobOptions {
     plainCaseId?: string;
     /** plain mode, with `plainCaseId`: the test cases still to build after this one, each in the next job (case-scripts.ts). */
     plainCaseQueue?: string[];
+    /** plain mode, with `plainCaseId`: why the case before this one made no test (its job's error); the same again ends the chain. */
+    plainCaseFailed?: string;
     /** agent mode: the agent run this job carries out (agent-run.ts). */
     agentRunId?: string;
     /** plain mode: rebuild this existing test (test_cases.id) from the new description instead of adding one. */

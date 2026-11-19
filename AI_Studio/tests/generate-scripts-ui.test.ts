@@ -180,6 +180,80 @@ describe("Generate test scripts, on Test cases", () => {
         if (shots) await page.screenshot({ path: path.join(shots, "generate-web-scripts-done.png") });
     });
 
+    it("writes 8 phone scripts in one click, a few at a time with the progress, and names the cases left when a request is refused (sheet #12)", async () => {
+        const { repo } = platform;
+        const store = new ManualCaseStore(platform.db);
+        const pid = repo.createProject({ name: "Eight phone shop", platforms: ["android"], testingModes: ["code"] }).id as string;
+        repo.createApplication(pid, "android-app://com.example.eight", { ...DEFAULT_JOB_OPTIONS, mobile: { appPackage: "com.example.eight" } });
+        const eight = Array.from({ length: 8 }, (_, i) => store.createCase(pid, ManualCaseInputSchema.parse({ title: `Verify screen ${i + 1}`, automation: "automated", area: "Screens", steps: [{ action: "Open it", expected: "Welcome is shown" }] })));
+        await page.goto(`${BASE}/#/projects/${pid}/tests`);
+        const card = page.getByTestId("generate-scripts");
+        await card.getByRole("button", { name: "Generate test scripts", exact: true }).click();
+        await pwExpect(card.getByText("Generate 8 phone test scripts?")).toBeVisible();
+        fake.reset();
+        fake.queue(MODEL, ...Array.from({ length: 5 }, () => ({ text: PHONE_ANSWER, delayMs: 400 })));
+        // The second request (the last three) is refused as a whole, as the AI limit refuses it.
+        const LIMIT = "The AI token limit was reached, so the AI cannot write test scripts now. You can still write them by hand.";
+        let posts = 0;
+        await page.route(`**/api/projects/${pid}/manual-cases/generate-scripts`, async (route) => {
+            if (route.request().method() === "POST" && !JSON.parse(route.request().postData() ?? "{}").dryRun && ++posts === 2) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: LIMIT }) });
+            return route.fallback();
+        });
+        await card.getByRole("button", { name: "Generate 8 scripts", exact: true }).click();
+        await pwExpect(card.getByText("Writing test scripts: 0 of 8")).toBeVisible();
+        await pwExpect(card.getByText("Test scripts generated")).toBeVisible({ timeout: 20_000 });
+        await pwExpect(card).toContainText("5 phone test scripts have been created");
+        const left = card.getByTestId("scripts-not-written");
+        await pwExpect(left.getByRole("listitem")).toHaveCount(3);
+        for (const c of eight.slice(5)) await pwExpect(left).toContainText(`${c.ref} got no script: ${LIMIT}`);
+        if (shots) await page.screenshot({ path: path.join(shots, "generate-scripts-left.png") });
+        await page.unroute(`**/api/projects/${pid}/manual-cases/generate-scripts`);
+        fake.reset();
+        fake.queue(MODEL, ...Array.from({ length: 3 }, () => ({ text: PHONE_ANSWER })));
+        await card.getByRole("button", { name: "Try these 3 again", exact: true }).click();
+        await pwExpect(card).toContainText("3 phone test scripts have been created");
+        expect(fake.seen).toHaveLength(3);
+        expect(store.listCases(pid).filter((c) => c.linkedTestIds.length === 1)).toHaveLength(8);
+    });
+
+    it("follows a web project's chain past a case that got no script, names it with its run's reason, and builds only that one again", async () => {
+        const { repo } = platform;
+        const store = new ManualCaseStore(platform.db);
+        const pid = repo.createProject({ name: "Chain web shop", platforms: ["web"], testingModes: ["code"] }).id as string;
+        repo.createApplication(pid, "http://127.0.0.1:8523", { ...DEFAULT_JOB_OPTIONS });
+        const three = ["Verify the home page", "Verify the search", "Verify the basket"].map((title) => store.createCase(pid, ManualCaseInputSchema.parse({ title, automation: "automated", area: "Shop", steps: [{ action: "Open it", expected: "It shows" }] })));
+        await page.goto(`${BASE}/#/projects/${pid}/tests`);
+        const card = page.getByTestId("generate-scripts");
+        await card.getByRole("button", { name: "Generate test scripts", exact: true }).click();
+        await card.getByRole("button", { name: "Generate 3 scripts", exact: true }).click();
+        await pwExpect(card.getByTestId("generate-scripts-building")).toContainText("Building test scripts: 0 of 3");
+        /** The job's end, played here: with a test it made, or failed with a reason. */
+        const end = async (job: any, made: boolean, error?: string) => {
+            if (made) {
+                const imported = await server.inject({ method: "POST", url: `/api/projects/${pid}/specs`, headers: { "x-api-key": KEY }, payload: { validate: false, specs: [{ title: job.options.plainDescription.split("\n")[0], kind: "web", category: "Plain English", steps: [{ action: "navigate", url: "/" }] }] } });
+                platform.db.run("UPDATE test_cases SET job_id = ? WHERE id = ?", job.id, JSON.parse(imported.body).tests[0].id);
+                repo.setJobStatus(job.id, "COMPLETED");
+            } else repo.setJobStatus(job.id, "FAILED", error);
+            return afterCaseJob(repo, job);
+        };
+        const first = repo.listJobs(pid)[0]!;
+        const second = (await end(first, true))!;
+        await pwExpect(card.getByTestId("generate-scripts-building")).toContainText("Building test scripts: 1 of 3", { timeout: 10_000 });
+        const third = (await end(second, false, "The search box could not be found"))!;
+        expect(third.options.plainCaseId).toBe(three[2]!.id);
+        expect(await end(third, true)).toBeNull();
+        await pwExpect(card.getByText("Test scripts generated")).toBeVisible({ timeout: 15_000 });
+        await pwExpect(card).toContainText("2 test scripts have been created");
+        await pwExpect(card.getByTestId("scripts-not-written")).toContainText(`${three[1]!.ref} got no script: The search box could not be found.`);
+        if (shots) await page.screenshot({ path: path.join(shots, "generate-web-scripts-left.png") });
+        await card.getByRole("button", { name: "Try it again", exact: true }).click();
+        await pwExpect(card.getByTestId("generate-scripts-building")).toContainText("Building test scripts: 0 of 1");
+        const again = repo.listJobs(pid)[0]!;
+        expect(again.options).toMatchObject({ plainCaseId: three[1]!.id, plainCaseQueue: [] });
+        expect(await end(again, true)).toBeNull();
+        await pwExpect(card).toContainText("1 test script has been created", { timeout: 15_000 });
+    });
+
     it("says before the click why it cannot write here: an iOS-only project, an Android project without its app", async () => {
         for (const [pid, why] of [
             [iphone, IOS_PROJECT],

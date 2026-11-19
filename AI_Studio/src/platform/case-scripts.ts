@@ -6,9 +6,11 @@
  * guessed ("Dashboard").
  *
  * Each case is one plain job: "Generate test scripts" (routes/generate-scripts.ts) starts the first, and when a job ends the test it made
- * becomes its case's script (linked to the case and the case's requirements) and the next case's job starts (job-runner.ts). The chain
- * stops at a cancel, when a job made no test (no AI, the browser could not start...), or when another run of the project has started:
- * the cases left have no script yet, so generating again picks them up.
+ * becomes its case's script (linked to the case and the case's requirements) and the next case's job starts (job-runner.ts). A case whose
+ * job made no test is passed over (its run says why) and the next one is built, so one click builds them all. The chain stops at a
+ * cancel, when another run of the project has started, or when two cases in a row made no test for the same reason (no AI, the browser
+ * could not start, the AI limit: the cases after them would fail the same way): the cases left have no script yet, the page names them
+ * with why, and generating again picks them up.
  */
 import { detectKind, PLAIN_MAX_LENGTH, refusalFor } from "../engine/authoring/describe.js";
 import { scriptTitleOf } from "../engine/authoring/case-script.js";
@@ -40,11 +42,12 @@ export function caseHasScript(repo: Repo, projectId: string, c: Pick<ManualCase,
 }
 
 /** The options of the plain job that builds this case's script, with the cases still to build after it. */
-export function caseJobOptions(base: JobOptions, c: ManualCase, queue: string[], apis: ReadonlyArray<{ path: string }>): JobOptions {
+export function caseJobOptions(base: JobOptions, c: ManualCase, queue: string[], apis: ReadonlyArray<{ path: string }>, lastFailure?: string): JobOptions {
     const description = caseDescription(c);
-    const { rewriteTestId: _rewrite, ...rest } = base;
+    const { rewriteTestId: _rewrite, plainCaseFailed: _failed, ...rest } = base;
     void _rewrite;
-    return { ...rest, mode: "plain", plainDescription: description, plainKind: detectKind(description, apis as Array<{ path: string }>), plainCaseId: c.id, plainCaseQueue: queue };
+    void _failed;
+    return { ...rest, mode: "plain", plainDescription: description, plainKind: detectKind(description, apis as Array<{ path: string }>), plainCaseId: c.id, plainCaseQueue: queue, ...(lastFailure !== undefined ? { plainCaseFailed: lastFailure } : {}) };
 }
 
 /**
@@ -81,7 +84,10 @@ export async function afterCaseJob(repo: Repo, job: JobRow): Promise<JobRow | nu
     await linkScriptsToCase(repo, pid, caseId, made);
 
     const queue = [...(job.options.plainCaseQueue ?? [])];
-    if (!queue.length || done.error === "Cancelled" || made.length === 0) return null;
+    if (!queue.length || done.error === "Cancelled") return null;
+    // No test made: the next case is built, unless the case before this one failed for the same reason (not a reason about the case).
+    const failure = made.length === 0 ? (done.error ?? "") : undefined;
+    if (failure !== undefined && job.options.plainCaseFailed === failure) return null;
     // A person started another run meanwhile: theirs goes first, and the cases left are generated again later.
     if (repo.listJobs(pid).some((j) => j.id !== job.id && !TERMINAL.includes(j.status))) return null;
     const cases = new ManualCaseStore(repo.db);
@@ -91,7 +97,7 @@ export async function afterCaseJob(repo: Repo, job: JobRow): Promise<JobRow | nu
         if (!c || c.automation !== "automated" || caseHasScript(repo, pid, c)) continue;
         // Changed since it was queued into something that is not built (a payment, an attack...): skipped, as the first call skips it.
         if (refusalFor(caseDescription(c), { allowChanges: job.options.allowMutatingApiTests === true })) continue;
-        return await repo.createJob(pid, job.applicationId, caseJobOptions(job.options, c, queue, apis));
+        return await repo.createJob(pid, job.applicationId, caseJobOptions(job.options, c, queue, apis, failure));
     }
     return null;
 }

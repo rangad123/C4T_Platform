@@ -1,7 +1,7 @@
-import { ClipboardList, Sparkles, X } from "lucide-react";
+import { ClipboardList, RotateCcw, Sparkles, X } from "lucide-react";
 import { AiModelNote } from "../../components/AiModelNote";
 import { useEffect, useMemo, useState } from "react";
-import { ApiError, api, projectShape, type ProjectDetail, type TestSummary } from "../../api";
+import { ApiError, api, projectShape, type Job, type ProjectDetail, type TestSummary } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { describeApiError, friendlyError, isActive } from "../../lib/labels";
@@ -39,7 +39,7 @@ export const NO_ADDRESS_FOR_SCRIPTS = "This project has no application address y
 const BUILT_LIVE = "The AI does each test case's steps in a real browser on the application, signed in with the project's sign-in, keeps the steps that worked and checks what the page really shows, then runs the script.";
 const ON_DEVICE = "The AI has not seen the app: it finds each button and field by its visible text or accessibility label, so check each script on the device before approving it.";
 
-/** Cases sent per request, so the page can say how far it got (the server takes at most 20). */
+/** Phone cases sent per request, so the page can say how far it got (the server takes at most 20; it sends back the rest as "later"). */
 const CHUNK = 5;
 
 type Form = "text" | "phone" | "ios";
@@ -106,7 +106,9 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
         }
     }
 
-    // Web: the server builds the scripts one after the other; the page follows the cases until each has its script or the runs have ended.
+    // Web: the server builds the scripts one after the other; the page follows each case's job until every case has its script or no job
+    // of the chain is going on any more. A case whose job ended without a script is named with the job's own reason; a case no job was
+    // started for is named with why the chain stopped before it.
     const building = state.step === "building" ? state.caseIds : null;
     useEffect(() => {
         if (!building) return;
@@ -115,14 +117,33 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
         let idle = 0;
         const tick = async () => {
             try {
-                const [list, project] = await Promise.all([api<CaseList>(`/projects/${projectId}/manual-cases`), api<ProjectDetail>(`/projects/${projectId}`)]);
+                const [list, jobs] = await Promise.all([api<CaseList>(`/projects/${projectId}/manual-cases`), api<Job[]>(`/projects/${projectId}/jobs`)]);
                 if (stop) return;
                 const linked = new Set(list.cases.filter((c) => c.linkedTestIds.length > 0).map((c) => c.id));
                 const done = building.filter((id) => linked.has(id)).length;
+                // Newest first (the server's order): each case's latest job.
+                const jobOf = (id: string) => jobs.find((j) => j.caseId === id);
+                const going = jobs.some((j) => isActive(j.status) && !!j.caseId && building.includes(j.caseId));
                 // Ended twice in a row: the next case's job starts right after one ends, so one look between them is not the end.
-                idle = isActive(project.latestJob?.status) ? 0 : idle + 1;
+                idle = going ? 0 : idle + 1;
                 if (done === building.length || idle >= 2) {
-                    const failed = building.filter((id) => !linked.has(id)).map((id) => ({ caseId: id, detail: `${list.cases.find((c) => c.id === id)?.ref ?? "A test case"} got no script. Its run on the Runs tab says why; generate again to try it once more.` }));
+                    const refOf = (id: string) => list.cases.find((c) => c.id === id)?.ref ?? "A test case";
+                    const last = jobs.find((j) => j.caseId && building.includes(j.caseId));
+                    const stoppedWhy = !last
+                        ? "it was not started."
+                        : last.error === "Cancelled"
+                          ? "the building was stopped."
+                          : jobs[0] && jobs[0].jobId !== last.jobId && !jobs[0].caseId
+                            ? "another run of this project started, and it went first."
+                            : last.caseId && !linked.has(last.caseId)
+                              ? `the test cases before it got no script for the same reason (${last.error ?? "no test was made"}), so the AI stopped there.`
+                              : "it changed while the others were built (it is Manual now, has a script, or asks for something a script is not built for).";
+                    const failed = building
+                        .filter((id) => !linked.has(id))
+                        .map((id) => {
+                            const j = jobOf(id);
+                            return { caseId: id, detail: j ? `${refOf(id)} got no script: ${j.error ?? "the AI made no test from it"}. Its run on the Runs tab says more.` : `${refOf(id)} was not tried: ${stoppedWhy}` };
+                        });
                     setState({ step: "done", made: done, failed });
                     announceProjectChanged(projectId);
                     onDone?.();
@@ -142,30 +163,50 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [building?.join(",")]);
 
+    /**
+     * Phone scripts: every case in one click, a few per request so the page can say how far it got. A case the AI could not write is
+     * named with why and the others go on; a refusal of a whole request (the AI limit, another call writing, no AI key) holds for the
+     * rest as well, so it stops there and names every case left with that sentence. Web: one request queues them all.
+     */
     async function write(eligible: string[], form: Form | null) {
-        const chunk = form === "text" ? eligible.length : CHUNK;
         setError(null);
         const failed: Array<{ caseId: string; detail: string }> = [];
         let made = 0;
         let aiNote: string | undefined;
-        setState({ step: "writing", done: 0, total: eligible.length });
+        const refs = new Map<string, string>();
+        const refOf = (id: string) => refs.get(id) ?? "A test case";
         try {
-            for (let i = 0; i < eligible.length; i += chunk) {
-                const r = await send({ caseIds: eligible.slice(i, i + chunk) });
-                if (r.started) {
-                    // Web: one call starts them all (the server builds them one after the other); the page follows from here.
-                    const refused = r.skipped.filter((s) => s.reason === "refused");
-                    if (refused.length) setError(refused.map((s) => s.detail).join(" "));
-                    return setState({ step: "building", caseIds: r.started.caseIds, done: 0 });
-                }
-                made += r.created.length;
-                aiNote ??= r.aiNote;
-                failed.push(...r.skipped.filter((s) => s.reason === "ai-failed" || s.reason === "refused"));
-                setState({ step: "writing", done: Math.min(i + chunk, eligible.length), total: eligible.length });
+            for (const c of (await api<CaseList>(`/projects/${projectId}/manual-cases`)).cases) refs.set(c.id, c.ref);
+        } catch {
+            // The names are only for the sentences: "A test case" then.
+        }
+        const queue = [...eligible];
+        setState({ step: "writing", done: 0, total: eligible.length });
+        while (queue.length) {
+            const part = form === "text" ? queue.splice(0) : queue.splice(0, CHUNK);
+            let r: GenerateAnswer;
+            try {
+                r = await send({ caseIds: part });
+            } catch (e) {
+                if (made === 0 && failed.length === 0 && queue.length === 0 && part.length === eligible.length) return fail(e);
+                const why = describeApiError(e);
+                for (const id of [...part, ...queue.splice(0)]) failed.push({ caseId: id, detail: `${refOf(id)} got no script: ${why}` });
+                break;
             }
-        } catch (e) {
-            if (made === 0) return fail(e);
-            failed.push({ caseId: "", detail: describeApiError(e) });
+            if (r.started) {
+                // Web: one call starts them all (the server builds them one after the other); the page follows from here.
+                const refused = r.skipped.filter((s) => s.reason === "refused");
+                if (refused.length) setError(refused.map((s) => `${refOf(s.caseId)}: ${s.detail}`).join(" "));
+                return setState({ step: "building", caseIds: r.started.caseIds, done: 0 });
+            }
+            made += r.created.length;
+            aiNote ??= r.aiNote;
+            for (const s of r.skipped) {
+                if (s.reason === "ai-failed" || s.reason === "refused") failed.push({ caseId: s.caseId, detail: `${refOf(s.caseId)} got no script: ${s.detail}` });
+                // More than one call takes: sent again in the next one.
+                else if (s.reason === "later") queue.push(s.caseId);
+            }
+            setState({ step: "writing", done: eligible.length - queue.length, total: eligible.length });
         }
         setState({ step: "done", made, failed, ...(aiNote ? { aiNote } : {}) });
         if (made > 0) {
@@ -205,7 +246,8 @@ function Building({ state }: { state: Extract<State, { step: "building" }> }) {
 }
 
 /** How many were made (and that phone scripts need the device), and the cases that got none, with why. */
-function Outcome({ state, form, projectId, onClose }: { state: Extract<State, { step: "done" }>; form: Form | null; projectId: string; /** Closes the banner. */ onClose?: () => void }) {
+function Outcome({ state, form, projectId, onClose, onRetry }: { state: Extract<State, { step: "done" }>; form: Form | null; projectId: string; /** Closes the banner. */ onClose?: () => void; /** Tries only the cases that got no script. */ onRetry?: (caseIds: string[]) => void }) {
+    const retry = [...new Set(state.failed.map((f) => f.caseId).filter(Boolean))];
     const them = state.made === 1 ? "it" : "them";
     return (
         <div className="stack-sm">
@@ -230,8 +272,19 @@ function Outcome({ state, form, projectId, onClose }: { state: Extract<State, { 
             )}
             <AiModelNote note={state.aiNote} />
             {state.failed.length > 0 && (
-                <Callout tone="warning" title={`${plural(state.failed.length, "test case")} got no script`}>
-                    <ul className="gen-fails">
+                <Callout
+                    tone="warning"
+                    title={`${plural(state.failed.length, "test case")} got no script`}
+                    actions={
+                        onRetry &&
+                        retry.length > 0 && (
+                            <Button size="sm" icon={RotateCcw} onClick={() => onRetry(retry)}>
+                                Try {retry.length === 1 ? "it" : `these ${retry.length}`} again
+                            </Button>
+                        )
+                    }
+                >
+                    <ul className="gen-fails" data-testid="scripts-not-written">
                         {state.failed.map((f, i) => (
                             <li key={`${f.caseId}-${i}`}>{f.detail}</li>
                         ))}
@@ -315,7 +368,7 @@ export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId:
 
             {state.step === "writing" && <Writing state={state} />}
             {state.step === "building" && <Building state={state} />}
-            {state.step === "done" && <Outcome state={state} form={form} projectId={projectId} onClose={() => setState({ step: "idle" })} />}
+            {state.step === "done" && <Outcome state={state} form={form} projectId={projectId} onClose={() => setState({ step: "idle" })} onRetry={(ids) => void write(ids, form)} />}
         </section>
     );
 }

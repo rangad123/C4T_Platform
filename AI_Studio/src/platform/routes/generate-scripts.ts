@@ -40,8 +40,8 @@ import type { RouteCtx } from "./types.js";
  *        → { form: "text" | "phone", created: [{ caseId, testId, key }], skipped: [{ caseId, reason, detail }], eligible?: string[],
  *            started?: { jobId, caseIds }, note?: string }
  *
- * No case ids means every case of the project. At most MAX_SCRIPTS_PER_CALL scripts are made per call; the rest are skipped with
- * reason "later" (the page sends them in the next call). `dryRun` writes nothing and calls no AI: it says which cases would get a
+ * No case ids means every case of the project. Web: every eligible case is queued in the one call. Android: at most
+ * MAX_SCRIPTS_PER_CALL scripts are made per call; the rest are skipped with reason "later" (the page sends them in the next call). `dryRun` writes nothing and calls no AI: it says which cases would get a
  * script, so the page can say how many before it starts. A web project without an application address, an Android project without
  * its app, and a project whose engine is switched off are refused before anything (the AI would be paid for scripts that cannot be
  * saved). One call per project at a time: a second answers 409 until the first has finished (web: while its jobs run).
@@ -108,10 +108,11 @@ export function registerGenerateScriptRoutes(ctx: RouteCtx): void {
             else eligible.push(caseId);
         }
         if (body.dryRun) return { form, created: [], skipped, eligible };
+        // Web: every case is queued (the jobs build them one after the other). Android: at most MAX_SCRIPTS_PER_CALL written in this call.
+        if (target.form === "text") return eligible.length ? await buildWebScripts(pid, eligible, byId, skipped) : { form, created: [], skipped };
         const now = eligible.slice(0, MAX_SCRIPTS_PER_CALL);
         for (const caseId of eligible.slice(MAX_SCRIPTS_PER_CALL)) skip(caseId, "later");
         if (now.length === 0) return { form, created: [], skipped };
-        if (target.form === "text") return await buildWebScripts(pid, now, byId, skipped);
         // Two calls at once could each write a script for the same case: the second waits its turn (taken before anything is awaited).
         if (writing.has(pid)) throw new HttpError(409, SCRIPTS_BEING_WRITTEN);
         writing.add(pid);

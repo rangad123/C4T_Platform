@@ -233,6 +233,8 @@ const publicJob = (j: JobRow) => ({
     scheduleId: j.options.scheduleId ?? null,
     runbookRunId: j.options.runbookRunId ?? null,
     environment: j.options.environment ?? null,
+    // The written test case this job builds the script of (case-scripts.ts): the Generate test scripts card follows them.
+    ...(j.options.plainCaseId ? { caseId: j.options.plainCaseId } : {}),
     // Only for an exploration that stops at a plan, and for creation that starts from one (see routes/plans.ts).
     ...(j.options.planOnly ? { planOnly: true } : {}),
     ...(j.options.fromPlan ? { fromPlan: j.options.fromPlan } : {}),

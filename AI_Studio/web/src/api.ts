@@ -58,6 +58,8 @@ export interface Job {
     deploy?: { commit?: string; environment?: string; label?: string } | null;
     progress: Record<PhaseKey, PhaseState>;
     counters: Counters;
+    /** A job that builds a written test case's script (Generate test scripts): that case's id. */
+    caseId?: string;
     error: string | null;
     /** Only for a run that was cancelled: how many tests reached a result and how many did not run, and a sentence made from those facts. */
     cancelled?: { planned: number; ran: number; notRun: number; note: string } | null;
