@@ -150,24 +150,37 @@ export interface ImportCandidate {
     ref: string;
     title: string;
     description: string;
+    /** The document's priority, when it gave one. */
+    priority: RequirementPriority | null;
     /** The heading it was under in the document, when it had one. */
     section: string | null;
     kind: ParsedRequirement["kind"];
 }
 
-/** A requirement's text as a record: the text itself as the title when it is short, else its first words and the whole text below. */
+const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).replace(/\s+\S*$/, "")}…` : s);
+
+/** A requirement as a record: its title, description (with the document's reference) and priority, each in its field. */
 export function candidateOf(r: ParsedRequirement): ImportCandidate {
     const text = r.text.replace(/\s+/g, " ").trim();
-    let title = text;
-    let description = "";
-    if (text.length > 160) {
-        const sentence = /^(.{20,160}?[.!?])\s/.exec(text)?.[1];
-        title = sentence ?? `${text.slice(0, 157).replace(/\s+\S*$/, "")}…`;
-        description = text;
+    let title = r.title?.trim() || text;
+    let description = r.title?.trim() ? (r.description ?? "") : "";
+    if (title.length > 160) {
+        const sentence = /^(.{20,160}?[.!?])\s/.exec(title)?.[1];
+        description = [title, description].filter(Boolean).join("\n");
+        title = sentence ?? `${title.slice(0, 157).replace(/\s+\S*$/, "")}…`;
     }
+    // The record has no reference field: the document's "Reference:" line is kept as the description's last line.
+    if (r.reference) description = [description, `Reference: ${r.reference}`].filter(Boolean).join("\n\n");
     // The parser's ids already fit a reference; one the AI copied from the document may not (a space, a slash).
     const ref = r.id.replace(/[^A-Za-z0-9._#-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, MAX_REF);
-    return { ref, title: title.slice(0, MAX_TITLE), description: description.slice(0, MAX_TEXT), section: r.section ?? null, kind: r.kind };
+    return {
+        ref,
+        title: fit(title, MAX_TITLE),
+        description: fit(description, MAX_TEXT),
+        priority: r.priority ?? null,
+        section: r.section ?? null,
+        kind: r.kind,
+    };
 }
 
 /** The deterministic pass of the requirements parser (engine/requirements/parse.ts) over a document's text: no AI. */
