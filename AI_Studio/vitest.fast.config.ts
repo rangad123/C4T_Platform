@@ -47,6 +47,7 @@ export default defineConfig({
             "tests/runner-protocol2-unit.test.ts",
             "tests/exploration-record-unit.test.ts",
             "tests/exploration-masked-on-write.test.ts",
+            "tests/secret-forms-unit.test.ts",
             "tests/explore-action-mask-unit.test.ts",
             "tests/explore-gated-llm-unit.test.ts",
             "tests/explore-sink-artifacts-unit.test.ts",

@@ -1,8 +1,9 @@
 /**
  * The forms a secret usually takes inside text, so masking catches more than the exact string: URL-encoded (as in a sign-in address),
  * form-encoded (an HTML form's body or `URLSearchParams`: `!'()~` escaped too and `+` for spaces), the strict RFC 3986 form many HTTP
- * libraries send (`!'()*` escaped), each also with lower-case hex escapes, JSON-escaped (as inside a quoted JSON body), and `encodeURI`'s
- * form. Shared by the platform's scrub (agent-routing.ts), the runner's log (src/agent/log.ts) and failure traces
+ * libraries send (`!'()*` escaped), each also with lower-case hex escapes, JSON-escaped (as inside a quoted JSON body), `encodeURI`'s
+ * form, and base64 (standard, without its padding, and URL-safe: a share link or a token that carries the secret encoded). A base64 copy
+ * is found only when the secret starts the encoded text (base64 of a longer text holding it elsewhere differs throughout). Shared by the platform's scrub (agent-routing.ts), the runner's log (src/agent/log.ts) and failure traces
  * (engine/evidence/trace-scrub.ts). The failure evidence helper pasted into every script (engine/evidence/capture.ts, evidenceSecrets)
  * keeps its own shorter copy. Values shorter than 4 characters are never returned: masking them would shred every line.
  */
@@ -35,5 +36,9 @@ export function secretVariants(secret: string): string[] {
     } catch {
         /* as above */
     }
+    const b64 = Buffer.from(secret, "utf8").toString("base64");
+    out.add(b64);
+    out.add(b64.replace(/=+$/, ""));
+    out.add(Buffer.from(secret, "utf8").toString("base64url"));
     return [...out].filter((s) => s.length >= 4).sort((a, b) => b.length - a.length);
 }
