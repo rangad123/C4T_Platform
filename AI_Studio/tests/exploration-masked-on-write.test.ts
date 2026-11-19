@@ -1,0 +1,93 @@
+/**
+ * CP3b R-4: every free-text field of an exploration's coverage record (the stop detail, the outcome and skip reasons, the coverage
+ * lists' statuses and reasons) is masked when it is written, with the run's secrets and the shared patterns. On the platform that is
+ * saveExploration (the record GET …/jobs/:jobId/coverage serves); on a runner, the record it sends (explorationForResult).
+ */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { memoryLogger } from "../src/agent/log.js";
+import { explorationForResult } from "../src/agent/task-runner.js";
+import { loadConfig } from "../src/config.js";
+import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { saveExploration } from "../src/platform/exploration-store.js";
+import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
+import { RepoSink } from "../src/platform/repo-sink.js";
+import { buildServer } from "../src/platform/server.js";
+import { seedProject } from "./fixtures/dashboard-seed.js";
+import { sampleExploration } from "./fixtures/exploration-record.js";
+
+const KEY = "exploration-mask-owner-key-1234";
+const PW = "Hunt3r!pw22";
+const BEARER = "abcDEF1234567890qq";
+const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJlX3Zh";
+const LEAK = `Bad request (echo): Authorization: Bearer ${BEARER} id_token=${JWT} the password ${PW} was refused`;
+
+/** A record whose every free-text field carries the leak. */
+function leaky() {
+    const e = sampleExploration();
+    return sampleExploration({
+        stopReason: "instability",
+        stopDetail: `3 environment failures in a row; the last: ${LEAK}`,
+        objectives: e.objectives.map((o) => ({ ...o, reason: `${o.reason} ${LEAK}` })),
+        skipped: e.skipped.map((s) => ({ ...s, reason: LEAK })),
+        outcomes: e.outcomes.map((o) => ({ ...o, status: "environment_failure" as const, reason: LEAK, ...(o.result ? { result: { ...o.result, ended: LEAK } } : {}) })),
+        coverage: {
+            ...e.coverage,
+            unexplored: e.coverage.unexplored.map((u) => ({ ...u, reason: LEAK, status: `environment_failure: ${LEAK}` })),
+            notRun: e.coverage.notRun.map((n) => ({ ...n, reason: LEAK })),
+        },
+        actionLog: e.actionLog.map((r) => ({ ...r, reason: LEAK })),
+    });
+}
+
+const leaks = (text: string) => ({ pw: text.includes(PW), bearer: text.includes(BEARER), jwt: text.includes(JWT) });
+const NONE = { pw: false, bearer: false, jwt: false };
+
+let platform: Platform;
+let app: Awaited<ReturnType<typeof buildServer>>;
+let dir = "";
+beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "exploration-mask-"));
+    platform = bootstrap(loadConfig({ DATA_DIR: dir, SECRET_KEY: "exploration-mask-secret-key-0123456789", API_KEY: KEY, SCHEDULER_ENABLED: "false" }));
+    app = await buildServer(platform);
+    await app.ready();
+});
+afterAll(async () => {
+    await app?.close();
+    platform?.db.close();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe("the coverage record's free text is masked when it is written", () => {
+    it("on the platform: the coverage route serves no run secret, bearer token or JWT from any field", async () => {
+        const s = seedProject(platform, "Masked coverage", "http://127.0.0.1:9");
+        const job = await platform.repo.createJob(s.projectId, s.appId, { ...DEFAULT_JOB_OPTIONS });
+        const sink = new RepoSink(platform.repo, platform.store, { id: job.id, projectId: s.projectId, applicationId: s.appId });
+        sink.addSecrets([PW]);
+        await saveExploration(sink, leaky());
+        await sink.writes.flush();
+        const res = await app.inject({ method: "GET", url: `/api/projects/${s.projectId}/jobs/${job.id}/coverage`, headers: { "x-api-key": KEY } });
+        expect(res.statusCode).toBe(200);
+        expect(leaks(res.body)).toEqual(NONE);
+        const body = JSON.parse(res.body);
+        // The text around the secrets stays readable, and what is not free text is kept as it was.
+        expect(body.stopDetail).toMatch(/^3 environment failures in a row; the last: Bad request \(echo\)/);
+        expect(body.coverage.notRun[0].operator).toBe("double_submit");
+        expect(body.coverage.unexplored[0].objectiveId).toBe("OBJ-0123456789abcdef");
+        // And the stored record as a whole (what a later reader of the artifact gets).
+        const row = platform.repo.db.get<{ path: string }>("SELECT path FROM artifacts WHERE job_id = ? AND kind = 'exploration'", job.id)!;
+        expect(leaks((await platform.store.getBytes(row.path)).toString("utf8"))).toEqual(NONE);
+    });
+
+    it("on a runner: the record it sends has no stored secret, bearer token or JWT in any field", () => {
+        const { log } = memoryLogger();
+        log.addSecrets([PW]);
+        const sent = explorationForResult(leaky(), log, "task-1");
+        expect(sent.exploration).toBeDefined();
+        expect(leaks(JSON.stringify(sent))).toEqual(NONE);
+        expect(sent.exploration!.stopDetail).toMatch(/^3 environment failures in a row; the last: Bad request \(echo\)/);
+        expect(sent.exploration!.outcomes.map((o) => o.objectiveId)).toEqual(sampleExploration().outcomes.map((o) => o.objectiveId));
+    });
+});

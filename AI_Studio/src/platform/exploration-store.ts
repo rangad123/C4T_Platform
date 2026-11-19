@@ -3,8 +3,10 @@
  * (orchestrator.ts), as one JSON artifact of the job, saved when the exploration ends. GET /api/projects/:id/jobs/:jobId/coverage
  * (routes/explore-findings.ts) reads it back. The action log in it is already capped (ACTION_LOG_CAP).
  */
+import { maskExplorationText } from "../agent-protocol/exploration.js";
 import { maskActionLog } from "../engine/explore/action-mask.js";
 import type { ExplorationSummary, GenerationSink } from "../engine/orchestrator.js";
+import { maskText } from "./redact-text.js";
 import type { Repo } from "./repo.js";
 import type { ArtifactStore } from "./storage.js";
 
@@ -12,11 +14,15 @@ export const EXPLORATION_ARTIFACT = "exploration";
 export const EXPLORATION_FILE = "exploration.json";
 
 /**
- * Stored with its action log masked again (explore/action-mask.ts), whoever wrote the record: the engine masks it already, and masking
- * twice changes nothing, so a record from a runner that did not mask it is stored masked too.
+ * Stored with its text masked again, whoever wrote the record: the action log (explore/action-mask.ts) and every free-text field (the
+ * stop detail, the outcome and skip reasons, the coverage lists' statuses and reasons: an outcome's reason can be an error's raw text,
+ * CP3b R-4), with the run's secrets the sink knows and the shared patterns. The engine masks the action log already, and masking twice
+ * changes nothing, so a record from a runner that did not mask it is stored masked too.
  */
-export async function saveExploration(sink: Pick<GenerationSink, "saveTextArtifact">, exploration: ExplorationSummary): Promise<void> {
-    await sink.saveTextArtifact(EXPLORATION_ARTIFACT, EXPLORATION_FILE, JSON.stringify({ ...exploration, actionLog: maskActionLog(exploration.actionLog ?? []) }));
+export async function saveExploration(sink: Pick<GenerationSink, "saveTextArtifact"> & { secretsToMask?(): string[] }, exploration: ExplorationSummary): Promise<void> {
+    const secrets = sink.secretsToMask?.() ?? [];
+    const text = maskExplorationText(exploration, (t) => maskText(t, secrets));
+    await sink.saveTextArtifact(EXPLORATION_ARTIFACT, EXPLORATION_FILE, JSON.stringify({ ...text, actionLog: maskActionLog(exploration.actionLog ?? [], secrets) }));
 }
 
 /** The job's exploration summary, or undefined when the job has none (an older job, one that did not explore by objectives, or pruned). */

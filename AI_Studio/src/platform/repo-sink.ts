@@ -72,6 +72,10 @@ export class RepoSink implements GenerationSink {
     addSecrets(list: ReadonlyArray<string | null | undefined>): void {
         for (const s of list) if (typeof s === "string" && s.length >= 4) this.secrets.add(s);
     }
+    /** The run's secrets, for a writer that masks a record itself (exploration-store.ts saveExploration). */
+    secretsToMask(): string[] {
+        return [...this.secrets];
+    }
     /** Text as this job stores it: its secrets and the shared patterns masked (redact-text.ts). */
     mask(text: string): string {
         return maskText(text, [...this.secrets]);
