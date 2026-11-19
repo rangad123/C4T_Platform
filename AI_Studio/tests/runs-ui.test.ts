@@ -633,6 +633,49 @@ describe("the test page", () => {
         await pwExpect(page.getByRole("button", { name: "More ways to run" })).toBeFocused();
     }, 240_000);
 
+    it("Run again is followed even when the page's first look for a running run is still on its way (queue row 219)", async () => {
+        // The page's first "which run is going" answer is read before the click but arrives after it. The click's own look must not
+        // ride on that stale answer: the strip still has to find the run and say how it ended.
+        mode = "slow";
+        let release!: () => void;
+        const released = new Promise<void>((r) => (release = r));
+        let held = false;
+        let heldSeen!: () => void;
+        const heldArrived = new Promise<void>((r) => (heldSeen = r));
+        const jobsRoute = `**/api/projects/${projectId}/jobs`;
+        await page.route(jobsRoute, async (route) => {
+            if (held) return route.continue();
+            held = true;
+            const stale = await route.fetch();
+            heldSeen();
+            await released;
+            await route.fulfill({ response: stale });
+        });
+        try {
+            await visit(`#/tests/${idOf["Fast one"]}`);
+            await heldArrived;
+            const again = page.getByRole("button", { name: "Run again" });
+            await pwExpect(again).toBeEnabled();
+            await again.click();
+            // The run is going on the server; only then does the stale answer (no run going) reach the page.
+            const until = Date.now() + 30_000;
+            for (;;) {
+                const jobs = (await api("GET", `/api/projects/${projectId}/jobs`)).body as Array<{ status: string }>;
+                if (jobs.some((j) => !["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status))) break;
+                if (Date.now() > until) throw new Error("the run did not start");
+                await sleep(50);
+            }
+            release();
+            await pwExpect(strip()).toBeVisible({ timeout: 30_000 });
+            await pwExpect(page.getByRole("region", { name: "Run finished" })).toBeVisible({ timeout: 60_000 });
+            await pwExpect(page.getByRole("region", { name: "Run finished" })).toContainText("The run finished");
+        } finally {
+            release();
+            await page.unroute(jobsRoute);
+            mode = "easy";
+        }
+    }, 120_000);
+
     it("is audited in both colour schemes and fits a phone", async () => {
         await axeBoth("test-page", async () => {
             await visit(`#/tests/${idOf["Fast one"]}`);

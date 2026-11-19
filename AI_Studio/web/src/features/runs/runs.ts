@@ -35,8 +35,18 @@ function activeStoreFor(projectId: string): ActiveStore {
     const listeners = new Set<() => void>();
     let timer: number | undefined;
     let flying: Promise<void> | undefined;
+    let queued: Promise<void> | undefined;
     const load = (): Promise<void> => {
-        flying ??= api<Job[]>(`/projects/${projectId}/jobs`)
+        // A look already on its way may have been asked before what this ask wants to see (a run just started): exactly one more look
+        // follows it, and every ask made meanwhile shares that one. No ask is dropped, and nothing extra runs when nobody asked.
+        if (flying) {
+            queued ??= flying.then(() => {
+                queued = undefined;
+                return load();
+            });
+            return queued;
+        }
+        flying = api<Job[]>(`/projects/${projectId}/jobs`)
             .then((list) => {
                 const now = list.find((j) => isActive(j.status));
                 // Only a change is announced: the same answer again must not re-draw every page that listens.
