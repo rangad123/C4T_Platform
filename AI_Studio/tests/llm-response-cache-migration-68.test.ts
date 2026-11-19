@@ -1,7 +1,7 @@
 /**
  * Migration 68 (the AI response cache): a database left by the release before it keeps its AI usage rows, which gain the cached-call counts
  * at 0; it gains the empty cache table, removed with its project; a fresh database and an upgraded one end with the same schema; opening
- * again re-runs nothing.
+ * again re-runs nothing. A database at slot 66 (a project's AI model, the slot before the 67 placeholder) opens to 68 too.
  */
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -46,6 +46,23 @@ describe("migration 68", () => {
         db.run("INSERT INTO llm_response_cache (project_id, cache_key, call_id, answer_json, bytes, created_at, last_used_at) VALUES (?,?,?,?,?,?,?)", "p1", "k", "rules", "{}", 2, at, at);
         db.run("DELETE FROM projects WHERE id = ?", "p1");
         expect(db.all("SELECT * FROM llm_response_cache")).toEqual([]);
+        db.close();
+    });
+
+    it("opens a database at slot 66 (a project's AI model) to 68, keeping each project's AI model; 67 is still a placeholder", () => {
+        const file = path.join(dir, "at66.db");
+        createDatabaseAtVersion(file, 66);
+        const raw = new DatabaseSync(file);
+        raw.prepare("INSERT INTO users (id, email, name, created_at, role, status) VALUES (?,?,?,?,?,?)").run("u-1", "one@people.example", "One", at, "owner", "active");
+        raw.prepare("INSERT INTO projects (id, owner_id, name, created_at, updated_at, ai_provider, ai_model) VALUES (?,?,?,?,?,?,?)").run("p1", "u-1", "Shop", at, at, "anthropic", "claude-haiku");
+        raw.close();
+        const db = new Db(file);
+        expect(db.all("SELECT version FROM schema_version WHERE version > 66 ORDER BY version")).toEqual([{ version: 67 }, { version: 68 }]);
+        expect(db.all("SELECT id, ai_provider, ai_model FROM projects")).toEqual([{ id: "p1", ai_provider: "anthropic", ai_model: "claude-haiku" }]);
+        expect(db.all("SELECT * FROM llm_response_cache")).toEqual([]);
+        const fresh = new Db(":memory:");
+        expect(schemaOf(db)).toEqual(schemaOf(fresh));
+        fresh.close();
         db.close();
     });
 
