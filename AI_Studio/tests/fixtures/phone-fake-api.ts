@@ -311,6 +311,10 @@ export class PhoneFake {
             if (method === "GET" && rest === "setup-check") return { body: { items: [] } };
             // The project's AI model (General settings): none chosen and no models of this person's keys (routes/project-ai-model.ts).
             if (method === "GET" && rest === "ai-model") return { body: { selected: null, selectedYours: true, choices: [] } };
+            // What the agents need (General settings' "Keep page thumbnails" reads it): a project not tested by the AI agent, nothing
+            // saved, as routes/agent-inputs.ts answers it.
+            if (method === "GET" && rest === "agent-inputs")
+                return { body: { applies: false, application: null, signIn: { username: null, hasPassword: false, hasTotpSecret: false }, apiAccess: { hasToken: false, oauth2: null }, openApiUrl: null, allowMutatingApiTests: false, keepThumbnails: true, cleanupAfter: true, requirements: { active: 0 }, agents: null, missing: [] } };
             if (method === "GET" && rest === "requirements/coverage") return { body: { total: 0, notCovered: 0, covered: 0, passing: 0, failing: 0, retired: 0 } };
             // The Test scripts list (round 38): the requirements each script covers, and each script's review state; none here.
             if (method === "GET" && rest === "requirements/links") return { body: { links: [] } };
