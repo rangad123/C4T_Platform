@@ -118,9 +118,11 @@ export interface GateAction {
     read: boolean;
     /**
      * What the request bound knows the target by (CP3b R-2), when it was found: `anchor`, the digest of its form and landmark ancestry and
-     * its own tag, type and (a field's) name (never its accessible name, which the page controls); `form`, the request target its form would send.
+     * its own tag, type and (a field's) name (never its accessible name, which the page controls); `form`, the request target its form would send;
+     * `formId`, the digest of that form element itself (its page, its place among the page's forms, its id, name, method and action), the
+     * same for every field and submit control of one form (CP3c T-4: the sign-in exemption is this form's, not its address's).
      */
-    anchor?: { anchor: string; form?: string };
+    anchor?: { anchor: string; form?: string; formId?: string };
 }
 
 export interface ActionGate {
@@ -141,16 +143,17 @@ export interface ActionGate {
     limitReached?(): boolean;
     /**
      * Told when a field was filled with the run's own password (the step's value is the `{{credentials.password}}` placeholder, which
-     * only the engine resolves): `form` is the request target of the form that field is in, `url` the page it was filled on. The gate
-     * decides whether that is the run's sign-in (its own sign-in page), whose submission every pass may repeat (CP3b R-2).
+     * only the engine resolves): `form` is the request target of the form that field is in, `formId` that form's own identity (the
+     * anchor's `formId`), `url` the page it was filled on. The gate decides whether that is the run's sign-in (its own sign-in page), whose
+     * submission every pass may repeat (CP3b R-2); only an action on that same form is exempt (CP3c T-4).
      */
-    signedIn?(a: { form: string; url: string }): void;
+    signedIn?(a: { form: string; formId?: string; url: string }): void;
 }
 
 /** A fill of the run's own password, told to the gate with the form it is in (`ActionGate.signedIn`). */
-function noteSignIn(gate: ActionGate | undefined, step: Step, anchor: { form?: string } | undefined, url: string): void {
+function noteSignIn(gate: ActionGate | undefined, step: Step, anchor: { form?: string; formId?: string } | undefined, url: string): void {
     const value = (step as { value?: unknown }).value;
-    if (step.action === "fill" && anchor?.form && typeof value === "string" && value.includes("{{credentials.password}}")) gate?.signedIn?.({ form: anchor.form, url });
+    if (step.action === "fill" && anchor?.form && typeof value === "string" && value.includes("{{credentials.password}}")) gate?.signedIn?.({ form: anchor.form, ...(anchor.formId ? { formId: anchor.formId } : {}), url });
 }
 
 /** How long after an action ends a state-changing request is still counted as that action's (a submit sent late), unless another action starts first. */
@@ -173,7 +176,7 @@ export async function targetIdentity(page: Page, l: Locator, data: RuntimeData):
  * (`requestTarget` of the form's method and action, or of the submit control's own formmethod and formaction), when it is in a form that
  * changes data.
  */
-async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise<{ identity: string; anchor: string; form?: string } | undefined> {
+async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise<{ identity: string; anchor: string; form?: string; formId?: string } | undefined> {
     try {
         const el = locate(page, l, data).first();
         const [aria, anchor] = await Promise.all([
@@ -223,7 +226,16 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
                 } catch {
                     action = "";
                 }
-                return { anchor: parts.join(">"), form: owner && action ? { method, action } : null };
+                // The form element itself (CP3c T-4): its page, its place among the page's forms and its own attributes, so two forms
+                // that post to one address (a single-endpoint app) are two forms, and every field and submit of one form name the same one.
+                let docPath = "";
+                try {
+                    docPath = new URL(self.ownerDocument.URL).pathname;
+                } catch {
+                    docPath = "";
+                }
+                const formSelf = owner ? [docPath, Array.prototype.indexOf.call(self.ownerDocument.forms, owner), owner.id, owner.getAttribute("name") ?? "", (owner.getAttribute("method") ?? "get").toLowerCase(), owner.getAttribute("action") ?? ""].join("|") : null;
+                return { anchor: parts.join(">"), form: owner && action ? { method, action } : null, formSelf };
             }, undefined, { timeout: 1_000 }),
         ]);
         // `- button "Continue"` or `- textbox "Email": typed value`: role and name only, never a value.
@@ -232,7 +244,8 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
         const identity = `${m?.[1] ?? "element"}${m?.[2] !== undefined ? ` ${JSON.stringify(m[2].slice(0, 120))}` : ""} @${digest}`;
         // A form method other than post is a GET (or a dialog): no request target, so no form for the bound.
         const form = anchor.form ? requestTarget(anchor.form.method === "post" ? "POST" : anchor.form.method, anchor.form.action) : undefined;
-        return { identity, anchor: digest, ...(form ? { form } : {}) };
+        const formId = anchor.formSelf !== null ? createHash("sha256").update(`form ${anchor.formSelf}`).digest("hex").slice(0, 12) : undefined;
+        return { identity, anchor: digest, ...(form ? { form } : {}), ...(form && formId ? { formId } : {}) };
     } catch {
         return undefined;
     }
@@ -243,7 +256,7 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
  * target not found at once (a button the page adds late) is waited for as long as the action itself would wait, so the gate is asked
  * with the element and its form rather than the locator text (CP3b R-2); the gate is still asked before the action runs.
  */
-async function stepTarget(page: Page, step: Step, data: RuntimeData, gate?: ActionGate): Promise<{ target?: string; anchor?: { anchor: string; form?: string } }> {
+async function stepTarget(page: Page, step: Step, data: RuntimeData, gate?: ActionGate): Promise<{ target?: string; anchor?: { anchor: string; form?: string; formId?: string } }> {
     const loc = "locator" in step ? (step.locator as Locator | undefined) : undefined;
     if (!loc) return {};
     let own = await resolveTarget(page, loc, data);
@@ -253,7 +266,7 @@ async function stepTarget(page: Page, step: Step, data: RuntimeData, gate?: Acti
     }
     const to = step.action === "drag" ? await targetIdentity(page, step.target as Locator, data) : undefined;
     const target = own && step.action === "drag" ? `${own.identity} -> ${to ?? JSON.stringify(step.target)}` : own?.identity;
-    return { ...(target ? { target } : {}), ...(own ? { anchor: { anchor: own.anchor, ...(own.form ? { form: own.form } : {}) } } : {}) };
+    return { ...(target ? { target } : {}), ...(own ? { anchor: { anchor: own.anchor, ...(own.form ? { form: own.form } : {}), ...(own.formId ? { formId: own.formId } : {}) } } : {}) };
 }
 
 const AUTHORING_USE = " Where this scenario reaches what a rule describes, assert the expected behaviour it states; when the application genuinely does otherwise, call finish(result=\"defect\").";

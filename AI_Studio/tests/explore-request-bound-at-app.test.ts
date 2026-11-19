@@ -47,6 +47,11 @@ beforeAll(async () => {
             }
             if (path.startsWith("/api/orders/")) return res.end("{}");
             if (path === "/login") return res.end(page(`<h1>Sign in</h1><form method="post" action="/login/session"><label>Username <input name="u"></label><label>Password <input name="p" type="password"></label><button type="submit">Sign in</button></form>`));
+            // A single-endpoint app (CP3c T-4): the sign-in form and a Delete form elsewhere both post to /app.
+            if (path === "/login2")
+                return res.end(page(`<h1>Sign in</h1><form method="post" action="/app"><input type="hidden" name="op" value="login"><label>Username <input name="u"></label><label>Password <input name="p" type="password"></label><button type="submit">Sign in</button></form>`));
+            if (path === "/shop") return res.end(page(`<h1>Shop</h1><form method="post" action="/app"><input type="hidden" name="op" value="delete-account"><button type="submit">Delete</button></form>`));
+            if (path === "/app") return res.end(page(`<h1>Done</h1><a href="/shop">Shop</a>`));
             if (path === "/login/session") return res.end(page(`<h1>Welcome</h1><a href="/order">Order</a>`));
             res.end(page(`<h1>Order</h1><form method="post" action="/order"><label>Quantity <input name="qty"></label><button type="submit">Order</button></form><p>Ordered: ${req.method === "POST" ? "yes" : "no"}</p>`));
         });
@@ -237,6 +242,28 @@ describe("the request bound and the run's own sign-in: every pass may sign in ag
         expect(outs.slice(0, 2).map((o) => o.status)).toEqual(["complete", "complete"]);
         expect(outs[2]).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/refused at ".*": The request POST \S+\/login\/session was already sent 2 times/) });
         expect(site.posts["/login/session"]).toBe(2);
+    }, 300_000);
+
+    it("the exemption is the sign-in form, not its address: a Delete form posting to the sign-in's /app is counted (CP3c T-4)", async () => {
+        site.posts = {};
+        const gate = pursuitGate("/login2");
+        const prefix = [
+            open,
+            { action: "navigate", url: "/login2", description: "" },
+            ...signIn,
+            ...Array.from({ length: 6 }, (_, i) => [{ action: "navigate", url: `/shop?i=${i}`, description: "" }, { action: "click", locator: { by: "role", role: "button", value: "Delete" }, description: "" }]).flat(),
+        ] as Step[];
+        const done: Call[][] = [[{ tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: "Done" } } }], [{ tool: "finish", input: { result: "complete", explanation: "signed in" } }]];
+        const o = await authorWebSpec({ ctx: ctxOf(done), browser, baseUrl: site.url, model: app(), scenario, credentials: { username: "tester", password: "Pw-12345!" }, gate, resume: { prefix, failure: "x", review: true } });
+        // One sign-in and the limit's Delete submits; the third Delete is refused before it runs.
+        expect(o).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/refused at ".*": The request POST \S+\/app was already sent 2 times/) });
+        expect(site.posts["/app"]).toBe(1 + LIMIT);
+        // The sign-in itself stays exempt: two more passes sign in again on the same /app.
+        site.posts = {};
+        const again = [open, ...Array.from({ length: 2 }, () => [{ action: "navigate", url: "/login2", description: "" }, ...signIn]).flat()] as Step[];
+        const o2 = await authorWebSpec({ ctx: ctxOf(done), browser, baseUrl: site.url, model: app(), scenario, credentials: { username: "tester", password: "Pw-12345!" }, gate, resume: { prefix: again, failure: "x", review: true } });
+        expect(o2.status).toBe("complete");
+        expect(site.posts["/app"]).toBe(2);
     }, 300_000);
 
     it("only the run's own password placeholder marks the sign-in: a form filled with typed text on the sign-in page is counted", async () => {
