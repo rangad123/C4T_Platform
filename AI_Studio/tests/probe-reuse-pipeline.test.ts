@@ -167,7 +167,9 @@ describe("reuse earlier runs across real explorations", () => {
     it("the next exploration takes the probe results of unchanged pages; the page changed in between is read again and reported", async () => {
         proxy.changed = true;
         try {
-            second = await explore(projectId);
+            // It also runs its test cases (runTestCases; an exploration writes them without running by default), so the journey's saved
+            // test is seen running beside the reuse.
+            second = await explore(projectId, { runTestCases: true });
         } finally {
             proxy.changed = false;
         }
