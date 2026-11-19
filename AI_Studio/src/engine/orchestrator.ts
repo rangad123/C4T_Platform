@@ -72,6 +72,7 @@ import { MAX_EXPLORED, OBJECTIVE_REF_MAX, objectivesFrom, type Objective, type O
 import { operatorApplied, scenariosFor, type OperatorCheck, type PerturbOptions } from "./explore/perturb.js";
 import { coverageOf, pursuitKey, type CoverageModel, type CoverageRecord, type CoverageTest, type SkippedOperator } from "./explore/coverage.js";
 import { pathPattern } from "./explore/state.js";
+import { senderName } from "./explore/request-target.js";
 import { usableRules, type AppKnowledge } from "./planning/planner.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 import { createThumbnailer } from "./discovery/thumbnails.js";
@@ -1809,12 +1810,17 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  *
  * The request bound (CP3b R-2), which names the page cannot change: the page controls an element's name and what lies between two
  * clicks, so the tracker also counts, for the whole pursuit (no state, read, navigation or fresh pass resets it), the state-changing
- * requests each action sent (`request`, by method and address pattern: explore/request-target.ts), and what sent them: the element's
- * anchor (its ancestry and own tag, type and a field's name, never its accessible name), else the action's key; a navigation by its address
- * pattern. Once one request target has been sent REQUEST_REPEAT_LIMIT times, `before` gives a refusal for an action that is not a read
- * and would send it again: one that sent it before, or a click or key press on a form that sends it. A target sent by more different
- * actions than the limit is the page's own traffic on every action (an analytics call), not one control's: each of its senders is then
- * refused only once it has sent it the limit's number of times itself.
+ * requests each action sent (`request`, by method and address pattern: explore/request-target.ts), and what sent them (`senderOf`): an
+ * element by its anchor (its form and landmark ancestry, labelled containers included, and its own tag, type and a field's name) with its
+ * role and accessible name as first seen, kept on the element itself while it stays on the page (web/author.ts), so a page that renames
+ * the control it was asked to click (a counter in its text) does not make a new sender, and a count badge in a name is dropped anyway
+ * (`senderName`); else the action's key; a navigation by its address pattern. The anchor alone is no sender (CP3c T-1): a page's form-less buttons often share one (BenchShop's
+ * nine submit buttons in <main>), and one control's history must not refuse another. `before` gives a refusal for an action that is not
+ * a read and would send a request target again past REQUEST_REPEAT_LIMIT: the same sender, once it has sent that target the limit's number
+ * of times itself, or a click or key press on a form whose target was sent that often in all (the form is the page's own record of
+ * where it sends, whatever its buttons are called). A target many senders send (an analytics call on every click) is so counted per
+ * sender and refuses no other control. A page that replaces a form-less control with a new element of another name after every click
+ * (a re-render, a reload) makes a new sender each time: that is bounded by the action and step budgets, not by this bound (CP3c T-3).
  * An action that already sent a state-changing request is on a new state the next time (the application's data changed since): so the
  * same form submitted a second time with other values is allowed, and a third time is a repeat (and past the request bound). An action
  * that sent nothing keeps the state as before.
@@ -1826,8 +1832,18 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  * one the engine signed in on.
  */
 export const REQUEST_REPEAT_LIMIT = 2;
+/**
+ * The request bound's sender for an element (CP3c T-1): the sender web/author.ts found for it (`anchor.sender`: the element as first
+ * seen, kept on it while it stays on the page), else its anchor digest with the role and accessible name of its identity
+ * (`role "name" @digest`, web/author.ts targetIdentity) as `senderName` folds them.
+ */
+export function senderOf(anchor: { anchor: string; sender?: string }, target: string | undefined): string {
+    if (anchor.sender) return `element ${anchor.sender}`;
+    const named = senderName((target ?? "").split(" -> ")[0]!.replace(/ @[0-9a-z]+$/i, ""));
+    return `element ${anchor.anchor}${named ? ` ${named}` : ""}`;
+}
 export function actionTracker(startUrl: string, secrets: readonly string[] = [], opts: { signInPath?: string } = {}): {
-    before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean; anchor?: { anchor: string; form?: string; formId?: string } }): { state: string; action: string; read: boolean; refusal?: string };
+    before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean; anchor?: { anchor: string; form?: string; formId?: string; sender?: string } }): { state: string; action: string; read: boolean; refusal?: string };
     after(a: { tool: string; args: unknown; ok: boolean; url?: string; read?: boolean }): void;
     freshPass(startUrl: string): void;
     request(target: string): void;
@@ -1846,8 +1862,8 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [],
     /** The form whose submit is running now (a click or key press on it, not a read), for the sign-in exemption. */
     let submitting: string | undefined;
     const isSignIn = (target: string, formId: string | undefined): boolean => formId !== undefined && signIn.get(target)?.has(formId) === true;
-    const sendersOf = (a: { tool: string; args: unknown; anchor?: { anchor: string } }, key: string): string[] => {
-        if (a.anchor) return [`element ${a.anchor.anchor}`];
+    const sendersOf = (a: { tool: string; args: unknown; target?: string; anchor?: { anchor: string; sender?: string } }, key: string): string[] => {
+        if (a.anchor) return [senderOf(a.anchor, a.target)];
         const to = (a.args as { url?: unknown } | null)?.url;
         if (a.tool === "navigate" && typeof to === "string") {
             try {
@@ -1871,8 +1887,8 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [],
             // The run's own sign-in form submitted again (another form sent its target to the limit): not refused.
             if (SUBMITS.has(a.tool) && isSignIn(target, a.anchor?.formId)) continue;
             const byForm = SUBMITS.has(a.tool) && a.anchor?.form === target;
-            const ambient = t.by.size > REQUEST_REPEAT_LIMIT;
-            const bySender = mine.some((m) => (ambient ? (t.by.get(m) ?? 0) >= REQUEST_REPEAT_LIMIT : t.by.has(m)));
+            // Counted per sender (CP3c T-1): only this control's own sends of the target refuse it.
+            const bySender = mine.some((m) => (t.by.get(m) ?? 0) >= REQUEST_REPEAT_LIMIT);
             if (byForm || bySender)
                 return maskAction(`The request ${target} was already sent ${t.count} times in this pursuit, and this action (${byForm ? "on the form that sends it" : "what sent it before"}) would send it again; it is not performed.`, secrets);
         }

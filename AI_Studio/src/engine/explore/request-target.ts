@@ -32,3 +32,11 @@ export function requestTarget(method: string, url: string, body?: string | null)
     }
     return `${m} ${u.origin}${path}${op}`;
 }
+
+/**
+ * A control's role and accessible name as the request bound's sender knows it (CP3c T-1): case and spacing folded, and a count badge
+ * the page keeps in it ("Order (3)", "Cart [2]") dropped. Other digits stay: "Tab 1" and "Tab 2" are two controls.
+ */
+export function senderName(roleAndName: string): string {
+    return roleAndName.replace(/[([]\s*\d+\s*[)\]]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
