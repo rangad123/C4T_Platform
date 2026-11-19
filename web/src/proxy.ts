@@ -203,7 +203,9 @@ const JUST_RENEWED_SECONDS = 15
 /** A JWT's payload, read WITHOUT verifying; only its times are used here. */
 function claimsOf(jwt: string): { exp?: unknown; iat?: unknown } | undefined {
   try {
-    const payload = JSON.parse(Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8'))
+    const payload: unknown = JSON.parse(
+      Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8'),
+    )
     return payload && typeof payload === 'object' ? payload : undefined
   } catch {
     return undefined
