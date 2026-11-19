@@ -37,6 +37,17 @@ const server = http.createServer((req, res) => {
         return;
     }
     if (req.url === "/hang") return; // never answers
+    if (req.url?.startsWith("/busy")) {
+        // A correct, slow page (CP3c T-2 case A): served after `?ms=`, it keeps a request open (so the network is never idle) and its
+        // Total becomes $25.00 2.6 s after load.
+        const ms = Number(new URL(req.url, BASE).searchParams.get("ms") ?? 0);
+        return void setTimeout(() => page("Cart", `<h1>Cart</h1><p>Total: <output aria-label="Total">...</output></p><script>fetch('/hang');setTimeout(()=>{document.querySelector('output').textContent='$25.00'},2600)</script>`), ms);
+    }
+    if (req.url === "/cookiecart") {
+        // Case B: the Total exists only with the cart cookie authoring's own session left; a fresh browser has an empty cart.
+        const has = /cart=1/.test(req.headers.cookie ?? "");
+        return page("Cart", `<h1>Cart</h1>${has ? `<p>Total: <output aria-label="Total">$30.00</output></p>` : `<p>Your cart is empty</p>`}`);
+    }
     if (req.url === "/visit") {
         // Counts up on every load: a check of "Visit 1" passed while authoring (the planner's own guess) and fails in every fresh replay.
         visits += 1;
@@ -141,6 +152,58 @@ describe("independence check", () => {
         const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1" });
         expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
         expect(r.independence).toBe("independent");
+    }, 60_000);
+
+    // CP3c T-2: "fails the same way". The captured check's failure while authoring (`capturedObserved`, Playwright's message) is an
+    // assertion that saw a value; a replay reproduces it only by failing at that check the same kind of way.
+    const sawValue = (v: string) => `expect(locator).toHaveText(expected) failed\n\nLocator:  getByLabel('Total')\nExpected: "$25.00"\nReceived: "${v}"\nTimeout:  5000ms`;
+    const sawNothing = `expect(locator).toBeVisible() failed\n\nLocator: getByLabel('Total')\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found`;
+
+    it("case B: captured with a wrong Total, but the fresh browser has no Total at all: element missing is not the same failure", async () => {
+        const steps = stepsOf([{ action: "navigate", url: "/cookiecart" }, totalCheck]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: sawValue("$30.00") }, { stepTimeoutMs: 1_500 });
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).toBe("state_dependent");
+        for (const replay of r.replays) expect(replay.summary).toMatch(/not the way it failed when captured/);
+        expect(confidenceOf({ sourced: true, capture: "captured", independence: r.independence })).toBe("medium");
+    }, 60_000);
+
+    it("case A: a check the replay's time leaves less than its full step time is not run, so a slow correct page is no reproduction", async () => {
+        // 1.5 s to serve the page plus 1 s to settle leave the check 1.5 of its 2 s.
+        const steps = stepsOf([{ action: "navigate", url: "/busy?ms=1500" }, totalCheck]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: sawValue("$30.00") }, { stepTimeoutMs: 2_000 });
+        expect(r.independence).toBe("state_dependent");
+        for (const replay of r.replays) expect(replay.summary).toMatch(/time ran out before/);
+    }, 60_000);
+
+    it("the not-reached rule: a check the replay's time ran out before is no reproduction, even of a captured timeout", async () => {
+        // Captured as a check that ran out of time: a replay's timeout there would be the same kind of failure, so only the rule that
+        // a check never started reproduces nothing keeps this from being independent.
+        const steps = stepsOf([{ action: "navigate", url: "/busy?ms=1500" }, totalCheck]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: "did not finish within 5 s" }, { stepTimeoutMs: 2_000 });
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).toBe("state_dependent");
+    }, 60_000);
+
+    it("the same value as captured, or another wrong value, is the same failure: independent", async () => {
+        const same = await checkIndependence(browser, BASE, { steps: clean, capturedSource: "expected:1", capturedObserved: sawValue("$30.00") });
+        expect(same.independence).toBe("independent");
+        expect(same.replays[0]!.summary).toMatch(/the same value as when captured/);
+        const other = await checkIndependence(browser, BASE, { steps: clean, capturedSource: "expected:1", capturedObserved: sawValue("$31.00") });
+        expect(other.independence).toBe("independent");
+        expect(other.replays[0]!.summary).toMatch(/another value than when captured/);
+    }, 60_000);
+
+    it("a check captured as finding no element reproduces when the replays find none either", async () => {
+        const steps = stepsOf([{ action: "navigate", url: "/cookiecart" }, { action: "assert", check: "visible", locator: { by: "label", value: "Total" }, source: "expected:1" }]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: sawNothing }, { stepTimeoutMs: 1_500 });
+        expect(r.independence).toBe("independent");
+    }, 60_000);
+
+    it("without the captured failure's text, only an assertion that saw a value reproduces it", async () => {
+        const steps = stepsOf([{ action: "navigate", url: "/cookiecart" }, totalCheck]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1" }, { stepTimeoutMs: 1_500 });
+        expect(r.independence).toBe("state_dependent");
     }, 60_000);
 
     it("a test with no sourced check is not run (no browser opened)", async () => {

@@ -7,6 +7,7 @@
  * A local server counts what really arrived; the test writer is a scripted model double, never a real model.
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/explore-request-bound-at-app.test.ts
  */
+import { spawn, type ChildProcess } from "node:child_process";
 import http from "node:http";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -46,6 +47,13 @@ beforeAll(async () => {
                 return res.end(page(`<h1>Api</h1><button id="b">Buy (${n})</button><p id="out"></p>`, `<script>let k=0;document.getElementById('b').onclick=async()=>{await fetch('/api/orders/'+(++k*7),{method:'POST'});const b=document.getElementById('b');b.textContent='Buy ('+k+')';b.name='n'+k}</script>`));
             }
             if (path.startsWith("/api/orders/")) return res.end("{}");
+            if (path === "/ashop") {
+                // CP3c T-1: a shop whose form-less buttons all sit in <main> (one anchor), and every click first POSTs an analytics event.
+                const buttons = ["Add to cart", "Update", "Tab 1", "Tab 2", "Continue", "Place order"].map((b) => `<button>${b}</button>`).join(" ");
+                const to: Record<string, string> = { "Add to cart": "/ashop/cart", Update: "/ashop/update", Continue: "/ashop/checkout", "Place order": "/ashop/order" };
+                return res.end(page(`<h1>A shop</h1>${buttons}<p id="out" role="status"></p>`, `<script>const TO=${JSON.stringify(to)};for(const b of document.querySelectorAll('main button'))b.onclick=async()=>{await fetch('/events',{method:'POST'});const t=TO[b.textContent];if(t)await fetch(t,{method:'POST'});document.getElementById('out').textContent=b.textContent==='Place order'?'Order placed':'Done: '+b.textContent}</script>`));
+            }
+            if (path === "/events" || path.startsWith("/ashop/")) return res.end("{}");
             if (path === "/login") return res.end(page(`<h1>Sign in</h1><form method="post" action="/login/session"><label>Username <input name="u"></label><label>Password <input name="p" type="password"></label><button type="submit">Sign in</button></form>`));
             // A single-endpoint app (CP3c T-4): the sign-in form and a Delete form elsewhere both post to /app.
             if (path === "/login2")
@@ -137,6 +145,33 @@ describe("the request bound: names the page controls and actions in between do n
         const r = await run("API", [[nav("/api")], Array.from({ length: 8 }, () => ({ tool: "click", input: { target: { by: "css", value: "#b" } } }))]);
         const sent = Object.entries(r.posts).filter(([p]) => p.startsWith("/api/orders/")).reduce((s, [, n]) => s + n, 0);
         expect(sent).toBeLessThanOrEqual(LIMIT);
+    }, 300_000);
+    it("T-1: analytics on every click: a normal checkout completes, each control twice at most, no other button refused", async () => {
+        const r = await run("ANALYTICS", [
+            [nav("/ashop")],
+            [btn("Add to cart")],
+            [btn("Add to cart")],
+            [btn("Update")],
+            [btn("Update")],
+            [btn("Tab 1")],
+            [btn("Tab 2")],
+            [btn("Tab 1")],
+            [btn("Continue")],
+            [btn("Place order")],
+            [{ tool: "assert", input: { check: "visible", target: { by: "text", value: "Order placed" } } }],
+            [{ tool: "finish", input: { result: "complete", explanation: "ordered" } }],
+        ]);
+        expect(r.refused).toEqual([]);
+        expect(r.performedClicks).toBe(9);
+        expect(r.status).toBe("completed");
+        // The exploration's own sends (the saved test's runs after the pursuit send more; they are not the exploration's actions).
+        expect(r.posts["/ashop/order"]).toBeGreaterThanOrEqual(1);
+    }, 300_000);
+    it("T-1: analytics on every click still bounds one control: a third Add to cart is refused before it runs", async () => {
+        const r = await run("ANALYTICS3", [[nav("/ashop")], [btn("Add to cart")], [btn("Tab 1")], [btn("Add to cart")], [btn("Tab 2")], [btn("Add to cart")]]);
+        expect(r.posts["/ashop/cart"] ?? 0).toBeLessThanOrEqual(LIMIT);
+        // Refused by the request bound itself (a tab between the clicks puts each on a new state).
+        expect(r.refused[0]?.reason).toMatch(/^The request POST \S+\/ashop\/cart was already sent 2 times/);
     }, 300_000);
     it("a legitimate test that submits the same form twice with different values still works within the limit", async () => {
         const fill = (v: string) => ({ tool: "fill", input: { target: { by: "label", value: "Quantity" }, value: v } });
@@ -275,5 +310,88 @@ describe("the request bound and the run's own sign-in: every pass may sign in ag
         for (let i = 0; i < 3; i++) outs.push(await pass(gate, [...typed, order[0]!]));
         expect(outs[2]).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/The request POST \S+\/login\/session was already sent 2 times/) });
         expect(site.posts["/login/session"]).toBe(2);
+    }, 300_000);
+});
+
+// ------------------------------------------------------------------ BenchShop, the paid series' app (CP3c T-1)
+
+describe("the request bound on BenchShop: its buttons share one anchor, and checkout, payment and cancelling stay open", () => {
+    const BENCH_PORT = 9985;
+    const bench = `http://127.0.0.1:${BENCH_PORT}`;
+    let browser: Browser;
+    let server: ChildProcess;
+    beforeAll(async () => {
+        server = spawn(process.execPath, ["examples/bench-shop/server.mjs", String(BENCH_PORT)], { stdio: "ignore", env: { ...process.env, BENCH_DEFECTS: "none" } });
+        for (let i = 0; i < 50; i++) {
+            if (await fetch(`${bench}/login`).then((r) => r.ok, () => false)) break;
+            await new Promise((r) => setTimeout(r, 100));
+        }
+        browser = await launchChromium(true);
+    }, 60_000);
+    afterAll(async () => {
+        await browser?.close();
+        server?.kill();
+    });
+    const scripted = (calls: Call[][]): EngineContext => {
+        let n = 0;
+        const m = new MockLanguageModelV3({
+            doGenerate: async () => {
+                const step = calls[n++];
+                if (!step) return { content: [{ type: "text" as const, text: "done" }], finishReason: { unified: "stop" as const, raw: "stop" }, usage, warnings: [] };
+                return { content: step.map((c, i) => ({ type: "tool-call" as const, toolCallId: `b${n}c${i}`, toolName: c.tool, input: JSON.stringify(c.input) })), finishReason: { unified: "tool-calls" as const, raw: "tool_calls" }, usage, warnings: [] };
+            },
+        });
+        return { config: loadConfig({}), emit: () => undefined, llm: { modelName: "scripted", model: m, usage: { inputTokens: 0, outputTokens: 0 }, object: async () => ({}) as never, text: async () => "yes" } };
+    };
+    const app = (): AppModel => ({
+        url: bench, origin: bench, siteType: "ecommerce", purpose: "shop", features: [], pages: [], navigation: [], apis: [], journeys: [],
+        authentication: { required: true, mechanisms: ["form"], loggedIn: true, loginPath: "/login" }, externalDependencies: [], documentedTestCases: [],
+        stats: { pagesVisited: 0, pagesSkipped: 0, apisFound: 0, durationMs: 0 },
+    });
+    const scenario = ScenarioSchema.parse({ scenarioId: "S-BUY", title: "Buy and cancel", description: "Add two products, apply a code, check out, place and cancel the order", category: "Order", startPath: "/login", expectedResults: ["The order is cancelled"] });
+    const click = (value: string) => ({ action: "click", locator: { by: "role", role: "button", value }, description: "" });
+    const flow = [
+        { action: "navigate", url: "/login", description: "" },
+        { action: "fill", locator: { by: "label", value: "Email" }, value: "{{credentials.username}}", description: "" },
+        { action: "fill", locator: { by: "label", value: "Password" }, value: "{{credentials.password}}", description: "" },
+        click("Sign in"),
+        { action: "navigate", url: "/products/p1", description: "" },
+        click("Add to cart"),
+        { action: "navigate", url: "/products/p2", description: "" },
+        click("Add to cart"),
+        { action: "fill", locator: { by: "label", value: "Discount code" }, value: "SAVE10", description: "" },
+        click("Apply"),
+        { action: "navigate", url: "/checkout", description: "" },
+        click("Continue"),
+        click("Place order"),
+        click("Cancel order"),
+    ] as Step[];
+
+    it("the probe flow (sign in, add to cart twice, apply, continue, place order, cancel) runs without a refusal", async () => {
+        const t = actionTracker(`${bench}/login`, [], { signInPath: "/login" });
+        const sent: Record<string, number> = {};
+        const refusals: string[] = [];
+        const gate: ActionGate = {
+            before: (a) => {
+                const v = t.before(a);
+                if (v.refusal) refusals.push(v.refusal);
+                return v.refusal ? { allowed: false, reason: v.refusal } : { allowed: true };
+            },
+            after: (a) => t.after(a),
+            freshPass: (start) => t.freshPass(start),
+            replay: () => false,
+            request: (target) => {
+                sent[target.replace(bench, "")] = (sent[target.replace(bench, "")] ?? 0) + 1;
+                t.request(target);
+            },
+            limitReached: () => t.limitReached(),
+            signedIn: (a) => t.signedIn(a),
+        };
+        const finish: Call[][] = [[{ tool: "assert", input: { check: "text", target: { by: "css", value: "[data-testid=status]" }, expected: "Cancelled" } }], [{ tool: "finish", input: { result: "complete", explanation: "bought and cancelled" } }]];
+        const out = await authorWebSpec({ ctx: scripted(finish), browser, baseUrl: bench, model: app(), scenario, credentials: { username: "alice@example.test", password: "Password1!" }, gate, resume: { prefix: flow, failure: "x", review: true } });
+        console.log("BENCH", JSON.stringify({ status: out.status, explanation: out.explanation.slice(0, 200), sent, refusals }));
+        expect(refusals).toEqual([]);
+        expect(out.status).toBe("complete");
+        expect(sent).toMatchObject({ "POST /api/cart/items": 2, "POST /api/cart/discount": 1, "POST /api/checkout/address": 1, "POST /api/orders": 1, "POST /api/orders/:id/cancel": 1 });
     }, 300_000);
 });

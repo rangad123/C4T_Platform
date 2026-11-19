@@ -113,6 +113,52 @@ describe("the request bound", () => {
         expect(act(t, other("A"))).toMatch(/^The request POST http:\/\/shop\.test\/events was already sent 4 times/);
     });
 
+    // CP3c T-1: BenchShop's form-less buttons (forms posted by its page script) all sit in <main>: one anchor, so the anchor alone is
+    // no sender. Each control is its own sender (role, accessible name with its digits dropped, and the anchor), and only the action
+    // that would send the SAME target again past the limit is refused.
+    it("BenchShop: buttons that share one anchor are each their own sender; Add to cart twice leaves checkout, payment and cancelling open", () => {
+        const t = actionTracker(START);
+        const D = "10b18dcf3c8e";
+        const B = "http://shop.test";
+        const btn = (name: string) => ({ ...click(name, D, null), target: `button "${name}" @${D}` });
+        expect(act(t, btn("Add to cart"), [`POST ${B}/api/cart/items`])).toBeUndefined();
+        expect(act(t, btn("Add to cart"), [`POST ${B}/api/cart/items`])).toBeUndefined();
+        expect(act(t, btn("Apply"), [`POST ${B}/api/cart/discount`])).toBeUndefined();
+        expect(act(t, btn("Update"), [`PATCH ${B}/api/cart/items/:id`])).toBeUndefined();
+        expect(act(t, btn("Remove"), [`DELETE ${B}/api/cart/items/:id`])).toBeUndefined();
+        expect(act(t, btn("Continue"), [`POST ${B}/api/checkout/address`])).toBeUndefined();
+        expect(act(t, btn("Place order"), [`POST ${B}/api/orders`])).toBeUndefined();
+        expect(act(t, btn("Pay now"), [`POST ${B}/api/orders/:id/pay`])).toBeUndefined();
+        expect(act(t, btn("Cancel order"), [`POST ${B}/api/orders/:id/cancel`])).toBeUndefined();
+        // The same control a third time is still refused: it sent its request twice.
+        expect(act(t, btn("Add to cart"))).toMatch(/^The request POST http:\/\/shop\.test\/api\/cart\/items was already sent 2 times/);
+    });
+
+    it("a form-less button whose name carries a counter is one sender: the third click is refused", () => {
+        const t = actionTracker(START);
+        const BUY = "POST http://shop.test/api/orders/:id";
+        const buy = (n: number) => ({ ...click(`Buy (${n})`, "b1", null), target: `button "Buy (${n})" @b1` });
+        expect(act(t, buy(0), [BUY])).toBeUndefined();
+        expect(act(t, buy(1), [BUY])).toBeUndefined();
+        expect(act(t, buy(2))).toMatch(/already sent 2 times/);
+    });
+
+    it("an analytics call on every click refuses no other button, and a control may be used twice: it is counted per sender", () => {
+        const t = actionTracker(START);
+        const EVENTS = "POST http://shop.test/events";
+        const D = "m1";
+        const btn = (name: string) => ({ ...click(name, D, null), target: `button "${name}" @${D}` });
+        expect(act(t, btn("Add to cart"), [EVENTS, "POST http://shop.test/cart"])).toBeUndefined();
+        expect(act(t, btn("Update"), [EVENTS, "PATCH http://shop.test/cart/:id"])).toBeUndefined();
+        // Update again: the events call was sent twice in all, but this control sent it once.
+        expect(act(t, btn("Update"), [EVENTS, "PATCH http://shop.test/cart/:id"])).toBeUndefined();
+        expect(act(t, btn("Tab"), [EVENTS])).toBeUndefined();
+        expect(act(t, btn("Continue"), [EVENTS, "POST http://shop.test/checkout"])).toBeUndefined();
+        expect(act(t, btn("Place order"), [EVENTS, "POST http://shop.test/orders"])).toBeUndefined();
+        // Update a third time: it sent both its own request and the events call twice.
+        expect(act(t, btn("Update"))).toMatch(/already sent \d+ times/);
+    });
+
     it("a navigation that sends the request is known by its address pattern, whatever its query", () => {
         const t = actionTracker(START);
         const INIT = "POST http://shop.test/session";
