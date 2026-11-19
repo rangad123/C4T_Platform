@@ -768,7 +768,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             if (outcome.status === "defect") {
                 // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
                 const capture = outcome.capture ?? "observed_only";
-                const replayed = { steps: written.steps, testData: written.testData, ...(outcome.status === "defect" && outcome.capturedCheck ? { capturedSource: outcome.capturedCheck.source } : {}), ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) };
+                const replayed = { steps: written.steps, testData: written.testData, ...(outcome.status === "defect" && outcome.capturedCheck ? { capturedSource: outcome.capturedCheck.source, capturedObserved: outcome.capturedCheck.observed } : {}), ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) };
                 // An observed-only defect test holds only steps that passed while authoring: replayed once (no AI), a step it stops at means
                 // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
                 // A replay that throws or cannot start did not pass either (N-9): the test is not reported as a finding, and the reason says why.

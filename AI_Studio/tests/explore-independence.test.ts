@@ -156,8 +156,9 @@ describe("independence check", () => {
 
     // CP3c T-2: "fails the same way". The captured check's failure while authoring (`capturedObserved`, Playwright's message) is an
     // assertion that saw a value; a replay reproduces it only by failing at that check the same kind of way.
-    const sawValue = (v: string) => `expect(locator).toHaveText(expected) failed\n\nLocator:  getByLabel('Total')\nExpected: "$25.00"\nReceived: "${v}"\nTimeout:  5000ms`;
-    const sawNothing = `expect(locator).toBeVisible() failed\n\nLocator: getByLabel('Total')\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found`;
+    // As the defect test keeps them (author.ts: Playwright's message, its lines joined).
+    const sawValue = (v: string) => `expect(locator).toHaveText(expected) failed Locator: getByLabel('Total') Expected: "$25.00" Received: "${v}" Timeout: 5000ms`;
+    const sawNothing = `expect(locator).toBeVisible() failed Locator: getByLabel('Total') Expected: visible Timeout: 5000ms Error: element(s) not found`;
 
     it("case B: captured with a wrong Total, but the fresh browser has no Total at all: element missing is not the same failure", async () => {
         const steps = stepsOf([{ action: "navigate", url: "/cookiecart" }, totalCheck]);
