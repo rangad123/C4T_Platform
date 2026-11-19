@@ -49,7 +49,10 @@ const stored = (projectId: string) =>
 describe("a new test's key", () => {
     it("is never taken twice when a scenario saves while another sits between taking its key and saving (the defect's independence check)", async () => {
         const p = project();
+        // Two jobs of the project: within one job the sink never hands a key out twice (main's handed keys), so the key a defect asked for
+        // can still be taken before it saves only by another job's sink.
         const sink = new RepoSink(platform.repo, platform.store, await jobIn(p));
+        const other = new RepoSink(platform.repo, platform.store, await jobIn(p));
         // Scenario A found a defect: it takes its key, then replays the failure before saving.
         const defect = (async () => {
             const key = await sink.nextTestKey("WEB");
@@ -59,8 +62,8 @@ describe("a new test's key", () => {
         // Scenario B, meanwhile: takes a key and saves at once.
         const plain = (async () => {
             await later(5);
-            const key = await sink.nextTestKey("WEB");
-            return sink.createTest({ spec: spec(key, "Open the cart"), framework: "playwright", validation: "PENDING" });
+            const key = await other.nextTestKey("WEB");
+            return other.createTest({ spec: spec(key, "Open the cart"), framework: "playwright", validation: "PENDING" });
         })();
         const [a, b] = await Promise.all([defect, plain]);
         expect(new Set([a.testId, b.testId]).size).toBe(2);
