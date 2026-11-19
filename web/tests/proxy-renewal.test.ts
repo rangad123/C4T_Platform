@@ -47,7 +47,11 @@ beforeEach(() => {
   refreshes = 0
 })
 
-async function visit(path: string, cookies: Record<string, string>, headers: Record<string, string> = {}) {
+async function visit(
+  path: string,
+  cookies: Record<string, string>,
+  headers: Record<string, string> = {},
+) {
   const cookie = Object.entries(cookies)
     .map(([k, v]) => `${k}=${v}`)
     .join('; ')
@@ -82,22 +86,42 @@ test('renews an access cookie that is not a readable token', async () => {
 
 test("renews on AI Studio's renewal path when AI Studio asks, the cookie's age aside", async () => {
   // AI Studio asks only after the API refused the cookie, whatever the reason.
-  await visit('/app/ai-studio/refresh', { c4t_access: token(600), c4t_refresh: 'r-asked' }, FROM_AI_STUDIO)
-  await visit('/app/ai-studio/refresh', { c4t_access: token(600), c4t_refresh: 'r-asked-2' }, { 'sec-fetch-site': 'same-origin' })
+  await visit(
+    '/app/ai-studio/refresh',
+    { c4t_access: token(600), c4t_refresh: 'r-asked' },
+    FROM_AI_STUDIO,
+  )
+  await visit(
+    '/app/ai-studio/refresh',
+    { c4t_access: token(600), c4t_refresh: 'r-asked-2' },
+    { 'sec-fetch-site': 'same-origin' },
+  )
   assert.equal(refreshes, 2)
 })
 
 test('a link from another site, or no Sec-Fetch-Site, cannot make the renewal path rotate a good token', async () => {
-  await visit('/app/ai-studio/refresh', { c4t_access: token(600), c4t_refresh: 'r-cross' }, { 'sec-fetch-site': 'cross-site' })
+  await visit(
+    '/app/ai-studio/refresh',
+    { c4t_access: token(600), c4t_refresh: 'r-cross' },
+    { 'sec-fetch-site': 'cross-site' },
+  )
   await visit('/app/ai-studio/refresh', { c4t_access: token(600), c4t_refresh: 'r-none' })
   assert.equal(refreshes, 0)
   // An expired one is still renewed, as anywhere under /app.
-  await visit('/app/ai-studio/refresh', { c4t_access: token(-1), c4t_refresh: 'r-cross-expired' }, { 'sec-fetch-site': 'cross-site' })
+  await visit(
+    '/app/ai-studio/refresh',
+    { c4t_access: token(-1), c4t_refresh: 'r-cross-expired' },
+    { 'sec-fetch-site': 'cross-site' },
+  )
   assert.equal(refreshes, 1)
 })
 
 test('a token renewed a moment ago is not rotated again when AI Studio asks once more', async () => {
-  await visit('/app/ai-studio/refresh', { c4t_access: token(895, 5), c4t_refresh: 'r-just' }, FROM_AI_STUDIO)
+  await visit(
+    '/app/ai-studio/refresh',
+    { c4t_access: token(895, 5), c4t_refresh: 'r-just' },
+    FROM_AI_STUDIO,
+  )
   assert.equal(refreshes, 0)
 })
 

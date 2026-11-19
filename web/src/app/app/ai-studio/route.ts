@@ -37,7 +37,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     next.status === 503
       ? new NextResponse(
           'Crowd4Test could not check your sign-in just now. Reload this page in a moment.',
-          { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '5' } },
+          {
+            status: 503,
+            headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '5' },
+          },
         )
       : new NextResponse(null, { status: next.status, headers: { location: next.location! } })
   response.headers.set('cache-control', 'no-store')
