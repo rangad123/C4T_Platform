@@ -106,6 +106,10 @@ An operator that does not run is listed with its reason, never left out silently
 
 Every limit is counted by the platform, not asked of the AI, and is fixed before the first page of the session is read.
 
+The limits are on the actions and requests the explorer starts: each action is counted before it is done, and a request the
+application receives because of one is behind a counted action, the page's first load included. Requests the page sends on its own,
+such as a timer that polls the server, are the application's, not the explorer's, so they are not counted and no limit stops them.
+
 | Level | Objectives | Browser actions | AI calls | Time | Visits to one screen in one pursuit |
 |---|---|---|---|---|---|
 | Thorough | 50 | 750 | 750 | 90 minutes | 8 |
