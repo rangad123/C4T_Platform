@@ -44,7 +44,7 @@ import { knowledgeBlock, usableRules, type KnowledgeRule } from "../planning/pla
 import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
 import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
-import { findLeftoverUse, LEFTOVER_REDO, leftoverReason } from "./leftovers.js";
+import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, startingIdsOf } from "./leftovers.js";
 import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 
 export interface AuthorInput {
@@ -550,7 +550,8 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
         }
         if (out.status === "complete" && input.review && !input.resume) out = await reviewAndFix(input, out);
         if (input.leftoverCheck && !input.resume && out.status !== "blocked") {
-            const uses = findLeftoverUse(out.steps);
+            const starting = startingIdsOf(input.model);
+            const uses = findLeftoverUse(out.steps, starting);
             if (uses.length) {
                 const redo = `${leftoverReason(uses)} ${LEFTOVER_REDO}`;
                 input.ctx.emit({ stage: "generation", kind: "leftover_redo", level: "warn", message: `${input.scenario.scenarioId}: written again from the start: ${leftoverReason(uses)}`, data: { steps: uses.map((u) => u.step) } });
@@ -558,7 +559,7 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
                 if (again.status === "complete" && input.review) again = await reviewAndFix({ ...input, redo }, again);
                 // A second try that could not finish keeps the first test (still flagged: the caller saves it for review).
                 if (again.status !== "blocked") out = again;
-                if (findLeftoverUse(out.steps).length) return out;
+                if (findLeftoverUse(out.steps, starting).length) return out;
             }
         }
         if (out.status === "defect") out = await confirmDefect(input, out);

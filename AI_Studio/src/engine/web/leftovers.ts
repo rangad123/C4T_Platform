@@ -12,6 +12,17 @@
  *   - a check of a named item that carries its own remove or delete control (a cart line, not a catalogue card);
  *   - a check of a discount, coupon, promo or voucher naming a code (SAVE10) that no earlier step typed or named.
  * Reading a catalogue card, opening a product by its link, or asserting a seeded order's cells is never flagged.
+ *
+ * Two more rules (queue row 228, from the row 227 triage of the Phase 3 smoke trial):
+ *   - a record id (ord-1008: letters, a hyphen, 3+ digits) the test opens, clicks or checks that is not one of the application's
+ *     starting records (`startingIds`, read from the discovery model): no step can have made it, since a record the test creates gets
+ *     whatever number the application hands out, so it is a record an earlier test left (or this run's number written as a literal).
+ *     A test that checks such an id is not found is left alone. Off when no starting ids are given;
+ *   - once the test has signed in with the provided account ({{credentials...}}) and before any step that adds to it (Add to cart,
+ *     Create, Place...): a press of Check out or Place order (or a wait or check that it shows), an Apply of a code just typed into a
+ *     discount or coupon field, and a check of an amount on the cart (its page, or a subtotal or discount) other than zero. Those show
+ *     only what the shared account already held. Signed out (or in a freshly registered account) the browser is fresh, so what such a
+ *     page shows is the application's starting data.
  */
 import type { Locator, Step } from "../spec/schema.js";
 
@@ -37,6 +48,24 @@ const OFFER_WORD = /\b(discount|coupon|promo|promotion|voucher)\b/i;
 const CODE_TOKEN = /\b[A-Z]{2,}\d+[A-Z0-9]*\b/g;
 /** Keys whose values are vocabulary, not names the test typed or chose. */
 const VOCABULARY = new Set(["action", "by", "role", "check", "source", "until", "compare", "from", "set", "response"]);
+
+/** A record id as shops print them: ord-1008, inv-20391. Lower-case only, so requirement and rule refs (R-033) are not records. */
+const RECORD_ID = /\b[a-z]+-\d{3,}\b/g;
+/** Controls that add to what the account holds: before one, the account's cart and orders are not the test's. */
+const GROW_CONTROL = /\b(add|create|new|place|buy|book|insert|upload|post|register|sign up)\b/i;
+/** Controls that are there only when the account holds something (a cart to check out). */
+const STATE_CONTROL = /^\s*(check ?out|proceed to checkout|place order)\b/i;
+/** A field a code is typed into before Apply. */
+const CODE_FIELD = /\b(discount|coupon|promo|promotion|voucher|gift ?card)\b/i;
+const APPLY_CONTROL = /^\s*apply\b/i;
+const MONEY = /[$€£¥₹]\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*\.\d{2}\b/g;
+const CART_PLACE = /\b(cart|basket|bag|checkout|check out)\b/i;
+const CART_WORDS = /\b(subtotal|discount|cart|basket)\b/i;
+/** A value typed from the provided test account: the test works in the shared account, which earlier tests may have filled. */
+const SHARED_ACCOUNT = /\{\{\s*credentials\./;
+const NOT_FOUND = /\b(not found|404|no such|does not exist|doesn't exist|no longer exists)\b/i;
+/** Checks that something is absent: on a fresh account that holds, so they are not leaning on leftovers. */
+const ABSENCE_CHECKS = new Set(["hidden", "notText", "count"]);
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
@@ -65,13 +94,59 @@ function itemOf(l: Locator | undefined): string | undefined {
     return undefined;
 }
 
+/** Every string a step carries except its description and vocabulary, as written (ids are matched case-sensitively). */
+function rawStringsOf(value: unknown, into: string[] = []): string[] {
+    if (typeof value === "string") into.push(value);
+    else if (Array.isArray(value)) for (const v of value) rawStringsOf(v, into);
+    else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) if (!VOCABULARY.has(k) && k !== "description") rawStringsOf(v, into);
+    return into;
+}
+
+/**
+ * Where a step names a record it opens, clicks or checks: an address, a locator's names, a check's expected text. Not typed values
+ * (a password like wrong-pass-123 is no record) and not requests (an API test's made-up id is its own).
+ */
+function whereRecordsShow(s: Step): string[] {
+    const l = locatorOf(s);
+    const names = [l?.value, l?.filter?.hasText, l?.within?.value];
+    if (s.action === "navigate") names.push(s.url);
+    if (s.action === "assert" && typeof s.expected === "string") names.push(s.expected);
+    return names.filter((x): x is string => typeof x === "string");
+}
+
+/** The record ids in a model of the application (its discovery crawl, every string in it): the starting data every fresh session sees. */
+export function startingIdsOf(model: unknown): Set<string> {
+    const ids = new Set<string>();
+    const walk = (v: unknown, depth: number): void => {
+        if (depth > 40) return;
+        if (typeof v === "string") for (const m of v.matchAll(RECORD_ID)) ids.add(m[0]);
+        else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
+        else if (v && typeof v === "object") for (const x of Object.values(v)) walk(x, depth + 1);
+    };
+    walk(model, 0);
+    return ids;
+}
+
 const locatorOf = (s: Step): Locator | undefined => ("locator" in s && s.locator && typeof s.locator === "object" && "by" in s.locator ? (s.locator as Locator) : undefined);
 
-/** The steps of a saved test that act on or check an item its own earlier steps never added or opened; empty when there are none. */
-export function findLeftoverUse(steps: readonly Step[]): LeftoverUse[] {
+/**
+ * The steps of a saved test that act on or check an item its own earlier steps never added or opened; empty when there are none.
+ * `startingIds`: the record ids of the application's starting data (`startingIdsOf` the discovery model); without them record ids are
+ * not checked.
+ */
+export function findLeftoverUse(steps: readonly Step[], startingIds?: ReadonlySet<string>): LeftoverUse[] {
     const found: LeftoverUse[] = [];
     const seen: string[] = [];
     let added = false;
+    // Row 228: whether a step has added to the account yet, where the test is (its last address or link), and what it reported once.
+    let grew = false;
+    let place = "";
+    let onStartingRecord = false;
+    let lastFill = "";
+    let signedIn = false;
+    let flaggedControl = false;
+    const usedIds = new Set<string>();
+    const checksNotFound = steps.some((s) => s.action === "assert" && NOT_FOUND.test(rawStringsOf(s).join(" ")));
     const introduced = (name: string) => {
         const h = norm(head(name));
         return seen.some((s) => s.includes(h));
@@ -88,6 +163,28 @@ export function findLeftoverUse(steps: readonly Step[]): LeftoverUse[] {
             else if (own && !introduced(own)) found.push({ step: i + 1, what: `clicks the row "${own.trim()}"` });
             else if (isRemoval && !item && !added) found.push({ step: i + 1, what: `presses "${control.trim()}" before the test added anything` });
         }
+        // A record id no step could have made: not starting data, so an earlier test's record.
+        if (startingIds && !checksNotFound) {
+            for (const id of whereRecordsShow(s).flatMap((t) => [...t.matchAll(RECORD_ID)].map((m) => m[0]))) {
+                if (startingIds.has(id) || usedIds.has(id)) continue;
+                usedIds.add(id);
+                found.push({ step: i + 1, what: `uses the record ${id}, which the test never created` });
+            }
+        }
+        if (signedIn && !grew && !flaggedControl && l && (l.by === "role" || l.by === "text")) {
+            const shows = s.action === "click" || (s.action === "wait" && s.until === "visible") || (s.action === "assert" && (s.check === "visible" || s.check === "enabled"));
+            const applies = s.action === "click" && APPLY_CONTROL.test(control) && CODE_FIELD.test(lastFill);
+            if ((shows && STATE_CONTROL.test(control)) || applies) {
+                flaggedControl = true;
+                found.push({ step: i + 1, what: `presses "${control.trim()}" before the test added anything` });
+            }
+        }
+        if (s.action === "assert" && signedIn && !grew && !onStartingRecord && !ABSENCE_CHECKS.has(s.check)) {
+            const shown = [l?.value, l?.filter?.hasText, typeof s.expected === "string" ? s.expected : undefined].filter((x): x is string => typeof x === "string").join(" ");
+            const amounts = [...shown.matchAll(MONEY)].map((m) => m[0]).filter((a) => /[1-9]/.test(a));
+            if (amounts.length && (CART_PLACE.test(place) || CART_WORDS.test(`${shown} ${s.description ?? ""}`)))
+                found.push({ step: i + 1, what: `checks the amount ${amounts[0]} before the test added anything` });
+        }
         if (s.action === "assert") {
             if (item && REMOVABLE_ITEM.test(item) && !introduced(item)) found.push({ step: i + 1, what: `checks "${head(item)}", a line the account held` });
             const text = [...stringsOf(l), typeof s.expected === "string" ? s.expected : ""].join(" ");
@@ -100,6 +197,16 @@ export function findLeftoverUse(steps: readonly Step[]): LeftoverUse[] {
         // A removal step introduces nothing: describing a leftover it clears does not make it the test's own.
         if (!isRemoval && !(s.action === "click" && CHANGE_CONTROL.test(control) && item)) seen.push(...stringsOf(s));
         if (s.action === "click" && ADD_CONTROL.test(control)) added = true;
+        if (s.action === "click" && GROW_CONTROL.test(control)) grew = true;
+        if (s.action === "fill") {
+            lastFill = [l?.value, s.description].join(" ");
+            if (SHARED_ACCOUNT.test(s.value)) signedIn = true;
+        }
+        const goesTo = s.action === "navigate" ? s.url : s.action === "click" && l?.role === "link" ? control : undefined;
+        if (goesTo !== undefined) {
+            place = goesTo;
+            onStartingRecord = !!startingIds && [...goesTo.matchAll(RECORD_ID)].some((m) => startingIds.has(m[0]));
+        }
     });
     return found;
 }
