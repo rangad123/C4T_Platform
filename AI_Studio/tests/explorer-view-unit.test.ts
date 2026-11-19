@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { activityLine, activityOfStep, pathOf, safeAddress, NOTE_MAX } from "../src/engine/frames/activity.js";
 import { createFrameSink, type ExplorerFrame, type FrameTarget } from "../src/engine/frames/sink.js";
-import { FRAME_LIMITS, fieldsToCover, firstThatFits, frameScale, shootPage, type Shot } from "../src/engine/frames/shoot.js";
+import { coverSecretFields, FRAME_LIMITS, fieldsToCover, firstThatFits, frameScale, shootPage, UNCHECKED_PART, type Shot } from "../src/engine/frames/shoot.js";
+import { namesSecretField } from "../src/shared/secret-field.js";
 import { secretKindOfField } from "../src/engine/recorder/act.js";
 import { FRAME_IDLE_MS, FrameHub, MAX_FRAME_JOBS, READS_PER_SECOND, REASONS, WATCH_WINDOW_MS, watchState } from "../src/platform/frame-hub.js";
 import type { Step } from "../src/engine/spec/schema.js";
@@ -153,11 +154,71 @@ describe("size and covering decisions", () => {
         expect(secretKindOfField({ tag: "input", type: "text", name: "pin" })).toBe("");
         expect(secretKindOfField({ tag: "input", type: "text", label: "Password" })).toBe("");
     });
+
+    it("also covers a field named only by its title, an editable element named like a secret field, and labels in other languages (CP3b R-7)", () => {
+        const fields = [
+            { tag: "input", type: "text", title: "Password" },
+            { tag: "div", ariaLabel: "Password" },
+            { tag: "input", type: "text", label: "Kennwort" },
+            { tag: "input", type: "text", label: "Passwort" },
+            { tag: "input", type: "text", label: "Mot de passe" },
+            { tag: "input", type: "text", label: "Contraseña" },
+            { tag: "input", type: "text", label: "Senha" },
+            { tag: "input", type: "text", label: "Wachtwoord" },
+            { tag: "input", type: "text", label: "Пароль" },
+            { tag: "input", type: "text", label: "密码" },
+            { tag: "input", type: "text", label: "パスワード" },
+            { tag: "input", type: "text", label: "暗証番号" },
+            { tag: "input", type: "text", label: "PIN-код" },
+            { tag: "input", type: "text", label: "Code PIN" },
+            { tag: "input", type: "text", label: "Geheimzahl" },
+            { tag: "input", type: "text", name: "motDePasse" },
+            { tag: "input", type: "text", label: "비밀번호" },
+        ];
+        expect(fieldsToCover(fields)).toEqual(fields.map((_f, i) => i));
+    });
+
+    it("does not cover ordinary fields named in other languages", () => {
+        for (const name of ["Benutzername", "Nom d'utilisateur", "Correo electrónico", "Пингвин", "Шпинат", "用户名", "ユーザー名", "Spinnaker", "Opinion", "Enclave", "Passagier", "Shipping"])
+            expect(namesSecretField(name), name).toBe(false);
+    });
 });
 
 describe("covering fails closed", () => {
     const frame = (detached: boolean) => ({ evaluate: async () => { throw new Error("boom"); }, isDetached: () => detached });
-    const pageWith = (frames: unknown[], onCamera: () => void) => ({ isClosed: () => false, frames: () => frames, url: () => "http://a.test/", title: async () => "", context: () => { onCamera(); return { newCDPSession: async () => { throw new Error("no camera in this double"); } }; } }) as never;
+    /** A page double: `onCamera` counts pictures asked for; the browser's view of the document is `root` (CDP DOM.getDocument). */
+    const pageWith = (frames: unknown[], onCamera: () => void, root: unknown = { nodeName: "#document", children: [] }) =>
+        ({
+            isClosed: () => false,
+            frames: () => frames,
+            mainFrame: () => frames[0],
+            url: () => "http://a.test/",
+            title: async () => "",
+            context: () => ({
+                newCDPSession: async () => ({
+                    send: async (method: string) => {
+                        if (method === "DOM.getDocument") return { root };
+                        if (method === "DOM.disable") return {};
+                        onCamera();
+                        throw new Error("no camera in this double");
+                    },
+                    detach: async () => undefined,
+                }),
+            }),
+        }) as never;
+
+    it("takes no picture of a page holding a closed shadow root, and says why (CP3b R-7)", async () => {
+        let camera = 0;
+        const fine = { evaluate: async () => [], isDetached: () => false };
+        const closed = { nodeName: "#document", children: [{ nodeName: "HTML", children: [{ nodeName: "BODY", children: [{ nodeName: "X-CARD", shadowRoots: [{ nodeName: "#document-fragment", shadowRootType: "closed", children: [{ nodeName: "INPUT" }] }] }] }] }] };
+        await expect(coverSecretFields(pageWith([fine], () => camera++, closed), [])).rejects.toThrow(UNCHECKED_PART);
+        expect(await shootPage(pageWith([fine], () => camera++, closed))).toBeNull();
+        expect(camera).toBe(0);
+        // An open one is entered by the cover itself: the picture is taken.
+        const open = { nodeName: "#document", children: [{ nodeName: "X-CARD", shadowRoots: [{ nodeName: "#document-fragment", shadowRootType: "open", children: [] }] }] };
+        await shootPage(pageWith([fine], () => camera++, open));
+        expect(camera).toBe(1);
+    });
 
     it("takes no picture when a frame that is still there cannot be covered", async () => {
         let camera = 0;

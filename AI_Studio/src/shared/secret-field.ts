@@ -1,6 +1,6 @@
 /**
  * Whether a field is named like one that takes a secret: a password or passphrase, a PIN, a one-time or verification code, a token,
- * an API or private key, a secret, a credential, card security details. One rule for what is hidden of a field the engine typed into
+ * an API or private key, a secret, a credential, card security details, in English and in other common languages. One rule for what is hidden of a field the engine typed into
  * or pictured: the exploration action log hides what was typed into such a field (engine/explore/action-mask.ts), and the pictures a
  * finding and the Explorer view keep cover it (engine/frames/shoot.ts), by its name, id, aria-label, placeholder or label text.
  *
@@ -23,7 +23,15 @@ export function nameWords(name: string): string {
 const SECRET_WORDS =
     /pass(?:word|wd|code|phrase)|\bpass\b|\bpwd\b|\bpin\b|\botp\b|one ?time|verification code|\btotp\b|\b2fa\b|\bmfa\b|secret|token|\bapi ?key\b|apikey|private ?key|credential|\bcvv\b|\bcvc\b|security code|card ?(?:number|no\b)|\bssn\b/;
 
+/**
+ * The same words in other common languages (CP3b R-7): password (German, French, Spanish, Portuguese, Dutch, Italian, Polish, Turkish,
+ * Swedish, Danish/Norwegian, Finnish, Russian, Chinese, Japanese, Korean) and PIN (German, French, Spanish, Portuguese, Russian,
+ * Chinese, Japanese, Korean). Words that are also parts of ordinary ones are matched as whole words only.
+ */
+const SECRET_WORDS_OTHER =
+    /passwort|kennwort|mot de passe|contrase(?:ñ|n)a|\bclave\b|\bsenha\b|wachtwoord|parola d.?ordine|\bhas(?:ł|l)o\b|şifre|\bsifre\b|l(?:ö|o)senord|\bpassord\b|adgangskode|salasana|пароль|密码|密碼|口令|パスワード|암호|비밀번호|geheimzahl|code (?:pin|confidentiel)|\bnip\b|código (?:pin|secreto)|(?:^|[^а-яё])пин(?:$|[^а-яё])|暗証番号|비밀 ?번호|핀 ?번호/;
+
 /** Whether any of these names (a field's name, id, labels, a locator's text, an element's accessible name) says it takes a secret. */
 export function namesSecretField(...names: ReadonlyArray<string | null | undefined>): boolean {
-    return names.some((n) => typeof n === "string" && n !== "" && SECRET_WORDS.test(nameWords(n)));
+    return names.some((n) => typeof n === "string" && n !== "" && (SECRET_WORDS.test(nameWords(n)) || SECRET_WORDS_OTHER.test(nameWords(n))));
 }
