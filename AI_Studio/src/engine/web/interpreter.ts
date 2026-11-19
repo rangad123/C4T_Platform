@@ -103,7 +103,7 @@ function locatePlain(page: Page | FrameLocator | PwLocator, l: PlainLocator, dat
 
 /** The latest answer of a request step, per page the steps run on (what the next response check judges). */
 const lastCalls = new WeakMap<Page, { status: number; headers: Record<string, string>; text: string; json: unknown }>();
-/** Addresses of the responses each page received, so a "wait for the response" step after the action that caused it still sees it. */
+/** Addresses of the responses each page received since its latest step other than a response wait began, so a "wait for the response" step after the action that caused it still sees it. */
 const seenResponses = new WeakMap<Page, string[]>();
 const at = (json: unknown, path: string): unknown => path.split(".").filter(Boolean).reduce<unknown>((acc, k) => (acc === null || acc === undefined ? undefined : (acc as Record<string, unknown>)[k]), json);
 const typeOf = (v: unknown) => (Array.isArray(v) ? "array" : v === null ? "null" : typeof v);
@@ -160,6 +160,10 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
             if (seen.push(r.url()) > 300) seen.shift();
         });
     }
+    // A "wait for the response" step takes only a response that came while the step before it ran, or after: the rendered script starts
+    // listening right before that step (generators/playwright.ts), so an earlier response (the page's own load) does not count. Row 227's
+    // WEB-026 waited for "account" after Save: the interpreter took the page load's /account response, the script timed out (queue row 228).
+    if (!(step.action === "wait" && step.until === "response")) seenResponses.get(top)?.splice(0);
     if ("inPopup" in step && step.inPopup === true) {
         const p = popups.get(top);
         if (!p || p.isClosed()) throw new Error("No popup window is open. A step before this one must open it (Click ... and wait for the popup).");
