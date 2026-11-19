@@ -3,10 +3,15 @@
  *
  * Order matters: secret fields are covered first, the picture is taken, and the cover is taken off again in a `finally`, so a failed picture never leaves
  * the page changed. A field is covered when it is secret by the recorder's own rule (`secretKindOfField` in recorder/act.ts, which mirrors the recorder's
- * page script and is kept in step with it by a test), or when its name, id, aria-label, placeholder or label text names it like a secret field
- * (shared/secret-field.ts: a password shown as text, a PIN, a token, an API key; CP3 N-6). The rule is applied to every input and text area in the page,
- * in its frames and inside open shadow roots. Besides those, any field that currently holds one of the project's stored secrets is covered, wherever
- * the AI typed it. A closed shadow root cannot be entered from the page: a field in one is not covered.
+ * page script and is kept in step with it by a test), or when its name, id, aria-label, title, placeholder or label text names it like a secret
+ * field (shared/secret-field.ts: a password shown as text, a PIN, a token, an API key, also in other languages; CP3 N-6, CP3b R-7). The rule is
+ * applied to every input, text area and editable element (`contenteditable`) in the page, in its frames and inside open shadow roots. Besides those,
+ * any field that currently holds one of the project's stored secrets is covered, wherever the AI typed it, and so is any element whose text shows
+ * one (a stored secret printed as page text).
+ *
+ * A closed shadow root cannot be entered from the page, so what is inside one cannot be checked. The browser's own view of the document (CDP, with
+ * shadow roots pierced) does show where one is: a page or frame holding a closed shadow root gets no picture at all, with the reason
+ * UNCHECKED_PART (fail closed).
  *
  * The picture is scaled down by the browser itself (a clip with a scale), so a 1280 px page is never shipped at full size.
  */
@@ -34,6 +39,10 @@ export interface Shot {
 
 /** The attribute a covered field carries while the picture is taken (it is gone again afterwards). */
 export const MASK_ATTR = "data-aitp-xmask";
+/** Why no picture is taken of a page with a part the cover cannot look into (a closed shadow root). */
+export const UNCHECKED_PART = "a part of the page could not be checked for secrets";
+/** The elements the cover looks at as fields: inputs, text areas and editable elements. */
+const FIELD_SELECTOR = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
 const MAX_FRAMES = 12;
 const MAX_FIELDS = 300;
 
@@ -54,18 +63,22 @@ export async function firstThatFits(qualities: readonly number[], take: (quality
     return null;
 }
 
-/** Which of a page's fields to cover: secret by kind, named like a secret field (by name, id, aria-label, placeholder or label), or currently holding a stored secret. */
-export function fieldsToCover(fields: ReadonlyArray<FieldFacts & { holdsSecret?: boolean }>): number[] {
+/** What the cover reads of one field: the recorder's facts, its title, and whether it holds a stored secret. */
+export type CoverFacts = FieldFacts & { title?: string; holdsSecret?: boolean };
+
+/** Which of a page's fields to cover: secret by kind, named like a secret field (by name, id, aria-label, title, placeholder or label), or currently holding a stored secret. */
+export function fieldsToCover(fields: ReadonlyArray<CoverFacts>): number[] {
     const out: number[] = [];
     fields.forEach((f, i) => {
-        if (f.holdsSecret || secretKindOfField(f) !== "" || namesSecretField(f.name, f.id, f.ariaLabel, f.placeholder, f.label)) out.push(i);
+        if (f.holdsSecret || secretKindOfField(f) !== "" || namesSecretField(f.name, f.id, f.ariaLabel, f.title, f.placeholder, f.label)) out.push(i);
     });
     return out;
 }
 
 // The fields are walked in the page the same way by each evaluate below (spelled out in each, since a function cannot be passed into
-// the page, and building one there would fail on a page whose content security policy forbids eval): inputs and text areas in document
-// order, each open shadow root's after its host, at most MAX_FIELDS, so the indexes of reading and covering agree.
+// the page, and building one there would fail on a page whose content security policy forbids eval): inputs, text areas and editable
+// elements (FIELD_SELECTOR) in document order, each open shadow root's after its host, at most MAX_FIELDS, so the indexes of reading and
+// covering agree.
 // The page-side code declares no helper function of its own (no `const f = () => …`, no `function f`): the platform and the runner
 // load the engine through tsx, which keeps function names by wrapping each such helper in a `__name(…)` call the page does not have
 // (tests/page-scripts-under-tsx.test.ts). Loops and inline callbacks only.
@@ -75,23 +88,25 @@ export function fieldsToCover(fields: ReadonlyArray<FieldFacts & { holdsSecret?:
 const COVER = "#475569";
 
 /** What the page tells about each input (never its value: whether it holds a stored secret is worked out inside the page). */
-async function readFields(frame: Frame, secrets: readonly string[]): Promise<Array<FieldFacts & { holdsSecret: boolean }>> {
+async function readFields(frame: Frame, secrets: readonly string[]): Promise<Array<CoverFacts & { holdsSecret: boolean }>> {
     return frame.evaluate(
-        ([max, stored]) => {
+        ([max, stored, selector]) => {
             const held = stored as string[];
             // The field walk (see above).
-            const els: Array<HTMLInputElement | HTMLTextAreaElement> = [];
+            const els: HTMLElement[] = [];
             const stack: Element[] = Array.from(document.querySelectorAll("*")).reverse();
             while (stack.length && els.length < (max as number)) {
                 const el = stack.pop()!;
-                if (el.matches("input, textarea")) els.push(el as HTMLInputElement | HTMLTextAreaElement);
+                if (el.matches(selector as string)) els.push(el as HTMLElement);
                 if (el.shadowRoot) stack.push(...Array.from(el.shadowRoot.querySelectorAll("*")).reverse());
             }
             return els.map((el) => {
-                const v = el.value ?? "";
+                const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el : undefined;
+                // An editable element's value is its text.
+                const v = field ? (field.value ?? "") : (el.textContent ?? "");
                 const root = el.getRootNode() as Document | ShadowRoot;
                 const by = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean).map((id) => root.getElementById?.(id) ?? null);
-                const label = [...Array.from(el.labels ?? []), ...by]
+                const label = [...Array.from(field?.labels ?? []), ...by]
                     .map((e) => (e?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200))
                     .join(" ")
                     .slice(0, 400);
@@ -102,6 +117,7 @@ async function readFields(frame: Frame, secrets: readonly string[]): Promise<Arr
                     name: el.getAttribute("name") ?? "",
                     id: el.id ?? "",
                     ariaLabel: el.getAttribute("aria-label") ?? "",
+                    title: el.getAttribute("title") ?? "",
                     placeholder: el.getAttribute("placeholder") ?? "",
                     label,
                     // A short secret must match the whole value (a part of an ordinary word is not a secret); a long one may sit inside it.
@@ -109,23 +125,41 @@ async function readFields(frame: Frame, secrets: readonly string[]): Promise<Arr
                 };
             });
         },
-        [MAX_FIELDS, secrets as string[]] as [number, string[]],
+        [MAX_FIELDS, secrets as string[], FIELD_SELECTOR] as [number, string[], string],
     );
 }
 
 async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> {
     const fields = await readFields(frame, secrets);
     const which = fieldsToCover(fields);
-    if (!which.length) return;
+    // A stored secret shown as text is looked for only when there is one long enough to find (a short one would match ordinary text).
+    const shown = secrets.filter((s) => s.length >= 4);
+    if (!which.length && !shown.length) return;
     await frame.evaluate(
-        ([attr, color, idx, max]) => {
+        ([attr, color, idx, max, selector, stored]) => {
             // The field walk (see above).
             const els: HTMLElement[] = [];
             const stack: Element[] = Array.from(document.querySelectorAll("*")).reverse();
             while (stack.length && els.length < (max as number)) {
                 const el = stack.pop()!;
-                if (el.matches("input, textarea")) els.push(el as HTMLElement);
+                if (el.matches(selector as string)) els.push(el as HTMLElement);
                 if (el.shadowRoot) stack.push(...Array.from(el.shadowRoot.querySelectorAll("*")).reverse());
+            }
+            // The elements whose text shows a stored secret, from the top down (each open shadow root's after its host): an element with
+            // a text of its own holding one, or whose secret is split over its children (no single child holds it whole). Its children
+            // that hold one are looked at too, so a child with its own colour is covered as well.
+            const secretList = stored as string[];
+            const texts: HTMLElement[] = [];
+            const down: Element[] = secretList.length ? [document.documentElement] : [];
+            while (down.length) {
+                const el = down.pop()!;
+                if (el.shadowRoot) down.push(...Array.from(el.shadowRoot.children));
+                const all = el.textContent ?? "";
+                if (!secretList.some((s) => all.includes(s))) continue;
+                const kids = Array.from(el.children).filter((c) => secretList.some((s) => (c.textContent ?? "").includes(s)));
+                const own = Array.from(el.childNodes).some((n) => n.nodeType === 3 && secretList.some((s) => (n.textContent ?? "").includes(s)));
+                if (own || !kids.length) texts.push(el as HTMLElement);
+                down.push(...kids);
             }
             const w = window as unknown as { __aitpMasked?: Array<{ el: HTMLElement; style: string | null }>; __aitpMaskStyle?: HTMLStyleElement };
             w.__aitpMasked = w.__aitpMasked ?? [];
@@ -135,8 +169,7 @@ async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> 
                 document.documentElement.appendChild(s);
                 w.__aitpMaskStyle = s;
             }
-            for (const i of idx as number[]) {
-                const el = els[i];
+            for (const el of [...(idx as number[]).map((i) => els[i]), ...texts]) {
                 if (!el || el.hasAttribute(attr as string)) continue;
                 w.__aitpMasked.push({ el, style: el.getAttribute("style") });
                 el.setAttribute(attr as string, "1");
@@ -146,7 +179,7 @@ async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> 
                 }
             }
         },
-        [MASK_ATTR, COVER, which, MAX_FIELDS] as [string, string, number[], number],
+        [MASK_ATTR, COVER, which, MAX_FIELDS, FIELD_SELECTOR, shown] as [string, string, number[], number, string, string[]],
     );
 }
 
@@ -171,11 +204,64 @@ async function uncoverIn(frame: Frame): Promise<void> {
     }, MASK_ATTR);
 }
 
+/** One node of the browser's own view of a document (CDP DOM.Node), as far as the closed-root check reads it. */
+interface DomNode {
+    shadowRootType?: string;
+    children?: DomNode[];
+    shadowRoots?: DomNode[];
+    contentDocument?: DomNode;
+    templateContent?: DomNode;
+}
+
+/** Whether a document, with its shadow roots and same-process frames pierced, holds a closed shadow root. */
+function holdsClosedRoot(root: DomNode): boolean {
+    const stack: DomNode[] = [root];
+    while (stack.length) {
+        const n = stack.pop()!;
+        if (n.shadowRootType === "closed") return true;
+        stack.push(...(n.children ?? []), ...(n.shadowRoots ?? []), ...(n.contentDocument ? [n.contentDocument] : []));
+    }
+    return false;
+}
+
+/**
+ * Whether the page, or one of its frames, holds a closed shadow root: read from the browser (CDP DOM.getDocument with shadow roots and
+ * frames pierced), since the page itself cannot see one. A frame in its own process (another site) has its own session and is read
+ * there; any other failure to read counts as holding one.
+ */
+async function hasClosedShadowRoot(page: Page): Promise<boolean> {
+    const own: CDPSession[] = [];
+    try {
+        const sessions: CDPSession[] = [await sessionFor(page)];
+        for (const f of page.frames()) {
+            if (f === page.mainFrame()) continue;
+            try {
+                const s = await page.context().newCDPSession(f);
+                own.push(s);
+                sessions.push(s);
+            } catch (e) {
+                // Playwright's answer for a frame that is part of its parent's session (read with the page).
+                if (!/separate CDP session/i.test(String((e as Error)?.message ?? e))) throw e;
+            }
+        }
+        for (const s of sessions) {
+            const { root } = (await s.send("DOM.getDocument", { depth: -1, pierce: true })) as { root: DomNode };
+            await s.send("DOM.disable").catch(() => undefined);
+            if (holdsClosedRoot(root)) return true;
+        }
+        return false;
+    } finally {
+        for (const s of own) await s.detach().catch(() => undefined);
+    }
+}
+
 /**
  * Covers the secret fields of the page and its frames; the returned function takes the cover off again (call it in a `finally`).
- * Fails closed: if a frame that is still there cannot be covered (or there are more frames than are looked at), nothing is returned and no picture is taken.
+ * Fails closed: if a frame that is still there cannot be covered (or there are more frames than are looked at), or a part of the page
+ * cannot be looked into (a closed shadow root: the error says UNCHECKED_PART), nothing is returned and no picture is taken.
  */
 export async function coverSecretFields(page: Page, secrets: readonly string[]): Promise<() => Promise<void>> {
+    if (await hasClosedShadowRoot(page)) throw new Error(UNCHECKED_PART);
     const all = page.frames();
     const touched: Frame[] = [];
     const release = async () => {

@@ -9,7 +9,7 @@
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchChromium } from "../src/engine/discovery/browser.js";
-import { MASK_ATTR, shootPage } from "../src/engine/frames/shoot.js";
+import { coverSecretFields, MASK_ATTR, shootPage, UNCHECKED_PART } from "../src/engine/frames/shoot.js";
 
 type Box = { x: number; y: number; w: number; h: number };
 const box = (i: number): Box => ({ x: 40, y: 60 + i * 110, w: 520, h: 80 });
@@ -105,6 +105,64 @@ describe("a picture covers every secret field (CP3 N-6)", () => {
                 return document.querySelectorAll(`[${attr}]`).length + host.querySelectorAll(`[${attr}]`).length + Array.from(host.querySelectorAll("input")).filter((e) => e.getAttribute("style")!.includes("transparent")).length;
             }, MASK_ATTR);
             expect(left).toBe(0);
+        } finally {
+            await page.close();
+        }
+    }, 60_000);
+});
+
+describe("the cover's further cases (CP3b R-7)", () => {
+    const STORED = "RunStoredSecret-1";
+    const MORE: Array<{ name: string; secret: boolean; html: (style: string, b: Box) => string }> = [
+        { name: "a password labelled in German", secret: true, html: (s, b) => `<label for="de" style="${labelAt(b)}">Kennwort</label><input id="de" type="text" value="Hunt3r!pw22" style="${s}">` },
+        { name: "a field named only by its title", secret: true, html: (s) => `<input type="text" title="Password" value="Hunt3r!pw22" style="${s}">` },
+        { name: "an editable element named like a password field", secret: true, html: (s) => `<div contenteditable="true" aria-label="Password" style="${s}">Hunt3r!pw22</div>` },
+        { name: "a stored secret shown as page text", secret: true, html: (s) => `<p>Your API token: <code style="${s}">${STORED}</code></p>` },
+        { name: "a stored secret split over two elements", secret: true, html: (s) => `<p style="${s}"><b>${STORED.slice(0, 6)}</b><i>${STORED.slice(6)}</i></p>` },
+        { name: "an ordinary paragraph", secret: false, html: (s) => `<p style="${s}">WWWWWWWWWW</p>` },
+    ];
+    const MORE_PAGE = `<!doctype html><html lang="en"><head><title>More</title></head><body style="margin:0;background:#fff;width:1280px;height:1100px">
+${MORE.map((c, i) => c.html(STYLE(box(i)), box(i))).join("\n")}</body></html>`;
+
+    it.each(MORE.map((c, i) => [c.name, i, c.secret] as const))("%s", async (_name, i, secret) => {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
+        try {
+            await page.setContent(MORE_PAGE);
+            const s = await shootPage(page, [STORED]);
+            expect(s).not.toBeNull();
+            const { width } = await look(s!.jpeg, { x: 0, y: 0, w: 1, h: 1 });
+            expect(covered(await look(s!.jpeg, inner(box(i), width / 1280)))).toBe(secret);
+            // The cover is off again afterwards.
+            expect(await page.evaluate((attr) => document.querySelectorAll(`[${attr}]`).length, MASK_ATTR)).toBe(0);
+        } finally {
+            await page.close();
+        }
+    }, 60_000);
+
+    it("a page holding a closed shadow root gets no picture, and the cover says why", async () => {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
+        try {
+            await page.setContent(`<!doctype html><html><body><p>Sign in</p><div id="host"></div>
+<script>document.getElementById("host").attachShadow({ mode: "closed" }).innerHTML = '<input name="password" type="password" value="closedpw-1">';</script></body></html>`);
+            await expect(coverSecretFields(page, [])).rejects.toThrow(UNCHECKED_PART);
+            expect(await shootPage(page)).toBeNull();
+            // Nothing was left changed on the page.
+            expect(await page.evaluate((attr) => document.querySelectorAll(`[${attr}]`).length, MASK_ATTR)).toBe(0);
+            // The same page with the root open is pictured (the check reads closed roots only).
+            await page.setContent(`<!doctype html><html><body><div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<p>hi</p>";</script></body></html>`);
+            expect(await shootPage(page)).not.toBeNull();
+        } finally {
+            await page.close();
+        }
+    }, 60_000);
+
+    it("a closed shadow root inside a frame also stops the picture", async () => {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
+        try {
+            const inner = `<div id=h></div><script>document.getElementById('h').attachShadow({mode:'closed'}).innerHTML='<input type=password value=closedpw-2>'</script>`;
+            await page.setContent(`<!doctype html><html><body><iframe srcdoc="${inner.replace(/"/g, "&quot;")}"></iframe></body></html>`);
+            await page.waitForFunction(() => (document.querySelector("iframe") as HTMLIFrameElement).contentDocument?.getElementById("h") !== null);
+            expect(await shootPage(page)).toBeNull();
         } finally {
             await page.close();
         }
