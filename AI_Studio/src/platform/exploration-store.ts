@@ -14,9 +14,9 @@ export const EXPLORATION_ARTIFACT = "exploration";
 export const EXPLORATION_FILE = "exploration.json";
 
 /**
- * Stored with its text masked again, whoever wrote the record: the action log (explore/action-mask.ts) and every free-text field (the
- * stop detail, the outcome and skip reasons, the coverage lists' statuses and reasons: an outcome's reason can be an error's raw text,
- * CP3b R-4), with the run's secrets the sink knows and the shared patterns. The engine masks the action log already, and masking twice
+ * Stored with its text masked again, whoever wrote the record: the action log (explore/action-mask.ts) and every string but the ids
+ * (an outcome's reason can be an error's raw text, CP3b R-4; a coverage list's page path, element name or endpoint can carry a
+ * password or token, CP3c T-5), with the run's secrets the sink knows and the shared patterns. The engine masks the action log already, and masking twice
  * changes nothing, so a record from a runner that did not mask it is stored masked too.
  */
 export async function saveExploration(sink: Pick<GenerationSink, "saveTextArtifact"> & { secretsToMask?(): string[] }, exploration: ExplorationSummary): Promise<void> {
