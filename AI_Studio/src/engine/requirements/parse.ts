@@ -65,6 +65,8 @@ const MODAL = /\b(shall|must|should|is required to|are required to|needs? to|has
 const STRONG_MODAL = /\b(shall|must|should|is required to|are required to|needs? to|has to|have to|will be able to)\b/i;
 const USER_STORY = /\bAs an?\s+[^,.;]{2,80},?\s+I\s+(?:want|need|can|would like|should be able)\b/i;
 const METADATA = /^(version|date|author|owner|status|project|document|revision|last updated|prepared by|approved by|reviewed by)\s*:/i;
+const DATE_CELL = /^(?:\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}|\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{4}|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4})$/;
+const INFO_FIELD = /^(?:document(?:\s+(?:id|number|no\.?|title|name|type|owner|status|version|reference))?|version|date|author|owner|status|project|revision|classification|prepared by|approved by|reviewed by|last updated|field|term)$/i;
 /** Sections whose items are not requirements. */
 const SKIP_SECTION = /\b(glossary|definitions?|abbreviations|acronyms|references|revision history|change ?log|table of contents|contents|document control|out of scope|non-goals)\b/i;
 
@@ -182,6 +184,8 @@ function tableCandidate(line: string): { id?: string; idOrigin: Candidate["idOri
     const cells = line.split("|").map((c) => cleanInline(c)).filter(Boolean);
     if (cells.length < 2) return null;
     if (cells.every((c) => /^:?-{2,}:?$/.test(c))) return "skip";
+    // Document information ("Document ID | SRS-1", "Version | 1.2") and revision history rows (a dated change) are not requirements.
+    if (cells.some((c) => DATE_CELL.test(c)) || (cells.length === 2 && INFO_FIELD.test(cells[0]!))) return "skip";
     const idx = cells.findIndex((c) => ID_FULL.test(c) || /^\d+(\.\d+)*$/.test(c));
     const others = cells.filter((_, k) => k !== idx);
     const text = others.reduce((a, b) => (b.length > a.length ? b : a), "");
@@ -734,9 +738,15 @@ export const NormalisedSchema = z.object({
             text: z.string(),
             section: z.string().optional(),
             kind: z.enum(REQUIREMENT_KINDS),
+            title: z.string().optional().describe("The requirement's own title, when the document gives one"),
+            description: z.string().optional(),
+            reference: z.string().optional().describe('The document\'s "Reference:" / "Source:" line'),
+            priority: z.enum(REQUIREMENT_PRIORITY_WORDS).optional(),
+            acceptanceCriteria: z.array(z.string()).optional().describe("The requirement's acceptance criteria, one per item"),
         }),
     ),
 });
+type Normalised = z.infer<typeof NormalisedSchema>["requirements"][number];
 
 const SYSTEM = `You normalise software requirements extracted from a requirements document into atomic, testable requirements.
 You receive candidate requirements found by a deterministic parser (format: [id] (section) text) and, when it fits, the document text.
@@ -751,7 +761,11 @@ Rules:
 - kind: functional (behaviour/feature), validation (input rules, required fields, formats, limits),
   security (authn/authz, protection, secrets, rate limiting), non-functional (performance, availability, accessibility,
   compatibility), other.
-- section: the heading the requirement belongs to, if any.`;
+- section: the heading the requirement belongs to, if any.
+- Acceptance criteria, headings, the title page, document information, revision history and references are never requirements
+  of their own. Acceptance criteria belong to the requirement they are listed under: return them in its acceptanceCriteria.
+- A candidate given with fields ("Acceptance criteria: …", a title, a description) is one requirement: keep its id, do not split
+  it, and return its title, description, reference, priority and acceptanceCriteria as given.`;
 
 function formatCandidates(reqs: Requirement[]): string {
     return reqs.map((r) => `[${r.id}]${r.section ? ` (${r.section})` : ""} ${r.text}`).join("\n");
@@ -776,7 +790,7 @@ export async function parseRequirements(ctx: EngineContext, text: string): Promi
     }
     const includeText = batches.length === 1 && text.length <= LLM_TEXT_BUDGET;
 
-    const normalised: Array<{ id: string; text: string; section?: string; kind: RequirementKind }> = [];
+    const normalised: Normalised[] = [];
     const leftover: Requirement[] = [];
     try {
         for (let b = 0; b < batches.length; b++) {
@@ -824,7 +838,7 @@ ${includeText ? `\nDocument text:\n"""\n${text}\n"""` : ""}`,
 function mergeNormalised(
     source: string,
     det: { requirements: Requirement[]; documentIds: Set<string> },
-    normalised: Array<{ id: string; text: string; section?: string; kind: RequirementKind }>,
+    normalised: Normalised[],
     leftover: Requirement[],
 ): Requirement[] {
     // The model saw nothing useful — trust the parser rather than returning an empty list.
@@ -834,20 +848,38 @@ function mergeNormalised(
     const legitimate = (id: string) =>
         known.has(id) || [...known].some((k) => id.startsWith(`${k}.`)) || (!/^R-\d+$/.test(id) && source.includes(id));
 
+    const byId = new Map(det.requirements.map((r) => [r.id, r]));
+    // An acceptance criterion the model listed as a requirement of its own stays where the parser attached it.
+    const criteria = new Set(det.requirements.flatMap((r) => r.acceptanceCriteria ?? []).map(normKey));
     const used = new Set<string>();
     const out: Requirement[] = [];
     const pending: Requirement[] = [];
     for (const n of normalised) {
         const text = n.text.replace(/\s+/g, " ").trim();
-        if (!text) continue;
+        if (!text || criteria.has(normKey(text))) continue;
         let id = n.id.trim().slice(0, 40);
         const r: Requirement = { id: "", text, kind: n.kind };
         if (n.section?.trim()) r.section = n.section.trim();
+        const known = byId.get(id);
+        const field = (v: string | undefined, d: string | undefined) => v?.trim() || d;
+        const title = field(n.title, known?.title);
+        const description = field(n.description, known?.description);
+        const reference = field(n.reference, known?.reference);
+        const priority = n.priority ?? known?.priority;
+        const ac = (n.acceptanceCriteria ?? []).map((c) => c.trim()).filter(Boolean);
+        const acceptanceCriteria = ac.length ? ac : known?.acceptanceCriteria;
+        if (title) r.title = title;
+        if (description) r.description = description;
+        if (reference) r.reference = reference;
+        if (priority) r.priority = priority;
+        if (acceptanceCriteria?.length) r.acceptanceCriteria = acceptanceCriteria;
         if (id && legitimate(id)) {
             for (let k = 2; used.has(id); k++) id = `${n.id.trim()}#${k}`;
             r.id = id;
+            if (known?.numbered && id === known.id) r.numbered = true;
             used.add(id);
         } else {
+            r.numbered = true;
             pending.push(r);
         }
         out.push(r);

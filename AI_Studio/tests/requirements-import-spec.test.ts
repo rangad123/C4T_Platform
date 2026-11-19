@@ -6,9 +6,10 @@
  * in order and without gaps, like requirements added by hand. Saved references never change.
  */
 import { describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.js";
 import { extractDocumentText, htmlToText } from "../src/engine/requirements/extract.js";
 import { parseRequirementsDeterministic, type Requirement } from "../src/engine/requirements/parse.js";
-import { candidatesFromText } from "../src/platform/requirement-store.js";
+import { candidatesFromText, candidatesWithAi } from "../src/platform/requirement-store.js";
 import { makeWordDocx, SPEC_EXPECTED, SPEC_MD, SPEC_MD_IDS, SPEC_TXT } from "./fixtures/requirements-spec.js";
 
 const docxText = () => extractDocumentText({ name: "Bookstore SRS.docx", data: makeWordDocx() });
@@ -63,6 +64,11 @@ describe("reading a specification without AI", () => {
         expect(htmlToText("<table><tr><td><p>Document ID</p></td><td><p>SRS-BOOK-001</p></td></tr><tr><td><p>Version</p></td><td><p>1.2</p></td></tr></table>")).toBe("Document ID | SRS-BOOK-001\nVersion | 1.2");
     });
 
+    it("never takes document information or a revision row for a requirement, also in a document without fields", () => {
+        const found = parseRequirementsDeterministic("| Document ID | SRS-BOOK-001 |\n| Version | 1.2 |\n| 1.0 | 2026-02-02 | Product team | First draft |\n| 1.1 | 20/02/2026 | Product team | Added checkout |\n\n- REQ-1: Users can sign in.");
+        expect(found.map((r) => r.id)).toEqual(["REQ-1"]);
+    });
+
     it("attaches criteria given as AC-numbered lines and Given/When/Then lines to their requirement", () => {
         const found = parseRequirementsDeterministic(
             ["REQ-7: Logout", "Description: A signed-in user can sign out.", "Acceptance criteria:", "AC1: The sign-out button is on every page.", "AC2: After signing out the account page asks to sign in.", "", "REQ-8: Wishlist", "Acceptance criteria:", "Given a signed-in shopper", "When they add a book to the wishlist", "Then the wishlist shows it"].join("\n"),
@@ -71,5 +77,30 @@ describe("reading a specification without AI", () => {
             ["REQ-7", "Logout", ["The sign-out button is on every page.", "After signing out the account page asks to sign in."]],
             ["REQ-8", "Wishlist", ["Given a signed-in shopper When they add a book to the wishlist Then the wishlist shows it"]],
         ]);
+    });
+});
+
+describe("reading a specification with the AI (scripted model)", () => {
+    const fake = (answer: unknown) => ({ config: loadConfig({}), llm: { modelName: "fake", usage: { inputTokens: 0, outputTokens: 0 }, object: async () => answer } as never });
+
+    it("keeps the fields and criteria when the model returns bare texts, and drops criteria it listed as requirements", async () => {
+        const text = await docxText();
+        const r = await candidatesWithAi(
+            fake({
+                requirements: [
+                    { id: "R-001", text: "A visitor must be able to create an account with an email address and a password.", kind: "functional" },
+                    { id: "", text: "The password must have at least 8 characters.", kind: "validation" },
+                    { id: "R-002", text: "A registered user must be able to sign in.", kind: "security" },
+                    { id: "R-003", text: "A shopper must be able to search the catalogue.", kind: "functional" },
+                    { id: "R-004", text: "A shopper must be able to pay by card.", kind: "functional", acceptanceCriteria: ["Given a valid card, the order is confirmed."] },
+                ],
+            }),
+            text,
+        );
+        expect(r.usedAi).toBe(true);
+        expect(r.candidates.map((c) => c.title)).toEqual(["User registration", "Sign in", "Search books", "Pay by card"]);
+        expect(r.candidates[0]!.acceptanceCriteria).toBe(SPEC_EXPECTED[0]!.acceptanceCriteria.join("\n"));
+        expect(r.candidates[3]!.acceptanceCriteria).toBe("Given a valid card, the order is confirmed.");
+        expect(r.candidates[2]!.description).toContain("Reference: BRD-04, section 4.1");
     });
 });
