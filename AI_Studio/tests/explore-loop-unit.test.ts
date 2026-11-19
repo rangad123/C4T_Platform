@@ -194,6 +194,22 @@ describe("runExploration: repeated state and action", () => {
         expect(r.usage.actions).toBe(1);
     });
 
+    it("refuses an action its tracker refuses (the request bound, CP3b R-2): not performed, and the pursuit ends", async () => {
+        const verdicts: boolean[] = [];
+        const r = await run([
+            obj("a", 1, {
+                script: async (ctx) => {
+                    verdicts.push(ctx.act({ state: "s1", action: "click Order", refusal: "The request POST /order was already sent 2 times in this pursuit." }).allowed);
+                    verdicts.push(ctx.act({ state: "s2", action: "click Other" }).allowed);
+                    return done();
+                },
+            }),
+        ]);
+        expect(verdicts).toEqual([false, false]);
+        expect(r.actionLog.filter((row) => row.result === "performed")).toHaveLength(0);
+        expect(r.outcomes[0]).toMatchObject({ status: "stopped", actions: 0, reason: "The request POST /order was already sent 2 times in this pursuit." });
+    });
+
     it("stops a pursuit that visits one state more often than the depth allows", async () => {
         const verdicts: boolean[] = [];
         const r = await run(
