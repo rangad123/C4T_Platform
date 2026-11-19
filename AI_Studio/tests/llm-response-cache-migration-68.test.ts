@@ -1,7 +1,7 @@
 /**
  * Migration 68 (the AI response cache): a database left by the release before it keeps its AI usage rows, which gain the cached-call counts
  * at 0; it gains the empty cache table, removed with its project; a fresh database and an upgraded one end with the same schema; opening
- * again re-runs nothing. A database at slot 66 (a project's AI model, the slot before the 67 placeholder) opens to 68 too.
+ * again re-runs nothing. A database at slot 66 (a project's AI model, the slot before candidate findings) opens to 68 too.
  */
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -49,7 +49,7 @@ describe("migration 68", () => {
         db.close();
     });
 
-    it("opens a database at slot 66 (a project's AI model) to 68, keeping each project's AI model; 67 is still a placeholder", () => {
+    it("opens a database at slot 66 (a project's AI model) to 68, keeping each project's AI model", () => {
         const file = path.join(dir, "at66.db");
         createDatabaseAtVersion(file, 66);
         const raw = new DatabaseSync(file);
