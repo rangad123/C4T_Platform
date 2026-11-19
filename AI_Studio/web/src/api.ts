@@ -320,6 +320,24 @@ function noteSignInEnded(links: Crowd4TestLinks): void {
     for (const l of signInEndedListeners) l(links);
 }
 
+/**
+ * Set by the sign-in gate once it has found the session ended, cleared when the person is back. While it is set, a refused
+ * request is not renewed (there is nothing to renew, and every poll would ask crowd4test.com again) and polling waits.
+ */
+let sessionEnded = false;
+const sessionEndedListeners = new Set<(ended: boolean) => void>();
+export const sessionHasEnded = (): boolean => sessionEnded;
+export function setSessionEnded(ended: boolean): void {
+    if (ended === sessionEnded) return;
+    sessionEnded = ended;
+    for (const l of sessionEndedListeners) l(ended);
+}
+/** Told when the session is found ended, and when the person is back. Returns the unsubscribe. */
+export function onSessionEndedChange(listener: (ended: boolean) => void): () => void {
+    sessionEndedListeners.add(listener);
+    return () => void sessionEndedListeners.delete(listener);
+}
+
 let renewing: Promise<void> | null = null;
 /**
  * Asks crowd4test.com to renew an expired session. Its answer cannot be read from here (another address), and does not need to
@@ -348,7 +366,7 @@ export class ApiError extends Error {
 async function refused<T>(res: Response, data: unknown, again: (() => Promise<T>) | undefined): Promise<T> {
     const body = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
     const c4t = crowd4testOf(body.details);
-    if (c4t?.crowd4test === "renew" && again) {
+    if (c4t?.crowd4test === "renew" && again && !sessionEnded) {
         await renewCrowd4Test(c4t.refreshUrl);
         return again();
     }

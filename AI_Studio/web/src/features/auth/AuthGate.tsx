@@ -1,6 +1,6 @@
 import { KeyRound, LogIn } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ApiError, api, crowd4testSignIn, crowd4testSignInHref, crowd4testSignInStuck, forgetCrowd4TestTrips, getKey, onSignInEnded, renewCrowd4Test, setKey } from "../../api";
+import { ApiError, api, crowd4testSignIn, crowd4testSignInHref, crowd4testSignInStuck, forgetCrowd4TestTrips, getKey, onSignInEnded, renewCrowd4Test, sessionHasEnded, setKey, setSessionEnded } from "../../api";
 import { Button, Callout, Disclosure, EmptyState, LinkButton } from "../../components/ui";
 import { useRoute } from "../../lib/router";
 import { AuthContext, getAuthState, type AuthState } from "./auth";
@@ -29,13 +29,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
             }
             setProblem(null);
             // Already in and now signed out on Crowd4Test: keep the page (and what is typed in it) and say so, rather than replace it.
+            // Until the person is back, requests are not renewed and polls wait (api.ts), so nothing asks crowd4test.com over and over.
             if (!s.me && signedIn.current && s.crowd4test && (s.crowd4test.status === "none" || s.crowd4test.status === "expired")) {
                 setEnded(s.crowd4test);
+                setSessionEnded(true);
                 return;
             }
+            // Already in and Crowd4Test cannot be reached for a moment: keep the page as it is, as when this server cannot be reached.
+            // A "refused" answer (the account was suspended or lost AI Studio) does replace the page, deliberately: that is final.
+            if (!s.me && signedIn.current && s.crowd4test?.status === "unreachable") return;
             if (s.me) forgetCrowd4TestTrips();
             signedIn.current = Boolean(s.me);
             setEnded(null);
+            setSessionEnded(false);
             setState(s);
             // A key was entered but the server did not take it (a public route ignores a wrong key, so "me" stays empty).
             setKeyRefused(fromKeyForm && !s.me);
@@ -54,7 +60,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
         confirming.current ??= check().finally(() => (confirming.current = null));
         return confirming.current;
     }, [check]);
-    useEffect(() => onSignInEnded(() => void confirm()), [confirm]);
+    // Once the session is known to have ended, only the person brings the next check: looking at the tab again, or "I have signed in".
+    useEffect(() => onSignInEnded(() => void (sessionHasEnded() || confirm())), [confirm]);
     // Signed in again in another tab: carry on here as soon as this tab is looked at again.
     useEffect(() => {
         if (!ended) return;

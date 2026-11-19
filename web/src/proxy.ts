@@ -5,7 +5,7 @@ import { spendRefreshToken } from '@/lib/auth/refresh-core'
 import { spendHrRefreshToken } from '@/lib/hrms/hr-refresh-core'
 import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
 import { authHeaders } from '@/lib/auth/request-context'
-import { domainFor, secondsUntilExpiry, sharedSessionFixes } from '@/lib/auth/shared-session'
+import { domainFor, sharedSessionFixes } from '@/lib/auth/shared-session'
 
 /**
  * Next 16 Proxy — formerly `middleware.ts`.
@@ -197,6 +197,18 @@ async function refreshIfExpired(
 const AI_STUDIO_RENEWAL = '/app/ai-studio/refresh'
 /** A token this close to its `exp` is renewed now rather than sent once more. */
 const RENEW_MARGIN_SECONDS = 30
+/** A token younger than this was just renewed: AI Studio asking again (another tab, a retry) does not rotate it once more. */
+const JUST_RENEWED_SECONDS = 15
+
+/** A JWT's payload, read WITHOUT verifying; only its times are used here. */
+function claimsOf(jwt: string): { exp?: unknown; iat?: unknown } | undefined {
+  try {
+    const payload = JSON.parse(Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8'))
+    return payload && typeof payload === 'object' ? payload : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Whether the access cookie should be renewed: it is gone, its token runs out
@@ -207,15 +219,28 @@ const RENEW_MARGIN_SECONDS = 30
  * down), so the browser keeps sending the cookie for a moment after the API
  * refuses it. A request in that moment used to go through unrenewed and, on
  * AI Studio's renewal or hand-off, ended on the sign-in form with the session
- * still good. The token is read unverified, only for its `exp`; the API still
- * checks every token itself.
+ * still good. The token is read unverified, only for its times; the API still
+ * checks every token itself. A value with no readable `exp` is renewed too.
+ *
+ * AI Studio's ask counts only from AI Studio itself (Sec-Fetch-Site
+ * same-origin or same-site): the path is a GET, so a link on another site
+ * could otherwise make the browser rotate the session at will. And not when
+ * the token is under JUST_RENEWED_SECONDS old: several AI Studio tabs asking
+ * together (each tab shares its own asks only) rotate once, not once each.
+ * That is decided here rather than by a longer wait in AI Studio for that
+ * reason: a wait in the page covers one tab, this covers every caller.
  */
 function accessNeedsRenewing(request: NextRequest): boolean {
   const access = request.cookies.get(ACCESS_COOKIE)?.value
   if (!access) return true
-  if (request.nextUrl.pathname === AI_STUDIO_RENEWAL) return true
-  const left = secondsUntilExpiry(access)
-  return left !== undefined && left <= RENEW_MARGIN_SECONDS
+  const { exp, iat } = claimsOf(access) ?? {}
+  const now = Date.now() / 1000
+  // A value that is not a readable token cannot be valid: the API would refuse it, so renew rather than send it.
+  if (typeof exp !== 'number' || exp - now <= RENEW_MARGIN_SECONDS) return true
+  const fetchSite = request.headers.get('sec-fetch-site')
+  const fromAiStudio = fetchSite === 'same-origin' || fetchSite === 'same-site'
+  if (request.nextUrl.pathname !== AI_STUDIO_RENEWAL || !fromAiStudio) return false
+  return !(typeof iat === 'number' && now - iat < JUST_RENEWED_SECONDS)
 }
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {

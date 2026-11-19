@@ -21,6 +21,7 @@ const SITE_PORT = 6875;
 const BASE = `http://127.0.0.1:${PORT}`;
 const SITE = `http://127.0.0.1:${SITE_PORT}`;
 const TOKEN = "access-good-1";
+const DOWN_TOKEN = "access-api-down-1";
 let browser: Browser;
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
@@ -47,6 +48,11 @@ beforeAll(async () => {
             renewals += 1;
             res.writeHead(204, { "cache-control": "no-store" });
             return res.end();
+        }
+        // DOWN_TOKEN: the API is in trouble for this one (a 500), so AI Studio cannot tell who it is.
+        if (url.pathname === "/v1/auth/me" && req.headers.authorization === `Bearer ${DOWN_TOKEN}`) {
+            res.writeHead(500, { "content-type": "application/json" });
+            return res.end("{}");
         }
         const ok = url.pathname === "/v1/auth/me" && req.headers.authorization === `Bearer ${TOKEN}`;
         res.writeHead(ok ? 200 : 401, { "content-type": "application/json" });
@@ -106,9 +112,13 @@ describe("a Crowd4Test sign-in that ends in the middle of work", () => {
         const page = await context.newPage();
         const errors: string[] = [];
         page.on("pageerror", (e) => errors.push(e.message));
+        // The page's auth checks: one on load, and one more because of the refusal (it asks before it says anything).
+        let checks = 0;
+        page.on("request", (r) => void (new URL(r.url()).pathname === "/api/auth/state" && checks++));
         trips.length = 0;
         await page.goto(`${BASE}/#/create`);
         await pwExpect.poll(() => refused, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+        await pwExpect.poll(() => checks, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
         await page.getByLabel("Project name").fill("Still here");
         await page.waitForTimeout(1_500);
         expect(trips).toEqual([]);
@@ -118,6 +128,46 @@ describe("a Crowd4Test sign-in that ends in the middle of work", () => {
         expect(errors).toEqual([]);
         await context.close();
     });
+
+    it("once the session has ended, polling waits and nothing asks crowd4test.com to renew again and again", async () => {
+        const context = await browser.newContext();
+        await context.addCookies([{ name: "c4t_access", value: TOKEN, domain: "127.0.0.1", path: "/" }, { name: "c4t_shared", value: "2", domain: "127.0.0.1", path: "/" }]);
+        const page = await context.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.goto(`${BASE}/#/`);
+        const id = await page.evaluate(async () => {
+            const res = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json", "x-requested-with": "ai-studio" }, body: JSON.stringify({ name: "Polled settings" }) });
+            return ((await res.json()) as { id: string }).id;
+        });
+        // Project settings polls the project's jobs every 5 seconds.
+        let polls = 0;
+        page.on("request", (r) => void (new URL(r.url()).pathname === `/api/projects/${id}/jobs` && polls++));
+        await page.goto(`${BASE}/#/projects/${id}/settings`);
+        await pwExpect.poll(() => polls, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+        // The access cookie runs out and cannot be renewed; the c4t_shared marker stays, so every answer is "renew".
+        await context.clearCookies({ name: "c4t_access" });
+        renewals = 0;
+        await pwExpect(banner(page)).toBeVisible({ timeout: 15_000 });
+        const [renewedThen, polledThen] = [renewals, polls];
+        expect(renewedThen).toBeLessThanOrEqual(3);
+        // Three poll intervals later: no new poll and no new renewal.
+        await page.waitForTimeout(16_000);
+        expect(renewals).toBe(renewedThen);
+        expect(polls).toBe(polledThen);
+        // Going to another page sends new requests; refused, none of them asks crowd4test.com to renew.
+        await page.evaluate((p) => void (location.hash = `#/projects/${p}/runs`), id);
+        await page.waitForTimeout(2_000);
+        expect(renewals).toBe(renewedThen);
+        // Looking at the tab again asks once (renewing once), not for ever.
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await page.waitForTimeout(2_000);
+        expect(renewals).toBeLessThanOrEqual(renewedThen + 1);
+        await pwExpect(banner(page)).toBeVisible();
+        expect(trips).toEqual([]);
+        expect(errors).toEqual([]);
+        await context.close();
+    }, 60_000);
 
     it("a session that really ended is said over the page, which keeps what was typed; signing in again carries on", async () => {
         const { context, page, errors } = await midForm();
@@ -137,6 +187,13 @@ describe("a Crowd4Test sign-in that ends in the middle of work", () => {
         await popup.waitForLoadState();
         expect(trips).toEqual(["/create"]);
         await popup.close();
+
+        // Looked at again while Crowd4Test cannot answer: the page stays as it is (it used to be replaced by "We can't reach").
+        await context.addCookies([{ name: "c4t_access", value: DOWN_TOKEN, domain: "127.0.0.1", path: "/" }]);
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await page.waitForTimeout(1_500);
+        await pwExpect(page.getByText("We can’t reach Crowd4Test sign-in")).toHaveCount(0);
+        await pwExpect(page.getByLabel("Project name")).toHaveValue("Half-typed checkout project");
 
         // Back with a sign-in: the message goes once the tab is looked at again, and the form still holds its text.
         await context.addCookies([{ name: "c4t_access", value: TOKEN, domain: "127.0.0.1", path: "/" }]);

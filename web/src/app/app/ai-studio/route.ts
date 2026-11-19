@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { env } from '@/lib/env'
 import { getUserOrUnknown } from '@/lib/auth/session'
 import { aiStudioHandOff } from '@/lib/navigation/ai-studio'
+import { ApiError } from '@/lib/api/types'
 
 /**
  * The sidebar's "AI Studio" entry, and AI Studio's way back in.
@@ -20,7 +21,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!env.AI_STUDIO_URL) return new NextResponse(null, { status: 404 })
 
   const to = request.nextUrl.searchParams.get('to')
-  const next = aiStudioHandOff(await getUserOrUnknown(), to, env.AI_STUDIO_URL)
+  let user: Awaited<ReturnType<typeof getUserOrUnknown>>
+  try {
+    user = await getUserOrUnknown()
+  } catch (error) {
+    // A suspended or deactivated account: the API's own sentence, and no retry that could never work.
+    if (!(error instanceof ApiError) || error.status !== 403) throw error
+    return new NextResponse(error.message, {
+      status: 403,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+    })
+  }
+  const next = aiStudioHandOff(user, to, env.AI_STUDIO_URL)
   const response =
     next.status === 503
       ? new NextResponse(
