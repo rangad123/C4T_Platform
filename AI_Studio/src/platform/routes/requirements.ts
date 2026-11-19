@@ -20,6 +20,7 @@ import {
     MAX_REQUIREMENTS,
     MAX_TEXT,
     MAX_TITLE,
+    numberCandidates,
     REF_PATTERN,
     REQUIREMENT_PRIORITIES,
     REQUIREMENT_STATUSES,
@@ -121,8 +122,9 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
     };
     const preview = async (pid: string, candidates: ImportCandidate[], usedAi: boolean, note: string | null = null) => {
         const taken = await store.takenRefs(pid);
-        const list = candidates.slice(0, MAX_REQUIREMENTS).map((c) => ({ ...c, exists: taken.has(c.ref.toUpperCase()) }));
-        return { candidates: list, total: candidates.length, existing: list.filter((c) => c.exists).length, usedAi, note, max: MAX_REQUIREMENTS };
+        const firstFree = Number(/^REQ-(\d+)$/.exec(await store.nextRef(pid))![1]);
+        const list = numberCandidates(candidates.slice(0, MAX_REQUIREMENTS), taken, firstFree).map((c) => ({ ...c, exists: !c.numbered && taken.has(c.ref.toUpperCase()) }));
+        return { candidates: list, total: candidates.length, existing: list.filter((c) => c.exists).length, usedAi, note, max: MAX_REQUIREMENTS, firstFree };
     };
 
     app.get("/api/projects/:id/requirements", async (req) => {

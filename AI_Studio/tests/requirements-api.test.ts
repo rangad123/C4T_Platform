@@ -84,7 +84,8 @@ describe("the rules", () => {
 
     it("finds requirements in text with the parser's rules, no AI", () => {
         const c = candidatesFromText("# Checkout\n- REQ-1: A shopper can pay by card.\n- REQ-2: The basket keeps its items after signing in.\n\nThe system must send a receipt by email.");
-        expect(c.map((x) => x.ref)).toEqual(["REQ-1", "REQ-2", "R-001"]);
+        // The sentence has no id in the document: it is numbered REQ-n when saved, like one added by hand.
+        expect(c.map((x) => [x.ref, x.numbered])).toEqual([["REQ-1", false], ["REQ-2", false], ["", true]]);
         expect(c[0]).toMatchObject({ title: "A shopper can pay by card.", section: "Checkout" });
     });
 });
@@ -264,13 +265,13 @@ describe("import", () => {
         const p = await call("POST", `${reqs(A)}/import/preview`, { text: doc });
         expect(p.status).toBe(200);
         expect(p.body).toMatchObject({ total: 3, existing: 1, usedAi: false });
-        expect(p.body.candidates.map((c: any) => [c.ref, c.exists])).toEqual([["REQ-20", false], ["REQ-21", true], ["R-001", false]]);
+        expect(p.body.candidates.map((c: any) => [c.ref, c.exists])).toEqual([["REQ-20", false], ["REQ-21", true], ["REQ-22", false]]);
         // The preview stored nothing.
         expect((await call("GET", reqs(A))).body.requirements.some((r: any) => r.ref === "REQ-20")).toBe(false);
-        const saved = await call("POST", `${reqs(A)}/import`, { requirements: p.body.candidates.map((c: any) => ({ ref: c.ref, title: c.title, description: c.description })) });
+        const saved = await call("POST", `${reqs(A)}/import`, { requirements: p.body.candidates.map((c: any) => ({ ...(c.numbered ? {} : { ref: c.ref }), title: c.title, description: c.description })) });
         expect(saved.status).toBe(201);
         expect(saved.body).toMatchObject({ created: 2, duplicates: ["REQ-21"] });
-        const rec = (await call("GET", reqs(A))).body.requirements.find((r: any) => r.ref === "R-001");
+        const rec = (await call("GET", reqs(A))).body.requirements.find((r: any) => r.ref === "REQ-22");
         expect(rec).toMatchObject({ source: "imported", title: "The system must lock an account after five failed sign-ins." });
     });
 

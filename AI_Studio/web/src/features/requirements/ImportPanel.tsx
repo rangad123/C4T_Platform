@@ -38,7 +38,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
             const body = mode === "paste" ? { text } : { file: { filename: file!.name, contentBase64: await toBase64(file!) } };
             const r = await api<ImportPreview>(`/projects/${projectId}/requirements/import/${ai ? "refine" : "preview"}`, { method: "POST", body });
             setPreview(r);
-            setPicked(new Set(r.candidates.filter((c) => !c.exists).map((c) => c.ref)));
+            setPicked(new Set(r.candidates.flatMap((c, i) => (c.exists ? [] : [String(i)]))));
         } catch (e) {
             setError(describeApiError(e));
         } finally {
@@ -51,9 +51,10 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
         setError("");
         setBusy("save");
         try {
+            // A requirement the document did not number is sent without a reference: the platform numbers the chosen ones REQ-n in order.
             const requirements = preview.candidates
-                .filter((c) => picked.has(c.ref))
-                .map((c) => ({ ref: c.ref, title: c.title, description: c.description, acceptanceCriteria: c.acceptanceCriteria, ...(c.priority ? { priority: c.priority } : {}) }));
+                .filter((_, i) => picked.has(String(i)))
+                .map((c) => ({ ...(c.numbered ? {} : { ref: c.ref }), title: c.title, description: c.description, acceptanceCriteria: c.acceptanceCriteria, ...(c.priority ? { priority: c.priority } : {}) }));
             const r = await api<{ created: number; duplicates: string[] }>(`/projects/${projectId}/requirements/import`, { method: "POST", body: { requirements, source: preview.usedAi ? "ai" : "imported" } });
             await onImported(`Imported ${plural(r.created, "requirement")}.${r.duplicates.length ? ` ${plural(r.duplicates.length, "reference")} already existed and ${r.duplicates.length === 1 ? "was" : "were"} left out: ${r.duplicates.slice(0, 5).join(", ")}${r.duplicates.length > 5 ? "…" : ""}.` : ""}`);
         } catch (e) {
@@ -62,13 +63,23 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
         }
     }
 
-    const toggle = (ref: string, on: boolean) => setPicked((s) => {
+    const toggle = (key: string, on: boolean) => setPicked((s) => {
         const n = new Set(s);
-        if (on) n.add(ref);
-        else n.delete(ref);
+        if (on) n.add(key);
+        else n.delete(key);
         return n;
     });
 
+    // The references the chosen ones get: the document's own, and REQ-n in order for the others (no gaps for the ones left out).
+    const refs = new Map<number, string>();
+    if (preview) {
+        const free = preview.candidates.filter((c) => c.numbered).map((c) => c.ref);
+        let k = 0;
+        preview.candidates.forEach((c, i) => {
+            if (!c.numbered) refs.set(i, c.ref);
+            else if (picked.has(String(i))) refs.set(i, free[k++]!);
+        });
+    }
 
     return (
         <section className="card card-pad stack-sm" aria-label="Import requirements">
@@ -81,7 +92,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
             </div>
             {!preview ? (
                 <>
-                    <p className="t-secondary">Paste a requirements document or choose its file. You see what was found before anything is saved. Requirement ids in the document (REQ-1, FR-2.3) become the references; the others are numbered. Acceptance criteria stay with their requirement.</p>
+                    <p className="t-secondary">Paste a requirements document or choose its file. You see what was found before anything is saved. Requirement ids in the document (REQ-1, FR-2.3) become the references; the others are numbered REQ-1, REQ-2 and on, like requirements added by hand. Acceptance criteria stay with their requirement.</p>
                     <div className="chips" role="group" aria-label="Where the requirements come from">
                         <button type="button" className="chip" aria-pressed={mode === "paste"} onClick={() => setMode("paste")}>
                             Paste text
@@ -129,7 +140,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
                     ) : (
                         <>
                             <div className="row">
-                                <Button size="sm" variant="ghost" onClick={() => setPicked(new Set(preview.candidates.filter((c) => !c.exists).map((c) => c.ref)))}>
+                                <Button size="sm" variant="ghost" onClick={() => setPicked(new Set(preview.candidates.flatMap((c, i) => (c.exists ? [] : [String(i)]))))}>
                                     Choose all
                                 </Button>
                                 <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
@@ -138,8 +149,8 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
                             </div>
                             <fieldset className="req-preview">
                                 <legend className="sr-only">Requirements found</legend>
-                                {preview.candidates.map((c) => (
-                                    <FoundRequirement key={c.ref} c={c} ref_={c.ref} checked={picked.has(c.ref)} onChange={(on) => toggle(c.ref, on)} />
+                                {preview.candidates.map((c, i) => (
+                                    <FoundRequirement key={i} c={c} ref_={refs.get(i) ?? null} checked={picked.has(String(i))} onChange={(on) => toggle(String(i), on)} />
                                 ))}
                             </fieldset>
                         </>

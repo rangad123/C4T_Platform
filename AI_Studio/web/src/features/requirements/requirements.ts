@@ -84,7 +84,10 @@ export interface RequirementDetailData extends Requirement {
 }
 
 export interface ImportCandidate {
+    /** The document's own id, or (numbered) the REQ-n it would be saved as. */
     ref: string;
+    /** The document gave no id: numbered REQ-n in order when saved, so only the chosen ones take numbers. */
+    numbered: boolean;
     title: string;
     description: string;
     /** One criterion per line. */

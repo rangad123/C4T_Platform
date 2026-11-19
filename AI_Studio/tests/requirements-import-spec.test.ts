@@ -5,11 +5,17 @@
  * revision history, introduction and headings are not requirements, and the references the import gives are the project's REQ-n,
  * in order and without gaps, like requirements added by hand. Saved references never change.
  */
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { extractDocumentText, htmlToText } from "../src/engine/requirements/extract.js";
 import { parseRequirementsDeterministic, type Requirement } from "../src/engine/requirements/parse.js";
+import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { candidatesFromText, candidatesWithAi } from "../src/platform/requirement-store.js";
+import { buildServer } from "../src/platform/server.js";
+import { addTest, seedProject, type Seed } from "./fixtures/dashboard-seed.js";
 import { makeWordDocx, SPEC_EXPECTED, SPEC_MD, SPEC_MD_IDS, SPEC_TXT } from "./fixtures/requirements-spec.js";
 
 const docxText = () => extractDocumentText({ name: "Bookstore SRS.docx", data: makeWordDocx() });
@@ -50,7 +56,8 @@ describe("reading a specification without AI", () => {
         const c = candidatesFromText(await docxText());
         expect(c).toHaveLength(4);
         expect(c[1]).toMatchObject({
-            ref: "R-002",
+            ref: "",
+            numbered: true,
             title: "Sign in",
             description: `${SPEC_EXPECTED[1]!.description}\n\nReference: ${SPEC_EXPECTED[1]!.reference}`,
             acceptanceCriteria: SPEC_EXPECTED[1]!.acceptanceCriteria.join("\n"),
@@ -98,9 +105,90 @@ describe("reading a specification with the AI (scripted model)", () => {
             text,
         );
         expect(r.usedAi).toBe(true);
-        expect(r.candidates.map((c) => c.title)).toEqual(["User registration", "Sign in", "Search books", "Pay by card"]);
+        expect(r.candidates.map((c) => [c.numbered, c.title])).toEqual([[true, "User registration"], [true, "Sign in"], [true, "Search books"], [true, "Pay by card"]]);
         expect(r.candidates[0]!.acceptanceCriteria).toBe(SPEC_EXPECTED[0]!.acceptanceCriteria.join("\n"));
         expect(r.candidates[3]!.acceptanceCriteria).toBe("Given a valid card, the order is confirmed.");
         expect(r.candidates[2]!.description).toContain("Reference: BRD-04, section 4.1");
+    });
+});
+
+const KEY = "spec-import-key-6a7b8c9d";
+let platform: Platform;
+let app: Awaited<ReturnType<typeof buildServer>>;
+let dir = "";
+let S: Seed;
+
+const call = async (method: string, url: string, payload?: unknown) => {
+    const res = await app.inject({ method: method as "GET", url, headers: { "x-api-key": KEY }, ...(payload !== undefined ? { payload: payload as object } : {}) });
+    return { status: res.statusCode, body: res.body ? (JSON.parse(res.body) as any) : null };
+};
+const reqs = () => `/api/projects/${S.projectId}/requirements`;
+const file = (name: string, data: Buffer | string) => ({ file: { filename: name, contentBase64: Buffer.from(data).toString("base64") } });
+
+beforeAll(async () => {
+    for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-spec-import-"));
+    platform = bootstrap(loadConfig({ DATA_DIR: dir, SECRET_KEY: "spec-import-secret-0123456789", API_KEY: KEY, SCHEDULER_ENABLED: "false" }));
+    app = await buildServer(platform);
+    await app.ready();
+    S = seedProject(platform, "Bookstore", "https://books.example.test");
+    addTest(platform, S, "login");
+}, 60_000);
+
+afterAll(async () => {
+    await app?.close();
+    platform?.db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe("importing the specification", () => {
+    it("numbers imported requirements after the ones added by hand, in order and without gaps, with their criteria saved", async () => {
+        for (const title of ["Home page shows new books", "Footer links work"]) expect((await call("POST", reqs(), { title })).body.ref).toMatch(/^REQ-[12]$/);
+        // A project that imported before this change keeps its references: R-001 stays R-001, and so does its link.
+        const old = await call("POST", reqs(), { ref: "R-001", title: "An older import" });
+        const test = S.tests.get("login")!;
+        expect((await call("POST", `${reqs()}/${old.body.id}/tests`, { automated: [test] })).status).toBe(200);
+
+        const p = await call("POST", `${reqs()}/import/preview`, file("Bookstore SRS.docx", makeWordDocx()));
+        expect(p.status).toBe(200);
+        expect(p.body).toMatchObject({ total: 4, existing: 0, usedAi: false });
+        expect(p.body.candidates.map((c: any) => [c.ref, c.numbered, c.title])).toEqual([
+            ["REQ-3", true, "User registration"],
+            ["REQ-4", true, "Sign in"],
+            ["REQ-5", true, "Search books"],
+            ["REQ-6", true, "Pay by card"],
+        ]);
+
+        // The person leaves "Sign in" out: the three kept still take REQ-3, REQ-4, REQ-5.
+        const kept = p.body.candidates.filter((c: any) => c.title !== "Sign in").map((c: any) => ({ title: c.title, description: c.description, acceptanceCriteria: c.acceptanceCriteria, priority: c.priority }));
+        const saved = await call("POST", `${reqs()}/import`, { requirements: kept });
+        expect(saved.status).toBe(201);
+        expect(saved.body.created).toBe(3);
+
+        const list = (await call("GET", reqs())).body.requirements as any[];
+        expect(list.map((r) => [r.ref, r.title])).toEqual([
+            ["R-001", "An older import"],
+            ["REQ-1", "Home page shows new books"],
+            ["REQ-2", "Footer links work"],
+            ["REQ-3", "User registration"],
+            ["REQ-4", "Search books"],
+            ["REQ-5", "Pay by card"],
+        ]);
+        const pay = list.find((r) => r.ref === "REQ-5");
+        expect(pay).toMatchObject({ priority: "critical", source: "imported", acceptanceCriteria: SPEC_EXPECTED[3]!.acceptanceCriteria.join("\n") });
+        expect(pay.description).toBe(`${SPEC_EXPECTED[3]!.description}\n\nReference: ${SPEC_EXPECTED[3]!.reference}`);
+        expect(list.find((r) => r.ref === "R-001").tests.linked).toBe(1);
+
+        // The next one added by hand follows on.
+        expect((await call("POST", reqs(), { title: "Gift cards" })).body.ref).toBe("REQ-6");
+    });
+
+    it("keeps the document's own ids, and a numbered one never takes an id the same import brings", async () => {
+        const p = await call("POST", `${reqs()}/import/preview`, file("bookstore.md", SPEC_MD));
+        expect(p.body.candidates.map((c: any) => c.ref)).toEqual(SPEC_MD_IDS);
+        const saved = await call("POST", `${reqs()}/import`, { requirements: [{ title: "Numbered" }, { ref: "REQ-7", title: "The document's REQ-7" }] });
+        expect(saved.body).toMatchObject({ created: 2, duplicates: [] });
+        const refs = (await call("GET", reqs())).body.requirements.map((r: any) => [r.ref, r.title]);
+        expect(refs).toEqual(expect.arrayContaining([["REQ-7", "The document's REQ-7"], ["REQ-8", "Numbered"]]));
     });
 });
