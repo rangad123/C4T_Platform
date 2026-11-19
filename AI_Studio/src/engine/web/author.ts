@@ -45,7 +45,7 @@ import { maskObservedText, observedTextSecrets } from "../evidence/observed-text
 import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 import { findLeftoverUse, LEFTOVER_REDO, leftoverReason } from "./leftovers.js";
-import { requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
+import { requestTarget, senderName, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -122,7 +122,7 @@ export interface GateAction {
      * `formId`, the digest of that form element itself (its page, its place among the page's forms, its id, name, method and action), the
      * same for every field and submit control of one form (CP3c T-4: the sign-in exemption is this form's, not its address's).
      */
-    anchor?: { anchor: string; form?: string; formId?: string };
+    anchor?: { anchor: string; form?: string; formId?: string; sender?: string };
 }
 
 export interface ActionGate {
@@ -176,7 +176,7 @@ export async function targetIdentity(page: Page, l: Locator, data: RuntimeData):
  * (`requestTarget` of the form's method and action, or of the submit control's own formmethod and formaction), when it is in a form that
  * changes data.
  */
-async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise<{ identity: string; anchor: string; form?: string; formId?: string } | undefined> {
+async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise<{ identity: string; anchor: string; form?: string; formId?: string; sender: string } | undefined> {
     try {
         const el = locate(page, l, data).first();
         const [aria, anchor] = await Promise.all([
@@ -235,7 +235,9 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
                     docPath = "";
                 }
                 const formSelf = owner ? [docPath, Array.prototype.indexOf.call(self.ownerDocument.forms, owner), owner.id, owner.getAttribute("name") ?? "", (owner.getAttribute("method") ?? "get").toLowerCase(), owner.getAttribute("action") ?? ""].join("|") : null;
-                return { anchor: parts.join(">"), form: owner && action ? { method, action } : null, formSelf };
+                // The request bound's sender this element was first seen as (CP3c T-1), kept on the element while it stays on the page.
+                const mark = (self as unknown as Record<symbol, unknown>)[Symbol.for("c4t.request-sender")];
+                return { anchor: parts.join(">"), form: owner && action ? { method, action } : null, formSelf, sender: typeof mark === "string" ? mark : null };
             }, undefined, { timeout: 1_000 }),
         ]);
         // `- button "Continue"` or `- textbox "Email": typed value`: role and name only, never a value.
@@ -245,7 +247,18 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
         // A form method other than post is a GET (or a dialog): no request target, so no form for the bound.
         const form = anchor.form ? requestTarget(anchor.form.method === "post" ? "POST" : anchor.form.method, anchor.form.action) : undefined;
         const formId = anchor.formSelf !== null ? createHash("sha256").update(`form ${anchor.formSelf}`).digest("hex").slice(0, 12) : undefined;
-        return { identity, anchor: digest, ...(form ? { form } : {}), ...(form && formId ? { formId } : {}) };
+        // The request bound's sender (CP3c T-1): the anchor alone is shared by sibling controls (BenchShop's buttons in <main>), so the
+        // role and accessible name are part of it. It is fixed on the element the first time it is seen: a page that renames the control
+        // after a click (a counter in its text) does not make it a new sender.
+        let sender = anchor.sender;
+        if (!sender) {
+            sender = createHash("sha256").update(`${anchor.anchor}\n${senderName(`${m?.[1] ?? "element"} ${m?.[2] ?? ""}`)}`).digest("hex").slice(0, 12);
+            const fixed = sender;
+            await el.evaluate((node, s) => {
+                (node as unknown as Record<symbol, unknown>)[Symbol.for("c4t.request-sender")] = s;
+            }, fixed, { timeout: 1_000 }).catch(() => undefined);
+        }
+        return { identity, anchor: digest, sender, ...(form ? { form } : {}), ...(form && formId ? { formId } : {}) };
     } catch {
         return undefined;
     }
@@ -256,7 +269,7 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
  * target not found at once (a button the page adds late) is waited for as long as the action itself would wait, so the gate is asked
  * with the element and its form rather than the locator text (CP3b R-2); the gate is still asked before the action runs.
  */
-async function stepTarget(page: Page, step: Step, data: RuntimeData, gate?: ActionGate): Promise<{ target?: string; anchor?: { anchor: string; form?: string; formId?: string } }> {
+async function stepTarget(page: Page, step: Step, data: RuntimeData, gate?: ActionGate): Promise<{ target?: string; anchor?: { anchor: string; form?: string; formId?: string; sender?: string } }> {
     const loc = "locator" in step ? (step.locator as Locator | undefined) : undefined;
     if (!loc) return {};
     let own = await resolveTarget(page, loc, data);
@@ -266,7 +279,7 @@ async function stepTarget(page: Page, step: Step, data: RuntimeData, gate?: Acti
     }
     const to = step.action === "drag" ? await targetIdentity(page, step.target as Locator, data) : undefined;
     const target = own && step.action === "drag" ? `${own.identity} -> ${to ?? JSON.stringify(step.target)}` : own?.identity;
-    return { ...(target ? { target } : {}), ...(own ? { anchor: { anchor: own.anchor, ...(own.form ? { form: own.form } : {}), ...(own.formId ? { formId: own.formId } : {}) } } : {}) };
+    return { ...(target ? { target } : {}), ...(own ? { anchor: { anchor: own.anchor, sender: own.sender, ...(own.form ? { form: own.form } : {}), ...(own.formId ? { formId: own.formId } : {}) } } : {}) };
 }
 
 const AUTHORING_USE = " Where this scenario reaches what a rule describes, assert the expected behaviour it states; when the application genuinely does otherwise, call finish(result=\"defect\").";

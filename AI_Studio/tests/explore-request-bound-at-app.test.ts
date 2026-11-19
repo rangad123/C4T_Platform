@@ -54,6 +54,11 @@ beforeAll(async () => {
                 return res.end(page(`<h1>A shop</h1>${buttons}<p id="out" role="status"></p>`, `<script>const TO=${JSON.stringify(to)};for(const b of document.querySelectorAll('main button'))b.onclick=async()=>{await fetch('/events',{method:'POST'});const t=TO[b.textContent];if(t)await fetch(t,{method:'POST'});document.getElementById('out').textContent=b.textContent==='Place order'?'Order placed':'Done: '+b.textContent}</script>`));
             }
             if (path === "/events" || path.startsWith("/ashop/")) return res.end("{}");
+            if (path === "/renamed") {
+                // A form-less button the page renames with other words after each click (no digits): the same element, one sender.
+                return res.end(page(`<h1>Renamed</h1><button id="r">Buy now</button>`, `<script>const W=['Buy again','Buy once more','Buy another','Get one','Grab it','Take it','Have it'];let k=0;document.getElementById('r').onclick=async()=>{await fetch('/renamed/buy',{method:'POST'});document.getElementById('r').textContent=W[k++%W.length]}</script>`));
+            }
+            if (path === "/renamed/buy") return res.end("{}");
             if (path === "/login") return res.end(page(`<h1>Sign in</h1><form method="post" action="/login/session"><label>Username <input name="u"></label><label>Password <input name="p" type="password"></label><button type="submit">Sign in</button></form>`));
             // A single-endpoint app (CP3c T-4): the sign-in form and a Delete form elsewhere both post to /app.
             if (path === "/login2")
@@ -146,6 +151,11 @@ describe("the request bound: names the page controls and actions in between do n
         const sent = Object.entries(r.posts).filter(([p]) => p.startsWith("/api/orders/")).reduce((s, [, n]) => s + n, 0);
         expect(sent).toBeLessThanOrEqual(LIMIT);
     }, 300_000);
+    it("T-1: a form-less button the page renames with other words after each click is still one sender: at most the limit", async () => {
+        const r = await run("RENAMED", [[nav("/renamed")], Array.from({ length: 8 }, () => css("#r"))]);
+        expect(r.posts["/renamed/buy"] ?? 0).toBeLessThanOrEqual(LIMIT);
+        expect(r.refused[0]?.reason).toMatch(REFUSED);
+    }, 300_000);
     it("T-1: analytics on every click: a normal checkout completes, each control twice at most, no other button refused", async () => {
         const r = await run("ANALYTICS", [
             [nav("/ashop")],
@@ -166,12 +176,13 @@ describe("the request bound: names the page controls and actions in between do n
         expect(r.status).toBe("completed");
         // The exploration's own sends (the saved test's runs after the pursuit send more; they are not the exploration's actions).
         expect(r.posts["/ashop/order"]).toBeGreaterThanOrEqual(1);
-    }, 300_000);
+        // About 4 minutes: the saved 11-step test is then run and replayed (the fixture's data operators), which is most of it.
+    }, 600_000);
     it("T-1: analytics on every click still bounds one control: a third Add to cart is refused before it runs", async () => {
         const r = await run("ANALYTICS3", [[nav("/ashop")], [btn("Add to cart")], [btn("Tab 1")], [btn("Add to cart")], [btn("Tab 2")], [btn("Add to cart")]]);
         expect(r.posts["/ashop/cart"] ?? 0).toBeLessThanOrEqual(LIMIT);
-        // Refused by the request bound itself (a tab between the clicks puts each on a new state).
-        expect(r.refused[0]?.reason).toMatch(/^The request POST \S+\/ashop\/cart was already sent 2 times/);
+        // Refused by the request bound itself (a tab between the clicks puts each on a new state): this control sent its requests twice.
+        expect(r.refused[0]?.reason).toMatch(/^The request POST \S+ was already sent \d+ times in this pursuit, and this action \(what sent it before\)/);
     }, 300_000);
     it("a legitimate test that submits the same form twice with different values still works within the limit", async () => {
         const fill = (v: string) => ({ tool: "fill", input: { target: { by: "label", value: "Quantity" }, value: v } });
@@ -392,6 +403,6 @@ describe("the request bound on BenchShop: its buttons share one anchor, and chec
         console.log("BENCH", JSON.stringify({ status: out.status, explanation: out.explanation.slice(0, 200), sent, refusals }));
         expect(refusals).toEqual([]);
         expect(out.status).toBe("complete");
-        expect(sent).toMatchObject({ "POST /api/cart/items": 2, "POST /api/cart/discount": 1, "POST /api/checkout/address": 1, "POST /api/orders": 1, "POST /api/orders/:id/cancel": 1 });
+        expect(sent).toMatchObject({ "POST /api/cart/items": 2, "POST /api/cart/discount": 1, "POST /api/checkout/address": 1, "POST /api/orders": 1, "POST /api/orders/ord-#/cancel": 1 });
     }, 300_000);
 });

@@ -152,7 +152,10 @@ describe("the request bound", () => {
         expect(act(t, btn("Update"), [EVENTS, "PATCH http://shop.test/cart/:id"])).toBeUndefined();
         // Update again: the events call was sent twice in all, but this control sent it once.
         expect(act(t, btn("Update"), [EVENTS, "PATCH http://shop.test/cart/:id"])).toBeUndefined();
-        expect(act(t, btn("Tab"), [EVENTS])).toBeUndefined();
+        // Numbered siblings are two controls ("Tab 1", "Tab 2"); a count badge is not part of a name ("Order (3)").
+        expect(act(t, btn("Tab 1"), [EVENTS])).toBeUndefined();
+        expect(act(t, btn("Tab 2"), [EVENTS])).toBeUndefined();
+        expect(act(t, btn("Tab 1"), [EVENTS])).toBeUndefined();
         expect(act(t, btn("Continue"), [EVENTS, "POST http://shop.test/checkout"])).toBeUndefined();
         expect(act(t, btn("Place order"), [EVENTS, "POST http://shop.test/orders"])).toBeUndefined();
         // Update a third time: it sent both its own request and the events call twice.
