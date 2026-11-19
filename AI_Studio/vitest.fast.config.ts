@@ -268,6 +268,7 @@ export default defineConfig({
             "tests/bench-understanding-paid-unit.test.ts",
             "tests/bench-understanding-run-unit.test.ts",
             "tests/explore-loop-unit.test.ts",
+            "tests/explore-request-bound-unit.test.ts",
             "tests/explore-objectives-unit.test.ts",
             "tests/explore-pursuits-unit.test.ts",
             "tests/author-prune-unit.test.ts",
