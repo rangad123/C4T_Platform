@@ -453,6 +453,27 @@ export function authoringSystem(o: { allowPurchases?: boolean; vision?: boolean;
     return base + (o.vision ? VISION_AUTHORING_NOTE : "") + (o.testData ? TEST_DATA_AUTHORING_NOTE : "") + (o.compact ? COMPACT_SNAPSHOT_NOTE : "");
 }
 
+/** Roles whose accessible name is the control's own label, so the name copied from the snapshot is the whole name. */
+const EXACT_ROLES = new Set(["button", "link", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "checkbox", "radio", "switch", "option", "textbox", "searchbox", "combobox", "spinbutton", "slider"]);
+const exactName = <L extends { by: string; role?: string; value?: string; exact?: boolean }>(l: L): L =>
+    l.by === "role" && l.exact === undefined && l.value?.trim() && EXACT_ROLES.has(l.role ?? "") ? { ...l, exact: true } : l;
+
+/**
+ * A control's role locator matches its name exactly unless the writer said otherwise (queue row 228): Playwright's default is a substring,
+ * so the link "Products" also matched "Browse products", which shows only on an empty cart, and the saved test broke on a fresh app
+ * (row 227, WEB-017). Containers (rows, cells, list items) keep the substring match: their names hold their whole content.
+ */
+export function withExactRoleNames(step: Step): Step {
+    const fix = (l: Locator): Locator => {
+        const own = exactName(l);
+        return own.within ? { ...own, within: exactName(own.within) } : own;
+    };
+    let out = step;
+    if ("locator" in out && out.locator && typeof out.locator === "object" && "by" in out.locator) out = { ...out, locator: fix(out.locator as Locator) } as Step;
+    if (out.action === "drag") out = { ...out, target: fix(out.target as Locator) } as Step;
+    return out;
+}
+
 const target = LocatorSchema.describe("How to find the element");
 /** The longest fixed pause the agent may record (a wait for something is the better step; the review flags fixed ones). */
 const MAX_FIXED_WAIT_MS = 3_000;
@@ -784,6 +805,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         const refuse = refusedBy(input.notes);
         let notesShownFor = pathOf(page.url());
         const record = async (step: Step, toolName: string, args: unknown) => {
+            step = withExactRoleNames(step);
             // The browser crashed or went away: nothing more can be done in it, so the scenario ends here with that reason.
             const lost = session.lostReason({ pageClosedCounts: false });
             if (lost) {
@@ -995,6 +1017,11 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                     const source = cited?.trim() ? sourceOf(cited, scenario, input.rules) : undefined;
                     if (cited?.trim() && !source)
                         return refuse(`The source ${JSON.stringify(cited.slice(0, 100))} is not a rule given to this scenario nor one of its expected results (expected:1 to expected:${scenario.expectedResults.length}); use one of those, or leave source out.`);
+                    // The engine's own wording of an expected result (an objective's template, an operator's, a citation) is never what the
+                    // application shows: such a check fails on every app (row 227, WEB-065), so it is refused (queue row 228).
+                    const wording = engineWordingIn(typeof given === "string" ? given : undefined, t?.value, t?.filter?.hasText, t?.within?.value);
+                    if (wording)
+                        return refuse(`The text ${JSON.stringify(wording)} is how the scenario words its expected result, not text the application shows. Check what the page itself shows that proves the result (a status, a message, a value), or leave that expected result unchecked.`);
                     if (NEEDS_LOCATOR.has(check) && !t) return refuse(`"${check}" needs a target`);
                     if ((check === "attribute" || check === "css" || check === "remembered") && !name) return refuse(`"${check}" needs a name`);
                     // The region's structure, captured now as a template a later run with other numbers still matches.
@@ -1017,11 +1044,6 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         input.onAction?.({ tool: "assert", args: { check, target: t, expected }, ok: false, observation: error });
                         return { success: false, error, url: page.url() };
                     }
-                    // The engine's own wording of an expected result (an objective's template, an operator's, a citation) is never what the
-                    // application shows: such a check fails on every app (row 227, WEB-065), so it is refused (queue row 228).
-                    const wording = engineWordingIn(typeof given === "string" ? given : undefined, t?.value, t?.filter?.hasText, t?.within?.value);
-                    if (wording)
-                        return refuse(`The text ${JSON.stringify(wording)} is how the scenario words its expected result, not text the application shows. Check what the page itself shows that proves the result (a status, a message, a value), or leave that expected result unchecked.`);
                     return record({ action: "assert", check, locator: t as Locator | undefined, expected, ...extra, description: why ?? "" }, "assert", { check, target: t, expected, ...extra });
                 },
             }),
