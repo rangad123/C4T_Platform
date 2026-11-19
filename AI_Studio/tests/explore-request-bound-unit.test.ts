@@ -149,10 +149,12 @@ describe("the state after a submit", () => {
 
 describe("the run's own sign-in", () => {
     const LOGIN = "POST http://shop.test/session";
-    const signInClick = { ...click("Sign in", "s1", LOGIN), url: "http://shop.test/login" };
+    /** The sign-in form's own identity (its place on its page), as resolveTarget gives it for the password field and the submit alike. */
+    const SIGN_IN_FORM = "f-login";
+    const signInClick = { ...click("Sign in", "s1", LOGIN), url: "http://shop.test/login", anchor: { anchor: "s1", form: LOGIN, formId: SIGN_IN_FORM } };
     const pass = (t: ReturnType<typeof actionTracker>, fillAt: string) => {
         t.freshPass("http://shop.test/login");
-        t.signedIn({ form: LOGIN, url: fillAt });
+        t.signedIn({ form: LOGIN, formId: SIGN_IN_FORM, url: fillAt });
         return act(t, signInClick, [LOGIN]);
     };
     it("its form, filled with the run's password on the engine's sign-in page, may be submitted by every pass", () => {
@@ -162,6 +164,29 @@ describe("the run's own sign-in", () => {
         act(t, click("Order"), [ORDER]);
         act(t, click("Order"), [ORDER]);
         expect(act(t, click("Order"))).toMatch(/already sent 2 times/);
+    });
+    it("the exemption is the sign-in form itself, not its address: another form posting to the same target is counted (CP3c T-4)", () => {
+        // A single-endpoint app: the sign-in form and a Delete form elsewhere both post to /app.
+        const APP = "POST http://shop.test/app";
+        const t = actionTracker("http://shop.test/login", [], { signInPath: "/login" });
+        const signInOnApp = { ...signInClick, anchor: { anchor: "s1", form: APP, formId: SIGN_IN_FORM } };
+        t.signedIn({ form: APP, formId: SIGN_IN_FORM, url: "http://shop.test/login" });
+        expect(act(t, signInOnApp, [APP])).toBeUndefined();
+        const del = { ...click("Delete", "d1", APP), url: "http://shop.test/shop", anchor: { anchor: "d1", form: APP, formId: "f-delete" } };
+        expect(act(t, del, [APP])).toBeUndefined();
+        expect(act(t, del, [APP])).toBeUndefined();
+        expect(act(t, del, [APP])).toMatch(/^The request POST http:\/\/shop\.test\/app was already sent 2 times/);
+        // The sign-in itself is still exempt on every pass.
+        for (let i = 0; i < 3; i++) expect(pass(t, "http://shop.test/login")).toBeUndefined();
+    });
+    it("a fill that does not say which form it is in exempts nothing", () => {
+        const t = actionTracker("http://shop.test/login", [], { signInPath: "/login" });
+        const outs = [0, 1, 2].map(() => {
+            t.freshPass("http://shop.test/login");
+            t.signedIn({ form: LOGIN, url: "http://shop.test/login" });
+            return act(t, signInClick, [LOGIN]);
+        });
+        expect(outs[2]).toMatch(/already sent 2 times/);
     });
     it("a page cannot claim it: a password filled on another page, or no sign-in page known to the engine, exempts nothing", () => {
         const elsewhere = actionTracker("http://shop.test/login", [], { signInPath: "/login" });

@@ -1637,17 +1637,20 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  * same form submitted a second time with other values is allowed, and a third time is a repeat (and past the request bound). An action
  * that sent nothing keeps the state as before.
  * The one exemption is the run's own sign-in: the form whose field the engine filled with the run's password placeholder on the
- * engine's own sign-in page (`signInPath`, where the engine's sign-in found the form). Its request target is not counted, so every pass
- * of a pursuit may sign in again. A page cannot claim it: the placeholder is the engine's, and the page is the one the engine signed in on.
+ * engine's own sign-in page (`signInPath`, where the engine's sign-in found the form). What that form's own submit sends to its request
+ * target is not counted, and that submit is not refused, so every pass of a pursuit may sign in again. The exemption is the form (its
+ * `formId`, as recorded when the placeholder was filled), not its address (CP3c T-4): another form that posts to the same target (a
+ * single-endpoint app's Delete) is counted like any other. A page cannot claim it: the placeholder is the engine's, and the page is the
+ * one the engine signed in on.
  */
 export const REQUEST_REPEAT_LIMIT = 2;
 export function actionTracker(startUrl: string, secrets: readonly string[] = [], opts: { signInPath?: string } = {}): {
-    before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean; anchor?: { anchor: string; form?: string } }): { state: string; action: string; read: boolean; refusal?: string };
+    before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean; anchor?: { anchor: string; form?: string; formId?: string } }): { state: string; action: string; read: boolean; refusal?: string };
     after(a: { tool: string; args: unknown; ok: boolean; url?: string; read?: boolean }): void;
     freshPass(startUrl: string): void;
     request(target: string): void;
     limitReached(): boolean;
-    signedIn(a: { form: string; url: string }): void;
+    signedIn(a: { form: string; formId?: string; url: string }): void;
 } {
     let url = startUrl;
     let previous = "";
@@ -1656,8 +1659,11 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [],
     const sent = new Map<string, { count: number; by: Map<string, number> }>();
     /** The senders of the action running now (set by `before` for an action that is not a read). */
     let senders: string[] = [];
-    /** The run's own sign-in form's request target(s): never counted. */
-    const signIn = new Set<string>();
+    /** The run's own sign-in: each request target, and the form(s) (`formId`) whose own submit sends it uncounted. */
+    const signIn = new Map<string, Set<string>>();
+    /** The form whose submit is running now (a click or key press on it, not a read), for the sign-in exemption. */
+    let submitting: string | undefined;
+    const isSignIn = (target: string, formId: string | undefined): boolean => formId !== undefined && signIn.get(target)?.has(formId) === true;
     const sendersOf = (a: { tool: string; args: unknown; anchor?: { anchor: string } }, key: string): string[] => {
         if (a.anchor) return [`element ${a.anchor.anchor}`];
         const to = (a.args as { url?: unknown } | null)?.url;
@@ -1677,9 +1683,11 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [],
         for (const [target, t] of sent) if ((SUBMITS.has(a.tool) && a.anchor?.form === target) || mine.some((m) => t.by.has(m))) n = Math.max(n, t.count);
         return Math.min(n, REQUEST_REPEAT_LIMIT - 1);
     };
-    const overLimit = (a: { tool: string; anchor?: { form?: string } }, mine: readonly string[]): string | undefined => {
+    const overLimit = (a: { tool: string; anchor?: { form?: string; formId?: string } }, mine: readonly string[]): string | undefined => {
         for (const [target, t] of sent) {
             if (t.count < REQUEST_REPEAT_LIMIT) continue;
+            // The run's own sign-in form submitted again (another form sent its target to the limit): not refused.
+            if (SUBMITS.has(a.tool) && isSignIn(target, a.anchor?.formId)) continue;
             const byForm = SUBMITS.has(a.tool) && a.anchor?.form === target;
             const ambient = t.by.size > REQUEST_REPEAT_LIMIT;
             const bySender = mine.some((m) => (ambient ? (t.by.get(m) ?? 0) >= REQUEST_REPEAT_LIMIT : t.by.has(m)));
@@ -1726,18 +1734,19 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [],
             const digest = createHash("sha256").update(before ? `${previous}\n#sent ${before}` : previous).digest("hex").slice(0, 12);
             const refusal = read ? undefined : overLimit(a, mine);
             if (!read) senders = refusal ? [] : mine;
+            if (!read) submitting = !refusal && SUBMITS.has(a.tool) ? a.anchor?.formId : undefined;
             return { state: `${pathPattern(url)}|${digest}`, action, read, ...(refusal ? { refusal } : {}) };
         },
-        signedIn: ({ form, url: at }) => {
-            if (!opts.signInPath) return;
+        signedIn: ({ form, formId, url: at }) => {
+            if (!opts.signInPath || !formId) return;
             try {
-                if (pathPattern(withoutQuery(at)) === pathPattern(withoutQuery(new URL(opts.signInPath, at).href))) signIn.add(form);
+                if (pathPattern(withoutQuery(at)) === pathPattern(withoutQuery(new URL(opts.signInPath, at).href))) signIn.set(form, (signIn.get(form) ?? new Set<string>()).add(formId));
             } catch {
                 /* not an address: no exemption */
             }
         },
         request: (target) => {
-            if (signIn.has(target)) return;
+            if (isSignIn(target, submitting)) return;
             const t = sent.get(target) ?? { count: 0, by: new Map<string, number>() };
             t.count += 1;
             for (const s of senders) t.by.set(s, (t.by.get(s) ?? 0) + 1);
