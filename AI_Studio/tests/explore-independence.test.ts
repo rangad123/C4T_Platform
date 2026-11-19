@@ -12,7 +12,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { CandidateFindingSchema, confidenceOf } from "../src/engine/explore/finding.js";
 import { checkIndependence } from "../src/engine/explore/independence.js";
 import { launchChromium } from "../src/engine/discovery/browser.js";
+import { maskObservedText } from "../src/engine/evidence/observed-text.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
+import { executeStep, runtimeData } from "../src/engine/web/interpreter.js";
+import { redactText } from "../src/shared/redact-text.js";
 
 const PORT = 9886;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -47,6 +50,18 @@ const server = http.createServer((req, res) => {
         // Case B: the Total exists only with the cart cookie authoring's own session left; a fresh browser has an empty cart.
         const has = /cart=1/.test(req.headers.cookie ?? "");
         return page("Cart", `<h1>Cart</h1>${has ? `<p>Total: <output aria-label="Total">$30.00</output></p>` : `<p>Your cart is empty</p>`}`);
+    }
+    if (req.url === "/fill") {
+        // Leaves the cart cookie, as an authoring session that added items would.
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "cart=1" });
+        return res.end(`<!doctype html><html lang="en"><head><title>Filled</title></head><body><h1>Filled</h1></body></html>`);
+    }
+    if (req.url === "/statecart") {
+        // CP3d U-1: with authoring's cart cookie the Total is $30.00, three items are listed and the quantity is 3; a fresh browser
+        // sees another wrong value: $0.00, no items (a count of 0) and 0.
+        const has = /cart=1/.test(req.headers.cookie ?? "");
+        const items = has ? `<ul><li class="item">a</li><li class="item">b</li><li class="item">c</li></ul>` : "";
+        return page("Cart", `<h1>Cart</h1>${items}<p>Total: <output aria-label="Total">${has ? "$30.00" : "$0.00"}</output></p><label>Quantity <input value="${has ? 3 : 0}"></label>`);
     }
     if (req.url === "/visit") {
         // Counts up on every load: a check of "Visit 1" passed while authoring (the planner's own guess) and fails in every fresh replay.
@@ -186,13 +201,73 @@ describe("independence check", () => {
         expect(r.independence).toBe("state_dependent");
     }, 60_000);
 
-    it("the same value as captured, or another wrong value, is the same failure: independent", async () => {
-        const same = await checkIndependence(browser, BASE, { steps: clean, capturedSource: "expected:1", capturedObserved: sawValue("$30.00") });
-        expect(same.independence).toBe("independent");
-        expect(same.replays[0]!.summary).toMatch(/the same value as when captured/);
-        const other = await checkIndependence(browser, BASE, { steps: clean, capturedSource: "expected:1", capturedObserved: sawValue("$31.00") });
-        expect(other.independence).toBe("independent");
-        expect(other.replays[0]!.summary).toMatch(/another value than when captured/);
+    /**
+     * The captured check's observation as authoring keeps it (web/author.ts: Playwright's message before its call log, masked and
+     * capped at 400), taken in a session that first opened `prime` (the authoring session's state) and then `path`.
+     */
+    async function observedWhileAuthoring(prime: string | undefined, path: string, check: Step): Promise<string> {
+        const ctx = await browser.newContext();
+        try {
+            const p = await ctx.newPage();
+            if (prime) await p.goto(BASE + prime);
+            await p.goto(BASE + path);
+            const err = await executeStep(p, check, runtimeData({}), BASE, 1_000).then(() => undefined, (e: Error) => e);
+            if (!err) throw new Error("the check passed while authoring");
+            return redactText(maskObservedText(err.message.split(/\n\s*Call log:/)[0]!, [], 400), 400);
+        } finally {
+            await ctx.close();
+        }
+    }
+    const checkOn = (path: string, check: Record<string, unknown>) => stepsOf([{ action: "navigate", url: path }, { action: "assert", source: "expected:1", ...check }]);
+    const highOf = (independence: string) => confidenceOf({ sourced: true, capture: "captured", independence: independence as never });
+
+    // CP3d U-1: only the SAME value as when captured reproduces a value failure. A fresh browser that lacks authoring's state sees
+    // another wrong value ($0.00, a count of 0): that is the state, not the defect.
+    it("U-1 text: captured $30.00 (authoring's cart), a fresh browser sees $0.00: state_dependent, medium, both values shown", async () => {
+        const steps = checkOn("/statecart", { check: "exactText", locator: { by: "label", value: "Total" }, expected: "$25.00" });
+        const observed = await observedWhileAuthoring("/fill", "/statecart", steps[1]!);
+        expect(observed).toMatch(/Received: "\$30\.00"/);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: observed }, { stepTimeoutMs: 1_500 });
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).toBe("state_dependent");
+        expect(highOf(r.independence)).toBe("medium");
+        for (const replay of r.replays) expect(replay.summary).toMatch(/captured \$30\.00, replay saw \$0\.00/);
+    }, 60_000);
+
+    it("U-1 count: captured 3 items, a fresh browser has none (Playwright says Received: 0): state_dependent", async () => {
+        const steps = checkOn("/statecart", { check: "count", locator: { by: "css", value: "li.item" }, expected: "2" });
+        const observed = await observedWhileAuthoring("/fill", "/statecart", steps[1]!);
+        expect(observed).toMatch(/Received: 3/);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: observed }, { stepTimeoutMs: 1_500 });
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).toBe("state_dependent");
+        expect(highOf(r.independence)).toBe("medium");
+        for (const replay of r.replays) expect(replay.summary).toMatch(/captured 3, replay saw 0/);
+    }, 60_000);
+
+    it("U-1 input value: captured 3, a fresh browser sees 0: state_dependent", async () => {
+        const steps = checkOn("/statecart", { check: "value", locator: { by: "label", value: "Quantity" }, expected: "2" });
+        const observed = await observedWhileAuthoring("/fill", "/statecart", steps[1]!);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: observed }, { stepTimeoutMs: 1_500 });
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).toBe("state_dependent");
+        for (const replay of r.replays) expect(replay.summary).toMatch(/captured 3, replay saw 0/);
+    }, 60_000);
+
+    it("U-1 the same value as captured stays independent, high (text and count)", async () => {
+        const text = stepsOf([{ action: "navigate", url: "/cart" }, totalCheck]);
+        const observed = await observedWhileAuthoring(undefined, "/cart", text[1]!);
+        const r = await checkIndependence(browser, BASE, { steps: text, capturedSource: "expected:1", capturedObserved: observed }, { stepTimeoutMs: 1_500 });
+        expect(r.independence).toBe("independent");
+        expect(highOf(r.independence)).toBe("high");
+        expect(r.replays[0]!.summary).toMatch(/the same value as when captured/);
+        // Spacing is not a value: the captured text with other whitespace is the same value.
+        const spaced = await checkIndependence(browser, BASE, { steps: text, capturedSource: "expected:1", capturedObserved: " $30.00 " }, { stepTimeoutMs: 1_500 });
+        expect(spaced.independence).toBe("independent");
+        const count = checkOn("/statecart", { check: "count", locator: { by: "css", value: "li.item" }, expected: "2" });
+        const none = await observedWhileAuthoring(undefined, "/statecart", count[1]!);
+        const c = await checkIndependence(browser, BASE, { steps: count, capturedSource: "expected:1", capturedObserved: none }, { stepTimeoutMs: 1_500 });
+        expect(c.independence).toBe("independent");
     }, 60_000);
 
     it("a check captured as finding no element reproduces when the replays find none either", async () => {

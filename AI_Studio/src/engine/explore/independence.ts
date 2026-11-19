@@ -3,9 +3,11 @@
  * fresh browser context, the way `pruneByReplay` (web/author.ts) replays them. The finding is `independent` only when both replays reach
  * the CAPTURED check (the defect test's failing check of a stated source: the last check citing `capturedSource`, else its last sourced
  * check) and both fail there, at that check itself (a replay whose time ran out before it started never ran it) (CP3b R-3), the same way it
- * failed when it was captured (CP3c T-2): an assertion that saw a value (the same one, or another wrong one) when it was captured is
- * reproduced only by an assertion that saw a value, not by a check that ran out of time or found no element (a fresh browser without
- * the state authoring left); a capture of that kind is reproduced by the same kind. The captured check gets its full step time: when the
+ * failed when it was captured (CP3c T-2): an assertion that saw a value when it was captured is reproduced only by an assertion that
+ * saw the SAME value (CP3d U-1: compared with spacing folded; a count by its number), not by another wrong value ($0.00 for a captured
+ * $30.00, or a count of 0: a fresh browser without the state authoring left), a check that ran out of time or one that found no
+ * element; a capture of another kind is reproduced by the same kind. Without the captured text, both replays must see one value. The
+ * replay's message is masked and capped the way authoring kept the captured one, so the two compare alike. The captured check gets its full step time: when the
  * replay's time leaves it less, it is not run. It is `state_dependent` when they stop at
  * different steps, at a step before the captured check (an earlier check of the planner's own guess, or a step that is not a check: state
  * left by authoring or by the first replay, as D1's WEB-034), or do not fail at all; a replay that stops before the captured check says
@@ -19,6 +21,8 @@
  */
 import type { Browser, Page } from "playwright";
 import { BrowserSession, settle } from "../discovery/browser.js";
+import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
+import { redactText } from "../../shared/redact-text.js";
 import { describeStep, type Step } from "../spec/schema.js";
 import { executeStep, runtimeData } from "../web/interpreter.js";
 import { nearbyTargets } from "../web/label-fallback.js";
@@ -92,6 +96,26 @@ export function failureKind(message: string, opts: { plainIsValue?: boolean } = 
     return { kind: "other" };
 }
 
+/** A seen value as compared (CP3d U-1): a quoted one unquoted, spacing folded. */
+function normalValue(v: string): string {
+    let s = v.trim();
+    if (/^"(?:[^"\\]|\\.)*"$/.test(s)) {
+        try {
+            s = String(JSON.parse(s));
+        } catch {
+            s = s.slice(1, -1);
+        }
+    }
+    return s.replace(/\s+/g, " ").trim();
+}
+/** A value as a replay summary shows it. */
+const shown = (v: string): string => {
+    const n = normalValue(v);
+    return n.length > 80 ? `${n.slice(0, 79)}…` : n;
+};
+/** A replay's failure message as authoring kept the captured one (web/author.ts: masked, joined to one line, capped at 400). */
+const asKept = (message: string, forms: readonly string[]): string => redactText(maskObservedText(message, forms, 400), 400);
+
 class OutOfTime extends Error {}
 /** The replay's time ran out before a step started: that step was never run. */
 class NotReached extends OutOfTime {}
@@ -141,7 +165,13 @@ async function replay(
             } catch (e) {
                 const what = isSourcedCheck(step) ? `the check of ${step.action === "assert" ? step.source : ""}` : step.action === "assert" ? "a check with no stated source" : "a step that is not a check";
                 const screenshot = shoot ? await within(shoot(session.page), SHOT_MS).catch(() => undefined) : undefined;
-                const failure = e instanceof OutOfTime ? { kind: "timeout" as const } : failureKind(e instanceof Error ? e.message.split(/\n\s*Call log:/)[0]! : String(e));
+                const raw = e instanceof Error ? e.message.split(/\n\s*Call log:/)[0]! : String(e);
+                let failure: FailureKind = e instanceof OutOfTime ? { kind: "timeout" } : failureKind(raw);
+                // The value as authoring would have kept it (CP3d U-1), so it compares with the captured one.
+                if (failure.kind === "value") {
+                    const kept = failureKind(asKept(raw, observedTextSecrets(secrets)));
+                    if (kept.kind === "value") failure = kept;
+                }
                 return { label, outcome: "failed", failedStep: i + 1, summary: `${label}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}`, ...(screenshot ? { screenshot } : {}), ...(e instanceof NotReached ? { notReached: true } : {}), failure };
             }
         }
@@ -170,8 +200,12 @@ export async function checkIndependence(browser: Browser, baseUrl: string, test:
     shot.push(await replay(browser, baseUrl, test, "Replay 2 in a fresh browser", stepTimeoutMs, opts.shoot, captured));
     // How the captured check failed when it was captured; without its text, as an assertion that saw a value.
     const want = test.capturedObserved !== undefined ? failureKind(test.capturedObserved, { plainIsValue: true }) : undefined;
-    // The same way (CP3c T-2): an assertion that saw a value is reproduced by one that saw a value; any other kind by the same kind.
-    const sameWay = (f: FailureKind | undefined) => f !== undefined && (want ? f.kind === want.kind && f.kind !== "other" : f.kind === "value");
+    // Without the captured text, the value both replays saw (they must agree on it).
+    const values = shot.map((r) => (r.failure?.kind === "value" ? normalValue(r.failure.value) : undefined));
+    // The same way (CP3c T-2): an assertion that saw a value is reproduced only by one that saw the same value (CP3d U-1); any other
+    // kind by the same kind.
+    const sameValue = (f: FailureKind & { kind: "value" }) => (want?.kind === "value" ? normalValue(f.value) === normalValue(want.value) : values.every((v) => v === normalValue(f.value)));
+    const sameWay = (f: FailureKind | undefined) => f !== undefined && (want ? f.kind === want.kind && f.kind !== "other" : f.kind === "value") && (f.kind !== "value" || sameValue(f));
     // A replay reproduces the defect only when it fails at the captured check itself, the same way; one that stops earlier, or whose time
     // ran out before the check, never ran it (CP3b R-3).
     const reproduced = (r: (typeof shot)[number]) => r.outcome === "failed" && r.failedStep === captured && !r.notReached && sameWay(r.failure);
@@ -182,8 +216,12 @@ export async function checkIndependence(browser: Browser, baseUrl: string, test:
         if (r.failedStep < captured) return { ...r, summary: `${said}. It did not reach the captured check (step ${captured}), so it does not reproduce the defect.` };
         if (r.failedStep !== captured) return r;
         if (notReached) return { ...r, summary: `${said}. The captured check was not run, so it does not reproduce the defect.` };
+        if (failure?.kind === "value" && want?.kind === "value") {
+            if (!sameWay(failure)) return { ...r, summary: `${said}. It failed at the captured check, but saw another value: captured ${shown(want.value)}, replay saw ${shown(failure.value)}, so it does not reproduce the defect.` };
+            return { ...r, summary: `${said}. It saw the same value as when captured (${shown(failure.value)}).` };
+        }
+        if (failure?.kind === "value" && !sameWay(failure)) return { ...r, summary: `${said}. The two replays saw different values (${values.map((v) => (v === undefined ? "none" : shown(v))).join(" and ")}), so it does not reproduce the defect.` };
         if (!sameWay(failure)) return { ...r, summary: `${said}. It failed at the captured check, but not the way it failed when captured, so it does not reproduce the defect.` };
-        if (failure?.kind === "value" && want?.kind === "value") return { ...r, summary: `${said}. It saw ${failure.value === want.value ? "the same value as when captured" : "another value than when captured"}.` };
         return r;
     });
     const screenshots = opts.shoot ? { screenshots: shot.flatMap((r) => (r.screenshot ? [r.screenshot] : [])) } : {};
