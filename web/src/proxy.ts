@@ -5,7 +5,7 @@ import { spendRefreshToken } from '@/lib/auth/refresh-core'
 import { spendHrRefreshToken } from '@/lib/hrms/hr-refresh-core'
 import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
 import { authHeaders } from '@/lib/auth/request-context'
-import { domainFor, sharedSessionFixes } from '@/lib/auth/shared-session'
+import { domainFor, secondsUntilExpiry, sharedSessionFixes } from '@/lib/auth/shared-session'
 
 /**
  * Next 16 Proxy — formerly `middleware.ts`.
@@ -193,6 +193,31 @@ async function refreshIfExpired(
   return applied
 }
 
+/** AI Studio's renewal path (`app/app/ai-studio/refresh`): requested only after the API refused the access cookie. */
+const AI_STUDIO_RENEWAL = '/app/ai-studio/refresh'
+/** A token this close to its `exp` is renewed now rather than sent once more. */
+const RENEW_MARGIN_SECONDS = 30
+
+/**
+ * Whether the access cookie should be renewed: it is gone, its token runs out
+ * within RENEW_MARGIN_SECONDS, or AI Studio asks (its renewal path).
+ *
+ * Not only "gone": the cookie's Max-Age counts from when the browser received
+ * it, the token's `exp` from when the API signed it (whole seconds, rounded
+ * down), so the browser keeps sending the cookie for a moment after the API
+ * refuses it. A request in that moment used to go through unrenewed and, on
+ * AI Studio's renewal or hand-off, ended on the sign-in form with the session
+ * still good. The token is read unverified, only for its `exp`; the API still
+ * checks every token itself.
+ */
+function accessNeedsRenewing(request: NextRequest): boolean {
+  const access = request.cookies.get(ACCESS_COOKIE)?.value
+  if (!access) return true
+  if (request.nextUrl.pathname === AI_STUDIO_RENEWAL) return true
+  const left = secondsUntilExpiry(access)
+  return left !== undefined && left <= RENEW_MARGIN_SECONDS
+}
+
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   // Checked first, and returns immediately either way: HRMS has its own
   // auth, its own cookies, its own everything below this line does not
@@ -272,8 +297,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   let refreshed: ReturnType<typeof authCookieOptions>[] = []
   if (
     pathname.startsWith('/app') &&
-    !request.cookies.has(ACCESS_COOKIE) &&
-    request.cookies.has(REFRESH_COOKIE)
+    request.cookies.has(REFRESH_COOKIE) &&
+    accessNeedsRenewing(request)
   ) {
     refreshed = await refreshIfExpired(request)
   }

@@ -300,9 +300,24 @@ export function crowd4testSignIn(signInUrl: string): boolean {
     } catch {
         // storage not available: the trip is not counted
     }
-    const page = location.hash.replace(/^#/, "") || "/";
-    location.assign(`${signInUrl}?to=${encodeURIComponent(page)}`);
+    location.assign(crowd4testSignInHref(signInUrl));
     return true;
+}
+
+/** The same AI Studio page, opened after signing in on crowd4test.com (its hand-off route takes `?to=` back to it). */
+export function crowd4testSignInHref(signInUrl: string): string {
+    const page = location.hash.replace(/^#/, "") || "/";
+    return `${signInUrl}?to=${encodeURIComponent(page)}`;
+}
+
+const signInEndedListeners = new Set<(links: Crowd4TestLinks) => void>();
+/** Told when a request came back "signed out on Crowd4Test" even after renewing. Returns the unsubscribe. */
+export function onSignInEnded(listener: (links: Crowd4TestLinks) => void): () => void {
+    signInEndedListeners.add(listener);
+    return () => void signInEndedListeners.delete(listener);
+}
+function noteSignInEnded(links: Crowd4TestLinks): void {
+    for (const l of signInEndedListeners) l(links);
 }
 
 let renewing: Promise<void> | null = null;
@@ -337,7 +352,9 @@ async function refused<T>(res: Response, data: unknown, again: (() => Promise<T>
         await renewCrowd4Test(c4t.refreshUrl);
         return again();
     }
-    if (c4t && (c4t.crowd4test === "sign-in" || c4t.crowd4test === "renew")) crowd4testSignIn(c4t.signInUrl);
+    // Never a page change from here: this may be a background read (a poll, a stream's ticket) while the person is mid-form. The
+    // sign-in gate checks once more and, only when the session really ended, says so over the page (features/auth/AuthGate.tsx).
+    if (c4t && (c4t.crowd4test === "sign-in" || c4t.crowd4test === "renew")) noteSignInEnded(c4t);
     throw new ApiError(res.status, (typeof body.error === "string" && body.error) || res.statusText, body.details, body);
 }
 

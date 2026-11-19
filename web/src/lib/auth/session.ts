@@ -60,6 +60,16 @@ export const getUser = async (): Promise<SessionUser | null> => {
 }
 
 /**
+ * Like `getUser`, but `undefined` when the session could not be read at all
+ * (a 502 during a deploy, a 429, a dropped connection): for a caller that
+ * must not treat "could not tell" as "signed out".
+ */
+export const getUserOrUnknown = async (): Promise<SessionUser | null | undefined> => {
+  const read = await readSession()
+  return read.ok ? read.user : undefined
+}
+
+/**
  * Redirects to sign-in when there is no live session — and only then.
  *
  * If the session could not be read at all, the error is rethrown to the
