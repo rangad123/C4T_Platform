@@ -10,7 +10,15 @@
 import http from "node:http";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { Browser } from "playwright";
+import { loadConfig } from "../src/config.js";
+import type { EngineContext } from "../src/engine/context.js";
+import { launchChromium } from "../src/engine/discovery/browser.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
+import { actionTracker } from "../src/engine/orchestrator.js";
+import { ScenarioSchema, type Step } from "../src/engine/spec/schema.js";
+import type { AppModel } from "../src/engine/understanding/app-model.js";
+import { authorWebSpec, type ActionGate } from "../src/engine/web/author.js";
 import { exploreShop, type ShopSite } from "./fixtures/objectives-shop.js";
 
 const PORT = 9983;
@@ -38,6 +46,8 @@ beforeAll(async () => {
                 return res.end(page(`<h1>Api</h1><button id="b">Buy (${n})</button><p id="out"></p>`, `<script>let k=0;document.getElementById('b').onclick=async()=>{await fetch('/api/orders/'+(++k*7),{method:'POST'});const b=document.getElementById('b');b.textContent='Buy ('+k+')';b.name='n'+k}</script>`));
             }
             if (path.startsWith("/api/orders/")) return res.end("{}");
+            if (path === "/login") return res.end(page(`<h1>Sign in</h1><form method="post" action="/login/session"><label>Username <input name="u"></label><label>Password <input name="p" type="password"></label><button type="submit">Sign in</button></form>`));
+            if (path === "/login/session") return res.end(page(`<h1>Welcome</h1><a href="/order">Order</a>`));
             res.end(page(`<h1>Order</h1><form method="post" action="/order"><label>Quantity <input name="qty"></label><button type="submit">Order</button></form><p>Ordered: ${req.method === "POST" ? "yes" : "no"}</p>`));
         });
     });
@@ -140,5 +150,103 @@ describe("the request bound: names the page controls and actions in between do n
         expect(r.posts["/order"]).toBeGreaterThanOrEqual(2);
         expect(r.refused).toEqual([]);
         expect(r.status).toBe("completed");
+    }, 300_000);
+});
+
+// ------------------------------------------------------------------ the run's own sign-in, in every pass of one pursuit
+
+describe("the request bound and the run's own sign-in: every pass may sign in again, a submit may not be sent a third time", () => {
+    let browser: Browser;
+    beforeAll(async () => {
+        browser = await launchChromium(true);
+    }, 60_000);
+    afterAll(async () => {
+        await browser?.close();
+    });
+    const ctxOf = (calls: Call[][]): EngineContext => {
+        let n = 0;
+        const m = new MockLanguageModelV3({
+            doGenerate: async () => {
+                const step = calls[n++];
+                if (!step) return { content: [{ type: "text" as const, text: "done" }], finishReason: { unified: "stop" as const, raw: "stop" }, usage, warnings: [] };
+                return { content: step.map((c, i) => ({ type: "tool-call" as const, toolCallId: `p${n}c${i}`, toolName: c.tool, input: JSON.stringify(c.input) })), finishReason: { unified: "tool-calls" as const, raw: "tool_calls" }, usage, warnings: [] };
+            },
+        });
+        return { config: loadConfig({}), emit: () => undefined, llm: { modelName: "scripted", model: m, usage: { inputTokens: 0, outputTokens: 0 }, object: async () => ({}) as never, text: async () => "yes" } };
+    };
+    const app = (): AppModel => ({
+        url: site.url, origin: site.url, siteType: "ecommerce", purpose: "demo", features: [], pages: [], navigation: [], apis: [], journeys: [],
+        authentication: { required: true, mechanisms: ["form"], loggedIn: true, loginPath: "/login" }, externalDependencies: [], documentedTestCases: [],
+        stats: { pagesVisited: 0, pagesSkipped: 0, apisFound: 0, durationMs: 0 },
+    });
+    const scenario = ScenarioSchema.parse({ scenarioId: "S-ORDER", title: "Order", description: "Sign in and order", category: "Order", startPath: "/login", expectedResults: ["The order page is shown"] });
+    const open = { action: "navigate", url: "/login", description: "Open /login" } as Step;
+    const signIn = [
+        { action: "fill", locator: { by: "label", value: "Username" }, value: "{{credentials.username}}", description: "" },
+        { action: "fill", locator: { by: "label", value: "Password" }, value: "{{credentials.password}}", description: "" },
+        { action: "click", locator: { by: "role", role: "button", value: "Sign in" }, description: "" },
+    ] as Step[];
+    const order = [{ action: "navigate", url: "/order", description: "" }, { action: "click", locator: { by: "role", role: "button", value: "Order" }, description: "" }] as Step[];
+    const finish: Call[][] = [[{ tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: "Order" } } }], [{ tool: "finish", input: { result: "complete", explanation: "ordered" } }]];
+
+    /** One pursuit's gate as the orchestrator builds it, with the engine's sign-in page; a refusal of the tracker is a refusal. */
+    function pursuitGate(signInPath: string | undefined): ActionGate {
+        const t = actionTracker(`${site.url}/login`, [], signInPath ? { signInPath } : {});
+        return {
+            before: (a) => {
+                const v = t.before(a);
+                return v.refusal ? { allowed: false, reason: v.refusal } : { allowed: true };
+            },
+            after: (a) => t.after(a),
+            freshPass: (start) => t.freshPass(start),
+            // The replays without the AI (pruning stale steps) are refused, so what reaches the app is only the passes' own actions.
+            replay: () => false,
+            request: (target) => t.request(target),
+            limitReached: () => t.limitReached(),
+            signedIn: (a) => t.signedIn(a),
+        };
+    }
+    /** A pass that replays `prefix` (a review's fix, the leftover redo) and then lets the scripted model finish. */
+    const pass = (gate: ActionGate, prefix: Step[]) =>
+        authorWebSpec({ ctx: ctxOf(finish), browser, baseUrl: site.url, model: app(), scenario, credentials: { username: "tester", password: "Pw-12345!" }, gate, resume: { prefix: [open, ...prefix], failure: "x", review: true } });
+
+    it("four passes each sign in again and the test is saved; the order submit is refused the third time", async () => {
+        site.posts = {};
+        const gate = pursuitGate("/login");
+        const outs = [];
+        outs.push(await pass(gate, [...signIn, ...order]));
+        outs.push(await pass(gate, [...signIn, ...order]));
+        outs.push(await pass(gate, [...signIn, ...order]));
+        outs.push(await pass(gate, [...signIn, order[0]!]));
+        console.log("SIGNIN", JSON.stringify({ posts: site.posts, outs: outs.map((o) => [o.status, o.explanation.slice(0, 160)]) }));
+        expect(outs[0]!.status).toBe("complete");
+        expect(outs[1]!.status).toBe("complete");
+        // The third pass signs in (not refused), and is refused at its third order submit.
+        expect(outs[2]).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/^Replay of previous steps was refused at ".*": The request POST \S+\/order was already sent 2 times/) });
+        // The fourth pass signs in a fourth time and its test is saved.
+        expect(outs[3]!.status).toBe("complete");
+        expect(site.posts["/login/session"]).toBe(4);
+        expect(site.posts["/order"]).toBe(2);
+    }, 300_000);
+
+    it("the exemption is the engine's sign-in page only: without it, the third sign-in is refused like any submit", async () => {
+        site.posts = {};
+        const gate = pursuitGate(undefined);
+        const outs = [];
+        for (let i = 0; i < 3; i++) outs.push(await pass(gate, [...signIn, order[0]!]));
+        expect(outs.slice(0, 2).map((o) => o.status)).toEqual(["complete", "complete"]);
+        expect(outs[2]).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/refused at ".*": The request POST \S+\/login\/session was already sent 2 times/) });
+        expect(site.posts["/login/session"]).toBe(2);
+    }, 300_000);
+
+    it("only the run's own password placeholder marks the sign-in: a form filled with typed text on the sign-in page is counted", async () => {
+        site.posts = {};
+        const gate = pursuitGate("/login");
+        // The password typed as text, not as {{credentials.password}}: the engine did not sign in, the page's form is any form.
+        const typed = signIn.map((st) => ((st as { value?: string }).value === "{{credentials.password}}" ? { ...st, value: "Pw-12345!" } : st)) as Step[];
+        const outs = [];
+        for (let i = 0; i < 3; i++) outs.push(await pass(gate, [...typed, order[0]!]));
+        expect(outs[2]).toMatchObject({ status: "blocked", explanation: expect.stringMatching(/The request POST \S+\/login\/session was already sent 2 times/) });
+        expect(site.posts["/login/session"]).toBe(2);
     }, 300_000);
 });

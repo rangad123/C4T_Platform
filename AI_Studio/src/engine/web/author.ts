@@ -139,6 +139,18 @@ export interface ActionGate {
     request?(target: string): void;
     /** Some request target has reached the repeat limit: a target not found at once is then waited for before `before` is asked (a late button). */
     limitReached?(): boolean;
+    /**
+     * Told when a field was filled with the run's own password (the step's value is the `{{credentials.password}}` placeholder, which
+     * only the engine resolves): `form` is the request target of the form that field is in, `url` the page it was filled on. The gate
+     * decides whether that is the run's sign-in (its own sign-in page), whose submission every pass may repeat (CP3b R-2).
+     */
+    signedIn?(a: { form: string; url: string }): void;
+}
+
+/** A fill of the run's own password, told to the gate with the form it is in (`ActionGate.signedIn`). */
+function noteSignIn(gate: ActionGate | undefined, step: Step, anchor: { form?: string } | undefined, url: string): void {
+    const value = (step as { value?: unknown }).value;
+    if (step.action === "fill" && anchor?.form && typeof value === "string" && value.includes("{{credentials.password}}")) gate?.signedIn?.({ form: anchor.form, url });
 }
 
 /** How long after an action ends a state-changing request is still counted as that action's (a submit sent late), unless another action starts first. */
@@ -720,10 +732,12 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 if (verdict && !verdict.allowed) {
                     return { status: "blocked", steps: recorded, testData, explanation: `Replay of previous steps was refused at "${describeStep(step)}": ${verdict.reason}` };
                 }
+                const at = here().url();
                 const done = acting(read);
                 const r = await run(step);
                 done();
                 input.gate?.after({ tool: step.action, args, ok: r.ok, url: here().url(), read, ...(target ? { target } : {}) });
+                if (r.ok) noteSignIn(input.gate, step, anchor, at);
                 if (!r.ok) {
                     return { status: "blocked", steps: recorded, testData, explanation: `Replay of previous steps failed at "${describeStep(step)}": ${r.error}` };
                 }
@@ -766,9 +780,11 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             // Working in a new tab: the step is recorded "in the popup" (the schema's popup support), as the script will run it.
             if (tab && !tab.isClosed() && POPUP_STEPS.has(step.action)) step = { ...step, inPopup: true } as Step;
             session.takeEvents();
+            const filledAt = here().url();
             const done = acting(read);
             const r = await run(step);
             input.gate?.after({ tool: toolName, args, ok: r.ok, url: here().url(), read, ...(target ? { target } : {}) });
+            if (r.ok) noteSignIn(input.gate, step, anchor, filledAt);
             await session.quiet();
             done();
             // A new tab whose page answers slowly is handed out late: waited for here, so the click that opened it is the one told and recorded.
