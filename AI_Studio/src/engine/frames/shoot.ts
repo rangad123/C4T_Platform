@@ -7,7 +7,13 @@
  * field (shared/secret-field.ts: a password shown as text, a PIN, a token, an API key, also in other languages; CP3 N-6, CP3b R-7). The rule is
  * applied to every input, text area and editable element (`contenteditable`) in the page, in its frames and inside open shadow roots. Besides those,
  * any field that currently holds one of the project's stored secrets is covered, wherever the AI typed it, and so is any element whose text shows
- * one (a stored secret printed as page text).
+ * one (a stored secret printed as page text). A `<select>` with a stored secret in any option is covered whole (a closed select draws its chosen
+ * option with its own style), SVG text is covered with its outermost `<svg>` (its fill is made transparent too, since SVG ignores `color`), and
+ * an element whose `::before` or `::after` content shows a stored secret (written into the rule, or taken from an attribute with `attr()`)
+ * is covered with its pseudo-elements (CP3c T-7).
+ *
+ * At most MAX_FIELDS fields are looked at in a frame. A frame with more gets no picture at all (fail closed, TOO_MANY_FIELDS): a secret
+ * field past the cap would otherwise be pictured uncovered (CP3c T-7).
  *
  * A closed shadow root cannot be entered from the page, so what is inside one cannot be checked. The browser's own view of the document (CDP, with
  * shadow roots pierced) does show where one is: a page or frame holding a closed shadow root gets no picture at all, with the reason
@@ -41,6 +47,8 @@ export interface Shot {
 export const MASK_ATTR = "data-aitp-xmask";
 /** Why no picture is taken of a page with a part the cover cannot look into (a closed shadow root). */
 export const UNCHECKED_PART = "a part of the page could not be checked for secrets";
+/** Why no picture is taken of a frame with more fields than the cover looks at (MAX_FIELDS). */
+export const TOO_MANY_FIELDS = "too many fields to cover";
 /** The elements the cover looks at as fields: inputs, text areas and editable elements. */
 const FIELD_SELECTOR = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
 const MAX_FRAMES = 12;
@@ -78,7 +86,7 @@ export function fieldsToCover(fields: ReadonlyArray<CoverFacts>): number[] {
 // The fields are walked in the page the same way by each evaluate below (spelled out in each, since a function cannot be passed into
 // the page, and building one there would fail on a page whose content security policy forbids eval): inputs, text areas and editable
 // elements (FIELD_SELECTOR) in document order, each open shadow root's after its host, at most MAX_FIELDS, so the indexes of reading and
-// covering agree.
+// covering agree. Reading walks one field further, to tell a frame with more than MAX_FIELDS (no picture) from one with exactly as many.
 // The page-side code declares no helper function of its own (no `const f = () => …`, no `function f`): the platform and the runner
 // load the engine through tsx, which keeps function names by wrapping each such helper in a `__name(…)` call the page does not have
 // (tests/page-scripts-under-tsx.test.ts). Loops and inline callbacks only.
@@ -87,20 +95,24 @@ export function fieldsToCover(fields: ReadonlyArray<CoverFacts>): number[] {
 
 const COVER = "#475569";
 
-/** What the page tells about each input (never its value: whether it holds a stored secret is worked out inside the page). */
-async function readFields(frame: Frame, secrets: readonly string[]): Promise<Array<CoverFacts & { holdsSecret: boolean }>> {
+/**
+ * What the page tells about each input (never its value: whether it holds a stored secret is worked out inside the page), and whether
+ * the frame has more fields than MAX_FIELDS (`over`).
+ */
+async function readFields(frame: Frame, secrets: readonly string[]): Promise<{ over: boolean; fields: Array<CoverFacts & { holdsSecret: boolean }> }> {
     return frame.evaluate(
         ([max, stored, selector]) => {
             const held = stored as string[];
-            // The field walk (see above).
+            // The field walk (see above), one field further than the cap.
             const els: HTMLElement[] = [];
             const stack: Element[] = Array.from(document.querySelectorAll("*")).reverse();
-            while (stack.length && els.length < (max as number)) {
+            while (stack.length && els.length <= (max as number)) {
                 const el = stack.pop()!;
                 if (el.matches(selector as string)) els.push(el as HTMLElement);
                 if (el.shadowRoot) stack.push(...Array.from(el.shadowRoot.querySelectorAll("*")).reverse());
             }
-            return els.map((el) => {
+            const over = els.length > (max as number);
+            return { over, fields: els.slice(0, max as number).map((el) => {
                 const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el : undefined;
                 // An editable element's value is its text.
                 const v = field ? (field.value ?? "") : (el.textContent ?? "");
@@ -123,14 +135,16 @@ async function readFields(frame: Frame, secrets: readonly string[]): Promise<Arr
                     // A short secret must match the whole value (a part of an ordinary word is not a secret); a long one may sit inside it.
                     holdsSecret: v !== "" && held.some((s) => (s.length < 4 ? v === s : v.includes(s))),
                 };
-            });
+            }) };
         },
         [MAX_FIELDS, secrets as string[], FIELD_SELECTOR] as [number, string[], string],
     );
 }
 
 async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> {
-    const fields = await readFields(frame, secrets);
+    const { over, fields } = await readFields(frame, secrets);
+    // Fail closed: a field past the cap is not looked at, so it could be a secret one shown uncovered.
+    if (over) throw new Error(TOO_MANY_FIELDS);
     const which = fieldsToCover(fields);
     // A stored secret shown as text is looked for only when there is one long enough to find (a short one would match ordinary text).
     const shown = secrets.filter((s) => s.length >= 4);
@@ -156,16 +170,46 @@ async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> 
                 if (el.shadowRoot) down.push(...Array.from(el.shadowRoot.children));
                 const all = el.textContent ?? "";
                 if (!secretList.some((s) => all.includes(s))) continue;
+                // A select draws its chosen option with its own style (an option's cannot be covered), and any option may be chosen.
+                if (el.tagName === "SELECT") {
+                    texts.push(el as HTMLElement);
+                    continue;
+                }
                 const kids = Array.from(el.children).filter((c) => secretList.some((s) => (c.textContent ?? "").includes(s)));
                 const own = Array.from(el.childNodes).some((n) => n.nodeType === 3 && secretList.some((s) => (n.textContent ?? "").includes(s)));
                 if (own || !kids.length) texts.push(el as HTMLElement);
                 down.push(...kids);
             }
+            // SVG text is drawn with its fill, and an SVG element has no background of its own to cover it with: its outermost <svg> is
+            // covered as well.
+            for (const el of [...texts]) {
+                if (!(el instanceof SVGElement)) continue;
+                let top: Element | null = el.closest("svg");
+                while (top && top.parentElement && top.parentElement.closest("svg")) top = top.parentElement.closest("svg");
+                if (top && !texts.includes(top as unknown as HTMLElement)) texts.push(top as unknown as HTMLElement);
+            }
+            // Text a ::before or ::after rule shows is not in the page's text: each element's two pseudo-elements are read, with an
+            // attr() in their content read from the element's attribute, and an element whose pseudo-element shows a stored secret is covered.
+            const every: Element[] = secretList.length ? Array.from(document.querySelectorAll("*")) : [];
+            for (let i = 0; i < every.length; i++) {
+                const el = every[i]!;
+                if (el.shadowRoot) every.push(...Array.from(el.shadowRoot.querySelectorAll("*")));
+                for (const pseudo of ["::before", "::after"]) {
+                    const content = getComputedStyle(el, pseudo).content;
+                    if (!content || content === "none" || content === "normal") continue;
+                    let shown = content;
+                    for (const m of content.matchAll(/attr\(\s*([^\s),]+)/g)) shown += ` ${el.getAttribute(m[1] ?? "") ?? ""}`;
+                    if (secretList.some((s) => shown.includes(s))) {
+                        if (!texts.includes(el as HTMLElement)) texts.push(el as HTMLElement);
+                        break;
+                    }
+                }
+            }
             const w = window as unknown as { __aitpMasked?: Array<{ el: HTMLElement; style: string | null }>; __aitpMaskStyle?: HTMLStyleElement };
             w.__aitpMasked = w.__aitpMasked ?? [];
             if (!w.__aitpMaskStyle) {
                 const s = document.createElement("style");
-                s.textContent = `[${attr}]::placeholder{color:transparent !important;-webkit-text-fill-color:transparent !important}[${attr}]:-webkit-autofill{-webkit-box-shadow:0 0 0 1000px ${color} inset !important;-webkit-text-fill-color:transparent !important}`;
+                s.textContent = `[${attr}]::placeholder,[${attr}]::before,[${attr}]::after{color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important}[${attr}]:-webkit-autofill{-webkit-box-shadow:0 0 0 1000px ${color} inset !important;-webkit-text-fill-color:transparent !important}`;
                 document.documentElement.appendChild(s);
                 w.__aitpMaskStyle = s;
             }
@@ -174,7 +218,7 @@ async function coverIn(frame: Frame, secrets: readonly string[]): Promise<void> 
                 w.__aitpMasked.push({ el, style: el.getAttribute("style") });
                 el.setAttribute(attr as string, "1");
                 // Inline and important, so a page's own rules cannot show the text again.
-                for (const [prop, val] of [["background", color], ["background-image", "none"], ["color", "transparent"], ["-webkit-text-fill-color", "transparent"], ["text-shadow", "none"], ["caret-color", "transparent"], ["border-color", color], ["box-shadow", "none"]] as const) {
+                for (const [prop, val] of [["background", color], ["background-image", "none"], ["color", "transparent"], ["-webkit-text-fill-color", "transparent"], ["text-shadow", "none"], ["caret-color", "transparent"], ["border-color", color], ["box-shadow", "none"], ["fill", "transparent"], ["stroke", "transparent"]] as const) {
                     el.style.setProperty(prop, val as string, "important");
                 }
             }
@@ -257,8 +301,9 @@ async function hasClosedShadowRoot(page: Page): Promise<boolean> {
 
 /**
  * Covers the secret fields of the page and its frames; the returned function takes the cover off again (call it in a `finally`).
- * Fails closed: if a frame that is still there cannot be covered (or there are more frames than are looked at), or a part of the page
- * cannot be looked into (a closed shadow root: the error says UNCHECKED_PART), nothing is returned and no picture is taken.
+ * Fails closed: if a frame that is still there cannot be covered (or there are more frames than are looked at, or a frame has more
+ * fields than are looked at: TOO_MANY_FIELDS), or a part of the page cannot be looked into (a closed shadow root: the error says
+ * UNCHECKED_PART), nothing is returned and no picture is taken.
  */
 export async function coverSecretFields(page: Page, secrets: readonly string[]): Promise<() => Promise<void>> {
     if (await hasClosedShadowRoot(page)) throw new Error(UNCHECKED_PART);

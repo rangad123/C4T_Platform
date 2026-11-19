@@ -209,7 +209,7 @@ describe("covering fails closed", () => {
 
     it("takes no picture of a page holding a closed shadow root, and says why (CP3b R-7)", async () => {
         let camera = 0;
-        const fine = { evaluate: async () => [], isDetached: () => false };
+        const fine = { evaluate: async () => ({ over: false, fields: [] }), isDetached: () => false };
         const closed = { nodeName: "#document", children: [{ nodeName: "HTML", children: [{ nodeName: "BODY", children: [{ nodeName: "X-CARD", shadowRoots: [{ nodeName: "#document-fragment", shadowRootType: "closed", children: [{ nodeName: "INPUT" }] }] }] }] }] };
         await expect(coverSecretFields(pageWith([fine], () => camera++, closed), [])).rejects.toThrow(UNCHECKED_PART);
         expect(await shootPage(pageWith([fine], () => camera++, closed))).toBeNull();
@@ -228,7 +228,7 @@ describe("covering fails closed", () => {
 
     it("takes no picture when the page has more frames than are looked at", async () => {
         let camera = 0;
-        expect(await shootPage(pageWith(Array.from({ length: 13 }, () => ({ evaluate: async () => [], isDetached: () => false })), () => camera++))).toBeNull();
+        expect(await shootPage(pageWith(Array.from({ length: 13 }, () => ({ evaluate: async () => ({ over: false, fields: [] }), isDetached: () => false })), () => camera++))).toBeNull();
         expect(camera).toBe(0);
     });
 

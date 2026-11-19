@@ -168,3 +168,51 @@ ${MORE.map((c, i) => c.html(STYLE(box(i)), box(i))).join("\n")}</body></html>`;
         }
     }, 60_000);
 });
+
+describe("the cover's further cases (CP3c T-7)", () => {
+    const STORED = "RunStoredSecret-1";
+    const T7: Array<{ name: string; secret: boolean; html: (style: string, b: Box, i: number) => string }> = [
+        { name: "a closed select showing a stored secret as its chosen option", secret: true, html: (s) => `<select style="${s}"><option selected>${STORED}</option></select>` },
+        { name: "a closed select with a stored secret in an option not chosen", secret: true, html: (s) => `<select style="${s}"><option selected>WWWW</option><option>${STORED}</option></select>` },
+        { name: "a stored secret drawn as SVG text", secret: true, html: (s) => `<svg style="${s}"><g><text x="0" y="60" font-size="56" fill="#000">${STORED}</text></g></svg>` },
+        { name: "a stored secret shown by ::after from an attribute", secret: true, html: (s, _b, i) => `<style>#c${i}::after{content:attr(data-k);color:#000}</style><div id="c${i}" data-k="${STORED}" style="${s}"></div>` },
+        { name: "a stored secret written into ::before itself, in its own colour", secret: true, html: (s, _b, i) => `<style>#c${i}::before{content:"${STORED}";color:#c00;-webkit-text-fill-color:#c00}</style><div id="c${i}" style="${s}"></div>` },
+        { name: "an ordinary select", secret: false, html: (s) => `<select style="${s}"><option selected>WWWW</option></select>` },
+        { name: "ordinary SVG text and an ordinary ::after", secret: false, html: (s, _b, i) => `<style>#c${i}::after{content:"WWWW";color:#000}</style><div id="c${i}" style="${s}"></div>` },
+    ];
+    const T7_PAGE = `<!doctype html><html lang="en"><head><title>T7</title></head><body style="margin:0;background:#fff;width:1280px;height:1100px">
+${T7.map((c, i) => c.html(STYLE(box(i)), box(i), i)).join("\n")}</body></html>`;
+
+    it.each(T7.map((c, i) => [c.name, i, c.secret] as const))("%s", async (_name, i, secret) => {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
+        try {
+            await page.setContent(T7_PAGE);
+            const s = await shootPage(page, [STORED]);
+            expect(s).not.toBeNull();
+            const { width } = await look(s!.jpeg, { x: 0, y: 0, w: 1, h: 1 });
+            expect(covered(await look(s!.jpeg, inner(box(i), width / 1280)))).toBe(secret);
+            expect(await page.evaluate((attr) => document.querySelectorAll(`[${attr}]`).length, MASK_ATTR)).toBe(0);
+        } finally {
+            await page.close();
+        }
+    }, 60_000);
+
+    it("past the field cap nothing is pictured (fail closed); at the cap the page still is", async () => {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
+        try {
+            // 300 checkboxes, then a password shown as text: the cover would not reach it.
+            await page.setContent(`<!doctype html><html><body>${'<input type="checkbox">'.repeat(300)}<label for="p">Password</label><input id="p" type="text" value="Hunt3r!pw22"></body></html>`);
+            await expect(coverSecretFields(page, [])).rejects.toThrow(/too many fields/);
+            expect(await shootPage(page, [STORED])).toBeNull();
+            expect(await page.evaluate((attr) => document.querySelectorAll(`[${attr}]`).length, MASK_ATTR)).toBe(0);
+            // 299 checkboxes and the password: 300 fields, all looked at, and the password is covered.
+            await page.setContent(`<!doctype html><html><body>${'<input type="checkbox">'.repeat(299)}<label for="p">Password</label><input id="p" type="text" value="Hunt3r!pw22"></body></html>`);
+            const release = await coverSecretFields(page, []);
+            expect(await page.evaluate((attr) => document.getElementById("p")!.hasAttribute(attr), MASK_ATTR)).toBe(true);
+            await release();
+            expect(await shootPage(page, [STORED])).not.toBeNull();
+        } finally {
+            await page.close();
+        }
+    }, 60_000);
+});
