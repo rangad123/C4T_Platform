@@ -145,10 +145,25 @@ export class RepoSink implements GenerationSink {
         };
     }
 
-    /** A test's meta as stored: the model as shown, and its candidate finding masked. */
+    /**
+     * A test's meta as stored: the model as shown, its candidate finding masked, and the other texts a page or a replay wrote masked the
+     * same way: the captured check's `observed` and the own-steps replay's `summary` (CP3b R-5).
+     */
     private storedMeta<M extends Record<string, unknown> | undefined>(given: M): M {
         const meta = this.shown(given);
-        return meta && meta.finding !== undefined ? ({ ...meta, finding: this.maskFinding(meta.finding) } as M) : meta;
+        if (!meta) return meta;
+        const secrets = [...this.secrets];
+        const field = (v: unknown, key: string): unknown => {
+            if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+            const o = v as Record<string, unknown>;
+            return typeof o[key] === "string" ? { ...o, [key]: maskText(o[key] as string, secrets) } : v;
+        };
+        return {
+            ...meta,
+            ...(meta.finding !== undefined ? { finding: this.maskFinding(meta.finding) } : {}),
+            ...(meta.capturedCheck !== undefined ? { capturedCheck: field(meta.capturedCheck, "observed") } : {}),
+            ...(meta.ownReplay !== undefined ? { ownReplay: field(meta.ownReplay, "summary") } : {}),
+        } as M;
     }
 
     createTest: GenerationSink["createTest"] = ({ spec, framework, validation, reason, meta: given }) =>
