@@ -66,3 +66,46 @@ it("capturedCheck.observed and ownReplay.summary are served without the run's se
     for (const secret of [CLIENT_SECRET, API_TOKEN, BEARER]) expect(second.body).not.toContain(secret);
     expect(JSON.parse(second.body).generationMeta.capturedCheck.observed).toContain("(2)");
 });
+
+/**
+ * CP3c T-6: every string of the stored meta is masked, not a list of fields: `explanation` and `visionObservations` (the test writer's
+ * and the vision model's words, which quote the page) were served raw, and the next field added must not leak either. Only id-like
+ * fields (the model, the test and scenario ids, the capture and independence verdicts, a check's source) are kept as given.
+ */
+it("every string of the meta is masked (explanation, visionObservations, a field added later); id-like fields are kept (CP3c T-6)", async () => {
+    const s = seedProject(platform, "Meta shop all", "http://127.0.0.1:9");
+    const job = await platform.repo.createJob(s.projectId, s.appId, { ...DEFAULT_JOB_OPTIONS });
+    const sink = new RepoSink(platform.repo, platform.store, { id: job.id, projectId: s.projectId, applicationId: s.appId });
+    sink.addSecrets([CLIENT_SECRET, API_TOKEN]);
+    const all = (n: number) => ({
+        model: "scripted-model-1",
+        authoring: "defect",
+        capture: "captured",
+        explanation: `Blocked (${n}): the header value ${API_TOKEN} with client_secret ${CLIENT_SECRET}`,
+        visionObservations: [`The banner shows ${CLIENT_SECRET}`, `Authorization: Bearer ${BEARER}`],
+        scenario: { scenarioId: "S-KEY-1", title: `Key ${API_TOKEN}`, expectedResults: [`hides ${CLIENT_SECRET}`] },
+        leftovers: [{ step: 2, text: `uses ${API_TOKEN}` }],
+        aFieldAddedLater: { deep: [`note ${CLIENT_SECRET}`] },
+        capturedCheck: { source: "expected:1", observed: `shows ${CLIENT_SECRET}` },
+    });
+    const h = await sink.createTest({ spec, framework: "playwright", validation: "NEEDS_REVIEW", reason: "a defect", meta: all(1) });
+    await sink.writes.flush();
+    const get = async () => {
+        const res = await app.inject({ method: "GET", url: `/api/tests/${h.id}`, headers: { "x-api-key": KEY } });
+        expect(res.statusCode).toBe(200);
+        return res;
+    };
+    const first = await get();
+    for (const secret of [CLIENT_SECRET, API_TOKEN, BEARER]) expect(first.body).not.toContain(secret);
+    const m = JSON.parse(first.body).generationMeta;
+    expect(m.explanation).toMatch(/^Blocked \(1\): the header value \[hidden\]/);
+    expect(m.visionObservations[0]).toBe("The banner shows [hidden]");
+    expect(m.leftovers[0].step).toBe(2);
+    expect(m).toMatchObject({ authoring: "defect", capture: "captured", scenario: { scenarioId: "S-KEY-1" }, capturedCheck: { source: "expected:1" } });
+
+    await sink.updateTest(h, { spec, validation: "NEEDS_REVIEW", reason: "a defect", attempts: 2, meta: all(2) } as never);
+    await sink.writes.flush();
+    const second = await get();
+    for (const secret of [CLIENT_SECRET, API_TOKEN, BEARER]) expect(second.body).not.toContain(secret);
+    expect(JSON.parse(second.body).generationMeta.explanation).toContain("(2)");
+});

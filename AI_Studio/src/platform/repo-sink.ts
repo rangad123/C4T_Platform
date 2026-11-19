@@ -56,6 +56,13 @@ export function screenshotProblem(name: string, bytes: Uint8Array): string | und
  * touch the database go through one ordered queue (job-write-queue.ts), so they land in the order they were made whether the stores behind
  * them are synchronous (today) or not. The methods that store files do not. The job runner flushes the queue before the job's final status.
  */
+/**
+ * The fields of a test's meta kept as written (CP3c T-6): the engine's ids and verdicts (the model's name, the test, scenario and
+ * objective ids, how it was authored, the capture, confidence and independence verdicts, a check's or finding's source and kind).
+ * Nothing a page, a replay or a model wrote is among them; every other string is masked.
+ */
+const RAW_META_KEYS: ReadonlySet<string> = new Set(["model", "authoring", "capture", "confidence", "independence", "source", "kind", "scenarioId", "testId", "testKey", "objectiveId", "id"]);
+
 export class RepoSink implements GenerationSink {
     private readonly suiteSlugByTest = new Map<string, string>();
     /** This job's writes, in order. */
@@ -157,24 +164,23 @@ export class RepoSink implements GenerationSink {
     }
 
     /**
-     * A test's meta as stored: the model as shown, its candidate finding masked, and the other texts a page or a replay wrote masked the
-     * same way: the captured check's `observed` and the own-steps replay's `summary` (CP3b R-5).
+     * A test's meta as stored: the model as shown, its candidate finding masked (maskFinding), and every other string in it masked with
+     * the run's secrets and the shared patterns, at any depth (CP3b R-5, CP3c T-6): the test writer's `explanation`, the vision model's
+     * `visionObservations`, a captured check's `observed`, a replay's `summary`, and any field added later, since a list of fields let
+     * two through. Only the id-like fields (RAW_META_KEYS) are kept as given.
      */
     private storedMeta<M extends Record<string, unknown> | undefined>(given: M): M {
         const meta = this.shown(given);
         if (!meta) return meta;
         const secrets = [...this.secrets];
-        const field = (v: unknown, key: string): unknown => {
-            if (!v || typeof v !== "object" || Array.isArray(v)) return v;
-            const o = v as Record<string, unknown>;
-            return typeof o[key] === "string" ? { ...o, [key]: maskText(o[key] as string, secrets) } : v;
+        const walk = (v: unknown, key: string | undefined): unknown => {
+            if (typeof v === "string") return key !== undefined && RAW_META_KEYS.has(key) ? v : maskText(v, secrets);
+            if (Array.isArray(v)) return v.map((x) => walk(x, key));
+            if (v && typeof v === "object") return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, walk(x, k)]));
+            return v;
         };
-        return {
-            ...meta,
-            ...(meta.finding !== undefined ? { finding: this.maskFinding(meta.finding) } : {}),
-            ...(meta.capturedCheck !== undefined ? { capturedCheck: field(meta.capturedCheck, "observed") } : {}),
-            ...(meta.ownReplay !== undefined ? { ownReplay: field(meta.ownReplay, "summary") } : {}),
-        } as M;
+        const { finding, ...rest } = meta as Record<string, unknown>;
+        return { ...(walk(rest, undefined) as Record<string, unknown>), ...(finding !== undefined ? { finding: this.maskFinding(finding) } : {}) } as M;
     }
 
     createTest: GenerationSink["createTest"] = ({ spec, framework, validation, reason, meta: given }) =>
