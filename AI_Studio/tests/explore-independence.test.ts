@@ -161,6 +161,18 @@ describe("independence check", () => {
         expect(confidenceOf({ sourced: true, capture: "captured", independence: r.independence })).not.toBe("high");
     }, 60_000);
 
+    it("the captured-step rule: an earlier step failing the very way the check was captured is still not the captured check (CP3d U-5)", async () => {
+        // Captured as a check that ran out of time; step 2 (a navigation that never answers) runs out of time too. Every other rule
+        // holds (it failed, it was run, the same kind of failure), so only judging the replay at the captured step (3) keeps this off
+        // independent. (An earlier check would not do: a check other than the captured one gets Playwright's full time, so it fails as
+        // out of time whatever it saw.)
+        const steps = stepsOf([{ action: "navigate", url: "/cart" }, { action: "navigate", url: "/hang" }, totalCheck]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1", capturedObserved: "did not finish within 1.5 s" }, { stepTimeoutMs: 1_500 });
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).toBe("state_dependent");
+        for (const replay of r.replays) expect(replay.summary).toMatch(/did not reach the captured check \(step 3\)/);
+    }, 60_000);
+
     it("the captured check is the one named by its source, not just any later sourced check", async () => {
         // The captured check is expected:1 at step 2; a later sourced check (expected:2, the planner's) is not the captured one.
         const steps = stepsOf([{ action: "navigate", url: "/cart" }, totalCheck, { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Cart" }, source: "expected:2" }]);
