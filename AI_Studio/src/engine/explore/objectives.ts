@@ -66,6 +66,11 @@ export const ObjectiveSchema = z
         question: z.string().min(1).max(QUESTION_MAX),
         /** What the source states should happen; empty only for a coverage gap. */
         expected: z.string().max(EXPECTED_MAX),
+        /**
+         * false: no source states a result to check (a workflow with no postconditions), so `expected` is the engine's own wording of
+         * "the steps can be done", and a failing check of it is observed only, never captured (queue row 228). Absent: stated.
+         */
+        stated: z.literal(false).optional(),
         operators: z.array(z.enum(OBJECTIVE_OPERATORS)).max(OBJECTIVE_OPERATORS.length),
         budget: ObjectiveBudgetSchema,
         priority: z.number().int(),
@@ -140,6 +145,8 @@ export function objectiveFingerprint(o: { kind: ObjectiveKind; source: { ref: st
 interface Draft {
     kind: ObjectiveKind;
     ref: string;
+    /** false: the expected text is the engine's wording, not a source's (see `stated` on the objective). */
+    stated?: false;
     evidence?: string;
     question: string;
     expected: string;
@@ -160,6 +167,9 @@ const fromRules = (rules: readonly KnowledgeRule[]): Draft[] =>
             priority: { sourceText: `${r.description} ${r.expected}`, stated: r.status === "confirmed" ? "confirmed" : "explicit" },
         }));
 
+/** The engine's own wording around a workflow's expected result (`engineWordingIn` in perturb.ts refuses an assert of it). */
+export const WORKFLOW_WORDING = { after: "Afterwards:", steps: "Every step completes:" } as const;
+
 const fromWorkflows = (workflows: readonly KnowledgeWorkflow[]): Draft[] =>
     usableWorkflows(workflows).map((w) => {
         const steps = [...w.steps].sort((a, b) => a.order - b.order || (a.action < b.action ? -1 : a.action > b.action ? 1 : 0)).map((s) => norm(s.action));
@@ -168,7 +178,9 @@ const fromWorkflows = (workflows: readonly KnowledgeWorkflow[]): Draft[] =>
             kind: "workflow",
             ref: w.id,
             question: `Can the workflow ${quote(w.name)} be completed as stated, and does it hold when repeated, interrupted or reached out of order?`,
-            expected: post.length ? `Afterwards: ${post.join("; ")}` : `Every step completes: ${steps.join(" -> ")}`,
+            expected: post.length ? `${WORKFLOW_WORDING.after} ${post.join("; ")}` : `${WORKFLOW_WORDING.steps} ${steps.join(" -> ")}`,
+            // No postconditions: nothing a source states can be checked, only that the steps can be done (row 228: WEB-064, WEB-065).
+            ...(post.length ? {} : { stated: false as const }),
             priority: { sourceText: [w.name, ...steps, ...post].join(" "), stated: "explicit", workflowSteps: steps.length },
         };
     });
@@ -250,6 +262,7 @@ export function objectivesFrom(model: ObjectiveModel, rules: readonly KnowledgeR
             source: d.evidence ? { ref, evidence: d.evidence } : { ref },
             question: clip(d.question, QUESTION_MAX),
             expected,
+            ...(d.stated === false ? { stated: false } : {}),
             operators: KIND_OPERATORS[d.kind].filter((op) => !allowed || allowed.has(op)),
             budget,
             priority: score,

@@ -17,7 +17,7 @@
  */
 import { expandRepeats, REPEAT_MAX, ScenarioSchema, type Scenario, type Step } from "../spec/schema.js";
 import type { InputClass } from "./input-classes.js";
-import { OBJECTIVE_OPERATORS, type Objective, type ObjectiveOperator } from "./objectives.js";
+import { OBJECTIVE_OPERATORS, WORKFLOW_WORDING, type Objective, type ObjectiveOperator } from "./objectives.js";
 
 /** Why an operator did not become a scenario. Coverage (P3-16) lists each under "not run" with this reason. */
 export const SKIP_REASONS = {
@@ -161,26 +161,57 @@ const needsSecondAccount = (o: Objective, wf?: PerturbWorkflow) => SECOND_ACCOUN
 
 const sortedSteps = (wf?: PerturbWorkflow) => [...(wf?.steps ?? [])].sort((a, b) => a.order - b.order || (a.action < b.action ? -1 : a.action > b.action ? 1 : 0));
 
+/** The fixed wording each operator puts around the source's expected result. */
+const OPERATOR_WORDING = {
+    double_submit: "Submitting twice has the effect of submitting once:",
+    repeat: "Done again, it still holds as stated:",
+    direct_url: "Opening a later step's address directly does not skip the earlier steps; this holds only after every stated step:",
+    back: "After going back to the previous page by its address, nothing is lost or done twice:",
+    refresh: "After reloading the page, it still holds:",
+    cancel: "leaves nothing half-done; this happens only when every step is completed:",
+} as const;
+
+const wordingKey = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+/** The engine's wording: matched in a check's text, whatever its case and spacing. */
+const ENGINE_WORDING = [...Object.values(OPERATOR_WORDING), ...Object.values(WORKFLOW_WORDING), "(source:"].map(wordingKey);
+
+/**
+ * The engine's own wording (an objective's or an operator's fixed text, or the "(source: ...)" citation) found in a check's text or
+ * target, or undefined. It is never something the application shows: a check of it fails on every app (row 227, WEB-065 asserted
+ * "Every step completes: Pay for the order" as page text), so the test writer is refused it.
+ */
+export function engineWordingIn(...texts: ReadonlyArray<string | undefined>): string | undefined {
+    for (const t of texts) {
+        if (!t) continue;
+        const k = t.replace(/\s+/g, " ").toLowerCase();
+        const hit = ENGINE_WORDING.find((w) => k.includes(w));
+        if (hit) return hit;
+    }
+    return undefined;
+}
+
 /**
  * Fixed wording around the source's expected result, citing the source. The expected text is quoted as data (one JSON string): it comes
  * from documents or the page, and it reaches the test writer's prompt.
  */
 function expectedFor(o: Objective, op: ObjectiveOperator, stepName?: string): string {
-    const cite = ` (source: ${norm(o.source.ref)})`;
+    // An objective no source states (a workflow with no postconditions) cites nothing, so a failing check of it is not captured
+    // (web/author.ts statedSource looks for this citation).
+    const cite = o.stated === false ? "" : ` (source: ${norm(o.source.ref)})`;
     const expected = JSON.stringify(norm(o.expected));
     switch (op) {
         case "double_submit":
-            return `Submitting twice has the effect of submitting once: ${expected}${cite}`;
+            return `${OPERATOR_WORDING.double_submit} ${expected}${cite}`;
         case "repeat":
-            return `Done again, it still holds as stated: ${expected}${cite}`;
+            return `${OPERATOR_WORDING.repeat} ${expected}${cite}`;
         case "direct_url":
-            return `Opening a later step's address directly does not skip the earlier steps; this holds only after every stated step: ${expected}${cite}`;
+            return `${OPERATOR_WORDING.direct_url} ${expected}${cite}`;
         case "back":
-            return `After going back to the previous page by its address, nothing is lost or done twice: ${expected}${cite}`;
+            return `${OPERATOR_WORDING.back} ${expected}${cite}`;
         case "refresh":
-            return `After reloading the page, it still holds: ${expected}${cite}`;
+            return `${OPERATOR_WORDING.refresh} ${expected}${cite}`;
         case "cancel":
-            return `Cancelling at ${stepName ? `the step ${quote(stepName, 100)}` : "a stated step"} leaves nothing half-done; this happens only when every step is completed: ${expected}${cite}`;
+            return `Cancelling at ${stepName ? `the step ${quote(stepName, 100)}` : "a stated step"} ${OPERATOR_WORDING.cancel} ${expected}${cite}`;
         default:
             return `${expected}${cite}`;
     }

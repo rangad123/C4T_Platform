@@ -7,6 +7,8 @@
 import { describe, expect, it } from "vitest";
 import { OBJECTIVE_OPERATORS, ObjectiveSchema, objectiveFingerprint, objectivesFrom, type ObjectiveOptions } from "../src/engine/explore/objectives.js";
 import { priorityOf } from "../src/engine/explore/priority.js";
+import { engineWordingIn, scenarioFor } from "../src/engine/explore/perturb.js";
+import { statedSource } from "../src/engine/web/author.js";
 import type { KnowledgeRule, KnowledgeWorkflow } from "../src/engine/planning/planner.js";
 import { c1e, c1eRules } from "./fixtures/bench-shop-c1e.js";
 
@@ -243,4 +245,31 @@ describe("priorityOf", () => {
         expect(p.reason).toMatch(/^[A-Z].*\.$/);
         expect(p.reason.split(/\.\s/)).toHaveLength(1);
     });
+
+    // Queue row 228 (row 227 triage, rule 2a): a workflow no source gives a postcondition states no result, so its objective is not stated
+    // and a failing check of it is observed only (smoke WEB-064 and WEB-065, journey-14 "Pay for order"); the engine's own wording is
+    // never a check's text.
+    it("does not make a stated expectation of a workflow with no postconditions; one with postconditions stays stated", () => {
+        const flows = [workflow("W-post"), workflow("W-bare", { postconditions: [] })];
+        const { objectives } = objectivesFrom({}, [], flows, options);
+        const bare = objectives.find((o) => o.source.ref === "W-bare")!;
+        const post = objectives.find((o) => o.source.ref === "W-post")!;
+        expect(bare.stated).toBe(false);
+        expect(post.stated).toBeUndefined();
+        for (const op of ["as_stated", "refresh"] as const) {
+            const bareScenario = scenarioFor(bare, op, { dataOperators: true, workflow: { preconditions: [], steps: [{ order: 0, action: "Open the page" }] } });
+            const postScenario = scenarioFor(post, op, { dataOperators: true, workflow: { preconditions: [], steps: [{ order: 0, action: "Open the page" }] } });
+            if (bareScenario.status !== "ready" || postScenario.status !== "ready") throw new Error("not ready");
+            expect(statedSource("expected:1", bareScenario.scenario, [], [])).toBe(false);
+            expect(statedSource("expected:1", postScenario.scenario, [], [])).toBe(true);
+        }
+    });
+
+    it("finds the engine's own wording in a check's text, whatever its case and spacing, and nothing in page text", () => {
+        expect(engineWordingIn("Every step completes: Pay for the order")).toBe("every step completes:");
+        expect(engineWordingIn(undefined, "after  reloading the page, it still holds: x")).toBe("after reloading the page, it still holds:");
+        expect(engineWordingIn("Total $5 (source: R-12)")).toBe("(source:");
+        expect(engineWordingIn("Order placed", "Your cart is empty", "Every step of the wizard is complete", undefined)).toBeUndefined();
+    });
 });
+

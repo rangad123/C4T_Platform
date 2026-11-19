@@ -46,6 +46,7 @@ import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, startingIdsOf } from "./leftovers.js";
 import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
+import { engineWordingIn } from "../explore/perturb.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -1016,6 +1017,11 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         input.onAction?.({ tool: "assert", args: { check, target: t, expected }, ok: false, observation: error });
                         return { success: false, error, url: page.url() };
                     }
+                    // The engine's own wording of an expected result (an objective's template, an operator's, a citation) is never what the
+                    // application shows: such a check fails on every app (row 227, WEB-065), so it is refused (queue row 228).
+                    const wording = engineWordingIn(typeof given === "string" ? given : undefined, t?.value, t?.filter?.hasText, t?.within?.value);
+                    if (wording)
+                        return refuse(`The text ${JSON.stringify(wording)} is how the scenario words its expected result, not text the application shows. Check what the page itself shows that proves the result (a status, a message, a value), or leave that expected result unchecked.`);
                     return record({ action: "assert", check, locator: t as Locator | undefined, expected, ...extra, description: why ?? "" }, "assert", { check, target: t, expected, ...extra });
                 },
             }),
