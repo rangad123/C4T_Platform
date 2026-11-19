@@ -285,6 +285,7 @@ export default defineConfig({
             "tests/explore-explored-unit.test.ts",
             "tests/remote-sink-refusal-unit.test.ts",
             "tests/repair-web-guard-unit.test.ts",
+            "tests/repair-computed-value-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

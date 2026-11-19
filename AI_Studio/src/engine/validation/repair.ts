@@ -15,7 +15,7 @@ import type { EngineContext } from "../context.js";
 import type { KnowledgeRule } from "../planning/planner.js";
 import { StepSchema, type Scenario, type Step, type TestSpec } from "../spec/schema.js";
 import type { AppModel } from "../understanding/app-model.js";
-import { authorWebSpec, statedSource } from "../web/author.js";
+import { authorWebSpec, statedSource, statedSourceText } from "../web/author.js";
 import type { ScriptRun } from "./runner.js";
 
 const TriageSchema = z.object({
@@ -101,7 +101,18 @@ export async function repairWeb(args: {
     // verdict stands and a fixable failure is repaired (C1c's WEB-037: wrong test data reported as an app defect).
     const failedStep = run.failedStepIndex >= 0 ? spec.steps[run.failedStepIndex] : undefined;
     if (failedStep?.action === "assert" && failedStep.source && statedSource(failedStep.source, args.scenario, args.rules, args.requirementIds)) {
-        return { verdict: "app_defect", reason: `a stated expectation is not met (${failedStep.source}): ${t.reason}` };
+        // Row 229 (1c): when triage says the test's data or expectation is wrong and the check expects an amount or a record id its stated
+        // source does not give (a total or an order number read from what the account held), the value is the test's, not the source's:
+        // triage's verdict stands and the test is repaired like any other (row 227: WEB-055, 056, 060 and C1e's WEB-028).
+        const computed = TEST_FAULTS.has(t.category) ? unstatedComputedValue(failedStep, statedSourceText(failedStep.source, args.scenario, args.rules)) : undefined;
+        if (computed === undefined) return { verdict: "app_defect", reason: `a stated expectation is not met (${failedStep.source}): ${t.reason}` };
+        ctx.emit({
+            stage: "validation",
+            kind: "computed_value_test_fault",
+            level: "warn",
+            message: `${spec.testId}: the failing check of ${failedStep.source} expects ${computed}, which its stated source does not give, so the test is repaired, not reported as a defect`,
+            data: { testId: spec.testId, source: failedStep.source, category: t.category },
+        });
     }
 
     // Keep the steps before the first *wrong* one — which can be earlier than the failing step (a stray
@@ -134,6 +145,36 @@ export async function repairWeb(args: {
     }
     if (outcome.status === "defect") return { verdict: "app_defect", reason: outcome.explanation };
     return { verdict: "unfixable", reason: outcome.explanation };
+}
+
+/** Triage categories that say the test is wrong, not the application: its data or its expected result. */
+const TEST_FAULTS: ReadonlySet<string> = new Set(["test_data", "assertion"]);
+/** An amount as written on a page: a currency sign next to a number, or a number with two decimals ($664.99, 1,234.50, 12,50 €). */
+const AMOUNT = /[$€£¥₹]\s?\d(?:[\d,.]*\d)?|\d[\d,]*[.,]\d{2}(?!\d)/g;
+/** A record id the application numbers (ord-1008, INV-20031). */
+const RECORD_ID = /\b[a-z]{2,}-\d{3,}\b/gi;
+/** An amount compared by its value (thousands separators, currency and sign dropped): "$1,234.50", "1234.5" and "1.234,50 €" are one, "$5" and "5.00" too. */
+const amountKey = (a: string) => {
+    const digits = a.replace(/[^\d.,]/g, "");
+    const m = /^(.*?)[.,](\d{2})$/.exec(digits);
+    return String(Number(m ? `${m[1]!.replace(/[.,]/g, "")}.${m[2]}` : digits.replace(/[.,]/g, "")));
+};
+
+/**
+ * The first amount or record id a check expects (its expected value, or the text its locator looks for) that `stated` (the words of its
+ * stated source, statedSourceText) does not give; undefined when it expects none, or every one is stated. A check that something is
+ * absent (notText, hidden) expects no value. Row 229 (1c).
+ */
+export function unstatedComputedValue(step: AssertStep, stated: string): string | undefined {
+    if (step.check === "notText" || step.check === "hidden") return undefined;
+    const said = [step.expected, step.locator?.by === "text" ? step.locator.value : undefined, step.locator?.filter?.hasText].filter((v): v is string => typeof v === "string");
+    const amounts = new Set([...stated.matchAll(AMOUNT)].map((m) => amountKey(m[0])));
+    const ids = new Set([...stated.matchAll(RECORD_ID)].map((m) => m[0].toLowerCase()));
+    for (const text of said) {
+        for (const m of text.matchAll(RECORD_ID)) if (!ids.has(m[0].toLowerCase())) return m[0];
+        for (const m of text.matchAll(AMOUNT)) if (!amounts.has(amountKey(m[0]))) return m[0];
+    }
+    return undefined;
 }
 
 const ApiRepairSchema = z.object({

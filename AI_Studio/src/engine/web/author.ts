@@ -400,6 +400,22 @@ export function statedSource(
     return (scenario.requirements ?? []).some((id) => known.has(id) && citesRequirement(text, id));
 }
 
+/**
+ * The words a stated source gives for a check (row 229, 1c): a rule's description and expected result; for `expected:<n>`, that expected
+ * result and the description and expected result of every usable rule it cites or its objective names. Empty when the source is unknown.
+ */
+export function statedSourceText(source: string, scenario: Pick<Scenario, "expectedResults" | "objective">, rules: readonly KnowledgeRule[] | undefined): string {
+    const usable = usableRules(rules ?? []);
+    const ruleText = (r: KnowledgeRule) => `${r.description} ${r.expected ?? ""}`;
+    const n = EXPECTED_SOURCE.exec(source.trim())?.[1];
+    if (!n) return usable.filter((r) => normRef(r.ref) === normRef(source)).map(ruleText).join(" ");
+    const text = scenario.expectedResults[Number(n) - 1];
+    if (text === undefined) return "";
+    const o = scenario.objective;
+    const named = usable.filter((r) => cites(text, r.ref) || (o !== undefined && normRef(o.source) === normRef(r.ref)));
+    return [text, ...named.map(ruleText)].join(" ");
+}
+
 const SYSTEM_TEMPLATE = `You are an automated QA engineer authoring ONE end-to-end test by performing it in a real browser.
 Every action you perform successfully is recorded into a reusable Playwright test, so be deliberate:
 - Perform the scenario step by step; after each action you receive the page's accessibility snapshot. Look before you act.
