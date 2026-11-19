@@ -8,6 +8,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { triggerName } from "../src/platform/selection/parity.js";
 import { runnableTestIds } from "../src/platform/scheduler.js";
 import { buildServer } from "../src/platform/server.js";
 
@@ -352,7 +353,10 @@ describe("selection preview: freshness and deploy trigger parity", () => {
     it("2. compares each active deploy trigger's runner with the viewer's, and requires a full run when one cannot be resolved", async () => {
         // The "CI" token made with the access key above runs the same tests as the access key's viewer.
         const same = (await send("POST", `/api/projects/${projectA}/selection-preview`, { endpoints: ["GET /health"] })).body;
-        expect(same.triggers).toEqual([{ trigger: expect.stringMatching(/^“CI” \(…\w{4}\)$/), parity: "same" }]);
+        // The hint is the token's last 4 characters, and a token is base64url: "-" and "_" are as likely as letters (CI once drew "IE-g").
+        const ciTrigger = /^“CI” \(…[\w-]{4}\)$/;
+        for (const hint of ["IE-g", "a_-Q", "0000"]) expect(triggerName("CI", hint)).toMatch(ciTrigger);
+        expect(same.triggers).toEqual([{ trigger: expect.stringMatching(ciTrigger), parity: "same" }]);
         expect(same.fullRunReasons.join(" ")).not.toMatch(/deploy trigger/);
         // An older token without a maker, a token whose maker has no active account, and a revoked one (ignored). Same time: by id.
         const now = new Date().toISOString();

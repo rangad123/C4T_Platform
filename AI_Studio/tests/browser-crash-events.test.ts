@@ -47,8 +47,8 @@ describe("a crash is an observed event", () => {
             await session.page.goto(BASE);
             expect(session.crashed).toBeUndefined();
             await session.page.goto("chrome://crash").catch(() => undefined);
-            await new Promise((r) => setTimeout(r, 500));
-            expect(session.crashed).toBe("The page crashed in the browser");
+            // Chromium reports the crash once the renderer is gone, which takes longer than half a second on a loaded machine (CI shard 4).
+            await expect.poll(() => session.crashed, { timeout: 15_000, interval: 50 }).toBe("The page crashed in the browser");
             const ev = session.takeEvents();
             expect(ev.crashed).toBe("The page crashed in the browser");
             expect(ev.problems).toContain("The page crashed in the browser");
