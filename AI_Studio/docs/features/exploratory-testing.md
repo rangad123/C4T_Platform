@@ -106,9 +106,13 @@ An operator that does not run is listed with its reason, never left out silently
 
 Every limit is counted by the platform, not asked of the AI, and is fixed before the first page of the session is read.
 
-The limits are on the actions and requests the explorer starts: each action is counted before it is done, and a request the
-application receives because of one is behind a counted action, the page's first load included. Requests the page sends on its own,
-such as a timer that polls the server, are the application's, not the explorer's, so they are not counted and no limit stops them.
+The actions and requests the explorer starts stay within the limits for pages that do not deliberately disguise repeated controls.
+Each action is counted before it is done, and a request the application receives because of one is behind a counted action, the
+page's first load included. A request that changes data (POST, PUT, PATCH, DELETE) is counted for the whole pursuit by its method and
+address: once one has been sent twice, an action that would send it again is refused before it runs. The run's own sign-in form may
+be submitted again on every pass. Requests the page sends on its own, such as a timer that polls the server, are the application's,
+not the explorer's, so they are not counted and no limit stops them. [Known limits](#known-limits) lists what a page can do to get
+past the request count.
 
 | Level | Objectives | Browser actions | AI calls | Time | Visits to one screen in one pursuit |
 |---|---|---|---|---|---|
@@ -230,6 +234,34 @@ The job also keeps the session's limits, each objective with its priority, the s
 - Confirming a finding (more clean replays, merging the same finding across runs) is not part of this; findings stay candidates.
 - Exploring by objectives uses AI calls on the starter's key, within the AI budgets that apply to every exploration
   ([ai-usage-budgets.md](ai-usage-budgets.md)).
+
+## Known limits
+
+These are known, accepted gaps in the request count and in secret masking. They need the page itself to do something unusual, or
+they are a small bias. The action, step and time limits above still hold in every case.
+
+**A page that disguises a repeated control** can send one request more than twice in a pursuit:
+- a control that changes its tag or type on every click (a button, then a link, then a `div` with a button role);
+- a control inside a section whose label changes on every click;
+- a GraphQL endpoint whose operation name changes on every click;
+- an address whose changing part is letters only (`/orders/bhx`, `/orders/cox`): numbers and long ids are recognised as record ids,
+  letter-only words are not;
+- a request the page sends more than 5 seconds after the action that caused it.
+
+**One action's own burst is not limited.** The count refuses the next action, not the requests already under way. One click whose
+page script sends ten requests sends all ten, and a page's own timer sends what it likes.
+
+**A saved sign-in has no sign-in exemption.** A run that starts from a saved session and has to sign in again more than twice in one
+pursuit is refused on the third sign-in, which ends that pursuit.
+
+**A quantity that ends a clause can read as a citation.** In "the length requirement 8." or "the age requirement 18;", the number
+can be taken as requirement 8 or 18. It only matters when the scenario covers a requirement with that number.
+
+**Some copies of a secret are not masked:**
+- the secret written as hex, quoted-printable, in upper case, HTML-escaped (`&amp;`, `&quot;`) or split across lines;
+- a field named with a word joined to a digit (`Clave1`, `senha1`, `pin1`): it is not recognised as a secret field, so what is typed
+  into it is not masked by its name (a stored secret is still masked wherever it appears as written);
+- the page title shown with the Explorer view's live picture.
 
 ## API
 
