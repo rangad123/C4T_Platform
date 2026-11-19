@@ -65,7 +65,7 @@ import { createHash } from "node:crypto";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { LlmClient } from "./llm/provider.js";
 import { inputClassesFor } from "./explore/input-classes.js";
-import { maskActionArgs, maskActionLog } from "./explore/action-mask.js";
+import { maskAction, maskActionArgs, maskActionLog, withoutQuery } from "./explore/action-mask.js";
 import { runExploration, type ActionLogRow, type Budgets, type ExplorationResult, type LoopObjective, type ObjectiveContext, type ObjectiveOutcome, type ObjectiveRun, type StopReason } from "./explore/loop.js";
 import { MAX_EXPLORED, OBJECTIVE_REF_MAX, objectivesFrom, type Objective, type ObjectiveField, type ObjectiveOperator } from "./explore/objectives.js";
 import { operatorApplied, scenariosFor, type OperatorCheck, type PerturbOptions } from "./explore/perturb.js";
@@ -947,8 +947,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     const tracker = actionTracker(new URL(p.scenario.startPath, origin).href, authoringSecretsOf(req));
                     // Asked before each action reaches the application (CP2 H-2): a refused one is not performed. Every pass of the pursuit
                     // (a review's fix, the leftover redo) starts its own repeat and depth tracking; the session's totals are shared (M-5).
+                    // The request bound is the pursuit's, across every pass (CP3b R-2).
                     const actionGate: ActionGate = {
                         before: (a) => loop.act(tracker.before(a)),
+                        request: (target) => tracker.request(target),
+                        limitReached: () => tracker.limitReached(),
                         after: (a) => tracker.after(a),
                         freshPass: (start) => {
                             tracker.freshPass(start);
@@ -1619,15 +1622,64 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  * double submit); the same action again on the same state is a repeat the loop refuses. `freshPass` starts again from a start page.
  * The key is also the action log's row text, so what is left of its arguments is masked before it is built (explore/action-mask.ts: a
  * key pressed into a field named like a secret one, one of the run's `secrets`, or text that looks like a key is never in it; CP3 N-2).
+ *
+ * The request bound (CP3b R-2), which names the page cannot change: the page controls an element's name and what lies between two
+ * clicks, so the tracker also counts, for the whole pursuit (no state, read, navigation or fresh pass resets it), the state-changing
+ * requests each action sent (`request`, by method and address pattern: explore/request-target.ts), and what sent them: the element's
+ * anchor (its ancestry and own tag, type and a field's name, never its accessible name), else the action's key; a navigation by its address
+ * pattern. Once one request target has been sent REQUEST_REPEAT_LIMIT times, `before` gives a refusal for an action that is not a read
+ * and would send it again: one that sent it before, or a click or key press on a form that sends it. A target sent by more different
+ * actions than the limit is the page's own traffic on every action (an analytics call), not one control's: each of its senders is then
+ * refused only once it has sent it the limit's number of times itself.
+ * An action that already sent a state-changing request is on a new state the next time (the application's data changed since): so the
+ * same form submitted a second time with other values is allowed, and a third time is a repeat (and past the request bound). An action
+ * that sent nothing keeps the state as before.
  */
+export const REQUEST_REPEAT_LIMIT = 2;
 export function actionTracker(startUrl: string, secrets: readonly string[] = []): {
-    before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean }): { state: string; action: string; read: boolean };
+    before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean; anchor?: { anchor: string; form?: string } }): { state: string; action: string; read: boolean; refusal?: string };
     after(a: { tool: string; args: unknown; ok: boolean; url?: string; read?: boolean }): void;
     freshPass(startUrl: string): void;
+    request(target: string): void;
+    limitReached(): boolean;
 } {
     let url = startUrl;
     let previous = "";
     let pending = "";
+    /** Per pursuit: each request target, how often it was sent, and how often by each sender. */
+    const sent = new Map<string, { count: number; by: Map<string, number> }>();
+    /** The senders of the action running now (set by `before` for an action that is not a read). */
+    let senders: string[] = [];
+    const sendersOf = (a: { tool: string; args: unknown; anchor?: { anchor: string } }, key: string): string[] => {
+        if (a.anchor) return [`element ${a.anchor.anchor}`];
+        const to = (a.args as { url?: unknown } | null)?.url;
+        if (a.tool === "navigate" && typeof to === "string") {
+            try {
+                return [`navigate ${pathPattern(withoutQuery(new URL(to, url).href))}`];
+            } catch {
+                /* keyed as given */
+            }
+        }
+        return [`action ${key}`];
+    };
+    const SUBMITS = new Set(["click", "press"]);
+    /** How often the requests this action would send were sent already (by it, or by its form for a submit), at most once less than the limit. */
+    const sentBefore = (a: { tool: string; anchor?: { form?: string } }, mine: readonly string[]): number => {
+        let n = 0;
+        for (const [target, t] of sent) if ((SUBMITS.has(a.tool) && a.anchor?.form === target) || mine.some((m) => t.by.has(m))) n = Math.max(n, t.count);
+        return Math.min(n, REQUEST_REPEAT_LIMIT - 1);
+    };
+    const overLimit = (a: { tool: string; anchor?: { form?: string } }, mine: readonly string[]): string | undefined => {
+        for (const [target, t] of sent) {
+            if (t.count < REQUEST_REPEAT_LIMIT) continue;
+            const byForm = SUBMITS.has(a.tool) && a.anchor?.form === target;
+            const ambient = t.by.size > REQUEST_REPEAT_LIMIT;
+            const bySender = mine.some((m) => (ambient ? (t.by.get(m) ?? 0) >= REQUEST_REPEAT_LIMIT : t.by.has(m)));
+            if (byForm || bySender)
+                return maskAction(`The request ${target} was already sent ${t.count} times in this pursuit, and this action (${byForm ? "on the form that sends it" : "what sent it before"}) would send it again; it is not performed.`, secrets);
+        }
+        return undefined;
+    };
     const moveTo = (to: string | undefined): void => {
         if (to) url = to;
     };
@@ -1660,9 +1712,21 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [])
             moveTo(a.url);
             const action = keyOf(a);
             pending = action;
-            const digest = createHash("sha256").update(previous).digest("hex").slice(0, 12);
-            return { state: `${pathPattern(url)}|${digest}`, action, read: a.read === true };
+            const read = a.read === true;
+            const mine = sendersOf(a, action);
+            const before = read ? 0 : sentBefore(a, mine);
+            const digest = createHash("sha256").update(before ? `${previous}\n#sent ${before}` : previous).digest("hex").slice(0, 12);
+            const refusal = read ? undefined : overLimit(a, mine);
+            if (!read) senders = refusal ? [] : mine;
+            return { state: `${pathPattern(url)}|${digest}`, action, read, ...(refusal ? { refusal } : {}) };
         },
+        request: (target) => {
+            const t = sent.get(target) ?? { count: 0, by: new Map<string, number>() };
+            t.count += 1;
+            for (const s of senders) t.by.set(s, (t.by.get(s) ?? 0) + 1);
+            sent.set(target, t);
+        },
+        limitReached: () => [...sent.values()].some((t) => t.count >= REQUEST_REPEAT_LIMIT),
         after: (a) => {
             if (!a.read) previous = pending;
             if (a.ok) moveTo(a.url);

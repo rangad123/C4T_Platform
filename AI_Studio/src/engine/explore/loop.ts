@@ -49,6 +49,8 @@ export interface LoopAction {
     action: string;
     /** It only reads the page (a wait, a check): counted and refused on a repeat, but not a new visit of its state for the depth. */
     read?: boolean;
+    /** Why the action's own tracker refuses it (the request bound, CP3b R-2): refused like a repeat, and the pursuit ends. */
+    refusal?: string;
 }
 
 export type ActVerdict = { allowed: true } | { allowed: false; reason: string };
@@ -268,6 +270,10 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
                 const key = JSON.stringify([state, action]);
                 if (seen.has(key)) {
                     loopRefusal = `The same action on the same state was tried again (${action}); it is not repeated.`;
+                    return refuse(state, action, loopRefusal);
+                }
+                if (a?.refusal) {
+                    loopRefusal = clip(a.refusal);
                     return refuse(state, action, loopRefusal);
                 }
                 const visitsHere = (visits.get(state) ?? 0) + (a?.read ? 0 : 1);
