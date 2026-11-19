@@ -13,7 +13,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { parseExploration, type ExplorationRecord } from "../agent-protocol/exploration.js";
+import { maskExplorationText, parseExploration, type ExplorationRecord } from "../agent-protocol/exploration.js";
+import { redactText } from "../shared/redact-text.js";
 import { ResultRequest, type AgentPhase, type HelloResponse, type RejectRequest, type RunnerConfigPush, type TaskOffer, type WebBrowserUsed, type WireRun } from "../agent-protocol/schema.js";
 import { enginesOf, type BrowserInUse, type BrowserLaunch, type BrowserSetup } from "./browser-setup.js";
 import { withDeviceLock } from "../engine/mobile/emulator.js";
@@ -1061,10 +1062,19 @@ export class TaskRunner {
 export function explorationForResult(exploration: unknown, log: Pick<Logger, "redact" | "warn">, short: string): { exploration?: ExplorationRecord } {
     if (exploration === undefined) return {};
     const record = parseExploration(exploration);
-    if (record.ok) return { exploration: masked(record.value, (t) => log.redact(t)) };
+    if (record.ok) {
+        // The stored secrets everywhere (the runner's log masking), then the shared patterns (bearer tokens, JWTs, secret parameters)
+        // in every free-text field (CP3b R-4); the engine masked the action log's actions with both already. The platform masks the
+        // record again when it saves it.
+        const known = masked(record.value, (t) => log.redact(t));
+        return { exploration: maskExplorationText(known, (t) => redactText(t, EXPLORATION_TEXT_MAX)) };
+    }
     log.warn(`Task ${short}: the coverage record was left out (${record.problem}).`);
     return {};
 }
+
+/** The longest text field of a coverage record (agent-protocol/exploration.ts). */
+const EXPLORATION_TEXT_MAX = 4_000;
 
 /** Row 184: the same value with every text in it passed through `mask` (the runner's log masking of stored sign-ins). */
 function masked<T>(v: T, mask: (t: string) => string): T {

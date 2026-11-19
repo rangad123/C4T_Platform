@@ -82,3 +82,37 @@ export function parseExploration(v: unknown): { ok: true; value: ExplorationReco
     const issue = r.error.issues[0];
     return { ok: false, problem: `${issue?.path.length ? `${issue.path.join(".")}: ` : ""}${issue?.message ?? "not a coverage record"}`.slice(0, 300) };
 }
+
+/** The free-text fields of a coverage record, as both the engine's ExplorationSummary and the wire record have them. */
+interface ExplorationText {
+    stopDetail: string;
+    objectives: ReadonlyArray<{ reason: string }>;
+    skipped: ReadonlyArray<{ reason: string }>;
+    outcomes: ReadonlyArray<{ reason: string; result?: { ended?: string } }>;
+    coverage: { unexplored: ReadonlyArray<{ reason: string; status: string }>; notRun: ReadonlyArray<{ reason: string }> };
+    actionLog: ReadonlyArray<{ reason?: string }>;
+}
+
+/**
+ * CP3b R-4: the record with every free-text field passed through `mask` (the stop detail, objective, skip and outcome reasons, how a
+ * pursuit ended, the coverage lists' statuses and reasons, an action log row's reason): an outcome's reason can be an error's raw text,
+ * which may quote a request with its credentials. Ids, refs and counts are left as they are, and so are the action log's actions and
+ * states (they have their own masking, action-mask.ts).
+ * The platform masks with the run's secrets and the shared patterns when it saves the record (exploration-store.ts), a runner before
+ * it sends one (task-runner.ts).
+ */
+export function maskExplorationText<T extends ExplorationText>(e: T, mask: (text: string) => string): T {
+    return {
+        ...e,
+        stopDetail: mask(e.stopDetail),
+        objectives: e.objectives.map((o) => ({ ...o, reason: mask(o.reason) })),
+        skipped: e.skipped.map((s) => ({ ...s, reason: mask(s.reason) })),
+        outcomes: e.outcomes.map((o) => ({ ...o, reason: mask(o.reason), ...(o.result ? { result: typeof o.result.ended === "string" ? { ...o.result, ended: mask(o.result.ended) } : o.result } : {}) })),
+        coverage: {
+            ...e.coverage,
+            unexplored: e.coverage.unexplored.map((u) => ({ ...u, reason: mask(u.reason), status: mask(u.status) })),
+            notRun: e.coverage.notRun.map((n) => ({ ...n, reason: mask(n.reason) })),
+        },
+        actionLog: e.actionLog.map((r) => (typeof r.reason === "string" ? { ...r, reason: mask(r.reason) } : r)),
+    };
+}
