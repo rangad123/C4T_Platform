@@ -254,24 +254,26 @@ function cites(text: string, ref: string): boolean {
 /** A requirement id that is only a number ("1", "1.1", "8.10"), as the requirements parser gives for a numbered list. */
 const NUMERIC_ID = /^\d+(?:\.\d+)*$/;
 const NUM = String.raw`\d+(?:\.\d+)*(?![\w-]|\.\w)`;
-const REQ_WORD = String.raw`\b(?:requirements?|req)\b\.?`;
-/** "requirement 1.1", "requirements 2.3 and 1.1", "req 1.1", "REQ-1.1". */
-const REQ_LISTED = new RegExp(String.raw`${REQ_WORD}\s*[-#:]?\s*(${NUM}(?:\s*(?:,|and|or|&|/)\s*${NUM})*)`, "gi");
-/** "[1.1]" or "(1.1)" with "requirement" at most three words before it ("per requirement [1.1]", "as the requirements say (1.1)"). */
-const REQ_BRACKETED = new RegExp(String.raw`${REQ_WORD}(?:\W+\w+){0,3}?\W*?[[(](${NUM})[\])]`, "gi");
+const REQ_WORD = String.raw`\b(?:requirements?|req)`;
+/** Between two ids of one citation: "requirements 2.3 and 1.1", "requirements 1, 2 / 3". */
+const REQ_SEP = String.raw`(?:\s*[,&/]\s*|\s+(?:and|or)\s+)`;
+/**
+ * "requirement 1.1", "requirements 2.3 and 1.1", "req 1.1", and the same in brackets: the word, ONE space, the ids, and then the end of
+ * the citation (the end of the text or a punctuation mark: ".", ",", ";", ":", "!", "?", ")" or "]"). Punctuation between the word and
+ * the id ("requirement: 8", "requirement (2)", "REQ-1.1") or a word after the id ("requirement 8 characters", "requirements 2 or more")
+ * is prose that happens to hold a number, not a citation (CP3b R-6).
+ */
+const REQ_CITED = new RegExp(String.raw`${REQ_WORD} (${NUM}(?:${REQ_SEP}${NUM})*)(?=\s*(?:$|[.,;:!?)\]]))`, "gi");
 
 /**
  * `text` cites requirement `id`. An id with letters ("REQ-1", "FR-2.3") is cited by naming it as a whole token (`cites`). A purely numeric
- * id is cited only in an explicit citation form ("requirement 1.1", "req 1.1", "REQ-1.1", "requirement [1.1]"), never as a bare number:
- * "the mug costs 1.1 kg" or "the badge shows 2 items" cite nothing (CP3 N-4).
+ * id is cited only in the explicit form `REQ_CITED` ("requirement 1.1", "(requirement 1.1)", "[requirement 1.1]"), never as a bare
+ * number: "the mug costs 1.1 kg" or "the badge shows 2 items" cite nothing (CP3 N-4), and neither does "requirement: 8 or more" (R-6).
  */
 export function citesRequirement(text: string, id: string): boolean {
     const want = normRef(id);
     if (!NUMERIC_ID.test(want)) return cites(text, id);
-    const t = normRef(text);
-    const listed = [...t.matchAll(REQ_LISTED)].flatMap((m) => m[1]!.split(/\s*(?:,|and|or|&|\/)\s*/i));
-    const bracketed = [...t.matchAll(REQ_BRACKETED)].map((m) => m[1]!);
-    return [...listed, ...bracketed].some((n) => n === want);
+    return [...normRef(text).matchAll(REQ_CITED)].some((m) => m[1]!.split(new RegExp(REQ_SEP, "i")).some((n) => n === want));
 }
 
 /**
