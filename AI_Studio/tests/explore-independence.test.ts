@@ -18,6 +18,7 @@ const PORT = 9886;
 const BASE = `http://127.0.0.1:${PORT}`;
 const taken = new Set<string>();
 let seeded = true;
+let visits = 0;
 
 const server = http.createServer((req, res) => {
     const page = (title: string, body: string) => {
@@ -36,6 +37,11 @@ const server = http.createServer((req, res) => {
         return;
     }
     if (req.url === "/hang") return; // never answers
+    if (req.url === "/visit") {
+        // Counts up on every load: a check of "Visit 1" passed while authoring (the planner's own guess) and fails in every fresh replay.
+        visits += 1;
+        return page("Cart", `<h1>Visit ${visits}</h1><p>Total: <output aria-label="Total">$30.00</output></p>`);
+    }
     if (req.url === "/signup") return page("Sign up", `<h1>Sign up</h1><form method="post" action="/signup"><label>Name <input name="name"></label><button type="submit">Sign up</button></form>`);
     return page("Cart", `<h1>Cart</h1><ul><li>Mug $10.00</li><li>Plate $15.00</li></ul><p>Total: <output aria-label="Total">${seeded ? "$30.00" : "$25.00"}</output></p>`);
 });
@@ -112,6 +118,29 @@ describe("independence check", () => {
         const r = await checkIndependence(browser, BASE, { steps: clean });
         expect(r.replays.map((x) => x.outcome)).toEqual(["passed", "passed"]);
         expect(r.independence).toBe("state_dependent");
+    }, 60_000);
+
+    it("replays that stop at an earlier sourced check, never reaching the captured one, do not make it independent (CP3b R-3)", async () => {
+        visits = 1;
+        const steps = stepsOf([
+            { action: "navigate", url: "/visit" },
+            { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Visit 1" }, source: "expected:2" },
+            totalCheck,
+        ]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1" }, { stepTimeoutMs: 2_000 });
+        // Both replays stop at the same sourced check, but it is the planner's guess at step 2, not the captured check at step 3.
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).not.toBe("independent");
+        for (const replay of r.replays) expect(replay.summary).toMatch(/did not reach the captured check \(step 3\)/);
+        expect(confidenceOf({ sourced: true, capture: "captured", independence: r.independence })).not.toBe("high");
+    }, 60_000);
+
+    it("the captured check is the one named by its source, not just any later sourced check", async () => {
+        // The captured check is expected:1 at step 2; a later sourced check (expected:2, the planner's) is not the captured one.
+        const steps = stepsOf([{ action: "navigate", url: "/cart" }, totalCheck, { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Cart" }, source: "expected:2" }]);
+        const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1" });
+        expect(r.replays.map((x) => x.failedStep)).toEqual([2, 2]);
+        expect(r.independence).toBe("independent");
     }, 60_000);
 
     it("a test with no sourced check is not run (no browser opened)", async () => {
