@@ -10,7 +10,7 @@ import http from "node:http";
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { CandidateFindingSchema, confidenceOf } from "../src/engine/explore/finding.js";
-import { checkIndependence } from "../src/engine/explore/independence.js";
+import { checkIndependence, failureKind } from "../src/engine/explore/independence.js";
 import { launchChromium } from "../src/engine/discovery/browser.js";
 import { maskObservedText } from "../src/engine/evidence/observed-text.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
@@ -293,6 +293,16 @@ describe("independence check", () => {
         const r = await checkIndependence(browser, BASE, { steps, capturedSource: "expected:1" }, { stepTimeoutMs: 1_500 });
         expect(r.independence).toBe("state_dependent");
     }, 60_000);
+
+    it("an ARIA snapshot check's value is the whole received snapshot, not its first token (CP3d U-6)", () => {
+        const snap = (got: string) => `The structure of the region does not match its snapshot. Expected:\n- navigation "Menu":\n  - link "B"\nReceived:\n${got}`;
+        const a = failureKind(snap('- navigation "Menu":\n  - link "A"'));
+        const b = failureKind(snap('- navigation "Menu":\n  - link "C"'));
+        expect(a).toEqual({ kind: "value", value: '- navigation "Menu": - link "A"' });
+        expect(b).not.toEqual(a);
+        // As authoring keeps it (lines joined): the same value.
+        expect(failureKind(snap('- navigation "Menu":\n  - link "A"').replace(/\s+/g, " "), { plainIsValue: true })).toEqual(a);
+    });
 
     it("a test with no sourced check is not run (no browser opened)", async () => {
         const fake = { newContext: () => Promise.reject(new Error("no browser should open")) } as unknown as Browser;

@@ -88,6 +88,9 @@ function capturedStep(test: DefectTest): number | undefined {
 type FailureKind = { kind: "value"; value: string } | { kind: "missing" } | { kind: "timeout" } | { kind: "other" };
 export function failureKind(message: string, opts: { plainIsValue?: boolean } = {}): FailureKind {
     if (/element\(s\) not found/i.test(message)) return { kind: "missing" };
+    // An ARIA snapshot check (web/interpreter.ts): the value is the whole received snapshot, spacing folded (CP3d U-6).
+    const snapshot = /^\s*The structure of the region does not match its snapshot\.[\s\S]*?\bReceived:\s*([\s\S]*)$/.exec(message);
+    if (snapshot) return { kind: "value", value: snapshot[1]!.replace(/\s+/g, " ").trim() };
     // On its own line in Playwright's message; the kept observation has its lines joined (author.ts redactText).
     const received = /\bReceived(?: [a-z]+)?:\s*("(?:[^"\\]|\\.)*"|\S+)/.exec(message);
     if (received) return { kind: "value", value: received[1]! };
