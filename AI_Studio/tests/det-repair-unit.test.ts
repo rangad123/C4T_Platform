@@ -249,7 +249,7 @@ const appModel = (pages: PageModel[]): AppModel => ({
 
 describe("exploration reuse", () => {
     const before = appModel([page("/", { purpose: "The shop's front page", type: "home" }), page("/products", { purpose: "Lists the products", type: "listing" }), page("/about")]);
-    const known = distillKnowledge(before, { now: new Date("2026-10-01T10:00:00Z") });
+    const known = distillKnowledge(before, { now: new Date("2026-10-01T10:00:00Z"), modelName: "scripted" });
 
     it("remembers what the AI understood and a stricter fingerprint, as hashes and one scrubbed sentence", () => {
         expect(known.pages.find((p) => p.path === "/")).toMatchObject({ purpose: "The shop's front page", ufp: expect.stringMatching(/^[0-9a-f]{16}$/) });
@@ -264,13 +264,16 @@ describe("exploration reuse", () => {
 
     it("counts a page as unchanged only with the same address and both fingerprints; older records without the second are sent again", () => {
         const now = appModel([page("/"), page("/products", { components: [{ role: "button", name: "Filter", locatorHint: "" }] }), page("/about"), page("/new")]);
-        const plan = planReuse(known, now);
+        const plan = planReuse(known, now, [], "scripted");
         expect([...plan.pages.keys()]).toEqual(["/", "/about"]);
         expect(plan.pages.get("/")).toEqual({ type: "home", purpose: "The shop's front page" });
         expect(plan.pages.get("/about")).toEqual({ type: "content" });
         expect(reuseMessage(plan, 4)).toBe("2 of 4 pages have not changed since the exploration of 2026-10-01: what the AI understood about them then is used, and they are not sent to the AI again (/, /about).");
         const old = { ...known, pages: known.pages.map(({ ufp: _u, ...p }) => p) };
-        expect(planReuse(old, now).pages.size).toBe(0);
+        expect(planReuse(old, now, [], "scripted").pages.size).toBe(0);
+        // An understanding written by another AI model, or by one memory did not record, is read again.
+        expect(planReuse(known, now, [], "another-model").pages.size).toBe(0);
+        expect(planReuse(known, now).pages.size).toBe(0);
     });
 
     it("the understanding prompt gets one line per unchanged page (no snapshot), and keeps the earlier understanding when the AI leaves it out", async () => {
@@ -288,7 +291,7 @@ describe("exploration reuse", () => {
         // A real snapshot is long (the snapshot is not part of either fingerprint).
         const now = appModel([page("/", { aria: `ARIA-SNAPSHOT-OF /\n${"- link \"Product\"\n".repeat(60)}` }), page("/new")]);
         const { siteType: _s, purpose: _p, features: _f, journeys: _j, ...base } = now;
-        const plan = planReuse(known, now);
+        const plan = planReuse(known, now, [], "scripted");
         const model = await analyzeApplication(ctx, base, { reuse: plan });
         expect(prompts[0]).toContain(REUSE_NOTE);
         expect(prompts[0]).toContain('### /  [home] title="Title of /" status=200  (unchanged since the exploration of 2026-10-01; understood then as: The shop\'s front page)');
