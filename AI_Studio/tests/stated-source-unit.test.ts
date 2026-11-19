@@ -115,9 +115,8 @@ describe("statedSource: a numeric requirement id counts only when cited as a req
             "Requirement 1.1: the total is $25.00",
             "The total is $25.00 (requirement 1.1).",
             "The total is $25.00 (req 1.1)",
-            "The total is $25.00 (REQ-1.1)",
-            "The total is $25.00 per requirement [1.1]",
-            "The total is $25.00, as the requirements say (1.1)",
+            "The total is $25.00 [requirement 1.1]",
+            "The total is $25.00 per requirement 1.1.",
             "The total is $25.00 (requirements 2.3 and 1.1)",
         ])
             expect(stated(["1.1"], text), text).toBe(true);
@@ -138,6 +137,22 @@ describe("statedSource: a numeric requirement id counts only when cited as a req
         expect(stated(["8.10"], "The order is listed (requirement 8.1)")).toBe(false);
         // "requirement" too far before the bracketed number.
         expect(stated(["1.1"], "The requirement page lists every product with its price and weight (1.1)")).toBe(false);
+    });
+
+    it("a requirement word followed by a quantity is prose, not a citation (CP3b R-6)", () => {
+        // The form is "requirement <id>" with only a space between, ending the citation, or "(requirement <id>)" / "[requirement <id>]".
+        expect(stated(["8"], "The password length requirement: 8 or more characters is enforced")).toBe(false);
+        expect(stated(["2"], "The minimum order requirement (2) items is shown")).toBe(false);
+        expect(stated(["2"], "Requirements 2 or more items show a discount")).toBe(false);
+        expect(stated(["8"], "The length requirement 8 characters is shown")).toBe(false);
+        expect(stated(["2"], "A requirement of 2 items is shown")).toBe(false);
+        // Punctuation between the word and the number is not the form either.
+        for (const text of ["The total is $25.00 (REQ-1.1)", "The total is $25.00 per requirement [1.1]", "The total is $25.00, as the requirements say (1.1)", "The total is $25.00 (requirement: 1.1)", "The total is $25.00 (requirement #1.1)"])
+            expect(stated(["1.1"], text), text).toBe(false);
+        // Ending at the end of the text or at a punctuation mark is a citation.
+        expect(stated(["2"], "The discount is shown (requirement 2)")).toBe(true);
+        expect(stated(["2"], "The discount is shown, see requirement 2")).toBe(true);
+        expect(stated(["2"], "Requirement 2: the discount is shown")).toBe(true);
     });
 
     it("every id of the bench requirements documents is stated when cited as the planner is told to, and never as a bare number", () => {
