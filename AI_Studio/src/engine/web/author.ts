@@ -45,6 +45,7 @@ import { maskObservedText, observedTextSecrets } from "../evidence/observed-text
 import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 import { findLeftoverUse, LEFTOVER_REDO, leftoverReason } from "./leftovers.js";
+import { requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -115,6 +116,11 @@ export interface GateAction {
     url: string;
     /** The action only reads the page (a wait or a check). */
     read: boolean;
+    /**
+     * What the request bound knows the target by (CP3b R-2), when it was found: `anchor`, the digest of its form and landmark ancestry and
+     * its own tag, type and (a field's) name (never its accessible name, which the page controls); `form`, the request target its form would send.
+     */
+    anchor?: { anchor: string; form?: string };
 }
 
 export interface ActionGate {
@@ -126,17 +132,36 @@ export interface ActionGate {
     freshPass(startUrl: string): void;
     /** Asked before saved steps are replayed in a fresh browser without the AI (`steps` actions): false means the replay is not run. */
     replay(steps: number, what: string): boolean;
+    /**
+     * Told of each state-changing request (explore/request-target.ts) that an allowed action sends while it runs, as it is sent (CP3b R-2):
+     * the request bound counts them for the pursuit and refuses, in `before`, an action that would send one again past the repeat limit.
+     */
+    request?(target: string): void;
+    /** Some request target has reached the repeat limit: a target not found at once is then waited for before `before` is asked (a late button). */
+    limitReached?(): boolean;
 }
+
+/** How long after an action ends a state-changing request is still counted as that action's (a submit sent late), unless another action starts first. */
+const REQUEST_AFTER_ACTION_MS = 5_000;
 
 /** Tools that only read the page: they do not count as a new visit of the state they run on (explore/loop.ts depth). */
 const READ_TOOLS = new Set(["assert", "wait", "remember"]);
 
 /**
  * What a target resolves to on `page` now: role and accessible name of the first match, and a digest of its stable anchor (N-3): the form
- * and landmark ancestry it sits in (each named by its label, or a form by where it posts) and its own tag, type and name. Never its
+ * and landmark ancestry it sits in (each named by its label, or a form by where it posts) and its own tag, type and, for a field, name. Never its
  * position among siblings, so a page that adds a section before it is the same element, and never a value. Undefined when nothing matches quickly.
  */
 export async function targetIdentity(page: Page, l: Locator, data: RuntimeData): Promise<string | undefined> {
+    return (await resolveTarget(page, l, data))?.identity;
+}
+
+/**
+ * `targetIdentity`, plus what the request bound needs (CP3b R-2): the element's anchor digest alone, and the request its form would send
+ * (`requestTarget` of the form's method and action, or of the submit control's own formmethod and formaction), when it is in a form that
+ * changes data.
+ */
+async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise<{ identity: string; anchor: string; form?: string } | undefined> {
     try {
         const el = locate(page, l, data).first();
         const [aria, anchor] = await Promise.all([
@@ -172,26 +197,51 @@ export async function targetIdentity(page: Page, l: Locator, data: RuntimeData):
                     parts.unshift(`${tag}${role ? `[${role}]` : ""}${name ? `(${name})` : ""}`);
                 }
                 const self = node as Element;
-                parts.push([self.tagName.toLowerCase(), self.getAttribute("type") ?? "", self.getAttribute("name") ?? ""].join(":"));
-                return parts.join(">");
+                // Its name attribute only for a field (it tells two fields of one form apart); a button's or link's is the page's to change, like its text (CP3b R-2).
+                const fieldType = (self.getAttribute("type") ?? "").toLowerCase();
+                const isField = /^(select|textarea)$/i.test(self.tagName) || (self.tagName === "INPUT" && !/^(submit|button|image|reset)$/.test(fieldType));
+                parts.push([self.tagName.toLowerCase(), self.getAttribute("type") ?? "", isField ? (self.getAttribute("name") ?? "") : ""].join(":"));
+                // The form it submits (its form owner, else the form around it) and where that form sends, with a submit control's own override.
+                const owner = ((self as HTMLButtonElement).form ?? self.closest("form")) as HTMLFormElement | null;
+                const submits = /^(button|input)$/i.test(self.tagName) && (self.getAttribute("type") ?? (self.tagName === "BUTTON" ? "submit" : "")).toLowerCase().match(/^(submit|image)$/);
+                const method = ((submits && self.getAttribute("formmethod")) || owner?.getAttribute("method") || "get").toLowerCase();
+                let action = "";
+                try {
+                    action = owner ? new URL((submits && self.getAttribute("formaction")) || owner.getAttribute("action") || self.ownerDocument.URL, self.ownerDocument.baseURI).href : "";
+                } catch {
+                    action = "";
+                }
+                return { anchor: parts.join(">"), form: owner && action ? { method, action } : null };
             }, undefined, { timeout: 1_000 }),
         ]);
         // `- button "Continue"` or `- textbox "Email": typed value`: role and name only, never a value.
         const m = /^- ([\w-]+)(?: "((?:[^"\\]|\\.)*)")?/.exec(aria.split("\n")[0] ?? "");
-        const digest = createHash("sha256").update(anchor).digest("hex").slice(0, 12);
-        return `${m?.[1] ?? "element"}${m?.[2] !== undefined ? ` ${JSON.stringify(m[2].slice(0, 120))}` : ""} @${digest}`;
+        const digest = createHash("sha256").update(anchor.anchor).digest("hex").slice(0, 12);
+        const identity = `${m?.[1] ?? "element"}${m?.[2] !== undefined ? ` ${JSON.stringify(m[2].slice(0, 120))}` : ""} @${digest}`;
+        // A form method other than post is a GET (or a dialog): no request target, so no form for the bound.
+        const form = anchor.form ? requestTarget(anchor.form.method === "post" ? "POST" : anchor.form.method, anchor.form.action) : undefined;
+        return { identity, anchor: digest, ...(form ? { form } : {}) };
     } catch {
         return undefined;
     }
 }
 
-/** A step's own target(s), as the gate names them. */
-async function stepTarget(page: Page, step: Step, data: RuntimeData): Promise<string | undefined> {
+/**
+ * A step's own target(s), as the gate names them, and its anchor for the request bound. Once the bound has a request at its limit, a
+ * target not found at once (a button the page adds late) is waited for as long as the action itself would wait, so the gate is asked
+ * with the element and its form rather than the locator text (CP3b R-2); the gate is still asked before the action runs.
+ */
+async function stepTarget(page: Page, step: Step, data: RuntimeData, gate?: ActionGate): Promise<{ target?: string; anchor?: { anchor: string; form?: string } }> {
     const loc = "locator" in step ? (step.locator as Locator | undefined) : undefined;
-    if (!loc) return undefined;
-    const own = await targetIdentity(page, loc, data);
+    if (!loc) return {};
+    let own = await resolveTarget(page, loc, data);
+    if (!own && !READ_TOOLS.has(step.action) && gate?.limitReached?.()) {
+        const appeared = await locate(page, loc, data).first().waitFor({ state: "attached", timeout: 6_000 }).then(() => true, () => false);
+        if (appeared) own = await resolveTarget(page, loc, data);
+    }
     const to = step.action === "drag" ? await targetIdentity(page, step.target as Locator, data) : undefined;
-    return own && step.action === "drag" ? `${own} -> ${to ?? JSON.stringify(step.target)}` : own;
+    const target = own && step.action === "drag" ? `${own.identity} -> ${to ?? JSON.stringify(step.target)}` : own?.identity;
+    return { ...(target ? { target } : {}), ...(own ? { anchor: { anchor: own.anchor, ...(own.form ? { form: own.form } : {}) } } : {}) };
 }
 
 const AUTHORING_USE = " Where this scenario reaches what a rule describes, assert the expected behaviour it states; when the application genuinely does otherwise, call finish(result=\"defect\").";
@@ -568,6 +618,28 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     input.gate?.freshPass(new URL(scenario.startPath || "/", baseUrl).href);
     const session = await BrowserSession.launch(browser, { startUrl: baseUrl, secrets: runSecretsOf(input), ...(input.notes?.length ? { notes: input.notes } : {}) });
     const { page } = session;
+    // The request bound (CP3b R-2): each state-changing request sent while an allowed action that is not a read runs, or in the few
+    // seconds after it before the next one starts (a submit the page sends late), is told to the gate as that action's. What the page
+    // sends on its own at other times (a timer's beacon while a check waits) is not the engine's and is not counted.
+    const actingFor = { from: 0, until: 0 };
+    const acting = (read: boolean) => {
+        if (!read) Object.assign(actingFor, { from: Date.now(), until: Number.POSITIVE_INFINITY });
+        return () => {
+            if (!read) actingFor.until = Date.now() + REQUEST_AFTER_ACTION_MS;
+        };
+    };
+    if (input.gate?.request) {
+        const tell = input.gate.request.bind(input.gate);
+        session.context.on("request", (r) => {
+            try {
+                if (!STATE_CHANGING_METHODS.has(r.method().toUpperCase()) || !actingFor.from || Date.now() > actingFor.until) return;
+                const target = requestTarget(r.method(), r.url(), r.postData());
+                if (target) tell(target);
+            } catch {
+                /* a request that cannot be read is not counted; the gate's other bounds still hold */
+            }
+        });
+    }
     page.setDefaultTimeout(6_000);
     /** The new tab the agent works in (a click opened it), else the page the test started on. */
     let tab: Page | undefined;
@@ -614,7 +686,9 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         if (ctx.signal?.aborted) return notOpened("this test writer's work was ended.");
         const opening = input.gate?.before({ tool: "navigate", args: openArgs, url: new URL(open.url, baseUrl).href, read: false });
         if (opening && !opening.allowed) return notOpened(opening.reason);
+        const openDone = acting(false);
         let first = await run(open);
+        openDone();
         input.gate?.after({ tool: "navigate", args: openArgs, ok: first.ok, url: here().url(), read: false });
         // A flaky connection (timeouts, ERR_NETWORK_CHANGED, DNS) on the very first load should not cost the
         // whole scenario: retry the opening navigation a couple of times before giving up.
@@ -641,12 +715,14 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 // Replayed steps reach the application too: the exploration's bound counts them like the model's own (CP2 M-5).
                 const { description: _d, ...args } = step as Step & { description?: string };
                 const read = READ_TOOLS.has(step.action);
-                const target = input.gate ? await stepTarget(here(), step, data) : undefined;
-                const verdict = input.gate?.before({ tool: step.action, args, url: here().url(), read, ...(target ? { target } : {}) });
+                const { target, anchor } = input.gate ? await stepTarget(here(), step, data, input.gate) : {};
+                const verdict = input.gate?.before({ tool: step.action, args, url: here().url(), read, ...(target ? { target } : {}), ...(anchor ? { anchor } : {}) });
                 if (verdict && !verdict.allowed) {
                     return { status: "blocked", steps: recorded, testData, explanation: `Replay of previous steps was refused at "${describeStep(step)}": ${verdict.reason}` };
                 }
+                const done = acting(read);
                 const r = await run(step);
+                done();
                 input.gate?.after({ tool: step.action, args, ok: r.ok, url: here().url(), read, ...(target ? { target } : {}) });
                 if (!r.ok) {
                     return { status: "blocked", steps: recorded, testData, explanation: `Replay of previous steps failed at "${describeStep(step)}": ${r.error}` };
@@ -679,9 +755,9 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             if (ctx.signal?.aborted) return { success: false, error: `${NOT_PERFORMED} This test writer's work was ended. Call finish.`, url: here().url() };
             // The exploration's bound is asked before the action runs (CP2 H-2), with the element it resolves to now (M-1).
             const read = READ_TOOLS.has(step.action);
-            const target = input.gate ? await stepTarget(here(), step, data) : undefined;
+            const { target, anchor } = input.gate ? await stepTarget(here(), step, data, input.gate) : {};
             if (input.gate) {
-                const verdict = input.gate.before({ tool: toolName, args, url: here().url(), read, ...(target ? { target } : {}) });
+                const verdict = input.gate.before({ tool: toolName, args, url: here().url(), read, ...(target ? { target } : {}), ...(anchor ? { anchor } : {}) });
                 if (!verdict.allowed) {
                     input.onAction?.({ tool: toolName, args, ok: false, observation: `${NOT_PERFORMED} ${verdict.reason}` });
                     return { success: false, error: `${NOT_PERFORMED} ${verdict.reason} Do not try it again; call finish.`, url: here().url() };
@@ -690,9 +766,11 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             // Working in a new tab: the step is recorded "in the popup" (the schema's popup support), as the script will run it.
             if (tab && !tab.isClosed() && POPUP_STEPS.has(step.action)) step = { ...step, inPopup: true } as Step;
             session.takeEvents();
+            const done = acting(read);
             const r = await run(step);
             input.gate?.after({ tool: toolName, args, ok: r.ok, url: here().url(), read, ...(target ? { target } : {}) });
             await session.quiet();
+            done();
             // A new tab whose page answers slowly is handed out late: waited for here, so the click that opened it is the one told and recorded.
             await session.newTab();
             const events = session.takeEvents();
