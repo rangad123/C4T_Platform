@@ -87,6 +87,9 @@ export interface ImportCandidate {
     ref: string;
     title: string;
     description: string;
+    /** One criterion per line. */
+    acceptanceCriteria: string;
+    priority: RequirementPriority | null;
     section: string | null;
     kind: string;
     exists: boolean;

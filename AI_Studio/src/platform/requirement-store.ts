@@ -150,6 +150,8 @@ export interface ImportCandidate {
     ref: string;
     title: string;
     description: string;
+    /** One criterion per line, as a person types them on the form. */
+    acceptanceCriteria: string;
     /** The document's priority, when it gave one. */
     priority: RequirementPriority | null;
     /** The heading it was under in the document, when it had one. */
@@ -159,7 +161,7 @@ export interface ImportCandidate {
 
 const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).replace(/\s+\S*$/, "")}…` : s);
 
-/** A requirement as a record: its title, description (with the document's reference) and priority, each in its field. */
+/** A requirement as a record: its title, description (with the document's reference) and acceptance criteria, each in its field. */
 export function candidateOf(r: ParsedRequirement): ImportCandidate {
     const text = r.text.replace(/\s+/g, " ").trim();
     let title = r.title?.trim() || text;
@@ -177,6 +179,7 @@ export function candidateOf(r: ParsedRequirement): ImportCandidate {
         ref,
         title: fit(title, MAX_TITLE),
         description: fit(description, MAX_TEXT),
+        acceptanceCriteria: fit((r.acceptanceCriteria ?? []).join("\n"), MAX_TEXT),
         priority: r.priority ?? null,
         section: r.section ?? null,
         kind: r.kind,

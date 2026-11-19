@@ -4,6 +4,8 @@
 .req-form-top { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 640px) { .req-form-top { grid-template-columns: minmax(0, 1fr); } }
 .req-preview { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 420px; overflow: auto; }
+.req-found-body { margin: 4px 0 0 28px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.req-found-body .bullets { margin: 0; }
 .req-test { display: flex; align-items: center; gap: 8px; padding-right: 12px; }
 .req-test .list-row { flex: 1; min-width: 0; }
 .req-bar { display: flex; height: 8px; border-radius: var(--radius-full); overflow: hidden; background: var(--surface-sunken); gap: 2px; }

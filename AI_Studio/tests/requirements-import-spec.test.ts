@@ -45,13 +45,14 @@ describe("reading a specification without AI", () => {
         expectSpec(parseRequirementsDeterministic(SPEC_TXT));
     });
 
-    it("makes the import candidates: a clean title, the description with the reference, the priority", async () => {
+    it("makes the import candidates: a clean title, the description with the reference, the criteria one per line", async () => {
         const c = candidatesFromText(await docxText());
         expect(c).toHaveLength(4);
         expect(c[1]).toMatchObject({
             ref: "R-002",
             title: "Sign in",
             description: `${SPEC_EXPECTED[1]!.description}\n\nReference: ${SPEC_EXPECTED[1]!.reference}`,
+            acceptanceCriteria: SPEC_EXPECTED[1]!.acceptanceCriteria.join("\n"),
             priority: "high",
         });
         // No title carries the description, the reference or the document's details.
