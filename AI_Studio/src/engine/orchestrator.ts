@@ -1093,7 +1093,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         calls.n += 1;
                     };
                     const signal = ctx.signal ? AbortSignal.any([ctx.signal, loop.signal]) : loop.signal;
-                    const tracker = actionTracker(new URL(p.scenario.startPath, origin).href, authoringSecretsOf(req));
+                    // The run's own sign-in page (where the engine signed in): its sign-in form may be submitted again by every pass.
+                    const tracker = actionTracker(new URL(p.scenario.startPath, origin).href, authoringSecretsOf(req), requiresAuth && authState.loginPath ? { signInPath: authState.loginPath } : {});
                     // Asked before each action reaches the application (CP2 H-2): a refused one is not performed. Every pass of the pursuit
                     // (a review's fix, the leftover redo) starts its own repeat and depth tracking; the session's totals are shared (M-5).
                     // The request bound is the pursuit's, across every pass (CP3b R-2).
@@ -1101,6 +1102,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         before: (a) => loop.act(tracker.before(a)),
                         request: (target) => tracker.request(target),
                         limitReached: () => tracker.limitReached(),
+                        signedIn: (s) => tracker.signedIn(s),
                         after: (a) => tracker.after(a),
                         freshPass: (start) => {
                             tracker.freshPass(start);
@@ -1816,14 +1818,18 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  * An action that already sent a state-changing request is on a new state the next time (the application's data changed since): so the
  * same form submitted a second time with other values is allowed, and a third time is a repeat (and past the request bound). An action
  * that sent nothing keeps the state as before.
+ * The one exemption is the run's own sign-in: the form whose field the engine filled with the run's password placeholder on the
+ * engine's own sign-in page (`signInPath`, where the engine's sign-in found the form). Its request target is not counted, so every pass
+ * of a pursuit may sign in again. A page cannot claim it: the placeholder is the engine's, and the page is the one the engine signed in on.
  */
 export const REQUEST_REPEAT_LIMIT = 2;
-export function actionTracker(startUrl: string, secrets: readonly string[] = []): {
+export function actionTracker(startUrl: string, secrets: readonly string[] = [], opts: { signInPath?: string } = {}): {
     before(a: { tool: string; args: unknown; target?: string; url?: string; read?: boolean; anchor?: { anchor: string; form?: string } }): { state: string; action: string; read: boolean; refusal?: string };
     after(a: { tool: string; args: unknown; ok: boolean; url?: string; read?: boolean }): void;
     freshPass(startUrl: string): void;
     request(target: string): void;
     limitReached(): boolean;
+    signedIn(a: { form: string; url: string }): void;
 } {
     let url = startUrl;
     let previous = "";
@@ -1832,6 +1838,8 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [])
     const sent = new Map<string, { count: number; by: Map<string, number> }>();
     /** The senders of the action running now (set by `before` for an action that is not a read). */
     let senders: string[] = [];
+    /** The run's own sign-in form's request target(s): never counted. */
+    const signIn = new Set<string>();
     const sendersOf = (a: { tool: string; args: unknown; anchor?: { anchor: string } }, key: string): string[] => {
         if (a.anchor) return [`element ${a.anchor.anchor}`];
         const to = (a.args as { url?: unknown } | null)?.url;
@@ -1902,7 +1910,16 @@ export function actionTracker(startUrl: string, secrets: readonly string[] = [])
             if (!read) senders = refusal ? [] : mine;
             return { state: `${pathPattern(url)}|${digest}`, action, read, ...(refusal ? { refusal } : {}) };
         },
+        signedIn: ({ form, url: at }) => {
+            if (!opts.signInPath) return;
+            try {
+                if (pathPattern(withoutQuery(at)) === pathPattern(withoutQuery(new URL(opts.signInPath, at).href))) signIn.add(form);
+            } catch {
+                /* not an address: no exemption */
+            }
+        },
         request: (target) => {
+            if (signIn.has(target)) return;
             const t = sent.get(target) ?? { count: 0, by: new Map<string, number>() };
             t.count += 1;
             for (const s of senders) t.by.set(s, (t.by.get(s) ?? 0) + 1);

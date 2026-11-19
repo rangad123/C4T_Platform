@@ -146,3 +146,31 @@ describe("the state after a submit", () => {
         expect(t.before(click("Tab", "t1", null)).state).toBe(`/order|${previous}`);
     });
 });
+
+describe("the run's own sign-in", () => {
+    const LOGIN = "POST http://shop.test/session";
+    const signInClick = { ...click("Sign in", "s1", LOGIN), url: "http://shop.test/login" };
+    const pass = (t: ReturnType<typeof actionTracker>, fillAt: string) => {
+        t.freshPass("http://shop.test/login");
+        t.signedIn({ form: LOGIN, url: fillAt });
+        return act(t, signInClick, [LOGIN]);
+    };
+    it("its form, filled with the run's password on the engine's sign-in page, may be submitted by every pass", () => {
+        const t = actionTracker("http://shop.test/login", [], { signInPath: "/login" });
+        for (let i = 0; i < 5; i++) expect(pass(t, "http://shop.test/login?next=/order")).toBeUndefined();
+        // Nothing else is exempt: an order submit is still refused the third time.
+        act(t, click("Order"), [ORDER]);
+        act(t, click("Order"), [ORDER]);
+        expect(act(t, click("Order"))).toMatch(/already sent 2 times/);
+    });
+    it("a page cannot claim it: a password filled on another page, or no sign-in page known to the engine, exempts nothing", () => {
+        const elsewhere = actionTracker("http://shop.test/login", [], { signInPath: "/login" });
+        expect(pass(elsewhere, "http://shop.test/order")).toBeUndefined();
+        expect(pass(elsewhere, "http://shop.test/order")).toBeUndefined();
+        expect(pass(elsewhere, "http://shop.test/order")).toMatch(/already sent 2 times/);
+        const unknown = actionTracker("http://shop.test/login");
+        pass(unknown, "http://shop.test/login");
+        pass(unknown, "http://shop.test/login");
+        expect(pass(unknown, "http://shop.test/login")).toMatch(/already sent 2 times/);
+    });
+});
