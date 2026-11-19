@@ -53,26 +53,20 @@ export async function readFrameElements(page: Page): Promise<FrameComponent[]> {
             frame.evaluate((max) => {
                 const items: Array<{ role: string; name: string }> = [];
                 const seen = new Set<string>();
-                const roleOf = (el: Element): string => {
-                    const r = el.getAttribute("role");
-                    if (r) return r.split(/\s+/)[0]!;
-                    const t = el.tagName.toLowerCase();
-                    if (t === "a") return "link";
-                    if (t === "button") return "button";
-                    if (t === "select") return "combobox";
-                    if (t === "textarea") return "textbox";
-                    if (t === "input") {
-                        const ty = (el.getAttribute("type") || "text").toLowerCase();
-                        return ty === "checkbox" ? "checkbox" : ty === "radio" ? "radio" : ty === "submit" || ty === "button" ? "button" : "textbox";
-                    }
-                    return t;
-                };
                 for (const el of Array.from(document.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, [role="button"], [role="link"], [role="tab"]'))) {
                     const labelled = (el as HTMLInputElement).labels?.[0]?.textContent;
                     const name = (el.getAttribute("aria-label") ?? labelled ?? el.getAttribute("placeholder") ?? (el as HTMLElement).innerText ?? (el as HTMLInputElement).value ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
                     if (!name || seen.has(name)) continue;
                     seen.add(name);
-                    items.push({ role: roleOf(el), name });
+                    // The role, worked out here: no helper function in code that runs in the page. tsx (npm start, the runner) keeps
+                    // function names by wrapping a helper in __name(...), which the page does not have (tests/page-scripts-under-tsx.test.ts).
+                    const t = el.tagName.toLowerCase();
+                    const ty = (el.getAttribute("type") || "text").toLowerCase();
+                    const r = el.getAttribute("role");
+                    const role = r
+                        ? r.split(/\s+/)[0]!
+                        : (t === "a" ? "link" : t === "button" ? "button" : t === "select" ? "combobox" : t === "textarea" ? "textbox" : t !== "input" ? t : ty === "checkbox" || ty === "radio" ? ty : ty === "submit" || ty === "button" ? "button" : "textbox");
+                    items.push({ role, name });
                     if (items.length >= max) break;
                 }
                 return items;
