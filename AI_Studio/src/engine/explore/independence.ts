@@ -16,6 +16,10 @@
  * Bounded: each step gets at most `stepTimeoutMs` (default 5 s) and each replay at most `steps x stepTimeoutMs`, so both together take
  * at most 2 x steps x 5 s (plus opening and closing the two browser contexts, and at most SHOT_MS per picture).
  *
+ * Account state (row 229): a replay of a test that signs in uses the account `prepare` gives (clean-account.ts: a newly registered one
+ * when the project allows it), so what earlier tests left on the shared test account does not decide the verdict. Without a clean
+ * account, two replays that reproduce it give `not_on_clean_state` (medium), never `independent`. A test that never signs in is clean.
+ *
  * `shoot` (queue row 173): where a replay stops, the page is handed to it before the browser context closes; it takes and stores a
  * picture and returns a reference to it, which the check lists in `screenshots` (a picture that fails is simply left out).
  */
@@ -26,6 +30,7 @@ import { redactText } from "../../shared/redact-text.js";
 import { describeStep, type Step } from "../spec/schema.js";
 import { executeStep, runtimeData } from "../web/interpreter.js";
 import { nearbyTargets } from "../web/label-fallback.js";
+import { usesTestAccount, type ReplayAccount } from "./clean-account.js";
 import type { IndependenceResult } from "./finding.js";
 
 /** One replay, in the shape of a candidate finding's `replays` entry (explore/finding.ts). */
@@ -43,12 +48,19 @@ export interface IndependenceCheck {
     replays: IndependenceReplay[];
     /** What `shoot` returned for the page where each replay stopped, in replay order (absent without `shoot`). */
     screenshots?: string[];
+    /** Every replay ran on clean account state (clean-account.ts): a newly registered account, or a test that never signs in. */
+    clean?: boolean;
 }
 
 export interface IndependenceOptions {
     stepTimeoutMs?: number;
     /** Takes and stores a picture of the page a replay stopped at; returns its reference, or undefined when none was kept. */
     shoot?: (page: Page) => Promise<string | undefined>;
+    /**
+     * Called before each replay (row 229): who the replay signs in as and whether that is clean account state (clean-account.ts
+     * replayAccountPreparer). Absent: the test's own credentials, clean only when the test never signs in.
+     */
+    prepare?: () => Promise<ReplayAccount>;
 }
 
 export interface DefectTest {
@@ -135,6 +147,15 @@ function cleanMessage(e: unknown, secrets: string[]): string {
     return m.length > MESSAGE_MAX ? `${m.slice(0, MESSAGE_MAX - 1)}…` : m;
 }
 
+const SHARED_NOTE = "on the shared test account, so not checked on clean state";
+
+/** Who the next replay signs in as (`prepare`), or the test's own account: clean only when the test never signs in. */
+async function accountFor(test: DefectTest, prepare: IndependenceOptions["prepare"]): Promise<ReplayAccount> {
+    const fallback: ReplayAccount = usesTestAccount(test.steps) ? { clean: false, note: SHARED_NOTE } : { clean: true, note: "" };
+    if (!prepare) return fallback;
+    return prepare().catch((): ReplayAccount => fallback);
+}
+
 async function replay(
     browser: Browser,
     baseUrl: string,
@@ -143,16 +164,21 @@ async function replay(
     stepTimeoutMs: number,
     shoot?: IndependenceOptions["shoot"],
     captured?: number,
-): Promise<IndependenceReplay & { screenshot?: string; notReached?: boolean; failure?: FailureKind }> {
-    const secrets = [test.credentials?.password ?? "", test.credentials?.totpSecret ?? ""].filter(Boolean);
+    account: ReplayAccount = { clean: true, note: "" },
+): Promise<IndependenceReplay & { screenshot?: string; notReached?: boolean; failure?: FailureKind; clean: boolean }> {
+    // A replay as a newly registered account signs in with that account's credentials (clean-account.ts); its summary says who it was.
+    const credentials = account.credentials ?? test.credentials;
+    const secrets = [credentials?.password ?? "", credentials?.totpSecret ?? "", test.credentials?.password ?? ""].filter(Boolean);
+    const who = account.note && usesTestAccount(test.steps) ? `${label} ${account.note}` : label;
+    const clean = account.clean;
     let session: BrowserSession;
     try {
         session = await BrowserSession.launch(browser, { startUrl: baseUrl, ...(secrets.length ? { secrets } : {}) });
     } catch (e) {
-        return { label, outcome: "error", summary: `${label}: the fresh browser could not start (${cleanMessage(e, secrets)}).` };
+        return { label, outcome: "error", summary: `${who}: the fresh browser could not start (${cleanMessage(e, secrets)}).`, clean };
     }
     session.page.setDefaultTimeout(stepTimeoutMs);
-    const data = runtimeData(test.testData ?? {}, test.credentials);
+    const data = runtimeData(test.testData ?? {}, credentials);
     const deadline = Date.now() + test.steps.length * stepTimeoutMs;
     try {
         for (const [i, step] of test.steps.entries()) {
@@ -175,10 +201,10 @@ async function replay(
                     const kept = failureKind(asKept(raw, observedTextSecrets(secrets)));
                     if (kept.kind === "value") failure = kept;
                 }
-                return { label, outcome: "failed", failedStep: i + 1, summary: `${label}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}`, ...(screenshot ? { screenshot } : {}), ...(e instanceof NotReached ? { notReached: true } : {}), failure };
+                return { label, outcome: "failed", failedStep: i + 1, summary: `${who}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}`, ...(screenshot ? { screenshot } : {}), ...(e instanceof NotReached ? { notReached: true } : {}), failure, clean };
             }
         }
-        return { label, outcome: "passed", summary: `${label}: all ${test.steps.length} steps passed; the defect did not show.` };
+        return { label, outcome: "passed", summary: `${who}: all ${test.steps.length} steps passed; the defect did not show.`, clean };
     } finally {
         await session.close();
     }
@@ -190,8 +216,10 @@ async function replay(
  * pass its own steps (a check bound to a value the authoring session saw, a step leaning on state the session left): it is a broken
  * test, not evidence of a defect (queue row 180, C1c's WEB-027/030/033/046). No AI calls.
  */
-export function replayOwnSteps(browser: Browser, baseUrl: string, test: DefectTest, opts: { stepTimeoutMs?: number } = {}): Promise<IndependenceReplay> {
-    return replay(browser, baseUrl, test, "Replay of the saved test in a fresh browser", opts.stepTimeoutMs ?? STEP_TIMEOUT_MS);
+export async function replayOwnSteps(browser: Browser, baseUrl: string, test: DefectTest, opts: { stepTimeoutMs?: number; prepare?: IndependenceOptions["prepare"] } = {}): Promise<IndependenceReplay & { clean: boolean }> {
+    const account = await accountFor(test, opts.prepare);
+    const { screenshot: _s, notReached: _n, failure: _f, ...r } = await replay(browser, baseUrl, test, "Replay of the saved test in a fresh browser", opts.stepTimeoutMs ?? STEP_TIMEOUT_MS, undefined, undefined, account);
+    return r;
 }
 
 /** Replays a defect test twice, each in a fresh browser context, and says whether its failure stands on its own. */
@@ -199,8 +227,10 @@ export async function checkIndependence(browser: Browser, baseUrl: string, test:
     const captured = capturedStep(test);
     if (captured === undefined) return { independence: "not_run", replays: [] };
     const stepTimeoutMs = opts.stepTimeoutMs ?? STEP_TIMEOUT_MS;
-    const shot = [await replay(browser, baseUrl, test, "Replay 1 in a fresh browser", stepTimeoutMs, opts.shoot, captured)];
-    shot.push(await replay(browser, baseUrl, test, "Replay 2 in a fresh browser", stepTimeoutMs, opts.shoot, captured));
+    // Each replay its own account (row 229): a newly registered one when `prepare` gives one.
+    const shot = [await replay(browser, baseUrl, test, "Replay 1 in a fresh browser", stepTimeoutMs, opts.shoot, captured, await accountFor(test, opts.prepare))];
+    shot.push(await replay(browser, baseUrl, test, "Replay 2 in a fresh browser", stepTimeoutMs, opts.shoot, captured, await accountFor(test, opts.prepare)));
+    const clean = shot.every((r) => r.clean);
     // How the captured check failed when it was captured; without its text, as an assertion that saw a value.
     const want = test.capturedObserved !== undefined ? failureKind(test.capturedObserved, { plainIsValue: true }) : undefined;
     // Without the captured text, the value both replays saw (they must agree on it).
@@ -213,7 +243,7 @@ export async function checkIndependence(browser: Browser, baseUrl: string, test:
     // ran out before the check, never ran it (CP3b R-3).
     const reproduced = (r: (typeof shot)[number]) => r.outcome === "failed" && r.failedStep === captured && !r.notReached && sameWay(r.failure);
     // The finding's replay entries carry no picture: the references are listed apart.
-    const replays: IndependenceReplay[] = shot.map(({ screenshot: _s, notReached, failure, ...r }) => {
+    const replays: IndependenceReplay[] = shot.map(({ screenshot: _s, notReached, failure, clean: _c, ...r }) => {
         const said = r.summary.replace(/\.+$/, "");
         if (r.outcome !== "failed" || r.failedStep === undefined) return r;
         if (r.failedStep < captured) return { ...r, summary: `${said}. It did not reach the captured check (step ${captured}), so it does not reproduce the defect.` };
@@ -228,6 +258,8 @@ export async function checkIndependence(browser: Browser, baseUrl: string, test:
         return r;
     });
     const screenshots = opts.shoot ? { screenshots: shot.flatMap((r) => (r.screenshot ? [r.screenshot] : [])) } : {};
-    if (replays.some((r) => r.outcome === "error")) return { independence: "not_run", replays, ...screenshots };
-    return { independence: shot.every(reproduced) ? "independent" : "state_dependent", replays, ...screenshots };
+    if (replays.some((r) => r.outcome === "error")) return { independence: "not_run", replays, ...screenshots, clean };
+    // Reproduced on the shared account only: not checked on clean state, so never `independent` (row 227: leftovers reproduce too).
+    const result: IndependenceResult = shot.every(reproduced) ? (clean ? "independent" : "not_on_clean_state") : "state_dependent";
+    return { independence: result, replays, ...screenshots, clean };
 }

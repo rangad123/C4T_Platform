@@ -9,7 +9,7 @@
  */
 
 export type CaptureState = "captured" | "observed_only";
-export type Independence = "independent" | "state_dependent" | "not_run";
+export type Independence = "independent" | "state_dependent" | "not_run" | "not_on_clean_state";
 export type Confidence = "high" | "medium" | "low";
 
 /** The finding itself (src/engine/explore/finding.ts CandidateFinding), as the page reads it. */
@@ -55,7 +55,9 @@ export function confidenceMeaning(f: Pick<CandidateFinding, "confidence" | "inde
     if (f.confidence === "medium")
         return f.independence === "state_dependent"
             ? `${SOURCED} and the saved test fails at that check, but replayed from a fresh start it did not fail the same way, so it may depend on what ran before.`
-            : `${SOURCED} and the saved test fails at that check, but it could not be replayed from a fresh start.`;
+            : f.independence === "not_on_clean_state"
+              ? `${SOURCED} and the saved test fails at that check, and it failed the same way when replayed, but on the shared test account, so it may still depend on what earlier tests left there.`
+              : `${SOURCED} and the saved test fails at that check, but it could not be replayed from a fresh start.`;
     return "The AI saw this while exploring, but no failing check of a stated expected result was kept.";
 }
 

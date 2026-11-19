@@ -60,6 +60,7 @@ import { findLeftoverUse, leftoverReason, startingIdsOf } from "./web/leftovers.
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
 import { checkIndependence, replayOwnSteps, type IndependenceCheck, type IndependenceReplay } from "./explore/independence.js";
+import { cleanReplayPlan, registerFreshAccount, replayAccountPreparer, signupPathOf } from "./explore/clean-account.js";
 import type { KnowledgeRule } from "./planning/planner.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { createHash } from "node:crypto";
@@ -918,6 +919,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
                 // A replay that throws or cannot start did not pass either (N-9): the test is not reported as a finding, and the reason says why.
                 const replaySecrets = [replayed.credentials?.password ?? "", replayed.credentials?.totpSecret ?? ""].filter(Boolean);
+                // Row 229 (1b): a replay that signs in as the main account does so as a newly registered account, when the project allows
+                // tests that change data and the exploration found a sign-up page (explore/clean-account.ts); otherwise it runs on the shared
+                // account and its verdict says it was not checked on clean state (never independent / high).
+                const signupPath = signupPathOf(model) ?? authState.signupPath;
+                const cleanPlan = cleanReplayPlan({ steps: written.steps, roleAccount: Boolean(asAccount), dataChanges, ...(signupPath ? { signupPath } : {}), startingIds: startingIdsOf(model) });
+                const prepare = replayAccountPreparer(cleanPlan, () =>
+                    registerFreshAccount(browser, origin, signupPath ?? "/", { ...(authState.loginPath ? { loginPath: authState.loginPath } : {}), ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}) }),
+                );
                 const ownAllowed = capture !== "observed_only" || replayAllowed(written.steps.length, "the replay of the test's own steps");
                 // Row 213: the exploration's limits refused the replay that checks it, so it is unverified: saved for review, not a finding.
                 if (!ownAllowed) {
@@ -935,7 +944,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 }
                 const own: IndependenceReplay | undefined =
                     capture === "observed_only"
-                        ? await replayOwnSteps(browser, origin, replayed).catch((e: unknown) => {
+                        ? await replayOwnSteps(browser, origin, replayed, { prepare }).catch((e: unknown) => {
                               let m = (e instanceof Error ? e.message : String(e)).split("\n")[0]!.trim().slice(0, 300);
                               for (const s of replaySecrets) m = m.split(s).join("***");
                               return { label: "Replay of the saved test in a fresh browser", outcome: "error" as const, summary: `the replay threw: ${m}` };
@@ -964,7 +973,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const independence =
                     // Two fresh replays of the saved steps.
                     capture === "captured" && replayAllowed(2 * written.steps.length, "the two fresh replays of the independence check")
-                        ? await checkIndependence(browser, origin, replayed, shoot ? { shoot } : {}).catch(() => ({ independence: "not_run" as const, replays: [] }))
+                        ? await checkIndependence(browser, origin, replayed, { prepare, ...(shoot ? { shoot } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
                 const found = defectFinding({ scenario, rules: scenarioRules, requirementIds, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
                 const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
@@ -1600,7 +1609,7 @@ export function defectFinding(p: {
     const capture: CaptureState = source ? p.capture : "observed_only";
     const confidence = confidenceOf({ sourced: source !== null, capture, independence: p.independence.independence });
     const named = n ? `expected result ${n[1]} (${cut(expected, 200)})` : rule ? `rule ${source}` : source ? `${source}` : "";
-    const independent = { independent: "both fresh replays failed at it", state_dependent: "the fresh replays did not fail at it the same way", not_run: "the fresh replays could not be run" }[p.independence.independence];
+    const independent = { independent: "both fresh replays failed at it", state_dependent: "the fresh replays did not fail at it the same way", not_run: "the fresh replays could not be run", not_on_clean_state: "both fresh replays failed at it, but on the shared test account, so it was not checked on clean state" }[p.independence.independence];
     const basis = source
         ? `The failing check is of ${named}; ${independent} (confidence ${confidence}).`
         : `No failing check of a stated expectation was kept, so it was seen, not kept as a check (confidence ${confidence}).`;

@@ -29,15 +29,19 @@ const text = (max: number) => z.string().transform((s) => redactText(s, max));
 const ref = z.string().min(1).max(L.refMax);
 
 export const CAPTURE_STATES = ["captured", "observed_only"] as const;
-export const INDEPENDENCE_RESULTS = ["independent", "state_dependent", "not_run"] as const;
+/**
+ * `not_on_clean_state` (row 229): both replays failed the same way, but on the shared test account (no account could be registered for
+ * them, clean-account.ts), so what earlier tests left there may be why: never `independent`, so never high.
+ */
+export const INDEPENDENCE_RESULTS = ["independent", "state_dependent", "not_run", "not_on_clean_state"] as const;
 export const FINDING_CONFIDENCE = ["high", "medium", "low"] as const;
 export type CaptureState = (typeof CAPTURE_STATES)[number];
 export type IndependenceResult = (typeof INDEPENDENCE_RESULTS)[number];
 export type FindingConfidence = (typeof FINDING_CONFIDENCE)[number];
 
 /**
- * Decision 9: `high` = sourced expectation + captured failing check + independence check passed; `medium` = sourced + captured,
- * independence not run or state-dependent; `low` = a defect claimed without a captured sourced check ("observed only").
+ * Decision 9: `high` = sourced expectation + captured failing check + independence check passed (on clean account state); `medium` =
+ * sourced + captured, independence not run, state-dependent or not checked on clean state; `low` = a defect claimed without a captured sourced check ("observed only").
  */
 export function confidenceOf(f: { sourced: boolean; capture: CaptureState; independence: IndependenceResult }): FindingConfidence {
     if (!f.sourced || f.capture !== "captured") return "low";
