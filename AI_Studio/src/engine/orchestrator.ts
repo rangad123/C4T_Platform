@@ -1813,14 +1813,15 @@ export function gatedLlm(base: LlmClient, gate: () => void): LlmClient {
  * requests each action sent (`request`, by method and address pattern: explore/request-target.ts), and what sent them (`senderOf`): an
  * element by its anchor (its form and landmark ancestry, labelled containers included, and its own tag, type and a field's name) with its
  * role and accessible name as first seen, kept on the element itself while it stays on the page (web/author.ts), so a page that renames
- * the control it was asked to click (a counter in its text) does not make a new sender, and a count badge in a name is dropped anyway
- * (`senderName`); else the action's key; a navigation by its address pattern. The anchor alone is no sender (CP3c T-1): a page's form-less buttons often share one (BenchShop's
+ * the control it was asked to click (a counter in its text) does not make a new sender, and every number and amount in a name is folded
+ * anyway (`senderName`, CP3d U-3), with the element's place among its siblings of its kind keeping "Tab 1" and "Tab 2" apart; else the action's key; a navigation by its address pattern. The anchor alone is no sender (CP3c T-1): a page's form-less buttons often share one (BenchShop's
  * nine submit buttons in <main>), and one control's history must not refuse another. `before` gives a refusal for an action that is not
  * a read and would send a request target again past REQUEST_REPEAT_LIMIT: the same sender, once it has sent that target the limit's number
  * of times itself, or a click or key press on a form whose target was sent that often in all (the form is the page's own record of
  * where it sends, whatever its buttons are called). A target many senders send (an analytics call on every click) is so counted per
- * sender and refuses no other control. A page that replaces a form-less control with a new element of another name after every click
- * (a re-render, a reload) makes a new sender each time: that is bounded by the action and step budgets, not by this bound (CP3c T-3).
+ * sender and refuses no other control. A page that replaces a form-less control with a new element of another name
+ * (other words, not only other numbers or prices) after every click (a re-render, a reload), or puts it in another place among its
+ * siblings, makes a new sender each time: that is bounded by the action and step budgets, not by this bound (CP3c T-3).
  * An action that already sent a state-changing request is on a new state the next time (the application's data changed since): so the
  * same form submitted a second time with other values is allowed, and a third time is a repeat (and past the request bound). An action
  * that sent nothing keeps the state as before.
@@ -1835,7 +1836,8 @@ export const REQUEST_REPEAT_LIMIT = 2;
 /**
  * The request bound's sender for an element (CP3c T-1): the sender web/author.ts found for it (`anchor.sender`: the element as first
  * seen, kept on it while it stays on the page), else its anchor digest with the role and accessible name of its identity
- * (`role "name" @digest`, web/author.ts targetIdentity) as `senderName` folds them.
+ * (`role "name" @digest`, web/author.ts targetIdentity) as `senderName` folds them (numbers too: without the element's place, two
+ * controls that differ only by a number are one sender here).
  */
 export function senderOf(anchor: { anchor: string; sender?: string }, target: string | undefined): string {
     if (anchor.sender) return `element ${anchor.sender}`;

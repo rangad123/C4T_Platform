@@ -45,7 +45,7 @@ import { maskObservedText, observedTextSecrets } from "../evidence/observed-text
 import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 import { findLeftoverUse, LEFTOVER_REDO, leftoverReason } from "./leftovers.js";
-import { requestTarget, senderName, STATE_CHANGING_METHODS } from "../explore/request-target.js";
+import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -237,7 +237,14 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
                 const formSelf = owner ? [docPath, Array.prototype.indexOf.call(self.ownerDocument.forms, owner), owner.id, owner.getAttribute("name") ?? "", (owner.getAttribute("method") ?? "get").toLowerCase(), owner.getAttribute("action") ?? ""].join("|") : null;
                 // The request bound's sender this element was first seen as (CP3c T-1), kept on the element while it stays on the page.
                 const mark = (self as unknown as Record<symbol, unknown>)[Symbol.for("c4t.request-sender")];
-                return { anchor: parts.join(">"), form: owner && action ? { method, action } : null, formSelf, sender: typeof mark === "string" ? mark : null };
+                // Its place among its parent's children of the same tag and role (CP3d U-3): part of the sender only, never of the anchor.
+                const selfRole = self.getAttribute("role") ?? "";
+                let position = 0;
+                for (const c of Array.from(self.parentElement?.children ?? [])) {
+                    if (c === self) break;
+                    if (c.tagName === self.tagName && (c.getAttribute("role") ?? "") === selfRole) position++;
+                }
+                return { anchor: parts.join(">"), form: owner && action ? { method, action } : null, formSelf, sender: typeof mark === "string" ? mark : null, position };
             }, undefined, { timeout: 1_000 }),
         ]);
         // `- button "Continue"` or `- textbox "Email": typed value`: role and name only, never a value.
@@ -248,11 +255,12 @@ async function resolveTarget(page: Page, l: Locator, data: RuntimeData): Promise
         const form = anchor.form ? requestTarget(anchor.form.method === "post" ? "POST" : anchor.form.method, anchor.form.action) : undefined;
         const formId = anchor.formSelf !== null ? createHash("sha256").update(`form ${anchor.formSelf}`).digest("hex").slice(0, 12) : undefined;
         // The request bound's sender (CP3c T-1): the anchor alone is shared by sibling controls (BenchShop's buttons in <main>), so the
-        // role and accessible name are part of it. It is fixed on the element the first time it is seen: a page that renames the control
-        // after a click (a counter in its text) does not make it a new sender.
+        // role and accessible name are part of it, with its numbers and amounts folded and its place among its siblings of the same kind
+        // (CP3d U-3: a re-rendered control is a new element). It is fixed on the element the first time it is seen: a page that renames
+        // the control after a click does not make it a new sender.
         let sender = anchor.sender;
         if (!sender) {
-            sender = createHash("sha256").update(`${anchor.anchor}\n${senderName(`${m?.[1] ?? "element"} ${m?.[2] ?? ""}`)}`).digest("hex").slice(0, 12);
+            sender = elementSender(anchor.anchor, `${m?.[1] ?? "element"} ${m?.[2] ?? ""}`, anchor.position);
             const fixed = sender;
             await el.evaluate((node, s) => {
                 (node as unknown as Record<symbol, unknown>)[Symbol.for("c4t.request-sender")] = s;

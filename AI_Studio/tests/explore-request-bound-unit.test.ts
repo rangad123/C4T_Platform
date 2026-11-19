@@ -5,7 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { requestTarget } from "../src/engine/explore/request-target.js";
+import { elementSender, requestTarget, senderName } from "../src/engine/explore/request-target.js";
 import { actionTracker, REQUEST_REPEAT_LIMIT } from "../src/engine/orchestrator.js";
 
 const START = "http://shop.test/order";
@@ -147,7 +147,9 @@ describe("the request bound", () => {
         const t = actionTracker(START);
         const EVENTS = "POST http://shop.test/events";
         const D = "m1";
-        const btn = (name: string) => ({ ...click(name, D, null), target: `button "${name}" @${D}` });
+        // Each button's sender as web/author.ts finds it: its anchor, its folded name and its place among the buttons beside it.
+        const ROW = ["Add to cart", "Update", "Tab 1", "Tab 2", "Continue", "Place order"];
+        const btn = (name: string) => ({ ...click(name, D, null), target: `button "${name}" @${D}`, anchor: { anchor: D, sender: elementSender(D, `button ${name}`, ROW.indexOf(name)) } });
         expect(act(t, btn("Add to cart"), [EVENTS, "POST http://shop.test/cart"])).toBeUndefined();
         expect(act(t, btn("Update"), [EVENTS, "PATCH http://shop.test/cart/:id"])).toBeUndefined();
         // Update again: the events call was sent twice in all, but this control sent it once.
@@ -168,6 +170,33 @@ describe("the request bound", () => {
         act(t, { tool: "navigate", args: { url: "/start?a=1" }, url: START }, [INIT]);
         act(t, { tool: "navigate", args: { url: "/start?a=2" }, url: START }, [INIT]);
         expect(act(t, { tool: "navigate", args: { url: "/start?a=3" }, url: START })).toMatch(/already sent 2 times/);
+    });
+});
+
+// CP3d U-3: a re-rendered control is a new element (the sender kept on it is lost), so its sender is found again from its anchor, its
+// name and its place. Counters and prices on buttons are ordinary UI: a number or amount anywhere in the name is not part of it.
+describe("sender names (CP3d U-3)", () => {
+    it("every number and amount in a control's name is a placeholder: counters and prices do not make a new sender", () => {
+        expect(senderName("button Buy now — 1 in cart")).toBe(senderName("button Buy now — 2 in cart"));
+        expect(senderName("button 9 left - Buy")).toBe(senderName("button 8 left - Buy"));
+        expect(senderName("button Pay $12.50 → $25.00")).toBe(senderName("button Pay $25.00 → $37.50"));
+        expect(senderName("button Pay $12.50")).toBe(senderName("button Pay $25.00 → $37.50"));
+        expect(senderName("button Pay €1.234,50")).toBe(senderName("button Pay EUR 99"));
+        expect(senderName("button Pay 1,250 USD")).toBe(senderName("button Pay ₹ 40"));
+        expect(senderName("button Order (3)")).toBe(senderName("button Order"));
+        expect(senderName("button Buy \u{1F6D2}")).toBe(senderName("button Buy"));
+        expect(senderName("button Buy")).toBe(senderName("button  BUY "));
+        // Words still count.
+        expect(senderName("button Buy")).not.toBe(senderName("button Sell"));
+        expect(senderName("button Pay $12.50")).not.toBe(senderName("button Refund $12.50"));
+    });
+    it("controls whose names differ only by a number are kept apart by their place among siblings of their kind", () => {
+        expect(elementSender("a1", 'tab Tab 1', 0)).not.toBe(elementSender("a1", 'tab Tab 2', 1));
+        expect(elementSender("a1", "link 1", 3)).not.toBe(elementSender("a1", "link 2", 4));
+        // A control re-rendered in its place with another count is the same sender.
+        expect(elementSender("a1", "button Buy now — 1 in cart", 0)).toBe(elementSender("a1", "button Buy now — 2 in cart", 0));
+        expect(elementSender("a1", "button Buy", 0)).not.toBe(elementSender("a2", "button Buy", 0));
+        expect(elementSender("a1", "button Buy", 0)).toMatch(/^[0-9a-f]{12}$/);
     });
 });
 

@@ -59,6 +59,13 @@ beforeAll(async () => {
                 return res.end(page(`<h1>Renamed</h1><button id="r">Buy now</button>`, `<script>const W=['Buy again','Buy once more','Buy another','Get one','Grab it','Take it','Have it'];let k=0;document.getElementById('r').onclick=async()=>{await fetch('/renamed/buy',{method:'POST'});document.getElementById('r').textContent=W[k++%W.length]}</script>`));
             }
             if (path === "/renamed/buy") return res.end("{}");
+            // CP3d U-3: a form-less button re-rendered after every click (a new element), its name carrying a number outside brackets.
+            const rr = /^\/rr\/(counter|left|pay)$/.exec(path);
+            if (rr) {
+                const label = { counter: "'Buy now — '+k+' in cart'", left: "(9-k)+' left - Buy'", pay: "'Pay $'+(12.5*(k+1)).toFixed(2)+' → $'+(12.5*(k+2)).toFixed(2)" }[rr[1] as "counter" | "left" | "pay"];
+                return res.end(page(`<h1>Re-render</h1><div id="w"></div>`, `<script>let k=0;const L=(k)=>${label};function draw(){document.getElementById('w').innerHTML='<button id="b" type="button">'+L(k)+'</button>';document.getElementById('b').onclick=async()=>{await fetch('/rr/${rr[1]}/buy',{method:'POST'});k++;draw()}}draw()</script>`));
+            }
+            if (path.startsWith("/rr/")) return res.end("{}");
             if (path === "/login") return res.end(page(`<h1>Sign in</h1><form method="post" action="/login/session"><label>Username <input name="u"></label><label>Password <input name="p" type="password"></label><button type="submit">Sign in</button></form>`));
             // A single-endpoint app (CP3c T-4): the sign-in form and a Delete form elsewhere both post to /app.
             if (path === "/login2")
@@ -155,6 +162,12 @@ describe("the request bound: names the page controls and actions in between do n
         const r = await run("RENAMED", [[nav("/renamed")], Array.from({ length: 8 }, () => css("#r"))]);
         expect(r.posts["/renamed/buy"] ?? 0).toBeLessThanOrEqual(LIMIT);
         expect(r.refused[0]?.reason).toMatch(REFUSED);
+    }, 300_000);
+    it.each(["counter", "left", "pay"])("U-3: a re-rendered button whose name carries a number outside brackets (%s) is refused at the third send", async (kind) => {
+        const r = await run(`RERENDER-${kind}`, [[nav(`/rr/${kind}`)], Array.from({ length: 8 }, () => css("#b"))]);
+        expect(r.posts[`/rr/${kind}/buy`] ?? 0).toBeLessThanOrEqual(LIMIT);
+        expect(r.performedClicks).toBe(LIMIT);
+        expect(r.refused[0]?.reason).toMatch(/^The request POST \S+ was already sent 2 times in this pursuit/);
     }, 300_000);
     it("T-1: analytics on every click: a normal checkout completes, each control twice at most, no other button refused", async () => {
         const r = await run("ANALYTICS", [

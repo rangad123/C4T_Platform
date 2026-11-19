@@ -106,7 +106,9 @@ An operator that does not run is listed with its reason, never left out silently
 
 Every limit is counted by the platform, not asked of the AI, and is fixed before the first page of the session is read.
 
-The actions and requests the explorer starts stay within the limits for pages that do not deliberately disguise repeated controls.
+The actions and requests the explorer starts stay within the limits, except on the pages listed under [Known limits](#known-limits):
+a control the page renames with other words or moves on every click, and the few other cases listed there. A counter or a price in
+a control's name ("Buy now — 3 in cart", "Pay $12.50") does not make it a new control.
 Each action is counted before it is done, and a request the application receives because of one is behind a counted action, the
 page's first load included. A request that changes data (POST, PUT, PATCH, DELETE) is counted for the whole pursuit by its method and
 address: once one has been sent twice, an action that would send it again is refused before it runs. The run's own sign-in form may
@@ -240,7 +242,9 @@ The job also keeps the session's limits, each objective with its priority, the s
 These are known, accepted gaps in the request count and in secret masking. They need the page itself to do something unusual, or
 they are a small bias. The action, step and time limits above still hold in every case.
 
-**A page that disguises a repeated control** can send one request more than twice in a pursuit:
+**A page that changes a repeated control** can send one request more than twice in a pursuit:
+- a control the page replaces with a new element whose name has other words after every click (numbers, prices and count badges
+  in a name are ignored, so a counter is not enough), or that it moves to another place among the controls beside it;
 - a control that changes its tag or type on every click (a button, then a link, then a `div` with a button role);
 - a control inside a section whose label changes on every click;
 - a GraphQL endpoint whose operation name changes on every click;
