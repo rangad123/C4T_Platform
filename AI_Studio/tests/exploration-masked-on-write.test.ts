@@ -42,6 +42,30 @@ function leaky() {
     });
 }
 
+/**
+ * CP3c T-5: the coverage lists (a page path, an element's name, an endpoint) and an objective's source carry what the page showed or
+ * where it went: a password in a reset path, an API token in an element's name or an endpoint. Every string is masked, not a field list.
+ */
+function leakyLists() {
+    const e = sampleExploration();
+    const t = (xs: string[]) => ({ total: xs.length + 1, exercised: 1, notExercised: xs, more: 0 });
+    return sampleExploration({
+        objectives: e.objectives.map((o) => ({ ...o, source: `/reset/${PW}` })),
+        coverage: {
+            ...e.coverage,
+            pages: { ...t([`/reset/${PW}`, `/share?token=${JWT}`]), unknown: [`/reset/${PW}`, `/keys/Bearer ${BEARER}`] },
+            elements: t([`/settings textbox "API token ${JWT}"`, `button "Use ${PW}"`]),
+            workflowSteps: t([`step with ${PW}`]),
+            transitions: t([`/a -> /reset/${PW}`]),
+            inputClasses: t([`password ${PW}`]),
+            rules: t([`R-1 ${PW}`]),
+            endpoints: t([`GET /api/keys/${JWT}`, `POST /api/login?password=${PW}`]),
+            unexplored: e.coverage.unexplored.map((u) => ({ ...u, source: `/reset/${PW}` })),
+        },
+        actionLog: e.actionLog.map((r) => ({ ...r, objectiveId: r.objectiveId, state: `/reset/${PW}|abc123abc123` })),
+    });
+}
+
 const leaks = (text: string) => ({ pw: text.includes(PW), bearer: text.includes(BEARER), jwt: text.includes(JWT) });
 const NONE = { pw: false, bearer: false, jwt: false };
 
@@ -79,6 +103,42 @@ describe("the coverage record's free text is masked when it is written", () => {
         // And the stored record as a whole (what a later reader of the artifact gets).
         const row = platform.repo.db.get<{ path: string }>("SELECT path FROM artifacts WHERE job_id = ? AND kind = 'exploration'", job.id)!;
         expect(leaks((await platform.store.getBytes(row.path)).toString("utf8"))).toEqual(NONE);
+    });
+
+    it("on the platform: every coverage list and an objective's source are masked too, ids are kept (CP3c T-5)", async () => {
+        const s = seedProject(platform, "Masked coverage lists", "http://127.0.0.1:9");
+        const job = await platform.repo.createJob(s.projectId, s.appId, { ...DEFAULT_JOB_OPTIONS });
+        const sink = new RepoSink(platform.repo, platform.store, { id: job.id, projectId: s.projectId, applicationId: s.appId });
+        sink.addSecrets([PW]);
+        await saveExploration(sink, leakyLists());
+        await sink.writes.flush();
+        const res = await app.inject({ method: "GET", url: `/api/projects/${s.projectId}/jobs/${job.id}/coverage`, headers: { "x-api-key": KEY } });
+        expect(res.statusCode).toBe(200);
+        expect(leaks(res.body)).toEqual(NONE);
+        const body = JSON.parse(res.body);
+        expect(body.coverage.pages.unknown[0]).toMatch(/^\/reset\//);
+        expect(body.coverage.endpoints.notExercised[0]).toMatch(/^GET \/api\/keys\//);
+        expect(body.coverage.unexplored[0].objectiveId).toBe("OBJ-0123456789abcdef");
+        // The stored record (the route serves only part of it): no leak in any field, and the ids are as written.
+        const row = platform.repo.db.get<{ path: string }>("SELECT path FROM artifacts WHERE job_id = ? AND kind = 'exploration'", job.id)!;
+        const stored = (await platform.store.getBytes(row.path)).toString("utf8");
+        expect(leaks(stored)).toEqual(NONE);
+        const record = JSON.parse(stored);
+        expect(record.objectives[0].id).toBe("OBJ-0123456789abcdef");
+        expect(record.objectives[0].source).toMatch(/^\/reset\//);
+        expect(record.outcomes[0].result.testKey).toBe("checkout-as-stated");
+        expect(record.outcomes.map((o: { objectiveId: string }) => o.objectiveId)).toEqual(sampleExploration().outcomes.map((o) => o.objectiveId));
+    });
+
+    it("on a runner: every coverage list is masked with the shared patterns too (CP3c T-5)", () => {
+        // No stored secret on this runner's log: only the shared patterns (bearer tokens, JWTs) can catch them.
+        const { log } = memoryLogger();
+        const sent = explorationForResult(leakyLists(), log, "task-1");
+        expect(sent.exploration).toBeDefined();
+        const text = JSON.stringify(sent);
+        expect(text.includes(JWT)).toBe(false);
+        expect(text.includes(BEARER)).toBe(false);
+        expect(sent.exploration!.outcomes[0]!.result!.testKey).toBe("checkout-as-stated");
     });
 
     it("on a runner: the record it sends has no stored secret, bearer token or JWT in any field", () => {

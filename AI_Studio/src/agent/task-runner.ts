@@ -1064,7 +1064,7 @@ export function explorationForResult(exploration: unknown, log: Pick<Logger, "re
     const record = parseExploration(exploration);
     if (record.ok) {
         // The stored secrets everywhere (the runner's log masking), then the shared patterns (bearer tokens, JWTs, secret parameters)
-        // in every free-text field (CP3b R-4); the engine masked the action log's actions with both already. The platform masks the
+        // in every string but the ids (CP3b R-4, CP3c T-5); the engine masked the action log's actions with both already. The platform masks the
         // record again when it saves it.
         const known = masked(record.value, (t) => log.redact(t));
         return { exploration: maskExplorationText(known, (t) => redactText(t, EXPLORATION_TEXT_MAX)) };
