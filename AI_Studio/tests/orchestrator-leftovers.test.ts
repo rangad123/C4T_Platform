@@ -120,6 +120,8 @@ async function explore(projectId: string) {
     calls.length = toolQueue.length = 0;
     const queued = await call("POST", `/api/projects/${projectId}/test-generation`, {
         url: URL, targets: ["web"], maxPages: 5, accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false,
+        // Explorations write their test cases without running them (S2); the leftover check runs with validation, so this asks them to run.
+        runTestCases: true,
     });
     expect(queued.status, JSON.stringify(queued.body)).toBe(202);
     let job: { status: string } | undefined;

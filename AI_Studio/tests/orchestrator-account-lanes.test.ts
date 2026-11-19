@@ -188,6 +188,8 @@ describe("one lane per account", () => {
         const queued = await call("POST", `/api/projects/${projectId}/test-generation`, {
             url: URL, targets: ["web"], maxPages: 5, credentials: { username: USER, password: PASSWORD }, variants: ["dark", "locale"],
             accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false,
+            // Explorations write their test cases without running them (S2); this test watches the replays, so it asks them to run.
+            runTestCases: true,
         });
         expect(queued.status, JSON.stringify(queued.body)).toBe(202);
         let job: { status: string } | undefined;
