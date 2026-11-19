@@ -10,7 +10,7 @@
  *  - Every other text passes the shared pattern masking (src/shared/redact-text.ts) and the run's secrets.
  * Masking an already masked row changes nothing, so the platform can mask again whatever a runner sent.
  */
-import { maskSecrets } from "../frameworks/plugin.js";
+import { secretVariants } from "../../agent-protocol/secret-variants.js";
 import { clip, HIDDEN, redactText } from "../../shared/redact-text.js";
 import { namesSecretField as namesSecretFieldName } from "../../shared/secret-field.js";
 import type { ActionLogRow } from "./loop.js";
@@ -31,6 +31,13 @@ const ABSOLUTE_URL = /\b([a-z][a-z0-9+.-]{0,31}:\/\/[^\s?#"'<>]*)[?#][^\s"'<>]*/
 export function withoutQuery(url: string): string {
     const cut = url.search(/[?#]/);
     return cut === -1 ? url : url.slice(0, cut);
+}
+
+/** The run's secrets hidden in every form text usually carries them in (plain, URL-encoded, JSON-escaped, base64: secret-variants.ts). */
+function maskSecrets(text: string, secrets: readonly string[]): string {
+    let out = text;
+    for (const v of [...new Set(secrets.flatMap((s) => secretVariants(s)))].sort((a, b) => b.length - a.length)) if (out.includes(v)) out = out.split(v).join(HIDDEN);
+    return out;
 }
 
 /** Free text masked: addresses lose their query and fragment, then pattern masking and the run's secrets. */
