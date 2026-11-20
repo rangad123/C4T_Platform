@@ -1,6 +1,6 @@
 /**
  * The Releases tab in a real browser against the real built UI (`web/dist`) and a real platform with seeded results (no model, no worker):
- * create manual cases (form and CSV import), open a release, see what blocks the approval, mark the checks (mouse and keyboard),
+ * create manual cases (form and workbook import), open a release, see what blocks the approval, mark the checks (mouse and keyboard),
  * be refused by the server, approve, see the history, download the report, reopen. Escaping, axe in light and dark, phone width.
  * Set MANUAL_SHOTS=<folder> to also write screenshots there. Port 5711.
  */
@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { buildXlsx } from "../src/security/findings/xlsx.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
 const PORT = 5711;
@@ -88,7 +89,7 @@ describe("Releases tab", () => {
         await shot("releases-empty");
     });
 
-    it("adds test cases with the form and imports a CSV file, naming the row that could not be imported", async () => {
+    it("adds test cases with the form and imports the test case workbook, naming the row that could not be imported", async () => {
         await page.getByRole("link", { name: "Add test cases" }).click();
         await pwExpect(page.getByRole("heading", { name: "No test cases yet" })).toBeVisible();
         // The tab and its empty state say "Add test case", with no "(manual)".
@@ -104,7 +105,7 @@ describe("Releases tab", () => {
         const add = async (ref: string, title: string, area: string, priority: string, action: string, expected: string) => {
             const form = await openForm();
             await form.getByLabel("Title", { exact: true }).fill(title);
-            await form.getByText("More: area, source, linked test scripts").click();
+            await form.getByText("More: area, page, source, linked test scripts").click();
             await form.getByLabel("Area", { exact: true }).fill(area);
             await form.getByLabel("Priority", { exact: true }).selectOption(priority);
             await form.getByLabel("Step 1, what to do").fill(action);
@@ -122,8 +123,9 @@ describe("Releases tab", () => {
         await pwExpect(page.getByText("Give the test case a title")).toBeVisible();
         await page.getByRole("button", { name: "Close the form" }).click();
 
-        const csv = 'title,area,priority,steps\nPrint the invoice,Billing,low,"Print => One page comes out"\n,Billing,low,\n';
-        await page.locator('input[type="file"]').setInputFiles({ name: "cases.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+        // The test case workbook (CSV was removed, owner 2026-11-20): one Manual row, and one row without a title.
+        const wb = buildXlsx([{ name: "Test cases", header: true, rows: [["Title", "Type", "Priority", "Page", "Steps"], ["Print the invoice", "Manual", "low", "Billing", "Print => One page comes out"], ["", "Manual", "low", "Billing", ""]] }]);
+        await page.locator('input[type="file"]').setInputFiles({ name: "cases.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from(wb) });
         await pwExpect(page.getByText("Imported 1 test case. 1 row could not be imported.")).toBeVisible();
         await pwExpect(page.getByRole("list", { name: "Rows that were not imported" })).toContainText("Row 3: The title is required");
         await pwExpect(row("Print the invoice")).toContainText("TC-003");
@@ -157,16 +159,15 @@ describe("Releases tab", () => {
         expect((await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: "Dark mode", area: "Display", priority: "medium" })).status).toBe(201);
     });
 
-    it("exports the cases as CSV", async () => {
+    it("exports the cases as JSON (no CSV any more)", async () => {
         await page.goto("about:blank");
         await page.goto(`${BASE}/#/projects/${shop.projectId}/manual-cases`);
         await pwExpect(page.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible();
-        await page.getByRole("button", { name: "Export", exact: true }).click();
-        const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: /Export as CSV/ }).click()]);
-        const text = fs.readFileSync((await download.path())!, "utf8");
-        expect(text.split("\r\n")[0]).toBe("title,area,priority,steps");
-        expect(text).toContain("Pay by card,Checkout,critical");
-        expect(text).toContain("Print the invoice,Billing,low");
+        const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export", exact: true }).click()]);
+        expect(download.suggestedFilename()).toMatch(/\.json$/);
+        const json = JSON.parse(fs.readFileSync((await download.path())!, "utf8")) as { cases: Array<{ title: string; area: string; priority: string }> };
+        expect(json.cases).toEqual(expect.arrayContaining([expect.objectContaining({ title: "Pay by card", area: "Checkout", priority: "critical" }), expect.objectContaining({ title: "Print the invoice", area: "Billing", priority: "low" })]));
+        await pwExpect(page.getByText(/CSV/)).toHaveCount(0);
     });
 
     it("opens a release from the tab and sums it up in one sentence", async () => {

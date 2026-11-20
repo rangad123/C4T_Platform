@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ManualCaseInputSchema, MAX_CASES, MAX_NAME, MAX_NOTE, ResultInputSchema, clean } from "../../engine/manual/cases.js";
-import { casesToCsv, casesToJson, ManualImportError, parseImport } from "../../engine/manual/csv.js";
+import { casesToJson, CSV_REPLACED, ManualImportError, parseJsonCases } from "../../engine/manual/cases-json.js";
 import { casesFromWorkbook } from "../../engine/manual/workbook-import.js";
 import { XLSX_MAX_BYTES, XlsxReadError } from "../../engine/manual/xlsx-read.js";
 import { HttpError } from "../http-error.js";
@@ -19,8 +19,9 @@ import type { RouteCtx } from "./types.js";
  *
  *   GET/POST        /api/projects/:id/manual-cases                      list, add
  *   GET/PUT/DELETE  /api/projects/:id/manual-cases/:cid                 one case
- *   POST            /api/projects/:id/manual-cases/import               { format?, content } JSON or CSV, or { format: "xlsx", content: base64 }
- *   GET             /api/projects/:id/manual-cases/export?format=json|csv
+ *   POST            /api/projects/:id/manual-cases/import               { format: "xlsx", content: base64 } the workbook, or { format?: "json", content }
+ *   GET             /api/projects/:id/manual-cases/export?format=json
+ *   (CSV import and export were removed, owner 2026-11-20: format "csv" answers 410 with CSV_REPLACED.)
  *   GET/POST        /api/projects/:id/releases                          list, open a release
  *   GET             /api/projects/:id/releases/:rid                     everything about one release
  *   POST            /api/projects/:id/releases/:rid/refresh             take the automated state again (open releases)
@@ -140,8 +141,11 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
                 parsed = { cases: wb.cases.map(({ requirementRef, ...c }) => ({ ...c, requirementId: (requirementRef && byRef.get(refKey(requirementRef))) || undefined })), skipped: wb.skipped };
                 stepsIgnored = wb.stepsIgnored;
             } else {
-                const p = parseImport(body.content, body.format);
-                // A JSON or CSV file names no requirement record of this project (their ids are not portable): its cases come in without one.
+                // CSV was replaced by the workbook (owner 2026-11-20). Text without a format that is not JSON is what a CSV file used to be.
+                if (body.format === "csv" || (body.format === undefined && typeof body.content === "string" && !/^\s*[[{]/.test(body.content.replace(/^\uFEFF/, ""))))
+                    throw new HttpError(410, `${CSV_REPLACED} Import the workbook, or a JSON file this page exported.`);
+                const p = parseJsonCases(body.content);
+                // A JSON file names no requirement record of this project (their ids are not portable): its cases come in without one.
                 parsed = { cases: p.cases.map((c) => ({ ...c, requirementId: undefined })), skipped: p.skipped };
             }
         } catch (e) {
@@ -171,7 +175,7 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         const { format } = z.object({ format: z.enum(["json", "csv"]).default("json") }).parse(req.query);
         const cases = store.listCases(pid);
         const base = `manual-cases-${slug(String(ctx.project(pid).name))}`;
-        if (format === "csv") return reply.header("content-type", "text/csv; charset=utf-8").header("content-disposition", `attachment; filename="${base}.csv"`).send(casesToCsv(cases));
+        if (format === "csv") throw new HttpError(410, `${CSV_REPLACED} Export the test cases as JSON instead.`);
         return reply.header("content-type", "application/json; charset=utf-8").header("content-disposition", `attachment; filename="${base}.json"`).send(casesToJson(cases));
     });
 

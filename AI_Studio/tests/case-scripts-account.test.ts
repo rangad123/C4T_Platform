@@ -24,6 +24,7 @@ import { caseDescription } from "../src/platform/case-scripts.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { saveSignIn } from "../src/platform/routes/project-sign-in.js";
 import { buildServer } from "../src/platform/server.js";
+import { buildXlsx } from "../src/security/findings/xlsx.js";
 import { Worker } from "../src/platform/worker.js";
 import { ACCOUNT_USER, startAccountSite, type AccountSite } from "./fixtures/account-site.js";
 
@@ -166,6 +167,40 @@ describe("test scripts from test cases", () => {
         // The second case's job started when the first ended, and its test is that case's script.
         const [second] = (await caseOf(pid, home.id)).linkedTestIds;
         expect((await detail(second!)).validationStatus).toBe("VALIDATED");
+    }, 300_000);
+
+    it("a case imported from the test case workbook starts on its page and gives the agent its preconditions and expected result (SPEC R6.5)", async () => {
+        const pid = project("Account app, imported");
+        const wb = buildXlsx([
+            {
+                name: "Test cases",
+                header: true,
+                rows: [
+                    ["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement"],
+                    ["TC-009", "Sign in from the sign-in page", "Automated", "High", "/login", "The saved account exists", "Type in the old way => ignored", "The Account page opens", ""],
+                ],
+            },
+        ]);
+        const imp = await call("POST", `/api/projects/${pid}/manual-cases/import`, { format: "xlsx", content: Buffer.from(wb).toString("base64") });
+        expect(imp.status, JSON.stringify(imp.body)).toBe(201);
+        // Already on the sign-in page: no "Sign in" link to click first.
+        queue.push(...SIGN_IN.slice(1));
+        seenPrompts.length = 0;
+        const r = await call("POST", `/api/projects/${pid}/manual-cases/generate-scripts`, {});
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        const [job] = await settle(pid);
+        expect(job!.status, job!.error ?? "").toBe("COMPLETED");
+        const prompts = seenPrompts.join("\n");
+        expect(prompts).toContain("The saved account exists");
+        expect(prompts).toContain("The Account page opens");
+        expect(prompts).not.toContain("Type in the old way");
+        const t = ((await call("GET", `/api/projects/${pid}/tests`)).body as any[])[0];
+        const made = await detail(t.id);
+        expect(made.validationStatus).toBe("VALIDATED");
+        // It starts on the case's page: the first step opens /login.
+        expect(made.spec.steps[0].action).toBe("navigate");
+        expect(JSON.stringify(made.spec.steps[0])).toContain("/login");
+        expect(made.spec.expectedResults).toEqual(["The Account page opens"]);
     }, 300_000);
 
     it("the same case gives the same script from Test scripts, Describe it as from Test cases", async () => {

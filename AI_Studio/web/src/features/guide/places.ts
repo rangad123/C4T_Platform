@@ -169,7 +169,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Choose Add test case, then Write one by hand, to add one yourself.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["Add test case", "Write one by hand"] },
             { text: "Choose Generate from requirements to let the AI write test cases for the requirements you pick.", button: "Read about requirements", to: { topic: "requirements-coverage" }, ui: ["Generate from requirements"] },
-            { text: "Choose Import to bring in test cases from a CSV or JSON file.", button: "Read about sharing checks", to: { topic: "release-signoff", search: "manual checks" }, ui: ["Import"] },
+            { text: "Choose Import to bring in test cases from the test case workbook (.xlsx) a Test Case Generation project downloads.", button: "Read about sharing checks", to: { topic: "release-signoff", search: "manual checks" }, ui: ["Import"] },
             { text: "Use All, Automated and Manual to see one type at a time.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["All", "Automated", "Manual"] },
             { text: "Use Generate test scripts to have the AI write a runnable test script for each automated test case. It needs both Write tests and Generate tests with AI.", button: "Open Test scripts", to: here("tests"), ui: ["Generate test scripts", "Test scripts", "Write tests", "Generate tests with AI"] },
         ],

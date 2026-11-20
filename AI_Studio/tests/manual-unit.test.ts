@@ -1,13 +1,13 @@
 /**
  * Manual test cases, browser-free and database-free:
  *  - validation of a case (every limit at the boundary, control characters, defaults);
- *  - CSV reading and writing (quotes, newlines, CRLF, byte-order mark, formula injection, round trip, caps);
- *  - JSON import shapes;
+ *  - JSON import shapes and the JSON export (CSV was removed, owner 2026-11-20: the test case workbook replaced it);
  *  - the roll-up and the sign-off rules as tables (every block and every warning, boundaries), the override comment and the sentence.
  */
 import { describe, expect, it } from "vitest";
 import { ManualCaseInputSchema, MAX_CASES, MAX_STEPS, MAX_TITLE, ResultInputSchema } from "../src/engine/manual/cases.js";
-import { casesToCsv, casesToJson, ManualImportError, parseCsv, parseCsvCases, parseImport, parseJsonCases, parseSteps, protectCell } from "../src/engine/manual/csv.js";
+import { casesToJson, CSV_REPLACED, parseJsonCases } from "../src/engine/manual/cases-json.js";
+import { stepsFromCell } from "../src/engine/manual/workbook-import.js";
 import { evaluateSignoff, OVERRIDE_MIN_COMMENT, overrideCommentOk, releaseSentence, rollup, SIGNOFF_RULES, type AutomatedState, type RollupItem } from "../src/engine/manual/signoff.js";
 
 const ok = (v: unknown) => ManualCaseInputSchema.safeParse(v);
@@ -68,27 +68,9 @@ describe("a manual case", () => {
     });
 });
 
-describe("reading CSV", () => {
-    it("reads plain rows, CRLF and a final newline", () => {
-        expect(parseCsv("a,b\r\n1,2\r\n")).toEqual([["a", "b"], ["1", "2"]]);
-        expect(parseCsv("a,b\n1,2")).toEqual([["a", "b"], ["1", "2"]]);
-        expect(parseCsv("a,b\r1,2\r")).toEqual([["a", "b"], ["1", "2"]]);
-    });
-
-    it("reads quotes, doubled quotes, commas and line breaks inside a cell", () => {
-        expect(parseCsv('t,s\n"He said ""hi"", twice","line1\nline2"\n')).toEqual([["t", "s"], ['He said "hi", twice', "line1\nline2"]]);
-    });
-
-    it("drops a byte-order mark and keeps empty cells", () => {
-        expect(parseCsv("﻿a,b,c\n1,,3\n")).toEqual([["a", "b", "c"], ["1", "", "3"]]);
-    });
-
-    it("refuses a quote that is never closed", () => {
-        expect(() => parseCsv('a,b\n"open,2')).toThrow(ManualImportError);
-    });
-
+describe("steps in a cell", () => {
     it("splits steps into action and expected result on the first arrow", () => {
-        expect(parseSteps("Open the page => It loads\nClick Pay\n\n  Check => a => b  ")).toEqual([
+        expect(stepsFromCell("Open the page => It loads\nClick Pay\n\n  Check => a => b  ")).toEqual([
             { action: "Open the page", expected: "It loads" },
             { action: "Click Pay", expected: "" },
             { action: "Check", expected: "a => b" },
@@ -96,99 +78,7 @@ describe("reading CSV", () => {
     });
 });
 
-describe("importing CSV", () => {
-    const csv = (rows: string[]) => ["title,area,priority,steps", ...rows].join("\n");
-
-    it("builds cases from the four columns, in any column order, ignoring unknown columns", () => {
-        const r = parseCsvCases('steps,extra,title,priority\n"Open => Loads",x,Open the page,HIGH\n');
-        expect(r.skipped).toEqual([]);
-        expect(r.cases).toEqual([{ title: "Open the page", area: "General", priority: "high", steps: [{ action: "Open", expected: "Loads" }], linkedTestIds: [], requirement: "" }]);
-    });
-
-    it("needs a title column", () => {
-        expect(() => parseCsvCases("name,area\nx,y")).toThrow(/“title” column/);
-        expect(() => parseCsvCases("")).toThrow(/empty/);
-    });
-
-    it("skips bad rows with their row number and a plain reason, and imports the rest", () => {
-        const r = parseCsvCases(csv(["Good,Billing,low,", ",Billing,low,", `${"t".repeat(161)},Billing,low,`, "Odd priority,Billing,urgent,", "Fine,Billing,,"]));
-        expect(r.cases.map((c) => c.title)).toEqual(["Good", "Fine"]);
-        expect(r.skipped).toEqual([
-            { row: 3, reason: "The title is required" },
-            { row: 4, reason: "The title can be at most 160 characters" },
-            { row: 5, reason: expect.stringContaining("Priority “urgent” is not one of") },
-        ]);
-    });
-
-    it("skips a row with more than 30 steps", () => {
-        const steps = Array.from({ length: MAX_STEPS + 1 }, (_, i) => `s${i} => ok`).join("\n");
-        const r = parseCsvCases(`title,steps\nToo long,"${steps}"\n`);
-        expect(r.cases).toEqual([]);
-        expect(r.skipped[0]).toEqual({ row: 2, reason: "A case can have at most 30 steps" });
-    });
-
-    it("ignores blank lines from a spreadsheet", () => {
-        const r = parseCsvCases("title,area\nA,x\n,\n\nB,y\n");
-        expect(r.cases.map((c) => c.title)).toEqual(["A", "B"]);
-        expect(r.skipped).toEqual([]);
-    });
-
-    it("accepts exactly 500 cases and refuses 501", () => {
-        const rows = (n: number) => `title\n${Array.from({ length: n }, (_, i) => `Case ${i}`).join("\n")}\n`;
-        expect(parseCsvCases(rows(MAX_CASES)).cases).toHaveLength(MAX_CASES);
-        expect(() => parseCsvCases(rows(MAX_CASES + 1))).toThrow(/at most 500/);
-    });
-
-    it("refuses a file that is far too large", () => {
-        expect(() => parseCsvCases(`title\n${"x".repeat(2_000_001)}`)).toThrow(/too large/);
-    });
-
-    it("keeps a formula-looking title as plain text", () => {
-        const r = parseCsvCases('title\n"=HYPERLINK(""http://evil.test"")"\n');
-        expect(r.cases[0]!.title).toBe('=HYPERLINK("http://evil.test")');
-    });
-});
-
-describe("exporting CSV", () => {
-    const one = (over: Record<string, unknown>) => ({ title: "T", area: "A", priority: "medium" as const, steps: [], ...over });
-
-    it.each(["=", "+", "-", "@"])("puts a quote in front of a cell that starts with %s", (ch) => {
-        const csv = casesToCsv([one({ title: `${ch}cmd|' /C calc'!A0`, area: `${ch}area` })]);
-        const lines = csv.trim().split("\r\n");
-        expect(lines[1]!.startsWith(`'${ch}cmd`)).toBe(true);
-        expect(lines[1]).toContain(`,'${ch}area,`);
-        expect(protectCell(`${ch}x`)).toBe(`'${ch}x`);
-    });
-
-    it("leaves ordinary cells alone, including a dash inside the text", () => {
-        expect(protectCell("Pay - confirm")).toBe("Pay - confirm");
-        expect(protectCell("")).toBe("");
-    });
-
-    it("protects a steps cell that starts with a dash", () => {
-        const csv = casesToCsv([one({ steps: [{ action: "-5 degrees", expected: "works" }] })]);
-        expect(csv).toContain("'-5 degrees => works");
-    });
-
-    it("writes the header, quotes cells with commas, quotes and line breaks, and ends each line with CRLF", () => {
-        const csv = casesToCsv([one({ title: 'A "quoted", title', steps: [{ action: "Open", expected: "Loads" }, { action: "Click", expected: "" }] })]);
-        expect(csv).toBe('title,area,priority,steps\r\n"A ""quoted"", title",A,medium,"Open => Loads\nClick"\r\n');
-    });
-
-    it("survives a round trip, formula protection included", () => {
-        const cases = [
-            one({ title: '=SUM(A1) "x", y', area: "Pay, billing", priority: "critical", steps: [{ action: "-1 step", expected: "multi\nline" }, { action: "Open", expected: "" }] }),
-            one({ title: "Plain", area: "+Area" }),
-        ];
-        const back = parseCsvCases(casesToCsv(cases)).cases;
-        expect(back.map((c) => [c.title, c.area, c.priority])).toEqual([
-            ['=SUM(A1) "x", y', "Pay, billing", "critical"],
-            ["Plain", "+Area", "medium"],
-        ]);
-        // a line break inside a step becomes a space so that one step stays one line
-        expect(back[0]!.steps).toEqual([{ action: "-1 step", expected: "multi line" }, { action: "Open", expected: "" }]);
-    });
-
+describe("exporting JSON", () => {
     it("writes the JSON export that the JSON import reads back", () => {
         const c = { id: "i", number: 1, ref: "TC-001", automation: "automated" as const, requirementId: null, createdAt: "x", updatedAt: "x", title: "T", area: "A", priority: "low" as const, steps: [{ action: "a", expected: "b" }], linkedTestIds: ["t1"], requirement: "R-1", preconditions: ["P"], expected: "E", page: "/p", sourceRef: "TC-009" };
         const text = casesToJson([c], new Date("2026-10-08T00:00:00Z"));
@@ -219,11 +109,14 @@ describe("importing JSON", () => {
         expect(r.skipped[0]!.reason).toBe("Step 2: A step’s action is required");
     });
 
-    it("chooses JSON or CSV by the text when no format is given", () => {
-        expect(parseImport('[{"title":"A"}]').cases).toHaveLength(1);
-        expect(parseImport("title\nA\nB").cases).toHaveLength(2);
-        expect(parseImport("title\nA", "csv").cases).toHaveLength(1);
-        expect(() => parseImport([{ title: "A" }], "csv")).toThrow(/as text/);
+    it("reads JSON text that starts with a byte-order mark", () => {
+        expect(parseJsonCases('\uFEFF[{"title":"A"}]').cases).toHaveLength(1);
+    });
+
+    it("has no CSV reader or writer any more: the test case workbook replaced CSV (owner 2026-11-20)", async () => {
+        const mod = (await import("../src/engine/manual/cases-json.js")) as Record<string, unknown>;
+        expect(Object.keys(mod).filter((k) => /csv/i.test(k) && k !== "CSV_REPLACED")).toEqual([]);
+        expect(CSV_REPLACED).toBe("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them.");
     });
 });
 

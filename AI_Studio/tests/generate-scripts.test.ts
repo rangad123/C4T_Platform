@@ -17,6 +17,8 @@ import { givePersonalKeys } from "./fixtures/ai-key.js";
 import { loadConfig } from "../src/config.js";
 import { afterCaseJob, caseDescription } from "../src/platform/case-scripts.js";
 import { MAX_SCRIPTS_PER_CALL } from "../src/engine/authoring/case-script.js";
+import { expectedOf, startPathOf } from "../src/engine/authoring/describe.js";
+import { buildXlsx } from "../src/security/findings/xlsx.js";
 import { ANOTHER_RUN, NO_ADDRESS_FOR_SCRIPTS, SCRIPTS_BEING_WRITTEN } from "../src/platform/routes/generate-scripts.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -112,6 +114,41 @@ describe("generate test scripts", () => {
         const again = await gen(A, {});
         expect(again).toMatchObject({ status: 409, body: { error: SCRIPTS_BEING_WRITTEN } });
         expect(platform.repo.listJobs(A)).toHaveLength(1);
+        platform.repo.setJobStatus(job.id, "FAILED", "Cancelled");
+    });
+
+    it("gives an Automated case imported from the test case workbook its page, preconditions and expected result, not its steps (SPEC R6.5)", async () => {
+        const pid = platform.repo.createProject({ name: "Imported shop", platforms: ["web"], testingModes: ["code"] }).id as string;
+        platform.repo.createApplication(pid, "http://127.0.0.1:7862", { ...DEFAULT_JOB_OPTIONS });
+        const wb = buildXlsx([
+            {
+                name: "Test cases",
+                header: true,
+                rows: [
+                    ["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement"],
+                    ["TC-004", "Keep the basket after signing in again", "Automated", "High", "/cart", "Two items are in the basket\nAn address is saved", "Click here => ignored", "The basket lists two items\nIts total is unchanged", ""],
+                ],
+            },
+        ]);
+        const imp = await call("POST", `/api/projects/${pid}/manual-cases/import`, { format: "xlsx", content: Buffer.from(wb).toString("base64") });
+        expect(imp.status, JSON.stringify(imp.body)).toBe(201);
+        expect(imp.body).toMatchObject({ created: 1, stepsIgnored: 1 });
+        const r = await gen(pid, {}, { authorization: `Bearer ${editor}` });
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        const job = platform.repo.getJob(r.body.started.jobId)!;
+        expect(job.options.plainDescription).toBe(
+            [
+                "Keep the basket after signing in again",
+                "Start on /cart",
+                "Before it starts: Two items are in the basket",
+                "Before it starts: An address is saved",
+                "Check that The basket lists two items",
+                "Check that Its total is unchanged",
+            ].join("\n"),
+        );
+        // The description reader takes the page as where the test starts and each line of the expected result as a check.
+        expect(startPathOf(job.options.plainDescription!)).toBe("/cart");
+        expect(expectedOf(job.options.plainDescription!)).toEqual(["The basket lists two items", "Its total is unchanged"]);
         platform.repo.setJobStatus(job.id, "FAILED", "Cancelled");
     });
 
