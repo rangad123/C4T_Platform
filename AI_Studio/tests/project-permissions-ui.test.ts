@@ -204,7 +204,7 @@ describe("controls that follow the permissions in this project", () => {
             const want: Array<[string, string, string[]]> = [
                 [`#/projects/${projectId}/requirements`, "People can sign in", ["Import", "Add requirement"]],
                 [`#/projects/${projectId}/requirements/${requirementId}`, "Test cases that cover it", ["Edit", "Delete", "Link test cases"]],
-                [`#/projects/${projectId}/tests`, "Verify sign in", ["Import", "Add test case (manual)"]],
+                [`#/projects/${projectId}/tests`, "Verify sign in", ["Import", "Add test case"]],
                 [`#/projects/${projectId}/scripts`, "Scripts", ["Import", "New test script"]],
                 [`#/projects/${projectId}/scripts?section=steps`, "Wait a moment", ["Add reusable steps", "Edit Wait a moment", "Delete Wait a moment"]],
                 [`#/projects/${projectId}/scripts?section=elements`, "Logo", ["Add element", "Import"]],

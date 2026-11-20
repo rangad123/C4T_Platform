@@ -10,7 +10,7 @@ import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, routes, type CasesSection } from "../../lib/router";
 import { useHere } from "../auth/project-access";
 import type { RequirementLink, RequirementList } from "../requirements/requirements";
-import { AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
+import { AUTOMATED_NO_STEPS, AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
 import "./manual.css";
 import { GenerateScriptsCard } from "../authoring/GenerateScriptsCard";
 
@@ -132,12 +132,12 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                         <Button icon={Upload} onClick={() => fileRef.current?.click()} tip="A CSV file with the columns title, area, priority and steps, or a JSON file this page exported.">
                             Import
                         </Button>
-                        <Menu label="Add test case (manual)" icon={Plus} variant="primary">
+                        <Menu label="Add test case" icon={Plus} variant="primary">
                             {(closeMenu) => (
                                 <>
                                     <MenuItem
                                         icon={PenLine}
-                                        description="Write its title, steps and what should happen"
+                                        description="Write its title, its type and, for a Manual case, its steps"
                                         onClick={() => {
                                             closeMenu();
                                             setAdding(true);
@@ -161,7 +161,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                             Import
                         </Button>
                         <Button variant="primary" icon={Plus} disabled tip={here.why("ai_studio.tests.write")}>
-                            Add test case (manual)
+                            Add test case
                         </Button>
                     </>
                 ) : undefined
@@ -337,7 +337,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                                 canWrite ? (
                                     <>
                                         <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>
-                                            Add test case (manual)
+                                            Add test case
                                         </Button>
                                         {canGenerate && (
                                             <Button icon={Sparkles} onClick={() => go(`${routes.requirements(id)}?generate=1`)}>
@@ -393,7 +393,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                                         <td className="tc-title">
                                             <a href={routes.testCase(id, c.id)}>{c.title}</a>
                                             <span className="t-meta">
-                                                {PRIORITY_LABEL[c.priority]} priority · {plural(c.steps.length, "step")}
+                                                {PRIORITY_LABEL[c.priority]} priority{c.automation === "manual" && ` · ${plural(c.steps.length, "step")}`}
                                             </span>
                                         </td>
                                         <td>
@@ -452,11 +452,13 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     );
 }
 
-/** One case, to read (people who may not change it). */
+/** One case, to read (people who may not change it). Steps belong to Manual cases only; an Automated case's are written with its script. */
 function CaseView({ c }: { c: ManualCase }) {
     return (
         <div className="stack-sm">
-            {c.steps.length === 0 ? (
+            {c.automation === "automated" ? (
+                <p className="t-secondary">{AUTOMATED_NO_STEPS}</p>
+            ) : c.steps.length === 0 ? (
                 <p className="t-secondary">No steps written.</p>
             ) : (
                 <ol className="tc-steps-view">
@@ -507,8 +509,10 @@ function CaseForm({
     async function submit(e: React.FormEvent) {
         e.preventDefault();
         if (!f.title.trim()) return setError("Give the test case a title, like “Verify sign in with a valid password”.");
-        const steps = f.steps.filter((s) => s.action.trim() || s.expected.trim());
-        if (steps.some((s) => !s.action.trim())) return setError("Every step needs an action. Fill it in or remove the step.");
+        const written = (list: CaseInput["steps"]) => list.filter((s) => s.action.trim() || s.expected.trim());
+        // Steps are written for Manual cases only. A new Automated case has none; one saved with steps before keeps them, unchanged.
+        const steps = f.automation === "manual" ? written(f.steps) : caseId ? written(initial.steps) : [];
+        if (f.automation === "manual" && steps.some((s) => !s.action.trim())) return setError("Every step needs an action. Fill it in or remove the step.");
         setBusy(true);
         setError("");
         try {
@@ -573,30 +577,34 @@ function CaseForm({
                     </div>
                 </div>
             </div>
-            <fieldset className="mc-steps">
-                <legend className="label">Steps</legend>
-                {f.steps.map((s, i) => (
-                    <div className="mc-step" key={i}>
-                        <div className="field">
-                            <label htmlFor={`mc-action-${i}`}>Step {i + 1}, what to do</label>
-                            <input id={`mc-action-${i}`} className="input" value={s.action} maxLength={500} onChange={(e) => setStep(i, "action", e.target.value)} />
+            {f.automation === "automated" ? (
+                <p className="hint">{AUTOMATED_NO_STEPS}</p>
+            ) : (
+                <fieldset className="mc-steps">
+                    <legend className="label">Steps</legend>
+                    {f.steps.map((s, i) => (
+                        <div className="mc-step" key={i}>
+                            <div className="field">
+                                <label htmlFor={`mc-action-${i}`}>Step {i + 1}, what to do</label>
+                                <input id={`mc-action-${i}`} className="input" value={s.action} maxLength={500} onChange={(e) => setStep(i, "action", e.target.value)} />
+                            </div>
+                            <div className="field">
+                                <label htmlFor={`mc-expected-${i}`}>Step {i + 1}, what should happen</label>
+                                <input id={`mc-expected-${i}`} className="input" value={s.expected} maxLength={500} onChange={(e) => setStep(i, "expected", e.target.value)} />
+                            </div>
+                            <Button type="button" size="sm" variant="ghost" icon={Trash2} aria-label={`Remove step ${i + 1}`} onClick={() => set("steps", f.steps.filter((_, j) => j !== i))}>
+                                Remove
+                            </Button>
                         </div>
-                        <div className="field">
-                            <label htmlFor={`mc-expected-${i}`}>Step {i + 1}, what should happen</label>
-                            <input id={`mc-expected-${i}`} className="input" value={s.expected} maxLength={500} onChange={(e) => setStep(i, "expected", e.target.value)} />
-                        </div>
-                        <Button type="button" size="sm" variant="ghost" icon={Trash2} aria-label={`Remove step ${i + 1}`} onClick={() => set("steps", f.steps.filter((_, j) => j !== i))}>
-                            Remove
+                    ))}
+                    <div>
+                        <Button type="button" size="sm" icon={Plus} disabled={f.steps.length >= MAX_STEPS} onClick={() => set("steps", [...f.steps, { action: "", expected: "" }])}>
+                            Add step
                         </Button>
+                        {f.steps.length >= MAX_STEPS && <span className="hint"> A test case can have {MAX_STEPS} steps at most.</span>}
                     </div>
-                ))}
-                <div>
-                    <Button type="button" size="sm" icon={Plus} disabled={f.steps.length >= MAX_STEPS} onClick={() => set("steps", [...f.steps, { action: "", expected: "" }])}>
-                        Add step
-                    </Button>
-                    {f.steps.length >= MAX_STEPS && <span className="hint"> A test case can have {MAX_STEPS} steps at most.</span>}
-                </div>
-            </fieldset>
+                </fieldset>
+            )}
             <Disclosure label="More: area, source, linked test scripts" defaultOpen={Boolean(initial.requirement) && !initial.requirementId}>
                 <div className="stack-sm">
                     <div className="grid-2">

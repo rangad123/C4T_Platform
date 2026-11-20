@@ -91,10 +91,13 @@ describe("Releases tab", () => {
     it("adds test cases with the form and imports a CSV file, naming the row that could not be imported", async () => {
         await page.getByRole("link", { name: "Add test cases" }).click();
         await pwExpect(page.getByRole("heading", { name: "No test cases yet" })).toBeVisible();
+        // The tab and its empty state say "Add test case", with no "(manual)".
+        await pwExpect(page.getByRole("button", { name: "Add test case", exact: true })).toHaveCount(2);
+        await pwExpect(page.getByText("(manual)")).toHaveCount(0);
         const row = (title: string) => page.getByRole("table").getByRole("row").filter({ hasText: title });
 
         const openForm = async () => {
-            await page.getByRole("button", { name: "Add test case (manual)" }).first().click();
+            await page.getByRole("button", { name: "Add test case", exact: true }).first().click();
             await page.getByRole("menuitem", { name: /Write one by hand/ }).click();
             return page.getByRole("form", { name: "New test case" });
         };
