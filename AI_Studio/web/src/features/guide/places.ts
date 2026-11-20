@@ -74,7 +74,6 @@ export type PlaceId =
     | "guide-words"
     // Round 25: the global places and the project places that are new (docs/product-restructure/INFORMATION_ARCHITECTURE.md).
     | "dashboard"
-    | "develop"
     | "runners-global"
     // Round 37: integrations set up once for an organisation (features/integrations/IntegrationsPage.tsx).
     | "integrations"
@@ -621,18 +620,6 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "Open a project that needs a look and read its dashboard.", button: "Read how a project is laid out", to: { topic: "places" } }],
         topic: "fleet-dashboard",
     },
-    develop: {
-        title: "Test development",
-        what: "Open any project's test scripts to write tests. AI agent projects can also be explored by the AI or recorded.",
-        canDo: [
-            { text: "Choose Open test scripts, then New test script for every way to write one.", button: "Read about describing a test", to: { topic: "describe-a-test" }, ui: ["Open test scripts", "New test script"] },
-            { text: "In an AI agent project, let the AI explore the application and write tests.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
-            { text: "In an AI agent project, record a test by using the application yourself.", button: "Read how recording works", to: { topic: "record-a-test" } },
-        ],
-        words: ["test", "exploration", "plan"],
-        next: [{ text: "Open a project's test scripts to see every way to add a test.", button: "Open projects", to: here("projects") }],
-        topic: "first-steps",
-    },
     "runners-global": {
         title: "Your runner",
         what: "A runner is the program on your computer that runs your tests. It is set up once in Settings, under Your runner.",
@@ -855,7 +842,8 @@ export function placeOf(route: RouteLike): PlaceId {
     if (a === "new") return q.get("project") ? "explore-again" : "new-project";
     if (a === "create") return "new-project";
     if (a === "dashboard") return "dashboard";
-    if (a === "develop") return "develop";
+    // Founder review 2026-11-19 (Q2): Test development is out of the sidebar; its old link opens Projects (main.tsx).
+    if (a === "develop") return "projects";
     if (a === "runners") return "runners-global";
     if (a === "integrations") return "integrations";
     if (a === "project-folders") return "folders";

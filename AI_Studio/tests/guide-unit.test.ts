@@ -35,6 +35,19 @@ function route(href: string) {
     return { parts: pathPart!.split("/").filter(Boolean), query: new URLSearchParams(qs ?? "") };
 }
 
+// ── Test development is out of the sidebar (founder review 2026-11-19, Q2) ──
+
+describe("no guide text points at Test development", () => {
+    it("has no tour step, place help or topic that sends people to it", () => {
+        const said = (t: string, where: string) => expect(t, where).not.toMatch(/Test development/);
+        for (const s of TOUR_STEPS) said(`${s.title} ${s.text} ${s.target ?? ""}`, s.id);
+        expect(TOUR_STEPS.map((s) => s.target)).not.toContain("nav-develop");
+        expect(PLACE_IDS as string[]).not.toContain("develop");
+        for (const id of PLACE_IDS) said(JSON.stringify(PLACES[id]), id);
+        for (const t of topics) said(JSON.stringify(t), t.id);
+    });
+});
+
 // ── search ──────────────────────────────────────────────────────────────────
 
 describe("guide search", () => {
@@ -154,6 +167,8 @@ describe("place help covers every place in the router", () => {
         [routes.guide, "guide"],
         [routes.guideTopic("schedules"), "guide-topic"],
         [routes.guideWords, "guide-words"],
+        // Founder review 2026-11-19 (Q2): Test development is out of the sidebar; an old link opens Projects and its help.
+        [routes.develop, "projects"],
     ];
     it.each(expected)("%s is the place %s", (href, id) => {
         expect(placeOf(route(href))).toBe(id);
@@ -180,8 +195,9 @@ describe("place help covers every place in the router", () => {
             if (a === "projects") continue;
             const id = placeOf({ parts: [a, "x"], query: new URLSearchParams() });
             expect(PLACES[id], `/${a}`).toBeDefined();
-            // Not the fallback: a route that is not in `placeOf` falls back to the projects list.
-            if (a !== "") expect(id, `/${a} has a place of its own`).not.toBe("projects");
+            // Not the fallback: a route that is not in `placeOf` falls back to the projects list. `develop` is the one route that
+            // opens Projects on purpose (Test development is out of the sidebar, Q2); the list above pins it.
+            if (a !== "" && a !== "develop") expect(id, `/${a} has a place of its own`).not.toBe("projects");
         }
         for (const c of third) {
             const id = placeOf({ parts: ["projects", "p1", c], query: new URLSearchParams() });
@@ -372,7 +388,7 @@ describe("the tour", () => {
 
     it("covers what the brief asks for in each chapter", () => {
         const of = (c: string) => TOUR_STEPS.filter((s) => s.chapter === c).map((s) => s.target ?? s.id);
-        expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-develop", "nav-libraries", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-runs", "tab-settings"]));
+        expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-libraries", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-runs", "tab-settings"]));
         expect(of("making")).toEqual(expect.arrayContaining(["new-test", "wb-steps", "wb-text", "wb-code", "wb-history", "wb-edit", "scripts-steps", "scripts-elements", "settings-data"]));
         // The New test script menu has a card each (the menu, describe, build, code); importing is the list's own Import button.
         expect(TOUR_STEPS.filter((s) => s.target === "new-test").length).toBeGreaterThanOrEqual(4);
@@ -419,7 +435,7 @@ describe("the tour", () => {
         expect(none.filter((id) => id === "no-project").length).toBe(1);
         // Only steps that need nothing remain, plus that one card.
         for (const id of none) if (id !== "no-project") expect(TOUR_STEPS.find((s) => s.id === id)!.needs ?? [], id).toEqual([]);
-        expect(none).toEqual(["nav-dashboard", "projects", "nav-agents", "nav-develop", "nav-libraries", "nav-integrations", "nav-settings", "nav-help", "no-project", "help", "guide", "tips", "again"]);
+        expect(none).toEqual(["nav-dashboard", "projects", "nav-agents", "nav-libraries", "nav-integrations", "nav-settings", "nav-help", "no-project", "help", "guide", "tips", "again"]);
         // A signed-in person adds their sidebar step even without a project. Round 37: Security assessment is not in the sidebar.
         expect(ids({ module: true, account: true })).toEqual(expect.arrayContaining(["account"]));
         expect(TOUR_STEPS.map((s) => s.id)).not.toContain("nav-security");

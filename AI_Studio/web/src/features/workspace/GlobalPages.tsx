@@ -60,6 +60,10 @@ export function DashboardPage() {
     );
 }
 
+/**
+ * Hidden for now (founder review 2026-11-19, Q2): no sidebar item and no route; `#/develop` opens Projects (main.tsx). To bring it
+ * back, route `develop` to this page in main.tsx, restore the sidebar item in components/Shell.tsx, and the tour step and place help.
+ */
 /** Test development: a launcher to each project's test scripts (plus exploring and recording for AI agent projects), and the review queue of drafts across them. */
 export function TestDevelopmentPage() {
     const projects = useFetch<ProjectRow[]>("/projects");
