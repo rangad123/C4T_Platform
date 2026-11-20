@@ -327,6 +327,23 @@ describe("exploring the seeded shop by objectives", () => {
         expect(summary.exploration!.outcomes.find((o) => o.objectiveId.endsWith(":invalid_input"))!.result).toMatchObject({ applied: false });
     }, 300_000);
 
+    it("row 231: a run cancelled during the session still keeps its coverage record, which says it was stopped", async () => {
+        site.fixed = false;
+        const { llm } = scriptedShopModel(() => COMPLIANT);
+        const stop = new AbortController();
+        const kept: NonNullable<NonNullable<Parameters<typeof exploreShop>[3]>["explorations"]> = [];
+        // The cancel (a person's stop, or a benchmark trial at its budget) lands once the first pursuit has finished.
+        const run = exploreShop(site, llm, OBJECTIVES_WITH_DATA, { signal: stop.signal, onEvent: (k) => void (k === "objective_finished" && stop.abort()), explorations: kept });
+        await expect(run).rejects.toThrow();
+        expect(kept).toHaveLength(1);
+        const e = kept[0]!;
+        // Partial, in the record's own shape: the stop reason says so, and the pursuit that ran is in it.
+        expect(e.stopReason).toBe("cancelled");
+        expect(e.outcomes[0]!.status).toBe("completed");
+        expect(e.coverage.uniqueScenarios).toBeGreaterThanOrEqual(1);
+        expect(e.actionLog.length).toBeGreaterThan(0);
+    }, 300_000);
+
     it("with objectives off the job is what it is without the stage: the same events, no exploration, no test-writer call", async () => {
         site.fixed = false;
         const strip = (e: { kind: string; message: string }) => ({ kind: e.kind, message: e.message });

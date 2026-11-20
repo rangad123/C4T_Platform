@@ -270,6 +270,11 @@ export interface GenerationSink {
     /** Store one run against a named environment (staging, production...), tagged with it, next to the test's own runs. */
     recordEnvironment?(h: TestHandle, scriptId: string | null, r: import("./environments/run.js").EnvironmentRecord, startedAt: string): Promise<void>;
     saveTextArtifact(kind: string, name: string, content: string): Promise<void>;
+    /**
+     * Keep an exploration's coverage record (GenerationSummary.exploration) as soon as its session ends, so a run cancelled or stopped
+     * at its budget after that point still has it (row 231). Absent: the host keeps it from the summary (a runner sends it in its result).
+     */
+    saveExploration?(e: ExplorationSummary): Promise<void>;
     /** Store one covered page thumbnail (a JPEG named `thumb-<n>.jpg`) with this job; answers its id, or null when the host did not keep it. */
     savePageThumbnail?(name: string, jpeg: Uint8Array): Promise<string | null>;
     /**
@@ -1198,6 +1203,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     coverage: coverageOf({ model: coverageModelOf(model, knowledge.objectiveInputs, apis), objectives: built.objectives, outcomes: session.outcomes, actionLog: session.actionLog, tests: saved, skipped: built.skipped }),
                     ...boundedActionLog(session.actionLog, authoringSecretsOf(req)),
                 };
+                // Kept now: a cancel or a budget stop from here on throws, and the summary never reaches the host (row 231).
+                try {
+                    await sink.saveExploration?.(summary.exploration);
+                } catch (e) {
+                    ctx.emit({ stage: "orchestration", kind: "exploration_record_failed", level: "warn", message: `The coverage record could not be kept: ${e instanceof Error ? e.message : String(e)}` });
+                }
                 ctx.emit({
                     stage: "generation",
                     kind: "exploration_stopped",

@@ -130,6 +130,19 @@ describe("the coverage record's free text is masked when it is written", () => {
         expect(record.outcomes.map((o: { objectiveId: string }) => o.objectiveId)).toEqual(sampleExploration().outcomes.map((o) => o.objectiveId));
     });
 
+    it("row 231: the job's sink keeps the record the engine hands it when the session ends, masked as saveExploration masks it", async () => {
+        const s = seedProject(platform, "Kept at session end", "http://127.0.0.1:9");
+        const job = await platform.repo.createJob(s.projectId, s.appId, { ...DEFAULT_JOB_OPTIONS });
+        const sink = new RepoSink(platform.repo, platform.store, { id: job.id, projectId: s.projectId, applicationId: s.appId });
+        sink.addSecrets([PW]);
+        await sink.saveExploration(leaky());
+        await sink.writes.flush();
+        const res = await app.inject({ method: "GET", url: `/api/projects/${s.projectId}/jobs/${job.id}/coverage`, headers: { "x-api-key": KEY } });
+        expect(res.statusCode).toBe(200);
+        expect(JSON.parse(res.body).stopReason).toBe("instability");
+        expect(leaks(res.body)).toEqual(NONE);
+    });
+
     it("on a runner: every coverage list is masked with the shared patterns too (CP3c T-5)", () => {
         // No stored secret on this runner's log: only the shared patterns (bearer tokens, JWTs) can catch them.
         const { log } = memoryLogger();

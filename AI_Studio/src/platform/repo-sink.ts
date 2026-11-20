@@ -25,6 +25,7 @@ import { isJpeg, THUMBNAIL_LIMITS, THUMBNAIL_NAME, THUMBNAIL_RUN_LIMITS } from "
 import { CandidateFindingStore } from "./candidate-finding-store.js";
 import { CandidateFindingSchema } from "../engine/explore/finding.js";
 import { FRAME_LIMITS } from "../engine/frames/shoot.js";
+import { saveExploration } from "./exploration-store.js";
 
 /**
  * Stores a rendered script as the test's current version for its framework. An unchanged script
@@ -427,6 +428,8 @@ export class RepoSink implements GenerationSink {
         this.writes.run(() => {
             new CleanupStore(this.repo.db).record({ projectId: this.job.projectId, jobId: this.job.id, items });
         });
+
+    saveExploration: NonNullable<GenerationSink["saveExploration"]> = (e) => saveExploration(this, e);
 
     saveTextArtifact: GenerationSink["saveTextArtifact"] = async (kind, name, content) => {
         const rel = path.posix.join(this.job.projectId, "_artifacts", this.job.id, name);
