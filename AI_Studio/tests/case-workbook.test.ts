@@ -24,7 +24,7 @@ import { ScenarioSchema, TestSpecSchema } from "../src/engine/spec/schema.js";
 import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CASE_AGENT_RUN_REFUSED } from "../src/platform/case-agent.js";
-import { CASE_IMPORT_MAX_ROWS } from "../src/platform/case-workbook.js";
+import { XLSX_MAX_ROWS as CASE_IMPORT_MAX_ROWS } from "../src/engine/manual/xlsx-read.js";
 import { PLAN_ARTIFACT } from "../src/platform/plan-store.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { NO_CASE_RUNS, NOT_A_CASE_AGENT_PROJECT } from "../src/platform/routes/case-outcome.js";

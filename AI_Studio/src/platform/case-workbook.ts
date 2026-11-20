@@ -19,6 +19,8 @@
  */
 import type { CaseOutcome, CaseOutcomeCase } from "./case-outcome-types.js";
 import { buildXlsx, type XlsxSheet } from "../security/findings/xlsx.js";
+// The most test case rows a code project's Import reads: the reader's own limit, so the note below and the Import never disagree.
+import { XLSX_MAX_ROWS as CASE_IMPORT_MAX_ROWS } from "../engine/manual/xlsx-read.js";
 
 export const CASE_WORKBOOK_SHEETS = ["Test cases", "Pages", "Tree"] as const;
 export const CASE_WORKBOOK_HEADERS = {
@@ -30,8 +32,6 @@ export const CASE_WORKBOOK_HEADERS = {
 /** Excel holds at most 1 048 576 rows in a sheet, the header included. */
 const ROW_MAX = 1_048_576;
 
-/** The most test case rows a code project's Import reads (src/engine/manual/xlsx-read.ts XLSX_MAX_ROWS; lead decision 2026-11-20). */
-export const CASE_IMPORT_MAX_ROWS = 5_000;
 const n = (x: number) => x.toLocaleString("en-US");
 /**
  * The line under the last test case when there are more than the Import reads: the workbook still has them all, and says so. It sits in

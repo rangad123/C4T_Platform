@@ -24,7 +24,7 @@ export const XLSX_MAX_BYTES = 10 * 1024 * 1024;
 export const XLSX_MAX_UNPACKED = 10 * 1024 * 1024;
 /** Most parts (zip entries) a workbook may have. The platform's workbook has 9; Excel and LibreOffice add a few. */
 export const XLSX_MAX_PARTS = 20;
-/** Most rows below the header, by default. */
+/** Most rows below the header, by default; also the limit the test case workbook (src/platform/case-workbook.ts) warns about. */
 export const XLSX_MAX_ROWS = 5_000;
 /** Columns with text beyond this one are refused. */
 export const XLSX_MAX_COLUMNS = 100;

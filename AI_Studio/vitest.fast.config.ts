@@ -253,6 +253,13 @@ export default defineConfig({
             "tests/app-intel-migration-65.test.ts",
             "tests/bench-understanding-paid-unit.test.ts",
             "tests/bench-understanding-run-unit.test.ts",
+            // Founder 2026-11-19: the test case workbook, its import and the outcome (no browser: pure, or Fastify inject on a temp database).
+            "tests/case-workbook-unit.test.ts",
+            "tests/xlsx-read-unit.test.ts",
+            "tests/case-workbook-import.test.ts",
+            "tests/case-outcome-unit.test.ts",
+            "tests/case-workbook.test.ts",
+            "tests/outcome-tree-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

@@ -97,7 +97,7 @@ const shown = () => page.locator(".oc-list > .oc-case");
 describe("outcome report", () => {
     it("says one summary line whose page count is the tree's nodes, with the failed addresses once and apart", async () => {
         await open("full");
-        await expect.poll(() => page.getByTestId("outcome-summary").textContent()).toBe("12 pages · 16 test cases · built from 3 runs");
+        await expect.poll(() => page.getByTestId("outcome-summary").textContent()).toBe("12 pages, 16 test cases, from 3 runs");
         await expandAll();
         expect(await items().count()).toBe(FULL.tree.length);
         expect(await items().count()).toBe(12);
@@ -219,7 +219,7 @@ describe("outcome report", () => {
     it("says a stopped run kept what it found", async () => {
         await open("stopped");
         expect(await page.getByTestId("outcome-run-note").textContent()).toBe("The last run was stopped. It kept the 3 pages and 4 test cases it found before then.");
-        expect(await page.getByTestId("outcome-summary").textContent()).toBe(`12 pages · 16 test cases · built from ${STOPPED.runs.length} runs`);
+        expect(await page.getByTestId("outcome-summary").textContent()).toBe(`12 pages, 16 test cases, from ${STOPPED.runs.length} runs`);
         expect(await page.getByTestId("outcome-missing").count()).toBe(0);
         if (SHOTS) await shot("outcome-stopped.png");
     });
