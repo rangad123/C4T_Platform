@@ -119,7 +119,7 @@ describe("keepAuthored replays a defect test on clean account state", () => {
         shop.reset(["Plate"]);
         const { finding } = await explore([...signIn, addItem("Mug"), total, finish], false);
         expect(finding).toMatchObject({ capture: "captured", independence: "not_on_clean_state", confidence: "medium" });
-        for (const r of finding.replays) expect(r.summary).toMatch(/on the shared test account \(the project does not allow tests that change data.*\), so not checked on clean state: stopped at step 6.*saw the same value as when captured \(\$30\.00\)/);
+        for (const r of finding.replays) expect(r.summary).toMatch(/on the shared test account \(the project does not allow tests that change data.*\), so not checked on clean state: stopped at step 7.*saw the same value as when captured \(\$30\.00\)/);
         expect(shop.registered).toEqual([]);
     }, 240_000);
 
@@ -127,7 +127,7 @@ describe("keepAuthored replays a defect test on clean account state", () => {
         shop.reset(["Plate"]);
         const { finding } = await explore([...signIn, addItem("Mug"), total, finish], true);
         expect(finding).toMatchObject({ capture: "captured", independence: "state_dependent", confidence: "medium" });
-        for (const r of finding.replays) expect(r.summary).toMatch(/as a newly registered account: stopped at step 6.*captured \$30\.00, replay saw \$10\.00/);
+        for (const r of finding.replays) expect(r.summary).toMatch(/as a newly registered account: stopped at step 7.*captured \$30\.00, replay saw \$10\.00/);
         expect(shop.registered).toHaveLength(2);
         // The replays signed in as the new accounts, never as the shared one.
         expect(shop.signIns.slice(-4).filter((e) => e === ALICE.username)).toEqual([]);
@@ -137,7 +137,7 @@ describe("keepAuthored replays a defect test on clean account state", () => {
         shop.reset(["Plate"]);
         const { finding } = await explore([...signIn, addItem("Mug"), addItem("Plate"), total, finish], true);
         expect(finding).toMatchObject({ capture: "captured", independence: "independent", confidence: "high" });
-        for (const r of finding.replays) expect(r.summary).toMatch(/as a newly registered account: stopped at step 7.*same value as when captured \(\$30\.00\)/);
+        for (const r of finding.replays) expect(r.summary).toMatch(/as a newly registered account: stopped at step 8.*same value as when captured \(\$30\.00\)/);
         expect(shop.registered).toHaveLength(2);
     }, 240_000);
 });
