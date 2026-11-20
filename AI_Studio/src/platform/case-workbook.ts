@@ -7,7 +7,7 @@
  *   - "Tree": Node, Parent, Page (one row per tree node).
  * A code project's Import reads the "Test cases" sheet back (src/engine/manual/xlsx-read.ts), so the headers are part of the contract.
  *
- * Steps are written only for Manual cases (R7), one per line as `action => expected` (the CSV rule, src/engine/manual/csv.ts), or the
+ * Steps are written only for Manual cases (R7), one per line as `action => expected` (read back by src/engine/manual/workbook-import.ts stepsFromCell), or the
  * action alone when it has no expected result. Preconditions and expected results are one per line.
  *
  * Safety comes from the writer (src/security/findings/xlsx.ts `buildXlsx`): every cell is an inline string, so a value that starts with
