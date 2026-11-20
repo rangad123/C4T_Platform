@@ -676,6 +676,20 @@ describe("the test page", () => {
         }
     }, 120_000);
 
+    it("Run again shows how a run ended even when it finished before the page looked for a running run", async () => {
+        // A one-step test can end in under a second: here no look ever sees the run going, as when it ends between looks.
+        const jobsRoute = `**/api/projects/${projectId}/jobs`;
+        await page.route(jobsRoute, (route) => route.fulfill({ json: [] }));
+        try {
+            await visit(`#/tests/${idOf["Fast one"]}`);
+            await page.getByRole("button", { name: "Run again" }).click();
+            await pwExpect(page.getByRole("region", { name: "Run finished" })).toBeVisible({ timeout: 60_000 });
+            await pwExpect(page.getByRole("region", { name: "Run finished" })).toContainText("The run finished");
+        } finally {
+            await page.unroute(jobsRoute);
+        }
+    }, 120_000);
+
     it("is audited in both colour schemes and fits a phone", async () => {
         await axeBoth("test-page", async () => {
             await visit(`#/tests/${idOf["Fast one"]}`);

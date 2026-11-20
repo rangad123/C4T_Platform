@@ -14,8 +14,23 @@ export * from "./run-text";
 
 const EVENT = "aitp:runs-changed";
 
-/** Tell the run strips and menus on this page that a run was started or stopped, so they look again at once. */
-export const announceRunsChanged = (): void => void window.dispatchEvent(new Event(EVENT));
+/**
+ * Tell the run strips and menus on this page that a run was started or stopped, so they look again at once. `started`: the run just
+ * started here; the strips follow it even when it ends before they look (a one-step test can finish in under a second).
+ */
+export const announceRunsChanged = (started?: string): void => void window.dispatchEvent(new CustomEvent(EVENT, { detail: started }));
+
+/** Calls `on` (keep it stable, e.g. a state setter) with the id of each run started on this page. */
+export function useRunStarted(on: (jobId: string) => void): void {
+    useEffect(() => {
+        const l = (e: Event) => {
+            const id = (e as CustomEvent<string | undefined>).detail;
+            if (id) on(id);
+        };
+        window.addEventListener(EVENT, l);
+        return () => window.removeEventListener(EVENT, l);
+    }, [on]);
+}
 
 /**
  * One shared lookup per project for "which run is going now": every Run control and strip on a page reads the same answer, so a page
