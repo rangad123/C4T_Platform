@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ChevronRight, Code2, ExternalLink, ListChecks, Play, RefreshCw, Sparkles, Upload } from "lucide-react";
-import { projectKind, projectShape, type ProjectDetail, type Severity, type TestSummary, type TestingMode } from "../api";
+import { downloadFrom, projectKind, projectShape, type ProjectDetail, type Severity, type TestSummary, type TestingMode } from "../api";
 import { JobProgress } from "../components/JobProgress";
 import { ArchivedNote } from "../components/ProjectHub";
 import { ProjectHead } from "../components/ProjectKind";
@@ -39,6 +39,9 @@ import { routes } from "../lib/router";
 import { countedSentence } from "../features/quarantine/quarantine";
 import { stoppedLine } from "../features/runs/runs";
 import "../features/quarantine/quarantine.css";
+import { CaseOutcome } from "../features/outcome/CaseOutcome";
+import type { CaseOutcome as Outcome } from "../features/outcome/outcome";
+import { useCan } from "../features/auth/permissions";
 
 const SEV_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const attentionRank = (t: TestSummary) => (t.severity ? SEV_RANK[t.severity.severity] : t.validationStatus === "NEEDS_REVIEW" ? 4 : 5);
@@ -124,12 +127,20 @@ export function ProjectOverview({ id }: { id: string }) {
     // A restored project asks for the sign-in details a backup never holds: that needs a person, so it is said here, not only in Settings.
     const storage = useFetch<{ needsSecrets: Array<{ label: string }> }>(`/projects/${id}/storage`);
     const p = project.data;
-    useOnFinish(isActive(p?.latestJob?.status), () => void tests.reload());
+    // An agent-only project may be a Test Case Generation project (SPEC D3): the outcome endpoint says so (`caseAgent`), and then the
+    // Dashboard is that outcome. Code and mixed projects never are, so they never ask.
+    const agentOnly = p ? projectKind(p) === "agent" : false;
+    const outcome = useFetch<Outcome>(agentOnly ? `/projects/${id}/outcome` : null, () => (isActive(project.data?.latestJob?.status) ? 3000 : null));
+    useOnFinish(isActive(p?.latestJob?.status), () => void (tests.reload(), agentOnly && outcome.reload()));
     useDocumentTitle(p?.name ?? "Project");
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: p?.name ?? "…" }], nav: "projects" });
 
     if (project.loading) return <Loading />;
     if (project.error || !p) return <ErrorState error={friendlyError(project.error?.message ?? "Project not found")} onRetry={project.reload} />;
+    // Not `outcome.loading` alone: on the render the project arrives the outcome has not been asked for yet.
+    if (agentOnly && !outcome.data && !outcome.error) return <Loading />;
+    // An outcome that cannot be read (an older server) leaves the agent Dashboard as it was.
+    if (outcome.data?.caseAgent) return <CaseAgentDashboard id={id} p={p} outcome={outcome.data} needsSecrets={storage.data?.needsSecrets ?? []} onChanged={project.reload} />;
 
     // The job answer may not say what it explored; a project whose application is a phone app has phone jobs.
     const job = p.latestJob ? phoneJobOf(p.latestJob, p.application?.url) : p.latestJob;
@@ -213,8 +224,9 @@ export function ProjectOverview({ id }: { id: string }) {
 
                 <SecuritySummaryCard id={id} />
 
-                {/* Coverage by requirement (RP-02): passing, failing, covered, not covered. */}
-                <RequirementsCoverageCard projectId={id} />
+                {/* Coverage by requirement (RP-02): passing, failing, covered, not covered. Not on an agent project's Dashboard (founder
+                    2026-11-19 P6): its requirements are an input there, and the Requirements tab keeps them. */}
+                {projectKind(p) !== "agent" && <RequirementsCoverageCard projectId={id} />}
 
                 {/* What was learnt about the application, for a website the AI agent explores. */}
                 {understandsApp(p) && <UnderstandingCard projectId={id} />}
@@ -319,6 +331,77 @@ export function ProjectOverview({ id }: { id: string }) {
                 )}
 
                 {job && <div className="card" style={{ padding: "0 20px" }}><TechnicalDetails job={job} /></div>}
+            </div>
+        </>
+    );
+}
+
+/**
+ * The Dashboard of a Test Case Generation project (founder 2026-11-19 P1, P3, P5, P6, P7): the header (name, kind, Explore again), what is
+ * still to set up, the run while one runs, and the outcome report with its one download. No pass or fail, no tests to run or open, no
+ * plan to confirm, no requirements coverage: the agent writes test cases and stops.
+ */
+function CaseAgentDashboard({ id, p, outcome, needsSecrets, onChanged }: { id: string; p: ProjectDetail; outcome: Outcome; needsSecrets: Array<{ label: string }>; onChanged: () => void }) {
+    const can = useCan();
+    const [downloadError, setDownloadError] = useState<string | null>(null);
+    const job = p.latestJob ? phoneJobOf(p.latestJob, p.application?.url) : p.latestJob;
+    const active = isActive(job?.status);
+    const url = p.application?.url;
+    const download = async () => {
+        setDownloadError(null);
+        try {
+            await downloadFrom(`/projects/${id}/outcome/workbook`, `${p.name} test cases.xlsx`);
+        } catch (e) {
+            setDownloadError((e as Error).message);
+        }
+    };
+    return (
+        <>
+            <ProjectHead
+                project={p}
+                subtitle={
+                    <>
+                        {url ? (
+                            <a href={url} target="_blank" rel="noreferrer" className="row" style={{ gap: 4 }}>
+                                {hostOf(url)} <ExternalLink size={13} aria-hidden />
+                            </a>
+                        ) : (
+                            !p.mobile && <span>No application yet</span>
+                        )}
+                        {job && <JobBadge job={{ ...job, caseAgent: true }} tipFocusable />}
+                    </>
+                }
+                actions={
+                    <LinkButton href={exploreAgainHref(job, id)} icon={RefreshCw}>
+                        Explore again
+                    </LinkButton>
+                }
+            />
+            <ProjectTabs id={id} active="overview" modes={projectShape(p).testingModes} />
+            {p.archived_at && <ArchivedNote id={id} />}
+            <div className="stack" data-testid="case-agent-dashboard">
+                <SetupChecklist id={id} />
+                {needsSecrets.length > 0 && (
+                    <Callout tone="warning" title="Some details need entering again" actions={<LinkButton size="sm" href={routes.setup(id, "storage")}>Open Storage and backup</LinkButton>}>
+                        {needsSecrets.map((n) => n.label).join("; ")}. They are never part of a backup.
+                    </Callout>
+                )}
+                {job && active && <JobProgress job={job} onChanged={onChanged} />}
+                {downloadError && (
+                    <Callout tone="danger" title="The test cases could not be downloaded">
+                        {downloadError}
+                    </Callout>
+                )}
+                <CaseOutcome
+                    outcome={outcome}
+                    downloadHref={can("ai_studio.reports.export") ? `/api/projects/${id}/outcome/workbook` : null}
+                    onDownload={() => void download()}
+                    emptyActions={
+                        <LinkButton href={routes.newProject({ project: id })} variant="primary" icon={Sparkles}>
+                            Start exploring
+                        </LinkButton>
+                    }
+                />
             </div>
         </>
     );

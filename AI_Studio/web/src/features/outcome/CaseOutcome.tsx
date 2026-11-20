@@ -11,9 +11,11 @@ import "./outcome.css";
  * apart from the pages), what the understanding says is missing, and one download. Nothing else: no pass or fail, no runs of tests.
  *
  * `downloadHref` is the workbook's address (GET /api/projects/:id/outcome/workbook); leave it out when the person may not export, and the
- * button is not shown. `emptyActions` is what the page offers when there is nothing yet (for example "Explore").
+ * button is not shown. `onDownload`, when given, takes the click instead of the plain link (the page then sends the request the way every
+ * request is sent, with the access key and a renewed sign-in, and shows a refusal as its sentence). `emptyActions` is what the page offers
+ * when there is nothing yet (for example "Explore").
  */
-export function CaseOutcome({ outcome, downloadHref, emptyActions, title = "Pages and test cases" }: { outcome: Outcome; downloadHref?: string | null; emptyActions?: ReactNode; title?: string }) {
+export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, title = "Pages and test cases" }: { outcome: Outcome; downloadHref?: string | null; onDownload?: () => void; emptyActions?: ReactNode; title?: string }) {
     const headingId = useId();
     const roots = useMemo(() => buildTree(outcome.tree), [outcome.tree]);
     const counts = useMemo(() => nodeCaseCounts(outcome.tree, outcome.cases), [outcome.tree, outcome.cases]);
@@ -43,7 +45,19 @@ export function CaseOutcome({ outcome, downloadHref, emptyActions, title = "Page
                     )}
                 </div>
                 {downloadHref && outcome.runs.length > 0 && !nothing && (
-                    <a className="btn btn-primary" href={downloadHref} download data-testid="outcome-download">
+                    <a
+                        className="btn btn-primary"
+                        href={downloadHref}
+                        download
+                        data-testid="outcome-download"
+                        onClick={
+                            onDownload &&
+                            ((e) => {
+                                e.preventDefault();
+                                onDownload();
+                            })
+                        }
+                    >
                         <Download size={18} aria-hidden />
                         Download test cases
                     </a>

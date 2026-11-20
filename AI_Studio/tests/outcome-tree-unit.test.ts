@@ -75,8 +75,8 @@ describe("visibleNodes", () => {
 describe("words", () => {
     it("says the summary with one page count: the number of tree nodes, never the failed addresses", () => {
         const o = outcome({ tree: [node("/", null), node("/a", "/")], cases: [tc("TC-001", "/")], runs: [{ jobId: "j1", startedAt: "", status: "completed", addedPages: 2, addedCases: 1 }], notOpened: 5 });
-        expect(summaryLine(o)).toBe("2 pages · 1 test case · built from 1 run");
-        expect(summaryLine(outcome({ tree: [node("/", null)], cases: [], runs: [] }))).toBe("1 page · 0 test cases · built from 0 runs");
+        expect(summaryLine(o)).toBe("2 pages, 1 test case, from 1 run");
+        expect(summaryLine(outcome({ tree: [node("/", null)], cases: [], runs: [] }))).toBe("1 page, 0 test cases, from 0 runs");
     });
 
     it("names the addresses that could not be opened once, in the singular and the plural, and nothing when there are none", () => {
