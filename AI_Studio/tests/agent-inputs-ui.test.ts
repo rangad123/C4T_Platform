@@ -47,7 +47,8 @@ beforeAll(async () => {
     shop = platform.repo.createProject({ name: "API shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
     platform.repo.createApplication(shop, SITE, { ...DEFAULT_JOB_OPTIONS }, { username: "old@shop.example", password: "an earlier password" });
     agentInputsStoreOf(platform).save(shop, { site: SITE, credentials: { username: "old@shop.example", password: "an earlier password" } });
-    await testingAgentsOf(platform).set(shop, ["api", "test-generation"], "test");
+    // Not with the Test Case Generation Agent: then the API agent does not run and nothing is asked for (Q6, tests/case-agent-fixes-ui.test.ts).
+    await testingAgentsOf(platform).set(shop, ["api", "accessibility"], "test");
     const users = accessControlOf(server).users;
     const olga = users.create({ email: "olga@example.com", name: "Olga Owner", role: "owner" });
     users.setPassword(olga.id, await hashPassword("olga's long password"));
@@ -99,8 +100,7 @@ describe("what the agents need", () => {
         await dialog().getByRole("button", { name: "Not now" }).click();
         await pwExpect(dialog()).toHaveCount(0);
         await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
-        // A Test Case Generation project (founder 2026-11-19, Q6): its explorations write test cases; the API agent waits for its own screens.
-        await pwExpect(page.getByTestId("explore-agents")).toHaveText("The Test Case Generation Agent writes this project’s test cases. The API Testing Agent comes back in a later update.");
+        await pwExpect(page.getByTestId("explore-agents")).toHaveText("Checked by this project’s testing agents: API Testing Agent, Accessibility Testing Agent.");
         await pwExpect(page.getByTestId("inputs-note").getByRole("link", { name: "Requirements" })).toHaveAttribute("href", `#/projects/${shop}/requirements`);
         await page.getByRole("button", { name: "Explore again" }).click();
         await pwExpect(dialog()).toBeVisible();

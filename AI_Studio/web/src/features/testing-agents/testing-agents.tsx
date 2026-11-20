@@ -61,6 +61,8 @@ export interface ProjectAgents {
     chosenAt: string | null;
     switches: Record<AgentSwitch, SwitchState>;
     platforms: Platform[];
+    /** A Test Case Generation project, by the server's rule (src/platform/case-agent.ts). */
+    caseAgent: boolean;
 }
 
 const ICONS: Record<AgentId, LucideIcon> = {
@@ -102,7 +104,7 @@ export function AgentPicker({ agents, platforms, value, onChange, disabled, lege
     return (
         <fieldset className="choice-group stack-sm" data-testid="agent-picker">
             <legend className="t-card">{legend}</legend>
-            <p className="t-meta">Choose at least one. Each agent decides which checks run when the AI explores the application.</p>
+            <p className="t-meta">Choose at least one. The Test Case Generation Agent explores the application or reads its requirements, builds a tree and writes test cases. Each other agent decides which checks an exploration runs.</p>
             <div className="ta-pick">
                 {agents.map((a) => {
                     const fits = fitsPlatforms(a, platforms);

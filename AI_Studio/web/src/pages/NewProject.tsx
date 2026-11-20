@@ -133,7 +133,7 @@ export function NewProject({ projectId }: { projectId: string }) {
                     <FieldHelp htmlFor="scope" label="Focus (optional)" help={`Told to the AI when it ${caseAgent ? "writes the test cases" : "plans which tests to write"}. The whole application is still explored.`} />
                     <input id="scope" className="input" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Everything — or e.g. “search and checkout only”" />
                 </div>
-                <LevelChoice value={chosenLevel} onChange={setLevel} />
+                <LevelChoice value={chosenLevel} onChange={setLevel} caseAgent={caseAgent} />
                 {!screenReviewOff && <ScreenReviewChoice level={chosenLevel} canReadImages={aiReady === true} value={screenReview} onChange={setScreenReview} />}
                 <label className="row" style={{ alignItems: "flex-start" }}>
                     <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />

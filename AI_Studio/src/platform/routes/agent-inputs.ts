@@ -28,13 +28,14 @@ import { REQUIREMENTS_MAX_CHARS } from "../../engine/requirements/extract.js";
 import { AgentInputsStore, sameSite, type SavedAgentInputs } from "../agent-inputs-store.js";
 export { sameSite };
 import { secretBoxOf } from "../ai-config.js";
+import { isCaseAgentProject } from "../case-agent.js";
 import { CleanupStore } from "../cleanup-store.js";
 import type { Row } from "../db.js";
 import { HttpError } from "../http-error.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import type { Platform } from "../bootstrap.js";
 import { projectSetupOf } from "../project-setup.js";
-import type { Credentials } from "../repo.js";
+import type { Credentials, Repo } from "../repo.js";
 import { RequirementStore } from "../requirement-store.js";
 import { agentById, type AgentId } from "../testing-agents.js";
 import { testingAgentsOf } from "./testing-agents.js";
@@ -96,7 +97,16 @@ export const missingInputsMessage = (missing: readonly MissingInput[]): string =
 /** The project's chosen agents (a project with no saved choice, or not tested by the AI agent, has none: nothing is mandatory for it). */
 async function chosenAgents(p: Platform, row: Row): Promise<AgentId[] | undefined> {
     if (!projectSetupOf(row).testingModes.includes("agent")) return undefined;
-    return testingAgentsOf(p).chosen(String(row.id));
+    const chosen = await testingAgentsOf(p).chosen(String(row.id));
+    return chosen ? agentsThatRun(p.repo, String(row.id), chosen) : undefined;
+}
+
+/**
+ * Of the chosen agents, the ones an exploration runs: in a Test Case Generation project only that agent (owner decision Q6), so the
+ * other agents' mandatory inputs are not asked for; their saved inputs stay saved. Every other project: all of them.
+ */
+async function agentsThatRun(repo: Repo, projectId: string, chosen: readonly AgentId[]): Promise<AgentId[]> {
+    return (await isCaseAgentProject(repo, projectId)) ? chosen.filter((a) => a === "test-generation") : [...chosen];
 }
 
 /** For test-generation: what the chosen agents miss for this exploration (empty for a project with no saved choice). */
@@ -243,7 +253,7 @@ export function registerAgentInputRoutes(ctx: RouteCtx): void {
             requirements: { active },
             agents: agents ? { ids: agents.agents, names: agents.agents.map((a) => agentById(a)?.name ?? a), source: agents.source } : null,
             // Only a saved choice makes an input mandatory (a project with none explores as before and is never refused).
-            missing: agents?.source === "chosen" ? missingInputs(agents.agents, { openApiUrl }) : [],
+            missing: agents?.source === "chosen" ? missingInputs(await agentsThatRun(repo, id, agents.agents), { openApiUrl }) : [],
         };
     };
 

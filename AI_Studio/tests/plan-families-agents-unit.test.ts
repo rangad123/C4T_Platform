@@ -64,22 +64,25 @@ describe("the plan's kinds of test, per chosen agent", () => {
 });
 
 describe("which projects are Test Case Generation projects (SPEC D3, Q6)", () => {
+    // Whether a project is one is the server's answer (FX14); tests/case-agent-view.test.ts checks web and server agree on real projects.
     type Agents = Parameters<typeof projectAgentView>[1] & {};
-    const agents = (over: Partial<Agents>): Agents => ({ applies: true, agents: ["test-generation"], source: "chosen", switches: switchesFor(["test-generation"]), ...over });
+    const agents = (over: Partial<Agents>): Agents => ({ applies: true, agents: ["test-generation"], source: "chosen", switches: switchesFor(["test-generation"]), caseAgent: true, ...over });
     const agentOnly = { testingModes: ["agent"] };
 
-    it("an AI-agent-only project whose saved agents include it", () => {
+    it("follows the server's caseAgent answer", () => {
         expect(projectAgentView(agentOnly, agents({})).caseAgent).toBe(true);
         expect(projectAgentView(agentOnly, agents({ agents: ["accessibility", "test-generation"] })).caseAgent).toBe(true);
+        expect(projectAgentView(agentOnly, agents({ caseAgent: false })).caseAgent).toBe(false);
+        expect(projectAgentView(agentOnly, agents({ caseAgent: undefined })).caseAgent).toBe(false);
+        expect(projectAgentView(undefined, undefined)).toEqual({ caseAgent: false, switches: null });
     });
 
-    it("not a mixed or code project, not one with no saved choice, not one without the agent", () => {
-        expect(projectAgentView({ testingModes: ["agent", "code"] }, agents({}))).toEqual({ caseAgent: false, switches: null });
-        expect(projectAgentView({ testingModes: ["code"] }, agents({ applies: false }))).toEqual({ caseAgent: false, switches: null });
-        expect(projectAgentView(agentOnly, agents({ source: "matched" }))).toEqual({ caseAgent: false, switches: null });
-        expect(projectAgentView(agentOnly, agents({ agents: ["accessibility"], switches: switchesFor(["accessibility"]) })).caseAgent).toBe(false);
-        expect(projectAgentView(undefined, undefined)).toEqual({ caseAgent: false, switches: null });
+    it("narrows the plan only for an AI-agent-only project with a saved choice", () => {
+        expect(projectAgentView(agentOnly, agents({})).switches).toEqual(switchesFor(["test-generation"]));
+        expect(projectAgentView({ testingModes: ["agent", "code"] }, agents({ caseAgent: false })).switches).toBeNull();
+        expect(projectAgentView({ testingModes: ["code"] }, agents({ applies: false, caseAgent: false })).switches).toBeNull();
+        expect(projectAgentView(agentOnly, agents({ source: "matched", caseAgent: false })).switches).toBeNull();
         // An older project with no modes saved is a mixed one.
-        expect(projectAgentView({ testingModes: [] }, agents({}))).toEqual({ caseAgent: false, switches: null });
+        expect(projectAgentView({ testingModes: [] }, agents({ caseAgent: false })).switches).toBeNull();
     });
 });

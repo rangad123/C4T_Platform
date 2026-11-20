@@ -8,7 +8,9 @@ import { routes } from "../../lib/router";
 import { AgentPicker, type AgentId, type AgentList, type ProjectAgents } from "./testing-agents";
 
 /**
- * Project Settings → General: the testing agents of a project tested by the AI agent. They decide which checks an exploration runs.
+ * Project Settings → General: the testing agents of a project tested by the AI agent. They decide what an exploration does: in a Test
+ * Case Generation project it builds a tree and writes test cases (other agents chosen with it wait, owner decision Q6); otherwise the
+ * agents' checks run.
  * A project with no saved choice shows the agents its latest exploration settings match, and runs as before until one is saved.
  */
 export function ProjectAgentsPanel({ id, canEdit }: { id: string; canEdit: boolean }) {
@@ -33,9 +35,9 @@ export function ProjectAgentsPanel({ id, canEdit }: { id: string; canEdit: boole
         setBusy(true);
         setNote(null);
         try {
-            await api(`/projects/${id}/testing-agents`, { method: "PUT", body: { agents: value } });
+            const now = await api<ProjectAgents>(`/projects/${id}/testing-agents`, { method: "PUT", body: { agents: value } });
             await mine.reload();
-            setNote({ tone: "success", text: "Saved. The next exploration runs the checks of these agents." });
+            setNote({ tone: "success", text: now.caseAgent ? "Saved. The next exploration builds the tree and writes test cases." : "Saved. The next exploration runs the checks of these agents." });
         } catch (e) {
             setNote({ tone: "danger", text: e instanceof ApiError ? e.message : "The agents were not saved. Try again." });
         } finally {
@@ -49,8 +51,8 @@ export function ProjectAgentsPanel({ id, canEdit }: { id: string; canEdit: boole
                 <h2 className="t-section" id="agents-title">
                     Testing agents
                 </h2>
-                <p className="t-secondary">
-                    The agents decide which checks run when the AI explores this project’s application. <a href={routes.agents}>What each agent does</a>
+                <p className="t-secondary" data-testid="project-agents-about">
+                    {mine.data.caseAgent ? CASE_AGENT_ABOUT : "The agents decide which checks run when the AI explores this project’s application."} <a href={routes.agents}>What each agent does</a>
                 </p>
                 {mine.data.source === "matched" && (
                     <Callout tone="info" title="No agents saved yet">
@@ -72,3 +74,6 @@ export function ProjectAgentsPanel({ id, canEdit }: { id: string; canEdit: boole
         </section>
     );
 }
+
+/** What the agents do in a Test Case Generation project (founder 2026-11-19; owner decision Q6 for the agents chosen with it). */
+const CASE_AGENT_ABOUT = "The Test Case Generation Agent explores this project’s application or reads its requirements, builds a tree and writes test cases. Other agents chosen with it come back in a later update.";
