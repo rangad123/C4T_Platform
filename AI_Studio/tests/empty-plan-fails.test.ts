@@ -89,9 +89,13 @@ const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
     return { status: res.statusCode, body: res.body.startsWith("{") || res.body.startsWith("[") ? JSON.parse(res.body) : res.body };
 };
 
-/** One exploration of the site by a project tested by the AI agent with these testing agents. */
+/**
+ * One exploration of the site by a project tested by the AI agent with these testing agents. A choice with the Test Case Generation Agent
+ * is not saved: that would make a Test Case Generation project, whose explorations stop at a plan (case-agent.ts). With no saved choice the
+ * project plans functional test cases and runs the checks asked for (page health here), as such a choice did before.
+ */
 async function explore(name: string, agents: string[], extra: Record<string, unknown> = {}) {
-    const made = await call("POST", "/api/projects", { name, platforms: ["web"], testingModes: ["agent"], agents });
+    const made = await call("POST", "/api/projects", { name, platforms: ["web"], testingModes: ["agent"], ...(agents.includes("test-generation") ? {} : { agents }) });
     expect(made.status, JSON.stringify(made.body)).toBe(201);
     planningCalls = 0;
     const queued = await call("POST", `/api/projects/${made.body.id}/test-generation`, { url: URL, targets: ["web"], maxPages: 10, healthChecks: true, ...(agents.includes("test-generation") ? { inputChecks: false } : {}), ...extra });
