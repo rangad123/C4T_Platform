@@ -1,7 +1,8 @@
 /**
- * Test development in a real browser against a real platform (port 7901): a launcher, not a place of its own. Each project row opens
- * its test scripts (whose New test script menu has every way to write one); an AI agent project also offers exploring and recording,
- * a code project offers neither. Below sits the review queue of drafts across projects. A person who may only read sees no tool they could not use. Requires `web/dist`.
+ * Test development is out of the sidebar for now (founder review 2026-11-19, owner decision Q2): it repeated each project's Test
+ * scripts. No role sees the item, Reusable libraries stays, and an old `#/develop` link or bookmark lands on Projects instead of a
+ * blank page. The drafts waiting for review stay on the Dashboard and in each project's Test scripts → Review (reviews-ui.test.ts).
+ * Real browser against a real platform (port 7901). Requires `web/dist`.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -11,7 +12,6 @@ import { expect as pwExpect } from "@playwright/test";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
-import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { hashPassword } from "../src/platform/auth/password.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -19,19 +19,26 @@ import { buildServer } from "../src/platform/server.js";
 
 const PORT = 7901;
 const BASE = `http://127.0.0.1:${PORT}`;
+const SHOTS = process.env.F1119_SHOTS ?? "";
 let browser: Browser;
-let page: Page;
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
 let dataDir = "";
-let projectId = "";
 
-const signIn = async (p: Page, email: string, password: string) => {
+const PEOPLE = [
+    ["olga@example.com", "Olga Owner", "owner"],
+    ["eddie@example.com", "Eddie Editor", "editor"],
+    ["vera@example.com", "Vera Viewer", "viewer"],
+] as const;
+
+const signedIn = async (email: string, name: string, width = 1280): Promise<Page> => {
+    const p = await (await browser.newContext({ viewport: { width, height: 900 } })).newPage();
     await p.goto(BASE);
     await p.getByLabel("Email").fill(email);
-    await p.getByLabel("Password").fill(password);
+    await p.getByLabel("Password").fill(`${name}'s long password`);
     await p.getByRole("button", { name: "Sign in" }).click();
     await pwExpect(p.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+    return p;
 };
 
 beforeAll(async () => {
@@ -41,19 +48,14 @@ beforeAll(async () => {
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY: "develop-ui-owner-key-61c2", HOST: "127.0.0.1", PORT: String(PORT), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
-    const { repo } = platform;
-    projectId = repo.createProject({ name: "Launch shop" }).id as string;
-    repo.createApplication(projectId, "http://127.0.0.1:9/", {});
-    const spec = TestSpecSchema.parse({ testId: "WEB-001", title: "A draft to review", kind: "web", category: "Smoke", priority: "high", steps: [{ action: "navigate", url: "/" }] });
-    repo.insertTest({ projectId, suiteId: repo.getOrCreateSuite(projectId, "Smoke", "smoke"), jobId: null, spec, framework: "playwright", validationStatus: "PENDING", versionSource: "ai" });
+    const projectId = platform.repo.createProject({ name: "Launch shop" }).id as string;
+    platform.repo.createApplication(projectId, "http://127.0.0.1:9/", {});
     const users = accessControlOf(server).users;
-    for (const [email, name, role] of [["olga@example.com", "Olga Owner", "owner"], ["vera@example.com", "Vera Viewer", "viewer"]] as const) {
+    for (const [email, name, role] of PEOPLE) {
         const u = users.create({ email, name, role });
         users.setPassword(u.id, await hashPassword(`${name}'s long password`));
     }
     browser = await chromium.launch();
-    page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-    await signIn(page, "olga@example.com", "Olga Owner's long password");
 }, 90_000);
 afterAll(async () => {
     await browser?.close();
@@ -62,63 +64,41 @@ afterAll(async () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-const row = () => page.getByRole("list", { name: "Your projects" }).getByRole("listitem").filter({ hasText: "Launch shop" });
-const open = async () => {
-    await page.goto("about:blank");
-    await page.goto(`${BASE}/#/develop`);
-    await pwExpect(page.getByRole("heading", { name: "Test development", level: 1 })).toBeVisible();
-};
+describe("Test development is out of the sidebar (Q2)", () => {
+    for (const [email, name, role] of PEOPLE) {
+        it(`shows ${role}s no Test development item, and keeps Reusable libraries`, async () => {
+            const p = await signedIn(email, name);
+            const side = p.getByRole("complementary", { name: "Main navigation" });
+            await pwExpect(side.getByRole("link", { name: "Reusable libraries", exact: true })).toBeVisible();
+            await pwExpect(side.getByRole("link", { name: "Test development" })).toHaveCount(0);
+            await pwExpect(side.locator('a[href="#/develop"]')).toHaveCount(0);
+            if (SHOTS) await p.screenshot({ path: path.join(SHOTS, `sidebar-${role}.png`) });
+            await p.context().close();
+        });
+    }
 
-describe("Test development", () => {
-    it("lists an AI agent project with exploring, recording and its test scripts, and the review queue below", async () => {
-        await open();
-        for (const tool of ["Explore with AI", "Record", "Open test scripts"]) await pwExpect(row().getByRole("link", { name: tool, exact: true })).toBeVisible();
-        // describing a test and building steps are offered once, in the project's New test script menu, not repeated on the row
-        for (const gone of ["Describe in words", "Build steps"]) await pwExpect(row().getByRole("link", { name: gone, exact: true })).toHaveCount(0);
-        await pwExpect(page.getByRole("region", { name: "Drafts waiting for review" }).getByRole("link", { name: /WEB-001 A draft to review/ })).toBeVisible();
-        expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
+    it("keeps it out of the phone navigation too", async () => {
+        const p = await signedIn("eddie@example.com", "Eddie Editor", 390);
+        await p.getByRole("button", { name: "Toggle navigation" }).click();
+        const side = p.getByRole("complementary", { name: "Main navigation" });
+        await pwExpect(side.getByRole("link", { name: "Reusable libraries", exact: true })).toBeVisible();
+        await pwExpect(side.getByRole("link", { name: "Test development" })).toHaveCount(0);
+        // the drawer slides in; the picture waits until it is fully open
+        await pwExpect.poll(async () => (await side.boundingBox())?.x).toBe(0);
+        if (SHOTS) await p.screenshot({ path: path.join(SHOTS, "sidebar-phone.png") });
+        await p.context().close();
     });
 
-    it("opens the AI exploration for that project", async () => {
-        await open();
-        await row().getByRole("link", { name: "Explore with AI", exact: true }).click();
-        expect(page.url()).toContain(`#/new?project=${projectId}`);
-        await pwExpect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    });
-
-    it("opens the recorder", async () => {
-        await open();
-        await row().getByRole("link", { name: "Record", exact: true }).click();
-        expect(page.url()).toContain(`#/projects/${projectId}/record`);
-        await pwExpect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    });
-
-    it("opens the project's test scripts, where New test script offers describing a test and building steps", async () => {
-        await open();
-        await row().getByRole("link", { name: "Open test scripts", exact: true }).click();
-        await pwExpect(page).toHaveURL(new RegExp(`#/projects/${projectId}/scripts`));
-        await page.getByRole("button", { name: "New test script", exact: true }).first().click();
-        await pwExpect(page.getByRole("menuitem", { name: "Build steps by hand", exact: true })).toBeVisible();
-        await page.keyboard.press("Escape");
-    });
-
-    it("offers a person who may only read no tool they cannot use, and keeps the way to the test scripts", async () => {
-        const viewer = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-        await signIn(viewer, "vera@example.com", "Vera Viewer's long password");
-        await viewer.goto(`${BASE}/#/develop`);
-        const list = viewer.getByRole("list", { name: "Your projects" });
-        await pwExpect(list.getByRole("link", { name: "Open test scripts", exact: true })).toBeVisible();
-        for (const tool of ["Explore with AI", "Record"]) await pwExpect(list.getByRole("link", { name: tool, exact: true })).toHaveCount(0);
-        await viewer.close();
-    });
-
-    it("offers a code project only its test scripts: no exploring and no recording", async () => {
-        platform.repo.createProject({ name: "Code only shop", testingModes: ["code"] });
-        await open();
-        const code = page.getByRole("list", { name: "Your projects" }).getByRole("listitem").filter({ hasText: "Code only shop" });
-        await pwExpect(code.getByRole("link", { name: "Open test scripts", exact: true })).toBeVisible();
-        await pwExpect(code.getByRole("link")).toHaveCount(1);
-        await pwExpect(row().getByRole("link", { name: "Explore with AI", exact: true })).toBeVisible();
-        await pwExpect(row().getByRole("link", { name: "Record", exact: true })).toBeVisible();
+    it("lands an old #/develop link on Projects, with Projects marked in the sidebar and no Test development page", async () => {
+        const p = await signedIn("olga@example.com", "Olga Owner");
+        await p.goto("about:blank");
+        await p.goto(`${BASE}/#/develop`);
+        await pwExpect(p.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
+        await pwExpect(p.getByText("Launch shop").first()).toBeVisible();
+        await pwExpect(p.getByRole("heading", { name: "Test development" })).toHaveCount(0);
+        await pwExpect(p.getByRole("complementary", { name: "Main navigation" }).locator('a.nav-item[aria-current="page"]')).toHaveText("Projects");
+        await pwExpect(p.locator('.content [role="alert"]')).toHaveCount(0);
+        expect((await new AxeBuilder({ page: p }).analyze()).violations.map((v) => v.id)).toEqual([]);
+        await p.context().close();
     });
 });

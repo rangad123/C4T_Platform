@@ -11,7 +11,7 @@ import { ScriptsPage } from "./features/workspace/ScriptsPage";
 import { SuitesPage } from "./features/workspace/SuitesPage";
 import { TestCasesPage } from "./features/workspace/TestCasesPage";
 import { CreateProjectPage } from "./features/workspace/CreateProjectPage";
-import { DashboardPage, FoldersPage, ProfilePage, TestDevelopmentPage } from "./features/workspace/GlobalPages";
+import { DashboardPage, FoldersPage, ProfilePage } from "./features/workspace/GlobalPages";
 import { LibrariesPage } from "./features/libraries/LibrariesPage";
 import { IntegrationsPage } from "./features/integrations/IntegrationsPage";
 import { NewCodePage } from "./features/code/EditorPage";
@@ -43,7 +43,8 @@ function Pages() {
     // The global places (docs/product-restructure/INFORMATION_ARCHITECTURE.md). `#/` stays the project list.
     if (a === "dashboard") return <DashboardPage />;
     if (a === "create") return <CreateProjectPage />;
-    if (a === "develop") return <TestDevelopmentPage />;
+    // Founder review 2026-11-19 (Q2): Test development is out of the sidebar for now, so an old link or bookmark opens Projects.
+    if (a === "develop") return <Home />;
     // `#/runners` and `#/runners/:id` (removed in round 45) are redirected to Your runner in Settings (lib/aliases.ts).
     if (a === "integrations") return <IntegrationsPage />;
     // Reusable libraries (round 37) took the Folders place; grouping projects into folders opens from the Projects page.

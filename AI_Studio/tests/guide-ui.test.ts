@@ -203,7 +203,7 @@ function everyPlace(): Array<[string, PlaceId]> {
         [routes.scripts(P()), "scripts"],
         [routes.agentRuns(P()), "agent-runs"],
         [routes.dashboard, "dashboard"],
-        [routes.develop, "develop"],
+        // Founder review 2026-11-19 (Q2): Test development is out of the sidebar; #/develop opens Projects (guide-unit pins its help).
         [routes.integrations, "integrations"],
         [routes.libraries, "libraries"],
         [routes.projectFolders, "folders"],
