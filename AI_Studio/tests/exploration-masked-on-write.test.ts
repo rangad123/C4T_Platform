@@ -11,7 +11,9 @@ import { memoryLogger } from "../src/agent/log.js";
 import { explorationForResult } from "../src/agent/task-runner.js";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { maskExplorationText } from "../src/agent-protocol/exploration.js";
 import { saveExploration } from "../src/platform/exploration-store.js";
+import { maskText } from "../src/platform/redact-text.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { RepoSink } from "../src/platform/repo-sink.js";
 import { buildServer } from "../src/platform/server.js";
@@ -162,5 +164,31 @@ describe("the coverage record's free text is masked when it is written", () => {
         expect(leaks(JSON.stringify(sent))).toEqual(NONE);
         expect(sent.exploration!.stopDetail).toMatch(/^3 environment failures in a row; the last: Bad request \(echo\)/);
         expect(sent.exploration!.outcomes.map((o) => o.objectiveId)).toEqual(sampleExploration().outcomes.map((o) => o.objectiveId));
+    });
+
+    it("row 232: workflow ids and transition refs stay readable (bench-shop and practice-store records), real secrets in the same places still go", () => {
+        // Ids and labels as the saved bench records carry them (eval/.data-bench/p3-m6-cand-*, p3-m7-practice).
+        const WF = "journey-1-sign-in-to-the-account";
+        const STEP = `${WF} #0 Open the sign-in page`;
+        const TRANSITION = "transition:Session:signed in->visitor";
+        // Secret-looking values in the same fields: a 34-character base64url key with dashes, a hex key cut by dashes, a session value.
+        const KEY64 = "Ab3dE-f9GhIj-K1mNoPq-R2sTuVwX-yz45";
+        const HEXKEY = "9f86d081-884c7d65-9a2feaa0-c55ad015";
+        const SESSION = "s3ss10nAbc";
+        const e = sampleExploration();
+        const record = sampleExploration({
+            objectives: [{ ...e.objectives[0]!, source: WF }, { ...e.objectives[0]!, id: "OBJ-1", source: TRANSITION }, { ...e.objectives[0]!, id: "OBJ-2", source: `wf-${KEY64}` }],
+            coverage: {
+                ...e.coverage,
+                workflowSteps: { total: 4, exercised: 0, notExercised: [STEP, `${HEXKEY} #0 Open`, `transition:Order:session:${SESSION}->paid`], more: 0 },
+                unexplored: [{ ...e.coverage.unexplored[0]!, source: WF }],
+            },
+        });
+        const out = JSON.stringify(maskExplorationText(record, (t) => maskText(t, [])));
+        const masked = JSON.parse(out) as typeof record;
+        expect(masked.objectives.map((o) => o.source)).toEqual([WF, TRANSITION, expect.stringContaining("[hidden]")]);
+        expect(masked.coverage.unexplored[0]!.source).toBe(WF);
+        expect(masked.coverage.workflowSteps.notExercised[0]).toBe(STEP);
+        for (const secret of [KEY64, HEXKEY, SESSION]) expect(out.includes(secret), secret).toBe(false);
     });
 });

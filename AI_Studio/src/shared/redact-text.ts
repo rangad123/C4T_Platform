@@ -82,11 +82,16 @@ const LONG_HEX = /\b[0-9a-fA-F]{32,}\b/g;
 const LONG_B64 = /(?<![A-Za-z0-9+/_-])(?=[A-Za-z0-9+/_-]{32,})(?=[A-Za-z0-9+/_-]*\d)(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{32,}={0,2}/g;
 
 /**
- * A long base64-looking run. With slashes it may be an address path (`9501/api/notes/50123/comments/70001`): then only its long parts are
+ * A long base64-looking run, unless it is a slug (SLUG). With slashes it may be an address path (`9501/api/notes/50123/comments/70001`): then only its long parts are
  * hidden and its short parts (ports, words, numeric ids) stay. A real base64 value has a slash only now and then, so its parts are long and
  * are all hidden.
  */
-const hideLongRun = (m: string): string => (m.includes("/") ? m.split("/").map((part) => (part.replace(/=+$/, "").length >= 20 ? HIDDEN : part)).join("/") : HIDDEN);
+const hideLongRun = (m: string): string => (m.includes("/") ? m.split("/").map((part) => (part.replace(/=+$/, "").length >= 20 && !SLUG.test(part) ? HIDDEN : part)).join("/") : SLUG.test(m) ? m : HIDDEN);
+/**
+ * A dash-joined run of lowercase words and whole numbers (`journey-1-sign-in-to-the-account`, row 232): an id made from a label, not a key.
+ * A random key's dash-cut parts mix letters with digits or upper case (`9f86d081-884c7d65`, `Ab3dE-f9GhIj`), so they are still hidden.
+ */
+const SLUG = /^(?:[a-z]+|\d+)(?:-(?:[a-z]+|\d+))+$/;
 /** A `host:port` in an address (`//session.example:8080`, `user@db.internal:5432`): the host only looks like a secret key name. */
 const isHostPort = (all: string, offset: number, key: string, sep: string, value: string): boolean =>
     sep.trim() === ":" && key.includes(".") && /^\d{1,5}(?:[/?#][^\s]*)?$/.test(value) && /(?:\/\/|@)$/.test(all.slice(Math.max(0, offset - 2), offset));
