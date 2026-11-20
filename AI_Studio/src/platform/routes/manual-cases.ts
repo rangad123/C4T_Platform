@@ -1,13 +1,15 @@
 import { z } from "zod";
 import { ManualCaseInputSchema, MAX_CASES, MAX_NAME, MAX_NOTE, ResultInputSchema, clean } from "../../engine/manual/cases.js";
 import { casesToCsv, casesToJson, ManualImportError, parseImport } from "../../engine/manual/csv.js";
+import { casesFromWorkbook } from "../../engine/manual/workbook-import.js";
+import { XLSX_MAX_BYTES, XlsxReadError } from "../../engine/manual/xlsx-read.js";
 import { HttpError } from "../http-error.js";
 import { buildManualIssueDraft } from "../issues/manual.js";
 import { TrackerError } from "../issues/http.js";
 import { IntegrationStore } from "../issues/store.js";
 import { keptSnapshot, newReleaseSnapshot, releaseSummaries, releaseView, reopenRelease, requireOpen, signRelease } from "../manual-releases.js";
-import { ManualCaseStore, MAX_RELEASES } from "../manual-case-store.js";
-import { RequirementStore } from "../requirement-store.js";
+import { CaseLimitError, ManualCaseStore, MAX_RELEASES } from "../manual-case-store.js";
+import { RequirementStore, refKey } from "../requirement-store.js";
 import { releaseReportName, renderReleaseHtml } from "../reports/release-report.js";
 import { SecretBox } from "../secrets.js";
 import type { RouteCtx } from "./types.js";
@@ -17,7 +19,7 @@ import type { RouteCtx } from "./types.js";
  *
  *   GET/POST        /api/projects/:id/manual-cases                      list, add
  *   GET/PUT/DELETE  /api/projects/:id/manual-cases/:cid                 one case
- *   POST            /api/projects/:id/manual-cases/import               { format?, content } JSON or CSV
+ *   POST            /api/projects/:id/manual-cases/import               { format?, content } JSON or CSV, or { format: "xlsx", content: base64 }
  *   GET             /api/projects/:id/manual-cases/export?format=json|csv
  *   GET/POST        /api/projects/:id/releases                          list, open a release
  *   GET             /api/projects/:id/releases/:rid                     everything about one release
@@ -47,7 +49,7 @@ const Signoff = z.object({
 });
 const Reopen = z.object({ by: Required(MAX_NAME, "Your name"), comment: Required(MAX_NOTE, "The comment") });
 const ImportBody = z.object({
-    format: z.enum(["json", "csv"]).optional(),
+    format: z.enum(["json", "csv", "xlsx"]).optional(),
     content: z.union([z.string().min(1, "There is nothing to import"), z.array(z.unknown()), z.object({}).passthrough()]),
 });
 
@@ -115,25 +117,53 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         return reply.code(201).send(made);
     });
 
-    app.post("/api/projects/:id/manual-cases/import", async (req, reply) => {
+    /** The test case workbook's file, sent as base64 text. */
+    const workbookBytes = (content: unknown): Uint8Array => {
+        if (typeof content !== "string") throw new HttpError(400, "Send the workbook's file as base64 text.");
+        const text = content.replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 === 1) throw new HttpError(400, "The workbook could not be read: its file was not sent as base64 text.");
+        return new Uint8Array(Buffer.from(text, "base64"));
+    };
+
+    // A workbook of 10 MB is about 13.4 MB as base64; the server's usual limit is 8 MB.
+    app.post("/api/projects/:id/manual-cases/import", { bodyLimit: Math.ceil((XLSX_MAX_BYTES * 4) / 3) + 64_000 }, async (req, reply) => {
         const pid = projectId(req);
         const body = ImportBody.parse(req.body);
         let parsed;
+        let stepsIgnored: number | undefined;
         try {
-            parsed = parseImport(body.content, body.format);
+            if (body.format === "xlsx") {
+                const wb = casesFromWorkbook(workbookBytes(body.content));
+                // The Requirement cell names a requirement of this project by its reference (REQ-3): the case then comes from it. Otherwise
+                // the text is kept as written.
+                const byRef = new Map((await requirements.list(pid)).map((r) => [refKey(r.ref), r.id]));
+                parsed = { cases: wb.cases.map(({ requirementRef, ...c }) => ({ ...c, requirementId: (requirementRef && byRef.get(refKey(requirementRef))) || undefined })), skipped: wb.skipped };
+                stepsIgnored = wb.stepsIgnored;
+            } else {
+                const p = parseImport(body.content, body.format);
+                // A JSON or CSV file names no requirement record of this project (their ids are not portable): its cases come in without one.
+                parsed = { cases: p.cases.map((c) => ({ ...c, requirementId: undefined })), skipped: p.skipped };
+            }
         } catch (e) {
-            if (e instanceof ManualImportError) throw new HttpError(400, e.message);
+            if (e instanceof ManualImportError || e instanceof XlsxReadError) throw new HttpError(400, e.message);
             throw e;
         }
         for (const c of parsed.cases) checkLinked(pid, c.linkedTestIds);
+        let r;
         try {
-            // A file names no requirement record of this project (their ids are not portable): its cases come in without one.
-            const r = store.importCases(pid, parsed.cases.map((c) => ({ ...c, requirementId: undefined })));
-            return reply.code(r.created.length ? 201 : 200).send({ created: r.created.length, duplicates: r.duplicates, skipped: parsed.skipped, total: store.countCases(pid) });
+            r = store.importCases(pid, parsed.cases);
         } catch (e) {
-            if (e instanceof Error && e.message === "limit") throw new HttpError(409, `Importing these would pass the ${MAX_CASES} manual cases a project can have. Nothing was imported.`);
+            if (e instanceof CaseLimitError) {
+                const room = Math.max(0, MAX_CASES - e.have);
+                throw new HttpError(
+                    409,
+                    `This project can hold ${MAX_CASES} test cases and already has ${e.have}, so at most ${room} more can be imported. This file has ${e.adding} new ones. Nothing was imported.`,
+                );
+            }
             throw e;
         }
+        for (const c of r.created) await linkRequirement(pid, c);
+        return reply.code(r.created.length ? 201 : 200).send({ created: r.created.length, duplicates: r.duplicates, skipped: parsed.skipped, ...(stepsIgnored === undefined ? {} : { stepsIgnored }), total: store.countCases(pid) });
     });
 
     app.get("/api/projects/:id/manual-cases/export", async (req, reply) => {

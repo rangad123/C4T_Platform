@@ -17,7 +17,7 @@ import { HEALING_MIGRATION } from "./healing-store.js";
 import { IDENTITY_MIGRATION } from "./identity-store.js";
 import { LIVE_SESSION_MIGRATION } from "./live-session-store.js";
 import { LOCATORS_MIGRATION } from "./locator-store.js";
-import { caseTypesMigration, MANUAL_MIGRATION } from "./manual-case-store.js";
+import { CASE_WORKBOOK_FIELDS_MIGRATION, caseTypesMigration, MANUAL_MIGRATION } from "./manual-case-store.js";
 import { MEMORY_MIGRATION } from "./memory-store.js";
 import { NOTES_MIGRATION } from "./notes-store.js";
 import { PERFORMANCE_MIGRATION } from "./perf-store.js";
@@ -320,6 +320,7 @@ ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
     // LATE_FILLED_SLOTS. 66 adds only columns, so it has no entry there.
     /* 67: reserved (candidate findings) */ `-- reserved`,
     /* 68: the AI response cache: answers of allowed reading calls per project, by a hash of the whole question, and the cached-call counts on AI usage rows (schema lives in llm-response-cache.ts; existing projects start with none, existing usage rows with 0) */ RESPONSE_CACHE_MIGRATION,
+    /* 69: what a test case imported from the test case workbook keeps: its preconditions, its expected result, its page and the workbook's ID it came from (schema lives in manual-case-store.ts; only columns with defaults, so existing cases keep every row and have none) */ CASE_WORKBOOK_FIELDS_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */

@@ -64,8 +64,15 @@ export function sheetName(name: string): string {
     return s || "Sheet";
 }
 
+/**
+ * Excel reads `_xHHHH_` in cell text as the character HHHH (its escape for what XML cannot carry), so a literal one is written with its
+ * underscore escaped (`_x005F_xHHHH_`): Excel, LibreOffice and the import (engine/manual/xlsx-read.ts) then read the exact text back. The
+ * lookahead leaves the closing underscore in place, so in `_x0041_x0042_` both are escaped.
+ */
+const escapeExcelEscapes = (s: string): string => s.replace(/_(?=x[0-9a-fA-F]{4}_)/g, "_x005F_");
+
 function cellText(v: string): string {
-    const s = xmlSafe(v);
+    const s = escapeExcelEscapes(xmlSafe(v));
     return s.length > XLSX_CELL_MAX ? s.slice(0, XLSX_CELL_MAX - CUT_NOTE.length) + CUT_NOTE : s;
 }
 
