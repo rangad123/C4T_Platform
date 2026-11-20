@@ -15,7 +15,7 @@ import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
-import { AGENTS_NEED_AGENT_MODE, agentsMatching, applyAgentChoice, CHOOSE_AN_AGENT, switchNeedsAgent, TESTING_AGENTS } from "../src/platform/testing-agents.js";
+import { AGENTS_NEED_AGENT_MODE, agentById, agentsMatching, applyAgentChoice, CHOOSE_AN_AGENT, droppedChecksNote, switchesFor, switchNeedsAgent, TESTING_AGENTS } from "../src/platform/testing-agents.js";
 import { withAgentChoice } from "../src/platform/routes/testing-agents.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;
@@ -98,6 +98,48 @@ describe("the agent list", () => {
     });
 });
 
+describe("the Test Case Generation Agent (founder 2026-11-19)", () => {
+    const tcg = agentById("test-generation")!;
+    // "Test case is just like an English statement… there is no code, there is no scripting, nothing." The only code is the code
+    // project the downloaded test cases are imported into.
+    const noCodeOrRuns = (text: string) => {
+        const rest = text.replace(/code projects?/gi, "");
+        expect(rest, text).not.toMatch(/\bcode\b|\brun|\bdraft|\bchecks?\b|pass|fail/i);
+    };
+
+    it("says it explores or reads requirements, builds a tree and writes test cases, and nothing about code, runs or drafts", () => {
+        expect(tcg.summary).toBe("Explores the application or reads your requirements, builds a tree of its pages and writes test cases for them.");
+        noCodeOrRuns(tcg.summary);
+        noCodeOrRuns(tcg.description);
+        for (const c of tcg.checks) noCodeOrRuns(c);
+        // The outcome: a tree and test cases, downloaded and imported into a code project.
+        expect(tcg.description).toMatch(/tree/);
+        expect(tcg.description).toMatch(/test cases/);
+        expect(tcg.description).toMatch(/download/);
+        expect(tcg.description).toMatch(/import them into a code project/);
+        // No form-input checks any more.
+        expect(JSON.stringify(tcg)).not.toMatch(/unusual input|search forms/i);
+    });
+
+    it("turns on only test case writing: no form input checks", () => {
+        expect(tcg.turnsOn).toEqual(["functionalTests"]);
+        expect(tcg.allows).toEqual([]);
+        const on = Object.entries(switchesFor(["test-generation"])).filter(([, v]) => v !== "off").map(([k]) => k);
+        expect(on).toEqual(["functionalTests"]);
+        const o = applyAgentChoice({ ...DEFAULT_JOB_OPTIONS, inputChecks: true }, {}, ["test-generation"]);
+        expect(o).toMatchObject({ functionalTests: true, inputChecks: false, accessibility: false, securityChecks: false, healthChecks: false, targets: ["web"] });
+    });
+
+    it("refuses form input checks asked for in a project with chosen agents, in a whole sentence", () => {
+        expect(() => applyAgentChoice({ ...DEFAULT_JOB_OPTIONS }, { inputChecks: true }, ["test-generation"])).toThrow(switchNeedsAgent("inputChecks"));
+        expect(switchNeedsAgent("inputChecks")).toBe("Form input checks are not part of any testing agent, so they cannot be turned on.");
+        expect(droppedChecksNote(["inputChecks"])).toBe("Left out because no testing agent runs them: Form input checks.");
+        expect(droppedChecksNote(["securityChecks", "inputChecks"])).toBe(
+            "Left out because this project's testing agents do not include the agent that runs them: Basic security checks. Add the agent again in the project's Settings → General to bring them back. Left out because no testing agent runs them: Form input checks.",
+        );
+    });
+});
+
 describe("choosing agents for a project", () => {
     let shop = "";
     let bank = "";
@@ -175,7 +217,7 @@ describe("the checks an exploration runs", () => {
         expect(o.performanceChecks).toBeUndefined();
         expect(o.visual).toBeUndefined();
         const all = applyAgentChoice({ ...DEFAULT_JOB_OPTIONS }, {}, ["api", "performance", "responsive-ui", "test-generation"]);
-        expect(all).toMatchObject({ targets: ["web", "api"], functionalTests: true, inputChecks: true, contractChecks: true, performanceChecks: true, visual: true });
+        expect(all).toMatchObject({ targets: ["web", "api"], functionalTests: true, inputChecks: false, contractChecks: true, performanceChecks: true, visual: true });
         expect(all.loadChecks).toBeUndefined();
     });
 
