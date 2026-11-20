@@ -113,6 +113,17 @@ describe("a scheduled exploration", () => {
     });
 });
 
+describe("a scheduled exploration of a Test Case Generation project", () => {
+    it("leaves out the form input checks its earlier explorations made, and says so", async () => {
+        const pid = (await asKey("POST", "/api/projects", { name: "Cases", platforms: ["web"], testingModes: ["agent"], agents: ["test-generation"] })).body.id as string;
+        platform.repo.createApplication(pid, SITE, { ...DEFAULT_JOB_OPTIONS, targets: ["web"], functionalTests: true, inputChecks: true });
+        const job = await startScheduledJob(platform.repo, { id: "sched-tcg-paths", projectId: pid, kind: "generate", retryFailures: 0 } as unknown as Schedule);
+        const o = platform.repo.getJob(job.id)!.options;
+        expect(o).toMatchObject({ functionalTests: true, inputChecks: false, accessibility: false, securityChecks: false });
+        expect(eventsOf(job.id).find((e) => e.kind === "agent_checks_dropped")?.message).toMatch(/no testing agent runs them: Form input checks/);
+    });
+});
+
 describe("creating tests from a plan", () => {
     it("leaves out a check whose agent was removed since the plan, and says so in the job's events", async () => {
         const { pid, planJob } = await projectWithPlan("Planned", ["security", "test-generation"], { securityChecks: true, accessChecks: true, functionalTests: true });
