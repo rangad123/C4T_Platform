@@ -10,7 +10,7 @@ import http from "node:http";
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { CandidateFindingSchema, confidenceOf } from "../src/engine/explore/finding.js";
-import { checkIndependence, failureKind } from "../src/engine/explore/independence.js";
+import { checkIndependence, failureKind, replayOwnSteps } from "../src/engine/explore/independence.js";
 import { launchChromium } from "../src/engine/discovery/browser.js";
 import { maskObservedText } from "../src/engine/evidence/observed-text.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
@@ -40,6 +40,12 @@ const server = http.createServer((req, res) => {
         return;
     }
     if (req.url === "/hang") return; // never answers
+    // Row 236: a click whose script sends the browser elsewhere a moment later, as a sign-in or checkout does, aborts the next load.
+    if (req.url === "/jumps") return page("Jumps", `<h1>Jumps</h1><button onclick="fetch('/late').then(()=>{location.href='/landed'})">Go</button>`);
+    if (req.url === "/late") return void setTimeout(() => res.writeHead(200, { "content-type": "application/json" }).end("{}"), 300);
+    if (req.url === "/slowcart") return void setTimeout(() => page("Slow cart", `<h1>Slow cart</h1>`), 1_500);
+    // Row 236: a correct Total that shows 6 s after load: within the runner's 10 s step time, not within 5 s.
+    if (req.url === "/latetotal") return page("Cart", `<h1>Cart</h1><p>Total: <output aria-label="Total">...</output></p><script>setTimeout(()=>{document.querySelector('output').textContent='$25.00'},6000)</script>`);
     if (req.url?.startsWith("/busy")) {
         // A correct, slow page (CP3c T-2 case A): served after `?ms=`, it keeps a request open (so the network is never idle) and its
         // Total becomes $25.00 2.6 s after load.
@@ -326,5 +332,31 @@ describe("independence check", () => {
         expect(r.replays.map((x) => x.failedStep)).toEqual([1, 1]);
         // 2 replays x 2 steps x 1 s, plus opening and closing two browser contexts.
         expect(took).toBeLessThan(2 * hanging.length * 1_000 + 3_000);
+    }, 60_000);
+});
+
+describe("the own-steps replay is as tolerant as the runner (row 236)", () => {
+    it("a navigate cut off by the previous page's scripted redirect (net::ERR_ABORTED) is tried once more", async () => {
+        const steps = stepsOf([
+            { action: "navigate", url: "/jumps" },
+            { action: "click", locator: { by: "role", role: "button", value: "Go" } },
+            { action: "navigate", url: "/slowcart" },
+            { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Slow cart" } },
+        ]);
+        const r = await replayOwnSteps(browser, BASE, { steps });
+        expect(r.summary).not.toMatch(/ERR_ABORTED|interrupted/);
+        expect(r.outcome).toBe("passed");
+    }, 60_000);
+
+    it("a step gets the runner's 10 s, not 5 s, by default", async () => {
+        const steps = stepsOf([{ action: "navigate", url: "/latetotal" }, totalCheck]);
+        const r = await replayOwnSteps(browser, BASE, { steps });
+        expect(r.outcome).toBe("passed");
+    }, 60_000);
+
+    it("the check still asserts: a wrong Total fails the replay at that check", async () => {
+        const steps = stepsOf([{ action: "navigate", url: "/latetotal" }, { ...totalCheck, expected: "$30.00" }]);
+        const r = await replayOwnSteps(browser, BASE, { steps });
+        expect(r).toMatchObject({ outcome: "failed", failedStep: 2 });
     }, 60_000);
 });

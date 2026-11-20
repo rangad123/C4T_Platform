@@ -13,8 +13,8 @@
  * left by authoring or by the first replay, as D1's WEB-034), or do not fail at all; a replay that stops before the captured check says
  * so in its summary. It is `not_run` when the test has no sourced check or a replay could not start. No AI calls.
  *
- * Bounded: each step gets at most `stepTimeoutMs` (default 5 s) and each replay at most `steps x stepTimeoutMs`, so both together take
- * at most 2 x steps x 5 s (plus opening and closing the two browser contexts, and at most SHOT_MS per picture).
+ * Bounded: each step gets at most `stepTimeoutMs` (default 10 s, the runner's action time) and each replay at most `steps x stepTimeoutMs`, so both together take
+ * at most 2 x steps x 10 s (plus opening and closing the two browser contexts, and at most SHOT_MS per picture).
  *
  * Account state (row 229): a replay of a test that signs in uses the account `prepare` gives (clean-account.ts: a newly registered one
  * when the project allows it), so what earlier tests left on the shared test account does not decide the verdict. Without a clean
@@ -76,7 +76,8 @@ export interface DefectTest {
     credentials?: { username: string; password: string; totpSecret?: string };
 }
 
-const STEP_TIMEOUT_MS = 5_000;
+// The platform runner's actionTimeout (validation/runner.ts): a replay as patient as the run that later validates the test (row 236).
+const STEP_TIMEOUT_MS = 10_000;
 const SETTLE_MS = 1_000;
 const MESSAGE_MAX = 300;
 /** A picture of the stopped page gets at most this long. */
