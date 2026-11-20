@@ -18,7 +18,7 @@ function ServerNotes({ where }: { where: AgentWhere }) {
             )}
             {!where.canRun.ok && (
                 <Callout tone="warning" title="Tests do not run on this server">
-                    {where.canRun.reason ?? "Nothing runs the tests here."} The agents’ checks run where your tests run.
+                    {where.canRun.reason ?? "Nothing runs the tests here."} The agents work where your tests run.
                 </Callout>
             )}
         </>
@@ -127,7 +127,8 @@ export function AgentDetailPage({ id }: { id: string }) {
                     <div className="grid-2">
                         <section className="card card-pad stack-sm" aria-labelledby="agent-checks">
                             <h2 className="t-section" id="agent-checks">
-                                What it checks
+                                {/* The Test Case Generation Agent checks nothing: it gives a tree and test cases (founder 2026-11-19). */}
+                                {a.id === "test-generation" ? "What it gives you" : "What it checks"}
                             </h2>
                             <ul className="ta-list">
                                 {a.checks.map((c) => (

@@ -8,12 +8,37 @@ import { LibrarySearch } from "../library/LibraryPage";
 import { ProjectLibrary } from "../libraries/ProjectLibrary";
 import { ProjectObjects } from "../objects/ProjectObjects";
 import { ScriptList, VersionPage } from "../review/ScriptReview";
+import { ScriptsInCodeProjects, useProjectAgentView } from "../testing-agents/case-agent";
+import { Skeleton } from "../../components/ui";
 
 /**
  * The Test scripts place: the runnable scripts (round 38: running, New test script and importing live here, not in Test cases),
  * the review of their versions, and the building blocks scripts share.
  */
 export function ScriptsPage({ id }: { id: string }) {
+    // A Test Case Generation project has no test scripts (founder 2026-11-19): its old address says where test scripts live instead.
+    const view = useProjectAgentView(id);
+    if (view.loading) return <Skeleton h={200} />;
+    if (view.caseAgent) return <CaseAgentScripts id={id} />;
+    return <ScriptsHub id={id} />;
+}
+
+/** The Test scripts place of a Test Case Generation project: only where test scripts live, under the project's own header. */
+function CaseAgentScripts({ id }: { id: string }) {
+    return (
+        <ProjectHub
+            id={id}
+            place="scripts"
+            title="Test scripts"
+            subtitle="This project writes test cases. Its test cases become test scripts in a code project."
+            sections={[{ key: "scripts", label: "Where test scripts live", render: () => <ScriptsInCodeProjects projectId={id} /> }]}
+            current="scripts"
+            hrefOf={() => routes.scripts(id)}
+        />
+    );
+}
+
+function ScriptsHub({ id }: { id: string }) {
     const q = useRoute().query;
     const reviewTest = q.get("test");
     const reviewVersion = Number(q.get("version")) || 0;

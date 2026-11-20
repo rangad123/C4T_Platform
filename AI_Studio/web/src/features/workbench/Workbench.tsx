@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api } from "../../api";
 import { usePage } from "../../components/Shell";
-import { Callout, ErrorState, LinkButton, Skeleton } from "../../components/ui";
+import { Callout, ErrorState, LinkButton, PageHeader, Skeleton } from "../../components/ui";
 import { useConfig, useDocumentTitle, useFetch } from "../../lib/hooks";
 import { describeApiError, frameworkLabel, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
@@ -20,6 +20,7 @@ import { TAB_LABEL, TABS, lastEditBeforeFailure, marksCurrent, stepMarks, testTa
 import { restoreSpecVersion } from "./restore";
 import { versionHref } from "../review/review";
 import { MissingSignInHint, usesCredentials } from "../identity/ProjectSignIn";
+import { ScriptsInCodeProjects, useProjectAgentView } from "../testing-agents/case-agent";
 import "./workbench.css";
 
 const FINAL = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -64,6 +65,8 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
     const t = test.data;
     const project = useFetch<{ name: string }>(t ? `/projects/${t.projectId}` : null);
     const versions = useFetch<SpecVersionRow[]>(t ? `/tests/${id}/spec-versions` : null);
+    // A Test Case Generation project has no test scripts (founder 2026-11-19): an old script's address says where scripts live.
+    const agentView = useProjectAgentView(t ? t.projectId : null);
     const config = useConfig();
     useDocumentTitle(t ? t.title : "Test");
     usePage({
@@ -284,6 +287,15 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
         );
     }
     if (test.error || !t) return <ErrorState error={friendlyError(test.error?.message ?? "Test not found")} onRetry={test.reload} />;
+    if (agentView.loading) return <Skeleton h={200} style={{ borderRadius: 12 }} />;
+    if (agentView.caseAgent) {
+        return (
+            <div className="stack" data-testid="case-agent-script">
+                <PageHeader title={t.title} subtitle={`${t.testId} was made in this project before its agent wrote test cases only.`} />
+                <ScriptsInCodeProjects projectId={t.projectId} />
+            </div>
+        );
+    }
 
     const last = t.executions[0];
     const visualActual = (last?.artifacts ?? []).some((a) => a.kind === "visual-actual");

@@ -99,7 +99,8 @@ describe("what the agents need", () => {
         await dialog().getByRole("button", { name: "Not now" }).click();
         await pwExpect(dialog()).toHaveCount(0);
         await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
-        await pwExpect(page.getByTestId("explore-agents")).toHaveText("Checked by this project’s testing agents: API Testing Agent, Test Case Generation Agent.");
+        // A Test Case Generation project (founder 2026-11-19, Q6): its explorations write test cases; the API agent waits for its own screens.
+        await pwExpect(page.getByTestId("explore-agents")).toHaveText("The Test Case Generation Agent writes this project’s test cases. The API Testing Agent comes back in a later update.");
         await pwExpect(page.getByTestId("inputs-note").getByRole("link", { name: "Requirements" })).toHaveAttribute("href", `#/projects/${shop}/requirements`);
         await page.getByRole("button", { name: "Explore again" }).click();
         await pwExpect(dialog()).toBeVisible();
