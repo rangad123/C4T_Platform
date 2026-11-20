@@ -1,4 +1,5 @@
 import { runnerOwnerOf } from "./agent-store.js";
+import { caseAgentOptions, refuseTestsInCaseAgentProject } from "./case-agent.js";
 import { noteCustomSkipped, splitCustom } from "./custom-policy.js";
 import { notePluginSkipped, pluginSkips, type RunShape } from "./plugin-policy.js";
 import { droppedChecksNote, narrowedByChoice, TestingAgentStore, type AgentSwitch, type AskedSwitches } from "./testing-agents.js";
@@ -81,6 +82,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
 
     let options: JobOptions;
     let dropped: AgentSwitch[] = [];
+    if (s.kind === "validate") await refuseTestsInCaseAgentProject(repo, s.projectId); // a Test Case Generation project runs no tests
     if (s.kind === "validate") {
         let testIds = await runnableTestIds(repo, s.projectId, "validate", runnerOwnerOf(s.createdBy));
         if (testIds.length === 0) throw new Error("This project has no tests that can be run yet.");
@@ -111,6 +113,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
             dropped = narrowed.dropped;
         }
     }
+    options = await caseAgentOptions(repo, s.projectId, options); // a Test Case Generation project explores plan-only (case-agent.ts)
     options.trigger = "schedule";
     options.scheduleId = s.id;
     // Who the run belongs to: the schedule and the person who made it (a person's own runner takes only that person's runs).

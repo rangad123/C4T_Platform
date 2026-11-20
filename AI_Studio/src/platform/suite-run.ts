@@ -13,6 +13,7 @@ import { noteCustomSkipped } from "./custom-policy.js";
 import { assertEnvironmentTargets } from "./environment-run.js";
 import { findEnvironment } from "./environments-store.js";
 import { HttpError } from "./http-error.js";
+import { refuseTestsInCaseAgentProject } from "./case-agent.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import { readHeartbeat } from "./ops/heartbeat.js";
 import { notePluginSkipped } from "./plugin-policy.js";
@@ -146,6 +147,7 @@ export async function startSuiteForSchedule(p: Platform, s: Schedule): Promise<J
     if (!suiteId) return undefined;
     const suite = await store.get(suiteId);
     if (!suite || suite.projectId !== s.projectId) throw new Error("The suite this schedule runs no longer exists. Edit the schedule and choose another.");
+    await refuseTestsInCaseAgentProject(p.repo, s.projectId); // a Test Case Generation project runs no tests (case-agent.ts)
     const can = runsCanStartHere(p);
     if (!can.ok) throw new Error(can.reason);
     const { repo } = p;
