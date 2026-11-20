@@ -73,10 +73,10 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
     const projectsUsing = async (req: Parameters<typeof actorOf>[0]) => {
         const visible = visibleProjectsOf(req, actorOf(req));
         const rows = repo.listProjects().filter((r) => (!visible || visible.has(r.id as string)) && !r.archived_at);
-        const out: Array<{ id: string; name: string; agents: AgentId[]; source: "chosen" | "matched" }> = [];
+        const out: Array<{ id: string; name: string; agents: AgentId[]; source: "chosen" | "matched"; caseAgent: boolean }> = [];
         for (const r of rows) {
             const a = await store.of(r);
-            if (a.applies) out.push({ id: String(r.id), name: String(r.name), agents: a.agents, source: a.source });
+            if (a.applies) out.push({ id: String(r.id), name: String(r.name), agents: a.agents, source: a.source, caseAgent: await isCaseAgentProject(repo, String(r.id)) });
         }
         return out;
     };
@@ -85,7 +85,7 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
     app.get("/api/testing-agents", async (req) => {
         const projects = await projectsUsing(req);
         return {
-            agents: TESTING_AGENTS.map((a) => ({ ...publicAgent(a), projects: projects.filter((x) => x.agents.includes(a.id)).map(({ id, name, source }) => ({ id, name, source })) })),
+            agents: TESTING_AGENTS.map((a) => ({ ...publicAgent(a), projects: projects.filter((x) => x.agents.includes(a.id)).map(({ id, name, source, caseAgent }) => ({ id, name, source, caseAgent })) })),
             ...(await where()),
         };
     });
@@ -93,7 +93,7 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
     app.get("/api/testing-agents/:agentId", async (req) => {
         const a = agentById((req.params as { agentId: string }).agentId);
         if (!a) throw new HttpError(404, AGENT_NOT_FOUND);
-        const projects = (await projectsUsing(req)).filter((x) => x.agents.includes(a.id)).map(({ id, name, source }) => ({ id, name, source }));
+        const projects = (await projectsUsing(req)).filter((x) => x.agents.includes(a.id)).map(({ id, name, source, caseAgent }) => ({ id, name, source, caseAgent }));
         return { agent: publicAgent(a), projects, ...(await where()) };
     });
 

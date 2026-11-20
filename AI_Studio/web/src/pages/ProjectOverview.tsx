@@ -34,6 +34,7 @@ import type { ScheduleList } from "../features/schedules/schedules";
 import { hostOf, plural, relativeTime } from "../lib/format";
 import { cleanReason, friendlyError, friendlyJobErrors, isActive, nothingRan } from "../lib/labels";
 import { useDocumentTitle, useFetch, useOnFinish, useProjectChanged } from "../lib/hooks";
+import { useCaseAgent } from "../features/runs/case-runs";
 import { help } from "../lib/help";
 import { routes } from "../lib/router";
 import { countedSentence } from "../features/quarantine/quarantine";
@@ -127,20 +128,19 @@ export function ProjectOverview({ id }: { id: string }) {
     // A restored project asks for the sign-in details a backup never holds: that needs a person, so it is said here, not only in Settings.
     const storage = useFetch<{ needsSecrets: Array<{ label: string }> }>(`/projects/${id}/storage`);
     const p = project.data;
-    // An agent-only project may be a Test Case Generation project (SPEC D3): the outcome endpoint says so (`caseAgent`), and then the
-    // Dashboard is that outcome. Code and mixed projects never are, so they never ask.
-    const agentOnly = p ? projectKind(p) === "agent" : false;
-    const outcome = useFetch<Outcome>(agentOnly ? `/projects/${id}/outcome` : null, () => (isActive(project.data?.latestJob?.status) ? 3000 : null));
-    useOnFinish(isActive(p?.latestJob?.status), () => void (tests.reload(), agentOnly && outcome.reload()));
+    // A Test Case Generation project (SPEC D3; the server's `caseAgent`, FX14) has its outcome as the Dashboard; only it asks for the outcome.
+    const caseAgent = useCaseAgent(id);
+    const outcome = useFetch<Outcome>(caseAgent ? `/projects/${id}/outcome` : null, () => (isActive(project.data?.latestJob?.status) ? 3000 : null));
+    useOnFinish(isActive(p?.latestJob?.status), () => void (tests.reload(), caseAgent && outcome.reload()));
     useDocumentTitle(p?.name ?? "Project");
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: p?.name ?? "…" }], nav: "projects" });
 
     if (project.loading) return <Loading />;
     if (project.error || !p) return <ErrorState error={friendlyError(project.error?.message ?? "Project not found")} onRetry={project.reload} />;
     // Not `outcome.loading` alone: on the render the project arrives the outcome has not been asked for yet.
-    if (agentOnly && !outcome.data && !outcome.error) return <Loading />;
+    if (caseAgent === undefined || (caseAgent && !outcome.data && !outcome.error)) return <Loading />;
     // An outcome that cannot be read (an older server) leaves the agent Dashboard as it was.
-    if (outcome.data?.caseAgent) return <CaseAgentDashboard id={id} p={p} outcome={outcome.data} needsSecrets={storage.data?.needsSecrets ?? []} onChanged={project.reload} />;
+    if (caseAgent && outcome.data) return <CaseAgentDashboard id={id} p={p} outcome={outcome.data} needsSecrets={storage.data?.needsSecrets ?? []} onChanged={project.reload} />;
 
     // The job answer may not say what it explored; a project whose application is a phone app has phone jobs.
     const job = p.latestJob ? phoneJobOf(p.latestJob, p.application?.url) : p.latestJob;

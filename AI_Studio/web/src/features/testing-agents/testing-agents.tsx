@@ -28,6 +28,8 @@ export interface AgentProjectRef {
     name: string;
     /** "matched": the project has no saved choice; the agent matches its latest exploration settings. */
     source: "chosen" | "matched";
+    /** A Test Case Generation project (src/platform/case-agent.ts isCaseAgentProject). */
+    caseAgent?: boolean;
 }
 
 export interface TestingAgent {

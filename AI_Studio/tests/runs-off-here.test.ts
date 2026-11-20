@@ -12,6 +12,7 @@ import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { writeHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { buildServer } from "../src/platform/server.js";
+import { projectSetupOf, setupItems } from "../src/platform/project-setup.js";
 import { EXPLORING_OFF_MESSAGE, IMPORTED_NOT_RUN, PLAIN_OFF_MESSAGE, RUNS_OFF_MESSAGE } from "../src/platform/suite-run.js";
 import { addTest, seedProject, type Seed } from "./fixtures/dashboard-seed.js";
 
@@ -83,6 +84,12 @@ describe("tests switched off on this server", () => {
         const items = (await call("GET", `/api/projects/${shop.projectId}/setup-check`)).body.items as Array<{ key: string; ok: boolean; text: string }>;
         expect(items.find((i) => i.key === "runner")).toEqual({ key: "runner", ok: false, text: "Tests are switched off on this server, so no run starts here. Tests you make are kept." });
         expect((await call("GET", "/api/config")).body.runsHere).toBe(false);
+    });
+
+    it("leaves that line out for a Test Case Generation project, which makes no tests (FX22)", () => {
+        const facts = { setup: projectSetupOf({}), hasWebAddress: true, hasAndroidApp: false, hasIosApp: false, canRunIos: false, aiConfigured: true, runner: { runOn: "platform" as const }, runsHere: false };
+        expect(setupItems(facts).some((i) => i.key === "runner")).toBe(true);
+        expect(setupItems({ ...facts, caseAgent: true }).some((i) => i.key === "runner")).toBe(false);
     });
 
     it("a schedule's Run now is refused and queues nothing, and the schedules list says schedules do not fire", async () => {

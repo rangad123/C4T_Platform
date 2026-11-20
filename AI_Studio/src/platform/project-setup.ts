@@ -127,6 +127,8 @@ export interface SetupFacts {
     runner: { runOn: "platform" } | { runOn: "agent"; online: number };
     /** Whether a run started now would start at all (suite-run.ts `runsCanStartHere`): false while tests are switched off on this server. */
     runsHere: boolean;
+    /** A Test Case Generation project (case-agent.ts): it makes no tests, so the "tests are switched off" line is not shown (FX22). */
+    caseAgent?: boolean;
 }
 
 /**
@@ -147,6 +149,7 @@ export function setupItems(f: SetupFacts): SetupItem[] {
     if (testingModes.includes("agent"))
         items.push({ key: "ai-model", ok: f.aiConfigured, text: f.aiConfigured ? "Your AI key is set up." : "Agent mode needs your AI key. Add your own in Settings, AI keys, or ask an admin to assign one." });
     const r = f.runner;
+    if (!f.runsHere && f.caseAgent) return items;
     items.push(
         !f.runsHere
             ? { key: "runner", ok: false, text: "Tests are switched off on this server, so no run starts here. Tests you make are kept." }

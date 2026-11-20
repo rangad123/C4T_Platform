@@ -34,7 +34,7 @@ const caseCounts = (o: CaseOutcome): string | null => (o.runs.length ? `${plural
 const caseJob = (p: ProjectRow, o: CaseOutcome) => ({ status: p.last_job_status!, error: o.runs[0]?.status === "stopped" ? "Cancelled" : null, caseAgent: true });
 
 /**
- * The outcomes of the listed Test Case Generation projects (GET /projects/:id/outcome, one request each), asked again whenever the list
+ * The outcomes of the listed Test Case Generation projects (GET /projects/:id/outcome, one request each, for the row's counts), asked again whenever the list
  * is (it polls while a project runs). A project whose outcome cannot be read is null: its row then shows what other agent rows show. A
  * project not in the map yet is still being asked about.
  */
@@ -110,8 +110,9 @@ export function Home() {
     }, [filterKey, page]);
 
     const rows = rowsOf(data);
-    // Test Case Generation projects (SPEC D3): agent-only, with that agent chosen. Their rows show their outcome.
-    const caseIds = rows.filter((p) => projectKind(p) === "agent" && agentsOf.get(p.id)?.includes("test-generation")).map((p) => p.id);
+    // Test Case Generation projects (SPEC D3; the server's `caseAgent`, FX14). Their rows show their outcome's counts.
+    const caseAgentIds = new Set((catalogue.data?.agents ?? []).flatMap((a) => a.projects.filter((r) => r.caseAgent).map((r) => r.id)));
+    const caseIds = rows.filter((p) => caseAgentIds.has(p.id)).map((p) => p.id);
     const outcomes = useCaseOutcomes(caseIds, data);
     // Until the agents and the outcomes are known, an agent row says nothing about its state (it would flicker from "Plan ready").
     const pendingOf = (p: ProjectRow) => projectKind(p) === "agent" && (catalogue.loading || (caseIds.includes(p.id) && !outcomes.has(p.id)));

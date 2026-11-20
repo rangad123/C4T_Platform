@@ -25,6 +25,7 @@ import { HttpError } from "../http-error.js";
 import { PlatformsSchema, projectSetupOf, setupItems, TestingModesSchema } from "../project-setup.js";
 import { isProjectNameTaken, projectNameTaken } from "../project-folders.js";
 import { runsCanStartHere } from "../suite-run.js";
+import { isCaseAgentProject } from "../case-agent.js";
 import type { RouteCtx } from "./types.js";
 
 export const NO_ORGANIZATION_TO_LINK = "This project is not part of an organisation, so it cannot be linked to a Crowd4Test project.";
@@ -136,6 +137,7 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
                 aiConfigured: (await aiGate(p, aiOwnerOfActor(currentActor()))).ok,
                 runner: runner.runOn === "platform" ? { runOn: "platform" } : { runOn: "agent", online: agents.ownRunner(ownerIdOfActor(currentActor()), id)?.online ? 1 : 0 },
                 runsHere: runsCanStartHere(p).ok,
+                caseAgent: await isCaseAgentProject(repo, id),
             }),
         };
     });
