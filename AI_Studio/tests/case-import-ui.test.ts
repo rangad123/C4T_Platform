@@ -2,6 +2,7 @@
  * Importing the test case workbook on a code project's Test cases tab (founder 2026-11-19, SPEC R6.4; task C7), in a real browser
  * against the real platform (no model):
  *   - Import takes .xlsx (and JSON), no longer CSV; its tooltip names the workbook;
+ *   - Export is one button that downloads the test case workbook (FX16); a list of 5,000 test cases shows quickly (FX15);
  *   - the reply is said plainly: created, already here, skipped rows with their reason, steps ignored on Automated rows;
  *   - a refusal is shown as the server's sentence (a workbook without a Test cases sheet; a CSV file, which the workbook replaced);
  *   - an imported case shows its page, preconditions and expected result in the edit form; the New test case form offers them too;
@@ -20,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { readTable } from "../src/engine/manual/xlsx-read.js";
 import { buildXlsx } from "../src/shared/xlsx.js";
 import { seedProject, type Seed } from "./fixtures/dashboard-seed.js";
 
@@ -98,7 +100,7 @@ describe("Import on the Test cases tab", () => {
         expect(accept.split(",")).toEqual(expect.arrayContaining([".xlsx", ".json"]));
         expect(accept).not.toMatch(/csv/i);
         await page.getByRole("button", { name: "Import", exact: true }).hover();
-        await pwExpect(openTip()).toContainText("The test case workbook (.xlsx) downloaded from a Test Case Generation project");
+        await pwExpect(openTip()).toContainText("The test case workbook (.xlsx) that Export here or a Test Case Generation project downloads");
     });
 
     it("says what it imported, and an imported Automated case shows its page, preconditions and expected result", async () => {
@@ -160,7 +162,7 @@ describe("Import on the Test cases tab", () => {
 
         // A CSV file (from before the workbook) is refused with the sentence that says so.
         await choose("cases.csv", "text/csv", Buffer.from("title,area\nPrint the invoice,Billing\n"));
-        await pwExpect(alert).toContainText("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them. Import the workbook, or a JSON file this page exported.");
+        await pwExpect(alert).toContainText("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them. Import the workbook, or a JSON backup.");
         await everyLook("import-refused-csv");
         expect(await casesNow()).toHaveLength(4);
     });
@@ -189,11 +191,59 @@ describe("Import on the Test cases tab", () => {
         await pwExpect(page.getByText("Added TC-005 “Search shows no result for nonsense”.")).toBeVisible();
     });
 
-    it("exports JSON only: no CSV choice is left", async () => {
-        await pwExpect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
-        await page.getByRole("button", { name: "Export", exact: true }).hover();
-        await pwExpect(openTip()).toContainText("JSON");
-        await pwExpect(page.getByRole("menuitem", { name: /CSV/ })).toHaveCount(0);
+    it("Export is one button, and it downloads the test case workbook (FX16): no JSON or CSV choice on the screen", async () => {
+        const exportButton = page.getByRole("button", { name: "Export", exact: true });
+        await pwExpect(exportButton).toHaveCount(1);
+        await exportButton.hover();
+        await pwExpect(openTip()).toContainText("the test case workbook (.xlsx)");
+        await pwExpect(openTip()).not.toContainText("JSON");
+        const [download] = await Promise.all([page.waitForEvent("download"), exportButton.click()]);
+        expect(download.suggestedFilename()).toBe("manual-cases-atlas-shop.xlsx");
+        const bytes = fs.readFileSync((await download.path())!);
+        const titles = readTable(new Uint8Array(bytes), "Test cases", { columns: ["Title"], required: ["Title"] }).map((r) => r.values.Title);
+        expect(titles).toEqual((await casesNow()).map((c) => c.title));
+        await pwExpect(page.getByRole("menuitem")).toHaveCount(0);
+        await pwExpect(page.getByRole("button", { name: /JSON|CSV/ })).toHaveCount(0);
+        await everyLook("export-workbook");
+    });
+
+    it("lists 5,000 test cases quickly (FX15)", async () => {
+        const big = seedProject(platform, "Big shop", "https://big.example.test");
+        platform.repo.updateProject(big.projectId, { testingModes: ["code"] });
+        const many = Array.from({ length: 5000 }, (_, i) => ({ title: `Check case number ${i + 1}`, area: `Area ${i % 40}`, priority: "medium", steps: [{ action: "Open the page", expected: "It opens" }] }));
+        const r = await server.inject({ method: "POST", url: `/api/projects/${big.projectId}/manual-cases/import`, headers: { "x-requested-with": "ai-studio" }, payload: { format: "json", content: JSON.stringify(many) } });
+        expect(r.statusCode, r.body).toBe(201);
+        await page.goto("about:blank");
+        const times: number[] = [];
+        for (let i = 0; i < 3; i++) {
+            const t0 = Date.now();
+            await page.goto(`${BASE}/#/projects/${big.projectId}/tests`);
+            await pwExpect(page.getByRole("heading", { name: "Test cases (5000)" })).toBeVisible({ timeout: 30_000 });
+            await pwExpect(page.getByRole("link", { name: "Check case number 1", exact: true })).toBeVisible();
+            times.push(Date.now() - t0);
+            await page.goto("about:blank");
+        }
+        times.sort((a, b) => a - b);
+        console.log(`FX15 5,000 cases: list shown in ${times.join(", ")} ms (median ${times[1]})`);
+        expect(times[1]).toBeLessThan(1500);
+        // The list draws 50 rows at a time, as Test scripts does; "Show 50 more" draws the next ones.
+        await page.goto(`${BASE}/#/projects/${big.projectId}/tests`);
+        const list = page.getByRole("region", { name: "Test cases list" });
+        await pwExpect(list.locator("tbody tr")).toHaveCount(50);
+        await pwExpect(page.getByText("Showing 50 of 5000")).toBeVisible();
+        await page.getByRole("button", { name: "Show 50 more" }).click();
+        await pwExpect(list.locator("tbody tr")).toHaveCount(100);
+        await page.getByRole("searchbox", { name: "Search test cases" }).fill("Check case number 4999");
+        await pwExpect(list.getByRole("link", { name: "Check case number 4999", exact: true })).toBeVisible();
+        // The paged list at both widths (an axe pass over it is in everyLook above, on the small project).
+        await page.getByRole("searchbox", { name: "Search test cases" }).fill("");
+        await pwExpect(page.getByRole("heading", { name: "Test cases (5000)" })).toBeVisible({ timeout: 30_000 });
+        for (const [width, height, label] of [[1280, 900, "desktop"], [390, 844, "phone"]] as const) {
+            await page.setViewportSize({ width, height });
+            expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), label).toBeLessThanOrEqual(0);
+            if (process.env.CASE_IMPORT_SHOTS) await page.screenshot({ path: path.join(process.env.CASE_IMPORT_SHOTS, `list-5000-${label}.png`), fullPage: true });
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
     });
 
     it("kept the browser console clean", () => {

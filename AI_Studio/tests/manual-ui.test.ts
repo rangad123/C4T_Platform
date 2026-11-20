@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { readTable } from "../src/engine/manual/xlsx-read.js";
 import { buildXlsx } from "../src/shared/xlsx.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
@@ -159,15 +160,15 @@ describe("Releases tab", () => {
         expect((await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: "Dark mode", area: "Display", priority: "medium" })).status).toBe(201);
     });
 
-    it("exports the cases as JSON (no CSV any more)", async () => {
+    it("exports the cases as the test case workbook (no JSON or CSV on the screen)", async () => {
         await page.goto("about:blank");
         await page.goto(`${BASE}/#/projects/${shop.projectId}/manual-cases`);
         await pwExpect(page.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible();
         const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export", exact: true }).click()]);
-        expect(download.suggestedFilename()).toMatch(/\.json$/);
-        const json = JSON.parse(fs.readFileSync((await download.path())!, "utf8")) as { cases: Array<{ title: string; area: string; priority: string }> };
-        expect(json.cases).toEqual(expect.arrayContaining([expect.objectContaining({ title: "Pay by card", area: "Checkout", priority: "critical" }), expect.objectContaining({ title: "Print the invoice", area: "Billing", priority: "low" })]));
-        await pwExpect(page.getByText(/CSV/)).toHaveCount(0);
+        expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
+        const rows = readTable(new Uint8Array(fs.readFileSync((await download.path())!)), "Test cases", { columns: ["Title", "Priority"], required: ["Title"] }).map((r) => r.values);
+        expect(rows).toEqual(expect.arrayContaining([{ Title: "Pay by card", Priority: "Critical" }, { Title: "Print the invoice", Priority: "Low" }]));
+        await pwExpect(page.getByText(/CSV|JSON/)).toHaveCount(0);
     });
 
     it("opens a release from the tab and sums it up in one sentence", async () => {

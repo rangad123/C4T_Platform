@@ -3,6 +3,7 @@ import { ManualCaseInputSchema, MAX_CASES, MAX_NAME, MAX_NOTE, ResultInputSchema
 import { casesToJson, CSV_REPLACED, ManualImportError, parseJsonCases } from "../../engine/manual/cases-json.js";
 import { casesFromWorkbook } from "../../engine/manual/workbook-import.js";
 import { XLSX_MAX_BYTES, XlsxReadError } from "../../engine/manual/xlsx-read.js";
+import { manualCaseWorkbook } from "../case-workbook.js";
 import { HttpError } from "../http-error.js";
 import { buildManualIssueDraft } from "../issues/manual.js";
 import { TrackerError } from "../issues/http.js";
@@ -143,7 +144,7 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
             } else {
                 // CSV was replaced by the workbook (owner 2026-11-20). Text without a format that is not JSON is what a CSV file used to be.
                 if (body.format === "csv" || (body.format === undefined && typeof body.content === "string" && !/^\s*[[{]/.test(body.content.replace(/^\uFEFF/, ""))))
-                    throw new HttpError(410, `${CSV_REPLACED} Import the workbook, or a JSON file this page exported.`);
+                    throw new HttpError(410, `${CSV_REPLACED} Import the workbook, or a JSON backup.`);
                 const p = parseJsonCases(body.content);
                 // A JSON file names no requirement record of this project (their ids are not portable): its cases come in without one.
                 parsed = { cases: p.cases.map((c) => ({ ...c, requirementId: undefined })), skipped: p.skipped };
@@ -172,10 +173,12 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
 
     app.get("/api/projects/:id/manual-cases/export", async (req, reply) => {
         const pid = projectId(req);
-        const { format } = z.object({ format: z.enum(["json", "csv"]).default("json") }).parse(req.query);
+        // The page downloads the workbook (FX16); JSON stays for backups and integrations.
+        const { format } = z.object({ format: z.enum(["json", "xlsx", "csv"]).default("json") }).parse(req.query);
         const cases = store.listCases(pid);
         const base = `manual-cases-${slug(String(ctx.project(pid).name))}`;
         if (format === "csv") throw new HttpError(410, `${CSV_REPLACED} Export the test cases as JSON instead.`);
+        if (format === "xlsx") return reply.header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").header("content-disposition", `attachment; filename="${base}.xlsx"`).send(Buffer.from(manualCaseWorkbook(cases)));
         return reply.header("content-type", "application/json; charset=utf-8").header("content-disposition", `attachment; filename="${base}.json"`).send(casesToJson(cases));
     });
 

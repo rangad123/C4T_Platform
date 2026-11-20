@@ -134,7 +134,7 @@ describe("manual cases", () => {
 
         expect((await call("GET", `${cases(ready)}/${id}`)).body.title).toBe("Pay with a saved card");
         const list = await call("GET", cases(ready));
-        expect(list.body).toMatchObject({ total: 1, max: 500, areas: ["Checkout"] });
+        expect(list.body).toMatchObject({ total: 1, max: 5000, areas: ["Checkout"] });
 
         const edited = await call("PUT", `${cases(ready)}/${id}`, { title: "Pay with a saved card (new)", area: "Checkout", priority: "high", steps: [] });
         expect(edited.status).toBe(200);
@@ -214,7 +214,7 @@ describe("import and export", () => {
         for (const body of [{ format: "csv", content: csv }, { content: csv }, { content: '"never closed' }]) {
             const r = await call("POST", `${cases(ready)}/import`, body);
             expect(r.status, JSON.stringify(body)).toBe(410);
-            expect(r.body.error).toBe("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them. Import the workbook, or a JSON file this page exported.");
+            expect(r.body.error).toBe("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them. Import the workbook, or a JSON backup.");
         }
         const out = await call("GET", `${cases(ready)}/export?format=csv`);
         expect(out.status).toBe(410);
@@ -265,26 +265,26 @@ describe("import and export", () => {
         expect((await call("GET", `${cases(third)}/export?format=xml`)).status).toBe(400);
     });
 
-    it("holds the limit of 500 cases: all of an import or nothing, and a single add is refused at the limit", async () => {
+    it("holds the limit of 5000 cases (FX15): all of an import or nothing, and a single add is refused at the limit", async () => {
         const s = seedProject(platform, "Many cases", null);
         const make = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ title: `${prefix} ${i}` }));
-        const full = await call("POST", `${cases(s)}/import`, { content: make(500, "A") });
+        const full = await call("POST", `${cases(s)}/import`, { content: make(5000, "A") });
         expect(full.status).toBe(201);
-        expect(full.body.created).toBe(500);
+        expect(full.body.created).toBe(5000);
         const more = await call("POST", `${cases(s)}/import`, { content: make(1, "B") });
         expect(more.status).toBe(409);
-        expect(more.body.error).toMatch(/500/);
+        expect(more.body.error).toMatch(/5000/);
         expect((await call("POST", cases(s), { title: "one more" })).status).toBe(409);
         // a duplicate-only import adds nothing and is not refused
         expect((await call("POST", `${cases(s)}/import`, { content: make(3, "A") })).body).toMatchObject({ created: 0, duplicates: 3 });
-        // 501 in one file is refused before anything is read
-        expect((await call("POST", `${cases(seedProject(platform, "Too many", null))}/import`, { content: make(501, "C") })).status).toBe(400);
+        // 5001 in one file is refused before anything is read
+        expect((await call("POST", `${cases(seedProject(platform, "Too many", null))}/import`, { content: make(5001, "C") })).status).toBe(400);
         // a partial overflow imports nothing at all
         const s2 = seedProject(platform, "Nearly full", null);
-        await call("POST", `${cases(s2)}/import`, { content: make(499, "N") });
+        await call("POST", `${cases(s2)}/import`, { content: make(4999, "N") });
         const over = await call("POST", `${cases(s2)}/import`, { content: make(3, "M") });
         expect(over.status).toBe(409);
-        expect((await call("GET", cases(s2))).body.total).toBe(499);
+        expect((await call("GET", cases(s2))).body.total).toBe(4999);
     });
 });
 

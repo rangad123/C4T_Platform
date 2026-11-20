@@ -4,8 +4,8 @@
  */
 import { ManualCaseInputSchema, MAX_CASES, type ManualCase, type ManualCaseInput } from "./cases.js";
 
-/** Largest import text accepted (characters). Far more than 500 cases of maximum size would need is refused. */
-export const MAX_IMPORT_CHARS = 2_000_000;
+/** Largest import text accepted (characters): about what the import route's body limit lets through. */
+export const MAX_IMPORT_CHARS = 13_000_000;
 
 export class ManualImportError extends Error {}
 

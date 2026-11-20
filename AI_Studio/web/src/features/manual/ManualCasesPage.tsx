@@ -17,7 +17,7 @@ import { GenerateScriptsCard } from "../authoring/GenerateScriptsCard";
 
 const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement: "", steps: [{ action: "", expected: "" }], linkedTestIds: [], automation: "manual", requirementId: null, preconditions: [], expected: "", page: "" };
 /** Import takes the test case workbook (founder 2026-11-19, Q3); CSV was removed (owner 2026-11-20). */
-const IMPORT_TIP = "The test case workbook (.xlsx) downloaded from a Test Case Generation project: its Test cases sheet is read. A JSON file this page exported works too.";
+const IMPORT_TIP = "The test case workbook (.xlsx) that Export here or a Test Case Generation project downloads: its Test cases sheet is read.";
 
 /** A file's bytes as base64 text, the way the import takes a workbook. */
 const base64Of = (file: File): Promise<string> =>
@@ -29,6 +29,8 @@ const base64Of = (file: File): Promise<string> =>
     });
 
 const FILTERS: CasesSection[] = ["all", "automated", "manual"];
+/** Rows drawn before "Show more", as on Test scripts: a project can hold 5,000 cases (FX15). */
+const PAGE_SIZE = 50;
 const FILTER_WORDS: Record<CasesSection, string> = { all: "All", automated: "Automated", manual: "Manual" };
 
 const inputOf = (c: ManualCase): CaseInput => ({ title: c.title, area: c.area, priority: c.priority, requirement: c.requirement, steps: c.steps.length ? c.steps : [{ action: "", expected: "" }], linkedTestIds: c.linkedTestIds, automation: c.automation, requirementId: c.requirementId, preconditions: c.preconditions ?? [], expected: c.expected ?? "", page: c.page ?? "" });
@@ -60,6 +62,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     const [q, setQ] = useState("");
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const fileRef = useRef<HTMLInputElement>(null);
+    const [limit, setLimit] = useState(PAGE_SIZE);
 
     const cases = list.data?.cases ?? [];
     const reqById = useMemo(() => new Map((reqs.data?.requirements ?? []).map((r) => [r.id, r])), [reqs.data]);
@@ -74,7 +77,8 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     };
     const shown = cases.filter((c) => (filter === "all" || c.automation === filter) && (!needle || `${c.ref}\n${c.title}\n${c.area}\n${c.requirement}\n${requirementRefs(c).map((r) => r.ref).join(" ")}`.toLowerCase().includes(needle)));
     const opened = open ? cases.find((c) => c.id === open) : undefined;
-    const allShownChosen = shown.length > 0 && shown.every((c) => selected.has(c.id));
+    const rows = shown.slice(0, limit);
+    const allShownChosen = rows.length > 0 && rows.every((c) => selected.has(c.id));
     const scriptOf = (c: ManualCase) => c.linkedTestIds.map((t) => testById.get(t)).find(Boolean);
 
     const close = () => go(routes.cases(id, filter));
@@ -103,7 +107,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     async function importFile(file: File) {
         setNotice(null);
         try {
-            // The test case workbook goes as base64 (the server reads its Test cases sheet); a JSON file this page exported, as text.
+            // The test case workbook goes as base64 (the server reads its Test cases sheet); a JSON backup, as text.
             const body = /\.json$/i.test(file.name) ? { format: "json", content: await file.text() } : /\.xlsx$/i.test(file.name) ? { format: "xlsx", content: await base64Of(file) } : { content: await file.text() };
             const r = await api<ImportResult>(`/projects/${id}/manual-cases/import`, { method: "POST", body });
             setNotice(importSummary(r));
@@ -117,9 +121,10 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
         }
     }
 
-    async function exportJson() {
+    // The test case workbook (FX16); JSON export stays in the API, for backups and integrations.
+    async function exportWorkbook() {
         try {
-            await downloadFrom(`/projects/${id}/manual-cases/export?format=json`, "test-cases.json");
+            await downloadFrom(`/projects/${id}/manual-cases/export?format=xlsx`, "test-cases.xlsx");
         } catch (e) {
             setNotice({ tone: "danger", text: `Download failed. ${describeApiError(e)}` });
         }
@@ -318,7 +323,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                         <input className="input" type="search" placeholder="Search test cases" aria-label="Search test cases" value={q} onChange={(e) => setQ(e.target.value)} />
                     </div>
                     {cases.length > 0 && can("ai_studio.reports.export") && (
-                        <Button icon={Download} onClick={() => void exportJson()} tip="Downloads every test case as a JSON file, to keep or to import into another project.">
+                        <Button icon={Download} onClick={() => void exportWorkbook()} tip="Downloads every test case as the test case workbook (.xlsx), to keep, share or import into another project.">
                             Export
                         </Button>
                     )}
@@ -370,7 +375,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                         <thead>
                             <tr>
                                 <th scope="col" className="tc-check">
-                                    <input type="checkbox" aria-label="Choose every test case shown" checked={allShownChosen} onChange={(e) => setSelected(e.target.checked ? new Set([...selected, ...shown.map((c) => c.id)]) : new Set([...selected].filter((x) => !shown.some((c) => c.id === x))))} />
+                                    <input type="checkbox" aria-label="Choose every test case shown" checked={allShownChosen} onChange={(e) => setSelected(e.target.checked ? new Set([...selected, ...rows.map((c) => c.id)]) : new Set([...selected].filter((x) => !rows.some((c) => c.id === x))))} />
                                 </th>
                                 <th scope="col">ID</th>
                                 <th scope="col">Test case</th>
@@ -383,7 +388,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                             </tr>
                         </thead>
                         <tbody>
-                            {shown.map((c) => {
+                            {rows.map((c) => {
                                 const refs = requirementRefs(c);
                                 const script = scriptOf(c);
                                 return (
@@ -439,6 +444,16 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                             })}
                         </tbody>
                     </table>
+                    {shown.length > limit && (
+                        <div className="more-row">
+                            <Button size="sm" onClick={() => setLimit((l) => l + PAGE_SIZE)}>
+                                Show {Math.min(PAGE_SIZE, shown.length - limit)} more
+                            </Button>
+                            <span className="t-meta">
+                                Showing {limit} of {shown.length}
+                            </span>
+                        </div>
+                    )}
                 </div>
             )}
             {selected.size > 0 && (

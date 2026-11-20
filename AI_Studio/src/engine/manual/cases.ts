@@ -12,7 +12,8 @@ export type CasePriority = (typeof PRIORITIES)[number];
 export const CASE_AUTOMATION = ["automated", "manual"] as const;
 export type CaseAutomation = (typeof CASE_AUTOMATION)[number];
 
-export const MAX_CASES = 500;
+/** Per project (owner 2026-11-20, FX15). */
+export const MAX_CASES = 5000;
 export const MAX_STEPS = 30;
 export const MAX_TITLE = 160;
 export const MAX_AREA = 80;
