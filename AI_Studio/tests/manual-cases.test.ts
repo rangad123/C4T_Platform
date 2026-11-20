@@ -147,6 +147,22 @@ describe("manual cases", () => {
         expect((await call("GET", cases(ready))).body.total).toBe(0);
     });
 
+    it("keeps the saved steps of an Automated case through an edit that sends them back unchanged (they are hidden, not deleted)", async () => {
+        const steps = [{ action: "Open the cart", expected: "The items are listed" }];
+        const made = await call("POST", cases(ready), { title: "Pay by card", automation: "automated", steps });
+        expect(made.status).toBe(201);
+        const id = made.body.id as string;
+        // The form sends an Automated case's steps as they were saved.
+        const edited = await call("PUT", `${cases(ready)}/${id}`, { title: "Pay by saved card", automation: "automated", steps: made.body.steps });
+        expect(edited.status).toBe(200);
+        expect(edited.body).toMatchObject({ title: "Pay by saved card", automation: "automated", steps });
+        // Switching it to Manual shows them again: they are still there.
+        const manual = await call("PUT", `${cases(ready)}/${id}`, { title: "Pay by saved card", automation: "manual", steps: edited.body.steps });
+        expect((await call("GET", `${cases(ready)}/${id}`)).body).toMatchObject({ automation: "manual", steps });
+        expect(manual.status).toBe(200);
+        expect((await call("DELETE", `${cases(ready)}/${id}`)).status).toBe(204);
+    });
+
     it("refuses invalid input with a 400 and says what is wrong", async () => {
         const bad = async (body: unknown) => (await call("POST", cases(ready), body)).status;
         expect(await bad({ title: "" })).toBe(400);

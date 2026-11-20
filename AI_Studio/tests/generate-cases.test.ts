@@ -108,8 +108,26 @@ describe("reading the AI's answer", () => {
             batch,
         );
         expect(out.map((c) => c.input)).toEqual([
-            expect.objectContaining({ title: "Verify sign in", priority: "high", automation: "automated", requirementId: "r1", area: "REQ-1 Sign in", steps: [{ action: "Open the page", expected: "The form shows" }] }),
+            // An Automated case is a title only: the steps it was given are dropped (they are written with its script).
+            expect.objectContaining({ title: "Verify sign in", priority: "high", automation: "automated", requirementId: "r1", area: "REQ-1 Sign in", steps: [] }),
             expect.objectContaining({ title: "Check the logo", priority: "medium", automation: "manual", steps: [] }),
+        ]);
+    });
+    it("writes steps only for Manual cases", () => {
+        const out = casesFromAnswer(
+            {
+                cases: [
+                    { requirement: "REQ-1", title: "Verify sign in", priority: "high", type: "automated", steps: [{ action: "Open the page", expected: "The form shows" }] },
+                    { requirement: "REQ-1", title: "Check the email arrives", priority: "high", type: "manual", steps: [{ action: "Open the inbox", expected: "The email is there" }] },
+                    { requirement: "REQ-1", title: "Unknown type is Manual", priority: "low", type: "sometimes", steps: [{ action: "Look", expected: "Seen" }] },
+                ],
+            },
+            batch,
+        );
+        expect(out.map((c) => [c.input.automation, c.input.steps])).toEqual([
+            ["automated", []],
+            ["manual", [{ action: "Open the inbox", expected: "The email is there" }]],
+            ["manual", [{ action: "Look", expected: "Seen" }]],
         ]);
     });
 });
@@ -146,10 +164,10 @@ describe("generating test cases", () => {
             { id: pay.id, ref: pay.ref, created: 2, failed: false },
             { id: basket.id, ref: basket.ref, created: 1, failed: false },
         ]);
-        expect(r.body.cases.map((c: any) => [c.ref, c.title, c.automation, c.priority, c.requirementId])).toEqual([
-            ["TC-001", "Verify paying by card", "automated", "high", pay.id],
-            ["TC-002", "Check the bank statement shows one charge", "manual", "critical", pay.id],
-            ["TC-003", "Verify the basket after signing in", "automated", "medium", basket.id],
+        expect(r.body.cases.map((c: any) => [c.ref, c.title, c.automation, c.priority, c.requirementId, c.steps.length])).toEqual([
+            ["TC-001", "Verify paying by card", "automated", "high", pay.id, 0],
+            ["TC-002", "Check the bank statement shows one charge", "manual", "critical", pay.id, 1],
+            ["TC-003", "Verify the basket after signing in", "automated", "medium", basket.id, 0],
         ]);
         // One call for the two requirements, with what each says and where the application is.
         expect(fake.seen).toHaveLength(1);

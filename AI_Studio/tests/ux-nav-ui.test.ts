@@ -281,7 +281,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         const filter = page.getByRole("group", { name: "Filter by type" });
         expect((await filter.getByRole("button").allTextContents()).map((t) => t.replace(/\s*\d+$/, ""))).toEqual(["All", "Automated", "Manual"]);
         await pwExpect(filter.getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true");
-        await pwExpect(page.getByTestId("place-head").getByRole("button", { name: "Add test case (manual)", exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("place-head").getByRole("button", { name: "Add test case", exact: true })).toBeVisible();
         for (const gone of ["New test", "New test script", "Run"]) await pwExpect(page.getByRole("button", { name: gone, exact: true }), gone).toHaveCount(0);
         await visit(routes.cases(P(), "manual"));
         await pwExpect(page.getByRole("group", { name: "Filter by type" }).getByRole("button", { name: /^Manual/ })).toHaveAttribute("aria-pressed", "true");
