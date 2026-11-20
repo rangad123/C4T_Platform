@@ -76,7 +76,8 @@ const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
 
 /** One exploration of the site by a project tested by the AI agent. */
 async function explore(name: string) {
-    const made = await call("POST", "/api/projects", { name, platforms: ["web"], testingModes: ["agent"], agents: ["test-generation", "ux"] });
+    // Not a Test Case Generation project: that one explores plan-only and makes no checks (tests/case-agent-plan-only.test.ts).
+    const made = await call("POST", "/api/projects", { name, platforms: ["web"], testingModes: ["agent"], agents: ["ux"] });
     expect(made.status, JSON.stringify(made.body)).toBe(201);
     readingCalls = 0;
     const queued = await call("POST", `/api/projects/${made.body.id}/test-generation`, { url: URL, targets: ["web"], maxPages: 10, healthChecks: true, inputChecks: false });

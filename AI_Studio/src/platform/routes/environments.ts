@@ -23,6 +23,7 @@ import { blockView } from "../block-store.js";
 import { assertEnvironmentTargets, assertMayRun, environmentStore, planEnvironmentRun } from "../environment-run.js";
 import { DataSetStore, environmentResultsFor, environmentResultsForProject, type Environment } from "../environments-store.js";
 import { HttpError } from "../http-error.js";
+import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { DEFAULT_JOB_OPTIONS, type JobRow, type Repo, type TestRow } from "../repo.js";
 import { refuseUnlessRunsStart } from "../suite-run.js";
 import type { Platform } from "../bootstrap.js";
@@ -115,6 +116,7 @@ export interface EnvironmentRunDeps {
  */
 export async function startEnvironmentRun(deps: EnvironmentRunDeps, projectId: string, tests: TestRow[], environment: string, confirmProduction: boolean | undefined) {
     const { repo } = deps;
+    await refuseTestsInCaseAgentProject(repo, projectId); // a Test Case Generation project runs no tests (case-agent.ts)
     refuseUnlessRunsStart({ config: deps.p.config, db: repo.db }); // tests switched off on this server: nothing is queued
     const env = await assertMayRun(environmentStore(repo, deps.p.config).get(projectId, environment), environment, confirmProduction);
     const plan = planEnvironmentRun(tests, env, blockView(repo.db, projectId));

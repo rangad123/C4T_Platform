@@ -4,6 +4,7 @@ import { CustomScriptStore } from "../custom-script-store.js";
 import { z } from "zod";
 import { detectKind, NO_MODEL_MESSAGE, PLAIN_MAX_LENGTH, PLAIN_MIN_LENGTH, PLAIN_ORIGIN, refusalFor } from "../../engine/authoring/describe.js";
 import { HttpError } from "../http-error.js";
+import { CASE_AGENT_PLAN_REFUSED, refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import { environmentFor } from "../plain-run.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions } from "../repo.js";
@@ -46,6 +47,7 @@ export function plainStarter(ctx: RouteCtx) {
 
     /** Everything that can be refused before a job exists, with plain words. Returns what the job needs. */
     async function prepare(projectId: string, body: { description: string; kind?: "web" | "api"; environment?: string; baseUrl?: string }, fixedKind?: "web" | "api") {
+        await refuseTestsInCaseAgentProject(repo, projectId, CASE_AGENT_PLAN_REFUSED); // no test scripts in a Test Case Generation project
         const latest = repo.getLatestApplicationPublic(projectId);
         const allowChanges = latest?.config?.allowMutatingApiTests === true;
         const refused = refusalFor(body.description, { allowChanges });
