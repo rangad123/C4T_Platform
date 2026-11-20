@@ -3,6 +3,7 @@ import { assessmentLoopOf } from "../security/routes/assessments.js";
 import type { Platform } from "./bootstrap.js";
 import { AlertService, AlertStore, isAlertable, type DeliveryOptions } from "./alerts.js";
 import { serverSmtp } from "./alert-email.js";
+import { noteCaseRunFinished } from "./case-outcome.js";
 import { apiChanges } from "./drift-store.js";
 import { QuarantineStore } from "./quarantine-store.js";
 import type { JobRow } from "./repo.js";
@@ -97,6 +98,8 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
         alerts,
         scheduler,
         async onJobFinished(job) {
+            // A Test Case Generation run ends by saying how many test cases it wrote (case-outcome.ts; never throws).
+            await noteCaseRunFinished(p, job);
             // A deploy trigger may have asked to be told how its run ended (cancelled runs included); runs in the background like alerts.
             track(getTriggerServices(p, { clock: opts.clock, delivery: opts.delivery }).onJobFinished(job));
             try {

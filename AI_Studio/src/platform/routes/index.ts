@@ -15,6 +15,7 @@ import { registerEnvironmentRoutes } from "./environments.js";
 import { registerEvidenceRoutes } from "./evidence.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { registerKnowledgeRoutes } from "./knowledge.js";
+import { registerCaseOutcomeRoutes } from "./case-outcome.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerUserRoutes } from "./users.js";
 import { registerProjectAccessRoutes } from "./project-access.js";
@@ -147,6 +148,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerPlanRoutes(ctx);
     registerExplorerRoutes(ctx);
     registerKnowledgeRoutes(ctx);
+    // The Test Case Generation outcome: its tree, pages and test cases, and the workbook (routes/case-outcome.ts, founder 2026-11-19).
+    registerCaseOutcomeRoutes(ctx);
     // People and access: signing in, a person's own account, people, activity, single sign-on (routes/auth.ts, routes/users.ts).
     registerAuthRoutes(ctx);
     registerUserRoutes(ctx);

@@ -192,6 +192,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "PUT /api/projects/:id/app-details": "ai_studio.project.settings",
     "POST /api/projects/:id/app-details/ipa": "ai_studio.project.settings",
     "GET /api/projects/:id/memory": "read",
+    "GET /api/projects/:id/outcome": "read",
+    "GET /api/projects/:id/outcome/workbook": "ai_studio.reports.export",
     // Notes for the AI (routes/notes.ts, round 53): anyone on the project reads them; changing them is a project setting.
     "GET /api/projects/:id/notes": "read",
     "POST /api/projects/:id/notes": "ai_studio.project.settings",
