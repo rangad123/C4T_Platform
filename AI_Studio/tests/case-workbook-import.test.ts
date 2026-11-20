@@ -8,6 +8,7 @@
  *   - only people who may write test cases import, and another organisation's project is a 404;
  *   - JSON export and import keep the new fields;
  *   - migration 69: a database at 68 keeps every case, which reads as having none of the new fields; one already at 69 opens unchanged;
+ *   - FX7: a project backup carries the four new fields and its restore keeps them; an older backup without them restores with none;
  *   - FX1: a literal `_xHHHH_` in a cell comes back exactly (the writer escapes it as `_x005F_xHHHH_`).
  *
  *   TAQWRIGHT_HOME=/nonexistent-taqwright node scripts/with-lock.mjs browser -- npx vitest run tests/case-workbook-import.test.ts
@@ -17,6 +18,7 @@ import http from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { casesFromWorkbook } from "../src/engine/manual/workbook-import.js";
@@ -25,6 +27,8 @@ import { accessControlOf } from "../src/platform/auth/access.js";
 import { PERMISSIONS } from "../src/platform/auth/permissions.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import type { CaseOutcome, CaseOutcomeCase } from "../src/platform/case-outcome-types.js";
+import { buildBackup, restoreBackup } from "../src/platform/backup.js";
+import { ManualCaseStore } from "../src/platform/manual-case-store.js";
 import { buildCaseWorkbook } from "../src/platform/case-workbook.js";
 import { createDatabaseAtVersion, Db, knownSchemaVersion } from "../src/platform/db.js";
 import { buildServer } from "../src/platform/server.js";
@@ -272,6 +276,61 @@ describe("JSON export and import", () => {
         const put = await cora("PUT", `/api/projects/${pid}/manual-cases/${c.id}`, { title: "Sign in, edited", priority: "high", steps: [] });
         expect(put.status, JSON.stringify(put.body)).toBe(200);
         expect(put.body).toMatchObject({ title: "Sign in, edited", preconditions: ["An account"], expected: "Opens", page: "/login", sourceRef: "TC-007" });
+    });
+});
+
+describe("backup and restore (FX7)", () => {
+    // The backup and restore functions the routes call (the routes need a platform administrator, which this file's accounts are not).
+    const backupOf = async (pid: string) => (await buildBackup(platform, pid, { evidence: false, maxEvidenceMB: 1, withoutSecurity: false })).bytes;
+    const restore = async (zip: Uint8Array, name: string) => (await restoreBackup(platform, zip, { name })).project.id as string;
+
+    /** The restored project's cases, read from the store (the restored project belongs to no organisation of this file's accounts). */
+    const storedCases = (pid: string) => new ManualCaseStore(platform.db).listCases(pid) as any[];
+
+    it("carries preconditions, expected result, page and the source ID of every case", async () => {
+        const pid = await project("t-cora", "Backup from");
+        await importXlsx(
+            pid,
+            handMade([
+                ["Sign in", "Automated", "high", "TC-007", "/login", "", "The account opens\nIts name shows", "An account\nA password", ""],
+                ["Look at the logo", "Manual", "low", "TC-008", "/", "Open the page => The logo shows", "", "", ""],
+            ]),
+        );
+        const zip = await backupOf(pid);
+        const written = JSON.parse(strFromU8(unzipSync(zip)["manual-cases.json"]!)) as any[];
+        expect(written.map((c) => [c.title, c.preconditions, c.expected, c.page, c.sourceRef])).toEqual([
+            ["Sign in", ["An account", "A password"], "The account opens\nIts name shows", "/login", "TC-007"],
+            ["Look at the logo", [], "", "/", "TC-008"],
+        ]);
+        const to = await restore(zip, "Backup to");
+        const pick = (c: any) => ({ title: c.title, automation: c.automation, steps: c.steps, preconditions: c.preconditions, expected: c.expected, page: c.page, sourceRef: c.sourceRef });
+        expect(storedCases(to).map(pick)).toEqual((await casesOf(pid)).map(pick));
+        expect(storedCases(to)[0]).toMatchObject({ preconditions: ["An account", "A password"], expected: "The account opens\nIts name shows", page: "/login", sourceRef: "TC-007" });
+    });
+
+    it("leaves out the outcome's \"forget what we learned\" time (C4's case-outcome/forgotten.json): a backup carries no runs, so the cut-off has nothing to cut", async () => {
+        const pid = await project("t-cora", "Forgotten from");
+        await importXlsx(pid, handMade([["Sign in", "Automated", "high", "TC-001", "/login", "", "Opens", "", ""]]));
+        // A fixture of the file C4 writes; the jobs it cuts off are not in a backup either.
+        await platform.store.put(`${pid}/case-outcome/forgotten.json`, JSON.stringify({ at: "2026-11-20T10:00:00.000Z" }));
+        const zip = await backupOf(pid);
+        const entries = unzipSync(zip);
+        const all = Object.entries(entries).map(([name, bytes]) => `${name}\n${strFromU8(bytes)}`).join("\n");
+        expect(all).not.toContain("forgotten");
+        expect(all).not.toContain("2026-11-20T10:00:00.000Z");
+        const to = await restore(zip, "Forgotten to");
+        expect(platform.repo.listJobs(to)).toEqual([]);
+        await expect(platform.store.getBytes(`${to}/case-outcome/forgotten.json`)).rejects.toThrow();
+    });
+
+    it("restores a backup made before these fields existed, with none of them", async () => {
+        const pid = await project("t-cora", "Old backup from");
+        await importXlsx(pid, handMade([["Sign in", "Automated", "high", "TC-001", "/login", "", "Opens", "An account", ""]]));
+        const entries = unzipSync(await backupOf(pid));
+        const old = (JSON.parse(strFromU8(entries["manual-cases.json"]!)) as any[]).map(({ preconditions: _p, expected: _e, page: _g, sourceRef: _s, ...rest }) => rest);
+        entries["manual-cases.json"] = strToU8(JSON.stringify(old));
+        const to = await restore(zipSync(entries), "Old backup to");
+        expect(storedCases(to)[0]).toMatchObject({ title: "Sign in", preconditions: [], expected: "", page: "", sourceRef: "" });
     });
 });
 

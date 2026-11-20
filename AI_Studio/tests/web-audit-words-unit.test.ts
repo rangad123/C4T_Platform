@@ -63,10 +63,10 @@ describe("one way to call the platform (round 47)", () => {
 
     it("renews the sign-in for a download too, and says the server's refusal in words", async () => {
         const f = answering([401, RENEW], [403, { error: "Forbidden" }]);
-        const e = await downloadFrom("/projects/p1/manual-cases/export?format=csv", "test-cases.csv").catch((x: unknown) => x);
+        const e = await downloadFrom("/projects/p1/manual-cases/export?format=json", "test-cases.json").catch((x: unknown) => x);
         f.restore();
         // Asked twice: once refused for the expired session, once more after renewing (a renewal within 2 s of another is shared).
-        expect(f.asked.filter((u) => u.startsWith("/api"))).toEqual(["/api/projects/p1/manual-cases/export?format=csv", "/api/projects/p1/manual-cases/export?format=csv"]);
+        expect(f.asked.filter((u) => u.startsWith("/api"))).toEqual(["/api/projects/p1/manual-cases/export?format=json", "/api/projects/p1/manual-cases/export?format=json"]);
         expect(describeApiError(e)).toBe("Your role in this project does not allow this. Ask a project owner.");
     });
 

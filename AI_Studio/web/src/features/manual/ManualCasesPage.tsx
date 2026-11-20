@@ -10,16 +10,28 @@ import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, routes, type CasesSection } from "../../lib/router";
 import { useHere } from "../auth/project-access";
 import type { RequirementLink, RequirementList } from "../requirements/requirements";
-import { AUTOMATED_NO_STEPS, AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
+import { AUTOMATED_NO_STEPS, AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority, importSummary } from "./manual";
 import "./manual.css";
 import { GenerateScriptsCard } from "../authoring/GenerateScriptsCard";
 
 
-const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement: "", steps: [{ action: "", expected: "" }], linkedTestIds: [], automation: "manual", requirementId: null };
+const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement: "", steps: [{ action: "", expected: "" }], linkedTestIds: [], automation: "manual", requirementId: null, preconditions: [], expected: "", page: "" };
+/** Import takes the test case workbook (founder 2026-11-19, Q3); CSV was removed (owner 2026-11-20). */
+const IMPORT_TIP = "The test case workbook (.xlsx) downloaded from a Test Case Generation project: its Test cases sheet is read. A JSON file this page exported works too.";
+
+/** A file's bytes as base64 text, the way the import takes a workbook. */
+const base64Of = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+        reader.onerror = () => reject(new Error("The file could not be read. Choose it again."));
+        reader.readAsDataURL(file);
+    });
+
 const FILTERS: CasesSection[] = ["all", "automated", "manual"];
 const FILTER_WORDS: Record<CasesSection, string> = { all: "All", automated: "Automated", manual: "Manual" };
 
-const inputOf = (c: ManualCase): CaseInput => ({ title: c.title, area: c.area, priority: c.priority, requirement: c.requirement, steps: c.steps.length ? c.steps : [{ action: "", expected: "" }], linkedTestIds: c.linkedTestIds, automation: c.automation, requirementId: c.requirementId });
+const inputOf = (c: ManualCase): CaseInput => ({ title: c.title, area: c.area, priority: c.priority, requirement: c.requirement, steps: c.steps.length ? c.steps : [{ action: "", expected: "" }], linkedTestIds: c.linkedTestIds, automation: c.automation, requirementId: c.requirementId, preconditions: c.preconditions ?? [], expected: c.expected ?? "", page: c.page ?? "" });
 
 /**
  * The Test cases place: the project's written test cases, one list. A test case is what a tester reads and follows (title, steps
@@ -43,7 +55,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     // Having the AI write cases also needs the AI's permission (the server asks for both).
     const canGenerate = canWrite && can("ai_studio.tests.generate");
     const [adding, setAdding] = useState(false);
-    const [notice, setNotice] = useState<{ tone: "success" | "danger" | "warning"; text: string; detail?: string[] } | null>(null);
+    const [notice, setNotice] = useState<{ tone: "success" | "danger" | "warning"; title?: string; text: string; detail?: string[] } | null>(null);
     const [confirming, setConfirming] = useState(false);
     const [q, setQ] = useState("");
     const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -91,26 +103,23 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     async function importFile(file: File) {
         setNotice(null);
         try {
-            const content = await file.text();
-            const format = /\.csv$/i.test(file.name) ? "csv" : /\.json$/i.test(file.name) ? "json" : undefined;
-            const r = await api<ImportResult>(`/projects/${id}/manual-cases/import`, { method: "POST", body: { content, ...(format ? { format } : {}) } });
-            const detail = r.skipped.map((s) => `Row ${s.row}: ${s.reason}`);
-            setNotice({
-                tone: r.skipped.length ? "warning" : "success",
-                text: `Imported ${plural(r.created, "test case")}.${r.duplicates ? ` ${plural(r.duplicates, "test case")} already existed and ${r.duplicates === 1 ? "was" : "were"} left out.` : ""}${r.skipped.length ? ` ${plural(r.skipped.length, "row")} could not be imported.` : ""}`,
-                detail,
-            });
+            // The test case workbook goes as base64 (the server reads its Test cases sheet); a JSON file this page exported, as text.
+            const body = /\.json$/i.test(file.name) ? { format: "json", content: await file.text() } : /\.xlsx$/i.test(file.name) ? { format: "xlsx", content: await base64Of(file) } : { content: await file.text() };
+            const r = await api<ImportResult>(`/projects/${id}/manual-cases/import`, { method: "POST", body });
+            setNotice(importSummary(r));
             await reloadCounted();
         } catch (e) {
-            setNotice({ tone: "danger", text: `Nothing was imported. ${describeApiError(e)}` });
+            // The server's sentence, as it is.
+            const why = describeApiError(e);
+            setNotice({ tone: "danger", title: /Nothing was imported/.test(why) ? undefined : "Nothing was imported", text: why });
         } finally {
             if (fileRef.current) fileRef.current.value = "";
         }
     }
 
-    async function exportAs(format: "csv" | "json") {
+    async function exportJson() {
         try {
-            await downloadFrom(`/projects/${id}/manual-cases/export?format=${format}`, `test-cases.${format}`);
+            await downloadFrom(`/projects/${id}/manual-cases/export?format=json`, "test-cases.json");
         } catch (e) {
             setNotice({ tone: "danger", text: `Download failed. ${describeApiError(e)}` });
         }
@@ -128,8 +137,8 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             actions={
                 canWrite ? (
                     <>
-                        <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden aria-label="Choose a file to import" onChange={(e) => e.target.files?.[0] && void importFile(e.target.files[0])} />
-                        <Button icon={Upload} onClick={() => fileRef.current?.click()} tip="A CSV file with the columns title, area, priority and steps, or a JSON file this page exported.">
+                        <input ref={fileRef} type="file" accept=".xlsx,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/json" hidden aria-label="Choose a file to import" onChange={(e) => e.target.files?.[0] && void importFile(e.target.files[0])} />
+                        <Button icon={Upload} onClick={() => fileRef.current?.click()} tip={IMPORT_TIP}>
                             Import
                         </Button>
                         <Menu label="Add test case" icon={Plus} variant="primary">
@@ -178,7 +187,9 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             )}
             {notice && (
                 <div className="stack-sm">
-                    <Callout tone={notice.tone}>{notice.text}</Callout>
+                    <Callout tone={notice.tone} title={notice.title}>
+                        {notice.text}
+                    </Callout>
                     {notice.detail && notice.detail.length > 0 && (
                         <ul className="rel-reasons" aria-label="Rows that were not imported">
                             {notice.detail.slice(0, 10).map((d) => (
@@ -307,18 +318,9 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                         <input className="input" type="search" placeholder="Search test cases" aria-label="Search test cases" value={q} onChange={(e) => setQ(e.target.value)} />
                     </div>
                     {cases.length > 0 && can("ai_studio.reports.export") && (
-                        <Menu label="Export" icon={Download}>
-                            {(closeMenu) => (
-                                <>
-                                    <MenuItem hint="Opens in a spreadsheet" onClick={() => (closeMenu(), void exportAs("csv"))}>
-                                        Export as CSV
-                                    </MenuItem>
-                                    <MenuItem hint="Keeps the type and linked scripts" onClick={() => (closeMenu(), void exportAs("json"))}>
-                                        Export as JSON
-                                    </MenuItem>
-                                </>
-                            )}
-                        </Menu>
+                        <Button icon={Download} onClick={() => void exportJson()} tip="Downloads every test case as a JSON file, to keep or to import into another project.">
+                            Export
+                        </Button>
                     )}
                 </div>
             </div>
@@ -456,6 +458,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
 function CaseView({ c }: { c: ManualCase }) {
     return (
         <div className="stack-sm">
+            <CaseDetails c={c} />
             {c.automation === "automated" ? (
                 <p className="t-secondary">{AUTOMATED_NO_STEPS}</p>
             ) : c.steps.length === 0 ? (
@@ -472,6 +475,40 @@ function CaseView({ c }: { c: ManualCase }) {
             )}
             {c.requirement && <p className="t-meta">Source: {c.requirement}</p>}
         </div>
+    );
+}
+
+/** The page, preconditions and expected result of a case (the workbook's columns), when it has them. */
+function CaseDetails({ c }: { c: Pick<ManualCase, "page" | "preconditions" | "expected"> }) {
+    const pre = c.preconditions ?? [];
+    if (!c.page && !pre.length && !c.expected) return null;
+    return (
+        <dl className="tc-details" data-testid="case-details">
+            {c.page && (
+                <>
+                    <dt>Page</dt>
+                    <dd className="mono">{c.page}</dd>
+                </>
+            )}
+            {pre.length > 0 && (
+                <>
+                    <dt>Preconditions</dt>
+                    <dd>
+                        <ul>
+                            {pre.map((p, i) => (
+                                <li key={i}>{p}</li>
+                            ))}
+                        </ul>
+                    </dd>
+                </>
+            )}
+            {c.expected && (
+                <>
+                    <dt>Expected result</dt>
+                    <dd className="tc-expected">{c.expected}</dd>
+                </>
+            )}
+        </dl>
     );
 }
 
@@ -500,6 +537,8 @@ function CaseForm({
     onSaved: (c: ManualCase) => void | Promise<void>;
 }) {
     const [f, setF] = useState<CaseInput>(initial);
+    // Preconditions are edited one per line; kept as typed until saved, so a new empty line stays while typing.
+    const [preText, setPreText] = useState(initial.preconditions.join("\n"));
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
@@ -516,7 +555,8 @@ function CaseForm({
         setBusy(true);
         setError("");
         try {
-            const body = { ...f, title: f.title.trim(), area: f.area.trim(), requirement: f.requirement.trim(), steps };
+            const preconditions = preText.split("\n").map((l) => l.trim()).filter(Boolean);
+            const body = { ...f, title: f.title.trim(), area: f.area.trim(), requirement: f.requirement.trim(), steps, preconditions, expected: f.expected.trim(), page: f.page.trim() };
             const saved = await api<ManualCase>(caseId ? `/projects/${projectId}/manual-cases/${caseId}` : `/projects/${projectId}/manual-cases`, { method: caseId ? "PUT" : "POST", body });
             await onSaved(saved);
         } catch (err) {
@@ -577,6 +617,16 @@ function CaseForm({
                     </div>
                 </div>
             </div>
+            <div className="grid-2">
+                <div className="field">
+                    <label htmlFor="mc-preconditions">Preconditions (optional)</label>
+                    <textarea id="mc-preconditions" className="input" rows={2} value={preText} placeholder="What must be true first, one per line" onChange={(e) => setPreText(e.target.value)} />
+                </div>
+                <div className="field">
+                    <label htmlFor="mc-expected">Expected result (optional)</label>
+                    <textarea id="mc-expected" className="input" rows={2} value={f.expected} maxLength={2000} placeholder="What should be true at the end" onChange={(e) => set("expected", e.target.value)} />
+                </div>
+            </div>
             {f.automation === "automated" ? (
                 <p className="hint">{AUTOMATED_NO_STEPS}</p>
             ) : (
@@ -605,7 +655,7 @@ function CaseForm({
                     </div>
                 </fieldset>
             )}
-            <Disclosure label="More: area, source, linked test scripts" defaultOpen={Boolean(initial.requirement) && !initial.requirementId}>
+            <Disclosure label="More: area, page, source, linked test scripts" defaultOpen={(Boolean(initial.requirement) && !initial.requirementId) || Boolean(initial.page)}>
                 <div className="stack-sm">
                     <div className="grid-2">
                         <div className="field">
@@ -617,6 +667,11 @@ function CaseForm({
                                 ))}
                             </datalist>
                             <span className="hint">A release groups its checks by area.</span>
+                        </div>
+                        <div className="field">
+                            <label htmlFor="mc-page">Page (optional)</label>
+                            <input id="mc-page" className="input mono" value={f.page} maxLength={300} placeholder="/checkout" onChange={(e) => set("page", e.target.value)} />
+                            <span className="hint">Where the test script starts.</span>
                         </div>
                         <div className="field">
                             <label htmlFor="mc-req">Source (optional)</label>

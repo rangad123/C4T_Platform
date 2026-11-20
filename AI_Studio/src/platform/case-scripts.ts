@@ -22,17 +22,26 @@ import { RequirementStore } from "./requirement-store.js";
 const TERMINAL = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
 
 /**
- * What a written case says, as the description of a described test: the title first (the test's title is its first line), then each
- * step, and each expected result as a check ("Check that ...", which the description reader takes as an expected result).
+ * What a written case says, as the description of a described test: the title first (the test's title is its first line), the page it
+ * starts on ("Start on /cart", which the description reader takes as the start page) and what must be true before it, then each step,
+ * and each expected result as a check ("Check that ...", which the description reader takes as an expected result): the steps' own and
+ * the case's expected result as a whole, one per line (a case imported from the test case workbook, SPEC R6.5).
  */
-export function caseDescription(c: Pick<ManualCase, "title" | "steps"> & { ref?: string | null }): string {
+export function caseDescription(c: Pick<ManualCase, "title" | "steps"> & Partial<Pick<ManualCase, "preconditions" | "expected" | "page">> & { ref?: string | null }): string {
     const lines = [scriptTitleOf({ ref: c.ref ?? "", title: c.title })];
+    const check = (text: string) => {
+        const t = text.trim().replace(/^expected(?:\s+results?)?\s*:\s*/i, "");
+        if (t) lines.push(`Check that ${t}`);
+    };
+    const page = c.page?.trim();
+    if (page) lines.push(`Start on ${page}`);
+    for (const p of c.preconditions ?? []) if (p.trim()) lines.push(`Before it starts: ${p.trim()}`);
     c.steps.forEach((s, i) => {
         const action = s.action.trim();
-        const expected = s.expected.trim().replace(/^expected(?:\s+results?)?\s*:\s*/i, "");
         if (action) lines.push(`${i + 1}. ${action}`);
-        if (expected) lines.push(`Check that ${expected}`);
+        check(s.expected);
     });
+    for (const e of (c.expected ?? "").split("\n")) check(e);
     return lines.join("\n").slice(0, PLAIN_MAX_LENGTH);
 }
 

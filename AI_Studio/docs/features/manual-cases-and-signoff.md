@@ -13,7 +13,8 @@ Every project has a **Releases** tab.
   "3 of 14 manual checks left, automated tests ready". With no release it explains what a release is.
 * **Manual cases** (button on the tab) is where you write the checks: title, area, priority (critical, high, medium, low), steps
   (what to do, what should happen, up to 30), an optional requirement and optional related automated tests. Add, edit, delete,
-  **Import** (CSV or JSON file) and **Export** (CSV or JSON).
+  **Import** (the test case workbook, .xlsx, or a JSON file) and **Export** (JSON). CSV was removed on 2026-11-20 (owner decision):
+  the workbook replaced it.
 * **A release page** shows, top to bottom:
   1. the sentence "Release 2.4: 3 of 14 manual checks left, automated tests ready";
   2. **Automated tests**: the run ribbon, the verdict (Ready, Needs attention, Blocked, Unknown) with the same reasons the
@@ -71,17 +72,19 @@ delete an entry through the API, and the database refuses an `UPDATE` of an audi
 
 ## Import and export
 
-* **CSV**: header row with a `title` column and optionally `area`, `priority`, `steps`, in any order; other columns are ignored.
-  The `steps` cell holds one step per line as `action => expected` (a line without `=>` is a step with no expected result).
-  Quoted cells, doubled quotes, line breaks inside quotes, CRLF and a byte-order mark are handled. A bad row (missing title,
-  unknown priority, more than 30 steps, text too long) is skipped and reported by row number; the other rows are imported.
+* **Workbook (.xlsx)**: the test case workbook a Test Case Generation project downloads, or a copy saved again in Excel or
+  LibreOffice. Only its **Test cases** sheet is read, with the headers ID, Title, Type, Priority, Page, Preconditions, Steps,
+  Expected result, Requirement in any order and case (only Title is required). Steps (one per line as `action => expected`) are
+  kept on Manual rows only; an Automated row's steps are ignored and counted (`stepsIgnored`). Page, preconditions, expected result
+  and the workbook's ID are kept; a Requirement cell that names one of the project's REQ-n references links the case to it. Sent as
+  `{ format: "xlsx", content: <base64> }`. A bad row is skipped and reported by its row number in the sheet.
+* **CSV**: no longer accepted or written. `format: "csv"` (or text that is not JSON) and `export?format=csv` answer 410 with the
+  sentence "Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them."
 * **JSON**: a list of cases or `{ "cases": [...] }` (what the export writes).
 * **Limits**: at most 500 cases per project; a file with more than 500 cases, or one that would take the project past 500, is
   refused as a whole. Text up to 2,000,000 characters. A case with the same title and area as an existing one is left out, so
   importing the same file twice adds nothing.
-* **Export safety**: in the CSV, a cell starting with `=`, `+`, `-` or `@` gets a leading `'` so a spreadsheet never runs it as a
-  formula; the import removes that quote again. In an exported step a line break becomes a space and `=>` becomes `->` (the one
-  lossy spot, needed to keep one step on one line). The JSON export also carries the requirement and related tests.
+* **Export**: JSON, with the type, steps, requirement, related tests, page, preconditions, expected result and workbook ID.
 
 ## Issues for failed checks
 
@@ -106,8 +109,8 @@ case or release of one project is a 404 through another.
 |---|---|
 | `GET/POST /manual-cases` | list (with `total`, `max`, `areas`), add (201) |
 | `GET/PUT/DELETE /manual-cases/:cid` | one case (delete answers 204) |
-| `POST /manual-cases/import` | `{ format?: "json" \| "csv", content }`; answers `{ created, duplicates, skipped[], total }` |
-| `GET /manual-cases/export?format=json\|csv` | file download |
+| `POST /manual-cases/import` | `{ format: "xlsx", content: base64 }` or `{ format?: "json", content }`; answers `{ created, duplicates, skipped[], stepsIgnored?, total }`; `format: "csv"` is 410 |
+| `GET /manual-cases/export?format=json` | file download (`format=csv` is 410) |
 | `GET/POST /releases` | list (`{ releases, manualCases }`), open one (201, full view) |
 | `GET /releases/:rid` | the full view: `sentence`, `automated`, `manual.rollup`, `manual.items`, `signoff` (`blocking`, `warnings`, `canApprove`, `rules`), `audit` |
 | `POST /releases/:rid/refresh` | store the automated state again (open releases only) |
@@ -119,7 +122,7 @@ case or release of one project is a 404 through another.
 
 ## How it is built
 
-* `src/engine/manual/cases.ts` (types, validation), `csv.ts` (CSV/JSON read and write), `signoff.ts` (roll-up, rules, sentence):
+* `src/engine/manual/cases.ts` (types, validation), `cases-json.ts` (JSON read and write), `workbook-import.ts` and `xlsx-read.ts` (the workbook), `signoff.ts` (roll-up, rules, sentence):
   pure, tested in `tests/manual-unit.test.ts` (browser-free, in the fast tier).
 * `src/platform/manual-case-store.ts` (migration slot 15: `manual_cases`, `releases`, `release_results`, `release_audit`),
   `manual-releases.ts` (snapshot from the dashboard, release views, sign-off and reopen), `reports/release-report.ts`,
