@@ -14,7 +14,8 @@
  * = + - @ is shown as typed and never runs as a formula; text is XML-escaped, characters XML cannot carry are dropped and a cell longer
  * than Excel's limit is cut. No prefix is added, so an imported title is exactly the title that was written. Here, the Tree keeps its
  * integrity (a Parent that is not another Node is written empty, a Page that is not a row of Pages is written empty) and no sheet goes
- * past Excel's row limit.
+ * past Excel's row limit. Past the Import's 5,000 rows every case is still written, and a line under the last one says how many more
+ * there are than the Import takes.
  */
 import type { CaseOutcome, CaseOutcomeCase } from "./case-outcome-types.js";
 import { buildXlsx, type XlsxSheet } from "../security/findings/xlsx.js";
@@ -28,6 +29,16 @@ export const CASE_WORKBOOK_HEADERS = {
 
 /** Excel holds at most 1 048 576 rows in a sheet, the header included. */
 const ROW_MAX = 1_048_576;
+
+/** The most test case rows a code project's Import reads (src/engine/manual/xlsx-read.ts XLSX_MAX_ROWS; lead decision 2026-11-20). */
+export const CASE_IMPORT_MAX_ROWS = 5_000;
+const n = (x: number) => x.toLocaleString("en-US");
+/**
+ * The line under the last test case when there are more than the Import reads: the workbook still has them all, and says so. It sits in
+ * the ID column with the other cells empty, so an Import never takes it for a test case.
+ */
+export const tooManyCasesNote = (total: number): string =>
+    `Note: this workbook has ${n(total)} test cases, ${n(total - CASE_IMPORT_MAX_ROWS)} more than a code project's Import takes (${n(CASE_IMPORT_MAX_ROWS)}). Before you import it, delete this line and ${n(total - CASE_IMPORT_MAX_ROWS)} test case rows, and import those in a second workbook.`;
 
 const oneLine = (s: string) => s.replace(/\s*[\r\n]+\s*/g, " ").trim();
 const lines = (xs: readonly string[]) => xs.map(oneLine).filter(Boolean).join("\n");
@@ -51,7 +62,8 @@ function sheet(name: (typeof CASE_WORKBOOK_SHEETS)[number], rows: string[][], wi
 
 /** The outcome as the three-sheet .xlsx of SPEC R9. */
 export function buildCaseWorkbook(o: CaseOutcome): Uint8Array {
-    const cases = o.cases.map((c) => [c.id, c.title, word(c.type), word(c.priority), c.page, lines(c.preconditions), stepsCell(c), lines(c.expected), c.requirement]);
+    const cases = o.cases.slice(0, ROW_MAX - 2).map((c) => [c.id, c.title, word(c.type), word(c.priority), c.page, lines(c.preconditions), stepsCell(c), lines(c.expected), c.requirement]);
+    if (o.cases.length > CASE_IMPORT_MAX_ROWS) cases.push([tooManyCasesNote(o.cases.length), "", "", "", "", "", "", "", ""]);
     const pages = o.pages.map((p) => [p.path, p.url, p.purpose]);
     const pagePaths = new Set(o.pages.map((p) => p.path));
     const nodes = new Set(o.tree.map((t) => t.node));
