@@ -57,7 +57,7 @@ describe("migration 68", () => {
         raw.prepare("INSERT INTO projects (id, owner_id, name, created_at, updated_at, ai_provider, ai_model) VALUES (?,?,?,?,?,?,?)").run("p1", "u-1", "Shop", at, at, "anthropic", "claude-haiku");
         raw.close();
         const db = new Db(file);
-        expect(db.all("SELECT version FROM schema_version WHERE version > 66 ORDER BY version")).toEqual([{ version: 67 }, { version: 68 }]);
+        expect(db.all("SELECT version FROM schema_version WHERE version > 66 AND version <= 68 ORDER BY version")).toEqual([{ version: 67 }, { version: 68 }]);
         expect(db.all("SELECT id, ai_provider, ai_model FROM projects")).toEqual([{ id: "p1", ai_provider: "anthropic", ai_model: "claude-haiku" }]);
         expect(db.all("SELECT * FROM llm_response_cache")).toEqual([]);
         const fresh = new Db(":memory:");

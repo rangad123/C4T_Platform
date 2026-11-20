@@ -84,6 +84,28 @@ CREATE INDEX idx_manual_cases_requirement ON manual_cases(requirement_id);
 CREATE UNIQUE INDEX idx_manual_cases_number ON manual_cases(project_id, number);
 `;
 
+/**
+ * Migration slot 69 (founder 2026-11-19, SPEC R6): what a case imported from the test case workbook keeps. Its preconditions (a JSON list),
+ * its expected result as a whole, the page it is about (a path), and `source_ref`, the workbook's ID it came from (TC-007; importing the
+ * same workbook again finds it). Only columns are added, each with a default, so every existing case keeps its row and reads as having none.
+ */
+export const CASE_WORKBOOK_FIELDS_MIGRATION = `
+ALTER TABLE manual_cases ADD COLUMN preconditions_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE manual_cases ADD COLUMN expected TEXT NOT NULL DEFAULT '';
+ALTER TABLE manual_cases ADD COLUMN page TEXT NOT NULL DEFAULT '';
+ALTER TABLE manual_cases ADD COLUMN source_ref TEXT NOT NULL DEFAULT '';
+`;
+
+/** The error `importCases` throws when the cases would pass the project's limit: how many the project has and how many would be added. */
+export class CaseLimitError extends Error {
+    constructor(
+        readonly have: number,
+        readonly adding: number,
+    ) {
+        super("limit");
+    }
+}
+
 export const MAX_RELEASES = 200;
 
 export type ReleaseStatus = "open" | "approved" | "rejected";
@@ -173,6 +195,10 @@ const toCase = (r: Row): ManualCase => ({
     ref: caseRef(Number(r.number ?? 0)),
     automation: r.automation === "automated" ? "automated" : "manual",
     requirementId: r.requirement_id ?? null,
+    preconditions: JSON.parse(r.preconditions_json ?? "[]"),
+    expected: r.expected ?? "",
+    page: r.page ?? "",
+    sourceRef: r.source_ref ?? "",
     createdAt: r.created_at,
     updatedAt: r.updated_at,
 });
@@ -239,8 +265,8 @@ export class ManualCaseStore {
         const id = randomUUID();
         const t = now();
         this.db.run(
-            `INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, automation, requirement_id, number, created_at, updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(number), 0) + 1 FROM manual_cases WHERE project_id = ?),?,?)`,
+            `INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, automation, requirement_id, preconditions_json, expected, page, source_ref, number, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(number), 0) + 1 FROM manual_cases WHERE project_id = ?),?,?)`,
             id,
             projectId,
             input.title,
@@ -251,6 +277,10 @@ export class ManualCaseStore {
             JSON.stringify(input.linkedTestIds),
             input.automation ?? "manual",
             input.requirementId ?? null,
+            JSON.stringify(input.preconditions ?? []),
+            input.expected ?? "",
+            input.page ?? "",
+            input.sourceRef ?? "",
             projectId,
             t,
             t,
@@ -258,14 +288,14 @@ export class ManualCaseStore {
         return this.getCase(projectId, id)!;
     }
 
-    /** `automation` and `requirementId` absent keep what the case has. */
+    /** `automation`, `requirementId`, `preconditions`, `expected`, `page` and `sourceRef` absent keep what the case has. */
     updateCase(projectId: string, id: string, input: ManualCaseInput): ManualCase | undefined {
         const before = this.getCase(projectId, id);
         if (!before) return undefined;
         const automation: CaseAutomation = input.automation ?? before.automation;
         const requirementId = input.requirementId === undefined ? before.requirementId : input.requirementId;
         this.db.run(
-            "UPDATE manual_cases SET title = ?, area = ?, priority = ?, requirement = ?, steps_json = ?, linked_json = ?, automation = ?, requirement_id = ?, updated_at = ? WHERE id = ? AND project_id = ?",
+            "UPDATE manual_cases SET title = ?, area = ?, priority = ?, requirement = ?, steps_json = ?, linked_json = ?, automation = ?, requirement_id = ?, preconditions_json = ?, expected = ?, page = ?, source_ref = ?, updated_at = ? WHERE id = ? AND project_id = ?",
             input.title,
             input.area,
             input.priority,
@@ -274,6 +304,10 @@ export class ManualCaseStore {
             JSON.stringify(input.linkedTestIds),
             automation,
             requirementId,
+            JSON.stringify(input.preconditions ?? before.preconditions),
+            input.expected ?? before.expected,
+            input.page ?? before.page,
+            input.sourceRef ?? before.sourceRef,
             now(),
             id,
             projectId,
@@ -295,14 +329,16 @@ export class ManualCaseStore {
     }
 
     /**
-     * Add many cases at once, all or nothing on the limit. A case whose title and area match one already there is left out
-     * (importing the same file twice adds nothing). Returns what was added and what was left out.
+     * Add many cases at once, all or nothing on the limit (`CaseLimitError`). A case already there is left out (importing the same file
+     * twice adds nothing): one whose source ID (the workbook's TC-007) the project already has, or whose title and area match. Returns
+     * what was added and how many were left out.
      */
     importCases(projectId: string, inputs: ManualCaseInput[]): { created: ManualCase[]; duplicates: number } {
         return retryOnUniqueViolation(this.db.dialect, () =>
             this.db.tx(() => {
                 const { fresh, duplicates } = this.withoutDuplicates(projectId, inputs);
-                if (this.countCases(projectId) + fresh.length > MAX_CASES) throw new Error("limit");
+                const have = this.countCases(projectId);
+                if (have + fresh.length > MAX_CASES) throw new CaseLimitError(have, fresh.length);
                 return { created: fresh.map((c) => this.insert(projectId, c)), duplicates };
             }),
         );
@@ -332,15 +368,26 @@ export class ManualCaseStore {
         );
     }
 
-    /** Those of `inputs` whose title and area match no case of the project nor an earlier input, and how many were left out. */
+    /**
+     * Those of `inputs` that match no case of the project nor an earlier input, and how many were left out. A match is the same source
+     * ID (without regard to case; an empty one matches nothing) or the same title and area.
+     */
     private withoutDuplicates(projectId: string, inputs: ManualCaseInput[]): { fresh: ManualCaseInput[]; duplicates: number } {
-        const seen = new Set(this.listCases(projectId).map(caseKey));
+        const existing = this.listCases(projectId);
+        const seen = new Set(existing.map(caseKey));
+        const refKey = (r: string | undefined) => (r ?? "").trim().toUpperCase();
+        const refs = new Set(existing.map((c) => refKey(c.sourceRef)).filter(Boolean));
         const fresh: ManualCaseInput[] = [];
         let duplicates = 0;
         for (const c of inputs) {
             const k = caseKey(c);
-            if (seen.has(k)) duplicates++;
-            else (seen.add(k), fresh.push(c));
+            const ref = refKey(c.sourceRef);
+            if (seen.has(k) || (ref && refs.has(ref))) duplicates++;
+            else {
+                seen.add(k);
+                if (ref) refs.add(ref);
+                fresh.push(c);
+            }
         }
         return { fresh, duplicates };
     }
