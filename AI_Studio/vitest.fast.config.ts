@@ -260,6 +260,7 @@ export default defineConfig({
             "tests/case-outcome-unit.test.ts",
             "tests/case-workbook.test.ts",
             "tests/outcome-tree-unit.test.ts",
+            "tests/plan-families-agents-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
