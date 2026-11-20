@@ -16,7 +16,7 @@
  *
  * Requires web/dist (build inside the lock):
  *   node scripts/with-lock.mjs build,browser -- sh -c "npx vite build web && npx vitest run tests/case-agent-run-ui.test.ts"
- * Screenshots: /home/aadhaar/projects/c4t-scratch/f1119-shots/u5 (or $U5_SHOTS). Port: platform 9087.
+ * Set U5_SHOTS=<folder> to also write screenshots. Port: platform 9087.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -32,7 +32,7 @@ import { buildServer } from "../src/platform/server.js";
 
 const PORT = 9087;
 const BASE = `http://localhost:${PORT}`;
-const SHOTS = process.env.U5_SHOTS ?? "/home/aadhaar/projects/c4t-scratch/f1119-shots/u5";
+const SHOTS = process.env.U5_SHOTS;
 
 let dataDir: string;
 let platform: Platform;
@@ -94,7 +94,7 @@ beforeAll(async () => {
     mixed = m.id;
     mixedRun = await seedRun(m, ["/", "/products"], ["Browse the products"], "PARTIALLY_COMPLETED", undefined, false);
 
-    fs.mkdirSync(SHOTS, { recursive: true });
+    if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
     browser = await chromium.launch();
     page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
     page.on("console", (msg) => msg.type() === "error" && !/Failed to load resource|fonts\.(googleapis|gstatic)/.test(msg.text()) && consoleErrors.push(msg.text()));
@@ -115,6 +115,7 @@ const visit = async (hash: string) => {
 const main = () => page.locator("main");
 const mainText = async () => (await main().textContent()) ?? "";
 async function shot(name: string) {
+    if (!SHOTS) return;
     await page.mouse.move(0, 0);
     await page.screenshot({ path: path.join(SHOTS, name), fullPage: true, animations: "disabled" });
 }
