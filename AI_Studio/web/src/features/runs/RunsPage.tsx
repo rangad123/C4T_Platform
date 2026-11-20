@@ -6,6 +6,9 @@ import { useFetch } from "../../lib/hooks";
 import { routes, useRoute, type RunsSection } from "../../lib/router";
 import { ReleasesPage } from "../manual/ReleasesPage";
 import { ProjectSchedule } from "../schedules/ProjectSchedule";
+import { ListSkeleton } from "../../components/ui";
+import { CaseRuns } from "./CaseRuns";
+import { useCaseAgent } from "./case-runs";
 
 /**
  * The Runs place: what happened and when. Every run, the ones that start by themselves, how results develop, and the two views
@@ -15,6 +18,16 @@ export function RunsPage({ id }: { id: string }) {
     const section = (useRoute().query.get("section") as RunsSection | null) ?? "runs";
     // A code project never explores, so its runs are only runs of tests.
     const code = projectKind(useFetch<ProjectDetail>(`/projects/${id}`).data) === "code";
+    // A Test Case Generation project's runs each add to its one tree: only its runs and their schedules (founder 2026-11-19, P7.2, O6).
+    const caseAgent = useCaseAgent(id);
+    if (caseAgent === undefined) return <ListSkeleton rows={3} />;
+    if (caseAgent) {
+        const tcg: HubSection[] = [
+            { key: "runs", label: "All runs", hint: "Every run: what each one added to the tree", render: () => <CaseRuns id={id} /> },
+            { key: "schedules", label: "Schedules", hint: "Explore again on a timetable, so the tree keeps growing", render: () => <ProjectSchedule id={id} section="schedules" /> },
+        ];
+        return <ProjectHub id={id} place="runs" title="Runs" subtitle="Each run explores the application again, adds to the same tree of pages and writes more test cases." sections={tcg} current={section === "schedules" ? "schedules" : "runs"} hrefOf={(k) => routes.runs(id, k as RunsSection)} />;
+    }
     const sections: HubSection[] = [
         { key: "runs", label: "All runs", hint: code ? "Every run of tests" : "Every exploration and every run of tests", render: () => <ProjectRuns id={id} /> },
         { key: "schedules", label: "Schedules", hint: "Run tests on a timetable and get told when something changes", render: () => <ProjectSchedule id={id} section="schedules" /> },

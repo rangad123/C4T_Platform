@@ -51,6 +51,8 @@ export interface MergedRuns {
     notOpened: number;
     /** By job id: how many distinct test cases the run wrote (new or already known). */
     written: Map<string, number>;
+    /** By job id: what the run found, new or already known: its pages (node paths), its test cases (TC ids) and the paths it could not open. */
+    byRun: Map<string, { pages: string[]; cases: string[]; failed: string[] }>;
 }
 
 const PRIORITIES: readonly CaseOutcomePriority[] = ["critical", "high", "medium", "low"];
@@ -143,6 +145,7 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
     const cases = new Map<string, CaseOutcomeCase>();
     const runs: CaseOutcomeRun[] = [];
     const written = new Map<string, number>();
+    const keysOf = new Map<string, Set<string>>();
     const seenPages = new Set<string>();
     for (const { run, part } of inputs) {
         let addedPages = 0;
@@ -178,7 +181,13 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
             });
         }
         written.set(run.jobId, mine.size);
+        keysOf.set(run.jobId, mine);
         runs.push({ ...run, addedPages, addedCases });
+    }
+    const byRun = new Map<string, { pages: string[]; cases: string[]; failed: string[] }>();
+    for (const { run, part } of inputs) {
+        const mine = keysOf.get(run.jobId) ?? new Set<string>();
+        byRun.set(run.jobId, { pages: [...new Set(part.pages.map((pg) => pg.path))], cases: [...mine].map((k) => cases.get(k)!.id), failed: [...new Set(part.failed)] });
     }
 
     const count = new Map<string, number>();
@@ -191,6 +200,7 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
         cases: [...cases.values()],
         notOpened: [...failed].filter((f) => !nodes.has(f)).length,
         written,
+        byRun,
     };
 }
 
@@ -326,7 +336,7 @@ async function caseRunsOf(p: Platformish, projectId: string): Promise<JobRow[]> 
     });
 }
 
-async function mergedOf(p: Platformish, projectId: string): Promise<MergedRuns> {
+export async function mergedOf(p: Platformish, projectId: string): Promise<MergedRuns> {
     const jobs = await caseRunsOf(p, projectId);
     const inputs: CaseRunInput[] = [];
     for (const j of jobs) inputs.push({ run: { jobId: j.id, startedAt: j.startedAt ?? j.createdAt, status: runStatusOf(j) }, part: await readCaseRun(p, j) });
@@ -336,7 +346,7 @@ async function mergedOf(p: Platformish, projectId: string): Promise<MergedRuns> 
 /** The outcome of a project (PLAN.md "Outcome contract"). A project that is not a Test Case Generation project answers caseAgent false and empty lists. */
 export async function caseOutcomeOf(p: Platformish, projectId: string): Promise<CaseOutcome> {
     if (!(await isCaseAgentProject(p.repo, projectId))) return EMPTY(false);
-    const { written: _w, ...merged } = await mergedOf(p, projectId);
+    const { written: _w, byRun: _b, ...merged } = await mergedOf(p, projectId);
     let missing: string[] = [];
     try {
         const latest = await new AppIntelStore(p.repo.db.sql).latest(projectId);

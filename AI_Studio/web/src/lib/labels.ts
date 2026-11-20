@@ -62,8 +62,10 @@ export const isActive = (s: JobStatus | undefined | null) => !!s && !["COMPLETED
 /** A run of only drafts: no test was allowed to run. Nothing went wrong, so it is not shown as a failure (review-store.ts). */
 export const nothingRan = (job: { status: JobStatus; error?: string | null }) => job.status === "FAILED" && /^Nothing ran: /.test(job.error ?? "");
 
-export function jobLabel(job: Pick<Job, "status" | "error" | "mode"> & { planOnly?: boolean; targets?: Job["targets"] }): { label: string; tone: Tone } {
+export function jobLabel(job: Pick<Job, "status" | "error" | "mode"> & { planOnly?: boolean; targets?: Job["targets"]; caseAgent?: boolean }): { label: string; tone: Tone } {
     if (nothingRan(job)) return { label: "Nothing ran", tone: "neutral" };
+    // A run of a Test Case Generation project explores, adds to the tree and writes test cases; nothing is run (founder 2026-11-19, FX8).
+    if (job.caseAgent) return caseJobLabel(job);
     // An exploration of an Android app and nothing else says so.
     const exploring = job.targets?.length && job.targets.every((t) => t === "mobile") ? "Exploring your phone app" : "Exploring your application";
     // An exploration that stops at a plan has created nothing yet: say that, not "Test suite ready".
@@ -126,6 +128,27 @@ export function jobLabel(job: Pick<Job, "status" | "error" | "mode"> & { planOnl
             return { label: rerun ? "Run finished, some tests need a look" : "Ready, some tests need a look", tone: "warning" };
         case "FAILED":
             return job.error === "Cancelled" ? { label: "Stopped", tone: "neutral" } : { label: rerun ? "Run failed" : "Exploration failed", tone: "danger" };
+    }
+}
+
+/** A run of a Test Case Generation project, in its own words. It ends PARTIALLY_COMPLETED when part of it had a problem (job-runner.ts: the run's errors); the reason is shown with it. */
+export function caseJobLabel(job: Pick<Job, "status" | "error">): { label: string; tone: Tone } {
+    switch (job.status) {
+        case "QUEUED":
+            return { label: "Waiting to start", tone: "neutral" };
+        case "ANALYZING":
+            return { label: "Understanding", tone: "info" };
+        case "PLANNING":
+        case "GENERATING":
+            return { label: "Writing test cases", tone: "info" };
+        case "COMPLETED":
+            return { label: "Test cases written", tone: "success" };
+        case "PARTIALLY_COMPLETED":
+            return { label: "Test cases written, with a problem", tone: "warning" };
+        case "FAILED":
+            return job.error === "Cancelled" ? { label: "Stopped", tone: "neutral" } : { label: "Did not finish", tone: "danger" };
+        default:
+            return { label: "Exploring", tone: "info" };
     }
 }
 
