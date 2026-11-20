@@ -5,10 +5,11 @@ import { Modal } from "../../components/Modal";
 import { Button, Callout } from "../../components/ui";
 import { describeApiError } from "../../lib/labels";
 import { announceRunsChanged, stopLabel, stopQuestion, type RunAnswer } from "./runs";
+import { CASE_STOP_QUESTION } from "./run-text";
 import "./runs.css";
 
 /** It says what stopping does before it does it. The safe choice (keep running) comes first and has the focus. */
-export function StopDialog({ job, onClose, onConfirmed }: { job: Pick<Job, "jobId" | "projectId" | "mode"> & { planOnly?: boolean }; onClose: () => void; onConfirmed: () => void }) {
+export function StopDialog({ job, onClose, onConfirmed }: { job: Pick<Job, "jobId" | "projectId" | "mode"> & { planOnly?: boolean; caseAgent?: boolean }; onClose: () => void; onConfirmed: () => void }) {
     const [counts, setCounts] = useState<RunAnswer["counts"] | undefined>();
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
@@ -26,7 +27,8 @@ export function StopDialog({ job, onClose, onConfirmed }: { job: Pick<Job, "jobI
         };
     }, [job.projectId, job.jobId]);
 
-    const q = stopQuestion(job.mode, counts, job.planOnly);
+    // A run of a Test Case Generation project keeps what it found in the project's tree (founder 2026-11-19, Q4).
+    const q = job.caseAgent ? CASE_STOP_QUESTION : stopQuestion(job.mode, counts, job.planOnly);
     async function stop() {
         setBusy(true);
         setError("");
@@ -66,7 +68,7 @@ export function StopDialog({ job, onClose, onConfirmed }: { job: Pick<Job, "jobI
  * The stop button of a run: asks first (see StopDialog), then says "Stopping…" until the run has ended (the page then replaces it).
  * `size` follows the buttons around it.
  */
-export function StopRun({ job, size = "md", onRequested }: { job: Pick<Job, "jobId" | "projectId" | "mode"> & { planOnly?: boolean }; size?: "sm" | "md"; onRequested?: () => void }) {
+export function StopRun({ job, size = "md", onRequested }: { job: Pick<Job, "jobId" | "projectId" | "mode"> & { planOnly?: boolean; caseAgent?: boolean }; size?: "sm" | "md"; onRequested?: () => void }) {
     const [asking, setAsking] = useState(false);
     const [requested, setRequested] = useState(false);
     return (

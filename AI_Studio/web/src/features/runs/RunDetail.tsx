@@ -22,12 +22,22 @@ import { Elapsed, RelTime } from "./RunTime";
 import { announceRunsChanged, ranSentence, runTitle, startedByText, STATE_WORD, stoppedLine, useRunAnswer, whereOf, type RunState } from "./runs";
 import { BadgeKey, keyEntries } from "../../components/Tooltip";
 import { RUN_TEST_STATE } from "../../lib/help";
+import { CaseRunDetail } from "./CaseRunDetail";
+import { runNumbers, useCaseOutcome } from "./case-runs";
 
 const RUN_STATES: RunState[] = ["passed", "finding", "failed", "running", "waiting", "not_run"];
 import "./runs.css";
 
-/** One run opened: what ran, where, when, how long and who started it; every test with failures first; what changed since the last run; and ways to run again. */
+/** One run opened. A Test Case Generation project's run shows what it added to the tree instead (CaseRunDetail.tsx, founder 2026-11-19). */
 export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
+    const outcome = useCaseOutcome(id);
+    if (outcome.loading) return <ListSkeleton rows={5} />;
+    if (outcome.data?.caseAgent) return <CaseRunDetail id={id} jobId={jobId} number={runNumbers(outcome.data).get(jobId)} />;
+    return <TestRunDetail id={id} jobId={jobId} />;
+}
+
+/** One run opened: what ran, where, when, how long and who started it; every test with failures first; what changed since the last run; and ways to run again. */
+function TestRunDetail({ id, jobId }: { id: string; jobId: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     const run = useRunAnswer(id, jobId, true);
     const name = project.data?.name;

@@ -69,8 +69,9 @@ export const JOB_STATUS: Record<JobStatus, string> = {
 };
 
 /** The definition for the word JobBadge shows (same branches as jobLabel in labels.ts). */
-export function jobHelp(job: { status: JobStatus; error?: string | null; mode?: string | null; planOnly?: boolean }): string {
+export function jobHelp(job: { status: JobStatus; error?: string | null; mode?: string | null; planOnly?: boolean; caseAgent?: boolean }): string {
     const stopped = job.status === "FAILED" && job.error === "Cancelled";
+    if (job.caseAgent) return caseJobHelp(job.status, stopped);
     if (job.status === "QUEUED") return JOB_STATUS.QUEUED;
     if (job.status === "FAILED" && /^Nothing ran: /.test(job.error ?? "")) return "No test ran: every test in this run is a draft waiting for approval. Nothing went wrong.";
     if (stopped) return "Someone stopped it. Results recorded before that are kept; tests that did not finish keep their previous result.";
@@ -102,6 +103,18 @@ export function jobHelp(job: { status: JobStatus; error?: string | null; mode?: 
     if (job.status === "FAILED") return rerun ? "The run stopped with a problem before it finished; the reason is shown." : "The exploration stopped with a problem before it finished; the reason is shown.";
     if (rerun) return job.mode === "environment" ? "Running your tests against the chosen environment." : "Running your tests now.";
     return JOB_STATUS[job.status];
+}
+
+/** The definition for a run of a Test Case Generation project (labels.ts caseJobLabel). Nothing is run, so it never speaks of tests passing. */
+function caseJobHelp(status: JobStatus, stopped: boolean): string {
+    if (status === "QUEUED") return JOB_STATUS.QUEUED;
+    if (stopped) return "Someone stopped it. The pages and test cases it found before then are kept in the tree.";
+    if (status === "COMPLETED") return "The run explored the application, added to its tree and wrote test cases.";
+    if (status === "PARTIALLY_COMPLETED") return "The run added to the tree and wrote test cases, but part of it had a problem; the reason is shown. What it found is kept.";
+    if (status === "FAILED") return "The run stopped with a problem before it finished. What it found before then is kept; the reason is shown.";
+    if (status === "ANALYZING") return "Working out what each page is for.";
+    if (status === "PLANNING" || status === "GENERATING") return "Writing test cases for the pages it found.";
+    return "Opening the application and finding its pages.";
 }
 
 /** A step of an exploration (labels.ts phaseText). */
