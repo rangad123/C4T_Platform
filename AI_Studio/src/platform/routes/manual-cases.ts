@@ -178,7 +178,7 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         const cases = store.listCases(pid);
         const base = `manual-cases-${slug(String(ctx.project(pid).name))}`;
         if (format === "csv") throw new HttpError(410, `${CSV_REPLACED} Export the test cases as JSON instead.`);
-        if (format === "xlsx") return reply.header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").header("content-disposition", `attachment; filename="${base}.xlsx"`).send(Buffer.from(manualCaseWorkbook(cases)));
+        if (format === "xlsx") return reply.header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").header("content-disposition", `attachment; filename="${base}.xlsx"`).send(Buffer.from(manualCaseWorkbook(cases, new Map((await requirements.list(pid)).map((r) => [r.id, r.ref])))));
         return reply.header("content-type", "application/json; charset=utf-8").header("content-disposition", `attachment; filename="${base}.json"`).send(casesToJson(cases));
     });
 

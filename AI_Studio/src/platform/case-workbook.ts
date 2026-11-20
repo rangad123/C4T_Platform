@@ -83,7 +83,8 @@ export function buildCaseWorkbook(o: CaseOutcome): Uint8Array {
  * A code project's test cases as the same workbook (owner decision 2026-11-20, FX16), so the download imports into another code project.
  * Pages and Tree name each page the cases are on once, with no address, purpose or parent: a code project keeps no more than that.
  */
-export function manualCaseWorkbook(cases: readonly ManualCase[]): Uint8Array {
+/** `refOf`: requirement record id → its REQ-n reference, so a case linked to a record names it in the Requirement cell (FX23). */
+export function manualCaseWorkbook(cases: readonly ManualCase[], refOf: ReadonlyMap<string, string> = new Map()): Uint8Array {
     const pages = [...new Set(cases.map((c) => c.page).filter(Boolean))];
     return buildCaseWorkbook({
         caseAgent: false,
@@ -92,6 +93,6 @@ export function manualCaseWorkbook(cases: readonly ManualCase[]): Uint8Array {
         missing: [],
         pages: pages.map((path) => ({ path, url: "", title: "", purpose: "" })),
         tree: pages.map((node) => ({ node, parent: null, page: node, title: "", cases: 0 })),
-        cases: cases.map((c) => ({ id: c.ref, title: c.title, type: c.automation, priority: c.priority, page: c.page, preconditions: c.preconditions, steps: c.steps, expected: c.expected.split("\n"), requirement: c.requirement })),
+        cases: cases.map((c) => ({ id: c.ref, title: c.title, type: c.automation, priority: c.priority, page: c.page, preconditions: c.preconditions, steps: c.steps, expected: c.expected.split("\n"), requirement: (c.requirementId && refOf.get(c.requirementId)) || c.requirement })),
     });
 }

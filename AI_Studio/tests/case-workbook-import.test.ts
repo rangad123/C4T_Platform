@@ -322,6 +322,13 @@ describe("GET /api/projects/:id/manual-cases/export?format=xlsx (FX16)", () => {
         expect(copy.map((c) => c.sourceRef)).toEqual(original.map((c) => c.ref));
         // The same file again adds nothing.
         expect((await importXlsx(to, wb)).body).toMatchObject({ created: 0, duplicates: 4 });
+
+        // A case linked to a requirement record names that record's reference in its Requirement cell (FX23).
+        const req = await cora("POST", `/api/projects/${from}/requirements`, { ref: "REQ-5", title: "Links are safe" });
+        const handWritten = original.find((c) => c.title.startsWith("=HYPERLINK"))!;
+        expect((await cora("PUT", `/api/projects/${from}/manual-cases/${handWritten.id}`, { title: handWritten.title, steps: handWritten.steps, requirementId: req.body.id })).status).toBe(200);
+        const linked = readTable(new Uint8Array((await download(from)).rawPayload), "Test cases", { columns: ["ID", "Requirement"], required: ["ID"] });
+        expect(linked.find((t) => t.values.ID === handWritten.ref)?.values.Requirement).toBe("REQ-5");
     });
 
     it("is allowed and refused exactly as the JSON export is", async () => {
