@@ -3,14 +3,15 @@ import { api, projectKind, projectShape, type ProjectDetail } from "../../api";
 import { Button, Callout } from "../../components/ui";
 import { describeApiError } from "../../lib/labels";
 import { useFetch } from "../../lib/hooks";
+import type { ProjectAgents } from "../testing-agents/testing-agents";
 import { LEVEL_SETTINGS, LEVELS, isLevel, type ExploreLevel } from "../../../../src/engine/levels";
 
 const NAME: Record<ExploreLevel, string> = { thorough: "Thorough", deep: "Deep", everything: "Everything" };
 
-/** One plain line per level, from the engine's own table (engine/levels.ts). */
-export function levelLine(level: ExploreLevel): string {
+/** One plain line per level, from the engine's own table (engine/levels.ts). `caseAgent`: a Test Case Generation project, which writes test cases. */
+export function levelLine(level: ExploreLevel, caseAgent = false): string {
     const s = LEVEL_SETTINGS[level];
-    const base = `Up to ${s.maxPages} pages, ${s.maxDepth} clicks deep, about ${s.maxScenarios} tests from the AI.`;
+    const base = `Up to ${s.maxPages} pages, ${s.maxDepth} clicks deep, about ${s.maxScenarios} ${caseAgent ? "test cases" : "tests"} from the AI.`;
     return level === "thorough"
         ? `${base} The default.`
         : `${base} Uses more AI and takes longer.${LEVEL_SETTINGS[level].visionByDefault ? " Includes the AI screen review when your model can read images: screenshots of key pages go to your AI provider." : ""}`;
@@ -23,7 +24,7 @@ export function projectLevel(project: ProjectDetail | null | undefined): Explore
 }
 
 /** "How much to explore": Thorough, Deep or Everything, each with its line. */
-export function LevelChoice({ value, onChange, name = "explore-level" }: { value: ExploreLevel; onChange: (l: ExploreLevel) => void; name?: string }) {
+export function LevelChoice({ value, onChange, name = "explore-level", caseAgent = false }: { value: ExploreLevel; onChange: (l: ExploreLevel) => void; name?: string; caseAgent?: boolean }) {
     return (
         <fieldset className="stack-sm" data-testid="explore-level">
             <legend className="t-section">How much to explore</legend>
@@ -33,7 +34,7 @@ export function LevelChoice({ value, onChange, name = "explore-level" }: { value
                     <span>
                         <span className="t-card">{NAME[l]}</span>
                         <span className="t-meta" style={{ display: "block" }}>
-                            {levelLine(l)}
+                            {levelLine(l, caseAgent)}
                         </span>
                     </span>
                 </label>
@@ -68,6 +69,8 @@ export function ScreenReviewChoice({ level, canReadImages, value, onChange }: { 
  */
 export function ExploreLevelSetting({ id }: { id: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
+    // A Test Case Generation project's levels count test cases (the server's rule, FX14).
+    const agents = useFetch<ProjectAgents>(`/projects/${id}/testing-agents`);
     const saved = projectLevel(project.data);
     const [level, setLevel] = useState<ExploreLevel>(saved);
     const [busy, setBusy] = useState(false);
@@ -90,7 +93,7 @@ export function ExploreLevelSetting({ id }: { id: string }) {
     }
     return (
         <div className="card card-pad stack-sm" data-testid="explore-level-setting">
-            <LevelChoice value={level} onChange={(l) => (setLevel(l), setMsg(null))} name="project-explore-level" />
+            <LevelChoice value={level} onChange={(l) => (setLevel(l), setMsg(null))} name="project-explore-level" caseAgent={agents.data?.caseAgent === true} />
             {!project.data.application && <p className="t-meta">Saved once the application has been explored for the first time.</p>}
             {msg && <Callout tone={msg.ok ? "success" : "danger"}>{msg.text}</Callout>}
             <div>

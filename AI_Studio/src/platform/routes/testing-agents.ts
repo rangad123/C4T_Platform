@@ -3,7 +3,8 @@
  *
  *   GET /api/testing-agents                   → { agents: [agent + projects], canRun, ai }   every agent, with the asker's projects using it
  *   GET /api/testing-agents/:agentId          → { agent, projects, canRun, ai }               one agent (404 for an unknown id)
- *   GET /api/projects/:id/testing-agents      → { applies, agents, source, switches, platforms }
+ *   GET /api/projects/:id/testing-agents      → { applies, agents, source, switches, platforms, caseAgent }
+ *                                               caseAgent: a Test Case Generation project (case-agent.ts), the one rule the web reads
  *   PUT /api/projects/:id/testing-agents      { agents: [ids] } → the same, after saving the choice
  *
  * Projects are listed only when the asker can reach them (visibleProjectsOf). A project's choice is changed with "Change project
@@ -15,6 +16,7 @@ import { actorLabel, currentActor } from "../auth/actor.js";
 import { visibleProjectsOf } from "../auth/project-scope.js";
 import { HttpError } from "../http-error.js";
 import type { Row } from "../db.js";
+import { isCaseAgentProject } from "../case-agent.js";
 import { DEFAULT_PLATFORMS, projectSetupOf, type ProjectPlatform, type TestingMode } from "../project-setup.js";
 import type { JobOptions, Repo } from "../repo.js";
 import { runsCanStartHere } from "../suite-run.js";
@@ -98,7 +100,7 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
     const view = async (id: string) => {
         const row = project(id);
         const a = await store.of(row);
-        return { ...a, switches: switchesFor(a.agents), platforms: projectSetupOf(row).platforms };
+        return { ...a, switches: switchesFor(a.agents), platforms: projectSetupOf(row).platforms, caseAgent: await isCaseAgentProject(repo, id) };
     };
 
     app.get("/api/projects/:id/testing-agents", async (req) => view((req.params as { id: string }).id));

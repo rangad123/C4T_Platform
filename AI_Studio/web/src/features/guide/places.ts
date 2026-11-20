@@ -129,7 +129,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Type the address of your application, then choose Explore again.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Explore again"] },
             { text: "Fill in Focus (optional) to tell the AI what matters most. The whole application is still explored.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Focus (optional)"] },
-            { text: "Which checks run is set by the project's Testing agents in Settings, then General.", button: "Read about the checks", to: { search: "checks besides clicks" }, ui: ["Testing agents", "Settings", "General"] },
+            { text: "What the AI does is set by the project's Testing agents in Settings, then General. The Test Case Generation Agent explores the application or reads its requirements, builds a tree and writes test cases.", button: "Read what each agent does", to: { search: "checks besides clicks" }, ui: ["Testing agents", "Settings", "General"] },
             { text: "Keep the sign-in details in Settings, under Sign-in, if your application needs a login.", button: "Read about test accounts", to: { topic: "test-accounts", search: "test accounts login" }, ui: ["Settings", "Sign-in"] },
             { text: "Go back to your list of projects.", button: "Back to projects", to: here("projects") },
         ],
