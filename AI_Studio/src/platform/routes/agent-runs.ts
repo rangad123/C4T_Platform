@@ -9,6 +9,7 @@ import { currentActor } from "../auth/actor.js";
 import { hidesCost } from "../auth/cost-hiding.js";
 import { findEnvironment } from "../environments-store.js";
 import { HttpError } from "../http-error.js";
+import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import { environmentFor } from "../plain-run.js";
 import { projectSetupOf } from "../project-setup.js";
@@ -72,6 +73,7 @@ export function registerAgentRunRoutes(ctx: RouteCtx): void {
         const project = ctx.project(id);
         const body = StartBody.parse(req.body);
         if (!projectSetupOf(project).testingModes.includes("agent")) throw new HttpError(409, "Agent mode is off for this project. Turn it on in the project's settings to start agent runs.");
+        await refuseTestsInCaseAgentProject(repo, id); // a Test Case Generation project runs no tests (case-agent.ts)
         const can = await agentRunsCanStart(p, id);
         if (!can.ok) throw new HttpError(409, can.reason);
         const misuse = misuseRefusal(`${body.objective}\n${body.successCriteria ?? ""}`);

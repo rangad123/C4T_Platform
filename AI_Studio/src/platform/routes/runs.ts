@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getAdapter, hasAdapter } from "../../engine/frameworks/index.js";
 import { EXTRA_VARIANT_IDS, normalizeVariants } from "../../engine/validation/variants.js";
+import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { HttpError } from "../http-error.js";
 import { DEFAULT_JOB_OPTIONS, unreadableTestSentence } from "../repo.js";
 import { buildRunDetail } from "../run-view.js";
@@ -31,6 +32,7 @@ export function registerRunRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/runs", async (req, reply) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
+        await refuseTestsInCaseAgentProject(repo, id); // a Test Case Generation project runs no tests (case-agent.ts)
         const body = StartBody.parse(req.body ?? {});
         // Said plainly before anything is queued: a run nothing will pick up is not a run.
         refuseUnlessRunsStart(ctx.p);

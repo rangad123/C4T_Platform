@@ -23,6 +23,7 @@ import { actorLabel } from "../auth/actor.js";
 import { PRODUCTION_CONFIRM_MESSAGE } from "../environment-run.js";
 import { findEnvironment } from "../environments-store.js";
 import { HttpError } from "../http-error.js";
+import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { ManualCaseStore } from "../manual-case-store.js";
 import type { TestRow } from "../repo.js";
 import { RequirementStore } from "../requirement-store.js";
@@ -258,6 +259,7 @@ export function registerSuiteRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/test-suites/:sid/run", async (req, reply) => {
         const { id, sid } = req.params as { id: string; sid: string };
         ctx.project(id);
+        await refuseTestsInCaseAgentProject(repo, id); // a Test Case Generation project runs no tests (case-agent.ts)
         const s = await suiteOf(id, sid);
         z.object({}).strict().parse(req.body ?? {});
         // Said plainly before anything is queued: a run nothing will pick up is not a run.
