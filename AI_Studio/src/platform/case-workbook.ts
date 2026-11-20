@@ -10,7 +10,7 @@
  * Steps are written only for Manual cases (R7), one per line as `action => expected` (read back by src/engine/manual/workbook-import.ts stepsFromCell), or the
  * action alone when it has no expected result. Preconditions and expected results are one per line.
  *
- * Safety comes from the writer (src/security/findings/xlsx.ts `buildXlsx`): every cell is an inline string, so a value that starts with
+ * Safety comes from the writer (src/shared/xlsx.ts `buildXlsx`): every cell is an inline string, so a value that starts with
  * = + - @ is shown as typed and never runs as a formula; text is XML-escaped, characters XML cannot carry are dropped and a cell longer
  * than Excel's limit is cut. No prefix is added, so an imported title is exactly the title that was written. Here, the Tree keeps its
  * integrity (a Parent that is not another Node is written empty, a Page that is not a row of Pages is written empty) and no sheet goes
@@ -18,7 +18,7 @@
  * there are than the Import takes.
  */
 import type { CaseOutcome, CaseOutcomeCase } from "./case-outcome-types.js";
-import { buildXlsx, type XlsxSheet } from "../security/findings/xlsx.js";
+import { buildXlsx, type XlsxSheet } from "../shared/xlsx.js";
 // The most test case rows a code project's Import reads: the reader's own limit, so the note below and the Import never disagree.
 import { XLSX_MAX_ROWS as CASE_IMPORT_MAX_ROWS } from "../engine/manual/xlsx-read.js";
 

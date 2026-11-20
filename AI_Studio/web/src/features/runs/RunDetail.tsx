@@ -23,16 +23,19 @@ import { announceRunsChanged, ranSentence, runTitle, startedByText, STATE_WORD, 
 import { BadgeKey, keyEntries } from "../../components/Tooltip";
 import { RUN_TEST_STATE } from "../../lib/help";
 import { CaseRunDetail } from "./CaseRunDetail";
-import { runNumbers, useCaseOutcome } from "./case-runs";
+import { runNumbers, useCaseAgent } from "./case-runs";
+import type { CaseOutcome } from "../outcome/outcome";
 
 const RUN_STATES: RunState[] = ["passed", "finding", "failed", "running", "waiting", "not_run"];
 import "./runs.css";
 
 /** One run opened. A Test Case Generation project's run shows what it added to the tree instead (CaseRunDetail.tsx, founder 2026-11-19). */
 export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
-    const outcome = useCaseOutcome(id);
-    if (outcome.loading) return <ListSkeleton rows={5} />;
-    if (outcome.data?.caseAgent) return <CaseRunDetail id={id} jobId={jobId} number={runNumbers(outcome.data).get(jobId)} />;
+    const caseAgent = useCaseAgent(id);
+    // Only such a run needs the outcome, for its run number.
+    const outcome = useFetch<CaseOutcome>(caseAgent ? `/projects/${id}/outcome` : null);
+    if (caseAgent === undefined || outcome.loading) return <ListSkeleton rows={5} />;
+    if (caseAgent) return <CaseRunDetail id={id} jobId={jobId} number={runNumbers(outcome.data).get(jobId)} />;
     return <TestRunDetail id={id} jobId={jobId} />;
 }
 

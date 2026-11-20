@@ -32,7 +32,7 @@ import { ManualCaseStore } from "../src/platform/manual-case-store.js";
 import { buildCaseWorkbook } from "../src/platform/case-workbook.js";
 import { createDatabaseAtVersion, Db, knownSchemaVersion } from "../src/platform/db.js";
 import { buildServer } from "../src/platform/server.js";
-import { buildXlsx } from "../src/security/findings/xlsx.js";
+import { buildXlsx } from "../src/shared/xlsx.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");

@@ -1,5 +1,5 @@
 /**
- * Security reports as Excel workbooks (round 20, UI2): the minimal XLSX writer (src/security/findings/xlsx.ts) and `format=xlsx` on FIND's
+ * Security reports as Excel workbooks (round 20, UI2): the minimal XLSX writer (src/shared/xlsx.ts) and `format=xlsx` on FIND's
  * report routes, through the real platform server (server.inject, no port opened, no browser).
  *
  * The file is unzipped here and its XML read back: the parts a spreadsheet needs, the two sheets, the Findings sheet's columns and values
@@ -21,7 +21,8 @@ import { buildServer } from "../src/platform/server.js";
 import { UserStore } from "../src/platform/user-store.js";
 import { fromCheckFailure, ingest, type RawResult } from "../src/security/findings/ingest.js";
 import { buildReport, CSV_COLUMNS, renderReportCsv } from "../src/security/findings/report.js";
-import { buildXlsx, columnName, findingRows, sheetName, XLSX_CELL_MAX } from "../src/security/findings/xlsx.js";
+import { findingRows } from "../src/security/findings/xlsx.js";
+import { buildXlsx, columnName, sheetName, XLSX_CELL_MAX } from "../src/shared/xlsx.js";
 import { securityStoreFor, type SecurityStore } from "../src/security/store.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;

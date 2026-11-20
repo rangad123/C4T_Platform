@@ -24,7 +24,7 @@ import { caseDescription } from "../src/platform/case-scripts.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { saveSignIn } from "../src/platform/routes/project-sign-in.js";
 import { buildServer } from "../src/platform/server.js";
-import { buildXlsx } from "../src/security/findings/xlsx.js";
+import { buildXlsx } from "../src/shared/xlsx.js";
 import { Worker } from "../src/platform/worker.js";
 import { ACCOUNT_USER, startAccountSite, type AccountSite } from "./fixtures/account-site.js";
 

@@ -18,7 +18,7 @@ import { loadConfig } from "../src/config.js";
 import { afterCaseJob, caseDescription } from "../src/platform/case-scripts.js";
 import { MAX_SCRIPTS_PER_CALL } from "../src/engine/authoring/case-script.js";
 import { expectedOf, startPathOf } from "../src/engine/authoring/describe.js";
-import { buildXlsx } from "../src/security/findings/xlsx.js";
+import { buildXlsx } from "../src/shared/xlsx.js";
 import { ANOTHER_RUN, NO_ADDRESS_FOR_SCRIPTS, SCRIPTS_BEING_WRITTEN } from "../src/platform/routes/generate-scripts.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";

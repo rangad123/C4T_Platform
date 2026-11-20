@@ -458,7 +458,7 @@ with `?type=security`).
 ## Round 20 screens and the Excel export (UI2)
 
 Code: `web/src/features/security/` (`Activity.tsx`, `Notifications.tsx`, `ApplicationExtras.tsx`, additions to `Applications.tsx`,
-`Reports.tsx`, `SecurityChrome.tsx`, `SecurityPage.tsx`, `security.ts`); the workbook writer `src/security/findings/xlsx.ts` and one
+`Reports.tsx`, `SecurityChrome.tsx`, `SecurityPage.tsx`, `security.ts`); the report workbook `src/security/findings/xlsx.ts` (its writer is `src/shared/xlsx.ts`) and one
 anchored addition to FIND's `routes/findings.ts`.
 
 - **Activity** (`#/projects/:id/security/activity`, a tab of the section): the project's security trail (CORE's

@@ -42,7 +42,7 @@ import { registerImportRoutes } from "./imports.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerMemoryRoutes } from "./memory.js";
 import { registerNotesRoutes } from "./notes.js";
-import { registerAppIntelRoutes } from "./app-intel.js";
+import { latestAppModel, registerAppIntelRoutes } from "./app-intel.js";
 import { registerOpsRoutes } from "./ops.js";
 import { registerLocatorRoutes } from "./locators.js";
 import { registerManualCaseRoutes } from "./manual-cases.js";
@@ -149,7 +149,7 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerExplorerRoutes(ctx);
     registerKnowledgeRoutes(ctx);
     // The Test Case Generation outcome: its tree, pages and test cases, and the workbook (routes/case-outcome.ts, founder 2026-11-19).
-    registerCaseOutcomeRoutes(ctx);
+    registerCaseOutcomeRoutes(ctx, (id) => latestAppModel(ctx.p, id));
     // People and access: signing in, a person's own account, people, activity, single sign-on (routes/auth.ts, routes/users.ts).
     registerAuthRoutes(ctx);
     registerUserRoutes(ctx);

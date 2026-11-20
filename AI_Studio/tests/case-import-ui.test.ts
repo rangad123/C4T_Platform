@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
-import { buildXlsx } from "../src/security/findings/xlsx.js";
+import { buildXlsx } from "../src/shared/xlsx.js";
 import { seedProject, type Seed } from "./fixtures/dashboard-seed.js";
 
 const PORT = 5738;

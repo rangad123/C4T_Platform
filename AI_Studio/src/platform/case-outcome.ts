@@ -23,7 +23,6 @@
 import type { Platform } from "./bootstrap.js";
 import type { CaseOutcome, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeRunStatus, CaseOutcomeTreeNode } from "./case-outcome-types.js";
 import { isCaseAgentProject } from "./case-agent.js";
-import { AppIntelStore } from "./app-intel-store.js";
 import { loadStoredPlan } from "./plan-store.js";
 import type { JobRow } from "./repo.js";
 
@@ -343,14 +342,16 @@ export async function mergedOf(p: Platformish, projectId: string): Promise<Merge
     return mergeCaseRuns(inputs);
 }
 
+/** The project's latest application model, as its own route reads it (routes/app-intel.ts `latestAppModel`, handed in by routes/index.ts). */
+export type AppModelReader = (projectId: string) => Promise<{ missingContext: ReadonlyArray<{ text: string }> } | undefined>;
+
 /** The outcome of a project (PLAN.md "Outcome contract"). A project that is not a Test Case Generation project answers caseAgent false and empty lists. */
-export async function caseOutcomeOf(p: Platformish, projectId: string): Promise<CaseOutcome> {
+export async function caseOutcomeOf(p: Platformish, projectId: string, appModel: AppModelReader): Promise<CaseOutcome> {
     if (!(await isCaseAgentProject(p.repo, projectId))) return EMPTY(false);
     const { written: _w, byRun: _b, ...merged } = await mergedOf(p, projectId);
     let missing: string[] = [];
     try {
-        const latest = await new AppIntelStore(p.repo.db.sql).latest(projectId);
-        missing = (latest?.model.missingContext ?? []).map((m) => m.text).slice(0, MAX_MISSING);
+        missing = ((await appModel(projectId))?.missingContext ?? []).map((m) => m.text).slice(0, MAX_MISSING);
     } catch {
         missing = [];
     }

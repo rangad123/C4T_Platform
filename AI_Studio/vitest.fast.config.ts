@@ -261,6 +261,11 @@ export default defineConfig({
             "tests/case-workbook.test.ts",
             "tests/outcome-tree-unit.test.ts",
             "tests/plan-families-agents-unit.test.ts",
+            // Founder 2026-11-19 round 2: Test Case Generation runs and the caseAgent answer (pure, or Fastify inject on a temp database).
+            "tests/case-run-outcome-unit.test.ts",
+            "tests/case-run-text-unit.test.ts",
+            "tests/case-agent-view.test.ts",
+            "tests/case-agent-wording-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

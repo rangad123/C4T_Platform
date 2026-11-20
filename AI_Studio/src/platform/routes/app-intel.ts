@@ -44,6 +44,9 @@ const SchemaName = z.object({ name: z.string().trim().regex(/^[\w][\w .()-]{0,19
 const Label = z.object({ label: z.string().trim().min(1, "Give the version a label.").max(200, "A version label is at most 200 characters.") }).strict();
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
+/** The latest application model of a project, for the Test Case Generation outcome (routes/index.ts hands it to routes/case-outcome.ts). */
+export const latestAppModel = async (p: RouteCtx["p"], projectId: string) => (await new AppIntelStore(p.sql).latest(projectId))?.model;
+
 export function registerAppIntelRoutes(ctx: RouteCtx): void {
     const { app, p } = ctx;
     const store = new AppIntelStore(p.sql);

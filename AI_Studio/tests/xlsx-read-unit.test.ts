@@ -1,6 +1,6 @@
 /**
  * The xlsx reader (founder 2026-11-19, C5; SPEC R6.2 and R6.3, with the row limit raised to 5,000 by the lead on 2026-11-20): src/engine/manual/xlsx-read.ts reads the "Test cases" sheet of the test
- * case workbook, both as the platform writes it (inline strings, src/security/findings/xlsx.ts) and as Excel or LibreOffice save it again
+ * case workbook, both as the platform writes it (inline strings, src/shared/xlsx.ts) and as Excel or LibreOffice save it again
  * (shared strings, rich text, styles, gaps, line breaks), and refuses wrong or hostile files with a sentence.
  *
  * LibreOffice and Excel are not on this machine, so the re-saved file is built here by `resavedWorkbook()` in the shape those programs
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 import { describe, expect, it } from "vitest";
 import { readSheet, readTable, XlsxReadError } from "../src/engine/manual/xlsx-read.js";
-import { buildXlsx, columnName } from "../src/security/findings/xlsx.js";
+import { buildXlsx, columnName } from "../src/shared/xlsx.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, "fixtures", "case-workbook-resaved.xlsx");

@@ -1,8 +1,8 @@
-import { caseOutcomeOf } from "../case-outcome.js";
+import { caseOutcomeOf, type AppModelReader } from "../case-outcome.js";
 import { caseRunOutcomeOf } from "../case-run-outcome.js";
 import { buildCaseWorkbook } from "../case-workbook.js";
 import { HttpError } from "../http-error.js";
-import { XLSX_CONTENT_TYPE } from "../../security/findings/xlsx.js";
+import { XLSX_CONTENT_TYPE } from "../../shared/xlsx.js";
 import type { RouteCtx } from "./types.js";
 
 /**
@@ -26,7 +26,7 @@ export function workbookDisposition(projectName: string): string {
     return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
-export function registerCaseOutcomeRoutes(ctx: RouteCtx): void {
+export function registerCaseOutcomeRoutes(ctx: RouteCtx, appModel: AppModelReader): void {
     const { app, p } = ctx;
 
     app.get("/api/projects/:id/outcome", async (req) => {
@@ -38,13 +38,13 @@ export function registerCaseOutcomeRoutes(ctx: RouteCtx): void {
             if (!one) throw new HttpError(404, NO_SUCH_RUN);
             return one;
         }
-        return caseOutcomeOf(p, id);
+        return caseOutcomeOf(p, id, appModel);
     });
 
     app.get("/api/projects/:id/outcome/workbook", async (req, reply) => {
         const { id } = req.params as { id: string };
         const project = ctx.project(id);
-        const outcome = await caseOutcomeOf(p, id);
+        const outcome = await caseOutcomeOf(p, id, appModel);
         if (!outcome.caseAgent) throw new HttpError(404, NOT_A_CASE_AGENT_PROJECT);
         if (!outcome.runs.length) throw new HttpError(404, NO_CASE_RUNS);
         return reply

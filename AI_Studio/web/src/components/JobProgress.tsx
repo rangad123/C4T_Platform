@@ -13,8 +13,7 @@ import { PhoneProgress } from "../features/phone/PhoneProgress";
 import { isPhoneJob, isPhoneOnly, phoneCounts, phonePhase } from "../features/phone/phone";
 import { useExecutionMode, workingOn } from "../features/runs/runs-here";
 import { JobExploreTree } from "../features/explore/ExploreTree";
-import { useFetch } from "../lib/hooks";
-import type { CaseOutcome } from "../features/outcome/outcome";
+import { useCaseAgent } from "../features/runs/case-runs";
 import { CaseStages } from "../features/runs/CaseRunDetail";
 
 /** Live "what is happening" for a running analysis: a checklist, one progress bar, no jargon. */
@@ -25,7 +24,7 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
     const job = stream.live && stream.job && stream.job.jobId === polled.jobId ? { ...stream.job, targets: stream.job.targets ?? polled.targets } : polled;
     // A run of a Test Case Generation project (always plan-only) has three stages named for what they do, and no list of pages or test
     // ideas of its own: the project's tree is the one list (founder 2026-11-19, P3, P5.3).
-    const caseAgent = useFetch<Pick<CaseOutcome, "caseAgent">>(polled.planOnly ? `/projects/${polled.projectId}/outcome` : null).data?.caseAgent === true;
+    const caseAgent = useCaseAgent(polled.planOnly ? polled.projectId : null) === true;
     const pct = progressPercent(job);
     const label = jobLabel({ ...job, caseAgent });
     // Validation-only runs skip every earlier phase; hide them rather than listing five "skipped".
