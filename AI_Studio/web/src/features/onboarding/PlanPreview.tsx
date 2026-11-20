@@ -11,6 +11,8 @@ import { countOf, createBody, createSentence, explored, foundSentence, ideaPrior
 import { LeftAlone } from "../phone/PhoneProgress";
 import { exploreAgainHref } from "../phone/phone";
 import { coverageSentence } from "../phonedevice/phonedevice";
+import { useProjectAgentView } from "../testing-agents/case-agent";
+import { familiesForAgents } from "./plan-agents";
 import "./onboarding.css";
 
 /**
@@ -25,8 +27,10 @@ export function PlanPreview({ projectId, job, onChanged }: { projectId: string; 
     const [problem, setProblem] = useState("");
     const [discarded, setDiscarded] = useState(false);
 
+    // The kinds of test are those of the project's chosen agents (founder 2026-11-19, sheet row 19): a kind no chosen agent does is not listed.
+    const agentView = useProjectAgentView(projectId);
     const shown = useMemo(() => (answer.data ? normalizePlan(answer.data) : undefined), [answer.data]);
-    const plan = shown && shown.ready ? shown : undefined;
+    const plan = useMemo(() => (shown && shown.ready && !agentView.loading ? { ...shown, families: familiesForAgents(shown.families, agentView.switches) } : undefined), [shown, agentView.loading, agentView.switches]);
     const exploreAgain = exploreAgainHref(job, projectId);
     useEffect(() => {
         if (plan && !choice) setChoice(initialChoice(plan));
@@ -41,7 +45,7 @@ export function PlanPreview({ projectId, job, onChanged }: { projectId: string; 
             </section>
         );
     }
-    if (answer.loading) {
+    if (answer.loading || (shown?.ready && agentView.loading)) {
         return (
             <section className="card card-pad stack" aria-label="Plan" aria-busy="true">
                 <Skeleton w={260} h={22} />
