@@ -85,6 +85,7 @@
             "preconditions": "Signed in.",
             "reproduction": ["Sign in", "POST /api/cart/items {\"productId\":\"nope\"}", "200 instead of 404"],
             "verifier": "BS-09", "severity": "low", "impact": "Clients cannot tell a failed add from a successful one.",
+            "unreachable": "Unreachable at Thorough with --login html (row 233): API tests get no token, so every POST /api/cart/items answers 401 ('needs the project's API token') and there is no UI path to an unknown product. Effective maximum 11 of 12 for bench-shop.",
             "detectableWithCurrentInfrastructure": { "level": "partly", "why": "The OpenAPI document states 404; data-changing API cases are off by default." }
         },
         {

@@ -18,6 +18,8 @@ const DefectSchema = z
         workflow: z.string().min(1).max(120),
         category: z.string().min(1).max(60),
         severity: z.string().min(1).max(20),
+        /** Why no test can reach it in this bench set-up (scoring v2: left out of the effective maximum, still counted as seeded). */
+        unreachable: z.string().min(1).max(400).optional(),
     })
     .passthrough();
 export type CatalogueDefect = z.infer<typeof DefectSchema>;

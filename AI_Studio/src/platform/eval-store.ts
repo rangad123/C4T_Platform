@@ -107,8 +107,9 @@ export class EvalStore {
     compare(s: EvalRunSummary, run?: EvalRun): Comparison | null {
         const prev = this.previousOf(s);
         if (!prev) return null;
-        // A benchmark run is also compared on its seeded-defect numbers (other runs have none).
-        const overall = [...compareMetrics(prev.overall, s.overall), ...(s.overall.benchmark ? compareMetrics(prev.overall, s.overall, BENCH_COMPARED) : [])];
+        // A benchmark run is also compared on its seeded-defect numbers (other runs have none), only with a run scored by the same rules.
+        const sameScoring = (prev.overall.benchmark?.scoring ?? 1) === (s.overall.benchmark?.scoring ?? 1);
+        const overall = [...compareMetrics(prev.overall, s.overall), ...(s.overall.benchmark && sameScoring ? compareMetrics(prev.overall, s.overall, BENCH_COMPARED) : [])];
         const out: Comparison = { comparedWith: { id: prev.id, startedAt: prev.startedAt }, overall, entries: [] };
         if (run) {
             const before = this.get(prev.id)?.run;
