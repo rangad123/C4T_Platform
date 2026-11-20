@@ -29,7 +29,7 @@ import { captchaMessage, detectCaptcha } from "../auth/captcha.js";
 import { hasPasswordField, login } from "../discovery/auth.js";
 import { BrowserSession, settle } from "../discovery/browser.js";
 import type { SiteNote } from "../memory/notes.js";
-import type { Step } from "../spec/schema.js";
+import type { Scenario, Step } from "../spec/schema.js";
 import type { AppModel } from "../understanding/app-model.js";
 
 export interface ReplayCredentials {
@@ -70,6 +70,39 @@ export function cleanReplayPlan(p: { steps: readonly Step[]; roleAccount: boolea
     const own = [...JSON.stringify(p.steps).matchAll(RECORD_ID)].map((m) => m[0]).find((id) => p.startingIds?.has(id));
     if (own) return shared(`the test uses the account's own starting data, ${own}, which a new account does not have`);
     return { register: true, signupPath: p.signupPath };
+}
+
+/** Words of a test that changes the account's state on the server (cart, orders, account details), so leftovers would change what it sees. */
+const STATE_WORDS = /\b(cart|basket|checkout|orders?|discount|coupon|profile|delivery address|account (details|page|settings))\b/i;
+/** Words of a test that checks an amount the cart works out. */
+const TOTAL_WORDS = /\b(sub-?totals?|totals?|discounts?|shipping)\b/i;
+const scenarioText = (s: Pick<Scenario, "title" | "description" | "preconditions" | "requiredData" | "expectedResults">) =>
+    [s.title, s.description, ...s.preconditions, ...s.requiredData, ...s.expectedResults].join("\n");
+
+/**
+ * Row 235 (fix 2 of ROW233-ROOT-CAUSE.md): whether a test is WRITTEN as a newly registered account, so the amounts and records it checks
+ * come from its own steps, not from what earlier tests left on the shared account (62 lost sightings, e.g. "−$113.71" = 10% of a
+ * $1,137.14 leftover cart). Every objective pursuit, and a planned test that changes cart, orders or account state; the same safety
+ * conditions as the replays (cleanReplayPlan), with the scenario's text standing in for steps that do not exist yet.
+ */
+export function cleanAuthoringPlan(p: { scenario: Pick<Scenario, "title" | "description" | "preconditions" | "requiredData" | "expectedResults">; objective: boolean; signsInAsMain: boolean; roleAccount: boolean; dataChanges: boolean; signupPath?: string; startingIds?: ReadonlySet<string> }): CleanPlan {
+    const text = scenarioText(p.scenario);
+    const shared = (why: string): CleanPlan => ({ register: false, clean: false, why: `written on the shared test account: ${why}` });
+    if (p.roleAccount) return shared("it signs in as a named test account, whose rights a new account would not have");
+    if (!p.signsInAsMain) return shared("it does not sign in as the project's test account");
+    if (!p.objective && !STATE_WORDS.test(text)) return shared("it does not change cart, orders or account state");
+    if (!p.dataChanges) return shared("the project does not allow tests that change data, so no account is registered");
+    if (!p.signupPath) return shared("the application has no sign-up page the exploration found");
+    const own = [...text.matchAll(RECORD_ID)].map((m) => m[0]).find((id) => p.startingIds?.has(id));
+    if (own) return shared(`it uses the account's own starting data, ${own}, which a new account does not have`);
+    return { register: true, signupPath: p.signupPath };
+}
+
+/** The scenario as written on a new account: it starts empty, and a total is checked on two or more lines the test adds itself (BS-01, BS-02). */
+export function freshAccountScenario<S extends Pick<Scenario, "title" | "description" | "preconditions" | "requiredData" | "expectedResults">>(s: S): S {
+    const lines = ["Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps"];
+    if (TOTAL_WORDS.test(scenarioText(s))) lines.push("The test checks a total: add at least two different products to the cart with its own steps, the last with quantity 2 or more, before checking it, so every amount comes from the test's own steps");
+    return { ...s, preconditions: [...s.preconditions, ...lines] };
 }
 
 /** What a sign-up field asks for, from its type, autocomplete hint, name, id, label and placeholder. */

@@ -28,6 +28,11 @@ export interface Budgets {
     minutes: number;
     /** How often one state may be visited in one pursuit. */
     depth: number;
+    /**
+     * The actions (not replays) all pursuits of one objective may take together (`LoopObjective.share`); absent: no share. A pursuit is
+     * refused past it, and the objective's later pursuits are not started, so one objective cannot spend the session's actions.
+     */
+    objectiveActions?: number;
 }
 
 export interface LoopObjective {
@@ -35,6 +40,8 @@ export interface LoopObjective {
     priority: number;
     /** `objectiveFingerprint` (P3-02): the same objective twice is pursued once. */
     fingerprint: string;
+    /** The objective this pursuit belongs to: its pursuits share `Budgets.objectiveActions`. Absent: its own id. */
+    share?: string;
 }
 
 export interface UsageCounter {
@@ -197,6 +204,7 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
     const actionLog: ActionLogRow[] = [];
     let pursued = 0;
     let failuresInARow = 0;
+    const shareUsed = new Map<string, number>();
 
     const environmentFailure = (detail: string): void => {
         failuresInARow += 1;
@@ -216,6 +224,12 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
         if (pursued >= budgets.objectives) stopSession("objectives_done", `The session's limit of ${budgets.objectives} objective pursuits was reached.`);
         if (budgetStop()) {
             outcomes.push({ objectiveId, status: "not_reached", reason: `The session stopped first: ${session.stop!.detail}`, actions: 0 });
+            continue;
+        }
+        const share = objective.share ?? objective.id;
+        const shareFull = budgets.objectiveActions !== undefined ? `The objective's share of ${budgets.objectiveActions} actions was used.` : null;
+        if (shareFull && (shareUsed.get(share) ?? 0) >= budgets.objectiveActions!) {
+            outcomes.push({ objectiveId, status: "stopped", reason: `${shareFull} Its other pursuits leave the rest of the session to other objectives.`, actions: 0 });
             continue;
         }
 
@@ -276,6 +290,10 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
                     loopRefusal = clip(a.refusal);
                     return refuse(state, action, loopRefusal);
                 }
+                if (shareFull && (shareUsed.get(share) ?? 0) >= budgets.objectiveActions!) {
+                    loopRefusal = shareFull;
+                    return refuse(state, action, loopRefusal);
+                }
                 const visitsHere = (visits.get(state) ?? 0) + (a?.read ? 0 : 1);
                 if (visitsHere > budgets.depth) {
                     loopRefusal = `The state ${state} was visited more often than the depth of ${budgets.depth} allows.`;
@@ -285,6 +303,7 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
                 visits.set(state, visitsHere);
                 actions += 1;
                 pursuitActions += 1;
+                shareUsed.set(share, (shareUsed.get(share) ?? 0) + 1);
                 actionLog.push({ seq: actionLog.length + 1, objectiveId, state, action, atMs: now() - startedAt, result: "performed" });
                 return { allowed: true };
             },

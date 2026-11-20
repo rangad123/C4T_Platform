@@ -19,7 +19,7 @@ describe("the session's pursuit budget", () => {
         const pursuits = ["OBJ-a", "OBJ-b", "OBJ-c"].flatMap((id, i) =>
             ["as_stated", "double_submit", "refresh"].map((op) => ({ id: `${id}:${op}`, priority: 10 - i, fingerprint: `${id}-${op}` })),
         );
-        const budgets = sessionBudgets(level, pursuits.length);
+        const budgets = sessionBudgets(level, pursuits.length, 3);
         const ran: string[] = [];
         const r = await runExploration({
             objectives: pursuits,
@@ -33,7 +33,7 @@ describe("the session's pursuit budget", () => {
         expect(r.outcomes.filter((o) => o.status === "not_reached")).toEqual([]);
         expect(r.stopReason).toBe("objectives_done");
         // The other budgets are the level's own.
-        expect(budgets).toEqual({ objectives: 9, actions: level.actions, aiCalls: level.aiCalls, tokens: level.tokens, minutes: level.minutes, depth: level.depth });
+        expect(budgets).toEqual({ objectives: 9, actions: level.actions, aiCalls: level.aiCalls, tokens: level.tokens, minutes: level.minutes, depth: level.depth, objectiveActions: level.actions / 3 });
     });
 
     it("the session's other budgets still stop the pursuits", async () => {
@@ -42,7 +42,7 @@ describe("the session's pursuit budget", () => {
         let calls = 0;
         const r = await runExploration({
             objectives: pursuits,
-            budgets: sessionBudgets(level, pursuits.length),
+            budgets: sessionBudgets(level, pursuits.length, pursuits.length),
             runObjective: async () => ((calls += 1), { status: "completed" }),
             now: () => 0,
             usage: () => ({ aiCalls: calls, tokens: 0 }),
@@ -63,7 +63,7 @@ describe("the session's pursuit budget", () => {
         let ran = 0;
         const r = await runExploration({
             objectives: built.pursuits,
-            budgets: sessionBudgets(thorough.exploration, built.pursuits.length),
+            budgets: sessionBudgets(thorough.exploration, built.pursuits.length, built.objectives.length),
             runObjective: async () => ((ran += 1), { status: "completed" }),
             now: () => 0,
             usage: () => ({ aiCalls: 0, tokens: 0 }),
