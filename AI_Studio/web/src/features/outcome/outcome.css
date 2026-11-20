@@ -10,7 +10,7 @@
 .oc-mono, .oc-id { font-family: var(--font-mono); font-size: 0.86em; }
 
 /* The newest run's state, one quiet line under the header. */
-.oc-note { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 24px; border-bottom: 1px solid var(--border-default); background: var(--surface-sunken); color: var(--text-secondary); font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
+.oc-note { display: flex; align-items: center; gap: 8px; margin: 0; max-width: none; padding: 10px 24px; border-bottom: 1px solid var(--border-default); background: var(--surface-sunken); color: var(--text-secondary); font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
 .oc-note.is-running svg { color: var(--text-brand); }
 .oc-note.is-failed svg, .oc-note.is-stopped svg { color: var(--status-warning-fg); }
 

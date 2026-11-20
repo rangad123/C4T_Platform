@@ -61,7 +61,8 @@ beforeAll(async () => {
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://localhost:${(server.address() as { port: number }).port}`;
     browser = await chromium.launch();
-    page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    // AxeBuilder needs a page from a context made by the test.
+    page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
     page.on("console", (m) => m.type() === "error" && !/fonts\.(googleapis|gstatic)/.test(m.text()) && consoleErrors.push(m.text()));
     page.on("pageerror", (e) => consoleErrors.push(String(e)));
     if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
@@ -86,6 +87,11 @@ async function expandAll() {
         await closed.first().click();
     }
 }
+/** A full-page screenshot with the pointer moved off the page and animations finished. */
+async function shot(name: string) {
+    await page.mouse.move(0, 0);
+    await page.screenshot({ path: path.join(SHOTS!, name), fullPage: true, animations: "disabled" });
+}
 const shown = () => page.locator(".oc-list > .oc-case");
 
 describe("outcome report", () => {
@@ -109,7 +115,7 @@ describe("outcome report", () => {
         // No pass or fail, no runs of tests, no second list of pages.
         const text = (await page.getByTestId("case-outcome").textContent()) ?? "";
         for (const banned of ["Passing", "Not passing", "Run all tests", "What we found", "Site map", "What the explorer knows", "Screens found", "Show all 41", "checks"]) expect(text).not.toContain(banned);
-        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "outcome-light-desktop.png"), fullPage: true });
+        if (SHOTS) await shot("outcome-light-desktop.png");
     });
 
     it("gives every node the number of test cases it lists, and the numbers add up to the total", async () => {
@@ -207,7 +213,7 @@ describe("outcome report", () => {
         await manual.getByRole("button").click();
         expect(await manual.locator(".oc-steps > li").count()).toBe(2);
         expect(await manual.locator(".oc-steps").textContent()).toContain("Expected: Every field is announced with its label.");
-        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "outcome-case-open.png"), fullPage: true });
+        if (SHOTS) await shot("outcome-case-open.png");
     });
 
     it("says a stopped run kept what it found", async () => {
@@ -215,7 +221,7 @@ describe("outcome report", () => {
         expect(await page.getByTestId("outcome-run-note").textContent()).toBe("The last run was stopped. It kept the 3 pages and 4 test cases it found before then.");
         expect(await page.getByTestId("outcome-summary").textContent()).toBe(`12 pages · 16 test cases · built from ${STOPPED.runs.length} runs`);
         expect(await page.getByTestId("outcome-missing").count()).toBe(0);
-        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "outcome-stopped.png"), fullPage: true });
+        if (SHOTS) await shot("outcome-stopped.png");
     });
 
     it("shows a calm empty state before any run, while the first run explores and when it stopped with nothing", async () => {
@@ -225,7 +231,7 @@ describe("outcome report", () => {
         expect(await page.getByTestId("outcome-download").count()).toBe(0);
         expect(await page.getByTestId("outcome-summary").count()).toBe(0);
         expect(await page.getByRole("button", { name: "Explore" }).count()).toBe(1);
-        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "outcome-empty.png"), fullPage: true });
+        if (SHOTS) await shot("outcome-empty.png");
 
         await open("running-empty");
         expect(await page.getByRole("heading", { name: "Exploring the application" }).count()).toBe(1);
@@ -256,9 +262,9 @@ describe("outcome report", () => {
             expect(dl!.height).toBeGreaterThanOrEqual(44);
             if (SHOTS) {
                 await page.emulateMedia({ colorScheme: "light" });
-                await page.screenshot({ path: path.join(SHOTS, "outcome-light-phone.png"), fullPage: true });
+                await shot("outcome-light-phone.png");
                 await page.emulateMedia({ colorScheme: "dark" });
-                await page.screenshot({ path: path.join(SHOTS, "outcome-dark-phone.png"), fullPage: true });
+                await shot("outcome-dark-phone.png");
             }
         } finally {
             await page.emulateMedia({ colorScheme: null });
@@ -274,7 +280,7 @@ describe("outcome report", () => {
                 await expandAll();
                 await page.locator('[role="treeitem"][data-path="/checkout"] > .ot-row .ot-title').click();
                 await page.locator('[data-case="TC-011"] button').click();
-                if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `outcome-${scheme}-desktop-selected.png`), fullPage: true });
+                if (SHOTS) await shot(`outcome-${scheme}-desktop-selected.png`);
                 const full = await new AxeBuilder({ page }).analyze();
                 expect(full.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
                 await open("empty");
@@ -282,7 +288,7 @@ describe("outcome report", () => {
                 expect(empty.violations.map((v) => v.id)).toEqual([]);
                 if (SHOTS && scheme === "dark") {
                     await open("full");
-                    await page.screenshot({ path: path.join(SHOTS, "outcome-dark-desktop.png"), fullPage: true });
+                    await shot("outcome-dark-desktop.png");
                 }
             }
         } finally {
