@@ -101,7 +101,7 @@ describe("importing JSON", () => {
         expect(r.skipped.map((s) => s.row)).toEqual([2, 3, 4]);
         expect(() => parseJsonCases({ nope: 1 })).toThrow(/list of cases/);
         expect(() => parseJsonCases("{not json")).toThrow(/not valid JSON/);
-        expect(() => parseJsonCases(Array.from({ length: MAX_CASES + 1 }, () => ({ title: "x" })))).toThrow(/at most 500/);
+        expect(() => parseJsonCases(Array.from({ length: MAX_CASES + 1 }, () => ({ title: "x" })))).toThrow(/at most 5000 at a time/);
     });
 
     it("tells step errors by step number", () => {

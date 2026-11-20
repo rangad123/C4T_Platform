@@ -16,6 +16,7 @@
  * integrity (a Parent that is not another Node is written empty, a Page that is not a row of Pages is written empty) and no sheet goes
  * past Excel's row limit.
  */
+import type { ManualCase } from "../engine/manual/cases.js";
 import type { CaseOutcome, CaseOutcomeCase } from "./case-outcome-types.js";
 import { buildXlsx, type XlsxSheet } from "../security/findings/xlsx.js";
 
@@ -64,4 +65,21 @@ export function buildCaseWorkbook(o: CaseOutcome): Uint8Array {
         ],
         { title: "Test cases" },
     );
+}
+
+/**
+ * A code project's test cases as the same workbook (owner decision 2026-11-20, FX16), so the download imports into another code project.
+ * Pages and Tree name each page the cases are on once, with no address, purpose or parent: a code project keeps no more than that.
+ */
+export function manualCaseWorkbook(cases: readonly ManualCase[]): Uint8Array {
+    const pages = [...new Set(cases.map((c) => c.page).filter(Boolean))];
+    return buildCaseWorkbook({
+        caseAgent: false,
+        runs: [],
+        notOpened: 0,
+        missing: [],
+        pages: pages.map((path) => ({ path, url: "", title: "", purpose: "" })),
+        tree: pages.map((node) => ({ node, parent: null, page: node, title: "", cases: 0 })),
+        cases: cases.map((c) => ({ id: c.ref, title: c.title, type: c.automation, priority: c.priority, page: c.page, preconditions: c.preconditions, steps: c.steps, expected: c.expected.split("\n"), requirement: c.requirement })),
+    });
 }

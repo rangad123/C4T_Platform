@@ -4,9 +4,10 @@
  *   - the Test cases sheet maps to test cases: Type and Priority without regard to case, Steps only on Manual rows (an Automated row's Steps
  *     are ignored and counted), preconditions, expected result, page and the workbook's ID kept, Requirement matched to a REQ-n reference;
  *   - a case already here is left out: the same workbook ID, or the same title on the same page;
- *   - the project's 500-case limit refuses the whole file with how many would fit; a damaged or wrong file is a 400 sentence; nothing saved;
+ *   - the project's 5,000-case limit (FX15) refuses the whole file with how many would fit; a damaged or wrong file is a 400 sentence; nothing saved;
  *   - only people who may write test cases import, and another organisation's project is a 404;
  *   - JSON export and import keep the new fields;
+ *   - FX16: the Export download is the same three-sheet workbook, and it imports into another code project as the same cases;
  *   - migration 69: a database at 68 keeps every case, which reads as having none of the new fields; one already at 69 opens unchanged;
  *   - FX7: a project backup carries the four new fields and its restore keeps them; an older backup without them restores with none;
  *   - FX1: a literal `_xHHHH_` in a cell comes back exactly (the writer escapes it as `_x005F_xHHHH_`).
@@ -216,14 +217,14 @@ describe("POST /api/projects/:id/manual-cases/import with format xlsx", () => {
         expect((await casesOf(pid)).map((c) => c.steps.length)).toEqual([0, 0, 1]);
     });
 
-    it("refuses the whole file when it would pass the project's 500 test cases, saying how many would fit", async () => {
+    it("refuses the whole file when it would pass the project's 5,000 test cases, saying how many would fit", async () => {
         const pid = await project("t-cora", "Full code");
-        const many = Array.from({ length: 498 }, (_, i) => ({ title: `Case ${i}` }));
-        expect((await cora("POST", `/api/projects/${pid}/manual-cases/import`, { format: "json", content: JSON.stringify(many) })).body.created).toBe(498);
+        const many = Array.from({ length: 4998 }, (_, i) => ({ title: `Case ${i}` }));
+        expect((await cora("POST", `/api/projects/${pid}/manual-cases/import`, { format: "json", content: JSON.stringify(many) })).body.created).toBe(4998);
         const r = await importXlsx(pid, handMade(Array.from({ length: 5 }, (_, i) => [`New ${i}`, "Automated", "", `TC-${i}`, "/", "", "", "", ""])));
         expect(r.status).toBe(409);
-        expect(r.body.error).toBe("This project can hold 500 test cases and already has 498, so at most 2 more can be imported. This file has 5 new ones. Nothing was imported.");
-        expect((await casesOf(pid)).length).toBe(498);
+        expect(r.body.error).toBe("This project can hold 5000 test cases and already has 4998, so at most 2 more can be imported. This file has 5 new ones. Nothing was imported.");
+        expect((await casesOf(pid)).length).toBe(4998);
     });
 
     it("refuses a damaged or wrong file with one sentence and saves nothing", async () => {
@@ -276,6 +277,57 @@ describe("JSON export and import", () => {
         const put = await cora("PUT", `/api/projects/${pid}/manual-cases/${c.id}`, { title: "Sign in, edited", priority: "high", steps: [] });
         expect(put.status, JSON.stringify(put.body)).toBe(200);
         expect(put.body).toMatchObject({ title: "Sign in, edited", preconditions: ["An account"], expected: "Opens", page: "/login", sourceRef: "TC-007" });
+    });
+});
+
+describe("GET /api/projects/:id/manual-cases/export?format=xlsx (FX16)", () => {
+    const download = (pid: string, format = "xlsx", token = "t-cora") => app.inject({ method: "GET", url: `/api/projects/${pid}/manual-cases/export?format=${format}`, headers: { cookie: `c4t_access=${token}` } });
+    /** What makes two cases the same case, whatever project they are in. */
+    const same = (c: any) => ({ title: c.title, automation: c.automation, priority: c.priority, page: c.page, preconditions: c.preconditions, steps: c.steps, expected: c.expected, requirement: c.requirement });
+
+    it("downloads the three-sheet workbook, which imports into another code project as the same cases", async () => {
+        const from = await project("t-cora", "Workbook from");
+        await importXlsx(
+            from,
+            handMade([
+                ["Sign in", "Automated", "high", "TC-007", "/login", "", "The account opens\nThe name shows", "An account\nA password", "REQ-1"],
+                ["The cart lines up", "Manual", "low", "TC-008", "/cart", "Open the cart => The lines line up\nZoom in", "", "", "The cart is readable"],
+                ["Pay by card", "Automated", "critical", "TC-009", "/cart", "", "Paid", "", ""],
+            ]),
+        );
+        // Written by hand, with no page; a title that looks like a formula stays text.
+        expect((await cora("POST", `/api/projects/${from}/manual-cases`, { title: '=HYPERLINK("http://evil.test")', steps: [{ action: "Look", expected: "" }] })).status).toBe(201);
+
+        const r = await download(from);
+        expect(r.statusCode, r.body).toBe(200);
+        expect(r.headers["content-type"]).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="manual-cases-workbook-from.xlsx"');
+        const wb = new Uint8Array(r.rawPayload);
+        // The same sheets as a Test Case Generation project's workbook; Pages and Tree name each page once.
+        expect(Object.keys(unzipSync(wb)).filter((f) => f.startsWith("xl/worksheets/")).length).toBe(3);
+        expect(readTable(wb, "Pages", { columns: ["Page", "Address", "Purpose"], required: ["Page"] }).map((t) => t.values.Page)).toEqual(["/login", "/cart"]);
+        expect(readTable(wb, "Tree", { columns: ["Node", "Parent", "Page"], required: ["Node"] }).map((t) => [t.values.Node, t.values.Parent, t.values.Page])).toEqual([
+            ["/login", "", "/login"],
+            ["/cart", "", "/cart"],
+        ]);
+        expect(readTable(wb, "Test cases", { columns: ["ID"], required: ["ID"] }).map((t) => t.values.ID)).toEqual(["TC-001", "TC-002", "TC-003", "TC-004"]);
+
+        const to = await project("t-cora", "Workbook to");
+        const back = await importXlsx(to, wb);
+        expect(back.body).toMatchObject({ created: 4, duplicates: 0, skipped: [], stepsIgnored: 0 });
+        const original = await casesOf(from);
+        const copy = await casesOf(to);
+        expect(copy.map(same)).toEqual(original.map(same));
+        // Each copy names the case it came from by the ID people read there.
+        expect(copy.map((c) => c.sourceRef)).toEqual(original.map((c) => c.ref));
+        // The same file again adds nothing.
+        expect((await importXlsx(to, wb)).body).toMatchObject({ created: 0, duplicates: 4 });
+    });
+
+    it("is allowed and refused exactly as the JSON export is", async () => {
+        const pid = await project("t-cora", "Workbook private");
+        for (const token of ["t-cora", "t-rita", "t-bob"]) expect((await download(pid, "xlsx", token)).statusCode, token).toBe((await download(pid, "json", token)).statusCode);
+        expect((await download(pid, "xlsx", "t-bob")).statusCode).toBe(404);
     });
 });
 
