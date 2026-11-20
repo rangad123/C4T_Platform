@@ -168,7 +168,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         title: "Test cases",
         what: "The written checks of a code project: a title, steps, what should happen and a requirement. Each is Automated (a tool can do it) or Manual (a person does it).",
         canDo: [
-            { text: "Choose Add test case (manual), then Write one by hand, to add one yourself.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["Add test case (manual)", "Write one by hand"] },
+            { text: "Choose Add test case, then Write one by hand, to add one yourself.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["Add test case", "Write one by hand"] },
             { text: "Choose Generate from requirements to let the AI write test cases for the requirements you pick.", button: "Read about requirements", to: { topic: "requirements-coverage" }, ui: ["Generate from requirements"] },
             { text: "Choose Import to bring in test cases from a CSV or JSON file.", button: "Read about sharing checks", to: { topic: "release-signoff", search: "manual checks" }, ui: ["Import"] },
             { text: "Use All, Automated and Manual to see one type at a time.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["All", "Automated", "Manual"] },
