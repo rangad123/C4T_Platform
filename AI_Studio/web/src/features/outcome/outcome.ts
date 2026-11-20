@@ -105,7 +105,7 @@ export function parentNode(roots: TreeNode[], path: string): TreeNode | null {
     return find(roots, null) ?? null;
 }
 
-/** "N pages, M test cases, from K runs" (commas: the copy rule avoids middle dots): the page count is the number of tree nodes. */
+/** "N pages, M test cases, from K runs" (commas, not middle dots: the copy rule in styles.css): the page count is the number of tree nodes. */
 export const summaryLine = (o: Pick<CaseOutcome, "tree" | "cases" | "runs">): string => `${plural(o.tree.length, "page")}, ${plural(o.cases.length, "test case")}, from ${plural(o.runs.length, "run")}`;
 
 /** The one note about addresses that failed to load; null when every address opened. */

@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, Folder, FolderPlus, LayoutDashboard, List, Search } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NewProjectLink } from "../components/NewProjectLink";
-import { PLATFORM_WORDS, projectKind, projectShape, type Platform, type ProjectKind, type ProjectPage, type ProjectRow } from "../api";
+import { PLATFORM_WORDS, api, projectKind, projectShape, type Platform, type ProjectKind, type ProjectPage, type ProjectRow } from "../api";
 import { Badge, Button, Callout, ErrorState, JobBadge, LinkButton, ListSkeleton, PageHeader, Ribbon, jobKey, type Tick } from "../components/ui";
 import { BadgeKey } from "../components/Tooltip";
 import { jobHelp } from "../lib/help";
@@ -18,6 +18,7 @@ import { SeeHow } from "../features/guide/SeeHow";
 import type { FoldersAnswer } from "../features/workspace/FoldersPage";
 import { KIND_HELP, KIND_WORDS, KindTile, PlatformMark, ProjectTags, shortAgentName, type TagAgent } from "../components/ProjectKind";
 import { AgentAvatar, type AgentId, type AgentList } from "../features/testing-agents/testing-agents";
+import type { CaseOutcome } from "../features/outcome/outcome";
 
 /** "all", "grouped", "none" (not in a folder) or a folder id. */
 type FolderFilter = string;
@@ -25,6 +26,33 @@ type FolderFilter = string;
 const NOT_EXPLORED = "The AI has not explored this application yet, so it has no tests.";
 const NO_SCRIPTS = "This code project has no test scripts yet. Add them on its Test scripts tab.";
 const NOT_RUN = "Its test scripts have not been run yet.";
+const CASES_NOT_EXPLORED = "The agent has not explored this application yet, so it has no test cases.";
+
+/** "N test cases, M pages" for a Test Case Generation project's row (founder 2026-11-19 P5.2); null before its first run. */
+const caseCounts = (o: CaseOutcome): string | null => (o.runs.length ? `${plural(o.cases.length, "test case")}, ${plural(o.tree.length, "page")}` : null);
+/** The row's job, in the Test Case Generation words (labels.ts caseJobLabel); the list has no error text, so a stopped run is told by the outcome. */
+const caseJob = (p: ProjectRow, o: CaseOutcome) => ({ status: p.last_job_status!, error: o.runs[0]?.status === "stopped" ? "Cancelled" : null, caseAgent: true });
+
+/**
+ * The outcomes of the listed Test Case Generation projects (GET /projects/:id/outcome, one request each), asked again whenever the list
+ * is (it polls while a project runs). A project whose outcome cannot be read is null: its row then shows what other agent rows show. A
+ * project not in the map yet is still being asked about.
+ */
+function useCaseOutcomes(ids: string[], list: unknown): Map<string, CaseOutcome | null> {
+    const [map, setMap] = useState<Map<string, CaseOutcome | null>>(new Map());
+    const key = ids.join(",");
+    useEffect(() => {
+        let cancelled = false;
+        if (!key) return setMap(new Map());
+        void Promise.all(key.split(",").map((id) => api<CaseOutcome>(`/projects/${id}/outcome`).then((o) => [id, o.caseAgent ? o : null] as const, () => [id, null] as const))).then((got) => {
+            if (!cancelled) setMap(new Map(got));
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [key, list]);
+    return map;
+}
 
 
 /** At most 40 ticks, in proportion; the rest are "waiting" because the project list only knows how many validated. */
@@ -82,6 +110,11 @@ export function Home() {
     }, [filterKey, page]);
 
     const rows = rowsOf(data);
+    // Test Case Generation projects (SPEC D3): agent-only, with that agent chosen. Their rows show their outcome.
+    const caseIds = rows.filter((p) => projectKind(p) === "agent" && agentsOf.get(p.id)?.includes("test-generation")).map((p) => p.id);
+    const outcomes = useCaseOutcomes(caseIds, data);
+    // Until the agents and the outcomes are known, an agent row says nothing about its state (it would flicker from "Plan ready").
+    const pendingOf = (p: ProjectRow) => projectKind(p) === "agent" && (catalogue.loading || (caseIds.includes(p.id) && !outcomes.has(p.id)));
     const total = Array.isArray(data) ? data.length : (data?.total ?? 0);
     const filtering = showArchived || q !== "" || folder !== "all";
     if (error && !data) return <ErrorState error={friendlyError(error.message)} onRetry={reload} />;
@@ -89,7 +122,7 @@ export function Home() {
     const firstRun = !loading && Boolean(data) && total === 0 && !filtering && page === 1;
     const folderList = folders.data?.folders ?? [];
     const pages = all ? 1 : Math.max(1, Math.ceil(total / PROJECTS_PAGE_SIZE));
-    const row = (p: ProjectRow) => <ProjectItem key={p.id} p={p} agents={agentsOf.get(p.id)} names={agentNames} />;
+    const row = (p: ProjectRow) => <ProjectItem key={p.id} p={p} agents={agentsOf.get(p.id)} names={agentNames} outcome={outcomes.get(p.id) ?? undefined} pending={pendingOf(p)} />;
     const groups: Array<{ key: string; title: string; rows: ProjectRow[] }> =
         folder === "grouped"
             ? [...folderList.map((f) => ({ key: f.id, title: f.name, rows: rows.filter((p) => p.folder_id === f.id) })), { key: "none", title: "Not in a folder", rows: rows.filter((p) => !p.folder_id || !folderList.some((f) => f.id === p.folder_id)) }].filter((g) => g.rows.length > 0)
@@ -143,6 +176,9 @@ export function Home() {
                         <BadgeKey
                             label="the project statuses"
                             entries={rows.map((p) => {
+                                const o = outcomes.get(p.id);
+                                if (pendingOf(p)) return null;
+                                if (o) return p.last_job_status ? jobKey([caseJob(p, o)])[0] : { word: "Not explored yet", text: CASES_NOT_EXPLORED };
                                 if (projectKind(p) === "code") return p.test_count === 0 ? { word: "No test scripts yet", text: NO_SCRIPTS } : p.last_job_status ? jobKey([{ status: p.last_job_status, error: null }])[0] : { word: "Not run yet", text: NOT_RUN };
                                 return p.last_job_status && p.test_count === 0 && (p.last_job_status === "COMPLETED" || p.last_job_status === "PARTIALLY_COMPLETED")
                                     ? { word: "Plan ready", text: jobHelp({ status: p.last_job_status, planOnly: true }) }
@@ -280,9 +316,10 @@ function rowsOf(d: ProjectPage | ProjectRow[] | undefined): ProjectRow[] {
     return Array.isArray(d) ? d : (d?.projects ?? []);
 }
 
-function ProjectItem({ p, agents, names }: { p: ProjectRow; agents: AgentId[] | undefined; names: Map<AgentId, string> }): ReactNode {
+function ProjectItem({ p, agents, names, outcome, pending }: { p: ProjectRow; agents: AgentId[] | undefined; names: Map<AgentId, string>; /** A Test Case Generation project's outcome. */ outcome?: CaseOutcome; /** Its state is not known yet: nothing is said about it. */ pending?: boolean }): ReactNode {
     const kind: ProjectKind = projectKind(p);
     const tagAgents: TagAgent[] | undefined = agents?.map((id) => ({ id, name: names.get(id) ?? id }));
+    const cases = outcome ? { counts: caseCounts(outcome) } : null;
     return (
         <li>
             <a className="list-row" href={routes.project(p.id)} data-kind={kind}>
@@ -295,19 +332,33 @@ function ProjectItem({ p, agents, names }: { p: ProjectRow; agents: AgentId[] | 
                         {relativeTime(p.created_at)}
                     </span>
                     {/* The count sits under the name, so the row's kind, platform and agents leave the name room. */}
-                    {p.test_count > 0 && (
-                        <span className="meta truncate">
-                            {p.validated_count} of {p.test_count} tests passing
-                        </span>
+                    {pending ? null : cases ? (
+                        cases.counts && (
+                            <span className="meta truncate" data-testid="row-cases">
+                                {cases.counts}
+                            </span>
+                        )
+                    ) : (
+                        p.test_count > 0 && (
+                            <span className="meta truncate">
+                                {p.validated_count} of {p.test_count} tests passing
+                            </span>
+                        )
                     )}
                 </span>
                 <span className="pk-facts">
                     <ProjectTags kind={kind} platforms={projectShape(p).platforms} agents={tagAgents} row />
                 </span>
-                <span className="pk-ribbon">{p.test_count > 0 && <Ribbon small ticks={projectTicks(p.validated_count, p.test_count)} label={`${p.validated_count} of ${p.test_count} tests passing`} />}</span>
+                <span className="pk-ribbon">{!pending && !cases && p.test_count > 0 && <Ribbon small ticks={projectTicks(p.validated_count, p.test_count)} label={`${p.validated_count} of ${p.test_count} tests passing`} />}</span>
                 <span className="tail">
                     {p.archived_at && <Badge>Archived</Badge>}
-                    {kind === "code" ? (
+                    {pending ? null : outcome ? (
+                        p.last_job_status ? (
+                            <JobBadge job={caseJob(p, outcome)} />
+                        ) : (
+                            <Badge tip={CASES_NOT_EXPLORED}>Not explored yet</Badge>
+                        )
+                    ) : kind === "code" ? (
                         // A code project is never explored: it says what its test scripts have, not "Not explored yet".
                         p.test_count === 0 ? (
                             <Badge tip={NO_SCRIPTS}>No test scripts yet</Badge>
