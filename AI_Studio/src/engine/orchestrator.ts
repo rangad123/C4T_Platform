@@ -60,7 +60,7 @@ import { findLeftoverUse, leftoverReason, startingIdsOf } from "./web/leftovers.
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
 import { checkIndependence, replayOwnSteps, type IndependenceCheck, type IndependenceReplay } from "./explore/independence.js";
-import { cleanReplayPlan, registerFreshAccount, replayAccountPreparer, signupPathOf } from "./explore/clean-account.js";
+import { cleanAuthoringPlan, cleanReplayPlan, freshAccountScenario, registerFreshAccount, replayAccountPreparer, signupPathOf, type ReplayCredentials } from "./explore/clean-account.js";
 import type { KnowledgeRule } from "./planning/planner.js";
 import type { MobileTarget } from "./mobile/target.js";
 import { createHash } from "node:crypto";
@@ -892,6 +892,26 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // The ideas this job writes, for the progress tree (web/src/features/explore/explore-tree.ts): each then starts and ends with an event.
         if (scenarios.length) ctx.emit({ stage: "generation", kind: "scenarios_queued", message: `${scenarios.length} test idea(s) to write`, data: { scenarios: scenarios.slice(0, 500).map((x) => ({ scenarioId: x.scenarioId, title: x.title })) } });
         /**
+         * Row 235 (fix 2): the account a test is written as. A test that changes cart, orders or account state, and every objective
+         * pursuit, is written as a newly registered account when row 229's conditions hold (explore/clean-account.ts cleanAuthoringPlan),
+         * told that the account starts empty; otherwise, or when registering fails, as the shared account as before.
+         */
+        const authoringAccount = async (scenario: Scenario, o: { objective: boolean; roleAccount: boolean; signsInAsMain: boolean }): Promise<{ scenario: Scenario; credentials?: ReplayCredentials }> => {
+            const signupPath = signupPathOf(model) ?? authState.signupPath;
+            const plan = cleanAuthoringPlan({ scenario, ...o, dataChanges, ...(signupPath ? { signupPath } : {}), startingIds: startingIdsOf(model) });
+            if (!plan.register) return { scenario };
+            const r = await registerFreshAccount(browser, origin, plan.signupPath, { ...(authState.loginPath ? { loginPath: authState.loginPath } : {}), ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}) }).catch((e: unknown) => ({
+                ok: false as const,
+                why: `registering failed: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]!.slice(0, 200)}`,
+            }));
+            if (!r.ok) {
+                ctx.emit({ stage: "generation", kind: "authoring_account", level: "warn", message: `${scenario.scenarioId}: written on the shared test account, because a new account could not be registered (${r.why}).`, data: { scenarioId: scenario.scenarioId, fresh: false } });
+                return { scenario };
+            }
+            ctx.emit({ stage: "generation", kind: "authoring_account", message: `${scenario.scenarioId}: written as a newly registered account, so what it checks comes from its own steps.`, data: { scenarioId: scenario.scenarioId, fresh: true } });
+            return { scenario: freshAccountScenario(scenario), credentials: r.credentials };
+        };
+        /**
          * Saves what the test writer made of a scenario: a defect test with its candidate finding (S1, replayed twice in fresh browsers
          * without AI) for review, or a complete test for validation. Returns the saved test's key.
          */
@@ -1020,13 +1040,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     // A role scenario is written signed in as its own test account, and its script runs as that account.
                     const asAccount = roleCredentials(scenario, req.roles);
                     const scenarioRules = rulesForScenario(scenario, req.appKnowledge);
+                    const as = await authoringAccount(scenario, { objective: false, roleAccount: Boolean(asAccount), signsInAsMain: laneOf(scenario) === "main" });
                     const outcome = await authorWebSpec({
                         ctx,
                         browser,
                         baseUrl: origin,
                         model,
-                        scenario,
-                        credentials: asAccount ? asAccount.credentials : creds && authState.loggedIn ? creds : undefined,
+                        scenario: as.scenario,
+                        credentials: as.credentials ?? (asAccount ? asAccount.credentials : creds && authState.loggedIn ? creds : undefined),
                         onAction: (a) => sink.agentAction(runId, a),
                         vision: wantVision,
                         maxSteps: levelSettings(req).authoringMaxSteps,
@@ -1049,7 +1070,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ctx.emit({ stage: "generation", kind: "scenario_skipped", level: "warn", message: `${scenario.scenarioId} "${scenario.title}" could not be authored: ${outcome.explanation}`, data: { scenarioId: scenario.scenarioId } });
                         return;
                     }
-                    await keepAuthored(scenario, outcome, asAccount, scenarioRules);
+                    await keepAuthored(as.scenario, outcome, asAccount, scenarioRules);
                 } catch (err) {
                     await sink.finishAgentRun(runId, "error", err instanceof Error ? err.message : String(err));
                     throw err;
@@ -1086,7 +1107,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const dataOperators = req.dataOperators === true && dataChanges;
                 const requiresAuth = Boolean(creds && authState.loggedIn);
                 const built = objectivePursuits(knowledge, { maxObjectives: b.objectives, steps: lv.authoringMaxSteps, perObjective: b.perObjective, dataChanges, dataOperators, requiresAuth, ...(req.exploredObjectives ? { explored: req.exploredObjectives } : {}) });
-                const budgets = sessionBudgets(b, built.pursuits.length);
+                const budgets = sessionBudgets(b, built.pursuits.length, built.objectives.length);
                 ctx.emit({
                     stage: "generation",
                     kind: "objectives_planned",
@@ -1129,6 +1150,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     };
                     const rules = p.objective.kind === "rule" ? usableRules(knowledge.rules).filter((r) => r.ref === p.objective.source.ref) : rulesForScenario(p.scenario, knowledge);
                     const runId = await sink.startAgentRun("web-authoring", `${p.scenario.scenarioId} ${p.scenario.title}`);
+                    const as = await authoringAccount(p.scenario, { objective: true, roleAccount: false, signsInAsMain: requiresAuth });
                     let outcome: AuthorOutcome;
                     try {
                         outcome = await authorWebSpec({
@@ -1136,8 +1158,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                             browser,
                             baseUrl: origin,
                             model,
-                            scenario: p.scenario,
-                            credentials: requiresAuth ? creds : undefined,
+                            scenario: as.scenario,
+                            credentials: as.credentials ?? (requiresAuth ? creds : undefined),
                             onAction: (a) => sink.agentAction(runId, a),
                             gate: actionGate,
                             // The objective's step budget holds across every pass of this pursuit, not per pass (CP2 M-5).
@@ -1172,7 +1194,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ctx.emit({ stage: "generation", kind: "operator_not_applied", level: "warn", message: `${p.scenario.scenarioId}: the recorded steps do not apply the operator "${p.operator}", so no test was saved for it.` });
                         return { status: "completed", result: { applied: false, authoring: outcome.status } };
                     }
-                    const testKey = await keepAuthored(p.scenario, outcome, undefined, rules, actionGate.replay);
+                    const testKey = await keepAuthored(as.scenario, outcome, undefined, rules, actionGate.replay);
                     saved.push({ objective: { id: p.objective.id, operator: p.operator }, steps: outcome.steps });
                     return { status: "completed", result: { applied: true, authoring: outcome.status, testKey } };
                 };
@@ -1712,6 +1734,7 @@ export function objectivePursuits(
             }
             pursuits.push({
                 id: pursuitKey(o.id, r.operator),
+                share: o.id,
                 priority: o.priority,
                 fingerprint: createHash("sha256").update(JSON.stringify(["pursuit", o.fingerprint, r.scenario.scenarioId])).digest("hex"),
                 objective: o,
@@ -1730,9 +1753,19 @@ export function objectivePursuits(
  * Time, actions, AI calls and tokens are the level's own and still bound the session. No pursuit built (every operator skipped, for
  * example with data changes off) still gives a budget of 1, which the loop requires: the empty session then ends at once.
  */
-export function sessionBudgets(b: Omit<ExplorationBudgets, "perObjective">, pursuits: number): Budgets {
-    return { objectives: Math.max(1, pursuits), actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth };
+export function sessionBudgets(b: Omit<ExplorationBudgets, "perObjective">, pursuits: number, objectives: number): Budgets {
+    return { objectives: Math.max(1, pursuits), actions: b.actions, aiCalls: b.aiCalls, tokens: b.tokens, minutes: b.minutes, depth: b.depth, objectiveActions: objectiveActionShare(b.actions, objectives) };
 }
+
+/** No objective's share of the session's actions is below this (fix 4 of ROW233-ROOT-CAUSE.md). */
+export const OBJECTIVE_ACTIONS_FLOOR = 20;
+/**
+ * Each objective's share of the session's actions: an equal split, so the four money rules can no longer take the 750 actions before the
+ * other objectives start (row 230: 18-29 of 92-124 pursuits ran, the top four objectives took 36-53% of the actions). Split by objective,
+ * not by pursuit: a workflow's seven operators share one turn. The floor is what a pursuit that saved a test usually needed (row 230: the
+ * writer's own actions were 15 at the median, 20 at about the 70th percentile) plus a fresh account's sign-in. Replays do not count.
+ */
+const objectiveActionShare = (actions: number, objectives: number): number => Math.max(OBJECTIVE_ACTIONS_FLOOR, Math.floor(actions / Math.max(1, objectives)));
 
 /** A model call refused because the session or the objective has spent its budget. */
 export class ExplorationStopped extends Error {

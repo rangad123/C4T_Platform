@@ -8,6 +8,9 @@
  *     each replay registers a new account through the sign-up page the exploration found, sees $10.00, and the finding is
  *     `state_dependent`;
  *   - a test that sets up its own cart (adds both items; the seeded defect shows on any account): as new accounts it is `independent`, high.
+ * Row 235 (fix 2): with data changes on, the cart test is also WRITTEN as a newly registered account (it never sees alice's Plate, so
+ * the writer captures $10.00 and the leftover-bound literal cannot happen), told the account is empty and to build two or more lines
+ * itself; an objective pursuit is written the same way.
  * Fixture site: port 9923. Run under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/orchestrator-clean-replay.test.ts
  */
@@ -42,10 +45,13 @@ const addItem = (item: string): Call => ({ tool: "click", input: { target: { by:
 const total: Call = { tool: "assert", input: { check: "exactText", target: { by: "role", role: "status", value: "Total" }, expected: "$25.00", source: "expected:2" } };
 const finish: Call = { tool: "finish", input: { result: "defect", explanation: "The total shows $30.00, not $25.00" } };
 let script: Call[] = [];
+/** The text of every prompt the writer was sent. */
+const prompts: string[] = [];
 
 const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
 const model = new MockLanguageModelV3({
     doGenerate: async (options) => {
+        prompts.push(JSON.stringify(options.prompt));
         const next = script[options.prompt.filter((m) => m.role === "assistant").length];
         if (!next) return { content: [{ type: "text" as const, text: "done" }], finishReason: { unified: "stop" as const, raw: "stop" }, usage, warnings: [] };
         return { content: [{ type: "tool-call" as const, toolCallId: `c${Math.random()}`, toolName: next.tool, input: JSON.stringify(next.input) }], finishReason: { unified: "tool-calls" as const, raw: "tool_calls" }, usage, warnings: [] };
@@ -75,8 +81,9 @@ const knowledge = (): AppKnowledge => ({
 });
 
 type Saved = { testId: string; validation: string; reason?: string; meta: Record<string, unknown> };
-async function explore(steps: Call[], dataChanges: boolean) {
+async function explore(steps: Call[], dataChanges: boolean, over: Record<string, unknown> = {}, findings: number | null = 1) {
     script = steps;
+    prompts.length = 0;
     const { runGeneration } = await import("../src/engine/orchestrator.js");
     const events: Array<{ kind: string; message: string; data?: Record<string, unknown> }> = [];
     const tests: Saved[] = [];
@@ -106,12 +113,13 @@ async function explore(steps: Call[], dataChanges: boolean) {
             url: shop.url, targets: ["web"], maxPages: 8, maxDepth: 2, maxScenarios: 1, allowMutatingApiTests: dataChanges, useMemory: false, credentials: ALICE,
             functionalTests: true, accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false, visionChecks: false,
             appKnowledge: knowledge(),
+            ...over,
         } as never,
         sink,
     );
     const defects = tests.filter((t) => t.meta.finding);
-    expect(defects, JSON.stringify({ tests, events: events.filter((e) => /defect|skipped|failed|leftover|depends|error/.test(e.kind)) }).slice(0, 4000)).toHaveLength(1);
-    return { finding: CandidateFindingSchema.parse(defects[0]!.meta.finding), events };
+    if (findings !== null) expect(defects, JSON.stringify({ tests, events: events.filter((e) => /defect|skipped|failed|leftover|depends|error/.test(e.kind)) }).slice(0, 4000)).toHaveLength(findings);
+    return { finding: CandidateFindingSchema.parse(defects[0]!.meta.finding), events, tests };
 }
 
 describe("keepAuthored replays a defect test on clean account state", () => {
@@ -123,21 +131,46 @@ describe("keepAuthored replays a defect test on clean account state", () => {
         expect(shop.registered).toEqual([]);
     }, 240_000);
 
-    it("data changes on: each replay registers a new account, sees $10.00, and the test is state dependent", async () => {
+    it("data changes on: the test is written as a new account too, so it never captures alice's leftover $30.00 (row 235)", async () => {
         shop.reset(["Plate"]);
-        const { finding } = await explore([...signIn, addItem("Mug"), total, finish], true);
-        expect(finding).toMatchObject({ capture: "captured", independence: "state_dependent", confidence: "medium" });
-        for (const r of finding.replays) expect(r.summary).toMatch(/as a newly registered account: stopped at step 7.*captured \$30\.00, replay saw \$10\.00/);
-        expect(shop.registered).toHaveLength(2);
-        // The replays signed in as the new accounts, never as the shared one.
-        expect(shop.signIns.slice(-4).filter((e) => e === ALICE.username)).toEqual([]);
+        const { finding, events } = await explore([...signIn, addItem("Mug"), total, finish], true);
+        // Before row 235 the writer saw alice's Plate ($30.00) and the replays as new accounts saw $10.00 (state dependent).
+        expect(finding).toMatchObject({ capture: "captured" });
+        for (const r of finding.replays) expect(r.summary).toMatch(/as a newly registered account: stopped at step 7.*same value as when captured \(\$10\.00\)/);
+        // One account to write the test in, one per replay.
+        expect(shop.registered).toHaveLength(3);
+        expect(events.filter((e) => e.kind === "authoring_account")).toEqual([expect.objectContaining({ data: expect.objectContaining({ fresh: true }) })]);
+        // The writer was told the account starts empty and to build two or more lines for a total.
+        expect(prompts[0]).toMatch(/newly registered account with an empty cart and no orders/);
+        expect(prompts[0]).toMatch(/at least two different products/);
     }, 240_000);
+
+    it("data changes off: the test is written on the shared account, as before", async () => {
+        shop.reset(["Plate"]);
+        await explore([...signIn, addItem("Mug"), total, finish], false);
+        expect(prompts[0]).not.toMatch(/newly registered account/);
+        expect(shop.signIns.every((e) => e === ALICE.username)).toBe(true);
+    }, 240_000);
+
+    it("data changes on: an objective pursuit is written as a new account", async () => {
+        shop.reset(["Plate"]);
+        const { events } = await explore([...signIn, addItem("Mug"), addItem("Plate"), total, finish], true, { objectives: true, appKnowledge: { ...knowledge(), objectiveInputs: { pages: [], transitions: [], workflowSteps: [] } } }, null);
+        const written = events.filter((e) => e.kind === "authoring_account");
+        expect(written.every((e) => e.data?.fresh === true)).toBe(true);
+        const fresh = written.map((e) => String(e.data?.scenarioId));
+        // The planned test and the objective's pursuits (the rule's and the workflow's operators).
+        expect(fresh[0]).toBe("S-001");
+        expect(fresh.length).toBeGreaterThan(1);
+        // Each new account signed in after its sign-up and the engine's sign-in check: the writer (or a replay) used it, not alice instead.
+        for (const email of shop.registered) expect(shop.signIns.filter((e) => e === email).length, email).toBeGreaterThanOrEqual(3);
+        expect(fresh.some((id) => id !== "S-001")).toBe(true);
+    }, 300_000);
 
     it("data changes on: a test that sets up its own cart is independent and high as new accounts", async () => {
         shop.reset(["Plate"]);
         const { finding } = await explore([...signIn, addItem("Mug"), addItem("Plate"), total, finish], true);
         expect(finding).toMatchObject({ capture: "captured", independence: "independent", confidence: "high" });
         for (const r of finding.replays) expect(r.summary).toMatch(/as a newly registered account: stopped at step 8.*same value as when captured \(\$30\.00\)/);
-        expect(shop.registered).toHaveLength(2);
+        expect(shop.registered).toHaveLength(3);
     }, 240_000);
 });

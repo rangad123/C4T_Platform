@@ -234,7 +234,7 @@ describe("exploring the seeded shop by objectives", () => {
             { kind: "objective_started", message: `${field} boundary_input: started`, data: { objectiveId: field, operator: "boundary_input" } },
             { kind: "objective_finished", message: `${field} boundary_input: finished (writer_stopped)`, data: { objectiveId: field, operator: "boundary_input", outcome: "writer_stopped" } },
         ]);
-        expect(ex.budgets).toEqual({ objectives: 3, actions: 750, aiCalls: 750, tokens: 7_500_000, minutes: 90, depth: 8, steps: 30 });
+        expect(ex.budgets).toEqual({ objectives: 3, actions: 750, aiCalls: 750, tokens: 7_500_000, minutes: 90, depth: 8, steps: 30, objectiveActions: Math.max(20, Math.floor(750 / ex.objectives.length)) });
         expect(ex.skipped).toEqual([]);
         expect(ex.outcomes.filter((o) => !o.objectiveId.endsWith(":boundary_input")).map((o) => o.status)).toEqual(["completed", "completed"]);
         expect(ex.usage.aiCalls).toBe(calls.filter((c) => !c.startsWith("object:")).length);
