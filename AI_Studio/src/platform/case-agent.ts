@@ -48,6 +48,17 @@ export async function caseAgentOptions(repo: Repo, projectId: string, options: J
 }
 
 /**
+ * An exploration with no address (SPEC R16, FX25): true when the project is a Test Case Generation project with active requirements, so
+ * the run writes its cases from them (`requirementsOnly`); a TCG project with neither is refused (400); other projects get false.
+ * Used by every start: the explore route, a schedule and a runbook step.
+ */
+export async function requirementsOnlyRun(repo: Repo, projectId: string): Promise<boolean> {
+    if (!(await isCaseAgentProject(repo, projectId))) return false;
+    if (!(await new RequirementStore(repo.db.sql).list(projectId)).some((r) => r.status === "active")) throw new HttpError(400, NO_ADDRESS_OR_REQUIREMENTS);
+    return true;
+}
+
+/**
  * A run from the requirements alone (SPEC R16, owner decision Q7; `requirementsOnly`): the project's active requirements go to the
  * requirements generator (engine/manual/generate.ts), and each case it writes is announced as the run's `scenario_planned` event, which
  * case-outcome.ts reads as the run's test cases (no page; the tree node is the requirement area). Nothing is saved or run here.

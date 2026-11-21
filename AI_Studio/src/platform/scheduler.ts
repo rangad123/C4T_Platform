@@ -1,5 +1,5 @@
 import { runnerOwnerOf } from "./agent-store.js";
-import { caseAgentOptions, refuseTestsInCaseAgentProject } from "./case-agent.js";
+import { caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { noteCustomSkipped, splitCustom } from "./custom-policy.js";
 import { notePluginSkipped, pluginSkips, type RunShape } from "./plugin-policy.js";
 import { droppedChecksNote, narrowedByChoice, TestingAgentStore, type AgentSwitch, type AskedSwitches } from "./testing-agents.js";
@@ -77,7 +77,9 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     const config = (app.config ?? {}) as Record<string, any>;
     // The address (or the platform's rules about addresses) may have changed since the schedule was made.
     // A project whose scripts run on a runner agent reaches its application from the agent's network (validation only: an analysis browses it from here).
-    if (!isAppUri(url)) await (s.kind === "validate" ? assertRunTarget(s.projectId, url) : assertAllowedTarget(url));
+    // No address in a Test Case Generation project: Explore again writes the cases from the requirements, as the explore route does (FX25).
+    const fromRequirements = s.kind !== "validate" && !url && (await requirementsOnlyRun(repo, s.projectId));
+    if (!fromRequirements && !isAppUri(url)) await (s.kind === "validate" ? assertRunTarget(s.projectId, url) : assertAllowedTarget(url));
     for (const extra of [config.openApiUrl, config.apiBaseUrl]) if (typeof extra === "string" && extra) await assertAllowedTarget(extra);
 
     let options: JobOptions;
@@ -99,6 +101,8 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
             if (testIds.length === 0) throw new Error("This project has no tests that can be run against an environment yet.");
             options = { ...DEFAULT_JOB_OPTIONS, mode: "environment", testIds, environment: env.name, ...(env.production ? { confirmProduction: true } : {}) };
         }
+    } else if (fromRequirements) {
+        options = { ...DEFAULT_JOB_OPTIONS, requirementsOnly: true };
     } else {
         // Saved generation settings, minus anything that only makes sense for another kind of job.
         const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, retryFailures: _r, requirementsText: _rt, startedBy: _sb, ...saved } = config;

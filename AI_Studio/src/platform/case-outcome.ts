@@ -172,7 +172,7 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
             const had = cases.get(key);
             if (!had) {
                 addedCases++;
-                cases.set(key, { ...c, title, page, id: `TC-${String(cases.size + 1).padStart(3, "0")}` });
+                cases.set(key, { ...c, title, page, ...(area ? { area } : {}), id: `TC-${String(cases.size + 1).padStart(3, "0")}` });
                 continue;
             }
             // A later run's non-empty facts win; the number stays.

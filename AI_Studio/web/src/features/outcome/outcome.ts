@@ -57,20 +57,23 @@ function reaches(made: Map<string, TreeNode>, parentOf: (p: string) => string | 
     return false;
 }
 
-/** The cases that start on a node's page; every case for `null` (nothing selected). */
-export const casesForNode = (cases: CaseOutcomeCase[], node: string | null): CaseOutcomeCase[] => (node === null ? cases : cases.filter((c) => c.page === node));
+/** The tree node a case hangs on: its requirement area (a run from the requirements alone, SPEC R16), else its start page. */
+const nodeOfCase = (c: CaseOutcomeCase): string => c.area || c.page;
+
+/** The cases that hang on a node; every case for `null` (nothing selected). */
+export const casesForNode = (cases: CaseOutcomeCase[], node: string | null): CaseOutcomeCase[] => (node === null ? cases : cases.filter((c) => nodeOfCase(c) === node));
 
 /** How many cases start on each node, counted from the cases (so a node's number is always the rows it lists). */
 export function nodeCaseCounts(tree: CaseOutcomeTreeNode[], cases: CaseOutcomeCase[]): Map<string, number> {
     const counts = new Map<string, number>(tree.map((n) => [n.node, 0]));
-    for (const c of cases) if (counts.has(c.page)) counts.set(c.page, counts.get(c.page)! + 1);
+    for (const c of cases) if (counts.has(nodeOfCase(c))) counts.set(nodeOfCase(c), counts.get(nodeOfCase(c))! + 1);
     return counts;
 }
 
 /** Cases whose page is not a node of the tree (for example written from a requirement alone). */
 export function unplacedCases(tree: CaseOutcomeTreeNode[], cases: CaseOutcomeCase[]): CaseOutcomeCase[] {
     const paths = new Set(tree.map((n) => n.node));
-    return cases.filter((c) => !paths.has(c.page));
+    return cases.filter((c) => !paths.has(nodeOfCase(c)));
 }
 
 /** Whether the numbers the server put on the nodes add up, with the unplaced cases, to the number of cases. */

@@ -6,6 +6,7 @@
  *     per requirement area, and the workbook's Page column is empty while its Tree sheet names the areas;
  *   - R16.2: no address and no active requirements: refused with "Add the application's address or a requirements document first.",
  *     and no job is made; another kind of project keeps its own refusal.
+ * FX25: a scheduled or runbook Explore again on such a project runs the same way (case-agent.ts requirementsOnlyRun).
  * Also (F3 review L1, L5): the stop question promises only what a stopped run keeps, and a TCG project's setup checklist has no test or
  * run line.
  *
@@ -179,7 +180,50 @@ describe("merging a requirements-only run with an exploration", () => {
             { run: { jobId: "b", startedAt: "2", status: "completed" }, part: { pages: [], edges: [], cases: [{ ...base, title: "Sign in", page: "", area: "REQ-1 Sign in", requirement: "REQ-1" }, { ...base, title: "Sign in", page: "", area: "REQ-2 Sign out" }], failed: [] } },
         ]);
         expect(m.cases.map((c) => [c.id, c.title, c.page])).toEqual([["TC-001", "Open home", "/"], ["TC-002", "Sign in", ""], ["TC-003", "Sign in", ""]]);
-        expect(m.cases.some((c) => "area" in c)).toBe(false);
+        expect(m.cases.map((c) => c.area)).toEqual([undefined, "REQ-1 Sign in", "REQ-2 Sign out"]);
         expect(m.tree.map((t) => [t.node, t.page, t.cases])).toEqual([["/", "/", 1], ["REQ-1 Sign in", "", 1], ["REQ-2 Sign out", "", 1]]);
     });
+});
+
+describe("FX25: a scheduled or runbook Explore again with no address runs from the requirements, as the explore route does", () => {
+    async function fromRequirements(name: string): Promise<string> {
+        const pid = await project(name, ["test-generation"]);
+        expect((await call("POST", `/api/projects/${pid}/requirements`, { title: "Sign in", description: "Sign in as a shopper" })).status).toBe(201);
+        platform.repo.createApplication(pid, "", {});
+        return pid;
+    }
+    async function finished(jobId: string): Promise<string> {
+        for (let i = 0; i < 200; i++) {
+            const s = platform.repo.getJob(jobId)!.status;
+            if (["COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"].includes(s)) return s;
+            await sleep(100);
+        }
+        return "still running";
+    }
+
+    it("a schedule", async () => {
+        const pid = await fromRequirements("Scheduled from requirements");
+        const made = await call("POST", `/api/projects/${pid}/schedules`, { kind: "generate", cadence: { type: "daily", time: "03:00" }, enabled: false });
+        expect(made.status, JSON.stringify(made.body)).toBe(201);
+        const r = await call("POST", `/api/projects/${pid}/schedules/${made.body.id}/run`);
+        expect(r.status, JSON.stringify(r.body)).toBe(202);
+        expect(platform.repo.getJob(r.body.jobId)!.options).toMatchObject({ mode: "generate", planOnly: true, requirementsOnly: true, trigger: "schedule" });
+        // A schedule made with the API key has no person's AI key behind it, so the job stops there (an older rule), never on the address.
+        expect(await finished(r.body.jobId)).toBe("FAILED");
+        expect(platform.repo.getJob(r.body.jobId)!.error).toMatch(/^AI is not available for this work/);
+    }, 60_000);
+
+    it("a runbook's analyze step", async () => {
+        const pid = await fromRequirements("Runbook from requirements");
+        const book = await call("POST", `/api/projects/${pid}/runbooks`, { version: 1, name: "Explore again", steps: [{ id: "a", type: "analyze" }] });
+        expect(book.status, JSON.stringify(book.body)).toBe(201);
+        const started = await call("POST", `/api/projects/${pid}/runbooks/${book.body.id}/run`);
+        expect(started.status, JSON.stringify(started.body)).toBe(202);
+        let run: any;
+        for (let i = 0; i < 300 && !run?.finished; i++, await sleep(100)) run = (await call("GET", `/api/projects/${pid}/runbook-runs/${started.body.runId}`)).body;
+        const jobId = run.steps[0].jobId as string;
+        expect(jobId, JSON.stringify(run)).toBeTruthy();
+        expect(platform.repo.getJob(jobId)!.options).toMatchObject({ mode: "generate", planOnly: true, requirementsOnly: true });
+        expect(platform.repo.getJob(jobId)!.status).toBe("COMPLETED");
+    }, 60_000);
 });

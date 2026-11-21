@@ -265,6 +265,7 @@ export default defineConfig({
             "tests/case-run-outcome-unit.test.ts",
             "tests/case-run-text-unit.test.ts",
             "tests/case-agent-view.test.ts",
+            "tests/case-agent-requirements-only.test.ts",
             "tests/case-agent-wording-unit.test.ts",
         ],
         testTimeout: 60_000,

@@ -47,6 +47,8 @@ export interface CaseOutcomeCase {
     steps: CaseOutcomeStep[];
     expected: string[];
     requirement: string;
+    /** A case written from the requirements alone (SPEC R16): the requirement-area tree node it hangs on (its page stays empty). */
+    area?: string;
 }
 
 /** `GET /api/projects/:id/outcome?counts=1`: what a Projects row shows, without the test cases themselves (F3 L6). */

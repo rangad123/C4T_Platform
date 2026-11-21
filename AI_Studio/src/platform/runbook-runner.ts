@@ -25,7 +25,7 @@ import { apiChanges } from "./drift-store.js";
 import { assertEnvironmentTargets } from "./environment-run.js";
 import { findEnvironment } from "./environments-store.js";
 import { HttpError } from "./http-error.js";
-import { caseAgentOptions, refuseTestsInCaseAgentProject } from "./case-agent.js";
+import { caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import { gateJob } from "./quarantine-service.js";
@@ -306,6 +306,8 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
         const build = async () => {
             const app = repo.getLatestApplicationPublic(run.projectId);
             if (!app) throw new StepProblem("This project has no application yet. Run an analysis first.");
+            // No address in a Test Case Generation project: the step writes the cases from the requirements, as the explore route does (FX25).
+            if (!app.url && (await requirementsOnlyRun(repo, run.projectId))) return { applicationId: app.id as string, options: await caseAgentOptions(repo, run.projectId, { ...DEFAULT_JOB_OPTIONS, requirementsOnly: true }) };
             await assertAppTargets({ url: app.url as string, config: app.config as Record<string, any> });
             const config = (app.config ?? {}) as Record<string, any>;
             // Saved settings of the latest analysis, minus anything that belongs to another kind of job. Data-changing tests

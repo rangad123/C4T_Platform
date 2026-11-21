@@ -61,6 +61,17 @@ describe("cases and counts", () => {
         expect(countsAgree(tree, cases)).toBe(true);
         expect(countsAgree([node("/", null, 5)], [tc("TC-001", "/")])).toBe(false);
     });
+
+    it("counts and lists a requirements-only run's cases on their requirement-area nodes (SPEC R16, FX24)", () => {
+        const area = (name: string, n: number): CaseOutcomeTreeNode => ({ node: name, parent: null, page: "", title: name, cases: n });
+        const areaTree = [node("/", null, 1), area("REQ-1 Sign in", 2), area("REQ-2 Search", 1)];
+        const inArea = (id: string, a: string): CaseOutcomeCase => ({ ...tc(id, ""), area: a });
+        const all = [tc("TC-001", "/"), inArea("TC-002", "REQ-1 Sign in"), inArea("TC-003", "REQ-1 Sign in"), inArea("TC-004", "REQ-2 Search")];
+        expect(casesForNode(all, "REQ-1 Sign in").map((c) => c.id)).toEqual(["TC-002", "TC-003"]);
+        expect(nodeCaseCounts(areaTree, all).get("REQ-2 Search")).toBe(1);
+        expect(unplacedCases(areaTree, all)).toEqual([]);
+        expect(countsAgree(areaTree, all)).toBe(true);
+    });
 });
 
 describe("visibleNodes", () => {

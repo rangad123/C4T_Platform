@@ -47,7 +47,7 @@ import { loadTargetProblem } from "./load-guard.js";
 import { isLoadSpec, LOAD_MAX_ENDPOINTS, LOAD_MAX_REQUESTS } from "../engine/performance/load.js";
 import { registerFeatureRoutes } from "./routes/index.js";
 import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
-import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, isCaseAgentProject, NO_ADDRESS_OR_REQUIREMENTS, refuseTestsInCaseAgentProject } from "./case-agent.js";
+import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
 import { adoptSignIn, assertMaySaveSignIn } from "./routes/project-sign-in.js";
 import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
@@ -444,9 +444,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const phoneOnly = wantsPhone && body0.targets!.every((t) => t === "mobile");
         const phoneUrl = phoneOnly ? `android-app://${latestMobile(id)!.appPackage}` : undefined;
         if (!body0.url && !phoneUrl) {
-            if (!(await isCaseAgentProject(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");
             // A Test Case Generation project without an address writes its test cases from its active requirements (SPEC R16).
-            if (!(await projectRequirementsDocument(p, id))) throw new HttpError(400, NO_ADDRESS_OR_REQUIREMENTS);
+            if (!(await requirementsOnlyRun(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");
             await assertNoActiveJob(id);
             // The project's latest application is kept as it is (the form fills its address in next time); a project without one gets an empty one.
             const appId = (repo.getLatestApplicationPublic(id)?.id as string | undefined) ?? repo.createApplication(id, "", {});
