@@ -211,13 +211,13 @@ The job also keeps the session's limits, each objective with its priority, the s
   state: Waiting, Exploring, Done, or Skipped (after the run, Not finished) with its reason. **Stop** is the run's own stop; afterwards the run's results show the
   stop reason "Cancelled". Which operators did not run, and why, is shown once the run is over.
 - People who may only look at the project see the same list without **Stop**.
-- **On the run's results**, the stop reason, the limits used and the coverage record, then **Findings to check**: each candidate
-  finding with what was observed, its objective (kind and source), how many actions its test takes, the expected result and its
-  source, its confidence in words with what that means, its evidence (screenshots, requests and console lines) and a link to the saved test. Each
-  is labelled "Needs a person to check" ("Found by the AI, needs a person to check"). Up to three screenshots
-  (where a fresh replay stopped, with password fields and stored secrets covered) show as thumbnails that open larger; a finding
-  without one says "No screenshot was saved for this finding." Captured findings come first; each captured one is labelled "Captured: kept as a failing check" and each other one "Seen, not kept as a check",
-  which also has a dashed border. An older run without findings says so in one sentence.
+- **On the run's results**, the stop reason, the limits used and the coverage record, then **Findings to check**: each finding
+  with what was observed, its objective (kind and source), the expected result and its source, its evidence (screenshots, requests
+  and console lines) and a link to the saved test. Its status, severity, confidence, reproduction, likely cause, order and the
+  actions a person can take are described in [Bug verification](bug-verification.md). Up to three screenshots (where a fresh replay
+  stopped, with password fields and stored secrets covered) show as thumbnails that open larger; a finding without one says "No
+  screenshot was saved for this finding." Each captured finding is labelled "Captured: kept as a failing check" and each other one
+  "Seen, not kept as a check", which also has a dashed border. An older run without findings says so in one sentence.
 - With an older runner, the view says in one sentence that the runner needs downloading again.
 - A refusal from the server is shown as its sentence.
 
