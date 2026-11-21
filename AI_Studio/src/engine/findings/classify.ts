@@ -8,7 +8,9 @@
  * causes leave it open. An application cause is reproduced when the same check failed with the same value in at least 2 attempts and
  * at least two thirds of them (H5: 2 of 3); not reproduced with passes = flaky. A reproduced failure is an application defect only
  * against a stated expectation (unstated or the planner's guess, or contradicted by a stated source = incorrect expectation; a
- * documented "not supported" = unsupported behaviour).
+ * documented "not supported" = unsupported behaviour). Two cases stay open (CP5-A): a failure that replayed only on the shared, dirty
+ * state (independence state_dependent / not_on_clean_state) until a fresh account reproduces it, and a lone locator timeout with no
+ * replay (a seed can make an element never appear).
  */
 import type { Attempt, FindingView } from "./view.js";
 
@@ -50,6 +52,9 @@ function causeOf(a: Attempt): Cause {
     return "app";
 }
 
+/** Playwright's own sentence for a locator action that waited out its timeout, and nothing more specific. */
+const BARE_LOCATOR_TIMEOUT = /^(?:TimeoutError: )?locator\.\w+: Timeout \d+ms exceeded\.?$/;
+
 const CAUSE_WORDS: Record<Cause, string> = {
     automation: "the test's own step",
     network: "a network error",
@@ -80,7 +85,7 @@ export function reproduction(attempts: readonly Attempt[]): Classification["repr
 /** H5: at least 2 attempts and at least two thirds of them failed the same way (2 of 3, 3 of 4, 4 of 5). */
 export const isReproduced = (r: Classification["reproduced"]) => r.same >= Math.max(2, Math.ceil((2 * r.of) / 3));
 
-export function classify(f: Pick<FindingView, "attempts" | "expected" | "layer">): Classification {
+export function classify(f: Pick<FindingView, "attempts" | "expected" | "layer" | "independence">): Classification {
     const rep = reproduction(f.attempts);
     if (f.attempts.length === 0) return open(["app_defect", "incorrect_expectation"], "No attempt was recorded, so nothing shows what happened.", rep);
     const failing = f.attempts.filter((a) => a.outcome !== "passed");
@@ -94,6 +99,8 @@ export function classify(f: Pick<FindingView, "attempts" | "expected" | "layer">
     }
     const cause = causes[0]!;
     const n = f.attempts.length;
+    if (cause === "automation" && n === 1 && BARE_LOCATOR_TIMEOUT.test(f.attempts[0]!.error?.split("\n")[0]?.trim() ?? ""))
+        return open(["automation", "app_defect"], "One attempt timed out waiting for an element, with no replay: the step may be wrong, or the application never showed the element.", rep);
     if (cause !== "app") return decided(cause, `${failing.length} of ${n} attempts failed because of ${CAUSE_WORDS[cause]}.`, rep);
 
     if (!isReproduced(rep)) {
@@ -108,5 +115,8 @@ export function classify(f: Pick<FindingView, "attempts" | "expected" | "layer">
     if (f.expected.contradictedBy) return decided("incorrect_expectation", `${same}, but ${f.expected.contradictedBy} states otherwise than the check.`, rep);
     if (f.expected.stated === "none" || f.expected.stated === "inferred")
         return decided("incorrect_expectation", `${same}, but no source states what the check expects (${f.expected.stated === "none" ? "unstated" : "the planner's guess"}).`, rep);
-    return decided("app_defect", `${same}, against an expectation ${f.expected.stated === "confirmed" ? "a person confirmed" : "a source states"}.`, rep);
+    const stated = `against an expectation ${f.expected.stated === "confirmed" ? "a person confirmed" : "a source states"}`;
+    if (f.independence === "state_dependent" || f.independence === "not_on_clean_state")
+        return open(["app_defect", "environment", "automation"], `${same}, ${stated}, but only on the shared account's state: it stays open until a fresh account reproduces it.`, rep);
+    return decided("app_defect", `${same}, ${stated}.`, rep);
 }

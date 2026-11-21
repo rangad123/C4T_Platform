@@ -2684,5 +2684,301 @@
    ],
    "requirements": []
   }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-cand-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-cand-1/d24222c6-fb75-44be-ab48-6831bd2e6329",
+   "projectId": "0a037f74-509d-483d-b98a-13eb87c329c1",
+   "source": {
+    "kind": "exploration",
+    "id": "d24222c6-fb75-44be-ab48-6831bd2e6329"
+   },
+   "state": "detected",
+   "title": "As stated: workflow \"journey-12-pay-for-an-order\"",
+   "testId": "d24222c6-fb75-44be-ab48-6831bd2e6329",
+   "detectedAt": "2026-11-06T00:01:21.000Z",
+   "expected": {
+    "text": "\"Every step completes: Submit payment for the order\" (source: journey-12-pay-for-an-order)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": "Signed in with the test account and opened /orders/ord-1000 (after the sign-in redirect). The step \"Submit payment for the order\" cannot be performed: the page shows Status \"Shipped\", the line item Pocket Notebook × 2 ($8.50), Total $13.50, delivery address, the note \"You can cancel an order until it ships\", and only a \"Cancel order\" button. There is no payment control, form or Pay button, so the ",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/orders/ord-1000"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "wait",
+     "target": "Sign out"
+    },
+    {
+     "action": "assert",
+     "target": "Pay"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Pay",
+     "error": "Error: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Pay",
+     "error": "a payment for the order can be submitted from /orders/ord-1000), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Pay",
+     "error": "a payment for the order can be submitted from /orders/ord-1000), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p2",
+   "category": "false_positive",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "d1-haiku-p2/5491b0e3-9568-4962-b6dd-dc256230aa65",
+   "projectId": "7fcb2440-f45f-4c28-b6cb-c5222230d6ac",
+   "source": {
+    "kind": "execution",
+    "id": "5491b0e3-9568-4962-b6dd-dc256230aa65"
+   },
+   "state": "detected",
+   "title": "Edit profile name and confirm it persists",
+   "testId": "5491b0e3-9568-4962-b6dd-dc256230aa65",
+   "detectedAt": "2026-11-21T00:06:09.000Z",
+   "expected": {
+    "text": "The Name field shows the new name containing qawxzl after saving The name shown in the account view matches the saved name after reload",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Signed in as {{credentials.username}}; original Name was \"Alice Moreau\". I changed Name to \"Ada Silva qawxzl\" and clicked Save; the page showed \"Saved.\". After reloading /account (checked twice), the Name field shows \"Alice Moreau\" again, so the change did not persist. Expected result 1 (Name shows the saved name containing qawxzl after saving/reload) failed. Expected result 2 could not be verifie",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "remember",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "wait",
+     "target": "Save"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "assert",
+     "target": "Name"
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "assert"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 5,
+     "target": "Name",
+     "error": "TimeoutError: locator.fill: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 5 (5. Enter account email in the Email field) could not use its element. TimeoutError: locator.fill: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p2",
+   "category": "false_positive",
+   "seed": "BS-12"
+  },
+  "view": {
+   "id": "d1-haiku-p2/6ef7a5bf-d39a-469a-a96d-94f043b0a5b3",
+   "projectId": "7fcb2440-f45f-4c28-b6cb-c5222230d6ac",
+   "source": {
+    "kind": "execution",
+    "id": "6ef7a5bf-d39a-469a-a96d-94f043b0a5b3"
+   },
+   "state": "detected",
+   "title": "Place an order from the cart with a delivery address",
+   "testId": "6ef7a5bf-d39a-469a-a96d-94f043b0a5b3",
+   "detectedAt": "2026-11-21T00:06:11.000Z",
+   "expected": {
+    "text": "An order confirmation shows a new order reference and the order total The Orders list shows the new order with a status such as placed or unpaid",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Order placement works: the order ord-1002 was created with status Placed, total $21.20, and delivery address \"39 Birch Avenue qawxzl\", and its order page shows the reference and total. However, the Orders list (/orders) shows only ord-1000 (Shipped, $13.50) and does not list the new order ord-1002, although it was re-loaded after placement. Expected result 2 (Orders list shows the new order) fails",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/products/p1"
+    },
+    {
+     "action": "click",
+     "target": "Main"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "click",
+     "target": "Check out"
+    },
+    {
+     "action": "fill",
+     "target": "Delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Continue"
+    },
+    {
+     "action": "click",
+     "target": "Place order"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders/ord-1002"
+    },
+    {
+     "action": "assert",
+     "target": "Order ord-1002"
+    },
+    {
+     "action": "wait",
+     "target": "Order ord-1002"
+    },
+    {
+     "action": "assert",
+     "target": "Total: $22.00"
+    },
+    {
+     "action": "assert",
+     "target": "Order ord-1002"
+    },
+    {
+     "action": "click",
+     "target": "Orders"
+    },
+    {
+     "action": "assert",
+     "target": "ord-1002 2026-11-01 Placed $22.00"
+    },
+    {
+     "action": "assert",
+     "target": "Newest first"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 7,
+     "target": "Check out",
+     "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 7 (7. Start checkout from the cart) could not use its element. TimeoutError: locator.click: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
  }
 ]

@@ -73,6 +73,31 @@ describe("classify", () => {
         expect(c.class).toBe("automation");
     });
 
+    it("never decides a state-bound failure as an application defect: it stays open until a fresh account reproduces it", () => {
+        for (const independence of ["state_dependent", "not_on_clean_state"] as const) {
+            const c = classify(view([fail(), fail(), fail()], { independence }));
+            expect(c.class, independence).toBe("open");
+            expect(c.candidates).toEqual(["app_defect", "environment", "automation"]);
+            expect(c.reason).toMatch(/fresh account/);
+        }
+        expect(classify(view([fail(), fail(), fail()], { independence: "independent" })).class).toBe("app_defect");
+        expect(classify(view([fail(), fail(), fail()], { independence: "not_run" })).class).toBe("app_defect");
+        // A state-bound failure that is decided otherwise keeps that class.
+        expect(classify(view([fail(), pass, pass], { independence: "state_dependent" })).class).toBe("flaky");
+    });
+
+    it("leaves a bare locator timeout with one attempt and no replay open between automation and an application defect", () => {
+        const timeout = (verb: string) => fail({ error: `TimeoutError: locator.${verb}: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator('#email')`, stepFault: "The test needs fixing, not your application: Step 4 could not use its element." });
+        for (const verb of ["fill", "click"]) {
+            const c = classify(view([timeout(verb)]));
+            expect(c.class, verb).toBe("open");
+            expect(c.candidates).toEqual(["automation", "app_defect"]);
+        }
+        // Replays that time out the same way, or an ambiguous element, are the test's own step.
+        expect(classify(view([timeout("fill"), timeout("fill"), timeout("fill")])).class).toBe("automation");
+        expect(classify(view([fail({ error: "Error: strict mode violation: getByLabel('Email') resolved to 2 elements", stepFault: "The test needs fixing." })])).class).toBe("automation");
+    });
+
     it("an application 5xx is about the application, not the infrastructure", () => {
         const own = { requests: [{ method: "POST", path: "/api/cart", status: 500, own: true }, { method: "GET", path: "/cdn.js", status: 502, own: false }] };
         expect(classify(view([fail(own), fail(own), fail(own)])).class).toBe("app_defect");
@@ -104,14 +129,33 @@ describe("classify on the W0-1 corpus rows", () => {
         for (const r of confirmed) expect(classify(r.v).class, r.v.id).toBe("app_defect");
     });
 
-    it("decides a locator timeout as automation, and leaves open an AI-judged detection without replays and a described-only finding", () => {
+    it("leaves open a single locator timeout, an AI-judged detection without replays and a described-only finding", () => {
         const timeouts = rows.filter((r) => /^TimeoutError: locator\./.test(r.v.attempts[0]?.error ?? ""));
         expect(timeouts.length).toBeGreaterThan(0);
-        for (const r of timeouts) expect(classify(r.v).class, r.v.id).toBe("automation");
+        for (const r of timeouts) expect(classify(r.v).candidates, r.v.id).toEqual(["automation", "app_defect"]);
         const judged = rows.filter((r) => /^AI judgement/.test(r.v.attempts[0]?.error ?? ""));
         expect(judged.length).toBeGreaterThan(0);
         const described = rows.filter((r) => r.v.attempts.length > 0 && r.v.attempts.every((a) => a.outcome === "passed"));
         expect(described.length).toBeGreaterThan(0);
         for (const r of [...judged, ...described]) expect(classify(r.v).class, r.v.id).toBe("open");
+    });
+
+    // CP5-A examples (CP5A-RESULT.md observations 1 and 2).
+    const byId = (id: string) => rows.find((r) => r.v.id.startsWith(id))!;
+    it("keeps the state-bound replays of p3-m4-cand-1/01cd4c89 open, and a seed's lone locator timeout open (d1-haiku-p2)", () => {
+        const stateBound = rows.filter((r) => r.v.independence === "state_dependent" || r.v.independence === "not_on_clean_state");
+        expect(stateBound.map((r) => r.v.id)).toContain(byId("p3-m4-cand-1/01cd4c89").v.id);
+        for (const r of stateBound) expect(classify(r.v).class, r.v.id).not.toBe("app_defect");
+        for (const id of ["d1-haiku-p2/5491b0e3", "d1-haiku-p2/6ef7a5bf"]) {
+            const r = byId(id);
+            expect(r.truth.seed, id).toMatch(/^BS-/);
+            expect(classify(r.v).candidates, id).toContain("app_defect");
+        }
+    });
+
+    it("still decides p3-m4-cand-1/d24222c6 as an application defect: the engine recorded it independent, so this rule does not reach it", () => {
+        const r = byId("p3-m4-cand-1/d24222c6");
+        expect(r.v.independence).toBe("independent");
+        expect(classify(r.v).class).toBe("app_defect");
     });
 });
