@@ -45,7 +45,7 @@ async function accessSessionEndAssert(page, base, cfg) {
             await p.close().catch(() => undefined);
         }
     };
-    const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
+    const ctx = await browser.newContext({ ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS, viewport: { width: 1280, height: 800 } });
     let later;
     try {
         const p = await ctx.newPage();
@@ -66,7 +66,7 @@ async function accessSessionEndAssert(page, base, cfg) {
             await p.waitForLoadState("load").catch(() => undefined);
             await p.waitForTimeout(500);
         }
-        later = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
+        later = await browser.newContext({ ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS, viewport: { width: 1280, height: 800 } });
         await later.addCookies(kept);
         const after = await probe(later);
         if (!after.on) return;

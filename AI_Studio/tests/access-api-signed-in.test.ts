@@ -15,7 +15,7 @@ import { parseOpenApi } from "../src/engine/api/openapi.js";
 import type { DraftSpec } from "../src/engine/api/test-specs.js";
 import { ACCESS_HELPER_SOURCE, generateApiAccessSpecs, generateApiListSpecs, signedInRequests, surveyAccess, surveyApiAccess, surveyApiLists, type SurveyEndpoint } from "../src/engine/identity/access.js";
 
-const helper = new Function("totpCode", "createHmac", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac) as { accessAssert: (page: unknown, base: string, spec: string) => Promise<void> };
+const helper = new Function("totpCode", "createHmac", "IGNORE_HTTPS_ERRORS", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac, false) as { accessAssert: (page: unknown, base: string, spec: string) => Promise<void> };
 const ROOT = path.resolve(__dirname, "..");
 const ACCOUNTS: Record<string, string[]> = { "bench-shop": ["alice", "bob"], "bench-rbac": ["ana", "ben", "mia", "ada"] };
 for (const names of Object.values(ACCOUNTS))

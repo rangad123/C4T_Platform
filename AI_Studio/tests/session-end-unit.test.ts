@@ -5,6 +5,9 @@
 import { describe, expect, it } from "vitest";
 import { ACCESS_HELPER_SOURCE, type Reach } from "../src/engine/identity/access.js";
 import { generateSessionEndSpecs } from "../src/engine/identity/session-end.js";
+import { renderScript } from "../src/engine/generators/index.js";
+import { TestSpecSchema } from "../src/engine/spec/schema.js";
+import { accessHelper, fakeBrowser, setAccounts } from "./identity-fake-browser.js";
 
 const cfg = (s: ReturnType<typeof generateSessionEndSpecs>[number]) => JSON.parse(String((s.steps[1] as { expected: string }).expected)) as Record<string, unknown>;
 const anon: Reach = { who: "anonymous", pages: [{ path: "/", heading: "Notes app" }, { path: "/login", heading: "Sign in" }] };
@@ -47,5 +50,24 @@ describe("session end on sign-out", () => {
         expect(ACCESS_HELPER_SOURCE).toContain("async function accessSessionEndAssert(page, base, cfg)");
         expect(ACCESS_HELPER_SOURCE).toContain("if (cfg.sessionEnd) return await accessSessionEndAssert(page, base, cfg);");
         expect(() => new Function(ACCESS_HELPER_SOURCE)).not.toThrow();
+    });
+
+    it("signs in only where HTTPS errors are not ignored on a normal project (T4's rule), and the web script declares that rule", async () => {
+        setAccounts(["ana", "bob"]);
+        const [spec] = generateSessionEndSpecs({ apis: RBAC, reach: [anon, ana] });
+        const runs = [
+            cfg(spec!),
+            { as: "ana", path: "/notes", marker: "Your notes", sev: "high" },
+            { api: true, as: "bob", path: "/api/notes/1", origin: "http://app.test", by: "ana", of: "ana", sev: "high", pattern: "/api/notes/{}", evidence: [] },
+        ];
+        for (const run of runs) {
+            const f = fakeBrowser({ answer: () => ({ status: 200, body: "{}" }) });
+            await accessHelper.accessAssert(f.page, "http://app.test", JSON.stringify(run)).catch(() => undefined);
+            expect(f.options.length, JSON.stringify(run)).toBeGreaterThan(0);
+            for (const o of f.options) expect(o.ignoreHTTPSErrors, JSON.stringify(run)).toBe(false);
+        }
+        expect(ACCESS_HELPER_SOURCE).not.toMatch(/ignoreHTTPSErrors:\s*true/);
+        const { content } = renderScript(TestSpecSchema.parse({ ...spec, testId: "ACC-001" }), "playwright", { baseUrl: "http://app.test" });
+        expect(content).toContain("const IGNORE_HTTPS_ERRORS = false;");
     });
 });

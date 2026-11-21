@@ -31,6 +31,7 @@ import { SESSION_END_HELPER_SOURCE } from "./session-end.js";
 /** First words of every access-control failure; the finding classifier keys on it. */
 export const ACCESS_FAILURE_PREFIX = "Access control check failed:";
 
+// The script declares IGNORE_HTTPS_ERRORS (ignoresHttpsErrors in generators/api.ts): the sign-in contexts follow it.
 export const ACCESS_HELPER_SOURCE = String.raw`const ACCESS_PREFIX = ${JSON.stringify(ACCESS_FAILURE_PREFIX)};
 const ACCESS_OTP = 'input[autocomplete="one-time-code"]:visible, input[name*="otp" i]:visible, input[name*="totp" i]:visible, input[name*="2fa" i]:visible, input[name*="mfa" i]:visible, input[name*="verif" i]:visible, input[name="code" i]:visible, input[id*="otp" i]:visible, input[id*="code" i]:visible, input[placeholder*="code" i]:visible';
 
@@ -102,7 +103,7 @@ async function accessAssert(page, base, spec) {
     try { pageTarget = new URL(String(cfg.path), base); } catch { pageTarget = null; }
     if (!/^\/(?![\/\\])/.test(pagePath) || /\\/.test(pagePath) || !pageTarget || pageTarget.origin !== home) throw new Error("The address " + cfg.path + " is not a page of the application (" + home + "), so it was not opened and it could not be judged whether it is open to “" + cfg.as + "”.");
     const browser = page.context().browser();
-    const ctx = browser ? await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } }) : page.context();
+    const ctx = browser ? await browser.newContext({ ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS, viewport: { width: 1280, height: 800 } }) : page.context();
     const p = await ctx.newPage();
     try {
         if (cfg.as !== "anonymous") await accessSignIn(p, base, cfg.as);
@@ -214,7 +215,7 @@ function accessWalk(body, key0, visit) {
 async function accessApiRead(page, base, cfg, who, origin, target, where) {
     const browser = page.context().browser();
     if (!browser) throw new Error("A separate browser context could not be opened, so it could not be judged whether GET " + where + " is open to “" + cfg.as + "”.");
-    const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
+    const ctx = await browser.newContext({ ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS, viewport: { width: 1280, height: 800 } });
     const p = await ctx.newPage();
     let auth = "";
     const own = {};
