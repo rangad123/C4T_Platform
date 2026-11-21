@@ -75,10 +75,13 @@ const pairsIn = (bytes: Buffer | Uint8Array | string): string[] => {
  */
 const P = (s: string) => s.split(" ");
 const KNOWN_LEAKS: Record<string, { audit: string; pairs: string[] }> = {
+    // The finding's observed text quotes the page (step 4): the same bare page-text values as the application model, nothing else.
+    "findings (API)": { audit: "L-6", pairs: P("text.bearer text.cookie text.password") },
     "row: applications": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
+    "row: candidate_findings": { audit: "L-6", pairs: P("text.bearer text.cookie text.password") },
     "screenshot (covered-box check)": { audit: "L-7", pairs: P("iframe.address iframe.apiKey iframe.bearer iframe.card iframe.cookie iframe.dbUrl iframe.email iframe.password iframe.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone") },
     "sent to the AI": { audit: "L-3", pairs: P("text.bearer text.cookie text.password") },
-    "stored database file": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
+    "stored database file": { audit: "L-2, L-6", pairs: P("text.bearer text.cookie text.password") },
     "stored file application-model.json": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
     "stored trace": { audit: "L-1", pairs: P("iframe.cookie iframe.password text.cookie text.password") },
 };
