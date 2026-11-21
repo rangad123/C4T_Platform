@@ -187,7 +187,8 @@ const app = http.createServer(async (req, res) => {
         }
         return html(200, shell("Two-step verification", '<form method="post" action="/verify"><label>Code <input name="code" autocomplete="one-time-code"></label><button type="submit">Verify</button></form>'));
     }
-    if (req.method === "POST" && p === "/logout") return redirect("/", { "set-cookie": "sid=; Path=/; Max-Age=0" });
+    // Signing out ends the session on the server too (the session-end access check tries the old cookie again).
+    if (req.method === "POST" && p === "/logout") return sessions.delete(sid), redirect("/", { "set-cookie": "sid=; Path=/; Max-Age=0" });
 
     if (p === "/" || p === "/about") return html(200, shell(p === "/" ? "Acme Portal" : "About Acme", "<p>Welcome.</p>", nav));
     if (p === "/login") return html(200, shell("Sign in", '<form method="post" action="/login"><label>Email <input name="email" type="email"></label><label>Password <input name="password" type="password"></label><button type="submit">Log in</button></form>', publicNav));

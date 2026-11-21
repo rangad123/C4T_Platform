@@ -13,7 +13,8 @@ import { generateApiSpecs } from "../api/test-specs.js";
 import { generateApiWorkflowSpecs } from "../api/workflows.js";
 import { generateA11ySpecs } from "../a11y/specs.js";
 import { generateHealthSpecs } from "../health/specs.js";
-import { generateAccessSpecs, generateApiAccessSpecs, type ApiAccessRow, type Reach } from "../identity/access.js";
+import { generateAccessSpecs, generateApiAccessSpecs, generateApiListSpecs, type ApiAccessRow, type ApiListRow, type Reach } from "../identity/access.js";
+import { generateSessionEndSpecs } from "../identity/session-end.js";
 import { generateInputSpecs } from "../inputs/specs.js";
 import { generateLatencySpecs } from "../performance/latency.js";
 import { generateLoadSpecs, LOAD_MAX_ENDPOINTS } from "../performance/load.js";
@@ -44,6 +45,8 @@ export interface StoredPlan {
     specBaseTrusted: boolean;
     accessReach: Reach[];
     apiAccess: ApiAccessRow[];
+    /** Each account's ids from documented list endpoints (same-level API checks); older plans have none. */
+    apiLists?: ApiListRow[];
     /** Plain sentences about what could not be planned (for example "the AI model is not set up"). */
     warnings: string[];
 }
@@ -177,8 +180,8 @@ function webAndApiFamilies(plan: StoredPlan, o: PlanOptions): PlanFamily[] {
     const apiPlain = generateApiSpecs(apis, { allowMutating, maxPerEndpoint: 6, contractChecks: false }).specs.length;
     const apiWithContract = generateApiSpecs(apis, { allowMutating, maxPerEndpoint: 6, contractChecks: true }).specs.length;
     const workflows = generateApiWorkflowSpecs(apis, { allowMutating, maxWorkflows: lv.apiEndpoints }).specs.length;
-    const apiAccess = plan.apiAccess.length ? generateApiAccessSpecs(plan.apiAccess).length : 0;
-    const webAccess = plan.accessReach.length > 1 ? generateAccessSpecs(plan.accessReach).length : 0;
+    const apiAccess = (plan.apiAccess.length ? generateApiAccessSpecs(plan.apiAccess, { maxSpecs: 8, reach: plan.accessReach }).length : 0) + generateApiListSpecs(plan.apiLists ?? []).length;
+    const webAccess = plan.accessReach.length > 1 ? generateAccessSpecs(plan.accessReach).length + generateSessionEndSpecs({ apis, reach: plan.accessReach }).length : 0;
     const pageSpeed = hasPages ? generatePerformanceSpecs(model, { maxPages: lv.speedPages, perTypeScale: lv.perTypeScale, budgets: o.performanceBudgets }).length : 0;
     const latency = generateLatencySpecs(apis, { maxEndpoints: lv.apiEndpoints, budgets: o.performanceBudgets }).length;
     const load = generateLoadSpecs(apis, { maxEndpoints: LOAD_MAX_ENDPOINTS, budgets: o.loadBudgets, hasCredential: o.hasCredential === true }).length;

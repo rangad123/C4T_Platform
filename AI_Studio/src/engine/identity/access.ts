@@ -26,6 +26,7 @@ import { isApiRequest } from "../discovery/network.js";
 import { ownAppHost } from "../../shared/app-host.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ScriptRun } from "../validation/runner.js";
+import { SESSION_END_HELPER_SOURCE } from "./session-end.js";
 
 /** First words of every access-control failure; the finding classifier keys on it. */
 export const ACCESS_FAILURE_PREFIX = "Access control check failed:";
@@ -91,6 +92,7 @@ async function accessSignIn(p, base, role) {
  */
 async function accessAssert(page, base, spec) {
     const cfg = JSON.parse(spec);
+    if (cfg.sessionEnd) return await accessSessionEndAssert(page, base, cfg);
     if (cfg.api) return await accessApiAssert(page, base, cfg);
     // The page must be one of the application's own (the address the run was started for): a path that names its own host
     // ("//other.example/x", "http://10.0.0.5/") or a scheme is refused before anything is opened, like a request step's address.
@@ -144,6 +146,15 @@ async function accessApiAssert(page, base, cfg) {
     let target;
     try { target = new URL(pathOnly, origin); } catch { target = null; }
     if (!/^\/(?![\/\\])/.test(pathOnly) || /\\/.test(pathOnly) || !target || target.origin !== origin) throw new Error("The address " + where + " is not a path on the application's API host (" + origin + "), so it was not called and it could not be judged whether it is open to “" + cfg.as + "”.");
+    // A refusal check (signed-in API access): one GET as cfg.as. Open only on a 2xx answer; for another account's record, a 2xx JSON one.
+    if (cfg.refuse) {
+        const read = await accessApiRead(page, base, cfg, cfg.as, origin, target, where);
+        if (!read || read.status < 200 || read.status >= 300 || (cfg.of && read.body === undefined)) return;
+        const who = cfg.as === "anonymous" ? "Anyone who is not signed in" : "A signed-in “" + cfg.as + "” user";
+        const doc = cfg.documented ? " (documented: HTTP " + cfg.documented + ")" : "";
+        if (cfg.of) throw new Error(ACCESS_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] " + who + " can call GET " + where + " (HTTP " + read.status + "), a record listed for the “" + cfg.of + "” account and not for “" + cfg.as + "”" + doc + ", so this is possible broken access control between accounts: check that the API refuses one account's records to another account");
+        throw new Error(ACCESS_PREFIX + " 1 endpoint may be open to someone who should not call it\n- [" + cfg.sev + "] " + who + " can call GET " + where + " (HTTP " + read.status + "). It is normally reached only by “" + cfg.by + "”" + doc + ", so this is possible broken access control: check that this endpoint is meant to be open to them");
+    }
     if (!cfg.of) throw new Error("The check does not name the account the record belongs to, so it could not be judged whether GET " + where + " is open to “" + cfg.as + "”.");
     const evidence = (cfg.evidence || []).map((e) => {
         const m = /\((\d+) characters\)/.exec(e.mask || "");
@@ -247,17 +258,18 @@ async function accessApiRead(page, base, cfg, who, origin, target, where) {
         await ctx.close().catch(() => undefined);
     }
 }
-`;
+${SESSION_END_HELPER_SOURCE}`;
 
 /** Script-side check for API endpoints: the answer to a request must be a refusal. */
 export const ACCESS_API_HELPER_SOURCE = String.raw`const ACCESS_API_PREFIX = ${JSON.stringify(ACCESS_FAILURE_PREFIX)};
-/** spec = JSON {as, path, by, sev}. Refusal = 401 / 403 / 404 / redirect. A 2xx is open to someone who may be restricted. */
+/** spec = JSON {as, path, by, of?, sev} (of: another account's record). Refusal = 401 / 403 / 404 / redirect. A 2xx is open to someone who may be restricted. */
 function accessStatusAssert(last, spec) {
     const cfg = JSON.parse(spec);
     const s = last.status;
     if (s === 401 || s === 403 || s === 404 || (s >= 300 && s < 400)) return;
     if (s < 200 || s >= 300) throw new Error("The endpoint answered HTTP " + s + ", so it could not be judged whether it is open or closed.");
     const who = cfg.as === "anonymous" ? "A caller without credentials" : "A caller with the “" + cfg.as + "” account\u2019s token";
+    if (cfg.of) throw new Error(ACCESS_API_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] " + who + " can call GET " + cfg.path + " (HTTP " + s + "), a record listed for the “" + cfg.of + "” account and not for them, so this is possible broken access control between accounts: check that the API refuses one account's records to another account");
     throw new Error(ACCESS_API_PREFIX + " 1 endpoint may be open to someone who should not call it\n- [" + cfg.sev + "] " + who + " can call GET " + cfg.path + " (HTTP " + s + "). It is normally reached only by " + (cfg.by === "anonymous" ? "visitors" : "“" + cfg.by + "”") + ", so this is possible broken access control: check that this endpoint is meant to be open to them");
 }
 `;
@@ -868,76 +880,295 @@ export interface ApiAccessRow {
     /** The concrete path that was called. */
     called: string;
     status: Record<string, number>;
+    /** Viewers that were called signed in (a session of their own, no API token): their checks sign in the same way. */
+    signedIn?: string[];
+    /** Refusal statuses the API description gives for this endpoint (401, 403, 404). */
+    documented?: number[];
 }
 
 export interface ApiRequester {
-    get(url: string, opts: { headers: Record<string, string>; failOnStatusCode: false; maxRedirects: 0; timeout: number }): Promise<{ status(): number }>;
+    get(url: string, opts: { headers: Record<string, string>; failOnStatusCode: false; maxRedirects: 0; timeout: number }): Promise<{ status(): number; text?(): Promise<string> }>;
 }
 
+/** An endpoint to survey: its template, the concrete path to call, and its documented statuses. */
+export interface SurveyEndpoint {
+    method: string;
+    path: string;
+    called: string;
+    statuses?: number[];
+}
+
+const refusals = (statuses: number[] | undefined) => (statuses ?? []).filter((s) => s === 401 || s === 403 || s === 404);
+
 /**
- * Call each endpoint once as a visitor and once per account that has an API token — GET only, one request at a time, at most
- * `maxEndpoints` endpoints. Only addresses that sound privileged are worth probing, so only those are called.
+ * Call each endpoint once as a visitor and once per account that has an API token, or, given `sessions`, per account signed in with a
+ * session of its own (cookies, no token) — GET only, one request at a time, at most `maxEndpoints` endpoints. Only addresses that sound
+ * privileged are worth probing, so only those are called. A `sessions` entry "anonymous" is the visitor's own unsigned context.
  */
-export async function surveyApiAccess(request: ApiRequester, apiBase: string, endpoints: Array<{ method: string; path: string; called: string }>, roles: RoleLogin[], maxEndpoints = 12): Promise<ApiAccessRow[]> {
+export async function surveyApiAccess(request: ApiRequester, apiBase: string, endpoints: SurveyEndpoint[], roles: RoleLogin[], maxEndpoints = 12, sessions?: Map<string, ApiRequester>): Promise<ApiAccessRow[]> {
     const withToken = roles.filter((r) => r.apiToken);
-    if (withToken.length === 0) return [];
+    const signedIn = roles.filter((r) => !r.apiToken && sessions?.has(r.name)).map((r) => r.name);
+    if (withToken.length === 0 && signedIn.length === 0) return [];
     const rows: ApiAccessRow[] = [];
     for (const ep of endpoints.filter((e) => e.method === "GET" && PRIVILEGED.test(e.path)).slice(0, maxEndpoints)) {
         const status: Record<string, number> = {};
-        const viewers: Array<[string, Record<string, string>]> = [["anonymous", {}], ...withToken.map((r): [string, Record<string, string>] => [r.name, { Authorization: `Bearer ${r.apiToken}` }])];
-        for (const [who, headers] of viewers) {
+        const viewers: Array<[string, ApiRequester, Record<string, string>]> = [
+            ["anonymous", sessions?.get("anonymous") ?? request, {}],
+            ...withToken.map((r): [string, ApiRequester, Record<string, string>] => [r.name, request, { Authorization: `Bearer ${r.apiToken}` }]),
+            ...signedIn.map((n): [string, ApiRequester, Record<string, string>] => [n, sessions!.get(n)!, {}]),
+        ];
+        for (const [who, via, headers] of viewers) {
             try {
-                status[who] = (await request.get(new URL(ep.called, apiBase).toString(), { headers, failOnStatusCode: false, maxRedirects: 0, timeout: 15_000 })).status();
+                status[who] = (await via.get(new URL(ep.called, apiBase).toString(), { headers, failOnStatusCode: false, maxRedirects: 0, timeout: 15_000 })).status();
             } catch {
                 /* unreachable for this viewer: no verdict about it */
             }
         }
-        rows.push({ method: "GET", path: ep.path, called: ep.called, status });
+        const documented = refusals(ep.statuses);
+        rows.push({ method: "GET", path: ep.path, called: ep.called, status, ...(signedIn.length ? { signedIn } : {}), ...(documented.length ? { documented } : {}) });
     }
     return rows;
+}
+
+/**
+ * A session of its own for each test account without an API token, and one for a visitor: signed in through the sign-in form, as the
+ * page survey does, in a fresh browser context each. Its `request` carries that context's cookies, held only in memory. Accounts that
+ * cannot sign in are left out (and said so). close() ends them all.
+ */
+export async function signedInRequests(ctx: EngineContext, browser: Browser, startUrl: string, roles: RoleLogin[]): Promise<{ sessions: Map<string, ApiRequester>; close(): Promise<void> }> {
+    const opened: BrowserSession[] = [];
+    const sessions = new Map<string, ApiRequester>();
+    const close = async () => void (await Promise.allSettled(opened.map((s) => s.close())));
+    try {
+        const anon = await BrowserSession.launch(browser, { startUrl });
+        opened.push(anon);
+        sessions.set("anonymous", anon.context.request);
+        for (const role of roles.filter((r) => !r.apiToken)) {
+            const session = await BrowserSession.launch(browser, { startUrl });
+            opened.push(session);
+            const r = await login(session, startUrl, { username: role.username, password: role.password, totpSecret: role.totpSecret });
+            if (r.ok) sessions.set(role.name, session.context.request);
+            else ctx.emit({ stage: "discovery", kind: "api_access_sign_in_skipped", level: "warn", message: `Could not sign in as test account “${role.name}” for the API access checks (${r.error}); it is left out of them.` });
+        }
+    } catch (e) {
+        await close();
+        throw e;
+    }
+    return { sessions, close };
 }
 
 const ok2xx = (s: number | undefined) => s !== undefined && s >= 200 && s < 300;
 
 /**
- * Checks for privileged-looking endpoints that an account with a token can call: every other viewer (a visitor, and accounts
- * that reach fewer of these endpoints) gets a "must be refused" check. Ones that are refused today guard against regressions;
- * ones that are open today fail and become findings.
+ * Checks for privileged-looking endpoints that an account can call: every other viewer (a visitor, and accounts that reach fewer of these
+ * endpoints) gets a "must be refused" check. Ones that are refused today guard against regressions; ones that are open today fail and
+ * become findings. When every account was answered but the endpoint documents a 403, the page survey (`reach`) can still say who the
+ * lesser accounts are (documentedLesser).
  */
-export function generateApiAccessSpecs(rows: ApiAccessRow[], opts: { maxSpecs: number } = { maxSpecs: 8 }): DraftSpec[] {
+export function generateApiAccessSpecs(rows: ApiAccessRow[], opts: { maxSpecs: number; reach?: Reach[]; origin?: string } = { maxSpecs: 8 }): DraftSpec[] {
     const reached = new Map<string, number>();
     for (const r of rows) for (const [who, s] of Object.entries(r.status)) if (ok2xx(s)) reached.set(who, (reached.get(who) ?? 0) + 1);
     const out: DraftSpec[] = [];
     for (const row of rows) {
         // The most privileged account that can call it (reaches the most of these endpoints).
-        const owner = Object.keys(row.status)
+        const top = Object.keys(row.status)
             .filter((w) => w !== "anonymous" && ok2xx(row.status[w]))
             .sort((a, b) => (reached.get(b) ?? 0) - (reached.get(a) ?? 0) || a.localeCompare(b))[0];
-        if (!owner) continue;
+        if (!top) continue;
+        const lesser = documentedLesser(row, opts.reach);
+        const by = lesser?.by ?? top;
         for (const viewer of Object.keys(row.status)) {
-            if (viewer === owner || (viewer !== "anonymous" && (reached.get(viewer) ?? 0) >= (reached.get(owner) ?? 0))) continue;
-            const who = viewer === "anonymous" ? "A caller without credentials" : `The “${viewer}” account`;
-            const headers = viewer === "anonymous" ? undefined : { Authorization: `Bearer {{credentials.${viewer}.apiToken}}` };
-            out.push({
-                title: `${viewer === "anonymous" ? "Not signed in" : `“${viewer}” account`}: cannot call GET ${row.path}`,
-                description: `${who} calls GET ${row.path}. It is normally reached only by “${owner}”, so it may be restricted. Fails if the endpoint answers with a success status. A single GET request; nothing is changed.`,
-                kind: "api",
-                category: "Access control",
-                type: "security",
-                priority: "high",
-                preconditions: viewer === "anonymous" ? [] : [`A test account named “${viewer}” with an API token is set up for this project`],
-                steps: [
-                    { action: "request", method: "GET", path: row.called, auth: "none", ...(headers ? { headers } : {}), description: `Call GET ${row.path} as ${viewer === "anonymous" ? "a caller without credentials" : `the “${viewer}” account`}` },
-                    { action: "assertResponse", check: "statusDenied", expected: JSON.stringify({ as: viewer, path: row.path, by: owner, sev: "high" }), description: `${who} is refused (HTTP 401, 403 or 404)` },
-                ],
-                expectedResults: [`GET ${row.path} is refused for ${viewer === "anonymous" ? "callers without credentials" : `the “${viewer}” account`}`],
-                testData: {},
-                tags: ["security", "access-control", "api"],
-                source: { origin: "access-check" },
-            });
+            if (lesser ? !lesser.viewers.includes(viewer) : viewer === by || (viewer !== "anonymous" && (reached.get(viewer) ?? 0) >= (reached.get(by) ?? 0))) continue;
+            const c = { as: viewer, path: row.called, template: row.path, by, documented: row.documented, origin: opts.origin };
+            out.push(row.signedIn?.includes(viewer) ? refusalSpec(c) : tokenSpec(c));
         }
     }
     return out.slice(0, opts.maxSpecs);
+}
+
+/**
+ * Who must be refused an endpoint that answered every signed-in account, when its API description documents a 403: the accounts that
+ * did not reach the page of the same address (the address without /api or /api/v1) while another account did. Undefined without that
+ * evidence, or when some account was refused (the survey's own answers then say who is lesser).
+ */
+function documentedLesser(row: ApiAccessRow, reach: Reach[] | undefined): { by: string; viewers: string[] } | undefined {
+    if (!reach || !row.documented?.includes(403)) return undefined;
+    const named = Object.keys(row.status).filter((w) => w !== "anonymous");
+    if (!named.length || named.some((w) => !ok2xx(row.status[w]))) return undefined;
+    const page = row.path.replace(/^\/api(?:\/v\d+)?(?=\/)/i, "");
+    const reaches = (w: string) => reach.find((r) => r.who === w)?.pages.some((p) => p.path === page);
+    const by = named.find((w) => reaches(w));
+    const viewers = named.filter((w) => !reaches(w) && reach.some((r) => r.who === w && !r.incomplete));
+    if (!by || !viewers.length) return undefined;
+    return { by, viewers: [...(row.status.anonymous !== undefined ? ["anonymous"] : []), ...viewers] };
+}
+
+interface Refusal {
+    as: string;
+    /** The concrete path called. */
+    path: string;
+    /** The endpoint's template (vertical) — the title names it. */
+    template?: string;
+    by: string;
+    /** For another account's record: the account it was listed for. */
+    of?: string;
+    documented?: number[];
+    /** The API host's origin when it is not the app's own. */
+    origin?: string;
+}
+
+const refusalText = (d: number[] | undefined) => (d?.length ? `HTTP ${d.join(" or ")}` : "HTTP 401, 403 or 404");
+
+/** A check made with the account's API token: one GET in an API script, judged by its status. */
+function tokenSpec(c: Refusal): DraftSpec {
+    const shown = c.template ?? c.path;
+    const who = c.as === "anonymous" ? "A caller without credentials" : `The “${c.as}” account`;
+    const headers = c.as === "anonymous" ? undefined : { Authorization: `Bearer {{credentials.${c.as}.apiToken}}` };
+    return {
+        title: c.of ? `“${c.as}” account: cannot read a record of “${c.of}” through the API (GET ${c.path})` : `${c.as === "anonymous" ? "Not signed in" : `“${c.as}” account`}: cannot call GET ${shown}`,
+        description: c.of
+            ? `${who} calls GET ${c.path}, a record the API listed for “${c.of}” and not for “${c.as}”. Fails if the endpoint answers with a success status. A single GET request; nothing is changed.`
+            : `${who} calls GET ${shown}. It is normally reached only by “${c.by}”, so it may be restricted. Fails if the endpoint answers with a success status. A single GET request; nothing is changed.`,
+        kind: "api",
+        category: "Access control",
+        type: "security",
+        priority: "high",
+        preconditions: c.as === "anonymous" ? [] : [`A test account named “${c.as}” with an API token is set up for this project`],
+        steps: [
+            { action: "request", method: "GET", path: c.path, auth: "none", ...(headers ? { headers } : {}), description: `Call GET ${shown} as ${c.as === "anonymous" ? "a caller without credentials" : `the “${c.as}” account`}` },
+            { action: "assertResponse", check: "statusDenied", expected: JSON.stringify({ as: c.as, path: shown, by: c.by, ...(c.of ? { of: c.of } : {}), sev: "high" }), description: `${who} is refused (${refusalText(c.documented)})` },
+        ],
+        expectedResults: [`GET ${shown} is refused for ${c.as === "anonymous" ? "callers without credentials" : `the “${c.as}” account`}`],
+        testData: {},
+        tags: ["security", "access-control", "api", ...(c.of ? ["cross-account"] : [])],
+        source: { origin: "access-check" },
+    };
+}
+
+/**
+ * A check made signed in (no API token): the access helper signs in as the account in a fresh browser context, as the page checks do, and
+ * makes one GET with that context's cookies. Open on a 2xx answer (for another account's record, a 2xx JSON answer); anything else is refused.
+ */
+function refusalSpec(c: Refusal): DraftSpec {
+    const shown = c.template ?? c.path;
+    const who = `The “${c.as}” account`;
+    return {
+        title: c.of ? `“${c.as}” account: cannot read a record of “${c.of}” through the API (GET ${c.path})` : `“${c.as}” account: cannot call GET ${shown}`,
+        description: c.of
+            ? `${who} signs in and calls GET ${c.path}, a record the API listed for “${c.of}” and not for “${c.as}”. Fails if the answer is a success with the record (documented: ${refusalText(c.documented)}). A single GET request; nothing is changed.`
+            : `${who} signs in and calls GET ${shown}. It is normally reached only by “${c.by}”, so it may be restricted. Fails if the endpoint answers with a success status (documented: ${refusalText(c.documented)}). A single GET request; nothing is changed.`,
+        kind: "web",
+        category: "Access control",
+        type: "security",
+        priority: "high",
+        preconditions: c.of ? [`Test accounts named “${c.as}” and “${c.of}” are set up for this project`] : [`A test account named “${c.as}” is set up for this project`],
+        steps: [
+            { action: "navigate", url: "/", description: "Start at the home page" },
+            {
+                action: "assert",
+                check: "accessDenied",
+                expected: JSON.stringify({ api: true, refuse: true, as: c.as, path: c.path, ...(c.origin ? { origin: c.origin } : {}), by: c.by, ...(c.of ? { of: c.of } : {}), sev: "high", ...(c.documented?.length ? { documented: c.documented.join(" or ") } : {}) }),
+                description: `${who} is refused GET ${shown} (${refusalText(c.documented)})`,
+            },
+        ],
+        expectedResults: [`GET ${shown} is refused for the “${c.as}” account`],
+        testData: {},
+        tags: ["security", "access-control", "api", ...(c.of ? ["cross-account"] : [])],
+        source: { origin: "access-check" },
+    };
+}
+
+// ── 2c. records from documented list endpoints ──────────────────────────────
+
+/** What each account's own GET of a documented list endpoint held: record ids, and the owner field's value when records have one. */
+export interface ApiListRow {
+    /** The list template (/api/notes) and the record template next to it (/api/notes/{id}). */
+    list: string;
+    detail: string;
+    documented?: number[];
+    items: Record<string, Array<{ id: string; owner?: string }>>;
+}
+
+const MAX_LIST_ITEMS = 50;
+const ID_FIELDS = ["id", "uuid", "_id"];
+const OWNER_FIELD = /^(owner|owner_?id|user_?id|user|created_?by|author|author_?id)$/i;
+const scalar = (v: unknown): v is string | number => typeof v === "string" || (typeof v === "number" && Number.isFinite(v));
+
+/** The records of a list answer: the array itself, or the first field holding an array of objects. Each needs an id. */
+export function listItems(body: unknown): Array<{ id: string; owner?: string }> | undefined {
+    const arr = Array.isArray(body) ? body : body && typeof body === "object" ? Object.values(body).find((v) => Array.isArray(v) && v.some((x) => x && typeof x === "object")) : undefined;
+    if (!Array.isArray(arr)) return undefined;
+    return arr.slice(0, MAX_LIST_ITEMS).flatMap((x) => {
+        if (!x || typeof x !== "object" || Array.isArray(x)) return [];
+        const rec = x as Record<string, unknown>;
+        const idKey = ID_FIELDS.find((k) => scalar(rec[k]));
+        if (!idKey) return [];
+        const ownerKey = Object.keys(rec).find((k) => OWNER_FIELD.test(k) && scalar(rec[k]));
+        return [{ id: String(rec[idKey]), ...(ownerKey ? { owner: String(rec[ownerKey]) } : {}) }];
+    });
+}
+
+/**
+ * Each account's own GET of each documented list endpoint that has a record endpoint next to it (/api/notes and /api/notes/{id}): GET
+ * only, one request at a time, at most `maxLists` lists. Only ids and owner values are kept, never other content.
+ */
+export async function surveyApiLists(viewers: Array<{ name: string; request: ApiRequester; headers?: Record<string, string> }>, apiBase: string, endpoints: SurveyEndpoint[], maxLists = 6): Promise<ApiListRow[]> {
+    if (viewers.length < 2) return [];
+    const gets = endpoints.filter((e) => e.method === "GET");
+    const pairs = gets
+        .flatMap((l) => {
+            const d = !l.path.includes("{") && gets.find((e) => e.path.startsWith(`${l.path.replace(/\/$/, "")}/{`) && /^\/\{[^/{}]+\}$/.test(e.path.slice(l.path.replace(/\/$/, "").length)));
+            return d ? [{ l, d }] : [];
+        })
+        .slice(0, maxLists);
+    const rows: ApiListRow[] = [];
+    for (const { l, d } of pairs) {
+        const items: ApiListRow["items"] = {};
+        for (const v of viewers) {
+            try {
+                const res = await v.request.get(new URL(l.called, apiBase).toString(), { headers: v.headers ?? {}, failOnStatusCode: false, maxRedirects: 0, timeout: 15_000 });
+                const text = ok2xx(res.status()) && res.text ? await res.text() : "";
+                const got = text && text.length <= MAX_API_BODY ? listItems(JSON.parse(text)) : undefined;
+                if (got) items[v.name] = got;
+            } catch {
+                /* no list for this account: no evidence from it */
+            }
+        }
+        const documented = refusals(d.statuses);
+        rows.push({ list: l.path, detail: d.path, ...(documented.length ? { documented } : {}), items });
+    }
+    return rows;
+}
+
+/**
+ * Same-level API checks from the lists: a record another account's list holds and the viewer's does not is that account's, so the viewer
+ * must be refused its record endpoint. When records carry an owner field, one whose owner also owns records only the viewer lists is the
+ * viewer's own (a shorter list, not another account's record) and is skipped. One record per pair of accounts and list, at most `max`.
+ */
+export function generateApiListSpecs(rows: ApiListRow[], opts: { max?: number; tokens?: string[]; origin?: string } = {}): DraftSpec[] {
+    const out: DraftSpec[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+        const names = Object.keys(row.items);
+        for (const viewer of names) {
+            const mine = row.items[viewer]!;
+            const mineIds = new Set(mine.map((x) => x.id));
+            for (const lister of names) {
+                if (lister === viewer) continue;
+                const theirs = row.items[lister]!;
+                const theirIds = new Set(theirs.map((x) => x.id));
+                const ownOwners = new Set(mine.filter((x) => !theirIds.has(x.id) && x.owner !== undefined).map((x) => x.owner));
+                const pick = theirs.find((x) => !mineIds.has(x.id) && !(x.owner !== undefined && ownOwners.has(x.owner)));
+                if (!pick) continue;
+                const path = row.detail.replace(/\{[^/{}]+\}$/, encodeURIComponent(pick.id));
+                if (seen.has(`${viewer} ${path}`)) continue;
+                seen.add(`${viewer} ${path}`);
+                const c = { as: viewer, path, by: lister, of: lister, documented: row.documented, origin: opts.origin };
+                out.push(opts.tokens?.includes(viewer) ? tokenSpec(c) : refusalSpec(c));
+            }
+        }
+    }
+    return out.slice(0, opts.max ?? 4);
 }
 
 // ── 3. classify ──────────────────────────────────────────────────────────────
