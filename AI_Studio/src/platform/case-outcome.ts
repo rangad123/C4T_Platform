@@ -9,7 +9,7 @@
  *   - addresses that could not be opened: its `page_failed` events. They are never pages; they are counted once, as `notOpened`.
  *
  * Runs are merged oldest first (SPEC R10): a page is one node however many runs saw it (keyed by its path), and a later run's non-empty
- * title, address and purpose win; a test case is one row however many runs planned it (keyed by its normalised title and page) and keeps
+ * title, address and purpose win; a test case is one row however many runs planned it (keyed by its normalised title and its own start page, so a later run's pages never renumber it) and keeps
  * the TC number of its first appearance. A run's `addedPages` and `addedCases` count what it was first to find.
  *
  * The tree (SPEC P3.3): the root is "/" when it is a page, else the oldest run's first page. A page's parent is the page the explorer first
@@ -140,7 +140,7 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
         parent.set(node, choices.find((c): c is string => Boolean(c) && c !== node && !closesLoop(node, c!)) ?? null);
     }
 
-    // ── test cases: one per normalised title and node; TC numbers by first appearance ──
+    // ── test cases: one per normalised title and start page; TC numbers by first appearance ──
     const cases = new Map<string, CaseOutcomeCase>();
     const runs: CaseOutcomeRun[] = [];
     const written = new Map<string, number>();
@@ -159,7 +159,8 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
             const title = c.title.trim();
             if (!title) continue;
             const page = nodeOf(c.page);
-            const key = `${titleKey(title)}\u0000${page}`;
+            // Keyed on the case's own start page, not its node: a later run's pages move nodes, never TC numbers (F3 M3).
+            const key = `${titleKey(title)}\u0000${c.page || "/"}`;
             mine.add(key);
             const had = cases.get(key);
             if (!had) {

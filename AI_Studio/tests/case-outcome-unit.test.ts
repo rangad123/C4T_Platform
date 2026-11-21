@@ -50,6 +50,19 @@ describe("each run grows the same outcome (R10.1)", () => {
         expect(mergeCaseRuns([a, b, c]).cases).toHaveLength(4);
     });
 
+    // F3 review M3 (tc-shift probe): two cases with one title whose start pages both fell back to "/" merged, and a later run that found
+    // /cart split them and renumbered every case after them; a re-import then skipped the wrong case as "already here".
+    it("never moves a TC number to another case when a later run finds the page an earlier case started on", () => {
+        const a = run({ pages: [page("/"), page("/products")], cases: [kase("Open the cart", "/"), kase("Open the cart", "/cart"), kase("Browse products", "/products")] });
+        const b = run({ pages: [page("/"), page("/cart")] });
+        const ids = (o: ReturnType<typeof mergeCaseRuns>) => o.cases.map((c) => `${c.id} ${c.title} @${c.page}`);
+        expect(ids(mergeCaseRuns([a]))).toEqual(["TC-001 Open the cart @/", "TC-002 Open the cart @/", "TC-003 Browse products @/products"]);
+        expect(ids(mergeCaseRuns([a, b]))).toEqual(["TC-001 Open the cart @/", "TC-002 Open the cart @/cart", "TC-003 Browse products @/products"]);
+        // A case with no start page (a stopped run's announced case) is the same case as one starting on "/".
+        const stopped = run({ pages: [page("/")], cases: [kase("Open the home page", "")] }, "stopped");
+        expect(mergeCaseRuns([stopped, run({ pages: [page("/")], cases: [kase("Open the home page", "/")] })]).cases).toHaveLength(1);
+    });
+
     it("lets a later run's title, address and purpose win, but never with an empty one", () => {
         const a = run({ pages: [page("/", "Old home", "The start")] });
         const b = run({ pages: [page("/", "New home", "")] });

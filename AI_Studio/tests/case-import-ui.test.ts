@@ -1,10 +1,10 @@
 /**
  * Importing the test case workbook on a code project's Test cases tab (founder 2026-11-19, SPEC R6.4; task C7), in a real browser
  * against the real platform (no model):
- *   - Import takes .xlsx (and JSON), no longer CSV; its tooltip names the workbook;
+ *   - Import takes only the workbook (.xlsx): no CSV, and no JSON (F3 L2: JSON stays in the API, for backups); its tooltip names the workbook;
  *   - Export is one button that downloads the test case workbook (FX16); a list of 5,000 test cases shows quickly (FX15);
  *   - the reply is said plainly: created, already here, skipped rows with their reason, steps ignored on Automated rows;
- *   - a refusal is shown as the server's sentence (a workbook without a Test cases sheet; a CSV file, which the workbook replaced);
+ *   - a refusal is shown as the server's sentence (a workbook without a Test cases sheet; a CSV or JSON file, which is not a workbook);
  *   - an imported case shows its page, preconditions and expected result in the edit form; the New test case form offers them too;
  *   - no axe violations, no sideways scrolling on a phone, in light and dark.
  *
@@ -93,12 +93,12 @@ afterAll(async () => {
 });
 
 describe("Import on the Test cases tab", () => {
-    it("takes the workbook, not CSV, and its tooltip names the workbook", async () => {
+    it("takes only the workbook, not CSV or JSON, and its tooltip names the workbook", async () => {
         await page.goto(casesUrl());
         await pwExpect(page.getByRole("heading", { name: "No test cases yet" })).toBeVisible();
         const accept = (await page.locator('input[type="file"]').getAttribute("accept")) ?? "";
-        expect(accept.split(",")).toEqual(expect.arrayContaining([".xlsx", ".json"]));
-        expect(accept).not.toMatch(/csv/i);
+        expect(accept.split(",")).toEqual(expect.arrayContaining([".xlsx"]));
+        expect(accept).not.toMatch(/csv|json/i);
         await page.getByRole("button", { name: "Import", exact: true }).hover();
         await pwExpect(openTip()).toContainText("The test case workbook (.xlsx) that Export here or a Test Case Generation project downloads");
     });
@@ -160,10 +160,13 @@ describe("Import on the Test cases tab", () => {
         await everyLook("import-refused");
         expect(await casesNow()).toHaveLength(4);
 
-        // A CSV file (from before the workbook) is refused with the sentence that says so.
+        // A CSV file (from before the workbook) or a JSON backup chosen anyway is read as a workbook and refused with that sentence.
+        const notWorkbook = "This file is not an Excel workbook (.xlsx). Import the test case workbook downloaded from a Test Case Generation project, or a copy of it saved as “Excel Workbook (.xlsx)”.";
         await choose("cases.csv", "text/csv", Buffer.from("title,area\nPrint the invoice,Billing\n"));
-        await pwExpect(alert).toContainText("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them. Import the workbook, or a JSON backup.");
+        await pwExpect(alert).toContainText(notWorkbook);
         await everyLook("import-refused-csv");
+        await choose("backup.json", "application/json", Buffer.from(JSON.stringify([{ title: "Print the invoice" }])));
+        await pwExpect(alert).toContainText(notWorkbook);
         expect(await casesNow()).toHaveLength(4);
     });
 
