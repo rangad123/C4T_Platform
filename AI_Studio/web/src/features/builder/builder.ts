@@ -154,6 +154,10 @@ export interface RespInfo {
     expectedLabel?: string;
     expectedHelp?: string;
     schema?: boolean;
+    /** relation: the expression field; dbCheck: the check's name. Both can say what they prove (source). */
+    expression?: boolean;
+    nameLabel?: string;
+    source?: boolean;
     more?: boolean;
 }
 export const RESPONSE_INFO: Record<string, RespInfo> = {
@@ -167,6 +171,8 @@ export const RESPONSE_INFO: Record<string, RespInfo> = {
     bodyNotContains: { label: "The answer does not contain text", path: "none", expected: "required", expectedLabel: "Text" },
     statusDenied: { label: "Access is refused", path: "none", expected: "required", expectedLabel: "Settings (JSON)", expectedHelp: 'For example: {"as":"anonymous","path":"/admin"}', more: true },
     matchesSchema: { label: "The answer matches its documented shape", path: "none", expected: "none", schema: true, more: true },
+    relation: { label: "Values of the answer agree", path: "none", expected: "none", expression: true, source: true, more: true },
+    dbCheck: { label: "A stored-data check passes", path: "none", expected: "none", nameLabel: "Database check", source: true, more: true },
     securityHeaders: { label: "Browser security headers are set", path: "none", expected: "optional", expectedLabel: "Headers to check (optional)", expectedHelp: "csp, frame, nosniff, referrer, hsts", more: true },
     cookieFlags: { label: "Session cookies are protected", path: "none", expected: "none", more: true },
     corsPolicy: { label: "Cross-origin access is not wide open", path: "none", expected: "none", more: true },
@@ -272,6 +278,7 @@ export const FIELDS: Record<string, FieldDef[]> = {
         { name: "until", kind: "choice", label: "Wait until", options: [["url", "The address contains"], ["response", "A response arrives from"], ["hidden", "An element is gone"], ["visible", "An element shows"]] },
         { name: "value", kind: "text", label: "Address text (for the address or a response)", placeholders: true },
         { name: "locator", kind: "optLocator", label: "Element (for gone or shows)" },
+        { name: "extract", kind: "map", label: "Remember from the response (optional)", help: "For a response: name on the left, where in it on the right. The response is then the answer the checks after it look at." },
         { name: "ms", kind: "ms", label: "Or wait a fixed time (milliseconds)", help: "Between 0 and 10000. Waiting until something happens is better than a fixed wait." },
         IN_POPUP,
     ],
@@ -323,6 +330,9 @@ export function fieldsFor(step: Step): FieldDef[] {
         if (info && info.path !== "none") out.push({ name: "path", kind: "text", label: info.pathLabel ?? "Path", required: info.path === "required" });
         if (info && info.expected !== "none") out.push({ name: "expected", kind: "text", label: info.expectedLabel ?? "Expected", help: info.expectedHelp, required: info.expected === "required", placeholders: true });
         if (info?.schema) out.push({ name: "schema", kind: "json", label: "Documented shape (JSON schema)", required: true });
+        if (info?.expression) out.push({ name: "expression", kind: "text", label: "How the values agree", help: "For example subtotal == sum(lines[*].lineTotal). $name reads a remembered value.", required: true });
+        if (info?.nameLabel) out.push({ name: "name", kind: "text", label: info.nameLabel, required: true });
+        if (info?.source) out.push({ name: "source", kind: "text", label: "What it proves (optional)", help: "A requirement, such as 4.1." });
         return out;
     }
     return base;
@@ -348,7 +358,7 @@ export function setField(step: Step, name: string, value: unknown): Step {
 export function setCheck(step: Step, check: string): Step {
     const next: Step = { ...step, check };
     const allowed = new Set(fieldsFor(next).map((f) => f.name));
-    for (const k of ["locator", "expected", "path", "schema", "inPopup", "name", "compare"]) if (!allowed.has(k)) delete next[k];
+    for (const k of ["locator", "expected", "path", "schema", "inPopup", "name", "compare", "expression"]) if (!allowed.has(k)) delete next[k];
     return next;
 }
 

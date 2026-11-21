@@ -161,6 +161,7 @@ export default defineConfig({
             "tests/doctor-unit.test.ts",
             "tests/dsl-unit.test.ts",
             "tests/relation.test.ts",
+            "tests/relation-render.test.ts",
             "tests/credential-origin-unit.test.ts",
             "tests/guard-hardening.test.ts",
             "tests/guide-content.test.ts",

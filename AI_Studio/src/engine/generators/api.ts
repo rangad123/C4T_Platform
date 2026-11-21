@@ -11,10 +11,12 @@
  */
 import { describeStep, placeholdersIn, repeatOf, type Step, type TestSpec } from "../spec/schema.js";
 import type { RenderContext, RenderedScript, ScriptGenerator } from "./types.js";
-import { knownBugLine, testDetails } from "./playwright.js";
+import { knownBugLine, relationCall, testDetails } from "./playwright.js";
 import { dataDeclaration, dataRowsFor, dataSetDeclaration, expr, fileHeader, lit, ROW_SETUP, rowTitle, scriptFilename } from "./render-utils.js";
 import { CLEANUP_HELPER_SOURCE, canCreateRecords, cleanupScriptSource, deleteOperationsOfSpec, mergeOperations } from "../cleanup/helper.js";
 import { CONTRACT_HELPER_SOURCE } from "../contracts/check.js";
+import { RELATION_HELPER_SOURCE } from "../validation/relation.js";
+import { DB_CHECK_NOT_YET } from "../web/checks.js";
 import { DRIFT_HELPER_SOURCE } from "../contracts/drift.js";
 import { ACCESS_API_HELPER_SOURCE, ACCESS_HELPER_SOURCE } from "../identity/access.js";
 import { LATENCY_HELPER_SOURCE } from "../performance/latency.js";
@@ -281,6 +283,10 @@ function renderStep(step: Step, declared: Set<string>, prev?: Extract<Step, { ac
                     return `await loadAssert(() => loadCall(request, ${expr(prev.path)}, { query: ${recordExpr(prev.query)}, headers: ${recordExpr(prev.headers)}, auth: ${prev.auth === "default"} }), ${lit(normalizeLoadBudgets(exp))}, (name, body) => test.info().attach(name, { body, contentType: "application/json" }), last.status, { lockKey: new URL(API_BASE_URL).host });`;
                 case "matchesSchema":
                     return `contractAssert(last.json, ${JSON.stringify(step.schema ?? {})});`;
+                case "relation":
+                    return relationCall(step);
+                case "dbCheck":
+                    throw new Error(DB_CHECK_NOT_YET(step.name ?? ""));
                 case "securityHeaders":
                 case "cookieFlags":
                 case "corsPolicy":
@@ -339,7 +345,7 @@ const IGNORE_HTTPS_ERRORS = ${passive};
 const DRIFT_OBSERVE = ${!passive};
 ${signs ? `/** The named test account the API calls sign in as when there is no token ("" = the project's own account). */\nconst API_SIGN_IN_AS = ${lit(signInAs(spec))};\n` : ""}${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec)}
 ${helpers}
-${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${signs ? `\n${API_SIGN_IN_SOURCE}${ACCESS_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupSource}` : ""}
+${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "relation") ? `\n${RELATION_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${signs ? `\n${API_SIGN_IN_SOURCE}${ACCESS_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupSource}` : ""}
 
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ request }) => {
 ${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n    // Each row is judged on its own responses.\n    responses.length = 0;\n    calls.length = 0;\n` : ""}    ${hasLoad ? "// A load check runs for about 10 seconds (twice at most), may wait its turn behind another load check, and waits for slow answers: far more than the default time limit.\n    test.setTimeout(180_000);\n    " : ""}let last!: Call;

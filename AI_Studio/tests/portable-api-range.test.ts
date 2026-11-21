@@ -29,6 +29,8 @@ import * as origin from "../src/engine/spec/credential-origin.js";
 import * as vision from "../src/engine/vision/capture.js";
 import * as pages from "../src/engine/web/pages.js";
 import { NEEDS_EXPECTED, NEEDS_LOCATOR, NEWER_PLAYWRIGHT_CHECKS } from "../src/engine/web/checks.js";
+import * as webChecks from "../src/engine/web/checks.js";
+import * as relation from "../src/engine/validation/relation.js";
 
 const BASE = "https://shop.example.test";
 const spec = (raw: Record<string, unknown>): TestSpec => TestSpecSchema.parse(raw);
@@ -56,6 +58,8 @@ const webSteps = [
     { action: "email", to: "test@mail.example.test", use: "link", after: "Confirm" },
     { action: "click", locator: { by: "role", role: "button", value: "Add", within: { by: "role", role: "listitem", nth: 1 }, filter: { hasText: "Mug", hasNotText: "Sold", has: { by: "altText", value: "Mug" }, hasNot: { by: "title", value: "Gone" } } } },
     { action: "wait", until: "response", value: "/api/cart" },
+    { action: "wait", until: "response", value: "/api/cart", extract: { subtotal: "subtotal" } },
+    { action: "assertResponse", check: "relation", expression: "subtotal == sum(lines[*].lineTotal)", source: "3.9" },
     { action: "wait", until: "url", value: "/cart" },
     { action: "wait", until: "hidden", locator: { by: "text", value: "Loading" } },
     { action: "remember", locator: { by: "testId", value: "price" }, name: "price" },
@@ -81,10 +85,12 @@ const apiSteps = [
     { action: "request", method: "POST", path: "/api/things", body: { name: "x-{{unique}}" }, extract: { thingId: "id" } },
     { action: "assertResponse", check: "status", expected: 201 },
     { action: "request", method: "GET", path: "/api/things/{{thingId}}", query: { full: "1" }, headers: { "x-trace": "1" }, auth: "none" },
-    ...RESPONSE_CHECKS.filter((c) => !["latency", "load", "statusDenied"].includes(c)).map((check) => ({
+    // A database check is refused until the database layer exists (DB_CHECK_NOT_YET).
+    ...RESPONSE_CHECKS.filter((c) => !["latency", "load", "statusDenied", "dbCheck"].includes(c)).map((check) => ({
         action: "assertResponse",
         check,
         ...(check === "jsonPath" || check === "jsonType" ? { path: "name" } : check === "header" ? { path: "content-type" } : {}),
+        ...(check === "relation" ? { expression: "count(items) >= 0", source: "1.1" } : {}),
         ...(check === "matchesSchema" ? { schema: { type: "object", required: ["id"], properties: { id: { type: "string" } } } } : {}),
         ...(["status", "statusClass", "statusBelow"].includes(check) ? { expected: check === "statusClass" ? "2xx" : 500 } : check === "jsonType" ? { expected: "string" } : check === "bodyContains" || check === "bodyNotContains" || check === "jsonPath" ? { expected: "x" } : {}),
     })),
@@ -122,7 +128,7 @@ function corpus(): Array<{ name: string; content: string }> {
 }
 
 /** Every piece of code a generator pastes into scripts, read on its own (a script only carries the ones it needs). */
-const HELPERS: Array<[string, unknown]> = Object.entries({ email, cleanup, contracts, drift, desktop, evidence, health, access, totp, inputs, perf, latency, load, security, origin, vision, pages }).flatMap(([mod, m]) =>
+const HELPERS: Array<[string, unknown]> = Object.entries({ email, cleanup, contracts, drift, desktop, evidence, health, access, totp, inputs, perf, latency, load, security, origin, vision, pages, webChecks, relation }).flatMap(([mod, m]) =>
     Object.entries(m as Record<string, unknown>)
         .filter(([k, v]) => typeof v === "string" && /_SOURCE$|_SETUP$|_IMPORTS$/.test(k))
         .map(([k, v]): [string, unknown] => [`${mod}.${k}`, v]),

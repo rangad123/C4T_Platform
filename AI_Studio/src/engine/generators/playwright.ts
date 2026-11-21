@@ -42,7 +42,8 @@ import { MAIN_PAGE_ONLY_CHECKS, POPUP_SETUP, UPLOAD_HELPER_SOURCE, UPLOAD_IMPORT
 import { EMAIL_HELPER_SOURCE, renderEmailStep, usesEmail } from "../auth/email-step.js";
 import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, overlayHelperSource, overlayRules } from "../web/interruptions.js";
 import { renderClock, renderCondition, renderPinnedTime } from "../web/conditions.js";
-import { classPattern, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
+import { RELATION_HELPER_SOURCE } from "../validation/relation.js";
+import { classPattern, DB_CHECK_NOT_YET, KEPT_CALL_HELPER_SOURCE, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
 import { jsonExpr, recordExpr } from "./api.js";
 import { LABEL_FIELD_HELPER_SOURCE, nearbyTargets, type FieldClue } from "../web/label-fallback.js";
 
@@ -51,6 +52,14 @@ const ACTS_ON = new Set<Step["action"]>(["click", "upload", "download", "drag", 
 const usesLabelField = (spec: TestSpec) => spec.steps.some((s) => ACTS_ON.has(s.action) && [("locator" in s ? s.locator : undefined), (s.action === "drag" ? s.target : undefined)].some((l) => l && isLabelField(l)));
 
 const isResponseWait = (s: Step | undefined) => s?.action === "wait" && s.until === "response";
+const isRelation = (s: Step) => s.action === "assertResponse" && s.check === "relation";
+/** `data[name] = capture(last, ...)` lines of a step's extract (a request's or a kept response's). */
+const captures = (extract?: Record<string, string>) => Object.entries(extract ?? {}).map(([name, path]) => `\n        data[${lit(name)}] = capture(last, ${lit(name)}, ${lit(path)});`).join("");
+/** A relation check in a script (web or API): judged by the pasted checker against the latest answer and the test's values. */
+export const relationCall = (step: Extract<Step, { action: "assertResponse" }>) => {
+    if (!step.expression) throw new Error("A relation check needs its expression");
+    return `relationAssert(${lit(step.expression)}, last?.json, data, ${step.source === undefined ? "undefined" : lit(step.source)});`;
+};
 /** The final outcome checks of a test (the asserts after its last other step) that run as soft assertions: every one is tried, the first failure is reported. */
 function softOutcomeChecks(steps: readonly Step[]): Set<number> {
     const last = steps.findLastIndex((s) => s.action !== "assert");
@@ -95,8 +104,13 @@ function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: s
         case "wait":
             if (step.until === "url") return `await page.waitForURL(${regexFromText(step.value ?? "")});`;
             // Listened for from the step before (see render()), so a response that came while that step ran is not missed.
-            if (step.until === "response") return `const seen = await responseWaits[${index}];
-        if (seen instanceof Error) throw seen;`;
+            if (step.until === "response") {
+                // With extract the answer is kept as the latest one (what the next response check judges) and its values captured.
+                // (read the moment it arrives, see render(), so a page that moves on right after cannot take the body away).
+                const keep = step.extract ? `\n        last = seen as WebCall;${captures(step.extract)}` : "";
+                return `const seen = await responseWaits[${index}];
+        if (seen instanceof Error) throw seen;${keep}`;
+            }
             if (step.until) {
                 if (!step.locator) throw new Error(`Waiting until an element is ${step.until} needs the element (a locator)`);
                 return `await ${L(step.locator)}.waitFor({ state: ${lit(step.until)} });`;
@@ -108,8 +122,7 @@ function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: s
             return renderAssert(step, snapshotName, softMessage);
         case "request": {
             // Through the page's request context: the browser's cookies for that site go with it (see ../web/checks.ts).
-            const extract = Object.entries(step.extract ?? {}).map(([name, path]) => `\n        data[${lit(name)}] = capture(last, ${lit(name)}, ${lit(path)});`).join("");
-            return `last = await webRequest(page, ${lit(step.method)}, ${expr(step.path)}, { query: ${recordExpr(step.query)}, headers: ${recordExpr(step.headers)}, body: ${step.body === undefined ? "undefined" : jsonExpr(step.body)} });${extract}`;
+            return `last = await webRequest(page, ${lit(step.method)}, ${expr(step.path)}, { query: ${recordExpr(step.query)}, headers: ${recordExpr(step.headers)}, body: ${step.body === undefined ? "undefined" : jsonExpr(step.body)} });${captures(step.extract)}`;
         }
         case "assertResponse": {
             const text = expr(String(step.expected ?? ""));
@@ -130,6 +143,10 @@ function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: s
                     return `expect(last.text).toContain(${text});`;
                 case "bodyNotContains":
                     return `expect(last.text).not.toContain(${text});`;
+                case "relation":
+                    return relationCall(step);
+                case "dbCheck":
+                    throw new Error(DB_CHECK_NOT_YET(step.name ?? ""));
                 default:
                     throw new Error(`The response check "${step.check}" runs in API tests only`);
             }
@@ -337,6 +354,8 @@ export const playwrightGenerator: ScriptGenerator = {
             const at = isResponseWait(spec.steps[i + 1]) ? i + 1 : i === 0 && isResponseWait(spec.steps[0]) ? 0 : -1;
             if (at < 0) return "";
             const wait = spec.steps[at] as Extract<Step, { action: "wait" }>;
+            // A wait that keeps the answer reads it through a route (KEPT_CALL_HELPER_SOURCE in ../web/checks.ts).
+            if (wait.extract) return `responseWaits[${at}] = keepAnswer(page, ${expr(wait.value ?? "")});\n        `;
             return `responseWaits[${at}] = page.waitForResponse((r) => r.url().includes(${expr(wait.value ?? "")})).catch((e: Error) => e);\n        `;
         };
         const usesCredentials = specUsesCredentials(spec);
@@ -373,7 +392,8 @@ export const playwrightGenerator: ScriptGenerator = {
         const healthEnd = `${health ? `\n    if (healthFailures.length) throw healthFailures[0];` : ""}${soft.size ? `\n    // The outcome checks above ran soft so each one reports; this hard check makes sure the test still fails when one did.\n    expect(test.info().errors.length, "Outcome checks failed (see the steps above)").toBe(0);` : ""}`;
         const responseSetup = spec.steps.some(isResponseWait) ? "    const responseWaits: Record<number, Promise<unknown>> = {};\n" : "";
         const remembers = spec.steps.some((s) => s.action === "remember" || (s.action === "assert" && s.check === "remembered"));
-        const requests = spec.steps.some((s) => s.action === "request");
+        // A kept response and a relation read the latest answer too, so their scripts carry the request helper (which declares it).
+        const requests = spec.steps.some((s) => s.action === "request" || (s.action === "wait" && !!s.extract) || isRelation(s));
         // Popups and uploads add their pieces only to the scripts that use them, so every other script stays exactly as it was.
         const popupSetup = interruptionSetup + (usesPopups(spec) ? POPUP_SETUP : "");
         const uploads = spec.steps.some((s) => s.action === "upload");
@@ -401,7 +421,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }, testInfo) => {
     await evidenceAttach(page, testInfo);
 });
-${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
+${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ page }) => {
 ${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
 });

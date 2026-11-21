@@ -57,7 +57,7 @@ export const PLAYWRIGHT_METHODS: Readonly<Record<string, string>> = {
     // Dialogs, downloads, drop zones, overlays (../web/interruptions.ts)
     addLocatorHandler: "1.42", message: "1.0", accept: "1.0", dismiss: "1.0", suggestedFilename: "1.0", createReadStream: "1.0", dispatchEvent: "1.0", evaluateHandle: "1.0",
     // BrowserContext, Browser, CDP, files
-    newPage: "1.0", newContext: "1.0", browser: "1.0", pages: "1.0", storageState: "1.8", newCDPSession: "1.0", send: "1.0", detach: "1.0", setFiles: "1.0", addInitScript: "1.0", cookies: "1.0", addCookies: "1.0", route: "1.0", unroute: "1.0",
+    newPage: "1.0", newContext: "1.0", browser: "1.0", pages: "1.0", storageState: "1.8", newCDPSession: "1.0", send: "1.0", detach: "1.0", setFiles: "1.0", addInitScript: "1.0", cookies: "1.0", addCookies: "1.0", route: "1.0", unroute: "1.0", fulfill: "1.0", continue: "1.0", fallback: "1.23",
     // APIRequestContext, APIResponse, Request, Response, ConsoleMessage
     fetch: "1.16", get: "1.16", post: "1.16", put: "1.16", patch: "1.16", delete: "1.16", head: "1.16", dispose: "1.16", status: "1.0", statusText: "1.0", ok: "1.0", headers: "1.0", headersArray: "1.15", allHeaders: "1.15", headerValue: "1.15",
     text: "1.0", json: "1.0", body: "1.0", request: "1.0", response: "1.0", resourceType: "1.0", failure: "1.0", method: "1.0", postData: "1.0", frame: "1.0", isNavigationRequest: "1.0", redirectedFrom: "1.0", securityDetails: "1.13", serverAddr: "1.13", location: "1.0", args: "1.0", timing: "1.0", sizes: "1.15",
@@ -91,7 +91,7 @@ export const PLAYWRIGHT_OPTIONS: Readonly<Record<string, Readonly<Record<string,
 export const NOT_PLAYWRIGHT: ReadonlySet<string> = new Set([
     // JavaScript built-ins
     "map", "forEach", "some", "every", "find", "findIndex", "includes", "indexOf", "lastIndexOf", "join", "push", "pop", "shift", "unshift", "slice", "splice", "concat", "reduce", "sort", "reverse", "flat", "flatMap", "keys", "values", "entries", "from", "isArray", "of",
-    "split", "replace", "replaceAll", "trim", "trimStart", "trimEnd", "toLowerCase", "toUpperCase", "startsWith", "endsWith", "padStart", "padEnd", "repeat", "charAt", "charCodeAt", "codePointAt", "localeCompare", "normalize", "match", "matchAll", "search", "substring", "toString", "toFixed", "toISOString", "valueOf", "at",
+    "split", "replace", "replaceAll", "trim", "trimStart", "trimEnd", "toLowerCase", "toUpperCase", "toPrecision", "startsWith", "endsWith", "padStart", "padEnd", "repeat", "charAt", "charCodeAt", "codePointAt", "localeCompare", "normalize", "match", "matchAll", "search", "substring", "toString", "toFixed", "toISOString", "valueOf", "at",
     "parse", "stringify", "assign", "create", "freeze", "fromEntries", "getOwnPropertyNames", "hasOwnProperty", "isFinite", "isInteger", "isSafeInteger", "isNaN", "parseInt", "parseFloat", "max", "min", "floor", "ceil", "round", "abs", "random", "pow", "sqrt", "trunc", "now",
     "then", "catch", "finally", "resolve", "reject", "race", "allSettled", "exec", "set", "has", "add", "call", "apply", "bind", "write", "writeBigUInt64BE", "readUInt32BE", "alloc", "for", "observe", "disconnect", "getEntries", "getEntriesByName", "getEntriesByType", "querySelector", "querySelectorAll", "closest", "matches", "getComputedStyle", "getBoundingClientRect", "getClientRects", "checkVisibility", "contains", "setAttribute", "removeAttribute", "hasAttribute",
     "encodeURIComponent", "decodeURIComponent", "toJSON",

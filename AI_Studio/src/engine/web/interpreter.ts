@@ -5,7 +5,7 @@
  * It must stay semantically aligned with ../generators/playwright.ts; the validator always runs
  * the rendered script, so the rendered script remains the source of truth for pass/fail.
  */
-import { expect, type FrameLocator, type Locator as PwLocator, type Page } from "@playwright/test";
+import { expect, type FrameLocator, type Locator as PwLocator, type Page, type Response } from "@playwright/test";
 import { frameSelector, MAIN_PAGE_ONLY_CHECKS } from "./pages.js";
 import { a11yThreshold, runA11yAudit } from "../a11y/audit.js";
 import { runHealthCheck } from "../health/checks.js";
@@ -19,7 +19,8 @@ import { dialogProblem, downloadProblem, generatedSample } from "./interruptions
 import { labelledField, LABEL_WAIT_MS, type FieldClue } from "./label-fallback.js";
 import { applyClock, applyCondition } from "./conditions.js";
 import { interpolate, type Locator, type PlainLocator, type Step } from "../spec/schema.js";
-import { ARIA_TEMPLATE_MAX, classPattern, ariaTemplate, numberIn, urlPatternRegex, WEB_REQUEST_RULE, WEB_RESPONSE_CHECKS } from "./checks.js";
+import { ARIA_TEMPLATE_MAX, classPattern, ariaTemplate, DB_CHECK_NOT_YET, numberIn, urlPatternRegex, WEB_REQUEST_RULE, WEB_RESPONSE_CHECKS } from "./checks.js";
+import { checkRelation } from "../validation/relation.js";
 
 export type RuntimeData = Record<string, string>;
 
@@ -104,10 +105,30 @@ function locatePlain(page: Page | FrameLocator | PwLocator, l: PlainLocator, dat
 
 /** The latest answer of a request step, per page the steps run on (what the next response check judges). */
 const lastCalls = new WeakMap<Page, { status: number; headers: Record<string, string>; text: string; json: unknown }>();
-/** Addresses of the responses each page received since its latest step other than a response wait began, so a "wait for the response" step after the action that caused it still sees it. */
-const seenResponses = new WeakMap<Page, string[]>();
+/** The responses each page received since its latest step other than a response wait began, so a "wait for the response" step after the action that caused it still sees it. */
+const seenResponses = new WeakMap<Page, Response[]>();
+/** The bodies of the API answers (fetch / XHR) a page received, read as they arrive: a page that moves on right after takes them away. */
+const answerBodies = new WeakMap<Response, Promise<string | undefined>>();
+/** Said when a kept answer's body is gone (the rendered script reads it through a route, see KEPT_CALL_HELPER_SOURCE in ./checks.ts). */
+export const KEPT_BODY_GONE = (part: string) => `The answer from the address containing "${part}" could not be read: the page moved on before its body could be read. The saved test reads it on its own; here, keep an answer the page stays on.`;
 const at = (json: unknown, path: string): unknown => path.split(".").filter(Boolean).reduce<unknown>((acc, k) => (acc === null || acc === undefined ? undefined : (acc as Record<string, unknown>)[k]), json);
 const typeOf = (v: unknown) => (Array.isArray(v) ? "array" : v === null ? "null" : typeof v);
+
+/** Keeps an answer as the page's latest (what the next response check judges) and captures its values into the test data. */
+function keep(top: Page, res: { status: number; headers: Record<string, string>; text: string }, extract: Record<string, string>, data: RuntimeData): void {
+    let json: unknown;
+    try {
+        json = JSON.parse(res.text);
+    } catch {
+        json = undefined;
+    }
+    lastCalls.set(top, { ...res, json });
+    for (const [name, path] of Object.entries(extract)) {
+        const v = at(json, path);
+        if (v === undefined || v === null || v === "") throw new Error(`Could not capture "${name}": no value at "${path}" in the HTTP ${res.status} response`);
+        data[name] = typeof v === "object" ? JSON.stringify(v) : String(v);
+    }
+}
 
 /** The popup an earlier step opened, per page the steps run on (the same rule as the rendered script: "in the popup" means the latest one). */
 const popups = new WeakMap<Page, Page>();
@@ -155,10 +176,12 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
     const opt = { timeout };
     let page = top;
     if (!seenResponses.has(top) && typeof top.on === "function") {
-        const seen: string[] = [];
+        const seen: Response[] = [];
         seenResponses.set(top, seen);
         top.on("response", (r) => {
-            if (seen.push(r.url()) > 300) seen.shift();
+            if (seen.push(r) > 300) seen.shift();
+            const type = typeof r.request === "function" ? r.request().resourceType() : "";
+            if (type === "fetch" || type === "xhr") answerBodies.set(r, r.text().catch(() => undefined));
         });
     }
     // A "wait for the response" step takes only a response that came while the step before it ran, or after: the rendered script starts
@@ -243,11 +266,17 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
             if (step.until === "url") return page.waitForURL(new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), opt);
             if (step.until === "response") {
                 const seen = seenResponses.get(top) ?? [];
-                const i = seen.findIndex((u) => u.includes(value));
+                const i = seen.findIndex((r) => r.url().includes(value));
                 // Seen already (the action before caused it): taken, so the next wait for the same address waits for a new one.
-                if (i >= 0) return void seen.splice(0, i + 1);
-                await page.waitForResponse((r) => r.url().includes(value), opt);
-                return void seen.splice(0);
+                const res = i >= 0 ? seen.splice(0, i + 1)[i]! : await page.waitForResponse((r) => r.url().includes(value), opt);
+                if (i < 0) seen.splice(0);
+                // With extract, the answer is kept as the latest one (what response checks judge) and its values captured.
+                if (step.extract) {
+                    const text = await (answerBodies.get(res) ?? res.text().catch(() => undefined));
+                    if (text === undefined) throw new Error(KEPT_BODY_GONE(value));
+                    keep(top, { status: res.status(), headers: res.headers(), text }, step.extract, data);
+                }
+                return;
             }
             if (step.until) {
                 if (!step.locator) throw new Error(`Waiting until an element is ${step.until} needs the element (a locator)`);
@@ -271,24 +300,17 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
             const fill = (r?: Record<string, string>) => (r ? Object.fromEntries(Object.entries(r).map(([k, v]) => [k, interpolate(v, data)])) : undefined);
             const body = step.body === undefined ? undefined : JSON.parse(interpolate(JSON.stringify(step.body), data));
             const res = await page.request.fetch(target, { method: step.method, headers: fill(step.headers), params: fill(step.query), data: body, failOnStatusCode: false, maxRedirects: 0, timeout: Math.max(timeout, 10_000) });
-            const text = await res.text();
-            let json: unknown;
-            try {
-                json = JSON.parse(text);
-            } catch {
-                json = undefined;
-            }
-            const call = { status: res.status(), headers: res.headers(), text, json };
-            lastCalls.set(top, call);
-            for (const [name, path] of Object.entries(step.extract ?? {})) {
-                const v = at(json, path);
-                if (v === undefined || v === null || v === "") throw new Error(`Could not capture "${name}": no value at "${path}" in the HTTP ${call.status} response`);
-                data[name] = typeof v === "object" ? JSON.stringify(v) : String(v);
-            }
+            keep(top, { status: res.status(), headers: res.headers(), text: await res.text() }, step.extract ?? {}, data);
             return;
         }
         case "assertResponse": {
+            if (step.check === "dbCheck") throw new Error(DB_CHECK_NOT_YET(step.name ?? ""));
             if (!WEB_RESPONSE_CHECKS.has(step.check)) throw new Error(`The response check "${step.check}" runs in API tests only`);
+            if (step.check === "relation") {
+                const r = checkRelation(step.expression ?? "", { body: lastCalls.get(top)?.json, vars: data }, step.source);
+                if (!r.held) throw new Error(r.message);
+                return;
+            }
             const call = lastCalls.get(top);
             if (!call) throw new Error("A response check needs a request step before it");
             const exp = step.expected;

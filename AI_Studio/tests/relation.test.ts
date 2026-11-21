@@ -130,6 +130,9 @@ describe("refusals", () => {
     }
     it("reads own data only: __proto__ and constructor are never reached through the prototype", () => {
         expect(held("constructor == null", {})).toBe(false);
+        // through the prototype these would read "Object" and a function
+        expect(checkRelation('constructor.name == "Object"', { body: {} })).toMatchObject({ held: false, message: expect.stringContaining("no value at constructor.name") });
+        expect(checkRelation("count(lines[0].hasOwnProperty) == 0", { body: { lines: [{}] } })).toMatchObject({ held: false, message: expect.stringContaining("no value at lines[0].hasOwnProperty") });
         expect(checkRelation("__proto__.x == 1", { body: {} })).toMatchObject({ held: false, message: expect.stringContaining("no value at __proto__.x") });
         expect(checkRelation("count(constructor) == 1", { body: [] })).toMatchObject({ held: false });
         // a key that came in as data is data

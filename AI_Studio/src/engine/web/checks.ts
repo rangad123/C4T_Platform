@@ -4,6 +4,7 @@
  * send a request.
  */
 import { interpolate, type Step, type TestSpec } from "../spec/schema.js";
+import { parseRelation } from "../validation/relation.js";
 
 type Assert = Extract<Step, { action: "assert" }>;
 
@@ -138,7 +139,17 @@ function numberIn(text: string): number {
 // ── requests inside a web test ─────────────────────────────────────────────
 
 /** The answer checks a web test's request can be judged by (the security, load and contract families stay in API tests). */
-export const WEB_RESPONSE_CHECKS = new Set<Extract<Step, { action: "assertResponse" }>["check"]>(["status", "statusClass", "statusBelow", "jsonPath", "jsonType", "header", "bodyContains", "bodyNotContains"]);
+export const WEB_RESPONSE_CHECKS = new Set<Extract<Step, { action: "assertResponse" }>["check"]>(["status", "statusClass", "statusBelow", "jsonPath", "jsonType", "header", "bodyContains", "bodyNotContains", "relation"]);
+
+/** Why a database check step cannot run yet (every renderer and the interpreter say the same). */
+export const DB_CHECK_NOT_YET = (name: string) => `The database check "${name}" cannot run yet: database checks need the project's read-only database access, which is not set up for this test.`;
+
+/** A relation's latest answer: one that reads no body path (only $values) needs no answer before it. */
+const readsAnswer = (step: Extract<Step, { action: "assertResponse" }>): boolean => {
+    if (step.check !== "relation") return true;
+    const r = parseRelation(step.expression ?? "");
+    return !r.ok || r.refs.paths.length > 0;
+};
 
 /** Starts every message of the rule; the script says the same. */
 export const WEB_REQUEST_RULE = "A web test sends requests only to the application's own site or its API address";
@@ -165,10 +176,13 @@ export function webRequestProblems(spec: Pick<TestSpec, "kind" | "steps" | "test
     let requested = false;
     for (const [i, step] of spec.steps.entries()) {
         if (step.action === "assertResponse") {
-            if (!WEB_RESPONSE_CHECKS.has(step.check)) out.push(`Step ${i + 1}: the response check "${step.check}" runs in API tests only. A web test can check: ${[...WEB_RESPONSE_CHECKS].join(", ")}.`);
-            else if (!requested) out.push(`Step ${i + 1}: a response check needs a request step before it.`);
+            if (step.check === "dbCheck") out.push(`Step ${i + 1}: ${DB_CHECK_NOT_YET(step.name ?? "")}`);
+            else if (!WEB_RESPONSE_CHECKS.has(step.check)) out.push(`Step ${i + 1}: the response check "${step.check}" runs in API tests only. A web test can check: ${[...WEB_RESPONSE_CHECKS].join(", ")}.`);
+            else if (!requested && readsAnswer(step)) out.push(`Step ${i + 1}: a response check needs a request step, or a wait for a response that captures values, before it.`);
             continue;
         }
+        // A kept answer (a response wait with extract) is judged like a request's.
+        if (step.action === "wait" && step.until === "response" && step.extract) requested = true;
         if (step.action !== "request") continue;
         requested = true;
         const raw = interpolate(step.path, spec.testData).trim();
@@ -211,6 +225,40 @@ function capture(res: WebCall, name: string, path: string): string {
     const v = at(res.json, path);
     if (v === undefined || v === null || v === "") throw new Error(\`Could not capture "\${name}": no value at "\${path}" in the HTTP \${res.status} response: \${res.text.slice(0, 300)}\`);
     return typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+`;
+
+/**
+ * Pasted after the request helper into scripts whose response wait keeps the answer (a wait with extract). The first matching request
+ * is passed through a route, so its body is read before the page gets it: a page that moves on right after (a form that redirects)
+ * cannot take the body away. Every other request is untouched. Resolves to the answer, or to an Error (the step throws it).
+ */
+export const KEPT_CALL_HELPER_SOURCE = `function keepAnswer(page: import("@playwright/test").Page, part: string): Promise<WebCall | Error> {
+    return new Promise((resolve) => {
+        let taken = false;
+        const match = (url: URL) => url.href.includes(part);
+        const timer = setTimeout(() => resolve(new Error('No response from an address containing "' + part + '" came within 30 seconds')), 30_000);
+        const handler = async (route: import("@playwright/test").Route) => {
+            if (taken) return route.fallback();
+            taken = true;
+            clearTimeout(timer);
+            try {
+                const res = await route.fetch({ maxRedirects: 0 });
+                const text = await res.text();
+                await route.fulfill({ response: res, body: text });
+                let json: unknown;
+                try { json = JSON.parse(text); } catch { json = undefined; }
+                resolve({ status: res.status(), headers: res.headers(), text, json });
+            } catch (e) {
+                resolve(e as Error);
+                await route.continue().catch(() => undefined);
+            } finally {
+                // Only after this route is answered: removing the handler while it runs leaves the route half handled.
+                await page.unroute(match, handler).catch(() => undefined);
+            }
+        };
+        page.route(match, handler).catch((e: Error) => resolve(e));
+    });
 }
 `;
 
