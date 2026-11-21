@@ -19,14 +19,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { EngineEvent } from "../context.js";
-import type { LlmClient, Usage } from "./provider.js";
+import type { LlmClient, StructuredCounts, Usage } from "./provider.js";
 import { answeredSlot } from "./resilience.js";
 import { BudgetExceeded, SpendLimitExceeded, budgetTokens, capDetail, capMessage, decideBudget, estimateTokens, monthOf, normalisePurpose, warningMessage, type CapHit, type Caps, type LlmPurpose, type Used, type UsageBilling } from "./usage.js";
 
 /** What the meter needs from the store (implemented by `platform/usage-store.ts`, replaced by plain objects in unit tests). */
 export interface MeterBackend {
     /** `cacheReadTokens`/`cacheWriteTokens`: of the input tokens, prompt-cache reads and writes (prompt-cache.ts); missing = none. */
-    addUsage(d: { jobId: string; projectId: string; purpose: string; model: string; at: Date; calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number; cachedCalls?: number; savedInputTokens?: number; savedOutputTokens?: number; billing?: UsageBilling }): void;
+    /** `repair`: how this call's structured answer was made usable, or that it failed (provider.ts `structured()`); missing = it was fine. */
+    addUsage(d: { jobId: string; projectId: string; purpose: string; model: string; at: Date; calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number; cachedCalls?: number; savedInputTokens?: number; savedOutputTokens?: number; billing?: UsageBilling; repair?: RepairKind; itemsDropped?: number }): void;
     totalsFor(jobId: string, projectId: string, month: string): Used;
     capsFor(projectId: string, billing?: UsageBilling): { caps: Caps; warnPercent: number };
     recordStop(s: { jobId: string; projectId: string; cap: string; used: number; limit: number; at: string }): void;
@@ -36,6 +37,20 @@ export interface MeterBackend {
      */
     spendBlock?(billing: UsageBilling | undefined, model: string, month: string): { usedCents: number; limitCents: number; message: string } | null;
 }
+
+/** One structured call's repair (task R, R-f): wrapping removed, cut-off list closed, bad items dropped, re-asked, or failed after all that. */
+export type RepairKind = "cleaned" | "salvaged" | "partial" | "reasked" | "failed";
+
+/** The repair of the call that moved the counters from `before` to `after`; the most telling kind wins (a failure, then a loss, then the rest). */
+export function repairOf(before: Usage, after: Usage): { repair?: RepairKind; itemsDropped?: number } {
+    const d = (k: keyof StructuredCounts) => (after.structured?.[k] ?? 0) - (before.structured?.[k] ?? 0);
+    const dropped = d("itemsDropped");
+    const kind: RepairKind | undefined = d("failed") > 0 ? "failed" : d("salvaged") > 0 ? "salvaged" : d("partial") > 0 ? "partial" : (after.repairs ?? 0) > (before.repairs ?? 0) ? "reasked" : d("cleaned") > 0 ? "cleaned" : undefined;
+    return { ...(kind ? { repair: kind } : {}), ...(dropped > 0 ? { itemsDropped: dropped } : {}) };
+}
+
+/** A copy of a client's counters that later calls do not change. */
+const snapshot = (u: Usage): Usage => ({ ...u, ...(u.structured ? { structured: { ...u.structured } } : {}) });
 
 /** The stop record's cap for the server key's monthly money limit (amounts in cents). */
 export const SPEND_CAP = "server-spend";
@@ -95,7 +110,7 @@ export class JobMeter {
         if (inner.modelName === "unavailable") return inner;
         this.client = inner;
         this.modelName = inner.modelName;
-        this.seen = { ...inner.usage };
+        this.seen = snapshot(inner.usage);
         // eslint-disable-next-line @typescript-eslint/no-this-alias
         const meter = this;
         let wrappedModel: LanguageModel | undefined;
@@ -210,8 +225,9 @@ export class JobMeter {
             const estimated = r.ok && r.estimate && delta.inputTokens + delta.outputTokens === 0 && !overlapped;
             const inputTokens = estimated ? (r.incoming ?? 0) : delta.inputTokens;
             const outputTokens = estimated ? (r.outputEstimate ?? 0) : delta.outputTokens;
-            this.seen = { ...this.client!.usage };
-            this.record(purpose, { calls: r.count ? 1 : 0, failedCalls: r.ok ? 0 : 1, inputTokens, outputTokens, images: r.images, estimatedCalls: estimated ? 1 : 0, ...cacheOf(delta) });
+            const repair = repairOf(this.seen, this.client!.usage);
+            this.seen = snapshot(this.client!.usage);
+            this.record(purpose, { calls: r.count ? 1 : 0, failedCalls: r.ok ? 0 : 1, inputTokens, outputTokens, images: r.images, estimatedCalls: estimated ? 1 : 0, ...cacheOf(delta), ...repair });
             this.callsSinceRefresh++;
             // A cap can be reached by this very call: say so now rather than at the next one.
             const d = decideBudget(this.used, this.caps, { warnPercent: this.warnPercent });
@@ -237,11 +253,11 @@ export class JobMeter {
         if (!this.client) return;
         const d = this.delta();
         if (d.inputTokens + d.outputTokens === 0) return;
-        this.seen = { ...this.client.usage };
+        this.seen = snapshot(this.client.usage);
         this.record(purpose, { calls: 0, failedCalls: 0, inputTokens: d.inputTokens, outputTokens: d.outputTokens, images: 0, estimatedCalls: 0, ...cacheOf(d) });
     }
 
-    private record(purpose: LlmPurpose, c: { calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number }): void {
+    private record(purpose: LlmPurpose, c: { calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number; repair?: RepairKind; itemsDropped?: number }): void {
         // What the limits count: prompt-cache reads and writes at their weight (usage.ts `budgetTokens`); input + output without caching.
         const tokens = budgetTokens(c);
         // In memory first: the totals stay right even if the store write fails.

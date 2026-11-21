@@ -11,11 +11,13 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, Output, type LanguageModel, type ModelMessage } from "ai";
+import { generateText, jsonSchema, NoObjectGeneratedError, Output, zodSchema, type JSONSchema7, type LanguageModel, type ModelMessage } from "ai";
 import type { z } from "zod";
 import type { Config } from "../../config.js";
 import type { EngineEvent } from "../context.js";
 import { classifyLlmError, LlmCallError, scrubDetail } from "./errors.js";
+import { redactText } from "../../shared/redact-text.js";
+import { candidates, tolerate } from "./json-tolerance.js";
 import { isResilientModel, ResilientModel, type ChainEntry, type ModelV3, type OwnKeyHandling, type ResiliencePolicy, type ResilientOptions } from "./resilience.js";
 import type { LlmPurpose } from "./usage.js";
 import type { ResponseCacheCall } from "./response-cache-calls.js";
@@ -64,6 +66,36 @@ export interface Usage {
     cacheWriteTokens?: number;
     /** Structured answers that were not in the requested form at first and needed the one repair re-ask. */
     repairs?: number;
+    /** How unusable structured answers were handled without a re-ask, and what was still lost (json-tolerance.ts); missing = none yet. */
+    structured?: StructuredCounts;
+}
+
+/**
+ * Per client (one job): answers made usable by removing wrapping (`cleaned`), by closing a cut-off list (`salvaged`), by dropping bad items
+ * (`partial`), the items so dropped, calls that failed even after the re-ask (`failed`), and calls a caller split in smaller ones (`split`).
+ */
+export interface StructuredCounts {
+    cleaned: number;
+    salvaged: number;
+    partial: number;
+    itemsDropped: number;
+    failed: number;
+    split: number;
+}
+
+/** Adds to a client's structured-answer counts. */
+export function countStructured(usage: Usage, kind: keyof StructuredCounts, n = 1): void {
+    const s = (usage.structured ??= { cleaned: 0, salvaged: 0, partial: 0, itemsDropped: 0, failed: 0, split: 0 });
+    s[kind] += n;
+}
+
+/**
+ * A structured answer that is a list of independent items (`key`, a top-level array of the schema): an answer the schema refuses keeps its
+ * valid items and drops the others, which are counted and told to `onDropped`. Never for objects whose items refer to each other.
+ */
+export interface StructuredItems {
+    key: string;
+    onDropped?: (count: number) => void;
 }
 
 export interface LlmClient {
@@ -84,6 +116,8 @@ export interface LlmClient {
         maxOutputTokens?: number;
         /** What the call is for; only used to label AI usage (see usage.ts). Never changes what is sent to the model. */
         purpose?: LlmPurpose;
+        /** The answer is a list of independent items: keep the valid ones of an otherwise refused answer (see `StructuredItems`). */
+        items?: StructuredItems;
         /**
          * The call may be answered from the platform's AI response cache (response-cache-calls.ts says which calls may): the same question
          * asked in the same project within the cache's time gets the stored answer. Never changes what is sent to the model.
@@ -347,9 +381,49 @@ export function createLlmClient(cfg: Config, opts: CreateClientOptions = {}): Ll
     return llmClientFromModel(model, modelName);
 }
 
-/** The note added to a prompt when an answer did not match the requested format: the one repair re-ask. */
-export function repairNote(problem: string): string {
-    return `Your previous answer could not be used: ${problem}. Answer again with only the JSON object in the requested format, nothing else.`;
+/** The note added to a prompt when an answer did not match the requested format: the one repair re-ask (a cut-off answer is asked to be shorter). */
+export function repairNote(problem: string, cutOff = false): string {
+    const shorter = cutOff ? " Give a shorter answer: at most half as many items, with short texts." : "";
+    return `Your previous answer could not be used: ${problem}. Answer again with only the JSON object in the requested format, nothing else.${shorter}`;
+}
+
+/** Any JSON value, as a schema the providers accept (R-g): a key or item of an "any" object or list is a plain value. */
+const JSON_SCALAR: JSONSchema7 = { anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }, { type: "null" }] };
+const JSON_VALUE: JSONSchema7 = { anyOf: [...JSON_SCALAR.anyOf!, { type: "object", additionalProperties: JSON_SCALAR }, { type: "array", items: JSON_SCALAR }] };
+/** Keys that make a subschema say something about the value; a subschema with none of them (`{}`, from z.unknown()) accepts anything. */
+const CONSTRAINING = ["type", "anyOf", "oneOf", "allOf", "enum", "const", "$ref", "not", "properties", "items"];
+
+/**
+ * The JSON Schema as sent to the provider (task R, R-g): no `{}` (Anthropic refuses an empty schema; it is sent as the JSON value types)
+ * and no `propertyNames` (some providers refuse it; JSON keys are strings anyway). Request side only: the answer is still validated by the
+ * zod schema itself, so nothing more is accepted. Returns a new object.
+ */
+export function providerJsonSchema(node: JSONSchema7 | boolean): JSONSchema7 | boolean {
+    if (node === false) return false;
+    if (node === true) return JSON_VALUE;
+    const out: Record<string, unknown> = { ...node };
+    delete out.propertyNames;
+    if (!CONSTRAINING.some((k) => k in out)) Object.assign(out, JSON_VALUE);
+    const each = (v: unknown) => (Array.isArray(v) ? v.map((x) => providerJsonSchema(x)) : providerJsonSchema(v as JSONSchema7 | boolean));
+    const map = (v: unknown) => Object.fromEntries(Object.entries(v as Record<string, JSONSchema7>).map(([k, x]) => [k, providerJsonSchema(x)]));
+    for (const k of ["items", "anyOf", "oneOf", "allOf", "not"]) if (out[k] !== undefined && out[k] !== JSON_VALUE.anyOf) out[k] = each(out[k]);
+    if (out.additionalProperties !== undefined && typeof out.additionalProperties === "object") out.additionalProperties = providerJsonSchema(out.additionalProperties as JSONSchema7);
+    for (const k of ["properties", "definitions", "$defs"]) if (out[k]) out[k] = map(out[k]);
+    return out as JSONSchema7;
+}
+
+/** The schema handed to the SDK: the zod schema's own JSON Schema made provider-safe (`providerJsonSchema`), validated by the zod schema. */
+export function requestSchema(schema: z.ZodTypeAny) {
+    const own = zodSchema(schema);
+    return jsonSchema(async () => providerJsonSchema(await own.jsonSchema) as JSONSchema7, { validate: own.validate });
+}
+
+/** The text of an unusable structured answer and whether it was cut off (the output limit, or JSON that never closes). */
+function badAnswer(err: unknown): { text?: string; finish?: string; cutOff: boolean } {
+    if (!NoObjectGeneratedError.isInstance(err)) return { cutOff: false };
+    const f = err.finishReason as unknown;
+    const finish = typeof f === "string" ? f : (f as { unified?: string } | undefined)?.unified;
+    return { text: err.text, finish, cutOff: finish === "length" || (!!err.text && candidates(err.text).some((c) => c.truncated)) };
 }
 
 /** What was wrong with an unusable structured answer, in one short line for the re-ask. */
@@ -399,30 +473,59 @@ export function llmClientFromModel(model: LanguageModel, modelName: string): Llm
     const resilient = isResilientModel(model);
     const retry = <T>(fn: () => Promise<T>) => (resilient ? fn() : withRetry(fn));
     const maxRetries = resilient ? 0 : LLM_MAX_RETRIES;
+    let sink: ((e: EngineEvent) => void) | undefined;
 
     /**
-     * Structured output with one repair re-ask: an answer that is not valid JSON or does not match the schema is asked for once more,
-     * with what was wrong; a second unusable answer fails plainly. The tokens of the unusable answer are counted too.
+     * Structured output, made robust (task R): an answer that is not valid JSON or does not match the schema is first read with
+     * json-tolerance.ts (wrapping removed; with `items`, a cut-off list closed and bad items dropped), and used only when the same schema
+     * passes. Otherwise it is asked for once more, with what was wrong (shorter, when it was cut off); a second unusable answer fails
+     * plainly. The tokens of the unusable answer are counted too.
      */
-    async function structured<R extends { output: unknown; usage: { inputTokens?: number; outputTokens?: number } }>(call: (note?: string) => Promise<R>): Promise<R> {
-        const once = async (note?: string): Promise<R> => {
+    async function structured(schema: z.ZodTypeAny, items: StructuredItems | undefined, purpose: LlmPurpose | undefined, call: (note?: string) => Promise<{ output: unknown; usage: { inputTokens?: number; outputTokens?: number } }>): Promise<unknown> {
+        const once = async (note?: string): Promise<unknown> => {
             const res = await call(note);
             track(res.usage);
             if (res.output === undefined || res.output === null) throw new LlmCallError({ cls: "bad_output", detail: "the answer was empty" }, { modelName });
-            return res;
+            return res.output;
+        };
+        /** The tolerated value of an unusable answer, counted and told to the job (R-f); undefined when nothing of it can be used. */
+        const usable = (err: unknown, last: boolean): { value: unknown } | undefined => {
+            track((err as { usage?: { inputTokens?: number; outputTokens?: number } }).usage);
+            const { text, finish } = badAnswer(err);
+            const t = text ? tolerate(text, schema, items?.key) : undefined;
+            const outcome = t ? t.kind : last ? "failed" : "reasked";
+            // What the answer was, so a failure's cause can be told later: how it ended, how long it was, and its start with secrets masked.
+            sink?.({
+                stage: "orchestration",
+                kind: "ai_answer_unusable",
+                level: t ? "info" : "warn",
+                message: `An AI answer${purpose ? ` (${purpose})` : ""} was not in the requested form: ${t ? `${t.kind}${t.dropped ? `, ${t.dropped} item(s) dropped` : ""}` : last ? "it failed after the re-ask" : "it is asked again"}.`,
+                data: { purpose: purpose ?? "other", outcome, finishReason: finish ?? "unknown", length: text?.length ?? 0, head: text ? scrubDetail(redactText(text.slice(0, 4000)), 200) : "", ...(t?.dropped ? { itemsDropped: t.dropped } : {}) },
+            });
+            if (!t) return undefined;
+            countStructured(usage, t.kind);
+            if (t.dropped) {
+                countStructured(usage, "itemsDropped", t.dropped);
+                items?.onDropped?.(t.dropped);
+            }
+            return { value: t.value };
         };
         try {
             return await once();
         } catch (err) {
             if (!isBadOutput(err)) throw err;
-            track((err as { usage?: { inputTokens?: number; outputTokens?: number } }).usage);
+            const fixed = usable(err, false);
+            if (fixed) return fixed.value;
             usage.repairs = (usage.repairs ?? 0) + 1;
-            const problem = describeBadOutput(err);
+            const cutOff = badAnswer(err).cutOff;
+            const problem = cutOff ? "it was cut off before the end (too long)" : describeBadOutput(err);
             try {
-                return await once(problem);
+                return await once(repairNote(problem, cutOff));
             } catch (err2) {
                 if (!isBadOutput(err2)) throw err2;
-                track((err2 as { usage?: { inputTokens?: number; outputTokens?: number } }).usage);
+                const fixed2 = usable(err2, true);
+                if (fixed2) return fixed2.value;
+                countStructured(usage, "failed");
                 throw new LlmCallError({ cls: "bad_output", detail: describeBadOutput(err2) }, { modelName, cause: err2 });
             }
         }
@@ -432,21 +535,21 @@ export function llmClientFromModel(model: LanguageModel, modelName: string): Llm
         modelName,
         model,
         usage,
-        async object({ system, prompt, cachePrefix, schema, maxOutputTokens }) {
-            const res = await structured((note) =>
+        async object({ system, prompt, cachePrefix, schema, maxOutputTokens, items, purpose }) {
+            const output = await structured(schema, items, purpose, (note) =>
                 retry(() =>
                     generateText({
                         model,
                         system,
-                        ...promptWithPrefix(note ? `${prompt}\n\n${repairNote(note)}` : prompt, cachePrefix),
+                        ...promptWithPrefix(note ? `${prompt}\n\n${note}` : prompt, cachePrefix),
                         maxOutputTokens,
                         providerOptions: PROVIDER_OPTIONS,
                         maxRetries,
-                        output: Output.object({ schema }),
+                        output: Output.object({ schema: requestSchema(schema) }),
                     }),
                 ),
             );
-            return res.output as z.infer<typeof schema>;
+            return output as z.infer<typeof schema>;
         },
         async text({ system, prompt, maxOutputTokens }) {
             const res = await retry(() => generateText({ model, system, prompt, maxOutputTokens, providerOptions: PROVIDER_OPTIONS, maxRetries }));
@@ -455,19 +558,19 @@ export function llmClientFromModel(model: LanguageModel, modelName: string): Llm
             if (res.finishReason === "content-filter" && !res.text) throw new LlmCallError({ cls: "refused" }, { modelName });
             return res.text;
         },
-        async imageObject({ system, prompt, images, schema, temperature, maxOutputTokens }) {
+        async imageObject({ system, prompt, images, schema, temperature, maxOutputTokens, purpose }) {
             const messages = (note?: string) => [
                 {
                     role: "user" as const,
                     content: [
                         { type: "text" as const, text: prompt },
                         ...images.map((i) => ({ type: "image" as const, image: i.data, mediaType: i.mediaType })),
-                        ...(note ? [{ type: "text" as const, text: repairNote(note) }] : []),
+                        ...(note ? [{ type: "text" as const, text: note }] : []),
                     ],
                 },
             ];
             const call = (withTemperature: boolean) =>
-                structured((note) =>
+                structured(schema, undefined, purpose ?? "vision", (note) =>
                     retry(() =>
                         generateText({
                             model,
@@ -477,22 +580,26 @@ export function llmClientFromModel(model: LanguageModel, modelName: string): Llm
                             ...(withTemperature && temperature !== undefined ? { temperature } : {}),
                             providerOptions: PROVIDER_OPTIONS,
                             maxRetries,
-                            output: Output.object({ schema }),
+                            output: Output.object({ schema: requestSchema(schema) }),
                         }),
                     ),
                 );
-            let res;
+            let output;
             try {
-                res = await call(true);
+                output = await call(true);
             } catch (err) {
                 // Some newer models refuse a temperature setting: "where possible" means one retry without it.
                 if (temperature === undefined || !/temperature/i.test(err instanceof Error ? err.message : String(err))) throw err;
-                res = await call(false);
+                output = await call(false);
             }
-            return res.output as z.infer<typeof schema>;
+            return output as z.infer<typeof schema>;
         },
     };
-    if (resilient) client.setEventSink = (fn) => model.setEventSink(fn);
+    if (resilient)
+        client.setEventSink = (fn) => {
+            sink = fn;
+            model.setEventSink(fn);
+        };
     return client;
 }
 
