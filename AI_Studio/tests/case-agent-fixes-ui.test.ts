@@ -7,6 +7,8 @@
  * - FX11: Settings, General says what the Test Case Generation Agent does (explores or reads requirements, builds a tree, writes test
  *   cases) instead of "which checks run"; an Accessibility project keeps the checks wording;
  * - FX14: all of the above read the server's `caseAgent` (GET /api/projects/:id/testing-agents).
+ * - R16.2 (C8): a TCG project with no address and no requirements says "Add the application's address or a requirements document first."
+ *   and posts nothing; its footer does not name the OpenAPI document (F3 review L5).
  * Axe in light and dark, and a phone width (390 px) with no sideways scrolling.
  *
  * Requires web/dist: node scripts/with-lock.mjs build,browser -- sh -c "npx vite build web && npx vitest run tests/case-agent-fixes-ui.test.ts"
@@ -22,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { LEVEL_SETTINGS } from "../src/engine/levels.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 
@@ -36,14 +39,15 @@ let server: Awaited<ReturnType<typeof buildServer>>;
 let dataDir: string;
 let browser: Browser;
 let page: Page;
+let stopBeat: (() => void) | undefined;
 const consoleErrors: string[] = [];
-const ids = { tcg: "", tcgApi: "", apiOnly: "", a11y: "" };
+const ids = { tcg: "", tcgApi: "", apiOnly: "", a11y: "", noInput: "" };
 
-async function agentProject(name: string, agents: string[]): Promise<string> {
+async function agentProject(name: string, agents: string[], address = true): Promise<string> {
     const made = await server.inject({ method: "POST", url: "/api/projects", payload: { name, platforms: ["web"], testingModes: ["agent"], agents } });
     expect(made.statusCode, made.body).toBe(201);
     const id = made.json().id as string;
-    platform.repo.createApplication(id, SITE, { ...DEFAULT_JOB_OPTIONS });
+    if (address) platform.repo.createApplication(id, SITE, { ...DEFAULT_JOB_OPTIONS });
     return id;
 }
 
@@ -52,12 +56,15 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-case-agent-fixes-ui-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "case-agent-fixes-ui-secret-0123456789", HOST: "127.0.0.1", PORT: String(PORT), WORKER_EMBEDDED: "false", SCHEDULER_ENABLED: "false" }));
+    // A worker elsewhere says it is alive, so the Explore button is not switched off (nothing runs a job here).
+    stopBeat = startHeartbeat(platform.db);
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     ids.tcg = await agentProject("Case shop", ["test-generation"]);
     ids.tcgApi = await agentProject("Case shop with its API", ["test-generation", "api"]);
     ids.apiOnly = await agentProject("API shop", ["api"]);
     ids.a11y = await agentProject("Accessible shop", ["accessibility"]);
+    ids.noInput = await agentProject("Case shop with nothing yet", ["test-generation"], false);
 
     browser = await chromium.launch();
     page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
@@ -69,6 +76,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
     await browser?.close();
+    stopBeat?.();
     await server?.close();
     platform?.db.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -110,6 +118,23 @@ describe("the explore form (FX12, FX13)", () => {
         await shot("fx12-explore-tcg-api.png");
         await axeBoth();
         await onPhone("fx12-explore-tcg-api-phone.png");
+    });
+
+    it("R16.2: no address and no requirements: the form says what to add and posts nothing; no OpenAPI mention (L5)", async () => {
+        await page.goto(`${BASE}/#/new?project=${ids.noInput}`);
+        await pwExpect(page.getByTestId("inputs-note")).toBeVisible();
+        expect(await page.getByTestId("inputs-note").innerText()).not.toMatch(/OpenAPI/);
+        const posts: string[] = [];
+        page.on("request", (r) => {
+            if (r.method() === "POST" && r.url().includes("/test-generation")) posts.push(r.url());
+        });
+        await page.getByRole("button", { name: "Explore again" }).click();
+        await pwExpect(page.getByText("Add the application's address or a requirements document first.")).toBeVisible();
+        await page.waitForTimeout(300);
+        expect(posts).toEqual([]);
+        expect(platform.repo.listJobs(ids.noInput)).toEqual([]);
+        await shot("r16-2-no-input.png");
+        await axeBoth();
     });
 
     it("a project of the API agent alone still asks for it, and counts tests", async () => {

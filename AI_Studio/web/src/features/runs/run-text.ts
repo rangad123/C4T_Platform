@@ -242,4 +242,4 @@ export function caseStageText(stage: CaseStage, state: "pending" | "running" | "
 }
 
 /** Asked before such a run is stopped: what it found so far stays in the tree. */
-export const CASE_STOP_QUESTION = { title: "Stop exploring?", body: "The pages and test cases this run found so far are kept in the project's tree. You can explore again at any time, and the next run adds to it." };
+export const CASE_STOP_QUESTION = { title: "Stop exploring?", body: "Pages found so far are kept. Test cases are kept once they have been written. You can explore again at any time, and the next run adds to it." };

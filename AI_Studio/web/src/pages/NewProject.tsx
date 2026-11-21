@@ -69,6 +69,9 @@ export function NewProject({ projectId }: { projectId: string }) {
     const aiReady = aiReadyOf(myAi);
     const aiMissing = aiReady === false;
     const agents = inputs.data?.applies && inputs.data.agents ? inputs.data.agents : null;
+    // A Test Case Generation project may work from its active requirements alone, with no address (SPEC R16).
+    const activeRequirements = useFetch<{ requirements: unknown[] }>(caseAgent ? `/projects/${projectId}/requirements?status=active` : null);
+    const fromRequirements = caseAgent && !url.trim() && (activeRequirements.data?.requirements.length ?? 0) > 0;
 
     function submit(e: React.FormEvent) {
         e.preventDefault();
@@ -80,8 +83,13 @@ export function NewProject({ projectId }: { projectId: string }) {
         setError(null);
         if (runnersOnly && blocked) return;
         if (missing.length) return setAskOpen(true);
-        const n = normalizeUrl(url);
-        if (!n.url) return setUrlError(n.error!);
+        if (caseAgent && !url.trim() && !fromRequirements) return setUrlError(NO_ADDRESS_OR_REQUIREMENTS);
+        let address: string | undefined;
+        if (!fromRequirements) {
+            const n = normalizeUrl(url);
+            if (!n.url) return setUrlError(n.error!);
+            address = n.url;
+        }
         setUrlError("");
         setBusy(true);
         try {
@@ -90,7 +98,7 @@ export function NewProject({ projectId }: { projectId: string }) {
             // sign-in, API access, OpenAPI document and requirements are the ones kept on the Requirements tab.
             await api(`/projects/${id}/test-generation`, {
                 method: "POST",
-                body: { url: n.url, plan: true, ...(aiMissing ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration ? { fullExploration: true } : {}), ...(screenReview !== null && !screenReviewOff ? { visionChecks: screenReview } : {}) },
+                body: { url: address, plan: true, ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration ? { fullExploration: true } : {}), ...(screenReview !== null && !screenReviewOff ? { visionChecks: screenReview } : {}) },
             });
             go(routes.project(id));
         } catch (err) {
@@ -107,7 +115,7 @@ export function NewProject({ projectId }: { projectId: string }) {
                         Application URL
                     </label>
                     <p className="hint" id="url-hint">
-                        {caseAgent ? `Enter the address of the website. ${CASE_AGENT_HINT}` : "Enter the address of the website you want to test. We’ll explore it and show you a plan. Nothing is created until you say so."}
+                        {caseAgent ? `Enter the address of the website, or leave it empty to write the test cases from the project’s requirements. ${CASE_AGENT_HINT}` : "Enter the address of the website you want to test. We’ll explore it and show you a plan. Nothing is created until you say so."}
                     </p>
                     <div className="input-wrap">
                         <Globe size={18} className="lead" aria-hidden />
@@ -147,7 +155,7 @@ export function NewProject({ projectId }: { projectId: string }) {
 
                 {aiMissing && (
                     <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.aiKeys}>Open AI keys</LinkButton>}>
-                        {aiProblemOf(myAi)} Exploring the web application needs it, so only the application’s API is explored here.{caseAgent ? "" : " API tests are created without the AI."}
+                        {aiProblemOf(myAi)} {caseAgent ? "Writing test cases needs it." : "Exploring the web application needs it, so only the application’s API is explored here. API tests are created without the AI."}
                     </Callout>
                 )}
                 {runnersOnly ? (
@@ -175,7 +183,15 @@ export function NewProject({ projectId }: { projectId: string }) {
             </div>
             <p className="t-meta" data-testid="inputs-note">
                 <ListChecks size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 6 }} />
-                The sign-in and API access the agents use are kept in <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>; the OpenAPI document and the requirements on the project’s <a href={routes.requirements(projectId)}>Requirements</a> tab. Which agents test it is set in <a href={routes.projectSettings(projectId)}>Settings → General</a>.
+                {caseAgent ? (
+                    <>
+                        The sign-in the agent uses is kept in <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>; the requirements on the project’s <a href={routes.requirements(projectId)}>Requirements</a> tab.
+                    </>
+                ) : (
+                    <>
+                        The sign-in and API access the agents use are kept in <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>; the OpenAPI document and the requirements on the project’s <a href={routes.requirements(projectId)}>Requirements</a> tab. Which agents test it is set in <a href={routes.projectSettings(projectId)}>Settings → General</a>.
+                    </>
+                )}
             </p>
             {askOpen && <MissingInputsDialog projectId={projectId} missing={missing} onClose={() => setAskOpen(false)} />}
         </form>
@@ -200,6 +216,8 @@ export function NewProject({ projectId }: { projectId: string }) {
 /** What an exploration of a Test Case Generation project does (SPEC P4.3): no checks, nothing run. */
 const CASE_AGENT_HINT = "We’ll explore the application, add to its tree and write test cases. Nothing is run.";
 const CASE_AGENT_NAME = "Test Case Generation Agent";
+/** SPEC R16.2, as the server says it (case-agent.ts NO_ADDRESS_OR_REQUIREMENTS). */
+const NO_ADDRESS_OR_REQUIREMENTS = "Add the application's address or a requirements document first.";
 
 /** Who writes the test cases; other agents chosen with it wait for their own screens (owner decision Q6, 2026-11-20). */
 function caseAgentSentence(names: string[]): string {

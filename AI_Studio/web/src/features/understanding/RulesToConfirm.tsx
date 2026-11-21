@@ -40,7 +40,7 @@ export function RulesToConfirm({ projectId }: { projectId: string }) {
                 </h2>
                 {!rules.error && <span className="t-meta">{shown.length === 0 ? "Nothing waiting" : plural(shown.length, "rule")}</span>}
             </div>
-            <p className="t-secondary">What we found the application should do. Tests treat a rule as expected behaviour once a source states it or a person confirms it.</p>
+            <p className="t-secondary">What we found the application should do. A rule counts as expected behaviour once a source states it or a person confirms it.</p>
             {rules.error ? (
                 <Callout tone="warning" title="The rules could not be loaded" actions={<Button size="sm" onClick={() => void rules.reload()}>Try again</Button>}>
                     {describeApiError(rules.error)}

@@ -47,7 +47,7 @@ import { loadTargetProblem } from "./load-guard.js";
 import { isLoadSpec, LOAD_MAX_ENDPOINTS, LOAD_MAX_REQUESTS } from "../engine/performance/load.js";
 import { registerFeatureRoutes } from "./routes/index.js";
 import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
-import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, refuseTestsInCaseAgentProject } from "./case-agent.js";
+import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, isCaseAgentProject, NO_ADDRESS_OR_REQUIREMENTS, refuseTestsInCaseAgentProject } from "./case-agent.js";
 import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
 import { adoptSignIn, assertMaySaveSignIn } from "./routes/project-sign-in.js";
 import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
@@ -443,7 +443,16 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (wantsPhone) assertPhoneExploration(id, latestMobile(id));
         const phoneOnly = wantsPhone && body0.targets!.every((t) => t === "mobile");
         const phoneUrl = phoneOnly ? `android-app://${latestMobile(id)!.appPackage}` : undefined;
-        if (!body0.url && !phoneUrl) throw new HttpError(400, "Give the address of the website or API to test");
+        if (!body0.url && !phoneUrl) {
+            if (!(await isCaseAgentProject(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");
+            // A Test Case Generation project without an address writes its test cases from its active requirements (SPEC R16).
+            if (!(await projectRequirementsDocument(p, id))) throw new HttpError(400, NO_ADDRESS_OR_REQUIREMENTS);
+            await assertNoActiveJob(id);
+            // The project's latest application is kept as it is (the form fills its address in next time); a project without one gets an empty one.
+            const appId = (repo.getLatestApplicationPublic(id)?.id as string | undefined) ?? repo.createApplication(id, "", {});
+            const job = await repo.createJob(id, appId, await caseAgentOptions(repo, id, { ...DEFAULT_JOB_OPTIONS, requirementsOnly: true }));
+            return reply.code(202).send({ jobId: job.id, status: job.status, plan: true });
+        }
         // What the request leaves out comes from the inputs saved on the Requirements tab (routes/agent-inputs.ts), on the same site only;
         // saved credentials never go to an API address or OpenAPI document nobody saved them for (409). A sign-in the request brings
         // becomes the project's saved sign-in below (Settings wins); nothing else saved changes.
