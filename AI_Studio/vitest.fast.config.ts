@@ -297,6 +297,7 @@ export default defineConfig({
             "tests/findings-migration-71.test.ts",
             "tests/finding-lifecycle-store.test.ts",
             "tests/findings-api.test.ts",
+            "tests/bench-verify-score-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
