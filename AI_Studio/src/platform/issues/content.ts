@@ -205,9 +205,8 @@ export interface FindingReportInput {
 
 /**
  * Text that leaves AI Studio (an issue in another company's tracker, a shared report) is masked harder than stored text: the shared
- * pattern filter (redactText), after URL-decoding so an encoded value is seen, then card numbers, international phone numbers, street
- * addresses, live/test API keys and token-like words (10+ characters mixing upper case, lower case and digits, no hyphen).
- * shortcut: these patterns repeat what lane E2 adds to shared/redact-text.ts; once it does, keep only the decode and redactText.
+ * pattern filter (redactText: cards, phones, addresses, API keys among them), after URL-decoding so an encoded value is seen, then
+ * token-like words (10+ characters mixing upper case, lower case and digits, no hyphen), which stored text keeps readable.
  */
 export function maskForTracker(s: string): string {
     const decoded = s.replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => {
@@ -218,10 +217,6 @@ export function maskForTracker(s: string): string {
         }
     });
     return redactText(decoded, 4000)
-        .replace(/\b\d{1,5}\s+(?:[A-Z][a-z]+\s+){1,3}(?:Street|St|Road|Rd|Lane|Ln|Avenue|Ave|Drive|Dr|Way|Close|Court|Ct|Boulevard|Blvd|Place|Pl|Terrace|Crescent)\b\.?(?:,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)?/g, "[address hidden]")
-        .replace(/(?<![\w.])(?:\d[ -]?){12,18}\d(?![\w.])/g, "[number hidden]")
-        .replace(/\+\d[\d ()-]{7,}\d/g, "[phone hidden]")
-        .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{4,}\b/g, HIDDEN)
         .replace(/(?<![\w-])(?=[\w!@#$%^&*+=~]*[A-Z])(?=[\w!@#$%^&*+=~]*[a-z])(?=[\w!@#$%^&*+=~]*\d)[\w!@#$%^&*+=~]{10,}(?![\w-])/g, HIDDEN);
 }
 

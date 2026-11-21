@@ -155,11 +155,11 @@ describe("the issue draft passes the canary grep", () => {
             const q = `/api/profile?${k}=${encodeURIComponent(CH.url[k])}`;
             const v = view({ observed: `Redirected to ${q}`, attempts: [1, 2].map(() => ({ outcome: "failed" as const, page: q, requests: [{ method: "GET", path: q, status: 200, own: true }] })) });
             const draft = findingIssueDraft(buildFindingReport({ members: [v], environment: ENV }));
-            planted += leaks(JSON.stringify(v)).length;
+            planted += leaks(q).length;
             expect(leaks([draft.title, toMarkdown(draft.blocks), JSON.stringify(toAdf(draft.blocks))].join("\n")), k).toEqual([]);
         }
-        // The finding view (shared/redact-text.ts) still keeps several of them; the report must not.
-        expect(planted).toBeGreaterThanOrEqual(3);
+        // Every kind was really planted (the check is not empty). Since E2 the finding view's shared redaction hides them as well.
+        expect(planted).toBeGreaterThanOrEqual(Object.keys(CH.url).length);
     });
 });
 
