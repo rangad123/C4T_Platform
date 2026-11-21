@@ -49,6 +49,14 @@ export interface CaseOutcomeCase {
     requirement: string;
 }
 
+/** `GET /api/projects/:id/outcome?counts=1`: what a Projects row shows, without the test cases themselves (F3 L6). */
+export interface CaseOutcomeCounts {
+    caseAgent: boolean;
+    runs: CaseOutcomeRun[];
+    /** pages: tree nodes. */
+    counts: { cases: number; pages: number };
+}
+
 export interface CaseOutcome {
     /** False: not a Test Case Generation project; the web keeps today's screens. */
     caseAgent: boolean;

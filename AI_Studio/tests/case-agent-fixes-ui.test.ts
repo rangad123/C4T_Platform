@@ -104,6 +104,9 @@ describe("the explore form (FX12, FX13)", () => {
         await page.waitForTimeout(500);
         await pwExpect(dialog()).toHaveCount(0);
         expect(await level.innerText()).not.toMatch(/\btests from the AI/);
+        // F3 M2: P4.1 bans the check family, and the agent turns screen review off.
+        expect(await level.innerText()).not.toMatch(/screen review/i);
+        await pwExpect(level).toContainText("Up to 120 pages in the tree, 5 clicks deep, about 100 test cases from the AI. Uses more AI and takes longer.");
         await shot("fx12-explore-tcg-api.png");
         await axeBoth();
         await onPhone("fx12-explore-tcg-api-phone.png");
@@ -126,6 +129,7 @@ describe("Settings, General (FX11, FX13)", () => {
         await pwExpect(panel.getByTestId("agent-picker")).toContainText("The Test Case Generation Agent explores the application or reads its requirements, builds a tree and writes test cases.");
         expect(await panel.getByTestId("project-agents-about").innerText()).not.toMatch(/checks/);
         await pwExpect(page.getByTestId("explore-level-setting")).toContainText(`about ${N} test cases from the AI.`);
+        expect(await page.getByTestId("explore-level-setting").innerText()).not.toMatch(/screen review/i);
         await panel.scrollIntoViewIfNeeded();
         await shot("fx11-settings-tcg.png");
         await axeBoth();

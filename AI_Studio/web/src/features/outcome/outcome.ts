@@ -3,9 +3,9 @@
  * (PLAN.md "Outcome contract", src/platform/case-outcome-types.ts) and the pure helpers the report is drawn from. One page count is used
  * everywhere: the number of tree nodes. Addresses that failed to load are not pages; they are one number, `notOpened`.
  */
-import type { CaseOutcome, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeTreeNode, CaseOutcomeType } from "../../../../src/platform/case-outcome-types.js";
+import type { CaseOutcome, CaseOutcomeCounts, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeTreeNode, CaseOutcomeType } from "../../../../src/platform/case-outcome-types.js";
 
-export type { CaseOutcome, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeTreeNode, CaseOutcomeType };
+export type { CaseOutcome, CaseOutcomeCounts, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeTreeNode, CaseOutcomeType };
 
 /** One node of the nested tree: a page, with the pages first reached from it. */
 export interface TreeNode {

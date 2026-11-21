@@ -139,8 +139,8 @@ export function ProjectOverview({ id }: { id: string }) {
     if (project.error || !p) return <ErrorState error={friendlyError(project.error?.message ?? "Project not found")} onRetry={project.reload} />;
     // Not `outcome.loading` alone: on the render the project arrives the outcome has not been asked for yet.
     if (caseAgent === undefined || (caseAgent && !outcome.data && !outcome.error)) return <Loading />;
-    // An outcome that cannot be read (an older server) leaves the agent Dashboard as it was.
-    if (caseAgent && outcome.data) return <CaseAgentDashboard id={id} p={p} outcome={outcome.data} needsSecrets={storage.data?.needsSecrets ?? []} onChanged={project.reload} />;
+    // An outcome that cannot be read shows its sentence and Try again in the outcome's place, never the old agent Dashboard (F3 L4).
+    if (caseAgent) return <CaseAgentDashboard id={id} p={p} outcome={outcome.data} outcomeError={outcome.error?.message} onRetry={() => void outcome.reload()} needsSecrets={storage.data?.needsSecrets ?? []} onChanged={project.reload} />;
 
     // The job answer may not say what it explored; a project whose application is a phone app has phone jobs.
     const job = p.latestJob ? phoneJobOf(p.latestJob, p.application?.url) : p.latestJob;
@@ -341,7 +341,7 @@ export function ProjectOverview({ id }: { id: string }) {
  * still to set up, the run while one runs, and the outcome report with its one download. No pass or fail, no tests to run or open, no
  * plan to confirm, no requirements coverage: the agent writes test cases and stops.
  */
-function CaseAgentDashboard({ id, p, outcome, needsSecrets, onChanged }: { id: string; p: ProjectDetail; outcome: Outcome; needsSecrets: Array<{ label: string }>; onChanged: () => void }) {
+function CaseAgentDashboard({ id, p, outcome, outcomeError, onRetry, needsSecrets, onChanged }: { id: string; p: ProjectDetail; outcome: Outcome | undefined; outcomeError: string | undefined; onRetry: () => void; needsSecrets: Array<{ label: string }>; onChanged: () => void }) {
     const can = useCan();
     const [downloadError, setDownloadError] = useState<string | null>(null);
     const job = p.latestJob ? phoneJobOf(p.latestJob, p.application?.url) : p.latestJob;
@@ -392,16 +392,20 @@ function CaseAgentDashboard({ id, p, outcome, needsSecrets, onChanged }: { id: s
                         {downloadError}
                     </Callout>
                 )}
-                <CaseOutcome
-                    outcome={outcome}
-                    downloadHref={can("ai_studio.reports.export") ? `/api/projects/${id}/outcome/workbook` : null}
-                    onDownload={() => void download()}
-                    emptyActions={
-                        <LinkButton href={routes.newProject({ project: id })} variant="primary" icon={Sparkles}>
-                            Start exploring
-                        </LinkButton>
-                    }
-                />
+                {!outcome ? (
+                    <ErrorState error={{ title: "The test cases could not be loaded", body: outcomeError ?? "" }} onRetry={onRetry} />
+                ) : (
+                    <CaseOutcome
+                        outcome={outcome}
+                        downloadHref={can("ai_studio.reports.export") ? `/api/projects/${id}/outcome/workbook` : null}
+                        onDownload={() => void download()}
+                        emptyActions={
+                            <LinkButton href={routes.newProject({ project: id })} variant="primary" icon={Sparkles}>
+                                Start exploring
+                            </LinkButton>
+                        }
+                    />
+                )}
             </div>
         </>
     );
