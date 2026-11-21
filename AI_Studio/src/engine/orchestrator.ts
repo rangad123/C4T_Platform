@@ -1708,7 +1708,7 @@ export function defectFinding(p: {
         actions: { stepCount: Math.min(p.stepCount, L.stepsMax) },
         expected: { text: expected, source },
         observed: p.outcome.explanation,
-        evidence: { screenshots: (p.independence.screenshots ?? []).slice(0, FINDING_SCREENSHOTS_MAX), requests: problems.filter((l) => !isConsole(l)).slice(0, L.requestsMax), console: problems.filter(isConsole).slice(0, L.consoleMax) },
+        evidence: { screenshots: (p.independence.screenshots ?? []).slice(0, FINDING_SCREENSHOTS_MAX), requests: problems.filter((l) => !isConsole(l)).slice(0, L.requestsMax), console: problems.filter(isConsole).slice(0, L.consoleMax), ...(p.outcome.layers ? { layers: p.outcome.layers } : {}) },
         capture,
         independence: p.independence.independence,
         confidence,

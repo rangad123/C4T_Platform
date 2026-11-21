@@ -57,8 +57,8 @@ export interface Disagreement {
     steps: (source: string) => Step[];
     /** One sentence: which layers disagreed and how. */
     explanation: string;
-    /** How the check failed while authoring (the relation's message, or the shown text). */
-    observed: string;
+    /** How the saved check failed while authoring, given its source (the relation's message, or the shown text). */
+    observed: (source: string) => string;
     layers: LayerSays[];
     /** "METHOD path answered N" lines (the finding's request evidence). */
     requests: string[];
@@ -141,7 +141,7 @@ export function readBackCheck(call: RawCall, got: { status: number; json: unknow
             kind: "readBack",
             steps,
             explanation,
-            observed: r.message,
+            observed: (source) => (checkRelation(expression, { body: got.json, vars }, source) as { message?: string }).message ?? r.message,
             layers: [
                 { layer: "api", observed: `${call.method} ${path} answered ${call.status}` },
                 { layer: "stored data", observed: `GET ${path} answered ${got.status}: ${r.message}` },
@@ -161,11 +161,62 @@ export function errorShown(call: RawCall, shown: string): Disagreement {
         kind: "error",
         steps: (source) => [{ action: "assert", check: "hidden", locator: { by: "text", value: shown, exact: true }, source, description: `"${shown}" is not shown when ${call.method} ${path} fails` }],
         explanation: `The page says "${shown}" while ${call.method} ${path} answered ${call.status}: the page reports success, the API refused or failed.`,
-        observed: `"${shown}" is shown`,
+        observed: () => `"${shown}" is shown`,
         layers: [
             { layer: "page", observed: `shows "${shown}" (a status message)` },
             { layer: "api", observed: `${call.method} ${path} answered ${call.status}` },
         ],
         requests: [answered(call)],
     };
+}
+
+/** A labelled value the page shows (a term and its definition, a row header and its cell, "Label: value"), with where it is. */
+export interface ShownValue {
+    label: string;
+    text: string;
+    locator: { by: "testId" | "css"; value: string };
+}
+
+/** "Discount (SAVE10):" and "discount", "Line total" and "lineTotal" or "line_total": the same name. */
+const nameKey = (s: string) => s.replace(/\([^)]*\)/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * C4b: a number the page shows under a label, against the same-named field of the action's answer (only names that match). Money is
+ * normalised: an amount with cents on the page against a whole number is in cents, and a sign the page shows (a discount as "−$6.28")
+ * may differ. The saved check keeps the answer, remembers the shown text and compares with `number()`; judged here on the real values.
+ */
+export function displayedCheck(call: RawCall, shown: readonly ShownValue[]): Disagreement | undefined {
+    if (call.status < 200 || call.status > 299 || !isObject(call.json)) return undefined;
+    const answer = call.json;
+    const path = pathOnly(call.path);
+    for (const s of shown) {
+        const field = Object.keys(answer).find((k) => FIELD.test(k) && nameKey(k) === nameKey(s.label));
+        const value = field === undefined ? undefined : answer[field];
+        if (field === undefined || typeof value !== "number" || !Number.isFinite(value)) continue;
+        const vars = { [`shown_${field}`]: s.text, [`api_${field}`]: String(value) };
+        // Text without a number ("Free") is not compared.
+        if (!checkRelation(`number($shown_${field}) == number($shown_${field})`, { body: {}, vars }).held) continue;
+        const cents = Number.isInteger(value) && /\d[.,]\d{2}(?!\d)/.test(s.text);
+        const shownNegative = checkRelation(`number($shown_${field}) < 0`, { body: {}, vars }).held;
+        const sign = shownNegative !== value < 0 && value !== 0 ? "-" : "";
+        const expression = cents ? `round(${sign}number($shown_${field}) * 100) == $api_${field}` : `${sign}number($shown_${field}) == $api_${field}`;
+        const r = checkRelation(expression, { body: {}, vars });
+        if (r.held) continue;
+        return {
+            kind: "displayed",
+            steps: (source) => [
+                { action: "wait", ms: 0, until: "response", value: path, extract: { [`api_${field}`]: field }, description: `Keep the answer of ${call.method} ${path}` },
+                { action: "remember", locator: s.locator, name: `shown_${field}`, from: "text", description: `Remember the ${s.label} shown` },
+                { action: "assertResponse", check: "relation", expression, source, description: `The ${s.label} shown is the ${field} of ${call.method} ${path}` },
+            ],
+            explanation: `The page shows ${s.label} "${s.text}", but ${call.method} ${path} answered ${field} ${value}: the page and the API disagree.`,
+            observed: (source) => (checkRelation(expression, { body: {}, vars }, source) as { message?: string }).message ?? r.message,
+            layers: [
+                { layer: "page", observed: `shows ${s.label} "${s.text}"` },
+                { layer: "api", observed: `${call.method} ${path} answered ${call.status} with ${field} ${value}` },
+            ],
+            requests: [answered(call)],
+        };
+    }
+    return undefined;
 }

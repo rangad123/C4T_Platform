@@ -4,7 +4,8 @@
  * API answers, reads back a successful write, and compares. Seeded, it turns the complete test into a defect test whose last step is the
  * check that shows it (and the saved script fails on the seeded shop, passes on the clean one); clean, from a dirty start, it changes
  * nothing. Expected behaviour comes from bench-shop's requirements: 7.3 (saved details are kept), 6.3 (the Orders page lists every
- * order), 7.4 (an over-long address is refused, and the page shows that message instead of "Saved.").
+ * order), 7.4 (an over-long address is refused, and the page shows that message instead of "Saved."), 3.12 (the cart page shows the
+ * same subtotal, discount, shipping and total as the cart in the API).
  */
 import { MockLanguageModelV3 } from "ai/test";
 import type { Browser } from "playwright";
@@ -12,6 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import type { EngineContext } from "../src/engine/context.js";
 import { launchChromium } from "../src/engine/discovery/browser.js";
+import { checkIndependence } from "../src/engine/explore/independence.js";
+import { defectFinding } from "../src/engine/orchestrator.js";
 import { renderScript } from "../src/engine/generators/index.js";
 import { ScenarioSchema, TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import type { AppModel } from "../src/engine/understanding/app-model.js";
@@ -132,6 +135,23 @@ const cases: Case[] = [
         last: { action: "assert", check: "hidden", locator: { by: "text", value: "Saved.", exact: true }, source: "expected:1" },
         layers: ["page", "api"],
     },
+    {
+        seed: "BS-13",
+        req: "3.12",
+        expected: "The cart page shows the same subtotal, discount, shipping charge and total as the cart in the API (requirement 3.12)",
+        calls: () => [
+            ...signIn,
+            { tool: "navigate", input: { url: "/products/p1" } },
+            { tool: "click", input: { target: role("button", "Add to cart") } },
+            { tool: "wait", input: { until: "url", value: "/cart" } },
+            { tool: "fill", input: { target: label("Discount code"), value: "SAVE10" } },
+            { tool: "click", input: { target: role("button", "Apply") } },
+            { tool: "assert", input: { check: "visible", target: role("heading", "Your cart"), source: "expected:1" } },
+            finish,
+        ],
+        last: { action: "assertResponse", check: "relation", expression: "round(number($shown_total) * 100) == $api_total", source: "expected:1" },
+        layers: ["page", "api"],
+    },
 ];
 
 const scenarioOf = (c: Case) =>
@@ -159,6 +179,8 @@ describe("seeded: the layers disagree, and the saved test shows it", () => {
             expect(out.steps.at(-1)).toEqual(expect.objectContaining(c.last));
             expect(out.layers?.map((l) => l.layer)).toEqual(c.layers);
             expect(out.evidence?.some((l) => /^(PUT|POST) \/api\/\S+ answered \d{3}$/.test(l))).toBe(true);
+            // Verdicts are not asked (the double says "no"), and nothing the writer returns holds the password.
+            expect(JSON.stringify(out)).not.toContain(alice.password);
             expect((await script(out, c, seeded)).status).toBe("failed");
             const r = await script(out, c, await shop("none"));
             expect(r.status, r.error).toBe("passed");
@@ -212,5 +234,29 @@ describe("bounds", () => {
         expect(back?.body).toMatch(/password/);
         expect(JSON.stringify(out)).not.toContain(alice.password);
         expect(JSON.stringify(out)).not.toContain(alice.username);
+    }, 240_000);
+});
+
+describe("the finding a read-back makes", () => {
+    it("BS-06: two fresh replays on newly registered accounts fail at the relation the same way: independent, confidence high, with the layers", async () => {
+        const c = cases[0]!;
+        const base = await shop("BS-06");
+        const out = await author(c, base);
+        expect(out.status).toBe("defect");
+        if (out.status !== "defect") return;
+        let n = 0;
+        const prepare = async () => {
+            const username = `fresh${Date.now()}${n++}@example.test`;
+            const r = await fetch(`${base}/api/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Fresh", email: username, password: alice.password }) });
+            expect(r.status).toBe(201);
+            return { credentials: { username, password: alice.password }, clean: true, note: "as a newly registered account" };
+        };
+        const independence = await checkIndependence(browser, base, { steps: out.steps, capturedSource: out.capturedCheck!.source, capturedObserved: out.capturedCheck!.observed, credentials: alice }, { prepare });
+        expect(independence.replays.map((r) => r.failedStep)).toEqual([out.steps.length, out.steps.length]);
+        expect(independence.independence, JSON.stringify(independence.replays)).toBe("independent");
+        const found = defectFinding({ scenario: scenarioOf(c), rules: [], requirementIds: [c.req], outcome: out, capture: "captured", independence, stepCount: out.steps.length, modelVersion: null });
+        expect(found).toMatchObject({ confidence: "high", source: "expected:1" });
+        expect(found.finding?.evidence.layers?.map((l) => l.layer)).toEqual(["api", "stored data"]);
+        expect(found.finding?.evidence.requests).toEqual(["PUT /api/profile answered 200", "GET /api/profile answered 200"]);
     }, 240_000);
 });

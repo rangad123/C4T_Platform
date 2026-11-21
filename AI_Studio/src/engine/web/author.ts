@@ -47,7 +47,7 @@ import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testd
 import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, startingIdsOf } from "./leftovers.js";
 import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 import { engineWordingIn } from "../explore/perturb.js";
-import { CALLS_MAX, CAPTURE_MAX, errorShown, readBackCheck, readBackOf, type CapturedCall, type Disagreement, type LayerSays, type RawCall } from "./correlation.js";
+import { CALLS_MAX, CAPTURE_MAX, displayedCheck, errorShown, readBackCheck, readBackOf, type CapturedCall, type Disagreement, type LayerSays, type RawCall, type ShownValue } from "./correlation.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -902,6 +902,16 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 if (shown) disagreements.push({ action, ...errorShown(failed, shown) });
                 return;
             }
+            // C4b: what the page shows now under a label, against the same-named fields of this action's answers.
+            const answers = writes.filter((c) => c.status < 300 && c.json !== undefined);
+            const shown = answers.length ? await shownValues(here()) : [];
+            for (const w of answers.length && shown.length ? answers : []) {
+                const d = displayedCheck(w, shown);
+                if (d) {
+                    disagreements.push({ action, ...d });
+                    break;
+                }
+            }
             if (!input.allowPurchases) return;
             for (const w of writes) {
                 const plan = readBackOf(w, model.apis);
@@ -1322,6 +1332,64 @@ async function statusMessage(page: Page): Promise<string | undefined> {
 }
 
 /**
+ * The labelled values the page shows (C4b): a term and its definition, a row header and its cell, a "Label: value" text; each once, with a
+ * locator that finds only its value (its test id, its id, or a selector by its label).
+ */
+async function shownValues(page: Page): Promise<ShownValue[]> {
+    try {
+        const found = await page.evaluate(() => {
+            // No helper functions in here (tests/page-scripts-under-tsx.test.ts).
+            const out: Array<{ label: string; text: string; testId: string; id: string; css: string }> = [];
+            const fold = /\s+/g;
+            for (const el of Array.from(document.querySelectorAll("dt, tr, p, li, span, div"))) {
+                if (out.length >= 40) break;
+                let label = "";
+                let value: Element | null = null;
+                let css = "";
+                const tag = el.tagName.toLowerCase();
+                if (tag === "dt") {
+                    label = (el.textContent ?? "").replace(fold, " ").trim();
+                    value = el.nextElementSibling?.tagName === "DD" ? el.nextElementSibling : null;
+                    css = `dt:text-is(${JSON.stringify(label)}) + dd`;
+                } else if (tag === "tr") {
+                    const cells = Array.from(el.children);
+                    if (cells.length !== 2 || cells[0]!.tagName !== "TH" || cells[1]!.tagName !== "TD") continue;
+                    label = (cells[0]!.textContent ?? "").replace(fold, " ").trim();
+                    value = cells[1]!;
+                    css = `tr:has(> th:text-is(${JSON.stringify(label)})) > td`;
+                } else {
+                    if (el.children.length) continue;
+                    const m = /^([A-Za-z][A-Za-z0-9 ()%_-]{0,40}):\s*(\S.*)$/.exec((el.textContent ?? "").replace(fold, " ").trim());
+                    if (!m) continue;
+                    label = m[1]!.trim();
+                    value = el;
+                    css = `${tag}:text-matches(${JSON.stringify(`^\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`)})`;
+                }
+                if (!label || !value || label.length > 40) continue;
+                const box = value.getBoundingClientRect();
+                const text = (value.textContent ?? "").replace(fold, " ").trim();
+                if (!text || text.length > 80 || box.width === 0 || box.height === 0) continue;
+                out.push({ label, text, testId: value.getAttribute("data-testid") ?? "", id: value.id, css });
+            }
+            return out;
+        });
+        const seen = new Map<string, number>();
+        for (const f of found) seen.set(f.label.toLowerCase(), (seen.get(f.label.toLowerCase()) ?? 0) + 1);
+        const out: ShownValue[] = [];
+        for (const f of found) {
+            if (seen.get(f.label.toLowerCase())! > 1) continue;
+            const locator: ShownValue["locator"] = f.testId ? { by: "testId", value: f.testId } : { by: "css", value: f.id ? `#${f.id.replace(/[^\w-]/g, "\\$&")}` : f.css };
+            // Only a locator that finds this one element.
+            const n = await (locator.by === "testId" ? page.getByTestId(locator.value) : page.locator(locator.value)).count().catch(() => 0);
+            if (n === 1) out.push({ label: f.label, text: f.text, locator });
+        }
+        return out;
+    } catch {
+        return [];
+    }
+}
+
+/**
  * The finished test with its captured answers (masked, tied to the saved steps), and, when a UI–API check disagreed on a complete test,
  * that test as a defect: its steps up to the action, then the correlation's check citing the first stated check the writer made after
  * that action (captured). Without such a check the test is kept as written and the defect is observed only.
@@ -1355,7 +1423,7 @@ function correlated(
         ...(kept.length ? { calls: kept } : {}),
     };
     if (!source) return { ...base, steps: out.steps, capture: "observed_only" };
-    return { ...base, steps: [...out.steps.slice(0, at + 1), ...d.steps(source)], capture: "captured", capturedCheck: { source, observed: mask(d.observed, 400) } };
+    return { ...base, steps: [...out.steps.slice(0, at + 1), ...d.steps(source)], capture: "captured", capturedCheck: { source, observed: mask(d.observed(source), 400) } };
 }
 
 /** Where blocked authoring traces are kept, inside the scratch folder. On a runner that folder is the task's own and goes with the task. */

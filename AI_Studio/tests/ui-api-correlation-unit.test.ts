@@ -6,11 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { CandidateFindingSchema, findingFingerprint } from "../src/engine/explore/finding.js";
+import { failureKind } from "../src/engine/explore/independence.js";
 import { parseDsl } from "../src/engine/dsl/parser.js";
 import { comparableSpec, printSpec } from "../src/engine/dsl/printer.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import { checkRelation } from "../src/engine/validation/relation.js";
-import { errorShown, fitsTemplate, readBackCheck, readBackOf, type RawCall } from "../src/engine/web/correlation.js";
+import { displayedCheck, errorShown, fitsTemplate, readBackCheck, readBackOf, type RawCall } from "../src/engine/web/correlation.js";
 
 const apis = [
     { method: "GET", path: "/api/profile" },
@@ -53,7 +54,7 @@ describe("the read-back check (7.3 and 6.3)", () => {
             expect.objectContaining({ action: "request", method: "GET", path: "/api/profile" }),
             expect.objectContaining({ action: "assertResponse", check: "relation", expression: "name == $sent_name and address == $sent_address", source: "7.3" }),
         ]);
-        expect(r!.disagreement!.observed).toMatch(/Relation check failed: name == \$sent_name and address == \$sent_address\..*address = "12 Harbour Street, Leeds"/);
+        expect(r!.disagreement!.observed("7.3")).toMatch(/Relation check failed \(7\.3\): name == \$sent_name and address == \$sent_address\..*address = "12 Harbour Street, Leeds"/);
         expect(r!.disagreement!.layers.map((l) => l.layer)).toEqual(["api", "stored data"]);
         expect(r!.disagreement!.requests).toEqual(["PUT /api/profile answered 200", "GET /api/profile answered 200"]);
     });
@@ -117,4 +118,55 @@ it("a finding carries the layers that disagreed, masked like its other evidence;
     expect(ok.success && ok.data.evidence.layers).toEqual([{ layer: "stored data", observed: "GET /api/profile reads [email hidden]" }]);
     expect(CandidateFindingSchema.safeParse(finding([{ layer: "database", observed: "x" }])).success).toBe(false);
     expect(CandidateFindingSchema.safeParse(finding(undefined)).success).toBe(true);
+});
+
+it("a relation that failed is the same failure whatever the run's own values; one that could not be judged is another", () => {
+    const failed = (id: string) => `Relation check failed (6.3): contains(orders[*].id, $created_id). Values: orders[*].id = ["ord-1000"], $created_id = "${id}".`;
+    expect(failureKind(failed("ord-1002"))).toEqual(failureKind(failed("ord-1003")));
+    expect(failureKind(failed("ord-1002"))).toEqual({ kind: "value", value: "Relation check failed (6.3): contains(orders[*].id, $created_id)" });
+    // The kept observation (masked, plain text) reads the same way.
+    expect(failureKind(failed("ord-1002"), { plainIsValue: true })).toEqual(failureKind(failed("ord-9")));
+    const unjudged = "Relation check failed (6.3): contains(orders[*].id, $created_id). orders[*].id is not a list (it is null). Values: orders[*].id = null.";
+    expect(failureKind(unjudged)).not.toEqual(failureKind(failed("ord-1002")));
+});
+
+describe("displayed values against the action's answer (C4b, requirement 3.12)", () => {
+    const cart: RawCall = { step: 7, method: "POST", path: "/api/cart/discount", status: 200, json: { subtotal: 1250, code: "SAVE10", discount: 125, shipping: 500, total: 1625 }, text: "" };
+    const at = (label: string, text: string) => ({ label, text, locator: { by: "testId" as const, value: label.toLowerCase() } });
+    const page = [at("Subtotal", "$12.50"), at("Discount (SAVE10)", "\u2212$1.25"), at("Shipping", "$5.00"), at("Total", "$16.25")];
+    it("the page showing the answer's amounts (in cents, a discount shown negative, Free not compared) agrees", () => {
+        expect(displayedCheck(cart, page)).toBeUndefined();
+        expect(displayedCheck({ ...cart, json: { ...(cart.json as object), shipping: 0 } }, [at("Shipping", "Free")])).toBeUndefined();
+        expect(displayedCheck({ ...cart, json: { total: 16.25 } }, [at("Total", "$16.25")])).toBeUndefined();
+        expect(displayedCheck(cart, [at("Total", "Total: $1,625.00")])).toBeDefined();
+    });
+    it("a total shown before the discount disagrees, and the saved check is that comparison", () => {
+        const d = displayedCheck(cart, [...page.slice(0, 3), at("Total", "$17.50")]);
+        expect(d?.layers).toEqual([
+            { layer: "page", observed: 'shows Total "$17.50"' },
+            { layer: "api", observed: "POST /api/cart/discount answered 200 with total 1625" },
+        ]);
+        expect(d!.observed("3.12")).toMatch(/Relation check failed \(3\.12\): round\(number\(\$shown_total\) \* 100\) == \$api_total\. Values: .*\$api_total = 1625/);
+        const steps = d!.steps("3.12");
+        expect(steps).toEqual([
+            expect.objectContaining({ action: "wait", until: "response", value: "/api/cart/discount", extract: { api_total: "total" } }),
+            expect.objectContaining({ action: "remember", locator: { by: "testId", value: "total" }, name: "shown_total", from: "text" }),
+            expect.objectContaining({ action: "assertResponse", check: "relation", expression: "round(number($shown_total) * 100) == $api_total", source: "3.12" }),
+        ]);
+        const spec = TestSpecSchema.parse({ testId: "WEB-001", title: "Shown total", kind: "web", steps: [{ action: "navigate", url: "/cart" }, ...steps] });
+        const back = parseDsl(printSpec(spec).text);
+        expect(back.diagnostics).toEqual([]);
+        expect(comparableSpec(back.spec!)).toBe(comparableSpec(spec));
+    });
+    it("only names that match are compared; a failed answer is not", () => {
+        expect(displayedCheck(cart, [at("Grand sum", "$99.00")])).toBeUndefined();
+        expect(displayedCheck({ ...cart, status: 500 }, [at("Total", "$99.00")])).toBeUndefined();
+    });
+    it("number() reads the first amount of a text", () => {
+        const n = (t: string) => checkRelation("number($t)", { body: {}, vars: { t } });
+        expect(n("\u2212$62.75").values.at(-1)).toEqual(["number($t)", -62.75]);
+        expect(n("Total: $1,234.50").values.at(-1)).toEqual(["number($t)", 1234.5]);
+        expect(checkRelation("number($t) == 3", { body: {}, vars: { t: "3" } }).held).toBe(true);
+        expect(checkRelation("number($t) == 0", { body: {}, vars: { t: "Free" } })).toMatchObject({ held: false, message: expect.stringContaining('$t holds no number (it is "Free")') });
+    });
 });
