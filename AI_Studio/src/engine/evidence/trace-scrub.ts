@@ -25,6 +25,12 @@
  * or smaller than it says, or with the wrong checksum, refuses the trace). Only the parts that changed are packed again; the others keep
  * their original bytes. One trace is cleaned at a time per process.
  *
+ * Besides the run's own secrets, the values the trace itself shows to be secret are masked the same way (secretsInTrace): every cookie
+ * value, the value of a header or JSON key whose name says secret, the value of a field that is secret or personal by its attributes (as
+ * the screenshot cover decides, proof-style.ts), and whatever the shared redaction hides in any text of the trace (e-mails, phone
+ * numbers, addresses, card numbers, credentials after a key word, a connection string's password, a query value that is one of those).
+ * A value with nothing that marks it (a token shown as plain page text) is not found.
+ *
  * Limits: masking is by known value (at least 4 characters). A value the test made itself (a code generated from an authenticator secret,
  * a password a code script holds in its own source), a secret transformed some other way, and anything inside a compressed part (a zip or
  * gzip body the application served) are not found. Screenshots and the video are pictures: a password field is drawn as dots, but a secret
@@ -39,6 +45,8 @@ import path from "node:path";
 import { webcrypto } from "node:crypto";
 import zlib from "node:zlib";
 import { secretVariants } from "../../agent-protocol/secret-variants.js";
+import { SECRET_KEY, secretsInText } from "../../shared/redact-text.js";
+import { isSensitiveField } from "./proof-style.js";
 import { isSecretSettingName, runSecretValues, type RunSecretsEnv } from "./secret-policy.js";
 
 /**
@@ -466,6 +474,104 @@ export async function scrubTraceBytes(data: Uint8Array, forms: readonly string[]
     }
 }
 
+const SECRET_NAME = new RegExp(String.raw`^(?:${SECRET_KEY}|(?:proxy-)?authorization)$`, "i");
+/** A value too ordinary to mask everywhere in a trace: a JSON word, or a short number (it would change timestamps and sizes). */
+const ORDINARY = /^(?:true|false|null|undefined|\d{1,7})$/i;
+
+/**
+ * The values of a Cookie or Set-Cookie header (Playwright joins several Set-Cookie headers with new lines), as sent and decoded: a cookie
+ * whose name says secret (or `sid`), or a value that looks like one (8 or more characters with a digit). A setting such as `theme=dark`
+ * stays: its value would be masked everywhere in the trace.
+ */
+function cookieValues(header: string, set: boolean): string[] {
+    const pairs = set ? header.split("\n").map((line) => line.split(";")[0]!) : header.split(";");
+    return pairs.flatMap((p) => {
+        const name = p.slice(0, p.indexOf("=")).trim();
+        const v = p.slice(p.indexOf("=") + 1).trim();
+        if (!p.includes("=") || !v || !(SECRET_NAME.test(name) || /^sid$/i.test(name) || (v.length >= 8 && /\d/.test(v)))) return [];
+        let plain = v;
+        try {
+            plain = decodeURIComponent(v);
+        } catch {
+            /* kept as sent */
+        }
+        return [v, plain];
+    });
+}
+
+/** Every secret a piece of trace data shows (see the file comment): walks a JSON value, or reads text as it is. */
+function collectSecrets(v: unknown, out: Set<string>, key?: string): void {
+    if (typeof v === "string") {
+        if (key !== undefined && SECRET_NAME.test(key)) out.add(v);
+        for (const f of secretsInText(v)) out.add(f);
+        return;
+    }
+    if (Array.isArray(v)) {
+        // A page snapshot's element: ["INPUT", { name, type, value, __playwright_value_ ... }, ...children].
+        const attrs = v[1] as Record<string, unknown> | undefined;
+        if ((v[0] === "INPUT" || v[0] === "TEXTAREA") && attrs && typeof attrs === "object" && !Array.isArray(attrs) && isSensitiveField(attrs)) {
+            for (const k of ["value", "__playwright_value_"]) if (typeof attrs[k] === "string") out.add(attrs[k] as string);
+        }
+        for (const x of v) collectSecrets(x, out);
+        return;
+    }
+    if (!v || typeof v !== "object") return;
+    const o = v as Record<string, unknown>;
+    // A header ({ name, value }), or a cookie of the browser's store ({ name, value, domain, path ... }).
+    if (typeof o.name === "string" && typeof o.value === "string") {
+        if (/^set-cookie$/i.test(o.name)) cookieValues(o.value, true).forEach((x) => out.add(x));
+        else if (/^cookie$/i.test(o.name)) cookieValues(o.value, false).forEach((x) => out.add(x));
+        else if ("domain" in o || SECRET_NAME.test(o.name)) {
+            out.add(o.value);
+            out.add(o.value.replace(/^(?:Bearer|Basic|Token)\s+/i, ""));
+        }
+    }
+    for (const [k, x] of Object.entries(o)) collectSecrets(x, out, k);
+}
+
+/** The secrets a text part of a trace shows: a JSON document, lines of JSON (the action and network logs), or other text read as it is. */
+function secretsOfPart(text: string, out: Set<string>): void {
+    try {
+        collectSecrets(JSON.parse(text), out);
+        return;
+    } catch {
+        /* not one JSON document */
+    }
+    for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+            collectSecrets(JSON.parse(line), out);
+        } catch {
+            for (const f of secretsInText(line)) out.add(f);
+        }
+    }
+}
+
+/**
+ * The values a trace itself shows to be secret (see the file comment), to be masked like the run's own. A trace that cannot be read gives
+ * none: the cleaning then refuses it anyway.
+ */
+export async function secretsInTrace(data: Uint8Array): Promise<string[]> {
+    const out = new Set<string>();
+    const pace = pacer();
+    const read = (b: Uint8Array) => (isMedia(b) ? undefined : asText(b));
+    if (!isZip(data)) {
+        const text = data.length <= TRACE_LIMITS.maxTotalBytes ? read(data) : undefined;
+        if (text !== undefined) for (const line of text.split("\n")) for (const f of secretsInText(line)) out.add(f);
+    } else {
+        const b = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+        const entries = readZip(b);
+        if (!entries || entries.length > TRACE_LIMITS.maxEntries || entries.reduce((n, e) => n + e.originalSize, 0) > TRACE_LIMITS.maxTotalBytes || entries.some((e) => e.originalSize > TRACE_LIMITS.maxEntryBytes)) return [];
+        for (const e of entries) {
+            await pace();
+            const content = await contentOf(b, e);
+            const text = content ? read(content) : undefined;
+            if (text !== undefined) secretsOfPart(text, out);
+        }
+    }
+    return [...out].filter((v) => v.length >= 4 && !ORDINARY.test(v.trim()));
+}
+
 /** One trace at a time per process: a few traces at once would hold several archives in memory and fill the thread pool. */
 let cleaning: Promise<unknown> = Promise.resolve();
 function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
@@ -479,8 +585,6 @@ function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
  * others); their forms are worked out here. On `ok: false` the file is left as it was and must not be kept or sent.
  */
 export function scrubTraceFile(file: string, secrets: readonly string[]): Promise<{ ok: true; masked: number } | { ok: false; reason: string }> {
-    const forms = traceSecretForms(secrets);
-    if (forms.length === 0) return Promise.resolve({ ok: true, masked: 0 });
     return oneAtATime(async () => {
         let data: Buffer;
         try {
@@ -491,7 +595,8 @@ export function scrubTraceFile(file: string, secrets: readonly string[]): Promis
         } catch {
             return { ok: false, reason: "the trace could not be read" };
         }
-        const r = await scrubTraceBytes(data, forms);
+        // The run's secrets and the ones the trace itself shows.
+        const r = await scrubTraceBytes(data, traceSecretForms([...secrets, ...(await secretsInTrace(data))]));
         if (!r.ok) return r;
         if (r.masked === 0) return { ok: true, masked: 0 };
         const tmp = `${file}.${process.pid}.clean`;
@@ -511,7 +616,6 @@ export function scrubTraceFile(file: string, secrets: readonly string[]): Promis
  * many traces were dropped. Used by the platform's own runs (validation/runner.ts); a runner does the same before it uploads.
  */
 export async function scrubRunTraces(runs: Array<{ artifacts: Array<{ kind: string; path: string }>; notes?: string[] }>, secrets: readonly string[]): Promise<number> {
-    if (traceSecretForms(secrets).length === 0) return 0;
     let dropped = 0;
     for (const run of runs) {
         const keep: typeof run.artifacts = [];
