@@ -1,8 +1,8 @@
 /**
  * C2 (Phase 4) against the bench apps: each documented case is red on its seed alone and green on the clean app from a dirty start
  * (leftover cart lines, SAVE10 and an extra order on bench-shop; an extra note on bench-rbac, as Wave 0's api-checks.mjs). The cases
- * are generated from tests/fixtures/bench-openapi.ts and run as the validator runs them, signed in as the project's account (C1).
- * Ports 9473-9474. BS-17 and BS-19 wait for their seeds (bench extension, T2).
+ * are generated from the apps' own API documents and run as the validator runs them, signed in as the project's account (C1).
+ * Ports 9473-9474. BS-19's oracle is the response-schema check (total in integer cents), the others' the documented status.
  */
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
@@ -12,7 +12,7 @@ import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema, type TestSpec } from "../src/engine/spec/schema.js";
 import { runScripts } from "../src/engine/validation/runner.js";
 import { startBenchApp, type BenchApp } from "../src/eval/bench/verify/app.js";
-import { RBAC_OPENAPI, SHOP_OPENAPI } from "./fixtures/bench-openapi.js";
+import { benchOpenApi } from "./fixtures/bench-openapi.js";
 
 const PASSWORD = "Password1!";
 
@@ -37,15 +37,18 @@ const DIRTY: Record<BenchApp, (base: string) => Promise<void>> = {
     },
 };
 
+/** Seeds whose case is told by the documented response schema, not by the status. */
+const SCHEMA_ORACLE = new Set(["BS-19"]);
+
 const CASES: Record<BenchApp, { doc: object; port: number; account: string; seeds: Record<string, string> }> = {
     "bench-shop": {
-        doc: SHOP_OPENAPI,
+        doc: await benchOpenApi("bench-shop"),
         port: 9473,
         account: "alice@example.test",
-        seeds: { "BS-03": 'POST /api/cart/items: rejects "quantity" above its maximum (10)', "BS-04": 'POST /api/register: rejects "email" not an email address', "BS-09": 'POST /api/cart/items: rejects an unknown "productId"' },
+        seeds: { "BS-03": 'POST /api/cart/items: rejects "quantity" above its maximum (10)', "BS-04": 'POST /api/register: rejects "email" not an email address', "BS-09": 'POST /api/cart/items: rejects an unknown "productId"', "BS-17": 'POST /api/register: rejects an "email" already used, in other letter case', "BS-19": "GET /api/orders/{id}: succeeds with a valid request" },
     },
     "bench-rbac": {
-        doc: RBAC_OPENAPI,
+        doc: await benchOpenApi("bench-rbac"),
         port: 9474,
         account: "ana@example.test",
         seeds: { "BR-07": 'POST /api/register: rejects "password" shorter than 8 characters', "BR-08": 'POST /api/notes: rejects "title" empty' },
@@ -72,9 +75,9 @@ describe.each(Object.keys(CASES) as BenchApp[])("%s documented cases", (app) => 
                 return { testId: spec.testId, filename: r.filename, content: r.content };
             });
             const runs = await runScripts(loadConfig({}).scratchDir, scripts, { baseUrl: running.base, credentials: { username: c.account, password: PASSWORD }, headless: true }, { workers: 2 });
-            // Red only counts on the documented status step itself, never on a step before it (sign-in, fresh account, real id).
-            const statusStep = (seed: string) => specs.get(seed)!.steps.findIndex((s) => s.action === "assertResponse" && s.check === "status");
-            return Object.fromEntries(seeds.map((seed, i) => [seed, runs[i]!.status === "passed" ? "green" : `red at step ${runs[i]!.failedStepIndex === statusStep(seed) ? "status" : runs[i]!.failedStepIndex}: ${(runs[i]!.error ?? runs[i]!.status).split("\n")[0]}`]));
+            // Red only counts on the oracle step itself (the documented status or schema), never on a step before it (sign-in, fresh account, real id).
+            const statusStep = (seed: string) => specs.get(seed)!.steps.findIndex((s) => s.action === "assertResponse" && s.check === (SCHEMA_ORACLE.has(seed) ? "matchesSchema" : "status"));
+            return Object.fromEntries(seeds.map((seed, i) => [seed, runs[i]!.status === "passed" ? "green" : `red at step ${runs[i]!.failedStepIndex === statusStep(seed) ? "oracle" : runs[i]!.failedStepIndex}: ${(runs[i]!.error ?? runs[i]!.status).split("\n")[0]}`]));
         } finally {
             await running.stop();
         }
@@ -87,6 +90,6 @@ describe.each(Object.keys(CASES) as BenchApp[])("%s documented cases", (app) => 
 
     it.each(Object.keys(c.seeds))("%s alone turns its case red", async (seed) => {
         const r = await runOn(seed, [seed]);
-        expect(r[seed]).toMatch(/^red at step status: /);
+        expect(r[seed]).toMatch(/^red at step oracle: /);
     }, 240_000);
 });
