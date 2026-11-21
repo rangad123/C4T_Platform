@@ -2,7 +2,13 @@
  * The text of an issue created from a finding, built once as a small neutral document and then rendered
  * in each tracker's markup (GitHub Markdown, Jira's Atlassian Document Format).
  */
+import { classify, reproduction } from "../../engine/findings/classify.js";
+import type { Explanation } from "../../engine/findings/explain.js";
+import { ROOT_CAUSE_LABEL_TEXT, type RootCause } from "../../engine/findings/root-cause.js";
+import { confidenceScore, severityOf } from "../../engine/findings/score.js";
+import type { FindingView } from "../../engine/findings/view.js";
 import { describeStep, type TestSpec } from "../../engine/spec/schema.js";
+import { HIDDEN, redactText } from "../../shared/redact-text.js";
 
 export type Block =
     | { t: "heading"; text: string }
@@ -159,4 +165,151 @@ export function toAdf(blocks: Block[]): AdfNode {
         }
     });
     return { type: "doc", version: 1, content };
+}
+
+// ── a bug report from a finding group (testing-engine Phase 5 C3, spec §5.1 item 7) ─────────────────────────────────────────────
+
+/** The owner's 13 fields of a bug report, in order. */
+export const REPORT_FIELDS = ["title", "severity", "confidence", "area", "environment", "preconditions", "steps", "expected", "actual", "reproduction", "evidence", "likelyCause", "nextStep"] as const;
+export type ReportField = (typeof REPORT_FIELDS)[number];
+export const REPORT_FIELD_LABEL: Record<ReportField, string> = {
+    title: "Title",
+    severity: "Severity",
+    confidence: "Confidence",
+    area: "Area",
+    environment: "Environment",
+    preconditions: "Preconditions",
+    steps: "Steps",
+    expected: "Expected",
+    actual: "Actual",
+    reproduction: "Reproduction",
+    evidence: "Evidence",
+    likelyCause: "Likely cause",
+    nextStep: "Next step",
+};
+/** Each field as lines of masked text (one line for most). */
+export type FindingReport = Record<ReportField, string[]>;
+
+export interface FindingReportInput {
+    /** The group; the first member is the one shown. */
+    members: readonly FindingView[];
+    /** The first member's saved test, when it has one (its preconditions and steps as written). */
+    spec?: TestSpec;
+    area?: string | null;
+    environment: { appUrl?: string | null; appVersion?: string | null; browser?: string | null };
+    /** Where the evidence is kept (the test's page in AI Studio); left out of the report when empty. */
+    evidenceUrl?: string;
+    explanation?: Explanation;
+    rootCause?: RootCause;
+}
+
+/**
+ * Text that leaves AI Studio (an issue in another company's tracker, a shared report) is masked harder than stored text: the shared
+ * pattern filter (redactText), after URL-decoding so an encoded value is seen, then card numbers, international phone numbers, street
+ * addresses, live/test API keys and token-like words (10+ characters mixing upper case, lower case and digits, no hyphen).
+ * shortcut: these patterns repeat what lane E2 adds to shared/redact-text.ts; once it does, keep only the decode and redactText.
+ */
+export function maskForTracker(s: string): string {
+    const decoded = s.replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => {
+        try {
+            return decodeURIComponent(m);
+        } catch {
+            return m;
+        }
+    });
+    return redactText(decoded, 4000)
+        .replace(/\b\d{1,5}\s+(?:[A-Z][a-z]+\s+){1,3}(?:Street|St|Road|Rd|Lane|Ln|Avenue|Ave|Drive|Dr|Way|Close|Court|Ct|Boulevard|Blvd|Place|Pl|Terrace|Crescent)\b\.?(?:,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)?/g, "[address hidden]")
+        .replace(/(?<![\w.])(?:\d[ -]?){12,18}\d(?![\w.])/g, "[number hidden]")
+        .replace(/\+\d[\d ()-]{7,}\d/g, "[phone hidden]")
+        .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{4,}\b/g, HIDDEN)
+        .replace(/(?<![\w-])(?=[\w!@#$%^&*+=~]*[A-Z])(?=[\w!@#$%^&*+=~]*[a-z])(?=[\w!@#$%^&*+=~]*\d)[\w!@#$%^&*+=~]{10,}(?![\w-])/g, HIDDEN);
+}
+
+const line = (s: string | null | undefined, max = 600) => clip(maskForTracker(String(s ?? "").replace(/\s+/g, " ").trim()), max);
+
+/** What to look at next when the AI wrote nothing: from the cause's location, else from the class. */
+const NEXT_BY_CLASS: Record<string, string> = {
+    app_defect: "Follow the steps on the application and compare the answer of the requests listed under Evidence with the expected result.",
+    incorrect_expectation: "Check the expected result against the requirement it comes from; the test may expect something the application never promised.",
+    automation: "Check the failing step of the test: it may point at the wrong element or wait for the wrong thing.",
+    infrastructure: "Run it again once the runner and browser are healthy; nothing yet shows the application is at fault.",
+    network: "Check the network between the runner and the application, then run it again.",
+    environment: "Check the test account, the run's secrets and the environment settings, then run it again.",
+    flaky: "Run it several times and compare the passing and failing attempts.",
+    unsupported: "Check the documentation that calls this not supported, and whether the test should expect it.",
+    open: "Follow the steps on the application by hand and see which of the possible causes it is.",
+};
+
+const where = (l: { file: string; line: number; function?: string; route?: string }) => `${l.file}:${l.line}${l.function ? ` in ${l.function}()` : ""}${l.route ? ` (${l.route})` : ""}`;
+
+/** The 13 fields from a finding group, every text masked for leaving AI Studio. */
+export function buildFindingReport(src: FindingReportInput): FindingReport {
+    const f = src.members[0]!;
+    const aiClass = src.explanation?.aiClass ?? false;
+    const sev = severityOf(f);
+    const conf = src.explanation?.confidence ?? confidenceScore(f, { aiClass });
+    const cls = src.explanation?.class ?? classify(f).class;
+    const rep = reproduction(f.attempts);
+    const failed = f.attempts.find((a) => a.outcome !== "passed");
+
+    const steps = src.spec
+        ? src.spec.steps.map((s, i) => `${line(describeStep(s), 200)}${failed?.failedStep === i + 1 ? "  ← failed here" : ""}`)
+        : f.steps.map((s, i) => `${line(`${s.action}${s.target ? ` ${s.target}` : ""}${s.url ? ` ${s.url}` : ""}`, 200)}${failed?.failedStep === i + 1 ? "  ← failed here" : ""}`);
+    const area = src.area ?? src.spec?.category ?? failed?.page ?? null;
+    const env = [
+        src.environment.appUrl ? `Application: ${line(src.environment.appUrl, 300)}` : "",
+        src.environment.appUrl || src.environment.browser ? `App version: ${line(src.environment.appVersion ?? "not recorded", 100)}` : "",
+        src.environment.browser ? `Browser: ${line(src.environment.browser, 100)}` : "",
+    ].filter(Boolean);
+    const requests = (failed?.requests ?? []).slice(0, 10).map((r) => `${line(r.method, 10)} ${line(r.path, 200)} → ${r.error ? line(r.error, 120) : (r.status ?? "no answer")}`);
+    const rc = src.rootCause;
+    const cause = rc?.location
+        ? [`${ROOT_CAUSE_LABEL_TEXT[rc.label]}: ${line(where(rc.location), 300)}`, line(rc.location.explanation ?? rc.reason, 600)]
+        : [`Unknown: ${line(rc?.reason ?? "no code source was searched for this finding.", 600)}`];
+    const next = src.explanation?.next ?? (rc?.location ? `Look at ${where(rc.location)} first. ${NEXT_BY_CLASS[cls] ?? NEXT_BY_CLASS.open}` : NEXT_BY_CLASS[cls] ?? NEXT_BY_CLASS.open!);
+
+    return {
+        title: [line(f.title, 240)],
+        severity: [`${SEVERITY_WORD[sev.severity] ?? sev.severity}: ${line(sev.basis, 300)}`],
+        confidence: [`${conf.confidence[0]!.toUpperCase()}${conf.confidence.slice(1)}: ${line(conf.basis, 300)}`],
+        area: area ? [line(area, 200)] : [],
+        environment: env,
+        preconditions: src.spec?.preconditions.length ? src.spec.preconditions.map((p) => line(p, 300)) : ["None stated: the steps start in a new browser session."],
+        steps,
+        expected: [`${line(f.expected.text, 600)}${f.expected.source ? ` (source: ${line(f.expected.source, 100)})` : ""}`],
+        actual: [line(f.observed, 1000), ...(failed?.error ? [line(failed.error, 600)] : [])].filter(Boolean),
+        reproduction: rep.of ? [`${rep.same} of ${rep.of} attempts failed the same way.`] : [],
+        evidence: [
+            ...requests,
+            ...(failed?.stack.length ? [`Stack: ${failed.stack.slice(0, 4).map((s) => line(s, 120)).join(" < ")}`] : []),
+            src.evidenceUrl ? "Screenshots, traces and the full request list are kept in AI Studio (link below)." : "Screenshots, traces and the full request list are kept in AI Studio.",
+        ],
+        likelyCause: cause.filter(Boolean),
+        nextStep: [line(next, 600)],
+    };
+}
+
+/** Fields a report lacks: empty, or "unknown" without a reason. Only the likely cause may be unknown, and then it says why. */
+export function missingFields(r: FindingReport): ReportField[] {
+    return REPORT_FIELDS.filter((k) => {
+        const text = r[k].join(" ").trim();
+        if (!text) return true;
+        return k === "likelyCause" ? /^unknown\W*$/i.test(text) : /^(?:unknown|not recorded)\b/i.test(text);
+    });
+}
+
+/** The issue a tracker gets for a finding group. */
+export function findingIssueDraft(r: FindingReport, evidenceUrl?: string): IssueDraft {
+    const sev = r.severity[0]!.split(":")[0]!;
+    const blocks: Block[] = [];
+    for (const k of REPORT_FIELDS) {
+        if (k === "title") continue;
+        blocks.push({ t: "heading", text: REPORT_FIELD_LABEL[k] });
+        if (k === "steps") blocks.push({ t: "list", ordered: true, items: r.steps });
+        else if (r[k].length > 1) blocks.push({ t: "list", items: r[k] });
+        else blocks.push({ t: "paragraph", text: r[k][0] ?? "" });
+    }
+    if (evidenceUrl) blocks.push({ t: "link", label: "Open the evidence in AI Studio", url: evidenceUrl });
+    blocks.push({ t: "paragraph", text: "Created automatically by the AI Testing Platform from a verified finding." });
+    return { title: clip(`[${sev}] ${r.title[0]}`, 240), labels: ["ai-testing", `severity-${sev.toLowerCase()}`, "finding"], blocks };
 }

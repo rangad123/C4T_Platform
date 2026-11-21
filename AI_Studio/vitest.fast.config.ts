@@ -300,6 +300,7 @@ export default defineConfig({
             "tests/bench-verify-score-unit.test.ts",
             "tests/findings-explain-unit.test.ts",
             "tests/findings-root-cause.test.ts",
+            "tests/finding-report.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
