@@ -299,6 +299,7 @@ export default defineConfig({
             "tests/findings-api.test.ts",
             "tests/bench-verify-score-unit.test.ts",
             "tests/findings-explain-unit.test.ts",
+            "tests/findings-root-cause.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
