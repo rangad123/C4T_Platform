@@ -24,7 +24,7 @@
  *   effective maximum      seeded defects minus those the catalogue marks unreachable (`reachable`); the detection rate stays / seeded
  * A result without `scoring` was scored by v1 (false positives include the engine's unreported tests; no effective maximum).
  */
-import type { Benchmark, BenchFinding, BenchMetrics, FindingCategory, ReplayVerdict } from "./schema.js";
+import type { Benchmark, BenchFinding, BenchMetrics, ExtensionScore, FindingCategory, LayerCounts, ReplayVerdict } from "./schema.js";
 
 export const SCORING_VERSION = 2;
 /** The reasons the engine's own gates give a test it saved for review but did not report (engine/orchestrator.ts keepAuthored). */
@@ -160,16 +160,54 @@ export function combineMetrics(parts: BenchMetrics[]): BenchMetrics {
 }
 
 /**
- * A saved result scored again by the current rules, offline: the categories the replays gave stay as they are, so detection cannot change;
- * every count is recomputed from the findings, the other numbers (cost, time, tests) are kept. Returns a copy.
+ * The extension seeds' own score (catalogue 2026-11-21.1): detection over the extension seeds only, from the same findings. It is reported
+ * beside the original score and never added into `metrics`, so results of the original catalogue stay comparable.
  */
-export function rescored(b: Benchmark, unreachable: string[]): Benchmark {
+export function extensionScore(i: MetricInputs): ExtensionScore {
+    const m = benchMetrics(i);
+    return { seeded: m.seeded, detected: m.detected, missed: m.missed, detectedLabeled: m.detectedLabeled, reachable: m.reachable!, detectionRate: m.detectionRate };
+}
+
+/** The extension score of the whole benchmark (counts summed, the rate recomputed); undefined when no app had extension seeds. */
+export function combineExtension(parts: Array<ExtensionScore | undefined>): ExtensionScore | undefined {
+    const xs = parts.filter((x): x is ExtensionScore => x !== undefined);
+    if (!xs.length) return undefined;
+    const sum = (k: "seeded" | "detected" | "missed" | "detectedLabeled" | "reachable") => xs.reduce((n, x) => n + x[k], 0);
+    return { seeded: sum("seeded"), detected: sum("detected"), missed: sum("missed"), detectedLabeled: sum("detectedLabeled"), reachable: sum("reachable"), detectionRate: rate(sum("detected"), sum("seeded")) };
+}
+
+/**
+ * Tests, findings, confirmed findings and false positives per layer (the engine's meta.layer; "unlabelled" for a test or finding without
+ * one). `tests` are the layers of the tests read, one entry per test.
+ */
+export function layerCounts(tests: Array<string | undefined>, findings: Array<Pick<BenchFinding, "layer" | "category" | "label" | "reason">>): Record<string, LayerCounts> {
+    const out: Record<string, LayerCounts> = {};
+    const row = (l: string | undefined) => (out[l ?? "unlabelled"] ??= { tests: 0, findings: 0, confirmed: 0, falsePositives: 0 });
+    for (const l of tests) row(l).tests++;
+    for (const f of findings) {
+        const r = row(f.layer);
+        r.findings++;
+        if (f.category === "confirmed") r.confirmed++;
+        if (!NOT_REPORTED.test(f.reason ?? "") && (f.category === "false_positive" || (f.category === "unreproduced" && f.label === "false_positive"))) r.falsePositives++;
+    }
+    return out;
+}
+
+/**
+ * A saved result scored again by the current rules, offline: the categories the replays gave stay as they are, so detection cannot change;
+ * every count is recomputed from the findings, the other numbers (cost, time, tests) are kept. Extension seeds (`extension`, the ids the
+ * result's catalogue marks so) are scored apart, as when the result was made. Returns a copy.
+ */
+export function rescored(b: Benchmark, unreachable: string[], extension: string[] = []): Benchmark {
     const apps = b.apps.map((a) => {
         const m = a.metrics;
-        const metrics = { ...benchMetrics({ ...m, seeded: a.seededDefects, findings: a.findings, startedAt: "1970-01-01T00:00:00.000Z", unreachable }), detectionTimeMs: m.detectionTimeMs };
-        return { ...a, metrics, defects: a.defects.map((d) => ({ ...d, ...(unreachable.includes(d.id) ? { unreachable: true } : {}) })) };
+        const inputs = { ...m, seeded: a.seededDefects.filter((d) => !extension.includes(d)), findings: a.findings, startedAt: "1970-01-01T00:00:00.000Z", unreachable };
+        const metrics = { ...benchMetrics(inputs), detectionTimeMs: m.detectionTimeMs };
+        const ext = a.seededDefects.filter((d) => extension.includes(d));
+        return { ...a, metrics, ...(ext.length ? { extension: extensionScore({ ...inputs, seeded: ext }) } : {}), defects: a.defects.map((d) => ({ ...d, ...(unreachable.includes(d.id) ? { unreachable: true } : {}) })) };
     });
-    return { ...b, scoring: SCORING_VERSION, apps, metrics: combineMetrics(apps.map((a) => a.metrics)) };
+    const ext = combineExtension(apps.map((a) => a.extension));
+    return { ...b, scoring: SCORING_VERSION, apps, metrics: combineMetrics(apps.map((a) => a.metrics)), ...(ext ? { extension: ext } : {}) };
 }
 
 /**

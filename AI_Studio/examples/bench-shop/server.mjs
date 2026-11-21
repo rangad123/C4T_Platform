@@ -5,6 +5,9 @@
 //   BENCH_RESET_TOKEN  enables POST /__bench/reset (header x-bench-reset must match); the route is 404 without it.
 //   BENCH_LOGIN        html (default): sign-in and registration are plain HTML forms (POST, then a 303 to the next page);
 //                      js: the same forms are sent by the page script to the JSON API instead.
+//   BENCH_DATA_TOKEN   enables GET /__bench/schema and GET /__bench/data (header x-bench-data must match): the stored data as tables
+//                      with keys, read-only, credentials and sessions left out. Without the variable or the header both routes are 404,
+//                      a wrong header is 403 and any method but GET is 405.
 // Data lives in memory and is reset on start. Loopback only.
 import http from "node:http";
 import { randomBytes } from "node:crypto";
@@ -19,8 +22,10 @@ const SWITCHES = new Set(
 const on = (id) => SWITCHES.has("all") || SWITCHES.has(id);
 const RESET_TOKEN = process.env.BENCH_RESET_TOKEN ?? "";
 const JS_LOGIN = process.env.BENCH_LOGIN === "js";
+const DATA_TOKEN = process.env.BENCH_DATA_TOKEN ?? "";
 
 const MAX_PER_ITEM = 10;
+const MAX_ADDRESS = 200;
 const FREE_SHIPPING_FROM = 5000;
 const SHIPPING = 500;
 const CODES = { SAVE10: 10 };
@@ -47,8 +52,11 @@ function reset() {
             { id: "ord-1000", userId: "u1", status: "shipped", lines: [{ productId: "p3", name: "Pocket Notebook", unitPrice: 425, quantity: 2, lineTotal: 850 }], subtotal: 850, discount: 0, shipping: SHIPPING, total: 1350, address: "12 Harbour Street, Leeds", placedAt: "2026-10-02T10:00:00.000Z" },
             { id: "ord-1001", userId: "u2", status: "placed", lines: [{ productId: "p2", name: "Desk Lamp", unitPrice: 3450, quantity: 1, lineTotal: 3450 }], subtotal: 3450, discount: 0, shipping: SHIPPING, total: 3950, address: "4 Mill Lane, York", placedAt: "2026-10-20T09:30:00.000Z" },
         ],
+        /** Item rows whose cart row is gone (kept apart from the live carts). */
+        strayItems: [],
         nextUser: 3,
         nextOrder: 1002,
+        nextCart: 1,
         clock: Date.parse("2026-11-01T08:00:00.000Z"),
     };
 }
@@ -126,7 +134,7 @@ function page(res, title, user, body, status = 200) {
 
 // ── cart and money ──────────────────────────────────────────────────────────
 function cartOf(uid) {
-    if (!db.carts.has(uid)) db.carts.set(uid, { lines: [], code: null });
+    if (!db.carts.has(uid)) db.carts.set(uid, { id: `c${db.nextCart++}`, lines: [], code: null });
     return db.carts.get(uid);
 }
 function priced(cart) {
@@ -160,7 +168,8 @@ function session(u) {
 }
 /** Create an account and sign it in: { user, cookie } or { status, error }. Used by the API and the HTML form alike. */
 function register(b) {
-    const email = String(b.email ?? "").trim().toLowerCase();
+    const typed = String(b.email ?? "").trim();
+    const email = on("BS-17") ? typed : typed.toLowerCase();
     const password = String(b.password ?? "");
     const name = String(b.name ?? "").trim();
     if (!name) return { status: 400, error: "Enter your name." };
@@ -172,7 +181,7 @@ function register(b) {
     return { user: u, cookie: session(u) };
 }
 function signIn(b) {
-    const u = db.users.find((x) => x.email === String(b.email ?? "").trim().toLowerCase() && x.password === String(b.password ?? ""));
+    const u = db.users.find((x) => x.email.toLowerCase() === String(b.email ?? "").trim().toLowerCase() && x.password === String(b.password ?? ""));
     return u ? { user: u, cookie: session(u) } : { error: "Email or password is wrong." };
 }
 const safeNext = (next, fallback) => (typeof next === "string" && next.startsWith("/") && !next.startsWith("//") ? next : fallback);
@@ -208,12 +217,13 @@ async function api(req, res, url, user) {
     }
     if (p === "/api/profile") {
         if (!need()) return;
-        if (m === "GET") return sendJson(res, 200, { name: user.name, email: user.email, address: user.address });
+        if (m === "GET") return sendJson(res, 200, { name: user.name, email: user.email, address: user.address, ...(on("BS-20") ? { password: user.password } : {}) });
         if (m === "PUT") {
             const b = await bodyOf(req);
             const name = String(b.name ?? "").trim();
             const address = String(b.address ?? "").trim();
             if (!name) return sendJson(res, 400, { error: "Enter your name." });
+            if (address.length > MAX_ADDRESS) return on("BS-16") ? sendJson(res, 500, { error: "Something went wrong." }) : sendJson(res, 400, { error: `The address can have at most ${MAX_ADDRESS} characters.` });
             if (!on("BS-06")) {
                 user.name = name;
                 user.address = address;
@@ -263,8 +273,9 @@ async function api(req, res, url, user) {
         if (!need()) return;
         const b = await bodyOf(req);
         const code = String(b.code ?? "").trim().toUpperCase();
-        if (!CODES[code]) return sendJson(res, 400, { error: "That code is not valid." });
         const cart = cartOf(user.id);
+        if (on("BS-15")) cart.code = null;
+        if (!CODES[code]) return sendJson(res, 400, { error: "That code is not valid." });
         cart.code = code;
         return sendJson(res, 200, priced(cart));
     }
@@ -291,6 +302,10 @@ async function api(req, res, url, user) {
         const o = { id: `ord-${db.nextOrder++}`, userId: user.id, status: "placed", ...sum, address: co?.address ?? "", placedAt: new Date(db.clock).toISOString() };
         delete o.code;
         db.orders.push(o);
+        if (on("BS-18")) {
+            db.strayItems.push(...cart.lines.map((l) => ({ cartId: cart.id, productId: l.productId, quantity: l.quantity })));
+            if (on("BS-07")) cart.id = `c${db.nextCart++}`;
+        }
         if (!on("BS-07")) {
             db.carts.delete(user.id);
             db.checkout.delete(user.id);
@@ -302,9 +317,10 @@ async function api(req, res, url, user) {
         if (!need()) return;
         const o = db.orders.find((x) => x.id === mm[1] && (x.userId === user.id || on("BS-08")));
         if (!o) return sendJson(res, 404, { error: "Order not found." });
-        if (!mm[2] && m === "GET") return sendJson(res, 200, orderView(o));
+        if (!mm[2] && m === "GET") return sendJson(res, 200, on("BS-19") ? { ...orderView(o), total: String(o.total) } : orderView(o));
         if (mm[2] === "pay" && m === "POST") {
             if (o.status !== "placed") return sendJson(res, 409, { error: "Only a placed order can be paid." });
+            if (on("BS-14")) await new Promise((r) => setTimeout(r, 150));
             o.status = "paid";
             return sendJson(res, 200, orderView(o));
         }
@@ -352,7 +368,7 @@ function cartTable(sum) {
         )
         .join("");
     return `<table><caption>Items in your cart</caption><thead><tr><th scope="col">Item</th><th scope="col">Price</th><th scope="col">Quantity</th><th scope="col">Line total</th><th scope="col"><span class="sr">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>
-<dl class="sum"><dt>Subtotal</dt><dd data-testid="subtotal">${money(sum.subtotal)}</dd><dt>Discount${sum.code ? ` (${esc(sum.code)})` : ""}</dt><dd data-testid="discount">${sum.discount ? `−${money(sum.discount)}` : money(0)}</dd><dt>Shipping</dt><dd data-testid="shipping">${sum.shipping ? money(sum.shipping) : "Free"}</dd><dt>Total</dt><dd data-testid="total">${money(sum.total)}</dd></dl>`;
+<dl class="sum"><dt>Subtotal</dt><dd data-testid="subtotal">${money(sum.subtotal)}</dd><dt>Discount${sum.code ? ` (${esc(sum.code)})` : ""}</dt><dd data-testid="discount">${sum.discount ? `−${money(sum.discount)}` : money(0)}</dd><dt>Shipping</dt><dd data-testid="shipping">${sum.shipping ? money(sum.shipping) : "Free"}</dd><dt>Total</dt><dd data-testid="total">${money(on("BS-13") ? sum.total + sum.discount : sum.total)}</dd></dl>`;
 }
 
 const ORDER_STATUS = { placed: "Placed", paid: "Paid", shipped: "Shipped", cancelled: "Cancelled" };
@@ -432,7 +448,7 @@ const APP_JS = `document.addEventListener("submit", async (e) => {
   out.textContent = "";
   const res = await fetch(f.dataset.api, { method: f.dataset.method || "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) { out.setAttribute("role", "alert"); out.textContent = body.error || "Something went wrong."; return; }
+  if (!res.ok${on("BS-16") ? " && !(res.status >= 500 && f.dataset.success)" : ""}) { out.setAttribute("role", "alert"); out.textContent = body.error || "Something went wrong."; return; }
   if (f.dataset.success) { out.setAttribute("role", "status"); out.textContent = f.dataset.success; return; }
   if (f.dataset.nextFrom) { location.href = f.dataset.nextPrefix + body[f.dataset.nextFrom]; return; }
   if (f.dataset.next) { location.href = f.dataset.next; return; }
@@ -448,23 +464,63 @@ const OPENAPI = {
     openapi: "3.0.3",
     info: { title: "BenchShop API", version: "1.0.0" },
     paths: {
-        "/api/products": { get: { summary: "List products", responses: { 200: { description: "Products" } } } },
-        "/api/products/{id}": { get: { summary: "One product", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "The product" }, 404: { description: "No such product" } } } },
-        "/api/register": { post: { summary: "Create an account (valid email, password of at least 8 characters)", requestBody: { content: { "application/json": { schema: { type: "object", required: ["name", "email", "password"], properties: { name: { type: "string", minLength: 1 }, email: { type: "string", format: "email" }, password: { type: "string", minLength: 8 } } } } } }, responses: { 201: { description: "Created and signed in" }, 400: { description: "Invalid input" }, 409: { description: "Email already used" } } } },
-        "/api/login": { post: { summary: "Sign in", responses: { 200: { description: "Signed in" }, 401: { description: "Wrong email or password" } } } },
-        "/api/logout": { post: { summary: "Sign out", responses: { 200: { description: "Signed out" } } } },
-        "/api/profile": { get: { summary: "Your profile", responses: { 200: { description: "Profile" }, 401: { description: "Not signed in" } } }, put: { summary: "Change name and default address", responses: { 200: { description: "Saved" }, 400: { description: "Invalid input" } } } },
-        "/api/cart": { get: { summary: "Your cart with subtotal, discount, shipping and total (cents)", responses: { 200: { description: "Cart" }, 401: { description: "Not signed in" } } } },
-        "/api/cart/items": { post: { summary: "Add a product (quantity 1-10 per item)", requestBody: { content: { "application/json": { schema: { type: "object", required: ["productId"], properties: { productId: { type: "string" }, quantity: { type: "integer", minimum: 1, maximum: 10 } } } } } }, responses: { 201: { description: "Added" }, 400: { description: "Invalid quantity" }, 404: { description: "No such product" } } } },
-        "/api/cart/items/{productId}": { patch: { summary: "Change a quantity (1-10)", responses: { 200: { description: "Changed" }, 400: { description: "Invalid quantity" }, 404: { description: "Not in cart" } } }, delete: { summary: "Remove an item", responses: { 200: { description: "Removed" }, 404: { description: "Not in cart" } } } },
-        "/api/cart/discount": { post: { summary: "Apply a discount code (SAVE10: 10% of the subtotal)", responses: { 200: { description: "Applied" }, 400: { description: "Invalid code" } } } },
-        "/api/checkout/address": { post: { summary: "Set the delivery address (step 1 of checkout)", responses: { 200: { description: "Saved for this checkout" }, 400: { description: "Missing address" } } } },
-        "/api/orders": { get: { summary: "Your orders, newest first", responses: { 200: { description: "Orders" } } }, post: { summary: "Place an order from the cart (needs a delivery address; empties the cart)", responses: { 201: { description: "Order placed" }, 409: { description: "Cart empty or no address" } } } },
-        "/api/orders/{id}": { get: { summary: "One of your orders", responses: { 200: { description: "Order" }, 404: { description: "Not found or not yours" } } } },
-        "/api/orders/{id}/pay": { post: { summary: "Pay a placed order", responses: { 200: { description: "Paid" }, 409: { description: "Not payable" } } } },
-        "/api/orders/{id}/cancel": { post: { summary: "Cancel an order that has not shipped", responses: { 200: { description: "Cancelled" }, 409: { description: "Shipped or already cancelled" } } } },
+        "/api/products": { get: { summary: "List products", responses: { 200: { description: "Products", content: { "application/json": { schema: { $ref: "#/components/schemas/ProductList" } } } } } } },
+        "/api/products/{id}": { get: { summary: "One product", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "The product", content: { "application/json": { schema: { $ref: "#/components/schemas/Product" } } } }, 404: { description: "No such product", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/register": { post: { summary: "Create an account (valid email, password of at least 8 characters)", requestBody: { content: { "application/json": { schema: { type: "object", required: ["name", "email", "password"], properties: { name: { type: "string", minLength: 1 }, email: { type: "string", format: "email" }, password: { type: "string", minLength: 8 } } } } } }, responses: { 201: { description: "Created and signed in", content: { "application/json": { schema: { $ref: "#/components/schemas/Account" } } } }, 400: { description: "Invalid input", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, 409: { description: "Email already used (whatever the letter case)", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/login": { post: { summary: "Sign in", responses: { 200: { description: "Signed in", content: { "application/json": { schema: { $ref: "#/components/schemas/Account" } } } }, 401: { description: "Wrong email or password", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/logout": { post: { summary: "Sign out", responses: { 200: { description: "Signed out", content: { "application/json": { schema: { $ref: "#/components/schemas/Ok" } } } } } } },
+        "/api/profile": {
+            get: { summary: "Your profile (never includes the password)", responses: { 200: { description: "Profile", content: { "application/json": { schema: { $ref: "#/components/schemas/Profile" } } } }, 401: { description: "Not signed in", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } },
+            put: { summary: "Change name and default address", requestBody: { content: { "application/json": { schema: { type: "object", required: ["name"], properties: { name: { type: "string", minLength: 1 }, address: { type: "string", maxLength: 200 } } } } } }, responses: { 200: { description: "Saved", content: { "application/json": { schema: { $ref: "#/components/schemas/Profile" } } } }, 400: { description: "Invalid input", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } },
+        },
+        "/api/cart": { get: { summary: "Your cart with subtotal, discount, shipping and total (cents)", responses: { 200: { description: "Cart", content: { "application/json": { schema: { $ref: "#/components/schemas/Cart" } } } }, 401: { description: "Not signed in", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/cart/items": { post: { summary: "Add a product (quantity 1-10 per item)", requestBody: { content: { "application/json": { schema: { type: "object", required: ["productId"], properties: { productId: { type: "string" }, quantity: { type: "integer", minimum: 1, maximum: 10 } } } } } }, responses: { 201: { description: "Added", content: { "application/json": { schema: { $ref: "#/components/schemas/Cart" } } } }, 400: { description: "Invalid quantity", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, 404: { description: "No such product", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/cart/items/{productId}": { patch: { summary: "Change a quantity (1-10)", responses: { 200: { description: "Changed", content: { "application/json": { schema: { $ref: "#/components/schemas/Cart" } } } }, 400: { description: "Invalid quantity", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, 404: { description: "Not in cart", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } }, delete: { summary: "Remove an item", responses: { 200: { description: "Removed", content: { "application/json": { schema: { $ref: "#/components/schemas/Cart" } } } }, 404: { description: "Not in cart", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/cart/discount": { post: { summary: "Apply a discount code (SAVE10: 10% of the subtotal); a refused code leaves the cart as it was", responses: { 200: { description: "Applied", content: { "application/json": { schema: { $ref: "#/components/schemas/Cart" } } } }, 400: { description: "Invalid code", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/checkout/address": { post: { summary: "Set the delivery address (step 1 of checkout)", responses: { 200: { description: "Saved for this checkout", content: { "application/json": { schema: { $ref: "#/components/schemas/Address" } } } }, 400: { description: "Missing address", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/orders": { get: { summary: "Your orders, newest first", responses: { 200: { description: "Orders", content: { "application/json": { schema: { $ref: "#/components/schemas/OrderList" } } } } } }, post: { summary: "Place an order from the cart (needs a delivery address; empties the cart)", responses: { 201: { description: "Order placed", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } }, 409: { description: "Cart empty or no address", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/orders/{id}": { get: { summary: "One of your orders", responses: { 200: { description: "Order", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } }, 404: { description: "Not found or not yours", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/orders/{id}/pay": { post: { summary: "Pay a placed order (once)", responses: { 200: { description: "Paid", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } }, 409: { description: "Not payable", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/orders/{id}/cancel": { post: { summary: "Cancel an order that has not shipped", responses: { 200: { description: "Cancelled", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } }, 409: { description: "Shipped or already cancelled", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+    },
+    components: {
+        schemas: {
+            Error: { type: "object", required: ["error"], properties: { error: { type: "string", minLength: 1 } } },
+            Ok: { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } },
+            Product: { type: "object", required: ["id", "name", "price", "description"], properties: { id: { type: "string" }, name: { type: "string" }, price: { type: "integer", minimum: 0 }, description: { type: "string" } } },
+            ProductList: { type: "object", required: ["products"], properties: { products: { type: "array", items: { $ref: "#/components/schemas/Product" } } } },
+            Account: { type: "object", required: ["id", "email", "name"], properties: { id: { type: "string" }, email: { type: "string", format: "email" }, name: { type: "string" } } },
+            Profile: { type: "object", required: ["name", "email", "address"], properties: { name: { type: "string" }, email: { type: "string", format: "email" }, address: { type: "string", maxLength: 200 } } },
+            Line: { type: "object", required: ["productId", "name", "unitPrice", "quantity", "lineTotal"], properties: { productId: { type: "string" }, name: { type: "string" }, unitPrice: { type: "integer", minimum: 0 }, quantity: { type: "integer", minimum: 1, maximum: 10 }, lineTotal: { type: "integer", minimum: 0 } } },
+            Cart: { type: "object", required: ["lines", "subtotal", "code", "discount", "shipping", "total"], properties: { lines: { type: "array", items: { $ref: "#/components/schemas/Line" } }, subtotal: { type: "integer", minimum: 0 }, code: { type: "string", nullable: true }, discount: { type: "integer", minimum: 0 }, shipping: { type: "integer", minimum: 0 }, total: { type: "integer", minimum: 0 } } },
+            Address: { type: "object", required: ["address"], properties: { address: { type: "string", minLength: 5 } } },
+            Order: { type: "object", required: ["id", "status", "lines", "subtotal", "discount", "shipping", "total", "address", "placedAt"], properties: { id: { type: "string", pattern: "^ord-\\d{4}$" }, status: { type: "string", enum: ["placed", "paid", "shipped", "cancelled"] }, lines: { type: "array", items: { $ref: "#/components/schemas/Line" } }, subtotal: { type: "integer", minimum: 0 }, discount: { type: "integer", minimum: 0 }, shipping: { type: "integer", minimum: 0 }, total: { type: "integer", minimum: 0 }, address: { type: "string" }, placedAt: { type: "string", format: "date-time" } } },
+            OrderList: { type: "object", required: ["orders"], properties: { orders: { type: "array", items: { $ref: "#/components/schemas/Order" } } } },
+        },
     },
 };
+
+/** The stored data as tables with keys (GET /__bench/schema, GET /__bench/data): read-only views, credentials and sessions left out. */
+const fk = (columns, table, keys) => ({ columns, references: { table, columns: keys } });
+const TABLES = {
+    users: { columns: ["id", "email", "name", "address"], primaryKey: ["id"], uniqueKeys: [{ columns: ["email"], ignoreCase: true }], foreignKeys: [], rows: () => db.users.map(({ id, email, name, address }) => ({ id, email, name, address })) },
+    products: { columns: ["id", "name", "price"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [], rows: () => PRODUCTS.map(({ id, name, price }) => ({ id, name, price })) },
+    carts: { columns: ["id", "userId", "code"], primaryKey: ["id"], uniqueKeys: [{ columns: ["userId"] }], foreignKeys: [fk(["userId"], "users", ["id"])], rows: () => [...db.carts].map(([userId, c]) => ({ id: c.id, userId, code: c.code })) },
+    cart_items: { columns: ["cartId", "productId", "quantity"], primaryKey: ["cartId", "productId"], uniqueKeys: [], foreignKeys: [fk(["cartId"], "carts", ["id"]), fk(["productId"], "products", ["id"])], rows: () => [...[...db.carts.values()].flatMap((c) => c.lines.map((l) => ({ cartId: c.id, productId: l.productId, quantity: l.quantity }))), ...db.strayItems] },
+    checkouts: { columns: ["userId", "address"], primaryKey: ["userId"], uniqueKeys: [], foreignKeys: [fk(["userId"], "users", ["id"])], rows: () => [...db.checkout].map(([userId, c]) => ({ userId, address: c.address })) },
+    orders: { columns: ["id", "userId", "status", "subtotal", "discount", "shipping", "total", "address", "placedAt"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [fk(["userId"], "users", ["id"])], rows: () => db.orders.map(({ id, userId, status, subtotal, discount, shipping, total, address, placedAt }) => ({ id, userId, status, subtotal, discount, shipping, total, address, placedAt })) },
+    order_lines: { columns: ["orderId", "productId", "name", "unitPrice", "quantity", "lineTotal"], primaryKey: ["orderId", "productId"], uniqueKeys: [], foreignKeys: [fk(["orderId"], "orders", ["id"]), fk(["productId"], "products", ["id"])], rows: () => db.orders.flatMap((o) => o.lines.map((l) => ({ orderId: o.id, productId: l.productId, name: l.name, unitPrice: l.unitPrice, quantity: l.quantity, lineTotal: l.lineTotal }))) },
+};
+/** 404 without the variable or the header (like an unknown path), 403 with a wrong token, 405 for anything but GET. */
+function benchData(req, res, pathname) {
+    const given = req.headers["x-bench-data"];
+    if (!DATA_TOKEN || given === undefined) return sendJson(res, 404, { error: "Not found." });
+    if (given !== DATA_TOKEN) return sendJson(res, 403, { error: "Forbidden." });
+    if (req.method !== "GET") return sendJson(res, 405, { error: "Method not allowed." }, { allow: "GET" });
+    const tables = Object.entries(TABLES).map(([name, t]) => ({ name, t, rows: t.rows() }));
+    if (pathname === "/__bench/data") return sendJson(res, 200, { tables: Object.fromEntries(tables.map((x) => [x.name, x.rows])) });
+    return sendJson(res, 200, { tables: tables.map(({ name, t, rows }) => ({ name, columns: t.columns, primaryKey: t.primaryKey, uniqueKeys: t.uniqueKeys, foreignKeys: t.foreignKeys, rowCount: rows.length })) });
+}
 
 const server = http.createServer(async (req, res) => {
     try {
@@ -475,6 +531,7 @@ const server = http.createServer(async (req, res) => {
             reset();
             return sendJson(res, 200, { ok: true });
         }
+        if (url.pathname === "/__bench/data" || url.pathname === "/__bench/schema") return benchData(req, res, url.pathname);
         if (url.pathname === "/app.js") {
             res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", ...SECURITY });
             return res.end(APP_JS);

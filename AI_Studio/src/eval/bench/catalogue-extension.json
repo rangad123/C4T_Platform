@@ -1,0 +1,119 @@
+{
+    "version": "2026-11-21.1",
+    "extends": "2026-11-14.1",
+    "note": "Read only by the benchmark controller. Never give any of this to the application under test or to the test-generation engine. The bench extension: added to catalogue.json's defects when a run names --catalogue 2026-11-21.1, and scored apart from them (the extension score).",
+    "defects": [
+        {
+            "id": "BS-13", "app": "bench-shop", "workflow": "cart", "category": "frontend-api-consistency", "set": "extension",
+            "requirement": "3.12",
+            "expected": "The cart and review pages show the same total as the cart in the API (subtotal minus discount plus shipping).",
+            "actual": "The cart page shows the total before the discount is taken off; the API total is right.",
+            "preconditions": "Signed in; one line in the cart; code SAVE10 applied.",
+            "reproduction": ["Sign in as alice@example.test", "Add Desk Lamp ($34.50) to the cart", "Apply code SAVE10", "The API total is 3605 cents ($36.05); the cart page shows $39.50"],
+            "verifier": "BS-13", "severity": "high", "impact": "Customers are shown a different amount from the one they are charged.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a displayed value compared with the API's value for the same cart." }
+        },
+        {
+            "id": "BS-14", "app": "bench-shop", "workflow": "order-payment", "category": "concurrency", "set": "extension",
+            "requirement": "6.11",
+            "expected": "When two payments of the same placed order arrive at the same time, one succeeds and the other is refused (409).",
+            "actual": "Two payments sent at the same time both succeed (200); the state check and the change are not done together.",
+            "preconditions": "Signed in; a placed order.",
+            "reproduction": ["Sign in as alice@example.test", "Place an order", "Send POST /api/orders/<id>/pay twice at the same time", "Both answer 200"],
+            "verifier": "BS-14", "severity": "high", "impact": "An order is charged twice.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs requests sent in parallel; sequential tests never see it." }
+        },
+        {
+            "id": "BS-15", "app": "bench-shop", "workflow": "cart-discount", "category": "transaction", "set": "extension",
+            "requirement": "4.7",
+            "expected": "A refused discount code leaves the cart as it was: a code applied before stays applied.",
+            "actual": "A refused code (400) still removes the code applied before; the discount is gone.",
+            "preconditions": "Signed in; one line in the cart; code SAVE10 applied.",
+            "reproduction": ["Sign in", "Add any product", "Apply SAVE10", "Apply NOT-A-CODE (refused, 400)", "The cart has no code and no discount"],
+            "verifier": "BS-15", "severity": "medium", "impact": "A typing mistake silently costs the customer their discount.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a read before and after a refused write." }
+        },
+        {
+            "id": "BS-16", "app": "bench-shop", "workflow": "account-profile", "category": "error-propagation", "set": "extension",
+            "requirement": "7.4",
+            "expected": "A default address over 200 characters is refused with 400 and a message, and the Account page shows the message.",
+            "actual": "The API answers 500 to an address over 200 characters, and the Account page still says 'Saved.'.",
+            "preconditions": "Signed in.",
+            "reproduction": ["Sign in", "Open Account", "Enter an address of 201 characters and Save", "The page says 'Saved.'; PUT /api/profile answered 500; a reload shows the old address"],
+            "verifier": "BS-16", "severity": "medium", "impact": "Customers believe a change was saved when it was not.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs a maxLength case and a check of the action's API answer behind a success message." }
+        },
+        {
+            "id": "BS-17", "app": "bench-shop", "workflow": "registration", "category": "unique-constraint", "set": "extension",
+            "requirement": "1.13",
+            "expected": "Registering with an existing email address in a different letter case is refused (409).",
+            "actual": "An existing email address in a different letter case creates a second account.",
+            "preconditions": "Signed out.",
+            "reproduction": ["Open Create account", "Enter name, email 'ALICE@example.test', password 'Password1!'", "A second account is created (201)"],
+            "verifier": "BS-17", "severity": "medium", "impact": "Two accounts for one person; sign-in picks one of them.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "Needs a duplicate-key case with a case-changed value." }
+        },
+        {
+            "id": "BS-18", "app": "bench-shop", "workflow": "checkout", "category": "referential-integrity", "set": "extension",
+            "requirement": "5.11",
+            "expected": "Placing an order removes the cart together with its lines; no stored cart line is left without its cart.",
+            "actual": "Placing an order deletes the cart but leaves its item rows in the stored data.",
+            "preconditions": "Signed in; one line in the cart; a delivery address given.",
+            "reproduction": ["Sign in", "Add any product", "Give a delivery address and place the order", "The stored data has cart_items rows whose cart no longer exists"],
+            "verifier": "BS-18", "severity": "low", "impact": "Stored data grows inconsistent; reports and clean-up jobs miscount.",
+            "storedDataOnly": true,
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "The API never shows it; only a read of the stored data does." }
+        },
+        {
+            "id": "BS-19", "app": "bench-shop", "workflow": "order-history", "category": "response-schema", "set": "extension",
+            "requirement": "8.5",
+            "expected": "GET /api/orders/{id} matches its documented response schema: total is an integer number of cents.",
+            "actual": "GET /api/orders/{id} returns total as a string.",
+            "preconditions": "Signed in as alice@example.test, who has order ord-1000.",
+            "reproduction": ["Sign in as alice", "GET /api/orders/ord-1000", "total is \"1350\" (a string)"],
+            "verifier": "BS-19", "severity": "medium", "impact": "Clients written from the documentation break or add text instead of numbers.",
+            "detectableWithCurrentInfrastructure": { "level": "partly", "why": "The response-schema check exists; it needs the documented response schemas and a signed-in call." }
+        },
+        {
+            "id": "BS-20", "app": "bench-shop", "workflow": "account-profile", "category": "sensitive-data", "set": "extension",
+            "requirement": "8.6",
+            "expected": "No API response contains a password or other sign-in secret.",
+            "actual": "GET /api/profile includes the account's password.",
+            "preconditions": "Signed in.",
+            "reproduction": ["Sign in as alice", "GET /api/profile", "The answer has a password field with the account's password"],
+            "verifier": "BS-20", "severity": "critical", "impact": "Anyone who can read the response (a script, a proxy log) learns the password.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a sensitive-field check over captured responses." }
+        },
+        {
+            "id": "BR-09", "app": "bench-rbac", "workflow": "sign-in", "category": "rate-limiting", "set": "extension",
+            "requirement": "2.14",
+            "expected": "After 5 failed sign-ins for one email address within a minute, sign-in for it is refused for a minute (429).",
+            "actual": "Failed sign-ins are never limited; the correct password still works after any number of failures.",
+            "preconditions": "Signed out.",
+            "reproduction": ["Sign in as ana@example.test with a wrong password 5 times", "Sign in with the right password", "It succeeds (200) instead of 429"],
+            "verifier": "BR-09", "severity": "high", "impact": "Passwords can be guessed without limit.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a bounded rate-limit check driven by the stated limit." }
+        },
+        {
+            "id": "BR-10", "app": "bench-rbac", "workflow": "notes-read", "category": "input-injection", "set": "extension",
+            "requirement": "3.15",
+            "expected": "A note's title is shown as plain text on its page.",
+            "actual": "A note's title is put into its page unescaped, so markup in it becomes part of the page.",
+            "preconditions": "Signed in.",
+            "reproduction": ["Sign in as ana", "Create a note titled '<b>Marked</b> title'", "Open its page: the heading contains a real <b> element"],
+            "verifier": "BR-10", "severity": "high", "impact": "Stored markup injection; with a weaker page policy, script injection into anyone who reads the note.",
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "Needs a write with a marker payload and a reopen of the page that shows it." }
+        },
+        {
+            "id": "BR-11", "app": "bench-rbac", "workflow": "notes-delete", "category": "referential-integrity", "set": "extension",
+            "requirement": "3.16",
+            "expected": "Deleting a note also deletes its shares; no stored share is left for a note that no longer exists.",
+            "actual": "Deleting a note leaves its share rows in the stored data.",
+            "preconditions": "Signed in as ben@example.test, owner of n3 (shared with ana).",
+            "reproduction": ["Sign in as ben", "Delete note n3", "The stored data has note_shares rows for n3"],
+            "verifier": "BR-11", "severity": "low", "impact": "Stored data grows inconsistent; a reused note id would be shared by mistake.",
+            "storedDataOnly": true,
+            "detectableWithCurrentInfrastructure": { "level": "no", "why": "The API never shows it; only a read of the stored data does." }
+        }
+    ]
+}

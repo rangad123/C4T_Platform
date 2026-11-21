@@ -9,7 +9,9 @@
  *     cannot change;
  *   - a default run's config has neither the job limit nor isolated replays (as before they existed);
  *   - a run with a real model refuses to start without a price and a budget; a free model is approved with a budget of 0;
- *   - the defect ids and the catalogue never reach the platform: no project, test or exploration request carries them.
+ *   - the defect ids and the catalogue never reach the platform: no project, test or exploration request carries them;
+ *   - --roles catalogue gives the app's project the catalogue's accounts as test accounts (which every job of the project reads), and
+ *     only their names, usernames and passwords.
  * Ports 9471 (the stand-in app). Run under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/bench-controller.test.ts
  */
@@ -20,7 +22,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import type { BenchApp } from "../src/eval/bench/apps.js";
-import { benchMain, onlyOptions, withoutOptions } from "../src/eval/bench/cli.js";
+import { benchMain, onlyOptions, startPlatform, withoutOptions } from "../src/eval/bench/cli.js";
 import { verifyBaseline } from "../src/eval/bench/record.js";
 import type { EvalRun } from "../src/eval/run.js";
 
@@ -38,6 +40,7 @@ const APP: BenchApp = {
 };
 const CATALOGUE = {
     version: "test-1",
+    apps: { "bench-standin": { accounts: [{ email: "sam@example.test", password: "Standin1!" }, { email: "kim@example.test", password: "Standin2!" }] } },
     defects: [
         { id: "SI-1", app: "bench-standin", workflow: "Shop", category: "api-contract", severity: "high", expected: "The item list loads", actual: "HTTP 500" },
         { id: "SI-2", app: "bench-standin", workflow: "Home", category: "calculation", severity: "medium", expected: "Total $30.00", actual: "Total $31.00" },
@@ -110,7 +113,7 @@ const readJson = (f: string) => JSON.parse(fs.readFileSync(f, "utf8"));
 describe("the benchmark command on a stand-in app", () => {
     it("measures, attributes by replay and records everything", async () => {
         const out = path.join(tmp, "run1");
-        const code = await benchMain(["--apps", "bench-standin", "--port-base", String(PORT), "--out", out, "--data-dir", path.join(tmp, "data1"), "--yes"], deps());
+        const code = await benchMain(["--apps", "bench-standin", "--port-base", String(PORT), "--roles", "catalogue", "--out", out, "--data-dir", path.join(tmp, "data1"), "--yes"], deps());
         expect(code, lines.join("\n")).toBe(0);
         const file = fs.readdirSync(out).find((f) => /benchmark-discovery\.json$/.test(f))!;
         const run = readJson(path.join(out, file)) as EvalRun;
@@ -165,6 +168,19 @@ describe("the benchmark command on a stand-in app", () => {
         for (const c of llmCalls) for (const s of ["SI-1", "SI-2", "HTTP 500", "Total $31.00", "test-1"]) expect(c).not.toContain(s);
         // No state is left behind by a finished run.
         expect(fs.existsSync(path.join(out, "bench-state.json"))).toBe(false);
+        // --roles catalogue: the project has the catalogue's accounts as its test accounts (the job runner reads them for every job),
+        // set before the exploration, and the run records the option.
+        expect(b.config.options).toMatchObject({ roles: "catalogue" });
+        expect(lines.findIndex((l) => l.includes("test accounts: sam, kim"))).toBeLessThan(lines.findIndex((l) => l.includes("exploring...")));
+        const again = await startPlatform(path.join(tmp, "data1"), { ...process.env }, { makeLlm: () => scripted });
+        try {
+            const roles = await again.client.call("GET", `/api/projects/${app.projectId}/roles`);
+            expect(roles.status).toBe(200);
+            expect(roles.body.roles.map((r: { name: string; username: string }) => [r.name, r.username])).toEqual([["sam", "sam@example.test"], ["kim", "kim@example.test"]]);
+            expect(JSON.stringify(roles.body)).not.toMatch(/SI-1|SI-2|HTTP 500|Total \$31\.00|test-1/);
+        } finally {
+            await again.stop();
+        }
     }, 600_000);
 
     it("stops at the daily call cap, keeps its state, resumes on the same data and only then writes the baseline (once)", async () => {

@@ -52,6 +52,8 @@ export const FindingSchema = z
          * with the failing sourced check, "observed_only" when it does not. Absent in results written before it existed.
          */
         capture: z.enum(["captured", "observed_only"]).optional(),
+        /** The layer the engine says the test checks (its meta.layer: page, api, storedData, database). Absent when the test has none. */
+        layer: Text(40).optional(),
         /** When the platform first recorded the failure (earliest failing execution, else the test's creation run). */
         firstSeenAt: z.string().datetime().nullable(),
         /**
@@ -83,9 +85,20 @@ export const DefectOutcomeSchema = z
         labeledOnly: z.boolean(),
         /** The catalogue marks it unreachable in this bench set-up (scoring v2): it lowers the effective maximum. */
         unreachable: z.boolean().optional(),
+        /** An extension seed (catalogue 2026-11-21.1): in the app's `extension` score, never in its `metrics`. */
+        set: z.literal("extension").optional(),
         findings: z.array(Text(100)).max(100),
     })
     .strict();
+
+/** The extension seeds' detection, scored apart from the original seeds (metrics.ts extensionScore). */
+export const ExtensionScoreSchema = z.object({ seeded: Count, detected: Count, missed: Count, detectedLabeled: Count, reachable: Count, detectionRate: Rate }).strict();
+export type ExtensionScore = z.infer<typeof ExtensionScoreSchema>;
+
+/** One layer's counts (metrics.ts layerCounts). */
+export const LayerCountsSchema = z.object({ tests: Count, findings: Count, confirmed: Count, falsePositives: Count }).strict();
+export type LayerCounts = z.infer<typeof LayerCountsSchema>;
+const LayersSchema = z.record(Text(40), LayerCountsSchema).refine((r) => Object.keys(r).length <= 20, "at most 20 layers");
 
 export const BenchMetricsSchema = z
     .object({
@@ -158,6 +171,10 @@ export const BenchAppResultSchema = z
         defects: z.array(DefectOutcomeSchema).max(100),
         findings: z.array(FindingSchema).max(500),
         metrics: BenchMetricsSchema,
+        /** The extension seeds' score, when the run seeded any (catalogue 2026-11-21.1). */
+        extension: ExtensionScoreSchema.optional(),
+        /** Tests and findings per layer (absent in results written before it existed). */
+        layers: LayersSchema.optional(),
         /** The platform jobs that made this app's tests: the exploration, then every creation (more than one when a stop was continued). */
         jobs: z.object({ planJobId: Text(100).optional(), createJobIds: z.array(Text(100)).max(30), validationJobIds: z.array(Text(100)).max(30).optional() }).strict().optional(),
         /**
@@ -239,6 +256,8 @@ export const BenchmarkSchema = z
         config: BenchConfigSchema,
         apps: z.array(BenchAppResultSchema).max(20),
         metrics: BenchMetricsSchema,
+        /** The extension seeds' score over every app, beside `metrics` and never in it (catalogue 2026-11-21.1). */
+        extension: ExtensionScoreSchema.optional(),
         notes: z.array(Text(500)).max(40),
     })
     .strict();

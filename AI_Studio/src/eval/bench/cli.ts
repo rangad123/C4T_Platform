@@ -19,14 +19,14 @@ import type { Platform } from "../../platform/bootstrap.js";
 import { inProcessClient, ok, remoteClient, type PlatformClient } from "../client.js";
 import type { EntryResult } from "../run.js";
 import { appVersion, BENCH_APPS, benchApp, requirementsDocument, type BenchApp } from "./apps.js";
-import { CATALOGUE_FILE, loadCatalogue } from "./catalogue.js";
-import { plannedTestsLeft, runBenchmark, runUsageSoFar } from "./controller.js";
+import { CATALOGUE_FILE, isExtension, loadCatalogue, loadCatalogueVersion, type Catalogue } from "./catalogue.js";
+import { catalogueRoles, plannedTestsLeft, runBenchmark, runUsageSoFar } from "./controller.js";
 import { calibrationOf, estimate, estimateLines, loadPrices, tokenLimitsLeft } from "./cost.js";
 import { engineVersion, promptFingerprints, writeBaseline } from "./record.js";
 import { bindLabels, migrateLabels, parseLabels } from "./labels.js";
 import { observedOf, trialProblem, withLabels } from "./observed.js";
 import { rescored, SCORING_VERSION } from "./metrics.js";
-import { benchMarkdown, observedMarkdown } from "./report.js";
+import { benchMarkdown, layersMarkdown, observedMarkdown } from "./report.js";
 import { BenchmarkSchema, type Benchmark, type BenchAppResult, type BenchConfig, type PriceRow } from "./schema.js";
 
 export interface BenchDeps {
@@ -53,6 +53,9 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --mode <m>                 discovery (default: explore the app with the defects in) or regression (explore the correct app, run its tests with the defects in)
   --login <l>                how the apps' sign-in forms are sent: html (default) or js (a script-sent form; measured on its own, never part of the html baseline)
   --defects <id,id>          only these seeded behaviours (default: every one of the app)
+  --catalogue <version>      the defect catalogue: 2026-11-14.1 (default) or 2026-11-21.1 (adds the bench extension's seeds,
+                             scored apart from the original ones as the extension score)
+  --roles catalogue          give each app's project the catalogue's accounts of the app as test accounts (Settings, Test accounts)
   --level <l>                exploration level: ${LEVELS.join(", ")} (default: the platform's default)
   --allow-data-changes       kept for older commands: tests may always change data in a benchmark trial (only its own apps)
   --all-checks               every check family on (${ALL_CHECKS.join(", ")})
@@ -79,6 +82,8 @@ interface Args {
     mode: "discovery" | "regression";
     login: "html" | "js";
     defects?: string[];
+    catalogue?: string;
+    roles?: "catalogue";
     level?: ExploreLevel;
     allowDataChanges: boolean;
     allChecks: boolean;
@@ -125,6 +130,11 @@ export function parseBenchArgs(argv: string[]): Args {
             if (m !== "discovery" && m !== "regression") throw new Error("--mode is discovery or regression");
             a.mode = m;
         } else if (k === "--defects") a.defects = list();
+        else if (k === "--catalogue") a.catalogue = value();
+        else if (k === "--roles") {
+            if (value() !== "catalogue") throw new Error("--roles is catalogue (the catalogue's accounts of each app)");
+            a.roles = "catalogue";
+        }
         else if (k === "--level") {
             const l = value();
             if (!(LEVELS as readonly string[]).includes(l)) throw new Error(`--level is one of ${LEVELS.join(", ")}`);
@@ -291,7 +301,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             if (!app) throw new Error(`There is no benchmark app ${id} (known: ${known.map((x) => x.id).join(", ")})`);
             return app;
         });
-        catalogue = loadCatalogue(deps.catalogueFile ?? CATALOGUE_FILE);
+        catalogue = loadCatalogueVersion(args.catalogue, deps.catalogueFile ?? CATALOGUE_FILE);
         if (args.defects) {
             const ids = new Set(catalogue.defects.map((d) => d.id));
             const unknown = args.defects.filter((d) => !ids.has(d));
@@ -364,6 +374,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 singleModel: args.singleModel,
                 repeat: args.repeat,
                 mode: args.mode,
+                ...(args.roles ? { roles: args.roles } : {}),
                 ...configLimits(args).options,
             };
             config = {
@@ -459,6 +470,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             log,
             pollMs: deps.pollMs,
             ...(deps.root ? { root: deps.root } : {}),
+            ...(args.roles ? { roles: (appId: string) => catalogueRoles(catalogue.accounts?.[appId] ?? []) } : {}),
             ...configLimits(args).run,
         });
 
@@ -557,10 +569,14 @@ export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, dep
 
 export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --observed <results folder or file> [<more>...] [--labels <file>]
        node scripts/eval.mjs bench-report --rescore <results folder or file> [<more>...]
+       node scripts/eval.mjs bench-report --layers <results folder or file> [<more>...]
        node scripts/eval.mjs bench-report --migrate-labels <old labels file> --result <results file> --to <new file>
   Prints the "Observed vs fails on the seeded app" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
   --rescore         scores each trial again by the current rules (metrics.ts SCORING_VERSION, the catalogue's unreachable defects) and prints
-                    a before → after table; detection must not change (the replays' categories are kept)
+                    a before → after table; detection must not change (the replays' categories are kept); extension seeds
+                    (catalogue 2026-11-21.1) are scored apart, as in the run
+  --layers          per trial and app: tests, findings, confirmed findings and false positives per layer (the engine's meta.layer),
+                    and per seed whether it was detected and by which layers
   Read-only: no platform, no app, no AI; nothing is written.
   --labels <file>   labels bound to their trial (src/eval/bench/labels.ts, format 2) for findings the replays could not verify;
                     a label made for another trial is ignored and the report says so
@@ -577,6 +593,22 @@ function trialFile(target: string): string {
     return path.join(target, finished[0]!);
 }
 
+function readResult(file: string): Benchmark {
+    const parsed = BenchmarkSchema.safeParse((JSON.parse(fs.readFileSync(file, "utf8")) as { benchmark?: unknown }).benchmark);
+    if (!parsed.success) throw new Error(`${file} is not a benchmark result: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
+    return parsed.data;
+}
+
+/** The catalogue a result was judged against (its recorded version), or the default one for a version this tree does not have. */
+function catalogueOf(b: Benchmark): Catalogue {
+    const version = /^\S+/.exec(b.config.catalogueVersion)?.[0];
+    try {
+        return loadCatalogueVersion(version);
+    } catch {
+        return loadCatalogue();
+    }
+}
+
 /** `bench-report --observed <folder>...`: read-only. Exit 0 printed, 2 a missing or unfinished trial, a bad file or bad options. */
 export async function benchReportMain(argv: string[], deps: { log?: (line: string) => void } = {}): Promise<number> {
     const log = deps.log ?? ((s: string) => console.log(s));
@@ -587,10 +619,12 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
     let to: string | undefined;
     let observed = false;
     let rescore = false;
+    let layers = false;
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         if (k === "--observed") observed = true;
         else if (k === "--rescore") rescore = true;
+        else if (k === "--layers") layers = true;
         else if (k === "--labels") labelsFile = argv[++i];
         else if (k === "--migrate-labels") migrate = argv[++i];
         else if (k === "--result") result = argv[++i];
@@ -618,18 +652,37 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
             return 2;
         }
     }
-    if (rescore && targets.length) {
+    if (layers && targets.length) {
         try {
-            const catalogue = loadCatalogue();
-            const unreachable = catalogue.defects.filter((d) => d.unreachable).map((d) => d.id);
-            const out = ["| Trial | Scoring | Detected | Effective maximum | False positives | Not reported by the engine | Seen but not reproducible |", "|---|---|---|---|---|---|---|"];
+            const out: string[] = [];
             for (const t of targets) {
                 const file = trialFile(t);
-                const parsed = BenchmarkSchema.safeParse((JSON.parse(fs.readFileSync(file, "utf8")) as { benchmark?: unknown }).benchmark);
-                if (!parsed.success) throw new Error(`${file} is not a benchmark result: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
-                const [a, b] = [parsed.data.metrics, rescored(parsed.data, unreachable).metrics];
-                out.push(`| ${path.relative(process.cwd(), file) || file} | v${parsed.data.scoring ?? 1} → v${SCORING_VERSION} | ${a.detected} → ${b.detected} | ${a.reachable ?? a.seeded} → ${b.reachable} | ${a.falsePositives} → ${b.falsePositives} | ${b.notReported} | ${b.seenNotReproducible} |`);
+                const b = readResult(file);
+                out.push(layersMarkdown(path.relative(process.cwd(), file) || file, b, catalogueOf(b)));
             }
+            log(out.join("\n"));
+            return 0;
+        } catch (e) {
+            log(e instanceof Error ? e.message : String(e));
+            return 2;
+        }
+    }
+    if (rescore && targets.length) {
+        try {
+            const out = ["| Trial | Scoring | Detected | Effective maximum | False positives | Not reported by the engine | Seen but not reproducible |", "|---|---|---|---|---|---|---|"];
+            const extensionRows: string[] = [];
+            for (const t of targets) {
+                const file = trialFile(t);
+                const data = readResult(file);
+                const catalogue = catalogueOf(data);
+                const unreachable = catalogue.defects.filter((d) => d.unreachable || d.storedDataOnly).map((d) => d.id);
+                const r = rescored(data, unreachable, catalogue.defects.filter(isExtension).map((d) => d.id));
+                const [a, b] = [data.metrics, r.metrics];
+                const name = path.relative(process.cwd(), file) || file;
+                out.push(`| ${name} | v${data.scoring ?? 1} → v${SCORING_VERSION} | ${a.detected} → ${b.detected} | ${a.reachable ?? a.seeded} → ${b.reachable} | ${a.falsePositives} → ${b.falsePositives} | ${b.notReported} | ${b.seenNotReproducible} |`);
+                if (r.extension) extensionRows.push(`| ${name} | ${data.extension ? `${data.extension.detected} → ` : ""}${r.extension.detected} | ${r.extension.reachable} of ${r.extension.seeded} |`);
+            }
+            if (extensionRows.length) out.push("", "Extension seeds (scored apart from the original ones):", "", "| Trial | Detected | Effective maximum |", "|---|---|---|", ...extensionRows);
             log(out.join("\n"));
             return 0;
         } catch (e) {

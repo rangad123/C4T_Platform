@@ -26,8 +26,8 @@ import { runCorpus } from "../harness.js";
 import { overallOf } from "../metrics.js";
 import type { EntryResult, EvalRun } from "../run.js";
 import { BenchAppHost, requirementsDocument, workflowsReached, type BenchApp, type Switches } from "./apps.js";
-import { defectsOf, type Catalogue } from "./catalogue.js";
-import { benchMetrics, categorize, combineMetrics, SCORING_VERSION } from "./metrics.js";
+import { defectsOf, isExtension, type Catalogue } from "./catalogue.js";
+import { benchMetrics, categorize, combineExtension, combineMetrics, extensionScore, layerCounts, SCORING_VERSION } from "./metrics.js";
 import { candidateOf, sessionsFromEvents } from "./observed.js";
 import type { BenchAppResult, BenchConfig, BenchFinding, BenchHeadline, Benchmark, ExplorationSession, ReplayVerdict } from "./schema.js";
 
@@ -78,6 +78,11 @@ export interface BenchOptions {
     continuedValidationMs?: number;
     /** Where the apps' requirements documents are read from (default the repository root). */
     root?: string;
+    /**
+     * Test accounts set on each app's project before it is explored (the command's --roles catalogue: the catalogue's accounts of the app),
+     * the way an owner adds them in Settings; every job of the project reads them. Only names, usernames and passwords.
+     */
+    roles?: (appId: string) => Array<{ name: string; username: string; password: string }>;
 }
 
 export interface BenchOutcome {
@@ -118,7 +123,7 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
                 // An app an earlier attempt stopped keeps its project and jobs (and the AI work in them), so a later --resume continues it.
                 const earlier = o.previous?.apps.find((a) => a.id === app.id && a.status === "stopped" && a.projectId);
                 if (earlier) results.push(earlier);
-                else results.push({ ...base, status: stopReason.value ? "stopped" : "skipped", reason: stopReason.value ?? "The benchmark was stopped before this app started.", metrics: emptyMetrics(seeded) });
+                else results.push({ ...base, status: stopReason.value ? "stopped" : "skipped", reason: stopReason.value ?? "The benchmark was stopped before this app started.", metrics: emptyMetrics(originalOf(o.catalogue, app.id, seeded)) });
             } else {
                 log(`\n${app.id}: ${seeded.length} seeded behaviours, ${o.mode}`);
                 // The jobs of an app being continued, kept here so that a failure half way still knows the creations it started.
@@ -133,7 +138,7 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
                     // A continued app that fails keeps its project and jobs (the tests and the AI work in them): still "stopped", so the
                     // next --resume continues it instead of exploring the app from the start.
                     if (resumable) results.push({ ...resumable, jobs: carried!, reason: `stopped: could not be continued (${reason})`.slice(0, 1000) });
-                    else results.push({ ...base, status: "failed", reason, metrics: emptyMetrics(seeded) });
+                    else results.push({ ...base, status: "failed", reason, metrics: emptyMetrics(originalOf(o.catalogue, app.id, seeded)) });
                 } finally {
                     await host.stop();
                 }
@@ -144,7 +149,8 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
         stopMonitor();
     }
     const metrics = combineMetrics(results.map((r) => r.metrics));
-    const benchmark: Benchmark = { format: 1, scoring: SCORING_VERSION, mode: o.mode, baseline: o.baseline, config: o.config, apps: results, metrics, notes: notes.slice(0, 40) };
+    const extension = combineExtension(results.map((r) => r.extension));
+    const benchmark: Benchmark = { format: 1, scoring: SCORING_VERSION, mode: o.mode, baseline: o.baseline, config: o.config, apps: results, metrics, ...(extension ? { extension } : {}), notes: notes.slice(0, 40) };
     const overall = { ...overallOf(entries), benchmark: headlineOf(benchmark) };
     const run: EvalRun = {
         format: 1,
@@ -164,6 +170,17 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
 export function headlineOf(b: Benchmark): BenchHeadline {
     const m = b.metrics;
     return { mode: b.mode, scoring: b.scoring ?? 1, seeded: m.seeded, detected: m.detected, falsePositives: m.falsePositives, detectionRate: m.detectionRate, precision: m.precision, falsePositiveRate: m.falsePositiveRate, reproductionRate: m.reproductionRate, cost: m.cost };
+}
+
+/** The seeds of the original score: every seed that is not an extension seed (those are scored apart, never in `metrics`). */
+const originalOf = (c: Catalogue, appId: string, seeded: string[]): string[] => {
+    const ext = new Set(defectsOf(c, appId).filter(isExtension).map((d) => d.id));
+    return seeded.filter((id) => !ext.has(id));
+};
+
+/** The catalogue's accounts of an app as test accounts (--roles catalogue): named after the email's local part, nothing else of the catalogue. */
+export function catalogueRoles(accounts: Array<{ email: string; password: string }>): Array<{ name: string; username: string; password: string }> {
+    return accounts.map((a) => ({ name: a.email.split("@")[0]!.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 24) || "account", username: a.email, password: a.password }));
 }
 
 function emptyMetrics(seeded: string[]) {
@@ -206,7 +223,14 @@ async function benchApp(
         onCreated: ({ at, tests }) => {
             collected = { at, tests: tests as TestRow[] };
         },
-        onProject: (projectId) => attachRequirements(client, projectId, app, o.root, log),
+        onProject: async (projectId) => {
+            await attachRequirements(client, projectId, app, o.root, log);
+            const roles = o.roles?.(app.id);
+            if (roles?.length) {
+                ok(await client.call("PUT", `/api/projects/${projectId}/roles`, { roles }), "Setting the test accounts");
+                log(`  test accounts: ${roles.map((r) => r.name).join(", ")}`);
+            }
+        },
     });
     const e = run.entries[0]!;
     // Stopped by the provider's rate limit or the daily cap: judge what was made so far. A job that finished only partly because the model
@@ -258,7 +282,7 @@ async function stoppedResult(client: PlatformClient, app: BenchApp, seeded: stri
     const tests = ok(await client.call("GET", `/api/projects/${projectId}/tests`), "Reading the tests") as TestRow[];
     log(`  ${stopped}: ${tests.length} tests made so far; --resume continues this app with the planned tests not made yet`);
     const version = o.config.apps.find((a) => a.id === app.id)?.version ?? "unknown";
-    const metrics = { ...emptyMetrics(seeded), testsGenerated: tests.length, aiCalls: usage.aiCalls, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, cost: usage.cost };
+    const metrics = { ...emptyMetrics(originalOf(o.catalogue, app.id, seeded)), testsGenerated: tests.length, aiCalls: usage.aiCalls, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, cost: usage.cost };
     return { id: app.id, entryId: app.id, projectId, status: "stopped", reason: stopped.slice(0, 1000), appVersion: version, seededDefects: seeded, defects: [], findings: [], metrics, jobs };
 }
 
@@ -374,7 +398,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     });
     // Which areas the tests reached, from their own steps.
     const paths: string[] = [];
-    const details = new Map<string, { generationMeta?: { capture?: unknown; finding?: unknown } | null }>();
+    const details = new Map<string, { generationMeta?: { capture?: unknown; finding?: unknown; layer?: unknown } | null }>();
     for (const t of tests.slice(0, MAX_DETAILS)) {
         const d = await call("GET", `/api/tests/${t.id}`, "Reading a test");
         details.set(t.id, d);
@@ -436,6 +460,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         // What the author recorded when it stopped the test as a defect (the observed-vs-captured report's "author recorded" column).
         const meta = (details.get(t.id) ?? (await call("GET", `/api/tests/${t.id}`, "Reading a test")))?.generationMeta;
         const capture = meta?.capture;
+        const layer = layerOf(meta?.layer);
         const source: BenchFinding["source"] = CHECK_TYPES.has(t.type) ? "check" : before.length ? "validation" : "authoring";
         findings.push({
             id: t.id,
@@ -448,6 +473,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
             defects: defects.filter((d) => seeded.includes(d)),
             ...(label && category === "unreproduced" && (label === "false_positive" || seeded.includes(label)) ? { label } : {}),
             ...(capture === "captured" || capture === "observed_only" ? { capture } : {}),
+            ...(layer ? { layer } : {}),
             firstSeenAt: firstFail ? new Date(firstFail).toISOString() : null,
             // A defect the author stopped is a candidate finding: its objective and the E7 fields it lacks (observed.ts).
             ...(o.mode === "discovery" && source === "authoring" ? { candidate: candidateOf(meta?.finding, t.testId) } : {}),
@@ -458,10 +484,14 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     for (const id of [jobs.planJobId, ...jobs.createJobIds]) if (id) sessions.push(...sessionsFromEvents(id, await jobEvents(client, id)));
 
     const catalogue = new Map(defectsOf(o.catalogue, app.id).map((d) => [d.id, d]));
-    const metrics = benchMetrics({
-        seeded,
+    const extensionSeeds = seeded.filter((id) => catalogue.get(id)?.set === "extension");
+    // shortcut: the harness has no database back end yet, so a seed seen only in the stored data is unreachable in every trial; when the
+    // database option lands (spec 4.4, D-a/D-b), count it as reachable in trials that have one.
+    const unreachable = seeded.filter((id) => catalogue.get(id)?.unreachable || catalogue.get(id)?.storedDataOnly);
+    const inputs = {
+        seeded: seeded.filter((id) => !extensionSeeds.includes(id)),
         findings,
-        unreachable: seeded.filter((id) => catalogue.get(id)?.unreachable),
+        unreachable,
         startedAt: benchStart,
         cost: usage.cost,
         testsGenerated: tests.length,
@@ -475,20 +505,27 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         outputTokens: usage.outputTokens,
         cacheReadTokens: usage.cacheReadTokens,
         cacheWriteTokens: usage.cacheWriteTokens,
-    });
+    };
+    const metrics = benchMetrics(inputs);
+    const extension = extensionSeeds.length ? extensionScore({ ...inputs, seeded: extensionSeeds }) : undefined;
+    // Tests per layer (the engine's meta.layer; "unlabelled" for a test without one), from the tests whose details were read.
+    const layers = layerCounts([...details.values()].map((d) => layerOf(d?.generationMeta?.layer)), findings);
     const defects = seeded.map((id) => {
         const d = catalogue.get(id)!;
         const by = findings.filter((f) => f.category === "confirmed" && f.defects.includes(id)).map((f) => f.testKey);
         const labeled = findings.filter((f) => f.label === id).map((f) => f.testKey);
-        return { id, category: d.category.slice(0, 60), workflow: d.workflow.slice(0, 120), severity: d.severity.slice(0, 20), detected: by.length > 0, labeledOnly: by.length === 0 && labeled.length > 0, ...(d.unreachable ? { unreachable: true } : {}), findings: [...by, ...labeled].slice(0, 100) };
+        return { id, category: d.category.slice(0, 60), workflow: d.workflow.slice(0, 120), severity: d.severity.slice(0, 20), detected: by.length > 0, labeledOnly: by.length === 0 && labeled.length > 0, ...(unreachable.includes(id) ? { unreachable: true } : {}), ...(d.set ? { set: d.set } : {}), findings: [...by, ...labeled].slice(0, 100) };
     });
-    log(`  detected ${metrics.detected} of ${metrics.seeded}; ${metrics.falsePositives} false positives; ${metrics.unreproduced} not reproduced`);
+    log(`  detected ${metrics.detected} of ${metrics.seeded}; ${metrics.falsePositives} false positives; ${metrics.unreproduced} not reproduced${extension ? `; extension seeds: detected ${extension.detected} of ${extension.seeded}` : ""}`);
     const version = o.config.apps.find((a) => a.id === app.id)?.version ?? "unknown";
     return {
         ...(entry ? { entry } : {}),
-        result: { id: app.id, entryId: app.id, projectId, status: "done", appVersion: version, seededDefects: seeded, defects, findings, metrics, jobs, exploration: { sessions: sessions.slice(0, 30) }, ...(caveats.length ? { caveats } : {}) },
+        result: { id: app.id, entryId: app.id, projectId, status: "done", appVersion: version, seededDefects: seeded, defects, findings, metrics, ...(extension ? { extension } : {}), layers, jobs, exploration: { sessions: sessions.slice(0, 30) }, ...(caveats.length ? { caveats } : {}) },
     };
 }
+
+/** A test's layer as the engine recorded it (meta.layer: page, api, storedData, database), or undefined. */
+const layerOf = (v: unknown): string | undefined => (typeof v === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(v) ? v : undefined);
 
 /** How long a stopped job gets to wind down, and how long the validation run of a continued app may take. */
 export const WIND_DOWN_MS = 10 * 60_000;
