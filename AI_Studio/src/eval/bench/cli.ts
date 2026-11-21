@@ -27,6 +27,7 @@ import { bindLabels, migrateLabels, parseLabels } from "./labels.js";
 import { observedOf, trialProblem, withLabels } from "./observed.js";
 import { rescored, SCORING_VERSION } from "./metrics.js";
 import { benchMarkdown, layersMarkdown, observedMarkdown } from "./report.js";
+import { LAYERS_ONLY_EXPLORATION, layersOnlyLlm } from "./layers-only.js";
 import { BenchmarkSchema, type Benchmark, type BenchAppResult, type BenchConfig, type PriceRow } from "./schema.js";
 
 export interface BenchDeps {
@@ -56,6 +57,9 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --catalogue <version>      the defect catalogue: 2026-11-14.1 (default) or 2026-11-21.1 (adds the bench extension's seeds,
                              scored apart from the original ones as the extension score)
   --roles catalogue          give each app's project the catalogue's accounts of the app as test accounts (Settings, Test accounts)
+  --layers-only              free trial of the deterministic layers (Phase 4): no AI key, a scripted model answers every AI call, only
+                             the API (with contract checks) and access checks run, then the usual replays; implies --roles catalogue
+                             and --catalogue 2026-11-21.1 unless given; prints per seed, per layer and every false positive
   --level <l>                exploration level: ${LEVELS.join(", ")} (default: the platform's default)
   --allow-data-changes       kept for older commands: tests may always change data in a benchmark trial (only its own apps)
   --all-checks               every check family on (${ALL_CHECKS.join(", ")})
@@ -84,6 +88,7 @@ interface Args {
     defects?: string[];
     catalogue?: string;
     roles?: "catalogue";
+    layersOnly: boolean;
     level?: ExploreLevel;
     allowDataChanges: boolean;
     allChecks: boolean;
@@ -106,7 +111,7 @@ interface Args {
 }
 
 export function parseBenchArgs(argv: string[]): Args {
-    const a: Args = { apps: BENCH_APPS.map((x) => x.id), mode: "discovery", login: "html", allowDataChanges: false, allChecks: false, singleModel: false, repeat: 1, isolatedReplays: false, portBase: 5291, estimateOnly: false, baseline: false, resume: false, out: "", yes: false, help: false };
+    const a: Args = { apps: BENCH_APPS.map((x) => x.id), mode: "discovery", login: "html", layersOnly: false, allowDataChanges: false, allChecks: false, singleModel: false, repeat: 1, isolatedReplays: false, portBase: 5291, estimateOnly: false, baseline: false, resume: false, out: "", yes: false, help: false };
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         const value = () => {
@@ -139,7 +144,8 @@ export function parseBenchArgs(argv: string[]): Args {
             const l = value();
             if (!(LEVELS as readonly string[]).includes(l)) throw new Error(`--level is one of ${LEVELS.join(", ")}`);
             a.level = l as ExploreLevel;
-        } else if (k === "--allow-data-changes") a.allowDataChanges = true;
+        } else if (k === "--layers-only") a.layersOnly = true;
+        else if (k === "--allow-data-changes") a.allowDataChanges = true;
         else if (k === "--all-checks") a.allChecks = true;
         else if (k === "--single-model") a.singleModel = true;
         else if (k === "--max") {
@@ -167,6 +173,10 @@ export function parseBenchArgs(argv: string[]): Args {
     }
     if (a.dataDir && path.resolve(a.dataDir) === path.resolve(REPO_ROOT, "data")) throw new Error("--data-dir must not be the platform's own ./data folder");
     if (!a.out) a.out = path.join(REPO_ROOT, "eval/results", defaultOutName(a.mode, a.login));
+    if (a.layersOnly) {
+        a.catalogue ??= "2026-11-21.1";
+        a.roles ??= "catalogue";
+    }
     return a;
 }
 
@@ -232,7 +242,7 @@ export function writeState(out: string, state: object): void {
 }
 const RESUME_MAY_CHANGE = new Set(["--yes", "--approved-budget-usd", "--daily-call-cap", "--resume", "--out"]);
 /** Options that take no value. */
-const FLAGS = new Set(["--allow-data-changes", "--isolated-replays", "--all-checks", "--single-model", "--max", "--estimate-only", "--baseline", "--resume", "--yes", "--help", "-h"]);
+const FLAGS = new Set(["--layers-only", "--allow-data-changes", "--isolated-replays", "--all-checks", "--single-model", "--max", "--estimate-only", "--baseline", "--resume", "--yes", "--help", "-h"]);
 /** argv split into options, each with its value when it has one. */
 function optionsOf(argv: string[]): string[][] {
     const out: string[][] = [];
@@ -276,6 +286,8 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
     }
     const log = deps.log ?? ((s: string) => console.log(s));
     const env = deps.env ?? process.env;
+    // A layers-only trial runs on the scripted model and the deterministic check families (layers-only.ts); a test's own deps win.
+    if (argv.includes("--layers-only")) deps = { ...deps, makeLlm: deps.makeLlm ?? (() => layersOnlyLlm()), exploration: { ...LAYERS_ONLY_EXPLORATION, ...(deps.exploration ?? {}) } };
     const scripted = Boolean(deps.makeLlm);
     let args: Args;
     let apps: BenchApp[];
@@ -375,6 +387,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 repeat: args.repeat,
                 mode: args.mode,
                 ...(args.roles ? { roles: args.roles } : {}),
+                ...(args.layersOnly ? { layersOnly: true } : {}),
                 ...configLimits(args).options,
             };
             config = {
@@ -503,6 +516,10 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
         const pct = (v: number | null) => (v === null ? "n/a" : `${Math.round(v * 1000) / 10}%`);
         log(`\nDetected ${m.detected} of ${m.seeded} seeded defects (${pct(m.detectionRate)}); precision ${pct(m.precision)}; ${m.falsePositives} false positives; reproduction ${pct(m.reproductionRate)}; ${m.aiCalls} AI calls${m.cost === null ? "" : `, about $${m.cost.toFixed(2)}`}.`);
         log(`Results: ${file}`);
+        if (args.layersOnly) {
+            log(`\n${layersMarkdown(path.relative(process.cwd(), file) || file, benchmark, catalogue)}`);
+            for (const a of benchmark.apps) for (const f of a.findings.filter((x) => x.category === "false_positive")) log(`False positive: ${a.id} ${f.testKey} (${f.layer ?? "unlabelled"}): ${f.title}${f.reason ? `: ${f.reason.split("\n")[0]!.slice(0, 200)}` : ""}`);
+        }
         const stoppedApps = benchmark.apps.filter((a) => a.status === "stopped");
         if (stoppedApps.length) {
             log(`Stopped (${stoppedApps.map((a) => `${a.id}: ${a.reason ?? ""}`).join("; ")}). Continue with: node scripts/eval.mjs bench --resume --out ${args.out}`);
