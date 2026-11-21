@@ -182,6 +182,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/test-coverage": "read",
     "POST /api/projects/:id/selection-preview": "read",
     "GET /api/projects/:id/selection-preview/detected-changes": "read",
+    // Starts a validation run of the focused or the full set: the same permission as "run these tests".
+    "POST /api/projects/:id/selection-run": "ai_studio.tests.run",
     "PUT /api/projects/:id/mobile-app": "ai_studio.project.settings",
     "PUT /api/projects/:id/explore-level": "ai_studio.project.settings",
     // A project's AI model (routes/project-ai-model.ts): the choices are the asking person's own; changing it is a project setting.
