@@ -192,6 +192,9 @@ function withCleanupHook(helpers: string): string {
     return helpers.replace(anchor, () => "    calls.push(out);\n    cleanupObserve(method, path, out);\n    return out;");
 }
 
+/** T4's rule: only passive security checks accept a bad certificate (IGNORE_HTTPS_ERRORS in a script); every other script, and its sign-in, does not. */
+export const ignoresHttpsErrors = (spec: Pick<TestSpec, "source">): boolean => spec.source.origin === "security-check";
+
 /** Interpolate {{vars}} inside an arbitrary JSON body into a JS expression. */
 export function jsonExpr(value: unknown): string {
     if (typeof value === "string") return expr(value);
@@ -327,7 +330,7 @@ export const apiGenerator: ScriptGenerator = {
             .join("\n");
         // Passive security checks look at the application's own origin (BASE_URL, not a separate API base), and
         // accept a bad certificate so one broken certificate does not hide every other finding: the TLS check reports it.
-        const passive = spec.source.origin === "security-check";
+        const passive = ignoresHttpsErrors(spec);
         const security = spec.steps.some((s) => s.action === "assertResponse" && isSecurityCheck(s.check));
         // Data-changing tests remove what they create (the DELETE operations come from the API description and from the test itself).
         const cleanup = canCreateRecords(spec);

@@ -14,7 +14,7 @@ import { parseOpenApi } from "../src/engine/api/openapi.js";
 import { ACCESS_HELPER_SOURCE, surveyAccess } from "../src/engine/identity/access.js";
 import { generateSessionEndSpecs } from "../src/engine/identity/session-end.js";
 
-const helper = new Function("totpCode", "createHmac", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac) as { accessAssert: (page: unknown, base: string, spec: string) => Promise<void> };
+const helper = new Function("totpCode", "createHmac", "IGNORE_HTTPS_ERRORS", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac, false) as { accessAssert: (page: unknown, base: string, spec: string) => Promise<void> };
 const ROOT = path.resolve(__dirname, "..");
 process.env.TEST_ANA_USERNAME = "ana@example.test";
 process.env.TEST_ANA_PASSWORD = "Password1!";

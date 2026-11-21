@@ -6,7 +6,8 @@
 import { createHmac } from "node:crypto";
 import { ACCESS_HELPER_SOURCE } from "../src/engine/identity/access.js";
 
-export const accessHelper = new Function("totpCode", "createHmac", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac) as {
+// A normal project's script: HTTPS errors are not ignored (IGNORE_HTTPS_ERRORS, as the generators declare it).
+export const accessHelper = new Function("totpCode", "createHmac", "IGNORE_HTTPS_ERRORS", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac, false) as {
     accessAssert: (page: unknown, base: string, spec: string) => Promise<void>;
 };
 
@@ -24,8 +25,10 @@ export function fakeBrowser(opts: {
 }) {
     const calls: FakeCall[] = [];
     let contexts = 0;
-    const newContext = async () => {
+    const options: Array<Record<string, unknown>> = [];
+    const newContext = async (o: Record<string, unknown>) => {
         contexts++;
+        options.push(o);
         const state = { typed: "", who: "anonymous" };
         let listener: ((r: unknown) => void) | undefined;
         const loc = (sel: string): Record<string, unknown> => {
@@ -63,7 +66,10 @@ export function fakeBrowser(opts: {
         return {
             newPage: async () => page,
             close: async () => undefined,
+            cookies: async () => [],
+            addCookies: async () => undefined,
             request: {
+                post: async () => ({ status: () => 200 }),
                 get: async (url: string, o: { headers: Record<string, string> }) => {
                     const call = { who: state.who, url, headers: o.headers };
                     calls.push(call);
@@ -79,7 +85,7 @@ export function fakeBrowser(opts: {
             browser: () => (opts.noBrowser ? null : { newContext }),
         }),
     };
-    return { page, calls, contexts: () => contexts };
+    return { page, calls, contexts: () => contexts, options };
 }
 
 /** Sign-in details for the named test accounts (the script reads TEST_<NAME>_USERNAME / _PASSWORD). */
