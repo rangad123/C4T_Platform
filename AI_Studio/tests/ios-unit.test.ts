@@ -375,7 +375,8 @@ describe("running scripts through the stand-in Taqwright CLI", () => {
         return { testId: "MOB-002", filename: r.filename, content: r.content };
     };
     const dir = () => fs.mkdtempSync(path.join(tmp, "run-"));
-    const PATH_ONLY = () => ({ PATH: process.env.PATH });
+    // TMPDIR too: the stand-in CLI writes OBSERVED under its own os.tmpdir(), which must be this process's.
+    const PATH_ONLY = () => ({ PATH: process.env.PATH, TMPDIR: os.tmpdir() });
 
     it("boots the simulator, runs with the iOS config and environment, stops what it started, and returns the neutral results", async () => {
         const f = fakeXcrun();
