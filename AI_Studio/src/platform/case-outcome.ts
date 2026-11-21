@@ -16,7 +16,8 @@
  * The tree (SPEC P3.3): the root is "/" when it is a page, else the oldest run's first page. A page's parent is the page the explorer first
  * reached it from (navigation edges, oldest run first); without one, its nearest URL-path ancestor that is a page; else the root. A
  * parent that would close a loop is replaced the same way, so the tree always ends at the root. A test case belongs to the node of its
- * start page (the same fallbacks), so every case's page is a node and the page count is the node count everywhere.
+ * start page (the same fallbacks), so every case's page is a node; a case whose own start page is not a page keeps it as `start`. Requirement
+ * areas are nodes with no page: they are never counted as pages (case-outcome-types.ts outcomeCounts).
  *
  * "Forget what we learned" also forgets the outcome: the time is kept in the object store (`<project>/case-outcome/forgotten.json`) and
  * runs started before it are left out. A finished run never changes, so what it found is kept in memory by job id.
@@ -172,7 +173,7 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
             const had = cases.get(key);
             if (!had) {
                 addedCases++;
-                cases.set(key, { ...c, title, page, ...(area ? { area } : {}), id: `TC-${String(cases.size + 1).padStart(3, "0")}` });
+                cases.set(key, { ...c, title, page, ...(area ? { area } : {}), ...(!area && c.page && c.page !== page ? { start: c.page } : {}), id: `TC-${String(cases.size + 1).padStart(3, "0")}` });
                 continue;
             }
             // A later run's non-empty facts win; the number stays.

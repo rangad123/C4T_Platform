@@ -30,7 +30,9 @@ export function runOutcomeOf(merged: Omit<MergedRuns, "written">, jobId: string)
     };
     const cases = merged.cases.filter((c) => ids.has(c.id));
     const count = new Map<string, number>();
-    for (const c of cases) count.set(c.page, (count.get(c.page) ?? 0) + 1);
+    for (const c of cases) count.set(c.area || c.page, (count.get(c.area || c.page) ?? 0) + 1);
+    // The requirement areas of the run's own cases are its nodes too, so they are grouped as on the Dashboard (F3 round 2 M5).
+    for (const c of cases) if (c.area) mine.add(c.area);
     const tree = merged.tree.filter((t) => mine.has(t.node)).map((t) => ({ ...t, parent: parentInRun(t.node), cases: count.get(t.node) ?? 0 }));
     return {
         runs: [run],

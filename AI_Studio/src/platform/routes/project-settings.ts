@@ -26,6 +26,7 @@ import { PlatformsSchema, projectSetupOf, setupItems, TestingModesSchema } from 
 import { isProjectNameTaken, projectNameTaken } from "../project-folders.js";
 import { runsCanStartHere } from "../suite-run.js";
 import { isCaseAgentProject } from "../case-agent.js";
+import { RequirementStore } from "../requirement-store.js";
 import type { RouteCtx } from "./types.js";
 
 export const NO_ORGANIZATION_TO_LINK = "This project is not part of an organisation, so it cannot be linked to a Crowd4Test project.";
@@ -127,6 +128,7 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
         const hasEnvironment = Boolean(p.db.get("SELECT 1 AS x FROM project_environments WHERE project_id = ? LIMIT 1", id));
         const agents = getAgentServices(p);
         const runner = agents.runnerStatus(id);
+        const caseAgent = await isCaseAgentProject(repo, id);
         return {
             items: setupItems({
                 setup: projectSetupOf(row),
@@ -137,7 +139,8 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
                 aiConfigured: (await aiGate(p, aiOwnerOfActor(currentActor()))).ok,
                 runner: runner.runOn === "platform" ? { runOn: "platform" } : { runOn: "agent", online: agents.ownRunner(ownerIdOfActor(currentActor()), id)?.online ? 1 : 0 },
                 runsHere: runsCanStartHere(p).ok,
-                caseAgent: await isCaseAgentProject(repo, id),
+                caseAgent,
+                hasRequirements: caseAgent && (await new RequirementStore(repo.db.sql).list(id)).some((r) => r.status === "active"),
             }),
         };
     });

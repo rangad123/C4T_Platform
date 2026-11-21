@@ -55,7 +55,9 @@ export function CreateProjectPage() {
     const allAgents = agentList.data?.agents ?? [];
     const agents = (pickedAgents ?? defaultAgents(allAgents, [platform])).filter((id) => allAgents.some((a) => a.id === id && fitsPlatforms(a, [platform])));
 
-    const missing = !name.trim() ? "Give the project a name." : !mode ? "Choose how the project is tested: AI agent or code." : mode === "agent" && agentList.data && agents.length === 0 ? "Choose at least one testing agent." : appDraftProblem(platform, app, { required: true });
+    // A Test Case Generation project can write its test cases from a requirements document instead of an address (SPEC R16, F3 round 2 M4).
+    const fromRequirements = mode === "agent" && agents.includes("test-generation");
+    const missing = !name.trim() ? "Give the project a name." : !mode ? "Choose how the project is tested: AI agent or code." : mode === "agent" && agentList.data && agents.length === 0 ? "Choose at least one testing agent." : appDraftProblem(platform, app, { required: !fromRequirements });
 
     if (!can("ai_studio.project.create")) {
         return (
@@ -143,7 +145,7 @@ export function CreateProjectPage() {
                         </label>
                     ))}
                 </fieldset>
-                <AppDetailsFields platform={platform} draft={app} onChange={setApp} offerLater />
+                <AppDetailsFields platform={platform} draft={app} onChange={setApp} offerLater optionalHint={fromRequirements ? "Leave it empty to write test cases from a requirements document." : undefined} />
                 <fieldset className="choice-group stack-sm">
                     <legend className="t-card">Testing mode</legend>
                     <p className="t-meta">One mode per project. You can change it later in Settings; tests already made stay.</p>

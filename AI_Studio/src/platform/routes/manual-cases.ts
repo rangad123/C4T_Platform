@@ -13,6 +13,7 @@ import { CaseLimitError, ManualCaseStore, MAX_RELEASES } from "../manual-case-st
 import { RequirementStore, refKey } from "../requirement-store.js";
 import { releaseReportName, renderReleaseHtml } from "../reports/release-report.js";
 import { SecretBox } from "../secrets.js";
+import { workbookDisposition } from "./case-outcome.js";
 import type { RouteCtx } from "./types.js";
 
 /**
@@ -178,7 +179,8 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         const cases = store.listCases(pid);
         const base = `manual-cases-${slug(String(ctx.project(pid).name))}`;
         if (format === "csv") throw new HttpError(410, `${CSV_REPLACED} Export the test cases as JSON instead.`);
-        if (format === "xlsx") return reply.header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").header("content-disposition", `attachment; filename="${base}.xlsx"`).send(Buffer.from(manualCaseWorkbook(cases, new Map((await requirements.list(pid)).map((r) => [r.id, r.ref])))));
+        // The workbook is named as a Test Case Generation project's download is: "<project name> test cases.xlsx" (F3 L7).
+        if (format === "xlsx") return reply.header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").header("content-disposition", workbookDisposition(String(ctx.project(pid).name ?? ""))).send(Buffer.from(manualCaseWorkbook(cases, new Map((await requirements.list(pid)).map((r) => [r.id, r.ref])))));
         return reply.header("content-type", "application/json; charset=utf-8").header("content-disposition", `attachment; filename="${base}.json"`).send(casesToJson(cases));
     });
 

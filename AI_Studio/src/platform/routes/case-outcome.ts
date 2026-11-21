@@ -1,4 +1,5 @@
 import { caseOutcomeOf, type AppModelReader } from "../case-outcome.js";
+import { outcomeCounts } from "../case-outcome-types.js";
 import { caseRunOutcomeOf } from "../case-run-outcome.js";
 import { buildCaseWorkbook } from "../case-workbook.js";
 import { HttpError } from "../http-error.js";
@@ -40,8 +41,8 @@ export function registerCaseOutcomeRoutes(ctx: RouteCtx, appModel: AppModelReade
             return one;
         }
         if ((req.query as { counts?: unknown }).counts === "1") {
-            const { caseAgent, runs, cases, tree } = await caseOutcomeOf(p, id, async () => undefined);
-            return { caseAgent, runs, counts: { cases: cases.length, pages: tree.length } };
+            const o = await caseOutcomeOf(p, id, async () => undefined);
+            return { caseAgent: o.caseAgent, runs: o.runs, counts: outcomeCounts(o) };
         }
         return caseOutcomeOf(p, id, appModel);
     });

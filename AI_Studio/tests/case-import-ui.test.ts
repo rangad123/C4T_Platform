@@ -201,7 +201,7 @@ describe("Import on the Test cases tab", () => {
         await pwExpect(openTip()).toContainText("the test case workbook (.xlsx)");
         await pwExpect(openTip()).not.toContainText("JSON");
         const [download] = await Promise.all([page.waitForEvent("download"), exportButton.click()]);
-        expect(download.suggestedFilename()).toBe("manual-cases-atlas-shop.xlsx");
+        expect(download.suggestedFilename()).toBe("Atlas shop test cases.xlsx");
         const bytes = fs.readFileSync((await download.path())!);
         const titles = readTable(new Uint8Array(bytes), "Test cases", { columns: ["Title"], required: ["Title"] }).map((r) => r.values.Title);
         expect(titles).toEqual((await casesNow()).map((c) => c.title));

@@ -296,6 +296,46 @@ describe("outcome report", () => {
         }
     });
 
+    it("names requirement areas as areas, never as pages, and shows an area's name once (F3 round 2 M5, L11)", async () => {
+        for (const width of [1280, 390]) {
+            await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+            await open("requirements");
+            expect(await page.getByTestId("outcome-summary").textContent()).toBe("6 test cases in 3 requirement areas, from 1 run");
+            expect(await page.locator(".oc-pages > .oc-subhead").textContent()).toBe("Requirement areas");
+            expect(await page.locator(".oc-head h2").textContent()).toBe("Test cases");
+            expect(await page.getByRole("tree").getAttribute("aria-label")).toBe("Requirement areas");
+            const area = page.locator('[role="treeitem"][data-path="REQ-1 Sign in"] > .ot-row');
+            expect(await area.locator(".ot-title").textContent()).toBe("REQ-1 Sign in");
+            expect(await area.locator(".ot-path").count()).toBe(0);
+            await area.locator(".ot-title").click();
+            expect(await page.locator(".oc-page-line").count()).toBe(0);
+            // A case in an area names the area, not "No page".
+            expect(await page.locator('[data-case="TC-001"] .oc-case-page').textContent()).toBe("REQ-1 Sign in");
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+            if (SHOTS) await shot(`requirements-areas-${width === 390 ? "phone" : "desktop"}.png`);
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
+        // A page-only outcome keeps its Pages heading.
+        await open("full");
+        expect(await page.locator(".oc-pages > .oc-subhead").textContent()).toBe("Pages");
+        expect(await page.locator(".oc-head h2").textContent()).toBe("Pages and test cases");
+    });
+
+    it("tells two cases with one title apart by their own start page (F3 round 2 L10)", async () => {
+        for (const width of [1280, 390]) {
+            await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+            await open("same-title");
+            expect(await page.locator('[data-case="TC-001"] .oc-case-start').textContent()).toBe("/basket");
+            expect(await page.locator('[data-case="TC-002"] .oc-case-start').textContent()).toBe("/basket/mini");
+            expect(await page.locator('[data-case="TC-003"] .oc-case-start').count()).toBe(0);
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+            if (SHOTS) await shot(`same-title-${width === 390 ? "phone" : "desktop"}.png`);
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
+        const axe = await new AxeBuilder({ page }).analyze();
+        expect(axe.violations.map((v) => v.id)).toEqual([]);
+    });
+
     it("logged no errors in the page", () => {
         expect(consoleErrors).toEqual([]);
     });

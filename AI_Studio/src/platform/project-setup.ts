@@ -129,6 +129,8 @@ export interface SetupFacts {
     runsHere: boolean;
     /** A Test Case Generation project (case-agent.ts): it makes no tests, so the "tests are switched off" line is not shown (FX22). */
     caseAgent?: boolean;
+    /** The project has active requirements: a Test Case Generation project writes its test cases from them without an address (F3 round 2 L9). */
+    hasRequirements?: boolean;
 }
 
 /**
@@ -138,8 +140,10 @@ export interface SetupFacts {
 export function setupItems(f: SetupFacts): SetupItem[] {
     const { platforms, testingModes } = f.setup;
     const items: SetupItem[] = [];
-    if (platforms.includes("web"))
-        items.push({ key: "web-address", ok: f.hasWebAddress, text: f.caseAgent ? (f.hasWebAddress ? "The application has an address to explore." : "Add the application's address, or write the test cases from the requirements.") : f.hasWebAddress ? "Web tests have an address to test." : "Web tests need an environment or the address of the site to test." });
+    if (platforms.includes("web")) {
+        const fromRequirements = Boolean(f.caseAgent && !f.hasWebAddress && f.hasRequirements);
+        items.push({ key: "web-address", ok: f.hasWebAddress || fromRequirements, text: f.caseAgent ? (f.hasWebAddress ? "The application has an address to explore." : fromRequirements ? "The test cases are written from the requirements." : "Add the application's address, or write the test cases from the requirements.") : f.hasWebAddress ? "Web tests have an address to test." : "Web tests need an environment or the address of the site to test." });
+    }
     if (platforms.includes("android"))
         items.push({ key: "android-app", ok: f.hasAndroidApp, text: f.hasAndroidApp ? "An Android app is set." : "Android tests need an app: upload one or give its package name." });
     if (platforms.includes("ios")) {

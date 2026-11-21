@@ -133,7 +133,7 @@ export function OutcomeTree({ roots, counts, selected, onSelect, label }: { root
                         )}
                         <span className="ot-text" id={id}>
                             <span className="ot-title">{n.title}</span>
-                            <span className="ot-path">{n.page}</span>
+                            {n.page && <span className="ot-path">{n.page}</span>}
                             <span className="sr-only">, {count === 1 ? "1 test case" : `${count} test cases`}</span>
                         </span>
                         <span className={`ot-count${count ? "" : " is-zero"}`} aria-hidden>

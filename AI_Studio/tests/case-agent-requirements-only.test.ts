@@ -151,6 +151,17 @@ describe("R16.1: a run from the requirements alone", () => {
         expect(readSheet(wb.raw, "Tree").slice(1).map((row) => row[0])).toEqual(["REQ-1 Sign in", "REQ-2 Search the products", "REQ-3 Pay for an order"]);
         expect(readSheet(wb.raw, "Pages").slice(1)).toEqual([]);
 
+        // F3 round 2 M5: the areas are not pages. The Projects row's counts and the run page agree with the workbook: 0 pages.
+        expect((await call("GET", `/api/projects/${pid}/outcome?counts=1`)).body.counts).toEqual({ cases: 6, pages: 0, areas: 3 });
+        const one = (await call("GET", `/api/projects/${pid}/outcome?run=${r.body.jobId}`)).body;
+        expect(one.pages).toEqual([]);
+        expect(one.runs[0]).toMatchObject({ addedPages: 0, addedCases: 6 });
+        // The run page groups its cases on the same areas as the Dashboard (none is left "not tied to a page").
+        expect(one.tree).toEqual(o.tree);
+        // L9: with the cases written from the requirements, the address item of the setup checklist is done.
+        const check = (await call("GET", `/api/projects/${pid}/setup-check`)).body;
+        expect(check.items.find((i: { key: string }) => i.key === "web-address")).toEqual({ key: "web-address", ok: true, text: "The test cases are written from the requirements." });
+
         // Nothing is made or run: no test scripts, no saved written cases, no other job.
         expect(platform.repo.listTests(pid)).toEqual([]);
         expect(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM manual_cases WHERE project_id = ?", pid)!.n).toBe(0);
@@ -167,6 +178,11 @@ describe("wording in a Test Case Generation project (F3 review L1, L5)", () => {
         const facts = { setup: projectSetupOf({}), hasWebAddress: true, hasAndroidApp: false, hasIosApp: false, canRunIos: false, aiConfigured: true, runner: { runOn: "platform" as const }, runsHere: true, caseAgent: true };
         expect(setupItems(facts).map((i) => i.text)).toEqual(["The application has an address to explore.", "Your AI key is set up."]);
         expect(setupItems({ ...facts, hasWebAddress: false })[0]!.text).toBe("Add the application's address, or write the test cases from the requirements.");
+        // L9: active requirements are the other input, so the item is done.
+        expect(setupItems({ ...facts, hasWebAddress: false, hasRequirements: true })[0]).toEqual({ key: "web-address", ok: true, text: "The test cases are written from the requirements." });
+        expect(setupItems({ ...facts, hasRequirements: true })[0]!.text).toBe("The application has an address to explore.");
+        // Another kind of project still needs its address.
+        expect(setupItems({ ...facts, caseAgent: false, hasWebAddress: false, hasRequirements: true })[0]!.ok).toBe(false);
         // Other projects keep theirs.
         expect(setupItems({ ...facts, caseAgent: false }).map((i) => i.text)).toEqual(["Web tests have an address to test.", "Your AI key is set up.", "Tests run on this server."]);
     });

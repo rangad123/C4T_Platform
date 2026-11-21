@@ -18,7 +18,7 @@ import { SeeHow } from "../features/guide/SeeHow";
 import type { FoldersAnswer } from "../features/workspace/FoldersPage";
 import { KIND_HELP, KIND_WORDS, KindTile, PlatformMark, ProjectTags, shortAgentName, type TagAgent } from "../components/ProjectKind";
 import { AgentAvatar, type AgentId, type AgentList } from "../features/testing-agents/testing-agents";
-import type { CaseOutcomeCounts } from "../features/outcome/outcome";
+import { countsLine, type CaseOutcomeCounts } from "../features/outcome/outcome";
 
 /** "all", "grouped", "none" (not in a folder) or a folder id. */
 type FolderFilter = string;
@@ -29,7 +29,7 @@ const NOT_RUN = "Its test scripts have not been run yet.";
 const CASES_NOT_EXPLORED = "The agent has not explored this application yet, so it has no test cases.";
 
 /** "N test cases, M pages" for a Test Case Generation project's row (founder 2026-11-19 P5.2); null before its first run. */
-const caseCounts = (o: CaseOutcomeCounts): string | null => (o.runs.length ? `${plural(o.counts.cases, "test case")}, ${plural(o.counts.pages, "page")}` : null);
+const caseCounts = (o: CaseOutcomeCounts): string | null => (o.runs.length ? countsLine(o.counts) : null);
 /** The row's job, in the Test Case Generation words (labels.ts caseJobLabel); the list has no error text, so a stopped run is told by the outcome. */
 const caseJob = (p: ProjectRow, o: CaseOutcomeCounts) => ({ status: p.last_job_status!, error: o.runs[0]?.status === "stopped" ? "Cancelled" : null, caseAgent: true });
 

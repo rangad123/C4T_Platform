@@ -2,7 +2,7 @@ import { ChevronRight, CircleSlash, Download, LoaderCircle, Network, OctagonPaus
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { EmptyState } from "../../components/ui";
 import { OutcomeTree } from "./OutcomeTree";
-import { PRIORITY_LABEL, TYPE_LABEL, buildTree, casesForNode, lastRunNote, nodeCaseCounts, notOpenedLine, plural, summaryLine, unplacedCases, type CaseOutcome as Outcome, type CaseOutcomeCase } from "./outcome";
+import { PRIORITY_LABEL, TYPE_LABEL, buildTree, casesForNode, lastRunNote, nodeCaseCounts, notOpenedLine, outcomeCounts, plural, summaryLine, unplacedCases, type CaseOutcome as Outcome, type CaseOutcomeCase } from "./outcome";
 import "./outcome.css";
 
 /**
@@ -15,7 +15,7 @@ import "./outcome.css";
  * request is sent, with the access key and a renewed sign-in, and shows a refusal as its sentence). `emptyActions` is what the page offers
  * when there is nothing yet (for example "Explore").
  */
-export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, title = "Pages and test cases" }: { outcome: Outcome; downloadHref?: string | null; onDownload?: () => void; emptyActions?: ReactNode; title?: string }) {
+export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, title }: { outcome: Outcome; downloadHref?: string | null; onDownload?: () => void; emptyActions?: ReactNode; title?: string }) {
     const headingId = useId();
     const roots = useMemo(() => buildTree(outcome.tree), [outcome.tree]);
     const counts = useMemo(() => nodeCaseCounts(outcome.tree, outcome.cases), [outcome.tree, outcome.cases]);
@@ -30,13 +30,17 @@ export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, t
     const note = lastRunNote(outcome.runs);
     const notOpened = notOpenedLine(outcome.notOpened);
     const nothing = outcome.tree.length === 0 && outcome.cases.length === 0;
+    // Requirement areas are not pages (F3 round 2 M5): the list is named for what it holds.
+    const { pages: pageCount, areas } = outcomeCounts(outcome);
+    const listName = !areas ? "Pages" : pageCount ? "Pages and requirement areas" : "Requirement areas";
+    const heading = title ?? (areas && !pageCount ? "Test cases" : "Pages and test cases");
 
     return (
         <section className="card oc" data-testid="case-outcome" aria-labelledby={headingId}>
             <header className="oc-head">
                 <div className="oc-titles">
                     <h2 className="t-section" id={headingId}>
-                        {title}
+                        {heading}
                     </h2>
                     {!nothing && (
                         <p className="oc-summary" data-testid="outcome-summary">
@@ -90,9 +94,9 @@ export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, t
                     )}
                     <div className="oc-body">
                         <div className="oc-pages">
-                            <h3 className="oc-subhead">Pages</h3>
+                            <h3 className="oc-subhead">{listName}</h3>
                             {roots.length > 0 ? (
-                                <OutcomeTree roots={roots} counts={counts} selected={selected} onSelect={setSelected} label="Pages of the application" />
+                                <OutcomeTree roots={roots} counts={counts} selected={selected} onSelect={setSelected} label={areas ? listName : "Pages of the application"} />
                             ) : (
                                 <p className="oc-quiet">No pages yet.</p>
                             )}
@@ -119,7 +123,7 @@ export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, t
                                     </button>
                                 )}
                             </div>
-                            {node && (
+                            {node?.page && (
                                 <p className="oc-page-line">
                                     <span className="oc-mono">{page?.url || node.page}</span>
                                     {page?.purpose && <span className="oc-purpose">{page.purpose}</span>}
@@ -128,7 +132,7 @@ export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, t
                             {shown.length > 0 ? (
                                 <ul className="oc-list">
                                     {shown.map((c) => (
-                                        <CaseRow key={c.id} c={c} pageTitle={pageTitle.get(c.page)} />
+                                        <CaseRow key={c.id} c={c} pageTitle={pageTitle.get(c.area || c.page)} />
                                     ))}
                                 </ul>
                             ) : (
@@ -181,6 +185,7 @@ function CaseRow({ c, pageTitle }: { c: CaseOutcomeCase; pageTitle?: string }) {
                         <span className={`badge ${manual ? "badge-neutral" : "badge-brand"}`}>{TYPE_LABEL[c.type]}</span>
                         <span className={`oc-prio is-${c.priority}`}>{PRIORITY_LABEL[c.priority]} priority</span>
                         <span className="oc-case-page">{pageTitle ?? (c.page || "No page")}</span>
+                        {c.start && <span className="oc-mono oc-case-start">{c.start}</span>}
                     </span>
                 </span>
             </button>

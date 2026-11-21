@@ -1,9 +1,10 @@
 /**
  * The outcome report of a Test Case Generation project (founder 2026-11-19 P3, R8, R15): the types of `GET /api/projects/:id/outcome`
  * (PLAN.md "Outcome contract", src/platform/case-outcome-types.ts) and the pure helpers the report is drawn from. One page count is used
- * everywhere: the number of tree nodes. Addresses that failed to load are not pages; they are one number, `notOpened`.
+ * everywhere (`outcomeCounts`): the tree's real pages. Requirement areas are counted apart, and addresses that failed to load are one
+ * number, `notOpened`.
  */
-import type { CaseOutcome, CaseOutcomeCounts, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeTreeNode, CaseOutcomeType } from "../../../../src/platform/case-outcome-types.js";
+import { outcomeCounts, type CaseOutcome, type CaseOutcomeCounts, type CaseOutcomeCase, type CaseOutcomePage, type CaseOutcomePriority, type CaseOutcomeRun, type CaseOutcomeTreeNode, type CaseOutcomeType } from "../../../../src/platform/case-outcome-types.js";
 
 export type { CaseOutcome, CaseOutcomeCounts, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeTreeNode, CaseOutcomeType };
 
@@ -11,7 +12,7 @@ export type { CaseOutcome, CaseOutcomeCounts, CaseOutcomeCase, CaseOutcomePage, 
 export interface TreeNode {
     path: string;
     title: string;
-    /** The page path this node shows (a row of `pages`). */
+    /** The page path this node shows (a row of `pages`); empty for a requirement area. */
     page: string;
     /** 1 for a root, as aria-level counts. */
     level: number;
@@ -32,7 +33,7 @@ export function buildTree(nodes: CaseOutcomeTreeNode[]): TreeNode[] {
         return p === null || p === path || !byPath.has(p) ? null : p;
     };
     const made = new Map<string, TreeNode>();
-    for (const n of byPath.values()) made.set(n.node, { path: n.node, title: n.title || n.node, page: n.page || n.node, level: 1, children: [] });
+    for (const n of byPath.values()) made.set(n.node, { path: n.node, title: n.title || n.node, page: n.page, level: 1, children: [] });
     const roots: TreeNode[] = [];
     for (const n of byPath.values()) {
         const p = parentOf(n.node);
@@ -108,8 +109,18 @@ export function parentNode(roots: TreeNode[], path: string): TreeNode | null {
     return find(roots, null) ?? null;
 }
 
-/** "N pages, M test cases, from K runs" (commas, not middle dots: the copy rule in styles.css): the page count is the number of tree nodes. */
-export const summaryLine = (o: Pick<CaseOutcome, "tree" | "cases" | "runs">): string => `${plural(o.tree.length, "page")}, ${plural(o.cases.length, "test case")}, from ${plural(o.runs.length, "run")}`;
+/** "N pages" and/or "A requirement areas", by the one count rule (a requirements-only outcome names no pages). */
+const placesOf = (c: CaseOutcomeCounts["counts"]): string[] => [...(c.pages || !c.areas ? [plural(c.pages, "page")] : []), ...(c.areas ? [plural(c.areas, "requirement area")] : [])];
+
+/** "N pages, M test cases, from K runs", or "M test cases in A requirement areas, from K runs" (commas, not middle dots: the copy rule in styles.css). */
+export function summaryLine(o: Pick<CaseOutcome, "tree" | "cases" | "runs">): string {
+    const c = outcomeCounts(o);
+    const runs = `from ${plural(o.runs.length, "run")}`;
+    return !c.pages && c.areas ? `${plural(c.cases, "test case")} in ${placesOf(c)[0]}, ${runs}` : `${[...placesOf(c), plural(c.cases, "test case")].join(", ")}, ${runs}`;
+}
+
+/** The Projects row: "M test cases, N pages" (and/or the requirement areas). */
+export const countsLine = (c: CaseOutcomeCounts["counts"]): string => [plural(c.cases, "test case"), ...placesOf(c)].join(", ");
 
 /** The one note about addresses that failed to load; null when every address opened. */
 export const notOpenedLine = (n: number): string | null => (n > 0 ? `${plural(n, "address", "addresses")} could not be opened` : null);
@@ -127,4 +138,4 @@ export function lastRunNote(runs: CaseOutcomeRun[]): string | null {
 
 export const TYPE_LABEL: Record<CaseOutcomeType, string> = { automated: "Automated", manual: "Manual" };
 export const PRIORITY_LABEL: Record<CaseOutcomePriority, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
-export { plural };
+export { outcomeCounts, plural };

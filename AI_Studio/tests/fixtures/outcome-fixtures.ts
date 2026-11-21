@@ -74,5 +74,33 @@ export const STOPPED_EMPTY: CaseOutcome = { ...EMPTY, runs: [{ jobId: "job-1", s
 /** The first run is still exploring. */
 export const RUNNING_EMPTY: CaseOutcome = { ...EMPTY, runs: [{ jobId: "job-1", startedAt: "2026-11-20T10:00:00.000Z", status: "running", addedPages: 0, addedCases: 0 }] };
 
-export const OUTCOMES = { full: FULL, stopped: STOPPED, empty: EMPTY, "stopped-empty": STOPPED_EMPTY, "running-empty": RUNNING_EMPTY } as const;
+/** A run from the requirements alone (SPEC R16): three requirement areas with two cases each, no page (F3 round 2 M5, L11). */
+const AREAS = ["REQ-1 Sign in", "REQ-2 Search the products", "REQ-3 Pay for an order"];
+export const REQUIREMENTS: CaseOutcome = {
+    caseAgent: true,
+    runs: [{ jobId: "job-1", startedAt: "2026-11-20T10:00:00.000Z", status: "completed", addedPages: 0, addedCases: 6 }],
+    pages: [],
+    tree: AREAS.map((a) => ({ node: a, parent: null, page: "", title: a, cases: 2 })),
+    cases: AREAS.flatMap((a, i) => [
+        { ...auto("", `Verify ${a.slice(6)} works`, "high", [], []), requirement: a.slice(0, 5), area: a, id: `TC-00${2 * i + 1}` },
+        { ...manual("", `Check ${a.slice(6)} by hand`, "low", [[`Open ${a.slice(6)}`, "It opens"]]), requirement: a.slice(0, 5), area: a, id: `TC-00${2 * i + 2}` },
+    ]),
+    notOpened: 0,
+    missing: [],
+};
+
+/** Two cases with one title whose start pages are not pages of the tree: each row names its own start page (F3 round 2 L10). */
+export const SAME_TITLE: CaseOutcome = {
+    ...REQUIREMENTS,
+    runs: [{ jobId: "job-1", startedAt: "2026-11-20T10:00:00.000Z", status: "completed", addedPages: 1, addedCases: 3 }],
+    pages: [{ path: "/", url: `${ORIGIN}/`, title: "Home", purpose: "" }],
+    tree: [{ node: "/", parent: null, page: "/", title: "Home", cases: 3 }],
+    cases: [
+        { ...auto("/", "Open the cart", "high", [], []), start: "/basket", id: "TC-001" },
+        { ...auto("/", "Open the cart", "high", [], []), start: "/basket/mini", id: "TC-002" },
+        { ...auto("/", "Open home", "high", [], []), id: "TC-003" },
+    ],
+};
+
+export const OUTCOMES = { full: FULL, stopped: STOPPED, empty: EMPTY, "stopped-empty": STOPPED_EMPTY, "running-empty": RUNNING_EMPTY, requirements: REQUIREMENTS, "same-title": SAME_TITLE } as const;
 export type OutcomeFixture = keyof typeof OUTCOMES;

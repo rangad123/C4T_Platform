@@ -301,7 +301,7 @@ describe("GET /api/projects/:id/manual-cases/export?format=xlsx (FX16)", () => {
         const r = await download(from);
         expect(r.statusCode, r.body).toBe(200);
         expect(r.headers["content-type"]).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        expect(r.headers["content-disposition"]).toBe('attachment; filename="manual-cases-workbook-from.xlsx"');
+        expect(r.headers["content-disposition"]).toBe("attachment; filename=\"Workbook from test cases.xlsx\"; filename*=UTF-8''Workbook%20from%20test%20cases.xlsx");
         const wb = new Uint8Array(r.rawPayload);
         // The same sheets as a Test Case Generation project's workbook; Pages and Tree name each page once.
         expect(Object.keys(unzipSync(wb)).filter((f) => f.startsWith("xl/worksheets/")).length).toBe(3);

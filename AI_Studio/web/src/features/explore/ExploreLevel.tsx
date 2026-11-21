@@ -32,7 +32,7 @@ export function LevelChoice({ value, onChange, name = "explore-level", caseAgent
         <fieldset className="stack-sm" data-testid="explore-level">
             <legend className="t-section">How much to explore</legend>
             {LEVELS.map((l) => (
-                <label className="row" key={l} style={{ alignItems: "flex-start" }}>
+                <label className="row" key={l} style={{ alignItems: "flex-start", flexWrap: "nowrap" }}>
                     <input type="radio" name={name} value={l} checked={value === l} onChange={() => onChange(l)} />
                     <span>
                         <span className="t-card">{NAME[l]}</span>
@@ -53,7 +53,7 @@ export function LevelChoice({ value, onChange, name = "explore-level", caseAgent
 export function ScreenReviewChoice({ level, canReadImages, value, onChange }: { level: ExploreLevel; canReadImages: boolean; value: boolean | null; onChange: (v: boolean) => void }) {
     const checked = value ?? (LEVEL_SETTINGS[level].visionByDefault && canReadImages);
     return (
-        <label className="row" style={{ alignItems: "flex-start" }}>
+        <label className="row" style={{ alignItems: "flex-start", flexWrap: "nowrap" }}>
             <input type="checkbox" data-testid="screen-review" checked={checked} onChange={(e) => onChange(e.target.checked)} />
             <span>
                 AI screen review (screenshots go to your AI provider)

@@ -124,6 +124,31 @@ describe("how much to explore", () => {
         expect(platform.repo.listJobs(shop)[0]!.options).toMatchObject({ level: "everything", maxPages: 250, maxDepth: 6, maxScenarios: 150, fullExploration: true });
     });
 
+    it("lays every level out the same: the radio inline with its name, at desktop and phone widths (F3 L8)", async () => {
+        const shots = process.env.LEVEL_SHOTS;
+        try {
+            for (const width of [1280, 390]) {
+                await page.setViewportSize({ width, height: 900 });
+                await page.goto(`${BASE}/#/new?project=${shop}`);
+                const levels = page.getByTestId("explore-level");
+                await pwExpect(levels.getByRole("radio")).toHaveCount(3);
+                for (const name of ["Thorough", "Deep", "Everything"]) {
+                    const radio = (await levels.getByRole("radio", { name: new RegExp(`^${name} `) }).boundingBox())!;
+                    const title = (await levels.getByText(name, { exact: true }).boundingBox())!;
+                    // Beside its name, on the name's first line: never on a line of its own above it.
+                    expect(radio.x + radio.width, name).toBeLessThanOrEqual(title.x);
+                    expect(radio.y, name).toBeLessThan(title.y + title.height);
+                }
+                if (shots) {
+                    fs.mkdirSync(shots, { recursive: true });
+                    await levels.screenshot({ path: path.join(shots, `explore-levels-${width === 390 ? "phone" : "desktop"}.png`) });
+                }
+            }
+        } finally {
+            await page.setViewportSize({ width: 1280, height: 720 });
+        }
+    });
+
     it("AI screen review: Deep shows it checked when the model can read images, and unchecking sends visionChecks:false", async () => {
         const p2 = await page.context().newPage();
         // The page's own view of the server: an AI model is set up (nothing is ever sent to a model here: no worker runs the job).

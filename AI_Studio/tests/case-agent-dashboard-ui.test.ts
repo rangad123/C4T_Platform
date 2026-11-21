@@ -464,8 +464,8 @@ describe("the Projects row of a Test Case Generation project", () => {
         const full = (await api("GET", `/api/projects/${store}/outcome`)).body;
         const counts = await api("GET", `/api/projects/${store}/outcome?counts=1`);
         expect(counts.status).toBe(200);
-        expect(counts.body).toEqual({ caseAgent: true, runs: full.runs, counts: { cases: full.cases.length, pages: full.tree.length } });
-        expect((await api("GET", `/api/projects/${access}/outcome?counts=1`)).body).toEqual({ caseAgent: false, runs: [], counts: { cases: 0, pages: 0 } });
+        expect(counts.body).toEqual({ caseAgent: true, runs: full.runs, counts: { cases: full.cases.length, pages: full.pages.length, areas: 0 } });
+        expect((await api("GET", `/api/projects/${access}/outcome?counts=1`)).body).toEqual({ caseAgent: false, runs: [], counts: { cases: 0, pages: 0, areas: 0 } });
     });
 
     it("rows of other projects are unchanged: pass counts and their ribbon", async () => {
