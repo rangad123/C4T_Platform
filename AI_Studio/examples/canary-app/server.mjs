@@ -8,13 +8,18 @@
 // (canaries.json), so a value found in stored data names both. The password field is empty: the test types the run's password into it,
 // which is the field channel's password.
 //
+// T-9 (KNOWN-LIMITS-P3, E2): the run's password in other forms (hex, quoted-printable, upper case, HTML entities, split across a line),
+// echoed in console lines, the profile answer and page text; and a field named "Clave1" (a secret word in another language with a digit).
+//
 // The fields, page text and iframe sit at fixed places on a 1280x800 page (BOXES), so a test can check whether a screenshot covers them.
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const C = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "canaries.json"), "utf8")).channels;
+const ALL = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "canaries.json"), "utf8"));
+const C = ALL.channels;
+const { _note, claveField, ...T9 } = ALL.t9;
 const KINDS = ["password", "bearer", "cookie", "apiKey", "email", "phone", "address", "card", "dbUrl"];
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 5760);
 
@@ -39,11 +44,14 @@ const home = () => {
         const value = k === "password" ? "" : ` value="${esc(C.field[k])}"`;
         return `<label style="position:absolute;left:20px;top:${top(i) - 18}px;font:12px sans-serif">${label}</label><input id="f-${k}" ${attrs}${value} aria-label="${label}" style="position:absolute;left:20px;top:${top(i)}px;width:400px;height:24px;font:14px monospace;border:1px solid #888;padding:2px">`;
     }).join("");
+    const clave = `<label style="position:absolute;left:20px;top:542px;font:12px sans-serif">Clave</label><input id="f-clave" name="clave1" aria-label="Clave1" value="${esc(claveField)}" style="position:absolute;left:20px;top:560px;width:400px;height:24px;font:14px monospace;border:1px solid #888;padding:2px">`;
+    const t9 = `<div id="t9" style="position:absolute;left:470px;top:560px;width:380px;white-space:pre-line;font:12px monospace">${Object.entries(T9).map(([k, v]) => `${k}: ${esc(v)}`).join("\n")}</div>`;
     const text = KINDS.map((k, i) => `<div id="t-${k}" style="position:absolute;left:470px;top:${top(i)}px;width:380px;height:28px;font:14px monospace;overflow:hidden">${esc(C.text[k])}</div>`).join("");
     const urlQs = new URLSearchParams(Object.fromEntries(KINDS.map((k) => [k, C.url[k]]))).toString();
     const script = `
-const C = ${JSON.stringify({ console: C.console, json: C.json, url: C.url, header: C.header })};
+const C = ${JSON.stringify({ console: C.console, json: C.json, url: C.url, header: C.header, t9: T9 })};
 for (const k of Object.keys(C.console)) console.log(k + ": " + C.console[k]);
+for (const k of Object.keys(C.t9)) console.log("echo " + k + ": " + C.t9[k]);
 console.error("profile check failed for " + C.console.email + " with token " + C.console.bearer);
 fetch("/api/ping?${urlQs}");
 fetch("/api/profile", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + C.header.bearer, "x-api-key": C.header.apiKey }, body: JSON.stringify(C.json) })
@@ -51,7 +59,7 @@ fetch("/api/profile", { method: "POST", headers: { "content-type": "application/
 `;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Canary account</title></head>
 <body style="margin:0;background:#fff"><main><h1 style="position:absolute;left:20px;top:0;margin:8px 0;font:20px sans-serif">Canary account</h1>
-<form onsubmit="return false">${fields}</form>${text}
+<form onsubmit="return false">${fields}${clave}</form>${text}${t9}
 <iframe title="Billing" src="/frame" style="position:absolute;left:880px;top:60px;width:380px;height:420px;border:0"></iframe>
 <p id="saved" role="status" style="position:absolute;left:20px;top:480px"></p>
 <a href="/export.csv" download style="position:absolute;left:20px;top:520px">Export</a>
@@ -91,7 +99,7 @@ const handler = (req, res) => {
             case "/export.csv":
                 return send(res, 200, "text/csv", `kind,value\n${KINDS.map((k) => `${k},"${C.download[k]}"`).join("\n")}\n`, { "content-disposition": 'attachment; filename="export.csv"' });
             case "/api/profile":
-                return send(res, 200, "application/json", JSON.stringify({ saved: true, profile: C.json, received: raw.length }));
+                return send(res, 200, "application/json", JSON.stringify({ saved: true, profile: C.json, received: raw.length, echo: T9 }));
             case "/api/ping":
                 return send(res, 200, "application/json", '{"ok":true}');
             default:

@@ -134,11 +134,11 @@ export function sanitizeEvidence(raw: unknown, secrets: string[] = []): Evidence
     const rt = loadEvidenceRuntime();
     // The shared redaction too (e-mails also URL-encoded, phone numbers, addresses, cards, `bearer:` lines, secret query values once
     // decoded): the script's own rules are a smaller set it carries with it.
-    const mask = (s: string, max: number) => rt.evidenceText(maskText(s), secrets, max);
+    const mask = (s: string, max: number) => rt.evidenceText(maskText(s, secrets), secrets, max);
     // A stored path goes through the same address cleaning as a live request (sensitive query values, tokens), not just the text rules.
     // A step's address is a path, or host + path for another site's page: cleaned like a request's.
     const cleanStepUrl = (u: string) => (u.startsWith("/") ? cleanPath(u) : mask(u, 500));
-    const cleanPath = (path: string) => maskText(rt.evidenceSplitUrl(`http://placeholder.invalid${path.startsWith("/") ? "" : "/"}${path}`, "placeholder.invalid", secrets).path);
+    const cleanPath = (path: string) => maskText(rt.evidenceSplitUrl(`http://placeholder.invalid${path.startsWith("/") ? "" : "/"}${path}`, "placeholder.invalid", secrets).path, secrets);
 
     const requests: EvidenceRequest[] = [];
     for (const r of top.data.requests) {

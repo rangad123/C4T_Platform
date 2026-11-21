@@ -33,7 +33,13 @@ const AUTOCOMPLETE = ["one-time-code", "cc-number", "cc-csc", "current-password"
 /** Fields of personal data and other secrets, by type, autocomplete and the words of the name, id, label or placeholder (case-insensitive). */
 const PERSONAL_TYPES = ["email", "tel"];
 const PERSONAL_AUTOCOMPLETE = ["email", "tel", "street-address", "address-line", "postal-code", "cc-"];
-const PERSONAL_WORDS = ["email", "e-mail", "phone", "mobile", "address", "token", "secret", "api_key", "api-key", "apikey", "api key", "session", "cookie", "dsn", "connection", "iban", "ssn"];
+const PERSONAL_WORDS = [
+    "email", "e-mail", "phone", "mobile", "address", "token", "secret", "api_key", "api-key", "apikey", "api key", "session", "cookie", "dsn", "connection", "iban", "ssn",
+    // Password in other languages (KNOWN-LIMITS-P3 T-9: a field named `Clave1`), as parts of a name, so a digit after one is covered too.
+    // "clave" also covers a "palabra clave" search box: covering a field too many is the safe side.
+    "clave", "senha", "contrase", "passwort", "kennwort", "wachtwoord", "mot de passe", "motdepasse", "haslo", "hasło", "sifre", "şifre",
+    "losenord", "lösenord", "passord", "adgangskode", "salasana", "пароль", "密码", "密碼", "パスワード", "비밀번호", "암호", "geheimzahl",
+];
 
 /**
  * Whether a field's attributes (as a page snapshot keeps them: name, id, type, autocomplete, aria-label, placeholder) mark it as secret or

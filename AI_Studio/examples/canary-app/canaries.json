@@ -100,5 +100,15 @@
       "card": "4000 0012 3406 3097",
       "dbUrl": "postgres://shop_admin:CnryDbDlPw9@db.internal:5432/shop"
     }
+  },
+  "t9": {
+    "_note": "KNOWN-LIMITS-P3 T-9 (Phase 5 E2): the run password (channels.field.password) as hex, upper-case hex, quoted-printable, upper case, HTML numeric entities and split across a line, which the app echoes in console lines, a JSON answer and page text; and a field named in another language with a digit (Clave1) holding its own value.",
+    "hex": "436e72794664507721317839",
+    "HEX": "436E72794664507721317839",
+    "qp": "CnryFdPw=211x9",
+    "upper": "CNRYFDPW!1X9",
+    "html": "CnryFdPw&#33;1x9",
+    "split": "CnryFd\nPw!1x9",
+    "claveField": "CnryClaveFd9z"
   }
 }

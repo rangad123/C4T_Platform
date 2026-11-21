@@ -15,6 +15,8 @@
 export function nameWords(name: string): string {
     return name
         .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        // A word joined to a number is two words (`Clave1`, `pin1`, KNOWN-LIMITS-P3 T-9); a number before a word (`2fa`) stays one.
+        .replace(/(\p{L})(\p{N})/gu, "$1 $2")
         .replace(/[\s_.:\-[\]/]+/g, " ")
         .toLowerCase();
 }

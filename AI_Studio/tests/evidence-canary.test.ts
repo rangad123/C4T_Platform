@@ -58,9 +58,17 @@ function needles(kind: Kind, v: string): string[] {
     if (kind === "email") out.add(v.replace("@", "%40"));
     return [...out];
 }
-const NEEDLES: Array<{ pair: string; forms: Buffer[] }> = CHANNELS.flatMap((ch) =>
-    KINDS.map((k) => ({ pair: `${ch}.${k}`, forms: needles(k, C[ch][k]).flatMap((n) => [Buffer.from(n, "latin1"), Buffer.from(n, "utf16le")]) })),
-);
+/**
+ * KNOWN-LIMITS-P3 T-9 (E2): the run's password in the forms the app echoes it in (`t9.<form>`, searched as written, JSON-escaped and
+ * HTML-escaped), and a field named "Clave1" holding its own value (`clave.field`, searched as any value).
+ */
+const { _note: _t9note, claveField: CLAVE, ...T9 } = canaries.t9;
+const bytes = (forms: string[]) => forms.flatMap((n) => [Buffer.from(n, "latin1"), Buffer.from(n, "utf16le")]);
+const NEEDLES: Array<{ pair: string; forms: Buffer[] }> = [
+    ...CHANNELS.flatMap((ch) => KINDS.map((k) => ({ pair: `${ch}.${k}`, forms: bytes(needles(k, C[ch][k])) }))),
+    ...Object.entries(T9).map(([form, v]) => ({ pair: `t9.${form}`, forms: bytes([...new Set([v, JSON.stringify(v).slice(1, -1), v.replace(/&/g, "&amp;")])]) })),
+    { pair: "clave.field", forms: bytes(needles("password", CLAVE)) },
+];
 const pairsIn = (bytes: Buffer | Uint8Array | string): string[] => {
     const b = typeof bytes === "string" ? Buffer.from(bytes, "utf8") : Buffer.from(bytes);
     return NEEDLES.filter((n) => n.forms.some((f) => b.includes(f))).map((n) => n.pair);
@@ -245,7 +253,7 @@ const BOXES: Array<{ pair: string; x: number; y: number; w: number; h: number }>
     { pair: `field.${k}`, x: 22, y: KEY(i) + 2, w: 390, h: 24 },
     { pair: `text.${k}`, x: 470, y: KEY(i), w: 300, h: 20 },
     { pair: `iframe.${k}`, x: 880, y: 60 + i * 44 + 10, w: 300, h: 20 },
-]);
+]).concat({ pair: "clave.field", x: 22, y: 562, w: 390, h: 24 });
 
 /** The boxes a screenshot shows: each box whose pixels are not all the proof cover's colour (#475569) and not all blank. */
 async function shownIn(files: string[]): Promise<Map<string, Set<string>>> {

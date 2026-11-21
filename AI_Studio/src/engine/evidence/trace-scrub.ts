@@ -80,13 +80,13 @@ const jsonInner = (s: string): string => JSON.stringify(s).slice(1, -1);
 /**
  * The forms a secret takes inside a trace: the shared ones (secret-variants.ts: exact, URL-encoded, form-encoded, JSON-escaped, `encodeURI`),
  * plus HTML escaping (a page snapshot, an HTML trace), JSON escaped twice (a title quoted inside a JSON string) and plain base64. Longest
- * first.
+ * first. `splits` as secretVariants: off for the values a trace itself shows (dozens of them), which would multiply the forms.
  */
-export function traceSecretForms(secrets: readonly string[]): string[] {
+export function traceSecretForms(secrets: readonly string[], splits = true): string[] {
     const out = new Set<string>();
     for (const s of secrets) {
         if (typeof s !== "string" || s.length < 4) continue;
-        for (const v of secretVariants(s)) {
+        for (const v of secretVariants(s, splits)) {
             out.add(v);
             out.add(htmlEscape(v));
             out.add(jsonInner(v));
@@ -596,7 +596,8 @@ export function scrubTraceFile(file: string, secrets: readonly string[]): Promis
             return { ok: false, reason: "the trace could not be read" };
         }
         // The run's secrets and the ones the trace itself shows.
-        const r = await scrubTraceBytes(data, traceSecretForms([...secrets, ...(await secretsInTrace(data))]));
+        const forms = new Set([...traceSecretForms(secrets), ...traceSecretForms(await secretsInTrace(data), false)]);
+        const r = await scrubTraceBytes(data, [...forms].sort((a, b) => b.length - a.length));
         if (!r.ok) return r;
         if (r.masked === 0) return { ok: true, masked: 0 };
         const tmp = `${file}.${process.pid}.clean`;
