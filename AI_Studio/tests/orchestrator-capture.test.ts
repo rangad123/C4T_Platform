@@ -90,8 +90,10 @@ const scripted: LlmClient = {
         calls.push(`text:${purpose ?? "?"}`);
         return "yes";
     }) as LlmClient["text"],
-    object: (async ({ system, purpose }: { system: string; purpose?: string }) => {
+    object: (async ({ system, purpose, cacheAs }: { system: string; purpose?: string; cacheAs?: string }) => {
         calls.push(`object:${purpose ?? "?"}`);
+        // Row 234: the requirements document's parse, as the model would answer it.
+        if (cacheAs === "requirements") return { requirements: [{ id: "1.1", text: "The total is the sum of the line prices.", kind: "functional" }] };
         if (/analysing a web application/.test(system)) {
             return {
                 siteType: "ecommerce", purpose: "A small shop", features: ["Cart"], pagePurposes: [],
@@ -148,7 +150,8 @@ type Event = { kind: string; message: string; data: Record<string, unknown> | nu
  * a project without a model gets no objectives and no calls. The independence check, the own-steps replay (row 180) and the finding
  * still add none.
  */
-async function explore(projectId: string, objectivePursuits = 0) {
+/** `pushedBack`: the writer's defect report was pushed back once for its missing failing check (row 234): one more agent turn. */
+async function explore(projectId: string, objectivePursuits = 0, pushedBack = 0) {
     calls.length = toolQueue.length = 0;
     onceVisits = driftVisits = 0;
     const queued = await call("POST", `/api/projects/${projectId}/test-generation`, {
@@ -180,7 +183,7 @@ async function explore(projectId: string, objectivePursuits = 0) {
             ["workflow", `not finished: ${WRITER_STOPPED}`],
         ]);
     }
-    expect(calls).toEqual(["object:analysis", "object:planning", "agent", "agent", "agent", "text:review", "text:review", "text:review", ...Array<string>(objectivePursuits).fill("agent"), "object:analysis"]);
+    expect(calls).toEqual(["object:analysis", "object:planning", "agent", "agent", "agent", ...Array<string>(pushedBack).fill("agent"), "text:review", "text:review", "text:review", ...Array<string>(objectivePursuits).fill("agent"), "object:analysis"]);
     return { status: job!.status, test: tests[0]!, events };
 }
 
@@ -310,7 +313,7 @@ describe("a defect test carries its candidate finding", () => {
         await statedRule(projectId);
         plan = cartScenario("/cart");
         script = [heading, total("expected:2"), finishDefect];
-        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS);
+        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS, 1); // a stated rule is given, so the report is pushed back once
 
         expect(test.validationStatus).toBe("NEEDS_REVIEW");
         const meta = metaOf(test);
@@ -368,5 +371,37 @@ describe("a defect test carries its candidate finding", () => {
         expect(test.validationReason).toMatch(/^Not reported as a finding: the replay of the saved test's own steps could not be run/);
         expect(test.validationReason).toContain("the replay browser went away");
         expect(test.validationReason).toContain("The total shows $30.00, not $25.00");
+    }, 300_000);
+
+    // Row 234's real cause: a creation from a stored plan had no requirement ids (they were parsed in the plan job), so a failing check of
+    // an expected result citing a requirement the scenario covers was dropped as unstated, and the defect was observed only.
+    it("from a stored plan: a failing check of an expected result citing a covered requirement is captured", async () => {
+        const projectId = (await call("POST", "/api/projects", { name: "From plan" })).body.id as string;
+        calls.length = toolQueue.length = 0;
+        plan = { ...cartScenario("/cart"), requirements: ["1.1"], expectedResults: ["The cart page is shown", "The total is $25.00 (requirement 1.1)"] };
+        script = [heading, total("expected:2"), finishDefect];
+        const doc = { filename: "requirements.md", contentBase64: Buffer.from("Requirements\n\n1.1: The total is the sum of the line prices.\n").toString("base64") };
+        const planned = await call("POST", `/api/projects/${projectId}/test-generation`, {
+            url: URL, targets: ["web"], maxPages: 5, plan: true, requirements: doc,
+            accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false,
+        });
+        expect(planned.status, JSON.stringify(planned.body)).toBe(202);
+        const done = async (jobId: string) => {
+            for (let i = 0; i < 600; i++) {
+                const job = (await call("GET", `/api/test-generation/${jobId}`)).body;
+                if (["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(job.status)) return job;
+                await new Promise((r) => setTimeout(r, 400));
+            }
+            throw new Error(`job ${jobId} did not finish`);
+        };
+        expect((await done(planned.body.jobId)).status).toBe("COMPLETED");
+        const created = await call("POST", `/api/projects/${projectId}/plans/${planned.body.jobId}/create`, {});
+        expect(created.status, JSON.stringify(created.body)).toBe(202);
+        await done(created.body.jobId);
+        const tests = platform.repo.listTests(projectId).filter((t) => (t.generationMeta as { scenario?: unknown } | null)?.scenario);
+        expect(tests).toHaveLength(1);
+        const meta = metaOf(tests[0]!);
+        expect(meta.capture).toBe("captured");
+        expect(meta.capturedCheck).toMatchObject({ source: "expected:2" });
     }, 300_000);
 });

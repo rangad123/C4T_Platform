@@ -329,12 +329,23 @@ const normRef = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /**
  * The source an assert may cite: a usable rule given to this scenario (its ref as stored), or `expected:<n>` for one of its expected
- * results; undefined when it names neither.
+ * results; undefined when it names neither. A requirement id ("R-001.b", "requirement 1.1") that a stated expected result cites stands
+ * for that expected result: the first such `expected:<n>` (row 234: the writer cited the id and the check was refused).
  */
-export function sourceOf(given: string, scenario: Pick<Scenario, "expectedResults">, rules: readonly KnowledgeRule[] | undefined): string | undefined {
+export function sourceOf(
+    given: string,
+    scenario: Pick<Scenario, "expectedResults" | "objective" | "requirements">,
+    rules: readonly KnowledgeRule[] | undefined,
+    requirementIds?: readonly string[],
+): string | undefined {
     const n = EXPECTED_SOURCE.exec(given.trim())?.[1];
     if (n) return Number(n) <= scenario.expectedResults.length ? `expected:${Number(n)}` : undefined;
-    return usableRules(rules ?? []).find((r) => normRef(r.ref) === normRef(given))?.ref;
+    const rule = usableRules(rules ?? []).find((r) => normRef(r.ref) === normRef(given))?.ref;
+    if (rule) return rule;
+    const id = normRef(given).replace(/^(?:requirements?|req)\s+/i, "");
+    if (!(scenario.requirements ?? []).some((r) => normRef(r) === id)) return undefined;
+    const at = scenario.expectedResults.findIndex((e, i) => citesRequirement(e, id) && statedSource(`expected:${i + 1}`, scenario, rules, requirementIds));
+    return at < 0 ? undefined : `expected:${at + 1}`;
 }
 
 /**
@@ -647,6 +658,9 @@ export const WRITER_STOPPED = "The test writer stopped before finishing the test
 const STEP_BUDGET_SPENT = "Step budget exhausted before finishing";
 /** The start of what the model is told about an action the exploration refused: it did not reach the application. */
 const NOT_PERFORMED = "Not performed:";
+/** A defect reported without the failing check that shows it: pushed back once (row 234), then it is observed only. */
+const NO_FAILING_CHECK_HINT =
+    'Not finished: a defect needs the failing check that shows it. Assert the expected result that failed, with source expected:<n> (its number in the scenario\'s list), then call finish(result="defect") again.';
 const NO_OUTCOME_HINT =
     "Not finished: the test has no assertion on the scenario's expected outcome after the last action. Assert what the user should now observe (text, value, URL or count), not only that the element you used is visible, then call finish again.";
 const INTERACTIONS = new Set<Step["action"]>(["navigate", "click", "fill", "select", "check", "press", "hover", "upload", "drag", "download"]);
@@ -747,6 +761,10 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     const testData: Record<string, string> = {};
     let outcome: AuthorOutcome | undefined;
     let pushbacks = 0;
+    /** The defect report that was pushed back for its missing failing check (once). */
+    let defectPushedBack: AuthorOutcome | undefined;
+    /** Something stated a failing check could cite: a usable rule, or an expected result tied to a stated source. */
+    const statable = usableRules(input.rules ?? []).length > 0 || input.scenario.expectedResults.some((_, i) => statedSource(`expected:${i + 1}`, input.scenario, input.rules, input.requirementIds));
     // Smaller page snapshots (setting LLM_COMPACT_SNAPSHOTS, on by default): off = exactly the snapshots, tools and instructions of before.
     const view = compactSnapshotsOn(ctx.config) ? new SnapshotView() : undefined;
     /** The page as the model gets it: the whole snapshot cut at `max`, or (smaller snapshots on) the compact one or what changed. */
@@ -1036,7 +1054,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         return { success: false, error, url: page.url() };
                     };
                     // The source goes into the saved test as written: only a rule this scenario was given, or one of its expected results.
-                    const source = cited?.trim() ? sourceOf(cited, scenario, input.rules) : undefined;
+                    const source = cited?.trim() ? sourceOf(cited, scenario, input.rules, input.requirementIds) : undefined;
                     if (cited?.trim() && !source)
                         return refuse(`The source ${JSON.stringify(cited.slice(0, 100))} is not a rule given to this scenario nor one of its expected results (expected:1 to expected:${scenario.expectedResults.length}); use one of those, or leave source out.`);
                     // The engine's own wording of an expected result (an objective's template, an operator's, a citation) is never what the
@@ -1099,7 +1117,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                         // to it, then the check (later steps are dropped, the defect shows there), so it fails while the bug is there. A failing
                         // check of the planner's own expected result is not kept: the defect is observed only (statedSource).
                         const kept = failedChecks.filter((c) => statedSource((c.step as { source: string }).source, scenario, input.rules, input.requirementIds)).at(-1);
-                        outcome = {
+                        const defect: AuthorOutcome = {
                             status: result,
                             steps: kept ? [...recorded.slice(0, kept.at), kept.step] : [...recorded],
                             testData,
@@ -1108,6 +1126,13 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                             capture: kept ? "captured" : "observed_only",
                             ...(kept ? { capturedCheck: { source: (kept.step as { source: string }).source, observed: kept.observed } } : {}),
                         };
+                        // No stated failing check while something stated could hold one: asked once; if the writer then stops, this report stands.
+                        if (!kept && !defectPushedBack && statable) {
+                            defectPushedBack = defect;
+                            input.onAction?.({ tool: "finish", args: { result }, ok: false, observation: NO_FAILING_CHECK_HINT });
+                            return { done: false, error: NO_FAILING_CHECK_HINT };
+                        }
+                        outcome = defect;
                     } else outcome = { status: result, steps: [...recorded], testData, explanation };
                     return { done: true };
                 },
@@ -1159,7 +1184,8 @@ ${snapshot}`;
         if (view) ctx.emit(snapshotSavingsEvent(scenario.scenarioId, view.totals));
 
         const base: AuthorOutcome =
-            outcome ?? {
+            outcome ??
+            defectPushedBack ?? {
                 status: "blocked",
                 steps: recorded,
                 testData,
