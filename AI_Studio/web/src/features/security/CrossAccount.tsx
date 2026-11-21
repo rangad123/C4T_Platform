@@ -2,7 +2,7 @@
  * On the application's page: the read-only cross-account checks (src/security/assessment/cross-account.ts). The person chooses two of the
  * project's test accounts (A and B) and lists addresses whose owner they know; an assessment then asks whether A can read what is B's.
  *
- *   GET    /api/v1/security/applications/:appId/cross-account   viewer   { designation | null, ready: { ok, problems[] }, signIns: { A, B } }
+ *   GET    /api/v1/security/applications/:appId/cross-account   viewer   { designation | null, ready: { ok, problems[] }, signIns: { A, B }, draft }
  *   PUT    /api/v1/security/applications/:appId/cross-account   editor   Designation -> the same answer
  *   DELETE /api/v1/security/applications/:appId/cross-account   editor   { deleted }
  *
@@ -40,6 +40,8 @@ interface Designation {
 interface Answer {
     designation: Designation | null;
     ready: { ok: boolean; problems: string[] };
+    /** Drafted from a test run's two-account evidence; used only once a person saves it. */
+    draft?: { designation: Designation; source: { runId: string; findings: string[] } } | null;
 }
 
 /** Most resources (src/security/assessment/cross-account.ts CROSS_ACCOUNT_LIMITS.resources). */
@@ -56,6 +58,7 @@ export function CrossAccountPanel({ projectId, app, onChanged }: { projectId: st
     const [draft, setDraft] = useState<Designation | null>(null);
     const [removing, setRemoving] = useState(false);
     const d = x.data?.designation ?? null;
+    const suggested = d ? null : (x.data?.draft ?? null);
     const envOk = CHECK_ENVIRONMENTS.includes(app.environment);
     const done = () => {
         setDraft(null);
@@ -82,6 +85,12 @@ export function CrossAccountPanel({ projectId, app, onChanged }: { projectId: st
                 <CrossAccountForm projectId={projectId} app={app} initial={draft} onCancel={() => setDraft(null)} onDone={done} />
             ) : (
                 <>
+                    {suggested && (
+                        <Callout tone="info" title="Drafted from a test run">
+                            Test run {suggested.source.runId} saw what two test accounts could each read
+                            {suggested.source.findings.length ? ` (findings ${suggested.source.findings.join(", ")})` : ""}. Review the drafted checks and save them to use them; until then they are not used.
+                        </Callout>
+                    )}
                     {!d ? (
                         <p className="t-secondary">Not set up. Choose two test accounts and the addresses whose owner you know, and an assessment checks whether account A can read what belongs to account B.</p>
                     ) : (
@@ -136,8 +145,8 @@ export function CrossAccountPanel({ projectId, app, onChanged }: { projectId: st
                     {canRun(role) ? (
                         <div className="row">
                             {envOk && (
-                                <Button icon={Users} onClick={() => setDraft(d ? { ...d, resources: d.resources.map((r) => ({ ...r, label: r.label ?? "" })) } : { accountA: "", accountB: "", resources: [blank()] })}>
-                                    {d ? "Change" : "Set up cross-account checks"}
+                                <Button icon={Users} onClick={() => setDraft(d ? { ...d, resources: d.resources.map((r) => ({ ...r, label: r.label ?? "" })) } : (suggested?.designation ?? { accountA: "", accountB: "", resources: [blank()] }))}>
+                                    {d ? "Change" : suggested ? "Review the drafted checks" : "Set up cross-account checks"}
                                 </Button>
                             )}
                             {d && (
