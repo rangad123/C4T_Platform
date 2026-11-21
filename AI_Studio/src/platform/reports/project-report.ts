@@ -18,6 +18,12 @@ import type { Repo } from "../repo.js";
 import { projectCompat } from "../routes/variants.js";
 import type { ArtifactStore } from "../storage.js";
 import { passRate } from "../../engine/summary/pass-rate.js";
+import { isReproduced, reproduction } from "../../engine/findings/classify.js";
+import { rootCause } from "../../engine/findings/root-cause.js";
+import { confidenceScore, label, severityOf } from "../../engine/findings/score.js";
+import { CandidateFindingStore } from "../candidate-finding-store.js";
+import { fromCandidate } from "../findings/adapters.js";
+import { buildFindingReport, REPORT_FIELD_LABEL, REPORT_FIELDS, type FindingReport } from "../issues/content.js";
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -55,6 +61,8 @@ export interface ProjectReportData {
     ran: number;
     bySeverity: Record<Severity, number>;
     findings: Finding[];
+    /** Confirmed bugs: one report per finding group (the 13 fields), most severe first; text masked as for an issue. */
+    confirmed: FindingReport[];
     failedTests: Array<{ key: string; title: string; area: string; reason: string; evidence?: string }>;
     areas: Array<{ name: string; total: number; validated: number; attention: number }>;
     compliance: Array<{ framework: string; covered: number; attention: number; gap: number; total: number }>;
@@ -127,6 +135,29 @@ export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: 
     for (const f of findings.slice(0, 15)) f.evidence = await evidenceSentence(repo, store, tests.find((t) => t.testKey === f.key)!.id);
     for (const f of failedTests.slice(0, 15)) f.evidence = await evidenceSentence(repo, store, tests.find((t) => t.testKey === f.key)!.id);
 
+    // Confirmed bugs (Phase 5): candidate findings shown as "Confirmed" (score.ts label), one per group.
+    const confirmed: Array<{ rank: number; report: FindingReport }> = [];
+    const seenGroups = new Set<string>();
+    const app0 = repo.getLatestApplicationPublic(projectId);
+    for (const r of await new CandidateFindingStore(repo.db.sql).list(projectId)) {
+        if (r.groupId && seenGroups.has(r.groupId)) continue;
+        const t = r.testId ? tests.find((x) => x.id === r.testId) : undefined;
+        const view = fromCandidate(r, t ? { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta } : undefined);
+        const severity = severityOf(view).severity;
+        const confidence = r.confidenceDetail?.confidence ?? confidenceScore(view).confidence;
+        if (!label({ state: r.state, severity, confidence, security: false, reproduced: isReproduced(reproduction(view.attempts)) }).startsWith("Confirmed")) continue;
+        if (r.groupId) seenGroups.add(r.groupId);
+        const report = buildFindingReport({
+            members: [view],
+            spec: t?.spec,
+            area: t?.suite,
+            environment: { appUrl: app0?.url as string | undefined, appVersion: r.appVersion },
+            rootCause: await rootCause({ members: [view] }),
+        });
+        confirmed.push({ rank: SEVERITIES.indexOf(severity), report });
+    }
+    confirmed.sort((a, b) => a.rank - b.rank);
+
     const mapped = complianceReport(tests.map((t) => ({ id: t.id, testKey: t.testKey, spec: t.spec, validationStatus: t.validationStatus })));
     const slowest = (await projectSlowest(repo.db.sql, projectId)).map((r) => ({
         key: r.testKey,
@@ -151,6 +182,7 @@ export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: 
         ran: run,
         bySeverity,
         findings,
+        confirmed: confirmed.map((c) => c.report),
         failedTests,
         areas: [...areas.values()].sort((a, b) => b.attention - a.attention || a.name.localeCompare(b.name)),
         compliance: mapped.map((f) => ({ framework: f.framework, ...f.summary })),
@@ -193,6 +225,16 @@ export function renderReportHtml(d: ProjectReportData): string {
         )
         .join("");
 
+    const confirmedCards = d.confirmed
+        .slice(0, 15)
+        .map(
+            (r) =>
+                `<article class="card"><header><strong>${esc(r.title[0])}</strong></header><dl>${REPORT_FIELDS.filter((k) => k !== "title")
+                    .map((k) => `<dt>${esc(REPORT_FIELD_LABEL[k])}</dt><dd>${r[k].length > 1 ? `<ul>${r[k].map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : esc(r[k][0] ?? "")}</dd>`)
+                    .join("")}</dl></article>`,
+        )
+        .join("");
+
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(d.projectName)} — test report</title>
@@ -206,7 +248,7 @@ h1{font-size:24px;margin:0 0 2px}h2{font-size:17px;margin:30px 0 10px;padding-bo
 .sev{display:inline-block;font-size:12px;font-weight:700;border-radius:6px;padding:1px 8px;border:1px solid currentColor}.sev-critical,.sev-high{color:var(--bad)}.sev-medium{color:var(--warn)}.sev-low{color:var(--mute)}
 .reason{white-space:pre-wrap;word-break:break-word;margin:6px 0}figure{margin:8px 0}figure img{max-width:100%;max-height:300px;border:1px solid var(--line);border-radius:6px}
 table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr{break-inside:avoid}
-ul{margin:6px 0;padding-left:20px}svg{color:var(--ok);max-width:100%;height:auto}
+ul{margin:6px 0;padding-left:20px}dl{margin:6px 0;display:grid;grid-template-columns:max-content 1fr;gap:2px 12px}dt{color:var(--mute);font-size:13px}dd{margin:0;word-break:break-word}svg{color:var(--ok);max-width:100%;height:auto}
 @media(max-width:600px){body{padding:14px}}
 @media print{body{padding:0;max-width:none}h2{break-after:avoid}}
 </style></head><body>
@@ -222,6 +264,7 @@ ul{margin:6px 0;padding-left:20px}svg{color:var(--ok);max-width:100%;height:auto
 </div>
 ${d.counts.notRun ? `<p class="meta">The pass rate counts only tests that have a result (passed, found a problem, or could not be validated). ${d.counts.notRun} ${d.counts.notRun === 1 ? "test has" : "tests have"} not been run yet and ${d.counts.notRun === 1 ? "is" : "are"} left out.</p>` : ""}
 ${d.trend.length > 1 ? `<h2>Pass rate over recent runs</h2>${trendSvg(d.trend)}` : ""}
+${d.confirmed.length ? `<h2>Confirmed bugs (${d.confirmed.length}${d.confirmed.length > 15 ? ", most serious 15 shown" : ""})</h2>${confirmedCards}` : ""}
 ${d.findings.length ? `<h2>What needs attention (${d.findings.length}${d.findings.length > 15 ? ", most serious 15 shown" : ""})</h2>${findings}` : ""}
 ${d.failedTests.length ? `<h2>Tests that could not be validated (${d.failedTests.length})</h2>${list(d.failedTests.slice(0, 15).map((t) => `<li><strong>${esc(t.title)}</strong> <span class="meta">${esc(t.key)} · ${esc(t.area)}</span><br><span class="reason">${esc(t.reason)}</span>${t.evidence ? `<br><span class="meta">What the page did: ${esc(t.evidence)}</span>` : ""}</li>`))}` : ""}
 ${d.areas.length ? `<h2>Coverage by area</h2>${table(["Area", "Tests", "Passed", "Need attention"], d.areas.map((a) => [esc(a.name), String(a.total), String(a.validated), String(a.attention)]))}` : ""}

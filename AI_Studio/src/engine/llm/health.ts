@@ -97,3 +97,55 @@ export function summariseHealth(samples: readonly HealthSample[], now: number = 
     }
     return out.sort((a, b) => b.latest - a.latest).map(({ latest: _latest, ...h }) => h);
 }
+
+// ── per-job call telemetry (task R, R4) ──────────────────────────────────────
+
+/** One AI call of a job as the meter saw it: what for, how long, how much it wrote, and how its answer was repaired. No prompt or answer. */
+export interface CallSample {
+    purpose: string;
+    ms: number;
+    outputTokens: number;
+    ok: boolean;
+    /** metered.ts `RepairKind`; missing = the answer was fine as it came. */
+    repair?: string;
+    itemsDropped?: number;
+}
+
+/** A job's calls of one purpose: latency and output tokens as median and 95th percentile, and how many answers needed which repair. */
+export interface PurposeCalls {
+    calls: number;
+    failed: number;
+    latencyMs: { p50: number; p95: number };
+    outputTokens: { p50: number; p95: number; total: number };
+    repairs: Record<string, number>;
+    itemsDropped: number;
+}
+
+/** The nearest-rank percentile (`p` in 0-100) of the values; 0 for none. */
+export function percentile(values: readonly number[], p: number): number {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))]!;
+}
+
+/** The samples summed per purpose. */
+export function summariseCalls(samples: readonly CallSample[]): Record<string, PurposeCalls> {
+    const out: Record<string, PurposeCalls> = {};
+    const by = new Map<string, CallSample[]>();
+    for (const s of samples) by.set(s.purpose, [...(by.get(s.purpose) ?? []), s]);
+    for (const [purpose, list] of by) {
+        const ms = list.map((s) => s.ms);
+        const tokens = list.map((s) => s.outputTokens);
+        const repairs: Record<string, number> = {};
+        for (const s of list) if (s.repair) repairs[s.repair] = (repairs[s.repair] ?? 0) + 1;
+        out[purpose] = {
+            calls: list.length,
+            failed: list.filter((s) => !s.ok).length,
+            latencyMs: { p50: percentile(ms, 50), p95: percentile(ms, 95) },
+            outputTokens: { p50: percentile(tokens, 50), p95: percentile(tokens, 95), total: tokens.reduce((a, b) => a + b, 0) },
+            repairs,
+            itemsDropped: list.reduce((a, s) => a + (s.itemsDropped ?? 0), 0),
+        };
+    }
+    return out;
+}

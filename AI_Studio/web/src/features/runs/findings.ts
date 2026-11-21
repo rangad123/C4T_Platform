@@ -4,8 +4,10 @@
  *
  *   GET /api/projects/:id/candidate-findings?job=  → FindingsAnswer: the findings this run found first or last, newest seen first.
  *
- * A candidate finding is found by the AI and needs a person to check it; the page never calls one settled. Its confidence is stated
- * (src/engine/explore/finding.ts confidenceOf), so its meaning here follows the same rule.
+ * Phase 5 (U1): each finding also carries its lifecycle state and the server's `review` (src/platform/routes/explore-findings.ts): the
+ * status label (findings/score.ts `label`, never "Confirmed" below high confidence), severity and confidence apart, reproduction, steps
+ * and the likely cause with its label. The page only orders and shows them: Confirmed first by severity, then the ones a person must
+ * review, then the rest folded by state.
  */
 
 export type CaptureState = "captured" | "observed_only";
@@ -27,6 +29,29 @@ export interface CandidateFinding {
     replays: Array<{ label: string; outcome: "failed" | "passed" | "error"; failedStep?: number; summary: string }>;
 }
 
+export type Severity = "critical" | "high" | "medium" | "low";
+/** A lifecycle state (src/engine/findings/lifecycle.ts FINDING_STATES). */
+export type FindingState = string;
+
+/** What the results card shows of a finding, worked out on the server (routes/explore-findings.ts reviewOf). */
+export interface FindingReview {
+    label: string;
+    severity: Severity;
+    severityBasis: string | null;
+    confidence: Confidence;
+    confidenceBasis: string;
+    reproduction: { same: number; of: number };
+    steps: Array<{ action: string; target?: string; url?: string }>;
+    /** Null when no cause was found at a code location; `noCause` says why. */
+    cause: { label: string; text: string } | null;
+    noCause: string | null;
+    stateLabel: string;
+    /** The state's place in the lifecycle. */
+    stateRank: number;
+    /** The verdicts the lifecycle lets a person give from this state. */
+    personMay: { confirm: boolean; notABug: boolean };
+}
+
 /** One stored finding (src/platform/candidate-finding-store.ts CandidateFindingRecord). */
 export interface FindingRecord {
     id: string;
@@ -37,6 +62,9 @@ export interface FindingRecord {
     firstSeenAt: string;
     lastSeenAt: string;
     finding: CandidateFinding;
+    state: FindingState;
+    groupId: string | null;
+    review: FindingReview;
 }
 
 export interface FindingsAnswer {
@@ -88,3 +116,55 @@ export const replayText = (r: CandidateFinding["replays"][number]): string =>
 
 /** What a finding's picture shows: the page where a fresh replay of its test stopped (row 173, findingShooter). */
 export const shotAlt = (i: number, n: number): string => `Screenshot ${i + 1} of ${n}: the page where a fresh replay of this finding’s test stopped`;
+
+const SEVERITY_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+/** Confirmed (as the label says, so high confidence only), else needs a person's review (that state, or a "Possible …" label), else the rest. */
+export function bucketOf(r: Pick<FindingRecord, "state" | "review">): "confirmed" | "review" | "rest" {
+    if (r.review.label.startsWith("Confirmed ")) return "confirmed";
+    return r.state === "needs_manual_review" || r.review.label.startsWith("Possible ") ? "review" : "rest";
+}
+
+/** By severity, worst first; then findingOrder. */
+const bySeverity = (list: readonly FindingRecord[]) =>
+    findingOrder(list)
+        .map((f, i) => ({ f, i }))
+        .sort((a, b) => SEVERITY_RANK[a.f.review.severity] - SEVERITY_RANK[b.f.review.severity] || a.i - b.i)
+        .map((x) => x.f);
+
+/** The card's order: Confirmed by severity, then Needs manual review by severity, then the rest folded by state (lifecycle order). */
+export function findingSections(list: readonly FindingRecord[]): { confirmed: FindingRecord[]; review: FindingRecord[]; folded: Array<{ state: FindingState; label: string; findings: FindingRecord[] }> } {
+    const rest = list.filter((r) => bucketOf(r) === "rest");
+    return {
+        confirmed: bySeverity(list.filter((r) => bucketOf(r) === "confirmed")),
+        review: bySeverity(list.filter((r) => bucketOf(r) === "review")),
+        folded: [...new Map(rest.map((r) => [r.state, r.review])).entries()]
+            .sort((a, b) => a[1].stateRank - b[1].stateRank)
+            .map(([state, rv]) => ({ state, label: rv.stateLabel, findings: findingOrder(rest.filter((r) => r.state === state)) })),
+    };
+}
+
+/** States a finding can be filed as an issue from (routes/integrations.ts FILABLE). */
+const FILABLE: readonly FindingState[] = ["confirmed", "classified", "needs_manual_review"];
+
+/** Which of the four actions a finding offers a person who may change it: only moves the lifecycle allows a person. */
+export function actionsOf(r: Pick<FindingRecord, "state" | "groupId" | "review">, hasTracker: boolean): { confirm: boolean; notABug: boolean; split: boolean; fileIssue: boolean } {
+    return {
+        confirm: r.review.personMay.confirm,
+        notABug: r.review.personMay.notABug,
+        split: r.groupId !== null,
+        fileIssue: hasTracker && FILABLE.includes(r.state),
+    };
+}
+
+/** "Reproduced 2 of 3 times", or why there is no count yet. */
+export function reproductionText(r: { same: number; of: number }): string {
+    if (r.of === 0) return "Not tried yet";
+    if (r.of === 1) return r.same ? "Failed once, not replayed yet" : "Not reproduced: the one attempt did not fail";
+    return `Failed the same way ${r.same} of ${r.of} times`;
+}
+
+export const SEVERITY_WORD: Record<Severity, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
+
+/** One step of the saved test in a line. */
+export const stepText = (s: FindingReview["steps"][number]): string => [s.action, s.target, s.url].filter(Boolean).join(" ");

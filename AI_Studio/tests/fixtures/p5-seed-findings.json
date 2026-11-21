@@ -1,0 +1,216 @@
+{
+ "_note": "The 8 seed-pinned bench-shop findings of the Phase 5 offline corpus (W0-1), with the endpoints one failed attempt recorded (its evidence footprint). Built from saved trial data; no person data.",
+ "findings": [
+  {
+   "trial": "p3-m4-cand-1",
+   "testKey": "WEB-019",
+   "seed": "BS-04",
+   "title": "Registration refuses an invalid email address",
+   "expected": "Anything else is refused with \"Enter a valid email address.\"",
+   "failedStep": 6,
+   "error": "Error: expect(locator).toBeVisible() failed",
+   "pages": [
+    "/register",
+    "/"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/register",
+     "status": 303
+    }
+   ]
+  },
+  {
+   "trial": "p3-m4-cand-4",
+   "testKey": "WEB-023",
+   "seed": "BS-06",
+   "title": "Change default delivery address, then place an order that uses it",
+   "expected": "Saving shows 'Saved.'; saved name and address become the account's details everywhere, including the next checkout's starting address.",
+   "failedStep": 21,
+   "error": "Error: expect(locator).toHaveValue(expected) failed",
+   "pages": [
+    "/register",
+    "/",
+    "/account",
+    "/products/p1",
+    "/cart",
+    "/checkout"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/register",
+     "status": 303
+    },
+    {
+     "method": "PUT",
+     "path": "/api/profile",
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/api/cart/items",
+     "status": 201
+    }
+   ]
+  },
+  {
+   "trial": "p3-m6-cand-1",
+   "testKey": "WEB-014",
+   "seed": "BS-06",
+   "title": "Saved delivery address is used at the next checkout",
+   "expected": "The default address is pre-filled and may be changed for this checkout only.",
+   "failedStep": 19,
+   "error": "Error: expect(locator).toHaveValue(expected) failed",
+   "pages": [
+    "/register",
+    "/",
+    "/account",
+    "/products/p1",
+    "/cart",
+    "/checkout"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/register",
+     "status": 303
+    },
+    {
+     "method": "PUT",
+     "path": "/api/profile",
+     "status": 200
+    },
+    {
+     "method": "POST",
+     "path": "/api/cart/items",
+     "status": 201
+    },
+    {
+     "method": "POST",
+     "path": "/api/checkout/address",
+     "status": 400
+    }
+   ]
+  },
+  {
+   "trial": "p3-m9-cand-1",
+   "testKey": "WEB-004",
+   "seed": "BS-06",
+   "title": "Changed name and delivery address persist after reload and sign in again",
+   "expected": "After reloading /account the Default delivery address textarea shows 1 Test Road, York (requirement R-054)",
+   "failedStep": 12,
+   "error": "Error: expect(locator).toHaveValue(expected) failed",
+   "pages": [
+    "/register",
+    "/",
+    "/account"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/register",
+     "status": 303
+    },
+    {
+     "method": "PUT",
+     "path": "/api/profile",
+     "status": 200
+    }
+   ]
+  },
+  {
+   "trial": "p3-m9-cand-1",
+   "testKey": "WEB-013",
+   "seed": "BS-04",
+   "title": "Registration refuses an invalid email address",
+   "expected": "The message Enter a valid email address. is shown next to the Email field (requirement 1.6)",
+   "failedStep": 6,
+   "error": "Error: expect(locator).toBeVisible() failed",
+   "pages": [
+    "/register",
+    "/"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/register",
+     "status": 303
+    }
+   ]
+  },
+  {
+   "trial": "p3-m9-cand-1",
+   "testKey": "WEB-014",
+   "seed": "BS-06",
+   "title": "Account page shows the signed-in email and current details",
+   "expected": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, including the starting address of the next checkout.",
+   "failedStep": 13,
+   "error": "Error: expect(locator).toHaveValue(expected) failed",
+   "pages": [
+    "/account",
+    "/login",
+    "/orders"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/login",
+     "status": 303
+    },
+    {
+     "method": "PUT",
+     "path": "/api/profile",
+     "status": 200
+    }
+   ]
+  },
+  {
+   "trial": "p3-m9-cand-2",
+   "testKey": "WEB-012",
+   "seed": "BS-06",
+   "title": "Saved name and delivery address persist after reload",
+   "expected": "After reload the delivery address textarea shows qamulx 9 Harbour Test Road, Leeds, and the account-linked checkout form shows the same address (requirement R-031)",
+   "failedStep": 11,
+   "error": "Error: expect(locator).toHaveValue(expected) failed",
+   "pages": [
+    "/register",
+    "/",
+    "/account"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/register",
+     "status": 303
+    },
+    {
+     "method": "PUT",
+     "path": "/api/profile",
+     "status": 200
+    }
+   ]
+  },
+  {
+   "trial": "p3-m9-cand-2",
+   "testKey": "WEB-018",
+   "seed": "BS-04",
+   "title": "Registration refuses an invalid email address",
+   "expected": "The message Enter a valid email address. is shown under the Email field (requirement R-001.b)",
+   "failedStep": 6,
+   "error": "Error: expect(locator).toBeVisible() failed",
+   "pages": [
+    "/register",
+    "/"
+   ],
+   "endpoints": [
+    {
+     "method": "POST",
+     "path": "/register",
+     "status": 303
+    }
+   ]
+  }
+ ]
+}

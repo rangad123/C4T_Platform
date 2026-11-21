@@ -16,6 +16,8 @@ import { z } from "zod";
 import { mapLimit, throwIfAborted, type EngineContext } from "../context.js";
 import { LEVEL_SETTINGS } from "../levels.js";
 import { notesBlock, type SiteNote } from "../memory/notes.js";
+import { classifyLlmError } from "../llm/errors.js";
+import { countStructured } from "../llm/provider.js";
 import { isBudgetExceeded } from "../llm/usage.js";
 import { ScenarioSchema, type Scenario } from "../spec/schema.js";
 import { RequirementIndex } from "../requirements/index.js";
@@ -27,7 +29,7 @@ import { STATING_SOURCES, type AppModel as IntelModel, type Rule, type RuleStatu
 import type { ObjectiveField, ObjectiveModel } from "../explore/objectives.js";
 
 // No objective: only the objective stage (explore/**) sets one, so a model cannot make its own expected result look stated (author.ts statedSource).
-const PlanSchema = z.object({ scenarios: z.array(ScenarioSchema.omit({ scenarioId: true, objective: true })) });
+export const PlanSchema = z.object({ scenarios: z.array(ScenarioSchema.omit({ scenarioId: true, objective: true })) });
 
 export interface PlanOptions {
     maxScenarios: number;
@@ -413,7 +415,7 @@ export interface PlanArea {
 }
 
 /** Areas planned one call each: pages grouped by their first path segment; groups under 3 pages share a call. */
-export function planAreas(model: AppModel, size = AREA_PAGES): PlanArea[] {
+export function planAreas(model: Pick<AppModel, "pages">, size = AREA_PAGES): PlanArea[] {
     if (model.pages.length <= size) return [{ name: "the whole application", pages: model.pages }];
     const groups = new Map<string, PageModel[]>();
     for (const p of model.pages) {
@@ -491,9 +493,15 @@ const STOP = new Set(["a", "an", "the", "is", "are", "to", "of", "on", "in", "wi
 const intentKey = (s: Planned) =>
     `${bare(s.startPath)}|${[...new Set(s.title.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w && !STOP.has(w)).map((w) => w.replace(/s$/, "")))].sort().join(" ")}`;
 
+/** The quota line of a planning prompt: a split call (see `round`) asks for less by changing only this line. */
+const quotaLine = (quota: number) => `- Plan at most ${quota} scenarios (fewer if this part of the app is small).`;
+
+/** A planning call whose answer could not be used is split in two halves, and a half once more (task R, R-e). */
+const MAX_SPLIT_DEPTH = 2;
+
 function constraints(model: AppModel, opts: PlanOptions, quota: number): string {
     return `Constraints:
-- Plan at most ${quota} scenarios (fewer if this part of the app is small).
+${quotaLine(quota)}
 - Test credentials ${opts.hasCredentials ? "ARE available" : "are NOT available: do not plan scenarios that require a successful login, but DO plan login-failure and validation scenarios"}.
 ${opts.scope ? `- Testing scope requested by the owner: ${opts.scope}` : "- Scope: the whole application."}
 ${model.authentication.required ? "" : "- No login form was detected; do not plan authentication scenarios.\n"}${
@@ -605,14 +613,49 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
         return added;
     };
     let stopped = false;
+    /** Test ideas the AI's answers had in a form that could not be used (dropped one by one, the rest kept), and halves of split calls that failed. */
+    let dropped = 0;
+    let lostHalves = 0;
+    /**
+     * One planning call. Each scenario is checked on its own: a bad one is dropped and counted, the rest kept. A call whose answer still
+     * cannot be used is split: half the quota, then the other half told what the first planned; `accept()` removes any repeat.
+     */
+    const ask = async (c: { prompt: string; quota: number }, depth = 0): Promise<Planned[]> => {
+        try {
+            // Every planning prompt starts with the same summary: sent as the shared prefix, the provider's prompt cache serves it to the next call.
+            const res = await ctx.llm.object({
+                system: planningSystem(opts.allowPurchases === true),
+                schema: PlanSchema,
+                maxOutputTokens: Math.min(16_000, 2_000 + 320 * c.quota),
+                purpose: "planning",
+                prompt: c.prompt,
+                cachePrefix: summary,
+                items: { key: "scenarios", onDropped: (n) => void (dropped += n) },
+            });
+            return res.scenarios;
+        } catch (err) {
+            if (depth >= MAX_SPLIT_DEPTH || c.quota < 2 || classifyLlmError(err).cls !== "bad_output") throw err;
+            countStructured(ctx.llm.usage, "split");
+            const half = Math.ceil(c.quota / 2);
+            const smaller = (prompt: string) => ({ quota: half, prompt: prompt.replace(quotaLine(c.quota), quotaLine(half)) });
+            const first = await ask(smaller(c.prompt), depth + 1).catch((e: unknown) => e);
+            const before = Array.isArray(first) && first.length ? `\n\nAlready planned in another part of this request (do not repeat these):\n${cut(first.map((s) => `- [${s.category}] ${s.title}`).join("\n"), COVERED_CHARS)}` : "";
+            const second = await ask(smaller(`${c.prompt}${before}`), depth + 1).catch((e: unknown) => e);
+            const halves = [first, second];
+            const ok = halves.filter((h): h is Planned[] => Array.isArray(h));
+            if (!ok.length) throw halves.find(isBudgetExceeded) ?? first;
+            lostHalves += halves.length - ok.length;
+            // A reached AI limit in one half stops planning as a failed call would.
+            const limit = halves.find(isBudgetExceeded);
+            if (limit) stopped = true;
+            return ok.flat();
+        }
+    };
     /** Runs a round of calls concurrently; a failed call is said in plain words and the others are kept. */
     const round = async (batch: Array<{ prompt: string; quota: number }>) => {
-        const results = await mapLimit(batch, ctx.config.CONCURRENCY, (c) =>
-            // Every planning prompt starts with the same summary: sent as the shared prefix, the provider's prompt cache serves it to the next call.
-            ctx.llm.object({ system: planningSystem(opts.allowPurchases === true), schema: PlanSchema, maxOutputTokens: Math.min(16_000, 2_000 + 320 * c.quota), purpose: "planning", prompt: c.prompt, cachePrefix: summary }),
-        );
+        const results = await mapLimit(batch, ctx.config.CONCURRENCY, (c) => ask(c));
         const failed = results.flatMap((r) => (r.ok ? [] : [r.error]));
-        const ok = results.flatMap((r) => (r.ok ? [r.value.scenarios] : []));
+        const ok = results.flatMap((r) => (r.ok ? [r.value] : []));
         if (!ok.length && !kept.length && failed.length) throw failed.find(isBudgetExceeded) ?? failed[0];
         let added = 0;
         for (const list of ok) added += accept(list);
@@ -662,6 +705,15 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
         const msg = `${notShown.length} requirement(s) were not shown to the AI while planning: ${notShown.slice(0, 10).map((r) => r.id).join(", ")}${notShown.length > 10 ? ", …" : ""}.`;
         opts.warnings?.push(msg);
         ctx.emit({ stage: "planning", kind: "requirements_not_shown", level: "warn", message: msg, data: { count: notShown.length } });
+    }
+    if (dropped || lostHalves) {
+        const parts = [
+            dropped ? `${dropped} test idea(s) were dropped: the AI's answer had them in a form that could not be used (the other ideas of those answers were kept)` : "",
+            lostHalves ? `${lostHalves} part(s) of planning calls split for a shorter answer still failed` : "",
+        ].filter(Boolean);
+        const msg = `${parts.join("; ")}.`;
+        opts.warnings?.push(msg);
+        ctx.emit({ stage: "planning", kind: "planning_partial", level: "warn", message: msg, data: { dropped, lostHalves } });
     }
     if (vague) ctx.emit({ stage: "planning", kind: "scenarios_vague", level: "warn", message: `${vague} test idea(s) were left out: they had no concrete expected outcome (only "the page loads" or alike).` });
 

@@ -373,6 +373,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/findings": "read",
     "GET /api/projects/:id/findings/:fid": "read",
     "POST /api/projects/:id/findings/:fid/transition": "ai_studio.tests.write",
+    // An issue filed from a finding group (routes/integrations.ts, Phase 5 C3): the same as filing one from a test.
+    "POST /api/projects/:id/findings/:fid/issue": "ai_studio.tests.write",
     "GET /api/projects/:id/requirements": "read",
     "POST /api/projects/:id/requirements": "ai_studio.tests.write",
     "GET /api/projects/:id/requirements/coverage": "read",
