@@ -67,26 +67,20 @@ const pairsIn = (bytes: Buffer | Uint8Array | string): string[] => {
 };
 
 /**
- * What leaks today, by evidence type: the (channel.kind) pairs found, and the audit line (P5-EVIDENCE-AUDIT.md) that explains them.
- * Taken from the run of 2026-11-21 (two runs, the same both times); E2 removes each entry as it fixes the leak.
+ * What is still kept, by evidence type: the (channel.kind) pairs found, and the audit line (P5-EVIDENCE-AUDIT.md) that explains them.
+ * Every pair left is a value that nothing marks as secret: a password, token or session id written on the page as plain text (in the
+ * page itself or in its iframe), with no key word, field or format around it. The redaction cannot tell it from other words, and page
+ * text stays in what the engine keeps so it can understand the app; screenshots show page text as it is (only fields are covered).
+ * Remove a pair when it no longer happens.
  */
 const P = (s: string) => s.split(" ");
 const KNOWN_LEAKS: Record<string, { audit: string; pairs: string[] }> = {
-    "evidence (API)": { audit: "L-4", pairs: P("console.address console.bearer console.card console.dbUrl console.email console.phone url.dbUrl url.email") },
-    "job events (API)": { audit: "L-5", pairs: P("url.bearer url.dbUrl url.email") },
-    "row: agent_events": { audit: "L-5", pairs: P("url.bearer url.dbUrl url.email") },
-    "row: applications": { audit: "L-2", pairs: P("console.bearer console.email field.address field.apiKey field.bearer field.card field.cookie field.dbUrl field.email field.phone json.address json.bearer json.dbUrl json.email json.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone url.apiKey url.bearer url.cookie url.dbUrl url.email") },
-    "scratch evidence json": { audit: "L-4, L-8", pairs: P("console.address console.bearer console.card console.dbUrl console.email console.phone url.dbUrl url.email") },
-    "scratch file partial-results.ndjson": { audit: "L-8", pairs: P("console.bearer console.email") },
-    "scratch playwright report": { audit: "L-8", pairs: P("console.bearer console.email") },
-    "scratch text artifact": { audit: "L-8", pairs: P("console.bearer console.email field.address field.apiKey field.bearer field.card field.cookie field.dbUrl field.email field.password field.phone iframe.address iframe.apiKey iframe.bearer iframe.card iframe.cookie iframe.dbUrl iframe.email iframe.password iframe.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone url.apiKey url.bearer url.cookie url.dbUrl url.email") },
-    "scratch trace": { audit: "L-1, L-8", pairs: P("console.address console.apiKey console.bearer console.card console.cookie console.dbUrl console.email console.password console.phone cookie.address cookie.apiKey cookie.bearer cookie.card cookie.cookie cookie.dbUrl cookie.email cookie.password cookie.phone field.address field.apiKey field.bearer field.card field.cookie field.dbUrl field.email field.phone header.address header.apiKey header.bearer header.card header.cookie header.dbUrl header.email header.password header.phone iframe.address iframe.apiKey iframe.bearer iframe.card iframe.cookie iframe.dbUrl iframe.email iframe.password iframe.phone json.address json.apiKey json.bearer json.card json.cookie json.dbUrl json.email json.password json.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone url.address url.apiKey url.bearer url.card url.cookie url.dbUrl url.email url.password url.phone") },
-    "screenshot (covered-box check)": { audit: "L-7", pairs: P("field.address field.apiKey field.bearer field.cookie field.dbUrl field.email field.phone iframe.address iframe.apiKey iframe.bearer iframe.card iframe.cookie iframe.dbUrl iframe.email iframe.password iframe.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone") },
-    "sent to the AI": { audit: "L-3", pairs: P("field.address field.apiKey field.bearer field.card field.cookie field.dbUrl field.email field.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone url.apiKey url.bearer url.cookie url.dbUrl url.email") },
-    "stored database file": { audit: "L-2, L-5, L-6", pairs: P("console.bearer console.email field.address field.apiKey field.bearer field.card field.cookie field.dbUrl field.email field.phone json.address json.bearer json.dbUrl json.email json.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone url.apiKey url.bearer url.cookie url.dbUrl url.email") },
-    "stored evidence json": { audit: "L-4", pairs: P("console.address console.bearer console.card console.dbUrl console.email console.phone url.dbUrl url.email") },
-    "stored file application-model.json": { audit: "L-2", pairs: P("console.bearer console.email field.address field.apiKey field.bearer field.card field.cookie field.dbUrl field.email field.phone json.address json.bearer json.dbUrl json.email json.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone url.apiKey url.bearer url.cookie url.dbUrl url.email") },
-    "stored trace": { audit: "L-1", pairs: P("console.address console.apiKey console.bearer console.card console.cookie console.dbUrl console.email console.password console.phone cookie.address cookie.apiKey cookie.bearer cookie.card cookie.cookie cookie.dbUrl cookie.email cookie.password cookie.phone field.address field.apiKey field.bearer field.card field.cookie field.dbUrl field.email field.phone header.address header.apiKey header.bearer header.card header.cookie header.dbUrl header.email header.password header.phone iframe.address iframe.apiKey iframe.bearer iframe.card iframe.cookie iframe.dbUrl iframe.email iframe.password iframe.phone json.address json.apiKey json.bearer json.card json.cookie json.dbUrl json.email json.password json.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone url.address url.apiKey url.bearer url.card url.cookie url.dbUrl url.email url.password url.phone") },
+    "row: applications": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
+    "screenshot (covered-box check)": { audit: "L-7", pairs: P("iframe.address iframe.apiKey iframe.bearer iframe.card iframe.cookie iframe.dbUrl iframe.email iframe.password iframe.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone") },
+    "sent to the AI": { audit: "L-3", pairs: P("text.bearer text.cookie text.password") },
+    "stored database file": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
+    "stored file application-model.json": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
+    "stored trace": { audit: "L-1", pairs: P("iframe.cookie iframe.password text.cookie text.password") },
 };
 
 const found = new Map<string, Set<string>>();
@@ -387,7 +381,10 @@ describe("evidence audit with canary secrets", () => {
         }
         // Every stored file, and the runs' scratch files.
         const stored = filesUnder(dataDir);
-        const scratch = filesUnder(path.join(REPO_ROOT, ".validation"), startedAt).filter((f) => !f.endsWith("evidence-canary-matrix.json"));
+        const scratchNow = () => filesUnder(path.join(REPO_ROOT, ".validation"), startedAt).filter((f) => !f.endsWith("evidence-canary-matrix.json"));
+        // A job's folder is removed just after its status is final: give the last one a moment.
+        for (let i = 0; i < 50 && scratchNow().length > 0; i++) await new Promise((r) => setTimeout(r, 200));
+        const scratch = scratchNow();
         const pictures: string[] = [];
         for (const [where, list] of [["stored", stored], ["scratch", scratch]] as const) {
             for (const f of list) {
@@ -401,6 +398,8 @@ describe("evidence audit with canary secrets", () => {
             }
         }
         expect(stored.some((f) => typeOf(f) === "trace")).toBe(true);
+        // L-8: a job's run folders (page snapshots, reports, traces, recordings) go when the job ends.
+        expect(scratch.map((f) => path.relative(REPO_ROOT, f))).toEqual([]);
         expect(pictures.length).toBeGreaterThan(0);
         searched.add("screenshot (covered-box check)");
         for (const [pair] of await shownIn(pictures)) found.set("screenshot (covered-box check)", (found.get("screenshot (covered-box check)") ?? new Set<string>()).add(pair));
@@ -413,6 +412,6 @@ describe("evidence audit with canary secrets", () => {
         expect(leaking).toEqual(known);
     }, 180_000);
 
-    it.todo("L-9: videos (stored and scratch) show every value on screen, fields included, and cannot be covered; they are not searched");
+    it.todo("L-9: videos show every value on screen, fields included, and cannot be covered; they are not searched. Kept 7 days (within every retention period), never in scratch");
     for (const [evidence, leak] of Object.entries(KNOWN_LEAKS)) it.todo(`${leak.audit}: ${evidence} keeps ${leak.pairs.join(", ")}`);
 });
