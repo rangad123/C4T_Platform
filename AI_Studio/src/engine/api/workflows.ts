@@ -66,7 +66,7 @@ export function resourceName(path: string): string {
 }
 
 /** `_strip_id_suffix`: petId → pet, user_id → user. */
-function stripIdSuffix(param: string): string {
+export function stripIdSuffix(param: string): string {
     for (const suffix of ["_id", "Id", "ID", "_uuid", "Uuid", "UUID"]) {
         if (param.endsWith(suffix) && param.length > suffix.length) return param.slice(0, -suffix.length).toLowerCase();
     }
