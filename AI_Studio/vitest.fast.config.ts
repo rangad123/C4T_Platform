@@ -40,6 +40,8 @@ export default defineConfig({
             "tests/trace-scrub-unit.test.ts",
             "tests/redact-widened-unit.test.ts",
             "tests/scratch-cleanup-unit.test.ts",
+            "tests/verify-video-off-unit.test.ts",
+            "tests/secret-forms-t9-unit.test.ts",
             "tests/runner-resources-unit.test.ts",
             "tests/runner-untrusted-unit.test.ts",
             "tests/approval-deps.test.ts",
