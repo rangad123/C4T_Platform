@@ -318,6 +318,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         meter?.finish();
     });
 
+    // This job's scratch files (each run's folder: page snapshots, reports, traces, recordings) are its own and go when it ends.
+    const jobScratch = path.join(config.scratchDir, `job-${job.id}`);
     try {
         // The starter's key cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
         if (ai.blocked && !validateOnly) throw new Error(ai.blocked);
@@ -328,7 +330,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             return;
         }
         const ctx: EngineContext = {
-            config,
+            config: { ...config, scratchDir: jobScratch },
             llm,
             signal: abort.signal,
             // Where this job's scripts run: this machine today (see engine/frameworks/executor.ts).
@@ -702,7 +704,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 console.warn(`[job ${job.id.slice(0, 8)}] could not link the test script to its test case or start the next one: ${e instanceof Error ? e.message : String(e)}`);
             }
         }
-        await cleanScratch(config.scratchDir).catch(() => undefined);
+        await fs.rm(jobScratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
+        await cleanScratch(config.scratchDir, repo).catch(() => undefined);
         await notifyFinished(deps, job.id);
     }
 }
@@ -755,11 +758,17 @@ async function notifyFinished(deps: RunnerDeps, jobId: string): Promise<void> {
     }
 }
 
-/** Remove validation scratch directories older than an hour (concurrent jobs keep theirs). */
-async function cleanScratch(dir: string): Promise<void> {
+/**
+ * Remove scratch folders older than an hour: a job's own (`job-<id>`, left by a job that never reached its end, such as a crash) and run
+ * folders made outside a job (`run-<time>-<id>`). Concurrent jobs keep theirs: a run folder is written to as it goes, and a job folder
+ * of a job `repo` knows is still going is kept however old it is. Run when a job ends and when a worker starts.
+ */
+export async function cleanScratch(dir: string, repo: Pick<Repo, "getJob">): Promise<void> {
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const e of entries) {
-        if (!e.isDirectory() || !e.name.startsWith("run-")) continue;
+        if (!e.isDirectory() || !/^(?:run|job)-/.test(e.name)) continue;
+        const job = e.name.startsWith("job-") ? repo.getJob(e.name.slice(4)) : undefined;
+        if (job && !TERMINAL_STATES.includes(job.status)) continue;
         const full = path.join(dir, e.name);
         const st = await fs.stat(full).catch(() => null);
         if (st && Date.now() - st.mtimeMs > 60 * 60_000) await fs.rm(full, { recursive: true, force: true });
