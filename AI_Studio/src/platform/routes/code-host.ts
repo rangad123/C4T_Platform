@@ -4,6 +4,7 @@ import { CodeHostStore } from "../code-host/store.js";
 import { HttpError } from "../http-error.js";
 import { TrackerError } from "../issues/http.js";
 import { SecretBox } from "../secrets.js";
+import { registerCodeHostWebhook, webhookPath } from "../code-host/webhook.js";
 import { NEW_SECRET_NEEDED } from "./shared-integrations.js";
 import type { RouteCtx } from "./types.js";
 
@@ -29,7 +30,8 @@ export function registerCodeHostRoutes(ctx: RouteCtx): void {
     });
 
     // The token may be left out when changing the repository of an existing connection on the same host.
-    const Body = GithubCodeSettings.extend({ token: z.string().min(1).max(500).optional(), verify: z.boolean().default(true) });
+    // `feedback` is the project's switch for the pull request comment and check (code-host/feedback.ts); off until turned on.
+    const Body = GithubCodeSettings.extend({ token: z.string().min(1).max(500).optional(), feedback: z.boolean().optional(), verify: z.boolean().default(true) });
     app.put("/api/projects/:id/code-host", async (req, reply) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
@@ -52,8 +54,10 @@ export function registerCodeHostRoutes(ctx: RouteCtx): void {
                 upstream(e);
             }
         }
-        const saved = store.save(id, { ...settings, apiUrl });
-        return reply.code(before ? 200 : 201).send({ connected: true, connection: saved });
+        const { connection, hookToken } = store.save(id, { ...settings, apiUrl });
+        // The webhook address is shown only by the save that made it (only its token's hash is kept); remove and connect again for a new one.
+        const webhookUrl = hookToken ? `${p.config.PUBLIC_URL?.trim().replace(/\/+$/, "") ?? ""}${webhookPath(hookToken)}` : undefined;
+        return reply.code(before ? 200 : 201).send({ connected: true, connection, ...(webhookUrl ? { webhookUrl } : {}) });
     });
 
     app.delete("/api/projects/:id/code-host", async (req, reply) => {
@@ -75,4 +79,6 @@ export function registerCodeHostRoutes(ctx: RouteCtx): void {
             throw e;
         }
     });
+    // GitHub's deliveries for the connected repository (the address's token and the signature are the credentials; code-host/webhook.ts).
+    registerCodeHostWebhook(ctx, store);
 }

@@ -15,7 +15,9 @@ type FakeCommit = { sha: string; message?: string; author?: string; login?: stri
 export interface FakeGithub {
     url: string;
     port: number;
-    requests: Array<{ method: string; url: string; authorization?: string }>;
+    requests: Array<{ method: string; url: string; authorization?: string; body?: any }>;
+    /** Issue comments per pull request, as written through the API (G2's sticky comment). */
+    comments: Map<number, Array<{ id: number; body: string }>>;
     close: () => Promise<void>;
 }
 
@@ -77,10 +79,13 @@ const commitBody = (c: FakeCommit) => ({
     parents: [],
 });
 
-export async function startFakeGithub(opts: { token: string; owner?: string; repo?: string; prs?: Record<number, Pr>; branches?: Record<string, { sha: string; protected?: boolean }> }): Promise<FakeGithub> {
+/** `checkRuns: "forbidden"` answers check runs as GitHub does for a personal access token (only GitHub Apps may create them). */
+export async function startFakeGithub(opts: { token: string; owner?: string; repo?: string; prs?: Record<number, Pr>; branches?: Record<string, { sha: string; protected?: boolean }>; checkRuns?: "ok" | "forbidden" }): Promise<FakeGithub> {
     const owner = opts.owner ?? "acme";
     const repo = opts.repo ?? "shop";
     const requests: FakeGithub["requests"] = [];
+    const comments: FakeGithub["comments"] = new Map();
+    let nextComment = 1;
     const send = (res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
         res.writeHead(status, { "content-type": "application/json; charset=utf-8", "x-github-api-version-selected": "2022-11-28", ...headers });
         res.end(JSON.stringify(body));
@@ -91,14 +96,39 @@ export async function startFakeGithub(opts: { token: string; owner?: string; rep
         return list.slice((p - 1) * per, p * per);
     };
     let port = 0;
-    const server = http.createServer((req, res) => {
+    const server = http.createServer(async (req, res) => {
         const u = new URL(req.url ?? "/", "http://127.0.0.1");
-        requests.push({ method: req.method ?? "", url: `${u.pathname}${u.search}`, authorization: req.headers.authorization });
+        const chunks: Buffer[] = [];
+        for await (const c of req) chunks.push(c as Buffer);
+        const text = Buffer.concat(chunks).toString("utf8");
+        const body = text ? JSON.parse(text) : undefined;
+        requests.push({ method: req.method ?? "", url: `${u.pathname}${u.search}`, authorization: req.headers.authorization, ...(body !== undefined ? { body } : {}) });
         if (req.headers.authorization !== `Bearer ${opts.token}`) return send(res, 401, { message: "Bad credentials", documentation_url: "https://docs.github.com/rest" });
         const base = `/repos/${owner}/${repo}`;
         if (!u.pathname.startsWith(base)) return send(res, 404, { message: "Not Found" });
         const rest = u.pathname.slice(base.length);
         if (rest === "") return send(res, 200, repoBody(owner, repo, port));
+        let w = /^\/issues\/(\d+)\/comments$/.exec(rest);
+        if (w) {
+            const list = comments.get(Number(w[1])) ?? [];
+            comments.set(Number(w[1]), list);
+            if (req.method === "GET") return send(res, 200, page(list, u.searchParams).map((c) => ({ ...c, html_url: `https://github.example/c/${c.id}` })));
+            const c = { id: nextComment++, body: String(body?.body ?? "") };
+            list.push(c);
+            return send(res, 201, { ...c, html_url: `https://github.example/c/${c.id}` });
+        }
+        w = /^\/issues\/comments\/(\d+)$/.exec(rest);
+        if (w && req.method === "PATCH") {
+            const c = [...comments.values()].flat().find((x) => x.id === Number(w![1]));
+            if (!c) return send(res, 404, { message: "Not Found" });
+            c.body = String(body?.body ?? "");
+            return send(res, 200, { ...c, html_url: `https://github.example/c/${c.id}` });
+        }
+        if (rest === "/check-runs" && req.method === "POST") {
+            if (opts.checkRuns === "forbidden") return send(res, 403, { message: "You must authenticate via a GitHub App.", documentation_url: "https://docs.github.com/rest/checks/runs#create-a-check-run" });
+            return send(res, 201, { id: 4, head_sha: body?.head_sha, status: body?.status, conclusion: body?.conclusion });
+        }
+        if (/^\/statuses\/[0-9a-f]{40}$/.test(rest) && req.method === "POST") return send(res, 201, { id: 5, state: body?.state, context: body?.context });
         let m = /^\/pulls\/(\d+)(\/files|\/commits)?$/.exec(rest);
         if (m) {
             const n = Number(m[1]);
@@ -124,6 +154,8 @@ export async function startFakeGithub(opts: { token: string; owner?: string; rep
         url: `http://127.0.0.1:${port}`,
         port,
         requests,
-        close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+        comments,
+        // A failed test can leave a keep-alive connection open; close it too, or the file never ends.
+        close: () => new Promise<void>((resolve) => (server.close(() => resolve()), server.closeAllConnections())),
     };
 }

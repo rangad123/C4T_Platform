@@ -54,6 +54,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/health": "own",
     "POST /api/triggers/:token/run": "own",
     "GET /api/triggers/:token/status/:jobId": "own",
+    "POST /api/code-host/github/:token": "own",
     "POST /api/agent/hello": "own",
     "POST /api/agent/poll": "own",
     "POST /api/agent/tasks/:id/heartbeat": "own",

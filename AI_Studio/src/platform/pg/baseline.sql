@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-71 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 71;
+-- Equal to SQLite migration slots 1-72 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 72;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -1876,6 +1876,50 @@ CREATE TABLE finding_groups (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX idx_finding_groups_project ON finding_groups (project_id);
+
+CREATE TABLE code_repos (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    host TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    api_url TEXT,
+    secret_enc TEXT NOT NULL,
+    hook_token_hash TEXT,
+    feedback BIGINT NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (hook_token_hash),
+    UNIQUE (project_id)
+);
+
+CREATE TABLE pr_events (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    delivery_id TEXT NOT NULL,
+    event TEXT NOT NULL,
+    action TEXT,
+    pr BIGINT,
+    head_sha TEXT,
+    environment TEXT,
+    queued TEXT,
+    ignored TEXT,
+    received_at TEXT NOT NULL,
+    UNIQUE (project_id, delivery_id)
+);
+CREATE INDEX idx_pr_events_pr ON pr_events (project_id, pr);
+
+CREATE TABLE pr_selections (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    pr BIGINT NOT NULL,
+    head_sha TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    selected_json TEXT NOT NULL,
+    reasons_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_pr_selections_pr ON pr_selections (project_id, pr, head_sha);
 
 CREATE TABLE candidate_findings (
     id TEXT PRIMARY KEY,

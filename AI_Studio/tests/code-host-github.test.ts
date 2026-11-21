@@ -116,9 +116,9 @@ describe("connecting a repository", () => {
         // the check was one real call to the repository, with the token, and to this host only
         expect(gh.requests.slice(before)).toEqual([{ method: "GET", url: "/repos/acme/shop", authorization: `Bearer ${TOKEN}` }]);
         expect(other.requests).toEqual([]);
-        const row = platform.db.get<{ secret_enc: string; config_json: string }>("SELECT * FROM integrations WHERE project_id = ? AND kind = 'code'", A)!;
-        expect(row.secret_enc + row.config_json).not.toContain(TOKEN);
-        expect(row.secret_enc + row.config_json).not.toContain(WEBHOOK_SECRET);
+        const row = platform.db.get<{ secret_enc: string }>("SELECT * FROM code_repos WHERE project_id = ?", A)!;
+        expect(JSON.stringify(row)).not.toContain(TOKEN);
+        expect(JSON.stringify(row)).not.toContain(WEBHOOK_SECRET);
         expect(new SecretBox(platform.config.dataDir, platform.config.SECRET_KEY).decrypt(row.secret_enc)).toEqual({ token: TOKEN, webhookSecret: WEBHOOK_SECRET });
     });
 
@@ -274,7 +274,7 @@ describe("reading a pull request", () => {
 describe("secrets", () => {
     it("removing the connection deletes the stored token", async () => {
         expect((await call("DELETE", `/api/projects/${A}/code-host`)).status).toBe(204);
-        expect(platform.db.get("SELECT id FROM integrations WHERE project_id = ? AND kind = 'code'", A)).toBeUndefined();
+        expect(platform.db.get("SELECT id FROM code_repos WHERE project_id = ?", A)).toBeUndefined();
         expect((await call("GET", `/api/projects/${A}/code-host`)).body).toEqual({ connected: false });
     });
 

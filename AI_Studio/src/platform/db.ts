@@ -6,6 +6,7 @@ import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, RUNNER_LIFECYCLE_MIGRATIO
 import { BLOCKS_MIGRATION } from "./block-store.js";
 import { CANDIDATE_FINDINGS_MIGRATION, FINDING_LIFECYCLE_MIGRATION } from "./candidate-finding-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
+import { codeHostMigration } from "./code-host/store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
 import { DEVICE_FARM_MIGRATION } from "./device-farm-store.js";
 import { SPEC_VERSIONS_MIGRATION } from "./spec-version-store.js";
@@ -326,6 +327,7 @@ ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
     /* 69: reserved (main's test case workbook fields) */ `-- reserved`,
     /* 70: reserved (Phase 4's database probe setting) */ `-- reserved`,
     /* 71: the finding lifecycle: each candidate finding's state, class, severity, confidence factors, duplicate group, reproduction attempts and app version, its history (finding_events) and duplicate groups (finding_groups) (schema lives in candidate-finding-store.ts; every existing finding keeps its row and starts as a candidate) */ FINDING_LIFECYCLE_MIGRATION,
+    /* 72: change-aware testing: the project's code repository (code_repos), the webhook deliveries it received (pr_events, one per delivery id) and the tests chosen per pull request (pr_selections) (schema lives in code-host/store.ts; a repository kept in integrations as kind `code` moves to code_repos with its encrypted secrets) */ codeHostMigration(sqliteDialect),
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */
