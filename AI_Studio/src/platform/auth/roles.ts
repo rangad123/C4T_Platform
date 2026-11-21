@@ -362,6 +362,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/candidate-findings": "read",
     "GET /api/projects/:id/objectives": "read",
     "GET /api/projects/:id/jobs/:jobId/coverage": "read",
+    // One findings list (routes/findings.ts, Phase 5): reading is access, a person's verdict (confirm, not a bug, split, reopen) is tests.write.
+    "GET /api/projects/:id/findings": "read",
+    "GET /api/projects/:id/findings/:fid": "read",
+    "POST /api/projects/:id/findings/:fid/transition": "ai_studio.tests.write",
     "GET /api/projects/:id/requirements": "read",
     "POST /api/projects/:id/requirements": "ai_studio.tests.write",
     "GET /api/projects/:id/requirements/coverage": "read",

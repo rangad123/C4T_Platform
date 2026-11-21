@@ -5,7 +5,8 @@
  * The owner's path: Detected → Candidate → Verification pending → Reproduced → Confirmed or Unconfirmed → Classified → Reported, plus the
  * side states Duplicate, Flaky, Environment issue, Automation issue and Needs manual review. "Not a bug" is a person's verdict (the
  * card's action), so it is a state too. Classified and Reported follow Confirmed only: an unconfirmed finding stays explicitly
- * unverified, moves to a side state, or waits for a person.
+ * unverified, moves to a side state, or waits for a person. Fixed and Accepted risk close a finding as the security module's states do
+ * (S2 maps them); a person accepts a confirmed risk with a reason, and only the regression service (X1) will move a finding to Fixed.
  *
  * A failed test enters as Detected and never becomes a Candidate while its failure is the test's own step (validation/test-fault.ts):
  * not every failed test is an application defect.
@@ -14,8 +15,8 @@ import type { FindingConfidence } from "../explore/finding.js";
 
 export const MAIN_STATES = ["detected", "candidate", "verification_pending", "reproduced", "confirmed", "unconfirmed", "classified", "reported"] as const;
 export const SIDE_STATES = ["duplicate", "flaky", "environment_issue", "automation_issue", "needs_manual_review", "not_a_bug"] as const;
-// shortcut: security `fixed` and `accepted-risk` have no state here yet; S2's adapter maps fixed → Fixed, so add the states with S2/X1.
-export const FINDING_STATES = [...MAIN_STATES, ...SIDE_STATES] as const;
+export const CLOSED_STATES = ["fixed", "accepted_risk"] as const;
+export const FINDING_STATES = [...MAIN_STATES, ...SIDE_STATES, ...CLOSED_STATES] as const;
 export type FindingState = (typeof FINDING_STATES)[number];
 export type Actor = "engine" | "person";
 
@@ -34,10 +35,12 @@ export const STATE_LABEL: Record<FindingState, string> = {
     automation_issue: "Automation issue",
     needs_manual_review: "Needs manual review",
     not_a_bug: "Not a bug",
+    fixed: "Fixed",
+    accepted_risk: "Accepted risk",
 };
 
 /** A move into one of these needs a reason (who decided what, and why). */
-export const NEEDS_REASON: readonly FindingState[] = ["unconfirmed", "not_a_bug", "duplicate"];
+export const NEEDS_REASON: readonly FindingState[] = ["unconfirmed", "not_a_bug", "duplicate", "accepted_risk"];
 
 const E: readonly Actor[] = ["engine"];
 const P: readonly Actor[] = ["person"];
@@ -52,23 +55,29 @@ const MOVES: Record<FindingState, Partial<Record<FindingState, readonly Actor[]>
     candidate: { verification_pending: E, needs_manual_review: EP },
     verification_pending: { reproduced: E, unconfirmed: E, flaky: E, automation_issue: E, environment_issue: E, needs_manual_review: E },
     reproduced: { confirmed: EP, unconfirmed: EP, needs_manual_review: E },
-    confirmed: { classified: EP, needs_manual_review: P },
+    confirmed: { classified: EP, needs_manual_review: P, accepted_risk: P },
     unconfirmed: { verification_pending: EP, flaky: E, automation_issue: E, environment_issue: E, needs_manual_review: EP, confirmed: P },
-    classified: { reported: EP },
-    reported: {},
+    classified: { reported: EP, accepted_risk: P },
+    reported: { accepted_risk: P },
     flaky: { verification_pending: EP, needs_manual_review: P, confirmed: P },
     environment_issue: { verification_pending: EP, needs_manual_review: P, confirmed: P },
     automation_issue: { verification_pending: EP, needs_manual_review: P, confirmed: P },
     needs_manual_review: { verification_pending: EP, confirmed: P, unconfirmed: P },
     duplicate: { candidate: P },
     not_a_bug: { candidate: P },
+    // Fixed comes back: verify it again. Nothing moves a finding to Fixed yet.
+    fixed: { verification_pending: EP },
+    accepted_risk: { verification_pending: P },
 };
+
+/** States a verdict closed: no default move to Duplicate or Not a bug out of them. */
+const CLOSED: readonly FindingState[] = ["duplicate", "not_a_bug", ...CLOSED_STATES];
 
 /** Who may move a finding from `from` to `to`; empty when nobody may. */
 export function moversOf(from: FindingState, to: FindingState): readonly Actor[] {
     const own = MOVES[from][to];
     if (own) return own;
-    const open = from !== "duplicate" && from !== "not_a_bug";
+    const open = !CLOSED.includes(from);
     if (open && to === "duplicate") return from === "reported" ? P : EP;
     if (open && to === "not_a_bug") return P;
     return [];

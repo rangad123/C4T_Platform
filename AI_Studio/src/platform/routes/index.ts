@@ -16,6 +16,7 @@ import { registerEvidenceRoutes } from "./evidence.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { registerKnowledgeRoutes } from "./knowledge.js";
 import { registerExploreFindingRoutes } from "./explore-findings.js";
+import { registerFindingRoutes } from "./findings.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerUserRoutes } from "./users.js";
 import { registerProjectAccessRoutes } from "./project-access.js";
@@ -112,6 +113,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerRequirementRoutes(ctx);
     // Candidate findings from exploration, read only (routes/explore-findings.ts, testing-engine Phase 3).
     registerExploreFindingRoutes(ctx);
+    // One findings list with the lifecycle, security findings read only (routes/findings.ts, testing-engine Phase 5).
+    registerFindingRoutes(ctx);
     registerSentryRoutes(ctx);
     // Integrations set up once for an organisation, and the projects that use them (routes/shared-integrations.ts).
     registerSharedIntegrationRoutes(ctx);

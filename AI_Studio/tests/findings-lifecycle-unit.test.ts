@@ -51,9 +51,14 @@ const TABLE: Record<string, "E" | "P" | "EP"> = {
     "needs_manual_review>unconfirmed": "P",
     "duplicate>candidate": "P",
     "not_a_bug>candidate": "P",
+    "confirmed>accepted_risk": "P",
+    "classified>accepted_risk": "P",
+    "reported>accepted_risk": "P",
+    "fixed>verification_pending": "EP",
+    "accepted_risk>verification_pending": "P",
 };
 for (const s of FINDING_STATES) {
-    if (s === "duplicate" || s === "not_a_bug") continue;
+    if (s === "duplicate" || s === "not_a_bug" || s === "fixed" || s === "accepted_risk") continue;
     TABLE[`${s}>duplicate`] = s === "reported" ? "P" : "EP";
     TABLE[`${s}>not_a_bug`] = "P";
 }
@@ -87,10 +92,14 @@ describe("lifecycle table", () => {
         expect(checkTransition({ from: "candidate", to: "confirmed", by: "engine", confidence: "high" })).toMatch(/cannot move from Candidate to Confirmed/);
         expect(checkTransition({ from: "unconfirmed", to: "classified", by: "person" })).toMatch(/cannot move/);
         expect(moversOf("reported", "classified")).toEqual([]);
+        // Only the regression service will move a finding to Fixed; nobody accepts a risk that is not confirmed.
+        for (const from of FINDING_STATES) expect(moversOf(from, "fixed"), from).toEqual([]);
+        expect(checkTransition({ from: "unconfirmed", to: "accepted_risk", by: "person", reason: "low impact" })).toMatch(/cannot move from Unconfirmed to Accepted risk/);
     });
 
-    it("requires a reason for Unconfirmed, Not a bug and Duplicate", () => {
+    it("requires a reason for Unconfirmed, Not a bug, Duplicate and Accepted risk", () => {
         for (const [from, to, by] of [
+            ["confirmed", "accepted_risk", "person"],
             ["verification_pending", "unconfirmed", "engine"],
             ["reproduced", "not_a_bug", "person"],
             ["candidate", "duplicate", "engine"],
@@ -162,7 +171,7 @@ describe("finding view", () => {
 
     it("refuses unknown fields and unknown states, and redacts free text", () => {
         expect(FindingViewSchema.safeParse({ ...phase4, extra: 1 }).success).toBe(false);
-        expect(FindingViewSchema.safeParse({ ...phase4, state: "fixed" }).success).toBe(false);
+        expect(FindingViewSchema.safeParse({ ...phase4, state: "solved" }).success).toBe(false);
         expect(FindingViewSchema.safeParse({ ...phase4, source: { kind: "crawler", id: "x" } }).success).toBe(false);
         const v = FindingViewSchema.parse({ ...phase4, observed: "Header was Authorization: Bearer abcdef0123456789xyz" });
         expect(v.observed).not.toContain("abcdef0123456789xyz");
