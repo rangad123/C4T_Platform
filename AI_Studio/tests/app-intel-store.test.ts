@@ -326,7 +326,8 @@ describe("nothing in test generation reads it yet", () => {
         // The intelligence engine's own files and the understanding benchmark read it; test generation does not. The repeat-run benchmark
         // reads only the extraction limits; web case scripts are now built in the browser, so case-script.ts no longer reads the model.
         // The AI response cache reads only the rule-reading answer's schema, to check a stored answer before handing it back.
+        // Impact analysis and the selection preview read workflows and rules to link a change (Phase 6 I2/I3); they generate nothing.
         const outside = users.filter((u) => !u.startsWith("engine/intel/") && !u.startsWith("eval/bench/understanding/"));
-        expect(outside.sort()).toEqual(["engine/explore/objectives.ts", "engine/planning/planner.ts", "eval/bench/repeat/run.ts", "eval/quality/score.ts", "platform/app-analysis.ts", "platform/app-intel-store.ts", "platform/db.ts", "platform/job-runner.ts", "platform/llm-response-cache-runner.ts", "platform/routes/app-intel.ts", "platform/routes/index.ts", "platform/routes/requirements.ts"].sort());
+        expect(outside.sort()).toEqual(["engine/explore/objectives.ts", "engine/impact/analyze.ts", "platform/routes/selection.ts", "engine/planning/planner.ts", "eval/bench/repeat/run.ts", "eval/quality/score.ts", "platform/app-analysis.ts", "platform/app-intel-store.ts", "platform/db.ts", "platform/job-runner.ts", "platform/llm-response-cache-runner.ts", "platform/routes/app-intel.ts", "platform/routes/index.ts", "platform/routes/requirements.ts"].sort());
     });
 });
