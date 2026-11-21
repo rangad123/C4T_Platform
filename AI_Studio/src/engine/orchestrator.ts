@@ -1299,9 +1299,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
 
             // 4b0. C5 invariants: one AI call proposes them from the stated requirements, and code keeps only the checkable ones.
-            // A run from an approved plan has no parsed requirements: read the document again, with the project's "ref: text" lines as the fallback.
-            const reparsed = req.requirements ? parseRequirementsDeterministic(req.requirements.text) : [];
-            const requirementList = parsedRequirements ?? (reparsed.length ? reparsed : (req.requirements?.text.match(/^[^\s:]{1,40}: .+$/gm) ?? []).map((l) => ({ id: l.slice(0, l.indexOf(":")), text: l.slice(l.indexOf(":") + 2) })));
+            const requirementList = parsedRequirements ?? (req.requirements ? parseRequirementsDeterministic(req.requirements.text) : []);
             if (requirementList.length) {
                 const proposal = await proposeInvariants(ctx, { requirements: requirementList, apis, origins: new Set([origin, new URL(renderCtx.apiBaseUrl).origin]), dataChanges, secrets: authoringSecretsOf(req) });
                 invariants = proposal.invariants;
@@ -1312,7 +1310,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             // 4b0a. C5 probes: each kept invariant is tried on a fresh account with generated writes; the case is saved with its seed.
             if (invariants.length && dataChanges) {
                 const headers = cleanupHeaders({ apiToken: req.credentials?.apiToken || req.credentials?.oauth2 ? await resolveApiToken(ctx, req.credentials) : undefined, apiAuthHeader: req.credentials?.apiAuthHeader });
-                const env: ProbeEnv = { apis, dataChanges, newClient: async () => fetchClient(renderCtx.apiBaseUrl, headers, req.cleanup?.fetch) };
+                const env: ProbeEnv = { apis, dataChanges, newClient: async (credential) => fetchClient(renderCtx.apiBaseUrl, credential ? headers : {}, req.cleanup?.fetch) };
                 for (const inv of invariants) {
                     throwIfAborted(ctx.signal);
                     const r = await probeInvariant(inv, env).catch((e: unknown) => ({ outcome: "skipped" as const, reason: `the probe could not reach the application: ${maskSecrets(e instanceof Error ? e.message : String(e), authoringSecretsOf(req)).slice(0, 200)}`, spec: undefined, held: 0, seed: 0 }));
@@ -1334,7 +1332,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const states = dataChanges ? stateModels(apis, req.appKnowledge?.objectiveInputs?.transitions ?? []) : [];
             if (states.length) {
                 const headers = cleanupHeaders({ apiToken: req.credentials?.apiToken || req.credentials?.oauth2 ? await resolveApiToken(ctx, req.credentials) : undefined, apiAuthHeader: req.credentials?.apiAuthHeader });
-                const env: ProbeEnv = { apis, dataChanges, newClient: async () => fetchClient(renderCtx.apiBaseUrl, headers, req.cleanup?.fetch) };
+                const env: ProbeEnv = { apis, dataChanges, newClient: async (credential) => fetchClient(renderCtx.apiBaseUrl, credential ? headers : {}, req.cleanup?.fetch) };
                 // The project's account reads its lists with its token, else signed in through the browser (as the access survey does).
                 const signed = !Object.keys(headers).length && creds ? await signedInRequests(ctx, browser, req.url, [{ name: "project", ...creds }]).catch(() => undefined) : undefined;
                 const viaBrowser = signed?.sessions.get("project");

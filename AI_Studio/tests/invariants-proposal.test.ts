@@ -75,6 +75,15 @@ describe("invariant proposal: what is kept", () => {
         expect((await proposeInvariants(ctx, base)).invariants).toEqual([withBody]);
     });
 });
+describe("invariant proposal: a model answer of the wrong shape", () => {
+    it("is a failed proposal in the report, never a thrown run", async () => {
+        const llm = { modelName: "scripted", model: undefined as never, usage: { inputTokens: 0, outputTokens: 0 }, text: async () => "", object: (async () => ({ scenarios: [] })) as LlmClient["object"] } satisfies LlmClient;
+        const r = await proposeInvariants({ llm }, base);
+        expect(r.invariants).toEqual([]);
+        expect(r.report).toMatchObject({ proposed: 0, kept: 0, dropped: [], error: expect.stringMatching(/^The invariant proposal failed: /) });
+    });
+});
+
 
 describe("invariant proposal: each invalid kind is dropped with its reason", () => {
     const cases: Array<[string, Partial<Invariant>, RegExp, Partial<InvariantInput>?]> = [

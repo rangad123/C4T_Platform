@@ -182,7 +182,8 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         if (unknown) throw new HttpError(400, `Unknown test idea: ${unknown}`);
 
         // Who started the plan is not who creates its tests: the person acting now is recorded (createJob), so their AI key and runner are used.
-        const { planOnly: _p, fromPlan: _f, excludeIdeas: _e, requirementsText: _r, startedBy: _s, ...kept } = job.options;
+        // The requirements text is kept: the run made from the plan checks them too (C5 invariants cite the requirement lines).
+        const { planOnly: _p, fromPlan: _f, excludeIdeas: _e, startedBy: _s, ...kept } = job.options;
         const { targets: _t, excludeIdeas: _x, continueStopped: _cs, runTestCases: runCases, ...switches } = body;
         const asked: JobOptions = {
             ...kept,

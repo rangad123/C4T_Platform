@@ -154,6 +154,8 @@ export interface LoggedStep {
     state: string;
 }
 interface Real {
+    /** "none" on a fresh account: the saved steps send only its session. */
+    auth: "none" | "default";
     send(method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }>;
     ids: string[];
     log: LoggedStep[];
@@ -182,7 +184,7 @@ async function step(sm: StateModel, m: Model, r: Real, o: { method: string; path
     r.log.push({ request: `${o.method} ${o.path}`, status: res.status, ...(exp ? { expected: exp } : {}), state });
     // A create the model expects refused gets no capture: at replay the refusal is checked, not a missing id.
     const extract = o.extract && is2xx(res.status) && typeof o.expected !== "number" ? { extract: { [o.extract]: "id" } } : {};
-    r.steps.push({ action: "request", method: o.method as Method, path: o.scriptPath, auth: "default", description: o.label, ...(o.body === undefined ? {} : { body: o.body }), ...extract });
+    r.steps.push({ action: "request", method: o.method as Method, path: o.scriptPath, auth: r.auth, description: o.label, ...(o.body === undefined ? {} : { body: o.body }), ...extract });
     if (o.expected !== undefined)
         r.steps.push(o.expected === "2xx" ? { action: "assertResponse", check: "statusClass", expected: "2xx", description: `Accepted (before: ${before})`.slice(0, 300) } : { action: "assertResponse", check: "status", expected: o.expected, description: `Refused with the documented HTTP ${o.expected} (before: ${before})`.slice(0, 300) });
     if (o.expected !== undefined && !matches(res.status, o.expected)) throw new Mismatch(`${o.method} ${o.path} answered HTTP ${res.status}, but the documented state model expects ${exp}`);
@@ -269,7 +271,7 @@ export async function runSequences(sm: StateModel, env: ProbeEnv, opts: { seed?:
     const up = signUpOf([...env.apis]);
     // The needed operations' bodies: their documented body, else the fields their answer documents; references take a listed id.
     const ids = new Map<string, unknown>();
-    const probe = await env.newClient();
+    const probe = await env.newClient(!up);
     try {
         for (const n of sm.create.needs) {
             const schema = bodySchema(n.ep)?.properties ? bodySchema(n.ep) : okSchema(n.ep);
@@ -290,9 +292,10 @@ export async function runSequences(sm: StateModel, env: ProbeEnv, opts: { seed?:
     let failure: { log: LoggedStep[]; steps: Step[]; message: string } | undefined;
     let first: { log: LoggedStep[]; steps: Step[] } | undefined;
     const runOne = async (cmds: Iterable<Cmd>, allow: () => boolean): Promise<boolean> => {
-        const client = await env.newClient();
+        const client = await env.newClient(!up);
         const tag = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
         const real: Real = {
+            auth: up ? "none" : "default",
             ids: [],
             log: [],
             steps: [],
@@ -307,7 +310,7 @@ export async function runSequences(sm: StateModel, env: ProbeEnv, opts: { seed?:
             if (up) {
                 const body = sample(bodySchema(up));
                 const r = await real.send("POST", up.path, body);
-                real.steps.push({ action: "request", method: "POST", path: up.path, auth: "default", body, description: "Create a fresh account for this sequence" }, { action: "assertResponse", check: "statusClass", expected: "2xx", description: "The fresh account is created" });
+                real.steps.push({ action: "request", method: "POST", path: up.path, auth: "none", body, description: "Create a fresh account for this sequence" }, { action: "assertResponse", check: "statusClass", expected: "2xx", description: "The fresh account is created" });
                 if (!is2xx(r.status)) throw new OverBudget();
             }
             await fc.asyncModelRun(() => ({ model: { needs: sm.create!.needs.map(() => "absent" as Have), records: [] }, real }), cmds);
@@ -390,7 +393,7 @@ export async function stateCheckSpecs(sm: StateModel, main: ProbeHttp, reached: 
             const doc = documents(a.ep, a.conflict)?.description;
             out.push({
                 title: `${a.ep.method.toUpperCase()} ${a.ep.path}: a ${s} ${sm.entity.replace(/s$/, "")} is refused with HTTP ${a.conflict}`,
-                description: `${sm.entity.replace(/s$/, "")} ${id} of the project's account is ${s}, a state a new account cannot reach; the API document says ${a.verb} is refused there${doc ? ` ("${doc}")` : ""}.`,
+                description: `${sm.entity.replace(/s$/, "")} ${id} of the project's account is ${s}, a state a new account cannot reach; the API document says ${a.verb} is refused there${doc ? ` ("${doc}")` : ""}. Known limit (data changes are on): if the application wrongly allows it, ${id} leaves the ${s} state, so a rerun stops at the state check instead of the refusal.`,
                 kind: "api",
                 category: "API · States",
                 type: "negative",

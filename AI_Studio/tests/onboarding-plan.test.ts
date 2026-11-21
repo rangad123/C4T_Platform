@@ -37,7 +37,7 @@ let svc: ReturnType<typeof getScheduleServices>;
 
 // ── the scripted model ────────────────────────────────────────────────────────
 /** `rules`: the application-understanding analysis after an exploration reads the explored pages for rules (one call). */
-const prompts = { analysis: 0, plan: 0, gap: 0, rules: 0 };
+const prompts = { analysis: 0, plan: 0, gap: 0, rules: 0, invariants: 0 };
 let modelCalls = 0;
 /** When false the platform has no AI model configured (the real "unavailable" client). */
 let aiOn = true;
@@ -72,6 +72,11 @@ const scripted: LlmClient = {
         if (/list what they state about its intended behaviour/.test(system)) {
             prompts.rules++;
             return { rules: [], workflows: [], roles: [], transitions: [], entities: [] };
+        }
+        // C5: the invariant proposal reads the requirements the plan carried over (none proposed here).
+        if (/You propose business invariants/.test(system)) {
+            prompts.invariants++;
+            return { invariants: [] };
         }
         if (/analysing a web application/.test(system)) {
             prompts.analysis++;
@@ -160,7 +165,7 @@ describe("explore first, create after the person has looked", () => {
         expect(job.counters.scenariosPlanned).toBe(2);
         // The AI was asked to understand and to plan (the plan, then one coverage-gap call), and never to author a test; the
         // application-understanding analysis read the explored pages once.
-        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1, rules: 1 });
+        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1, rules: 1, invariants: 0 });
         expect(modelCalls).toBe(0);
         // Nothing exists yet: no test, no run summary, no script.
         expect(await testsOf(projectId)).toEqual([]);
@@ -217,7 +222,9 @@ describe("explore first, create after the person has looked", () => {
         const left = plan.ideas[1].id as string;
         // The plan was someone else's: creating its tests records who creates them (their AI key and runner), never the plan's starter.
         const planRow = platform.repo.getJob(planJob)!;
-        platform.db.run("UPDATE generation_jobs SET options_json = ? WHERE id = ?", JSON.stringify({ ...planRow.options, startedBy: { kind: "user", id: "someone-else" } }), planJob);
+        // The plan read the project's requirements: its tests are made with the same text (C5 invariants cite it), not only its name.
+        const requirements = { requirementsText: "Requirements\n\n3.9: The cart's subtotal is the sum of its line totals.", requirementsName: "The project's requirements" };
+        platform.db.run("UPDATE generation_jobs SET options_json = ? WHERE id = ?", JSON.stringify({ ...planRow.options, ...requirements, startedBy: { kind: "user", id: "someone-else" } }), planJob);
         const created = await call("POST", `/api/projects/${projectId}/plans/${planJob}/create`, {
             accessibility: false,
             healthChecks: false,
@@ -234,10 +241,12 @@ describe("explore first, create after the person has looked", () => {
         expect(job.counters.scenariosPlanned).toBe(1);
         const createdRow = platform.repo.getJob(created.body.jobId)!;
         expect(createdRow.options.startedBy).toEqual({ kind: "open", id: null });
+        expect(createdRow.options).toMatchObject(requirements);
         expect(JSON.stringify(platform.repo.getApplication(createdRow.applicationId)?.config ?? {})).not.toContain("someone-else");
 
-        // Nothing was explored, understood or planned again, and no analysis read anything: this job explored nothing.
-        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1, rules: 1 });
+        // Nothing was explored, understood or planned again, and no analysis read anything: this job explored nothing. The one new call
+        // is the invariant proposal, made from the requirements the plan carried over.
+        expect(prompts).toEqual({ analysis: 1, plan: 1, gap: 1, rules: 1, invariants: 1 });
         const kinds = (await events(created.body.jobId)).map((e) => e.kind);
         expect(kinds).toContain("plan_reused");
         // A job made from a stored plan explores nothing, so the application understanding is not read again.

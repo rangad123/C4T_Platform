@@ -32,8 +32,11 @@ export interface ProbeHttp {
 export interface ProbeEnv {
     apis: readonly ApiEndpointModel[];
     dataChanges: boolean;
-    /** A new session with no cookies (it carries the run's API token, if any). */
-    newClient(): Promise<ProbeHttp>;
+    /**
+     * A new session with no cookies. `credential`: it also sends the run's API token or header. That is only asked for when the API
+     * documents no sign-up: on a fresh account only that account's session is sent.
+     */
+    newClient(credential: boolean): Promise<ProbeHttp>;
 }
 
 /**
@@ -256,7 +259,7 @@ class OverBudget extends Error {}
 
 /** Runs one case on a fresh account. `allow(n)` is asked before each request; false ends the case as "held" (the budget is spent). */
 async function runCase(plan: Plan, inv: Invariant, writes: readonly ProbeWrite[], env: ProbeEnv, allow: () => boolean): Promise<CaseOutcome & { setupFailed?: string }> {
-    const client = await env.newClient();
+    const client = await env.newClient(!plan.signUp);
     let requests = 0;
     const send = async (method: string, path: string, body?: unknown) => {
         if (!allow()) throw new OverBudget();
@@ -317,7 +320,7 @@ async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
         if (l) lists.set(n, l);
     }
     if (lists.size) {
-        const client = await env.newClient();
+        const client = await env.newClient(!signUp);
         try {
             for (const [n, l] of lists) {
                 const records = recordsOf((await client.send("GET", l.path)).json);
@@ -396,7 +399,9 @@ export async function probeInvariant(inv: Invariant, env: ProbeEnv, opts: { seed
 
 /** The saved test: the fresh account, the setup, and the concrete writes, each followed by the relation with the values it sent. */
 function specOf(inv: Invariant, plan: Plan, writes: readonly ProbeWrite[], seed: number, o: { held: number; failed: boolean }): DraftSpec {
-    const call = (ep: ApiEndpointModel, path: string, body: unknown, description: string): Step => ({ action: "request", method: ep.method.toUpperCase() as Extract<Step, { action: "request" }>["method"], path, auth: "default", description, ...(body === undefined ? {} : { body }) });
+    // On a fresh account the script sends only that account's session (auth "none"), never the run's token or the project's sign-in.
+    const auth = plan.signUp ? ("none" as const) : ("default" as const);
+    const call = (ep: ApiEndpointModel, path: string, body: unknown, description: string): Step => ({ action: "request", method: ep.method.toUpperCase() as Extract<Step, { action: "request" }>["method"], path, auth, description, ...(body === undefined ? {} : { body }) });
     const ok = (description: string): Step => ({ action: "assertResponse", check: "statusClass", expected: "2xx", description });
     const steps: Step[] = [];
     if (plan.signUp) steps.push(call(plan.signUp.ep, plan.signUp.ep.path, plan.signUp.body, "Create a fresh account for this check"), ok("The fresh account is created"));

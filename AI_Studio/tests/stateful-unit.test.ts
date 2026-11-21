@@ -70,7 +70,8 @@ function shop(defect?: "BS-05" | "BS-10") {
             },
         };
     };
-    const env: ProbeEnv & { requests: () => number; main: ProbeHttp } = { apis: APIS, dataChanges: true, newClient: async () => client(++accounts), requests: () => requests, main: client(0) };
+    const credentials: boolean[] = [];
+    const env: ProbeEnv & { requests: () => number; main: ProbeHttp; credentials: boolean[] } = { apis: APIS, dataChanges: true, newClient: async (credential) => (credentials.push(credential), client(++accounts)), requests: () => requests, main: client(0), credentials };
     return env;
 }
 
@@ -130,8 +131,8 @@ describe("stateful sequences", () => {
         // An app that fails every order it should place (500 instead of 201): only a sequence with both needed steps before the create shows it.
         const env = shop();
         const real = env.newClient;
-        env.newClient = async () => {
-            const c = await real();
+        env.newClient = async (credential) => {
+            const c = await real(credential);
             return { send: async (method, path, body) => ((r) => (method === "POST" && path === "/api/orders" && r.status === 201 ? { status: 500, json: {} } : r))(await c.send(method, path, body)) };
         };
         let found = 0;
@@ -149,6 +150,17 @@ describe("stateful sequences", () => {
         expect(found).toBeGreaterThan(0);
     });
 
+    it("on a fresh account only its session is sent: no run token while sequencing, and auth none in the saved sequence", async () => {
+        const env = shop("BS-10");
+        const r = await runSequences(stateModels(APIS)[0]!, env, { seed: 5 });
+        expect(env.credentials.length).toBeGreaterThan(1);
+        expect(env.credentials.every((c) => c === false)).toBe(true);
+        expect(r.spec!.steps.filter((s) => s.action === "request").map((s) => s.action === "request" && s.auth)).toEqual(["none", "none", "none"]);
+        const noSignUp = { ...shop("BS-10"), apis: APIS.filter((a) => a.path !== "/api/register") };
+        await runSequences(stateModels(noSignUp.apis)[0]!, noSignUp, { seed: 5 });
+        expect(new Set(noSignUp.credentials)).toEqual(new Set([true]));
+    });
+
     it("BS-05: a state no new account reaches is checked on the project's account's record in it", async () => {
         const env = shop();
         const m = stateModels(APIS)[0]!;
@@ -160,6 +172,7 @@ describe("stateful sequences", () => {
             { method: "POST", path: "/api/orders/ord-0999/cancel" },
             { check: "status", expected: 409 },
         ]);
+        expect(specs[1]!.description).toMatch(/Known limit \(data changes are on\): .*a rerun stops at the state check/);
         expect(await stateCheckSpecs(m, env.main, [], false)).toEqual([]);
     });
 });

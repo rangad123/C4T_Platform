@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { parseOpenApi } from "../src/engine/api/openapi.js";
-import { aimedCases, expressionConstants, generateCase, MAX_PROBE_WRITES, MAX_SHRINK_REQUESTS, probeInvariant, withValues, type ProbeEnv, type ProbeHttp } from "../src/engine/api/probes.js";
+import { aimedCases, expressionConstants, fetchClient, generateCase, MAX_PROBE_WRITES, MAX_SHRINK_REQUESTS, probeInvariant, withValues, type ProbeEnv, type ProbeHttp } from "../src/engine/api/probes.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { checkRelation, parseRelation } from "../src/engine/validation/relation.js";
 import type { Invariant } from "../src/engine/validation/invariants.js";
@@ -32,11 +32,14 @@ const PRODUCTS = [
 /** The shop: one cart per account (a sign-up starts a new one). `defect` switches a bench seed's behaviour on. */
 function shop(defect?: "BS-02" | "BS-11") {
     let requests = 0;
-    const env: ProbeEnv & { requests: () => number } = {
+    const credentials: boolean[] = [];
+    const env: ProbeEnv & { requests: () => number; credentials: boolean[] } = {
         apis: APIS,
         dataChanges: true,
         requests: () => requests,
-        async newClient(): Promise<ProbeHttp> {
+        credentials,
+        async newClient(credential): Promise<ProbeHttp> {
+            credentials.push(credential);
             let lines: Array<{ productId: string; quantity: number }> = [];
             return {
                 async send(method, path, body) {
@@ -127,6 +130,32 @@ describe("invariant probe", () => {
         expect(clean.held).toBeGreaterThan(0);
         expect(TestSpecSchema.parse({ ...clean.spec, testId: "API-002" }).testData.probeSeed).toBe("3");
         expect((await probeInvariant(SUM, shop(), { seed: 3 })).outcome).toBe("held");
+    });
+
+    it("on a fresh account only its session is sent: no run token at probe time, and auth none in the saved test", async () => {
+        const env = shop("BS-02");
+        const r = await probeInvariant(SUM, env, { seed: 1 });
+        expect(env.credentials.length).toBeGreaterThan(1);
+        expect(env.credentials.every((c) => c === false)).toBe(true);
+        expect(r.spec!.steps.filter((s) => s.action === "request").every((s) => s.action === "request" && s.auth === "none")).toBe(true);
+        // Without a documented sign-up the probe runs on the project's account, with its credential.
+        const noSignUp = { ...shop("BS-02"), apis: APIS.filter((a) => a.path !== "/api/register") };
+        const p = await probeInvariant(SUM, noSignUp, { seed: 1 });
+        expect(new Set(noSignUp.credentials)).toEqual(new Set([true]));
+        expect(p.spec!.steps.filter((s) => s.action === "request").every((s) => s.action === "request" && s.auth === "default")).toBe(true);
+    });
+
+    it("the fetch session sends only the headers it is given, and its own cookies", async () => {
+        const seen: Array<Record<string, string>> = [];
+        const fake = (async (_u: URL, init: RequestInit) => {
+            seen.push(init.headers as Record<string, string>);
+            return new Response("{}", { status: 201, headers: { "set-cookie": "sid=abc; Path=/; HttpOnly" } });
+        }) as unknown as typeof fetch;
+        const c = fetchClient("http://shop.test", {}, fake);
+        await c.send("POST", "/api/register", { email: "a@b.c" });
+        await c.send("GET", "/api/cart");
+        expect(seen).toEqual([{ accept: "application/json", "content-type": "application/json" }, { accept: "application/json", cookie: "sid=abc" }]);
+        await expect(c.send("GET", "//evil.test/x")).rejects.toThrow(/only paths on the application/);
     });
 
     it("the saved relation carries the values each write sent, and stays inside the grammar", () => {

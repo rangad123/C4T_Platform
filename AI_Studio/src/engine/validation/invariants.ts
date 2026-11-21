@@ -170,7 +170,8 @@ export function invariantPrompt(input: InvariantInput): string {
 export async function proposeInvariants(ctx: Pick<EngineContext, "llm">, input: InvariantInput): Promise<{ invariants: Invariant[]; report: InvariantReport }> {
     let proposed: Invariant[];
     try {
-        proposed = (await ctx.llm.object({ system: SYSTEM, prompt: invariantPrompt(input), schema: ProposalSchema, purpose: "planning", maxOutputTokens: 4096 })).invariants;
+        // Parsed again here: an answer that is not the schema's shape is a failed proposal, never a failed run.
+        proposed = ProposalSchema.parse(await ctx.llm.object({ system: SYSTEM, prompt: invariantPrompt(input), schema: ProposalSchema, purpose: "planning", maxOutputTokens: 4096 })).invariants;
     } catch (e) {
         return { invariants: [], report: { proposed: 0, kept: 0, dropped: [], error: `The invariant proposal failed: ${maskSecrets(e instanceof Error ? e.message : String(e), input.secrets)}`.slice(0, 300) } };
     }
