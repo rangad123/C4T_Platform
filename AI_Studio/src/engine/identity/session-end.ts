@@ -80,7 +80,7 @@ async function accessSessionEndAssert(page, base, cfg) {
 
 const SIGN_OUT_PATH = /(^|\/)(log-?out|sign-?out|log-?off)$/i;
 const SIGN_OUT_NAME = /^(log|sign)\s?(out|off)$/i;
-const WHO_AM_I = /(^|\/)(me|whoami|session|account|profile|user)$/i;
+export const WHO_AM_I = /(^|\/)(me|whoami|session|account|profile|user)$/i;
 const GENERIC = /^(home|welcome|index|menu|dashboard|untitled|page)$/i;
 
 /**
