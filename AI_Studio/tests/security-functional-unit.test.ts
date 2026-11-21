@@ -89,7 +89,8 @@ describe("rate limit: only from a stated limit, bounded, on a throwaway account"
 
 const signIn: Step[] = [
     { action: "navigate", url: "/login" },
-    { action: "fill", locator: { by: "label", value: "Email" }, value: "{{credentials.username}}" },
+    // A sign-in field the free-text rule would not recognise: the {{credentials}} value alone keeps it unmarked.
+    { action: "fill", locator: { by: "label", value: "Username" }, value: "{{credentials.username}}" },
     { action: "fill", locator: { by: "label", value: "Password" }, value: "{{credentials.password}}" },
     { action: "click", locator: { by: "role", role: "button", value: "Sign in" } },
 ] as Step[];

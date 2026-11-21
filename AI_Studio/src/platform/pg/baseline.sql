@@ -1375,6 +1375,13 @@ CREATE TABLE security_cross_account (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE security_cross_account_draft (
+    application_id TEXT PRIMARY KEY REFERENCES security_applications(id) ON DELETE CASCADE,
+    designation_json TEXT NOT NULL,
+    source_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE ops_heartbeats (
     name TEXT PRIMARY KEY,
     at BIGINT NOT NULL,
