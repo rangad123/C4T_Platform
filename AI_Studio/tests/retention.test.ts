@@ -616,9 +616,9 @@ describe("an open finding holds its evidence until it is closed plus the failed-
         const runOf = async (name: string, fp: string, closedDaysAgo: number | null) => {
             const t = addTest(platform, seed, name, "web");
             const run = addRun(platform, seed, t, { daysAgo: 30, status: "failed", files: [{ kind: "screenshot", size: 500 }, { kind: "trace", size: 900 }] });
-            const store = new CandidateFindingStore(platform.db.sql, () => iso(closedDaysAgo ?? 30));
-            const { finding: f } = await store.upsert({ projectId: seed.projectId, testId: t.id, finding: finding(fp) });
-            if (closedDaysAgo !== null) await store.transition(seed.projectId, f.id, { to: "not_a_bug", by: "person", actor: { label: "One" }, reason: "Works as designed" });
+            // Found with the run, 30 days ago; closed later: the hold counts from the close, not from when the finding was made.
+            const { finding: f } = await new CandidateFindingStore(platform.db.sql, () => iso(30)).upsert({ projectId: seed.projectId, testId: t.id, finding: finding(fp) });
+            if (closedDaysAgo !== null) await new CandidateFindingStore(platform.db.sql, () => iso(closedDaysAgo)).transition(seed.projectId, f.id, { to: "not_a_bug", by: "person", actor: { label: "One" }, reason: "Works as designed" });
             return run;
         };
         const open = await runOf("Open finding", "a", null);
