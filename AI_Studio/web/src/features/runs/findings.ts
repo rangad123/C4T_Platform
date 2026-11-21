@@ -42,7 +42,9 @@ export interface FindingReview {
     confidenceBasis: string;
     reproduction: { same: number; of: number };
     steps: Array<{ action: string; target?: string; url?: string }>;
-    cause: { label: string; text: string };
+    /** Null when no cause was found at a code location; `noCause` says why. */
+    cause: { label: string; text: string } | null;
+    noCause: string | null;
     stateLabel: string;
     /** The state's place in the lifecycle. */
     stateRank: number;

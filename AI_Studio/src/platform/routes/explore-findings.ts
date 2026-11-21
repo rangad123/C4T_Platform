@@ -7,8 +7,8 @@
  *                                                     is what the results card shows (Phase 5 U1): the status label (findings/score.ts
  *                                                     `label`: never "Confirmed" below high confidence), severity and confidence each
  *                                                     with its basis, reproduction "same of of", the saved test's steps and the
- *                                                     likely cause with its label (root-cause.ts; Unknown while no code source is
- *                                                     connected), the state's name and rank, and whether a person may Confirm or
+ *                                                     likely cause with its label (root-cause.ts; null, with `noCause` saying why,
+ *                                                     while none was found), the state's name and rank, and whether a person may Confirm or
  *                                                     call it Not a bug (lifecycle.ts). Computed here, so the page has no rule of
  *                                                     its own.
  *   GET /api/projects/:id/objectives                  → { available: true, objectives: [{ id, kind, source, question, expected, operators,
@@ -61,7 +61,9 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
             confidenceBasis: conf.basis,
             reproduction: rep,
             steps: view.steps,
-            cause: { label: ROOT_CAUSE_LABEL_TEXT[rc.label], text: `${at}${rc.location?.explanation ?? rc.reason}` },
+            // A cause only when one was found at a code location; otherwise the reason there is none (said once on the card).
+            cause: rc.location ? { label: ROOT_CAUSE_LABEL_TEXT[rc.label], text: `${at}${rc.location.explanation ?? rc.reason}` } : null,
+            noCause: rc.location ? null : rc.reason,
             // The state's name and its place in the lifecycle (the folded groups' order), and the verdicts a person may give from it.
             stateLabel: STATE_LABEL[r.state],
             stateRank: FINDING_STATES.indexOf(r.state),

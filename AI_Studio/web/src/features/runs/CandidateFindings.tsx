@@ -21,6 +21,8 @@ function objectiveText(o: FindingRecord["finding"]["objective"]): string {
     return `${kindWord(o.kind)} ${o.source}${o.operator ? ` · ${operatorWord(o.operator)}` : ""}`;
 }
 
+const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+
 const STATUS_TONE = { confirmed: "danger", review: "warning", rest: "neutral" } as const;
 
 /** What a person may change: the actions the lifecycle allows them, a reason for Not a bug, and the issue it was filed as. */
@@ -171,24 +173,21 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                         {sourceText(f.expected.source)}
                     </span>
                 </dd>
-                <dt>Severity</dt>
-                <dd data-testid="finding-severity-basis">
-                    <span className="fnd-conf">{SEVERITY_WORD[rv.severity]}</span>
-                    {rv.severityBasis ? `: ${rv.severityBasis}` : ""}
-                </dd>
                 <dt>Confidence</dt>
                 <dd data-testid="finding-confidence">
-                    <span className="fnd-conf">{CONFIDENCE_WORD[rv.confidence]}</span>: {rv.confidenceBasis}
+                    <span className="fnd-conf">{CONFIDENCE_WORD[rv.confidence]}</span> · {lowerFirst(reproductionText(rv.reproduction))}
                 </dd>
-                <dt>Reproduced</dt>
-                <dd data-testid="finding-reproduction">{reproductionText(rv.reproduction)}</dd>
-                <dt>Likely cause</dt>
-                <dd data-testid="finding-cause">
-                    <Badge tone="neutral">
-                        <span data-testid="finding-cause-label">{rv.cause.label}</span>
-                    </Badge>{" "}
-                    {rv.cause.text}
-                </dd>
+                {rv.cause && (
+                    <>
+                        <dt>Likely cause</dt>
+                        <dd data-testid="finding-cause">
+                            <Badge tone="neutral">
+                                <span data-testid="finding-cause-label">{rv.cause.label}</span>
+                            </Badge>{" "}
+                            {rv.cause.text}
+                        </dd>
+                    </>
+                )}
             </dl>
             {ev.screenshots.length > 0 && (
                 <ul className="fnd-shots" data-testid="finding-screenshots">
@@ -208,6 +207,14 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                     Evidence ({plural(ev.screenshots.length, "screenshot")}, {plural(ev.requests.length, "request")}, {plural(ev.console.length, "console line")})
                 </summary>
                 <div className="stack-sm fnd-evidence" data-testid="finding-evidence">
+                    <ul className="fnd-replays" data-testid="finding-reasons">
+                        <li>
+                            {SEVERITY_WORD[rv.severity]} severity{rv.severityBasis ? `: ${rv.severityBasis}` : ""}
+                        </li>
+                        <li>
+                            {CONFIDENCE_WORD[rv.confidence]}: {rv.confidenceBasis}
+                        </li>
+                    </ul>
                     {ev.screenshots.length ? (
                         <p className="t-meta">Password fields and stored secrets are covered in the pictures above.</p>
                     ) : (
@@ -253,7 +260,6 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                     <span>Its saved test was deleted.</span>
                 )}
                 {rec.seenCount > 1 && <span> Seen in {plural(rec.seenCount, "run")}.</span>}
-                {f.modelVersion && <span className="fnd-model"> Model {f.modelVersion}</span>}
             </p>
             <Actions rec={rec} projectId={projectId} act={act} />
         </li>
@@ -278,6 +284,8 @@ export function CandidateFindings({ projectId, jobId, explores }: { projectId: s
     const sections = useMemo(() => findingSections(got.data?.findings ?? []), [got.data]);
     if (got.loading || (!got.data && !got.error)) return null;
     if (!got.error && list.length === 0 && !explores) return null;
+    // Said once for the list, not on every finding.
+    const noCause = list.find((r) => !r.review.cause)?.review.noCause ?? null;
     const act: Act = { write, tracker: trackers.data?.[0], onChanged: () => void got.reload() };
     let n = 0;
     const rows = (rs: FindingRecord[]) => (
@@ -301,6 +309,11 @@ export function CandidateFindings({ projectId, jobId, explores }: { projectId: s
             ) : (
                 <>
                     <p className="t-secondary">Found by the AI. Confirmed bugs come first, then findings a person needs to check. Open a finding’s saved test to see what it does.</p>
+                    {noCause && (
+                        <p className="t-meta" data-testid="run-findings-no-cause">
+                            Likely cause not shown: {lowerFirst(noCause)}
+                        </p>
+                    )}
                     {sections.confirmed.length > 0 && (
                         <div className="stack-sm" data-testid="findings-confirmed">
                             <h3 className="t-meta fnd-sub">Confirmed ({sections.confirmed.length})</h3>

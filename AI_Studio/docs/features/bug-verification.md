@@ -17,12 +17,12 @@ Within a group, captured findings come before observed-only ones, then higher co
 - **Status**: the finding's state in words. "Confirmed" is shown only at high confidence: a confirmed finding below high confidence
   reads "Possible *severity* bug, needs review", and a critical or high security finding that has not been reproduced reads
   "Possible *severity* security issue, needs review" (`src/engine/findings/score.ts`, `label`).
-- **Severity** and **confidence**, shown separately, each with the reason it has that level.
-- **Reproduced**: how often the attempts failed the same way, for example "Failed the same way 2 of 3 times".
-- **Steps** of its saved test, behind a disclosure.
+- **Severity** as a badge, and **confidence** with how often the attempts failed the same way on one line, for example
+  "High confidence · failed the same way 2 of 3 times". The reason for each level is under the finding's Evidence.
+- **Steps** of its saved test, behind a disclosure, with the objective and the expected result.
 - **Thumbnails** of its screenshots, each opening larger in a new tab.
-- **Likely cause**, with its label: Verified, Strongly supported, Hypothesis or Unknown. While no code source is connected to the
-  project the cause is Unknown and says why.
+- **Likely cause**, with its label (Verified, Strongly supported or Hypothesis), only when one was found at a code location. When
+  none was, one line above the list says why (for example, no code source is connected to the project).
 
 The server works these out (`GET /api/projects/:id/candidate-findings?job=`, the `review` field of each finding), so the page has no
 rule of its own.

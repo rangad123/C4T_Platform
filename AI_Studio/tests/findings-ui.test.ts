@@ -3,7 +3,7 @@
  * page: Confirmed findings first, worst severity first; then the ones that need a person's review; the rest folded by state. Every row
  * shows its status (never "Confirmed" below high confidence, and a person's confirmation of a medium-confidence finding reads "Possible
  * …, needs review"), severity and confidence apart, how often it reproduced ("2 of 3"), its test's steps, thumbnails that open larger,
- * the likely cause with its label, and the four actions a person who may change tests gets where the lifecycle allows them: Confirm,
+ * the likely cause with its label (said once above the list while no code source is connected), and the four actions a person who may change tests gets where the lifecycle allows them: Confirm,
  * Not a bug (with a reason), Split, File issue. Everything is reachable from the keyboard. The Phase 3 facts stay: objective, expected
  * result and source, what was observed, evidence, a link to the saved test; an observed-only finding looks different. A person who may
  * only look reads the same with no buttons; a refusal from the server is shown as its sentence; an older run without findings says so.
@@ -329,14 +329,19 @@ describe("a finished exploration with findings", () => {
         // A verified row: status, severity, confidence apart, "2 of 3", steps, the likely cause with its label.
         const crit = row("The payments page answered something else.");
         await pwExpect(crit.getByTestId("finding-severity")).toHaveText("Critical severity");
-        await pwExpect(crit.getByTestId("finding-confidence")).toHaveText("High confidence: the same failure in 2 of 3 attempts");
-        await pwExpect(crit.getByTestId("finding-reproduction")).toHaveText("Failed the same way 2 of 3 times");
-        await pwExpect(crit.getByTestId("finding-cause-label")).toHaveText("Unknown");
-        await pwExpect(crit.getByTestId("finding-cause")).toContainText("No code source is connected to this project");
+        await pwExpect(crit.getByTestId("finding-confidence")).toHaveText("High confidence · failed the same way 2 of 3 times");
+        // The reasons for both levels are in the folded details, not on the row.
+        await crit.getByText(/^Evidence/).click();
+        await pwExpect(crit.getByTestId("finding-reasons").getByRole("listitem")).toHaveText([/^Critical severity/, "High confidence: the same failure in 2 of 3 attempts"]);
+        await crit.getByText(/^Evidence/).click();
+        // No code source: the likely cause is said once above the list, not on each row; no model line on a row.
+        await pwExpect(section().getByTestId("run-findings-no-cause")).toHaveText("Likely cause not shown: no code source is connected to this project, so no code location can be checked.");
+        await pwExpect(section().getByTestId("finding-cause")).toHaveCount(0);
+        await pwExpect(section()).not.toContainText("model-7");
         await crit.getByTestId("finding-actions").click();
         await pwExpect(crit.getByTestId("finding-steps").getByRole("listitem")).toHaveText(["navigate /cart", "navigate /checkout"]);
         const possible = row("The search page answered something else.");
-        await pwExpect(possible.getByTestId("finding-confidence")).toHaveText("Medium confidence: the expectation is the planner's guess");
+        await pwExpect(possible.getByTestId("finding-confidence")).toHaveText("Medium confidence · failed the same way 2 of 3 times");
         // The same rule in the answer itself.
         const answer = (await call("GET", `/api/projects/${projectId}/candidate-findings?job=${run}`)).body.findings as FindingRecord[];
         for (const f of answer) if (f.review.label.startsWith("Confirmed")) expect(f.review.confidence).toBe("high");
@@ -360,7 +365,7 @@ describe("a finished exploration with findings", () => {
         await pwExpect(f.getByTestId("finding-actions")).toHaveText("2 steps");
         await pwExpect(f.getByTestId("finding-expected")).toHaveText(CAPTURED.expected.text);
         await pwExpect(f.getByTestId("finding-source")).toHaveText("Stated in R-checkout-total");
-        await pwExpect(f.getByTestId("finding-confidence")).toContainText(/^(High|Medium|Low) confidence: ./);
+        await pwExpect(f.getByTestId("finding-confidence")).toContainText(/^(High|Medium|Low) confidence · ./);
         await pwExpect(f.getByRole("link", { name: /Open the saved test/ })).toHaveAttribute("href", `#/tests/${capturedTest}`);
         // Its two screenshots as thumbnails on the row, each opening larger from the keyboard.
         const shots = f.getByTestId("finding-screenshots").getByRole("img");
@@ -394,7 +399,7 @@ describe("a finished exploration with findings", () => {
         await pwExpect(f.getByTestId("finding-capture")).toHaveText("Seen, not kept as a check");
         await pwExpect(f.getByTestId("finding-objective")).toHaveText("Workflow WF-checkout");
         await pwExpect(f.getByTestId("finding-source")).toHaveText("No stated source: the AI’s own expectation");
-        await pwExpect(f.getByTestId("finding-confidence")).toContainText(/^Low confidence: /);
+        await pwExpect(f.getByTestId("finding-confidence")).toContainText(/^Low confidence · /);
         await pwExpect(f.getByRole("link", { name: /Open the saved test/ })).toHaveAttribute("href", `#/tests/${observedTest}`);
         await f.getByText(/^Evidence/).click();
         await pwExpect(f.getByTestId("finding-screenshots")).toHaveText("No screenshot was saved for this finding.");
