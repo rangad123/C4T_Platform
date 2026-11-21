@@ -174,7 +174,8 @@ describe("a failure trace from a runner", () => {
         expect(names.some((n) => /\d-trace\.network$/.test(n))).toBe(true);
         const actions = names.filter((n) => n.endsWith(".trace")).map((n) => Buffer.from(parts[n]!).toString("utf8")).join("\n");
         expect(actions).toMatch(/"method":"fill","params":\{[^}]*"value":"\[hidden\]"/);
-        expect(actions).toContain(USER); // a user name is not a secret: the evidence stays useful
+        // An e-mail address is personal data, hidden in a trace as in job events and evidence (P5 L-1), the sign-in user name too.
+        expect(actions).not.toContain(USER);
         expect(leaksIn(parts, [PASSWORD, TOKEN])).toEqual([]);
         expect(readableSecrets(parts, [PASSWORD, TOKEN])).toEqual([]);
         // The agent's own output never had them either.
@@ -325,7 +326,7 @@ describe("a real Chromium form sign-in", () => {
         expect(r).toMatchObject({ ok: true });
         const after = unzipSync(new Uint8Array(fs.readFileSync(file)));
         expect(readableSecrets(after, [pw])).toEqual([]);
-        expect(Object.values(after).some((b) => Buffer.from(b).toString().includes(`email=${encodeURIComponent(USER)}&password=[hidden]`))).toBe(true);
+        expect(Object.values(after).some((b) => Buffer.from(b).toString().includes("email=[hidden]&password=[hidden]"))).toBe(true);
         // Playwright names a resource after the sha1 of its content. A masked part gets the sha1 of its cleaned content; the sha1 of the
         // original (enough to test a guessed password offline) is in no name and no text.
         const sha1 = (b: Uint8Array) => createHash("sha1").update(b).digest("hex");
