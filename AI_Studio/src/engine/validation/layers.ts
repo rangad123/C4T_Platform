@@ -4,12 +4,14 @@
  */
 import { z } from "zod";
 import type { Step } from "../spec/schema.js";
+import { InvariantReportSchema } from "./invariants.js";
 
 export const LAYERS = ["page", "api", "storedData", "database"] as const;
 export type Layer = (typeof LAYERS)[number];
 
 const LayerState = z.union([z.object({ status: z.literal("ran"), tests: z.number().int().min(0) }).strict(), z.object({ status: z.literal("unavailable"), reason: z.string().max(300) }).strict()]);
-export const LayerReportSchema = z.object({ page: LayerState, api: LayerState, storedData: LayerState, database: LayerState }).strict();
+/** `invariants` (C5, optional): how many invariants the AI proposed and kept, and each dropped one with its reason. */
+export const LayerReportSchema = z.object({ page: LayerState, api: LayerState, storedData: LayerState, database: LayerState, invariants: InvariantReportSchema.optional() }).strict();
 export type LayerReport = z.infer<typeof LayerReportSchema>;
 
 /** The layer a test checks: API tests and the API access checks (an accessDenied assert on an API call) are "api", the rest "page". */

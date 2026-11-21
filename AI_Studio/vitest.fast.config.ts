@@ -163,6 +163,7 @@ export default defineConfig({
             "tests/relation.test.ts",
             "tests/dsl-relation.test.ts",
             "tests/relation-render.test.ts",
+            "tests/invariants-proposal.test.ts",
             "tests/credential-origin-unit.test.ts",
             "tests/guard-hardening.test.ts",
             "tests/guide-content.test.ts",
