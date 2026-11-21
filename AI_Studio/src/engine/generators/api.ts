@@ -16,7 +16,7 @@ import { dataDeclaration, dataRowsFor, dataSetDeclaration, expr, fileHeader, lit
 import { CLEANUP_HELPER_SOURCE, canCreateRecords, cleanupScriptSource, deleteOperationsOfSpec, mergeOperations } from "../cleanup/helper.js";
 import { CONTRACT_HELPER_SOURCE } from "../contracts/check.js";
 import { DRIFT_HELPER_SOURCE } from "../contracts/drift.js";
-import { ACCESS_API_HELPER_SOURCE } from "../identity/access.js";
+import { ACCESS_API_HELPER_SOURCE, ACCESS_HELPER_SOURCE } from "../identity/access.js";
 import { LATENCY_HELPER_SOURCE } from "../performance/latency.js";
 import { isLoadStep, LOAD_CALL_SOURCE, LOAD_HELPER_SOURCE, normalizeLoadBudgets } from "../performance/load.js";
 import { SECURITY_HELPER_SOURCE, isSecurityCheck } from "../security/checks.js";
@@ -105,6 +105,80 @@ function need(...names: string[]): void {
     const missing = names.filter((n) => data[n] === undefined);
     if (missing.length) throw new Error(\`No value for \${missing.map((n) => "{{" + n + "}}").join(", ")}: no earlier step captured it (extract) and testData does not define it\`);
 }`;
+
+/** C1 sign-in for API calls; only in scripts that send a request with the project's credentials (see withSignInHook). */
+const API_SIGN_IN_SOURCE = `/**
+ * Signing in for API calls when the run has no API token or header (C1): the script signs in for itself, once per test, in a browser of
+ * its own (the access checks' sign-in helper), and its API calls use that browser's cookies. The username and password come from the
+ * environment only (TEST_USERNAME / TEST_PASSWORD, or TEST_<ACCOUNT>_* for a named account), never from the script. With a token or
+ * header, or with no sign-in, nothing happens and the calls are exactly as before.
+ */
+let apiBrowser: Browser | undefined;
+let apiSession: { test: string; request?: APIRequestContext } | undefined;
+test.afterAll(async () => { await apiBrowser?.close().catch(() => undefined); });
+async function apiSignedIn(): Promise<APIRequestContext | undefined> {
+    if (process.env.API_TOKEN || process.env.API_AUTH_HEADER) return undefined;
+    const testId = test.info().testId;
+    if (apiSession?.test === testId) return apiSession.request;
+    // The shared helper reads TEST_<NAME>_*: the project's own account gets a name longer than any test account's (24 characters at most).
+    const as = API_SIGN_IN_AS || "project-sign-in-from-settings";
+    if (!API_SIGN_IN_AS) {
+        if (!process.env.TEST_USERNAME || !process.env.TEST_PASSWORD) return (apiSession = { test: testId }).request;
+        process.env.TEST_PROJECT_SIGN_IN_FROM_SETTINGS_USERNAME = process.env.TEST_USERNAME;
+        process.env.TEST_PROJECT_SIGN_IN_FROM_SETTINGS_PASSWORD = process.env.TEST_PASSWORD;
+        process.env.TEST_PROJECT_SIGN_IN_FROM_SETTINGS_TOTP_SECRET = process.env.TEST_TOTP_SECRET ?? "";
+    }
+    apiSession = { test: testId };
+    const use = test.info().project.use as { headless?: boolean; channel?: string; launchOptions?: Record<string, unknown>; proxy?: { server: string } };
+    apiBrowser ??= await chromium.launch({ headless: use.headless !== false, ...(use.channel ? { channel: use.channel } : {}), ...(use.launchOptions ?? {}) });
+    const context = await apiBrowser.newContext({ ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS, serviceWorkers: "block", ...(use.proxy ? { proxy: use.proxy } : {}) });
+    const page = await context.newPage();
+    try {
+        await accessSignIn(page, process.env.BASE_URL ?? API_BASE_URL, as);
+    } catch (e) {
+        // A named account was asked for: say why it could not be used. The project's own account: the calls go unsigned, as before C1.
+        await context.close().catch(() => undefined);
+        if (API_SIGN_IN_AS) throw e;
+        console.log("AITP: the API calls are not signed in: " + String((e as Error)?.message ?? e).split("\\n")[0]);
+        return undefined;
+    } finally {
+        await page.close().catch(() => undefined);
+    }
+    apiSession.request = context.request;
+    return apiSession.request;
+}
+// shortcut: no one-time codes here (a script may not import node:crypto, which the code helper needs); give the helper an allowed home when a project needs it.
+function totpCode() {
+    throw new Error("Signing in for the API calls asks for a one-time code, which API tests cannot enter yet. Save an API token for the project instead.");
+}
+`;
+
+/** The `call()` of a script that sends credentials: signed in when the run has no token (API_SIGN_IN_SOURCE). Others are unchanged. */
+function withSignInHook(helpers: string): string {
+    const anchor = "    const res = await request.fetch(target, {";
+    if (!helpers.includes(anchor)) throw new Error("The API script helpers changed: update the sign-in hook in generators/api.ts");
+    return helpers.replace(anchor, () => "    // No API token or header for this run, but a sign-in: the call is made signed in (C1). Calls without credentials keep the plain context.\n    const via = opts.auth ? ((await apiSignedIn()) ?? request) : request;\n    const res = await via.fetch(target, {");
+}
+
+/** The script's `call()` with the hooks it needs; a script that needs none is byte-for-byte the plain helpers. */
+function withHooks(helpers: string, o: { cleanup: boolean; signs: boolean }): string {
+    const signed = o.signs ? withSignInHook(helpers) : helpers;
+    return o.cleanup ? withCleanupHook(signed) : signed;
+}
+
+/** Records a signed-in script created are removed through the same signed-in session (a DELETE without it would be refused). */
+function withSignedInCleanup(source: string): string {
+    const anchor = "const res = await request.fetch(new URL(rec.deletePath, API_BASE_URL)";
+    if (!source.includes(anchor)) throw new Error("The cleanup helper changed: update the signed-in cleanup in generators/api.ts");
+    return source.replace(anchor, () => "const res = await ((await apiSignedIn().catch(() => undefined)) ?? request).fetch(new URL(rec.deletePath, API_BASE_URL)");
+}
+
+/** A named test account to sign in as (testData.signInAs, an account name as the project's accounts have), or "" for the project's own. */
+function signInAs(spec: TestSpec): string {
+    const name = spec.testData.signInAs ?? "";
+    if (name && !/^[a-z][a-z0-9_-]{0,23}$/.test(name)) throw new Error(`"${name}" is not a test account name (lower-case letters, digits, - or _)`);
+    return name;
+}
 
 /**
  * A script that can POST also notes the records it creates (see ../cleanup/helper.ts): `call()` reports every response to
@@ -251,16 +325,21 @@ export const apiGenerator: ScriptGenerator = {
         const security = spec.steps.some((s) => s.action === "assertResponse" && isSecurityCheck(s.check));
         // Data-changing tests remove what they create (the DELETE operations come from the API description and from the test itself).
         const cleanup = canCreateRecords(spec);
-        const helpers = cleanup ? withCleanupHook(HELPERS) : HELPERS;
+        // A script that sends the project's credentials signs in for itself when its run has no API token (C1, API_SIGN_IN_SOURCE).
+        // Not a load check: its requests go through loadCall, which takes the token only.
+        const signs = !hasLoad && spec.steps.some((s) => s.action === "request" && s.auth === "default");
+        const helpers = withHooks(HELPERS, { cleanup, signs });
+        const cleanupScript = cleanup ? cleanupScriptSource({ testId: spec.testId, ops: mergeOperations(ctx.deleteOps, deleteOperationsOfSpec(spec)) }) : "";
+        const cleanupSource = signs && cleanup ? withSignedInCleanup(cleanupScript) : cleanupScript;
         const content = `${fileHeader(spec, "Playwright API")}
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect, ${signs ? "chromium, type Browser, " : ""}type APIRequestContext } from "@playwright/test";
 ${RUN_ADDRESS_IMPORT}${security ? 'import * as tls from "node:tls";\n' : ""}${cleanup ? 'import * as cleanupFs from "node:fs";\nimport * as cleanupPath from "node:path";\n' : ""}
 const API_BASE_URL = ${passive ? `process.env.BASE_URL ?? ${lit(ctx.baseUrl)}` : `process.env.API_BASE_URL ?? ${lit(ctx.apiBaseUrl ?? ctx.baseUrl)}`};
 const IGNORE_HTTPS_ERRORS = ${passive};
 const DRIFT_OBSERVE = ${!passive};
-${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec)}
+${signs ? `/** The named test account the API calls sign in as when there is no token ("" = the project's own account). */\nconst API_SIGN_IN_AS = ${lit(signInAs(spec))};\n` : ""}${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec)}
 ${helpers}
-${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupScriptSource({ testId: spec.testId, ops: mergeOperations(ctx.deleteOps, deleteOperationsOfSpec(spec)) })}` : ""}
+${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${signs ? `\n${API_SIGN_IN_SOURCE}${ACCESS_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupSource}` : ""}
 
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ request }) => {
 ${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n    // Each row is judged on its own responses.\n    responses.length = 0;\n    calls.length = 0;\n` : ""}    ${hasLoad ? "// A load check runs for about 10 seconds (twice at most), may wait its turn behind another load check, and waits for slow answers: far more than the default time limit.\n    test.setTimeout(180_000);\n    " : ""}let last!: Call;
