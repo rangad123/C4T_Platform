@@ -38,7 +38,8 @@ const env: RunSecretsEnv = {
     },
 };
 const SECRETS = ["Pw-main 9!", "Admin-pw-42", "role-access-token-11", "api-refresh-token-22", "hdr-bearer-33", "COOKIE-session-7f3a9c", "LS-refresh-tok-55aa", "SS-access-tok-66bb", "IDB-id-token-77cc99", "db-pass-44", "camel-api-key-55", "kebab-client-secret-66", "env-refresh-77", "Basic cHJveHk6cHc=", "env-session-88", "pk-material-99"];
-const PLAIN = ["https://app.example", "pub-key-plain", "created_at", "checkout", "u-12345", "ana@example.test"];
+// The user name is not a secret of the run, but as an e-mail address it is personal data: the shared redaction hides it (P5 L-1, L-4).
+const PLAIN = ["https://app.example", "pub-key-plain", "created_at", "checkout", "u-12345"];
 
 /** A stored evidence attachment whose console lines and request paths carry every value. */
 function evidenceWith(values: string[]): Evidence {
@@ -120,6 +121,7 @@ describe("structure and safety", () => {
             expect(ev, v).toContain(v.replace("https://app.example", "app.example").startsWith("app.example") ? "app.example" : v);
             expect(tr, v).toContain(v);
         }
+        expect(evidenceText(["ana@example.test"])).not.toContain("ana@example.test");
         const out = sanitizeEvidence(evidenceWith(["hello"]), secretsOfRun(env))!;
         expect(out.requests[0]!.method).toBe("GET");
         expect(out.requests[0]!.status).toBe(500);
