@@ -276,7 +276,7 @@ export const RESPONSE_CHECKS = [
      * the test's $values, such as `discount == round(subtotal * 0.10)`. `source` names the stated expectation (a requirement id).
      */
     "relation",
-    /** A database-layer check (C10) named by `name`. Its rendering comes with the database layer; until then it is refused with a reason. */
+    /** A database-layer check (C10) named by `name` (database/checks.ts), run through the run's read-only database access. */
     "dbCheck",
 ] as const;
 
@@ -460,8 +460,8 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
                 if (!r.ok) ctx.addIssue({ code: "custom", message: `Not a relation the grammar allows: ${r.error}` });
             })
             .optional(),
-        /** dbCheck only: the name of the database-layer check. */
-        name: z.string().min(1).max(100).optional(),
+        /** dbCheck only: the database-layer check in its words (database/checks.ts), at most DB_CHECK_NAME_MAX (400) characters. */
+        name: z.string().min(1).max(400).optional(),
         /** relation and dbCheck: the stated expectation the check proves (a requirement id such as "4.1"), named when it fails. */
         source: z.string().min(1).max(500).optional(),
         ...base,

@@ -141,7 +141,7 @@ function numberIn(text: string): number {
 /** The answer checks a web test's request can be judged by (the security, load and contract families stay in API tests). */
 export const WEB_RESPONSE_CHECKS = new Set<Extract<Step, { action: "assertResponse" }>["check"]>(["status", "statusClass", "statusBelow", "jsonPath", "jsonType", "header", "bodyContains", "bodyNotContains", "relation"]);
 
-/** Why a database check step cannot run yet (every renderer and the interpreter say the same). */
+/** Why the live interpreter does not run a database check step (a saved test's script runs it, through the run's database check service). */
 export const DB_CHECK_NOT_YET = (name: string) => `The database check "${name}" cannot run yet: database checks need the project's read-only database access, which is not set up for this test.`;
 
 /** A relation's latest answer: one that reads no body path (only $values) needs no answer before it. */
@@ -176,8 +176,9 @@ export function webRequestProblems(spec: Pick<TestSpec, "kind" | "steps" | "test
     let requested = false;
     for (const [i, step] of spec.steps.entries()) {
         if (step.action === "assertResponse") {
-            if (step.check === "dbCheck") out.push(`Step ${i + 1}: ${DB_CHECK_NOT_YET(step.name ?? "")}`);
-            else if (!WEB_RESPONSE_CHECKS.has(step.check)) out.push(`Step ${i + 1}: the response check "${step.check}" runs in API tests only. A web test can check: ${[...WEB_RESPONSE_CHECKS].join(", ")}.`);
+            // A database check reads the stored data, not an answer: it needs no request before it.
+            if (step.check === "dbCheck") continue;
+            if (!WEB_RESPONSE_CHECKS.has(step.check)) out.push(`Step ${i + 1}: the response check "${step.check}" runs in API tests only. A web test can check: ${[...WEB_RESPONSE_CHECKS].join(", ")}.`);
             else if (!requested && readsAnswer(step)) out.push(`Step ${i + 1}: a response check needs a request step, or a wait for a response that captures values, before it.`);
             continue;
         }
