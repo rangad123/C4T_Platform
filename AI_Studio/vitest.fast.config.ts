@@ -298,6 +298,7 @@ export default defineConfig({
             "tests/finding-lifecycle-store.test.ts",
             "tests/findings-api.test.ts",
             "tests/bench-verify-score-unit.test.ts",
+            "tests/findings-explain-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
