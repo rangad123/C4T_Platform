@@ -1,0 +1,104 @@
+{
+  "_note": "Planted secrets for tests/evidence-canary.test.ts (Phase 5 E1). Fake values: none of them is real. One value per kind and channel, so a hit names both.",
+  "channels": {
+    "field": {
+      "password": "CnryFdPw!1x9",
+      "bearer": "cnryFdBearerTok1",
+      "cookie": "cnryFdSessCk1q",
+      "apiKey": "sk_live_cnryFdKey1Zp",
+      "email": "cnry.fd1@people.example",
+      "phone": "+1 415 555 0111",
+      "address": "111 Canary Lane, Springfield",
+      "card": "4000 0012 3400 7011",
+      "dbUrl": "postgres://shop_admin:CnryDbFdPw1@db.internal:5432/shop"
+    },
+    "header": {
+      "password": "CnryHdPw!2x9",
+      "bearer": "cnryHdBearerTok2",
+      "cookie": "cnryHdSessCk2q",
+      "apiKey": "sk_live_cnryHdKey2Zp",
+      "email": "cnry.hd2@people.example",
+      "phone": "+1 415 555 0122",
+      "address": "222 Canary Lane, Springfield",
+      "card": "4000 0012 3401 4025",
+      "dbUrl": "postgres://shop_admin:CnryDbHdPw2@db.internal:5432/shop"
+    },
+    "cookie": {
+      "password": "CnryCkPw!3x9",
+      "bearer": "cnryCkBearerTok3",
+      "cookie": "cnryCkSessCk3q",
+      "apiKey": "sk_live_cnryCkKey3Zp",
+      "email": "cnry.ck3@people.example",
+      "phone": "+1 415 555 0133",
+      "address": "333 Canary Lane, Springfield",
+      "card": "4000 0012 3402 1038",
+      "dbUrl": "postgres://shop_admin:CnryDbCkPw3@db.internal:5432/shop"
+    },
+    "json": {
+      "password": "CnryJsPw!4x9",
+      "bearer": "cnryJsBearerTok4",
+      "cookie": "cnryJsSessCk4q",
+      "apiKey": "sk_live_cnryJsKey4Zp",
+      "email": "cnry.js4@people.example",
+      "phone": "+1 415 555 0144",
+      "address": "444 Canary Lane, Springfield",
+      "card": "4000 0012 3402 8041",
+      "dbUrl": "postgres://shop_admin:CnryDbJsPw4@db.internal:5432/shop"
+    },
+    "url": {
+      "password": "CnryUrPw!5x9",
+      "bearer": "cnryUrBearerTok5",
+      "cookie": "cnryUrSessCk5q",
+      "apiKey": "sk_live_cnryUrKey5Zp",
+      "email": "cnry.ur5@people.example",
+      "phone": "+1 415 555 0155",
+      "address": "555 Canary Lane, Springfield",
+      "card": "4000 0012 3403 5053",
+      "dbUrl": "postgres://shop_admin:CnryDbUrPw5@db.internal:5432/shop"
+    },
+    "console": {
+      "password": "CnryCoPw!6x9",
+      "bearer": "cnryCoBearerTok6",
+      "cookie": "cnryCoSessCk6q",
+      "apiKey": "sk_live_cnryCoKey6Zp",
+      "email": "cnry.co6@people.example",
+      "phone": "+1 415 555 0166",
+      "address": "666 Canary Lane, Springfield",
+      "card": "4000 0012 3404 2067",
+      "dbUrl": "postgres://shop_admin:CnryDbCoPw6@db.internal:5432/shop"
+    },
+    "text": {
+      "password": "CnryTxPw!7x9",
+      "bearer": "cnryTxBearerTok7",
+      "cookie": "cnryTxSessCk7q",
+      "apiKey": "sk_live_cnryTxKey7Zp",
+      "email": "cnry.tx7@people.example",
+      "phone": "+1 415 555 0177",
+      "address": "777 Canary Lane, Springfield",
+      "card": "4000 0012 3404 9070",
+      "dbUrl": "postgres://shop_admin:CnryDbTxPw7@db.internal:5432/shop"
+    },
+    "iframe": {
+      "password": "CnryIfPw!8x9",
+      "bearer": "cnryIfBearerTok8",
+      "cookie": "cnryIfSessCk8q",
+      "apiKey": "sk_live_cnryIfKey8Zp",
+      "email": "cnry.if8@people.example",
+      "phone": "+1 415 555 0188",
+      "address": "888 Canary Lane, Springfield",
+      "card": "4000 0012 3405 6083",
+      "dbUrl": "postgres://shop_admin:CnryDbIfPw8@db.internal:5432/shop"
+    },
+    "download": {
+      "password": "CnryDlPw!9x9",
+      "bearer": "cnryDlBearerTok9",
+      "cookie": "cnryDlSessCk9q",
+      "apiKey": "sk_live_cnryDlKey9Zp",
+      "email": "cnry.dl9@people.example",
+      "phone": "+1 415 555 0199",
+      "address": "999 Canary Lane, Springfield",
+      "card": "4000 0012 3406 3097",
+      "dbUrl": "postgres://shop_admin:CnryDbDlPw9@db.internal:5432/shop"
+    }
+  }
+}

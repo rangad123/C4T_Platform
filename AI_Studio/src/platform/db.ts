@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, RUNNER_LIFECYCLE_MIGRATION, RUNNER_RESET_MIGRATION, RUNNER_SHARING_MIGRATION, RUNNER_SHOW_BROWSER_MIGRATION } from "./agent-store.js";
 import { BLOCKS_MIGRATION } from "./block-store.js";
-import { CANDIDATE_FINDINGS_MIGRATION } from "./candidate-finding-store.js";
+import { CANDIDATE_FINDINGS_MIGRATION, FINDING_LIFECYCLE_MIGRATION } from "./candidate-finding-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
 import { DEVICE_FARM_MIGRATION } from "./device-farm-store.js";
@@ -321,6 +321,11 @@ ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
     // LATE_FILLED_SLOTS (told by its table).
     /* 67: candidate findings from exploration, one per project and fingerprint, shaped like security_findings, status candidate only (schema lives in candidate-finding-store.ts; existing projects have none) */ CANDIDATE_FINDINGS_MIGRATION,
     /* 68: the AI response cache: answers of allowed reading calls per project, by a hash of the whole question, and the cached-call counts on AI usage rows (schema lives in llm-response-cache.ts; existing projects start with none, existing usage rows with 0) */ RESPONSE_CACHE_MIGRATION,
+    // 69 (main: the test case workbook fields) and 70 (Phase 4: the probe setting) are taken on other branches; held here so Phase 5
+    // gets 71. Integration replaces each with its SQL, so these two lines never ship.
+    /* 69: reserved (main's test case workbook fields) */ `-- reserved`,
+    /* 70: reserved (Phase 4's database probe setting) */ `-- reserved`,
+    /* 71: the finding lifecycle: each candidate finding's state, class, severity, confidence factors, duplicate group, reproduction attempts and app version, its history (finding_events) and duplicate groups (finding_groups) (schema lives in candidate-finding-store.ts; every existing finding keeps its row and starts as a candidate) */ FINDING_LIFECYCLE_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */
