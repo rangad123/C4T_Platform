@@ -1,6 +1,6 @@
 /**
  * D-b (spec 4.4): a benchmark app's tables kept in node:sqlite (BENCH_DB, examples/bench-*), read as a `DatabaseProbe`. Benchmark mode
- * only. The file is opened read-only (`file:…?mode=ro`, readOnly, query_only), and only under eval/.data-bench/<trial>/: the real path
+ * only. The file is opened read-only (`file:…?mode=ro` and readOnly), and only under eval/.data-bench/<trial>/: the real path
  * (links resolved) must sit at least one folder below that root. Templates become parameterised SQL here: names come from the validated
  * schema (plain identifiers, quoted), every value is a bound parameter, and nothing the caller writes is ever SQL text.
  */
@@ -48,8 +48,7 @@ export async function openBenchDatabase(file: string, root = BENCH_DATA_ROOT): P
     const real = benchDatabaseFile(file, root);
     // As platform/db.ts loads it: the test runner's bundler does not know node:sqlite as a built-in.
     const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-    const d = new DatabaseSync(`${pathToFileURL(real).href}?mode=ro`, { readOnly: true });
-    d.exec("PRAGMA query_only = 1; PRAGMA busy_timeout = 2000;");
+    const d = new DatabaseSync(`${pathToFileURL(real).href}?mode=ro`, { readOnly: true, timeout: 2000 });
     // Case folding the way the D-a back end folds (JavaScript's toLowerCase), not SQLite's ASCII-only lower().
     d.function("bench_fold", { deterministic: true }, (v) => (typeof v === "string" ? v.toLowerCase() : v));
     return d;
@@ -62,10 +61,11 @@ export function benchSqliteProbe(access: { file: string; root?: string; evidence
     const open = (): Promise<DatabaseSync> => (db ??= openBenchDatabase(access.file, access.root));
     const schema = async (): Promise<DbSchema> => {
         const d = await open();
-        const have = new Set((d.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as Array<{ name: string }>).map((r) => r.name));
-        if (!have.has(META)) return { tables: [] };
+        // A table's columns as the file has them (none: no such table).
+        const columnsOf = (name: string) => new Set((d.prepare("SELECT name FROM pragma_table_info(?)").all(name) as Array<{ name: string }>).map((c) => c.name));
+        if (!columnsOf(META).size) return { tables: [] };
         const raw = (d.prepare(`SELECT name, spec FROM ${q(META)}`).all() as Array<{ name: unknown; spec: unknown }>)
-            .filter((r) => typeof r.name === "string" && DB_NAME.test(r.name) && have.has(r.name) && r.name !== META)
+            .filter((r) => typeof r.name === "string" && DB_NAME.test(r.name) && r.name !== META && columnsOf(r.name).size > 0)
             .map((r) => {
                 let spec: Record<string, unknown> = {};
                 try {
@@ -74,7 +74,7 @@ export function benchSqliteProbe(access: { file: string; root?: string; evidence
                     /* no keys known */
                 }
                 const name = r.name as string;
-                const real = new Set((d.prepare(`SELECT name FROM pragma_table_info(?)`).all(name) as Array<{ name: string }>).map((c) => c.name));
+                const real = columnsOf(name);
                 const columns = (Array.isArray(spec.columns) ? spec.columns : []).filter((c) => typeof c === "string" && real.has(c));
                 const rowCount = Number((d.prepare(`SELECT COUNT(*) AS n FROM ${q(name)}`).get() as { n: number | bigint }).n);
                 return { ...spec, name, columns, rowCount };
