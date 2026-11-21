@@ -25,7 +25,8 @@ import type { FinishedItem } from "./cleanup/ledger.js";
 import { cleanupHeaders, type CleanupRequest } from "./cleanup/run.js";
 import { generateA11ySpecs } from "./a11y/specs.js";
 import { generateHealthSpecs } from "./health/specs.js";
-import { generateAccessSpecs, generateApiAccessSpecs, rolePageBudget, surveyAccess, surveyApiAccess, type ApiAccessRow, type Reach, type RoleLogin } from "./identity/access.js";
+import { generateAccessSpecs, generateApiAccessSpecs, generateApiListSpecs, rolePageBudget, signedInRequests, surveyAccess, surveyApiAccess, surveyApiLists, type ApiAccessRow, type ApiListRow, type ApiRequester, type Reach, type RoleLogin } from "./identity/access.js";
+import { generateSessionEndSpecs } from "./identity/session-end.js";
 import { generateInputSpecs } from "./inputs/specs.js";
 import { generateVisionSpecs } from "./vision/specs.js";
 import { generateLatencySpecs } from "./performance/latency.js";
@@ -223,6 +224,8 @@ export interface ExploreCheckpoint {
     specBaseTrusted: boolean;
     accessReach: Reach[];
     apiAccess: ApiAccessRow[];
+    /** Each account's ids from documented list endpoints (same-level API checks); older checkpoints have none. */
+    apiLists?: ApiListRow[];
 }
 export const CHECKPOINT_ARTIFACT = "explore-checkpoint";
 export const CHECKPOINT_FILE = "explore-checkpoint.json";
@@ -460,6 +463,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         let accessReach: Reach[] = [];
         /** What each account is answered by privileged-looking API endpoints (access-control checks of the API). */
         let apiAccess: ApiAccessRow[] = [];
+        /** Record ids each account's documented list endpoints hold (same-level API checks). */
+        let apiLists: ApiListRow[] = [];
         const from = req.plan ?? req.resume;
         // Site memory informs the prompts below and the change summary, and (reuse on) where the sign-in page is.
         const memory = await openMemory(ctx, sink, { origin, enabled: req.useMemory !== false, secrets: secretValues(req), modelName: ctx.llm.modelName });
@@ -479,6 +484,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             specBaseTrusted = from.specBaseTrusted;
             accessReach = from.accessReach;
             apiAccess = from.apiAccess;
+            apiLists = from.apiLists ?? [];
             await sink.counters({ pagesDiscovered: pages.length, apisDiscovered: apis.length });
             await sink.saveModel(stored);
             summary.model = stored;
@@ -624,18 +630,29 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         apis.push(a);
                     }
                 }
-                // Who is answered by privileged-looking endpoints: one GET each as a visitor and per account with an API token.
-                if (wantApi && req.accessChecks !== false && req.roles?.some((r) => r.apiToken)) {
+                // Who is answered by privileged-looking endpoints: one GET each as a visitor and per account with an API token, or, when
+                // nothing has a token, per account signed in with a session of its own. The same accounts read the documented lists.
+                const projectCred = req.credentials;
+                const noTokens = !projectCred?.apiToken && !projectCred?.apiAuthHeader && !projectCred?.oauth2 && !req.roles?.some((r) => r.apiToken);
+                if (wantApi && req.accessChecks !== false && req.roles?.length && (noTokens || req.roles.some((r) => r.apiToken))) {
+                    const signed = noTokens ? await signedInRequests(ctx, browser, req.url, req.roles).catch((e: unknown) => (ctx.emit({ stage: "discovery", kind: "api_access_survey_failed", level: "warn", message: `Signing in the test accounts for the API access checks failed: ${e instanceof Error ? e.message : String(e)}` }), undefined)) : undefined;
                     try {
-                        const callable = apis.flatMap((a) => {
-                            if (a.method !== "GET") return [];
-                            const called = a.source === "openapi" ? fillApiPath(a.path, a) : (a.examplePath ?? a.path);
-                            return called && !called.includes("{") ? [{ method: a.method, path: a.path, called }] : [];
-                        });
-                        apiAccess = await surveyApiAccess(session.context.request, apiOrigin, callable, req.roles);
-                        ctx.emit({ stage: "discovery", kind: "api_access_survey_done", message: `API access survey: ${apiAccess.length} privileged-looking endpoints called as ${["a visitor", ...req.roles.filter((r) => r.apiToken).map((r) => r.name)].join(", ")}` });
+                        if (!noTokens || signed) {
+                            const callable = apis.flatMap((a) => {
+                                if (a.method !== "GET") return [];
+                                const called = a.source === "openapi" ? fillApiPath(a.path, a) : (a.examplePath ?? a.path);
+                                return called && !called.includes("{") ? [{ method: a.method, path: a.path, called, statuses: a.statuses }] : [];
+                            });
+                            const sessions = signed?.sessions;
+                            apiAccess = await surveyApiAccess(session.context.request, apiOrigin, callable, req.roles, 12, sessions);
+                            const viewers = req.roles.flatMap((r): Array<{ name: string; request: ApiRequester; headers?: Record<string, string> }> => (r.apiToken ? [{ name: r.name, request: session.context.request, headers: { Authorization: `Bearer ${r.apiToken}` } }] : sessions?.has(r.name) ? [{ name: r.name, request: sessions.get(r.name)! }] : []));
+                            apiLists = await surveyApiLists(viewers, apiOrigin, apis.map((a) => ({ method: a.method, path: a.path, called: a.path, statuses: a.statuses })));
+                            ctx.emit({ stage: "discovery", kind: "api_access_survey_done", message: `API access survey: ${apiAccess.length} privileged-looking endpoints and ${apiLists.length} lists called as ${["a visitor", ...viewers.map((v) => v.name)].join(", ")}` });
+                        }
                     } catch (e) {
                         ctx.emit({ stage: "discovery", kind: "api_access_survey_failed", level: "warn", message: `API access survey failed: ${e instanceof Error ? e.message : String(e)}` });
+                    } finally {
+                        await signed?.close();
                     }
                 }
                 for (const a of apis.filter((x) => x.source === "network")) {
@@ -683,7 +700,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 await session.close();
             }
             // Checkpoint: a stop from here on keeps what the crawl found (GenerationRequest.resume).
-            if (summary.model && req.planOnly) await saveCheckpoint(ctx, sink, { version: 1, stage: "discovered", model: summary.model, specBaseTrusted, accessReach, apiAccess });
+            if (summary.model && req.planOnly) await saveCheckpoint(ctx, sink, { version: 1, stage: "discovered", model: summary.model, specBaseTrusted, accessReach, apiAccess, apiLists });
         }
         throwIfAborted(ctx.signal);
 
@@ -741,7 +758,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 await sink.phase("ANALYZING", "understanding", "done");
                 throwIfAborted(ctx.signal);
                 // Checkpoint: a stop during planning keeps the AI's reading of the application too.
-                if (!understood && req.planOnly) await saveCheckpoint(ctx, sink, { version: 1, stage: "understood", model, specBaseTrusted, accessReach, apiAccess });
+                if (!understood && req.planOnly) await saveCheckpoint(ctx, sink, { version: 1, stage: "understood", model, specBaseTrusted, accessReach, apiAccess, apiLists });
 
                 await sink.phase("PLANNING", "planning", "running");
                 const warningsBefore = summary.errors.length;
@@ -820,7 +837,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             // The person looks at the plan and chooses; nothing is generated or run until they do.
             await sink.phase("GENERATING", "generation", "skipped");
             await sink.phase("VALIDATING", "validation", "skipped");
-            summary.plan = { version: 1, createdAt: new Date().toISOString(), model, scenarios, analysed, ...(requirementIds.length ? { requirementIds } : {}), specBaseTrusted, accessReach, apiAccess, warnings: [...summary.errors] };
+            summary.plan = { version: 1, createdAt: new Date().toISOString(), model, scenarios, analysed, ...(requirementIds.length ? { requirementIds } : {}), specBaseTrusted, accessReach, apiAccess, apiLists, warnings: [...summary.errors] };
             await sink.counters({ llmInputTokens: ctx.llm.usage.inputTokens, llmOutputTokens: ctx.llm.usage.outputTokens });
             ctx.emit({ stage: "orchestration", kind: "plan_ready", message: `Plan ready: ${pages.length} pages, ${apis.length} API endpoints and ${scenarios.length} journeys planned. Nothing was created yet.` });
             return summary;
@@ -1264,13 +1281,18 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
 
             // 4b1. Access control for API endpoints (deterministic): a visitor or a lesser account must be refused.
-            if (req.accessChecks !== false && apiAccess.length) {
-                const access = generateApiAccessSpecs(apiAccess);
+            if (req.accessChecks !== false && (apiAccess.length || apiLists.length)) {
+                // A check made signed in without a token runs in a browser script (kind web); one with a token is an API script.
+                const apiHost = req.apiBaseUrl ? new URL(req.apiBaseUrl).origin : undefined;
+                const offHost = apiHost && apiHost !== new URL(req.url).origin ? { origin: apiHost } : {};
+                const tokens = (req.roles ?? []).filter((r) => r.apiToken).map((r) => r.name);
+                const access = [...generateApiAccessSpecs(apiAccess, { maxSpecs: 8, reach: accessReach, ...offHost }), ...generateApiListSpecs(apiLists, { tokens, ...offHost })];
                 for (const d of access) {
                     if (await carried(d)) continue;
-                    const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
-                    await persistNew(spec, "playwright-api", "PENDING", undefined, { access: true });
-                    pending.push({ spec, framework: "playwright-api" });
+                    const web = d.kind === "web";
+                    const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey(web ? "WEB" : "API") });
+                    await persistNew(spec, web ? "playwright" : "playwright-api", "PENDING", undefined, { access: true });
+                    pending.push({ spec, framework: web ? "playwright" : "playwright-api" });
                 }
                 if (access.length) ctx.emit({ stage: "generation", kind: "api_access_tests_generated", message: `${access.length} API access-control checks generated` });
             }
@@ -1345,7 +1367,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // 4d3. Passive security checks (deterministic, GET-only) for the application origin.
         // 4d2a. Access control (deterministic): pages some account reached that a lesser account (or a visitor) may not open.
         if (wantWeb && req.accessChecks !== false && accessReach.length > 1) {
-            const access = generateAccessSpecs(accessReach, { maxSpecs: 8, maxOrdinary: 3, appUrl: req.url, ...(req.apiBaseUrl ? { apiHosts: [req.apiBaseUrl] } : {}) });
+            const apiHost = req.apiBaseUrl ? new URL(req.apiBaseUrl).origin : undefined;
+            const access = [
+                ...generateAccessSpecs(accessReach, { maxSpecs: 8, maxOrdinary: 3, appUrl: req.url, ...(req.apiBaseUrl ? { apiHosts: [req.apiBaseUrl] } : {}) }),
+                // The session ends on sign-out: needs a sign-out the app documents or shows (identity/session-end.ts).
+                ...generateSessionEndSpecs({ apis, reach: accessReach, ...(apiHost && apiHost !== new URL(req.url).origin ? { origin: apiHost } : {}) }),
+            ];
             for (const d of access) {
                 if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });
