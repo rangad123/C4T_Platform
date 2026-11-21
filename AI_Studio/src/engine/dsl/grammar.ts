@@ -144,7 +144,7 @@ export const PHRASES: readonly PhraseDef[] = [
     { id: "access", group: HEALTH, for: "web", about: "A page is closed to people who may not see it. The setting is the JSON the access check takes.", template: "Expect access to the page to be restricted as {expected:str}", example: 'Expect access to the page to be restricted as "{\\"as\\":\\"anonymous\\",\\"path\\":\\"/admin\\"}"', fixed: a("accessDenied"), absent: ["locator"] },
 
     // ── calling an API ─────────────────────────────────────────────────
-    { id: "request", group: CALL, for: "api", about: "Send a request. Add with the query, with the header, with the body (JSON), without signing in, and remember a value of the answer for later steps.", template: "Send a {method:method} request to {path:url}{opts:reqopts}", example: 'Send a POST request to /api/orders with the header "X-Trace" = "1" with the body {"sku":"A1"} and remember "orderId" from "id"', fixed: { action: "request" } },
+    { id: "request", group: CALL, for: "both", about: "Send a request. Add with the query, with the header, with the body (JSON), without signing in, and remember a value of the answer for later steps.", template: "Send a {method:method} request to {path:url}{opts:reqopts}", example: 'Send a POST request to /api/orders with the header "X-Trace" = "1" with the body {"sku":"A1"} and remember "orderId" from "id"', fixed: { action: "request" } },
 
     // ── checking the answer ────────────────────────────────────────────
     { id: "answer-status-below", group: ANSWER, for: "api", about: "The status is lower than this number (500 means no server error).", template: "Expect the status to be below {expected:scalar}", example: "Expect the status to be below 500", fixed: r("statusBelow") },

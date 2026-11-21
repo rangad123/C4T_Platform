@@ -35,6 +35,8 @@ export const CAPTURE_STATES = ["captured", "observed_only"] as const;
  */
 export const INDEPENDENCE_RESULTS = ["independent", "state_dependent", "not_run", "not_on_clean_state"] as const;
 export const FINDING_CONFIDENCE = ["high", "medium", "low"] as const;
+/** The layers a UI–API finding's evidence names (web/correlation.ts LayerSays). */
+export const FINDING_LAYERS = ["page", "api", "stored data"] as const;
 export type CaptureState = (typeof CAPTURE_STATES)[number];
 export type IndependenceResult = (typeof INDEPENDENCE_RESULTS)[number];
 export type FindingConfidence = (typeof FINDING_CONFIDENCE)[number];
@@ -64,6 +66,11 @@ export const CandidateFindingSchema = z
                 /** Request/response summaries ("POST /api/cart -> 500"). */
                 requests: z.array(text(L.lineMax)).max(L.requestsMax),
                 console: z.array(text(L.lineMax)).max(L.consoleMax),
+                /** A UI–API check (Phase 4 C4): what each layer that disagreed showed (the page, the API, the stored data read through the API). */
+                layers: z
+                    .array(z.object({ layer: z.enum(FINDING_LAYERS), observed: text(L.lineMax) }).strict())
+                    .max(3)
+                    .optional(),
             })
             .strict(),
         capture: z.enum(CAPTURE_STATES),
