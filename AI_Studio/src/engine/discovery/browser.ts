@@ -6,7 +6,7 @@
  * here: cross-host *document* navigations are aborted at the network layer (context.route)
  * instead of being stopped after they start. Each session watches its page's API traffic (./network.ts).
  */
-import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
+import { maskObservedText, maskSnapshot, observedTextSecrets } from "../evidence/observed-text.js";
 import { chromium, type Browser, type BrowserContext, type Dialog, type Page, type Request } from "playwright";
 import type { SiteNote } from "../memory/notes.js";
 import { installOverlayHandlers, overlayRules } from "../web/interruptions.js";
@@ -330,7 +330,7 @@ export async function launchChromium(headless = true): Promise<Browser> {
 /** Accessibility-tree snapshot used as the LLM-facing page representation (autospec's approach). */
 export async function ariaSnapshot(page: Page, maxChars = 12_000): Promise<string> {
     try {
-        const snap = await page.locator("body").ariaSnapshot({ timeout: 5_000 });
+        const snap = maskSnapshot(await page.locator("body").ariaSnapshot({ timeout: 5_000 }));
         return snap.length > maxChars ? snap.slice(0, maxChars) + "\n…(truncated)" : snap;
     } catch {
         return "(accessibility snapshot unavailable)";

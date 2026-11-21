@@ -136,7 +136,9 @@ describe("smaller page snapshots in the authoring agent", () => {
         expect(on.prompts[0]).toContain('link \\"Products\\" [url=/products]');
         const results = toolResults(on.prompts[on.prompts.length - 1]!);
         expect(results[0]).toContain("changed:");
-        expect(results[0]).toContain("demo@example.com");
+        // The typed e-mail shows as changed but masked: the AI never sees the sign-in name (leak fix L-2/L-3).
+        expect(results[0]).toContain("[hidden]");
+        expect(results.join("")).not.toContain("demo@example.com");
         expect(results[1]).toContain("nothing changed since your last look");
 
         const offResults = toolResults(off.prompts[off.prompts.length - 1]!).join("").length;

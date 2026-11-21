@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { frameHub } from "./frame-hub.js";
 import { jobsWaitingForRunner } from "./agent-services.js";
-import { runJob, type RunnerDeps } from "./job-runner.js";
+import { cleanScratch, runJob, type RunnerDeps } from "./job-runner.js";
 import { diskFreeBytes } from "./ops/health.js";
 import { loadOpsSettings } from "./ops/settings.js";
 import type { JobMode } from "./repo.js";
@@ -94,6 +94,8 @@ export class Worker {
         }
         const reclaimed = this.deps.repo.reclaimStaleJobs();
         if (reclaimed) console.warn(`[worker] re-queued ${reclaimed} orphaned job(s)`);
+        // Scratch folders an earlier process left behind (it stopped before its jobs ended) hold page snapshots and traces: they go.
+        void cleanScratch(this.deps.config.scratchDir, this.deps.repo).catch(() => undefined);
         void this.loop();
     }
 

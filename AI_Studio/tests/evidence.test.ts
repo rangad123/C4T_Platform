@@ -244,12 +244,11 @@ describe("nothing secret is stored anywhere", () => {
         expect(found).toEqual([]);
     });
 
-    it("the evidence files and the Playwright reports the scripts wrote are clean too", () => {
+    it("the evidence files and the Playwright reports the scripts wrote are gone with their job's run folder", () => {
         const scratch = path.join(REPO_ROOT, ".validation");
+        // A job's run folders are removed when the job ends (P5 L-8); what was stored from them is checked above.
         const files = filesUnder(scratch, startedAt).filter((f) => /(-evidence\.json|report\.json)$/.test(f));
-        expect(files.some((f) => f.endsWith("-evidence.json"))).toBe(true);
-        const found = files.flatMap((f) => leaks(fs.readFileSync(f)).map((s) => `${s} in ${path.relative(scratch, f)}`));
-        expect(found).toEqual([]);
+        expect(files.map((f) => path.relative(scratch, f))).toEqual([]);
     });
 });
 

@@ -87,6 +87,11 @@ export interface ExecutionOptions {
      * ../browsers/choice.ts). It goes into the run's Playwright config, never into the test file. Unset: Playwright's own Chromium, as before.
      */
     browser?: BrowserLaunch;
+    /**
+     * Playwright frameworks only: false records no video. Verification attempts set it (spec Q6: a recording shows every value on screen and
+     * cannot be masked). Unset: every test is recorded, as before.
+     */
+    video?: false;
 }
 
 /**

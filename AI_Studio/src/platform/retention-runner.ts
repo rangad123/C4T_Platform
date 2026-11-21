@@ -59,6 +59,7 @@
 import { formatBytes, previewSentence } from "../engine/retention/format.js";
 import { retentionLimits, type RetentionPolicy } from "../engine/retention/policy.js";
 import { DAY_MS, DETAILS_EXPIRED, GRACE_DAYS, graceHolds, expiredEventData, expiredReason, isExpired, originPath, planPrune, type PrunePlan, type RetentionArtifact, type RetentionExecution } from "../engine/retention/rules.js";
+import type { FindingState } from "../engine/findings/lifecycle.js";
 import type { Platform } from "./bootstrap.js";
 import { wasCancelled } from "./cancel-summary.js";
 import type { Db, Row } from "./db.js";
@@ -209,16 +210,43 @@ function expiredSummaries(p: Platform, projectId: string, policy: RetentionPolic
         });
 }
 
+/** A finding in one of these states is closed: its evidence is kept keepFailedDays more, then expires as usual (rules.ts finding hold). */
+export const CLOSED_FINDING_STATES: readonly FindingState[] = ["reported", "duplicate", "not_a_bug"];
+
+/**
+ * The finding hold's input: each test with a finding -> null while any of its findings is open, else when the last one was closed (its
+ * move into the closed state; a finding with no such event counts from its last update).
+ */
+function findingHolds(p: Platform, projectId: string): Map<string, number | null> {
+    const closed = CLOSED_FINDING_STATES.map(() => "?").join(",");
+    const rows = p.db.all<Row>(
+        `SELECT f.test_id, f.state IN (${closed}) AS closed,
+                COALESCE((SELECT MAX(e.at) FROM finding_events e WHERE e.finding_id = f.id AND e.to_state = f.state), f.updated_at) AS closed_at
+           FROM candidate_findings f WHERE f.project_id = ? AND f.test_id IS NOT NULL`,
+        ...CLOSED_FINDING_STATES,
+        projectId,
+    );
+    const out = new Map<string, number | null>();
+    for (const r of rows) {
+        const test = r.test_id as string;
+        const at = Number(r.closed) ? ms(r.closed_at as string) : null;
+        const was = out.get(test);
+        out.set(test, at === null || was === null ? null : Math.max(at, was ?? 0));
+    }
+    return out;
+}
+
 /** Everything the rules need, read from the database for one project. */
 export function planFor(p: Platform, projectId: string, policy: RetentionPolicy, now: number): FullPlan {
     const execRows = p.db.all<Row>(
-        `SELECT e.id, e.status, e.started_at,
+        `SELECT e.id, e.test_case_id, e.status, e.started_at,
                 CASE WHEN (e.error IS NOT NULL AND NOT ${skipReason("e")}) OR EXISTS (SELECT 1 FROM test_execution_steps s WHERE s.execution_id = e.id AND s.error IS NOT NULL) THEN 1 ELSE 0 END AS details
            FROM test_executions e JOIN test_cases t ON t.id = e.test_case_id WHERE t.project_id = ?`,
         projectId,
     );
-    const executions: RetentionExecution[] = execRows.map((r) => ({ id: r.id, startedAt: ms(r.started_at), passed: r.status === "passed", details: Number(r.details) === 1 }));
+    const executions: RetentionExecution[] = execRows.map((r) => ({ id: r.id, startedAt: ms(r.started_at), passed: r.status === "passed", details: Number(r.details) === 1, testId: r.test_case_id ?? null }));
     const startedAt = new Map(executions.map((e) => [e.id, e.startedAt]));
+    const testOf = new Map(executions.map((e) => [e.id, e.testId]));
 
     // An agent run's screenshots have no test run: their age counts from the job they belong to (rules.ts, rule 2).
     const rows = p.db.all<Row>(
@@ -234,10 +262,11 @@ export function planFor(p: Platform, projectId: string, policy: RetentionPolicy,
         executionId: r.execution_id ?? null,
         at: (r.execution_id ? startedAt.get(r.execution_id) : undefined) ?? (ms(r.job_at) || ms(r.created_at)),
         createdAt: ms(r.created_at),
+        testId: (r.test_case_id as string | null) ?? (r.execution_id ? (testOf.get(r.execution_id) ?? null) : null),
     }));
 
     const graceFrom = retentionStart(p.db);
-    const plan = planPrune({ now, policy, executions, artifacts, ...(graceFrom !== undefined ? { graceFrom } : {}) });
+    const plan = planPrune({ now, policy, executions, artifacts, findingHolds: findingHolds(p, projectId), ...(graceFrom !== undefined ? { graceFrom } : {}) });
     const tests = new Map(p.db.all<Row>("SELECT id, test_key FROM test_cases WHERE project_id = ?", projectId).map((r) => [r.id as string, r.test_key as string]));
     const other = otherRecordWrites(p, projectId, policy, now, graceFrom);
     const summaries = expiredSummaries(p, projectId, policy, now, graceFrom).map((x) => x.jobId);
@@ -284,7 +313,9 @@ export function publicPlan(policy: RetentionPolicy, full: FullPlan) {
         graceRecordsNote: full.graceRecords ? `The details of ${full.graceRecords === 1 ? "1 record" : `${full.graceRecords} records`} from before retention was first switched on are kept for the first ${GRACE_DAYS} days too.` : null,
         graceUntil: iso(full.graceUntil),
         heldBytes: plan.heldBytes,
-        sizeLimitNote: policy.maxArtifactMB && plan.heldBytes > 0 ? `The ${policy.maxArtifactMB} MB size limit does not count the ${formatBytes(plan.heldBytes)} of files kept ${plan.grace && plan.undated ? "for the first days or for an unreadable time" : plan.grace ? `for the first ${GRACE_DAYS} days` : "for an unreadable time"}, so they do not push newer files out.` : null,
+        sizeLimitNote: policy.maxArtifactMB && plan.heldBytes > 0 ? `The ${policy.maxArtifactMB} MB size limit does not count the ${formatBytes(plan.heldBytes)} of files kept ${plan.grace && plan.undated ? "for the first days or for an unreadable time" : plan.grace ? `for the first ${GRACE_DAYS} days` : plan.undated ? "for an unreadable time" : "as a finding's evidence"}, so they do not push newer files out.` : null,
+        findingHeld: plan.findingHeld,
+        findingHeldNote: plan.findingHeld ? `${plan.findingHeld === 1 ? "1 file is" : `${plan.findingHeld} files are`} kept as the evidence of a finding that is still open, or was closed less than ${policy.keepFailedDays} days ago.` : null,
         undated: plan.undated,
         undatedNote: plan.undated ? `${plan.undated === 1 ? "1 file is" : `${plan.undated} files are`} kept because the time of ${plan.undated === 1 ? "its run" : "their runs"} could not be read.` : null,
     };

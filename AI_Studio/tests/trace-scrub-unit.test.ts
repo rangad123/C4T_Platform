@@ -384,3 +384,55 @@ describe("round 40 review: what the cleaner missed or got wrong", () => {
 });
 
 const traceFormsInclude = (secrets: string[], v: string): boolean => traceSecretForms(secrets).includes(v);
+
+describe("the values a trace itself shows to be secret are masked too (P5 L-1)", () => {
+    // None of these is a secret of the run: the trace shows them to be secret by where they stand.
+    const SHOWN = {
+        cookie: "sessCk9q2LmX",
+        setCookie: "rememberMe7Zp",
+        header: "hdrKey4Tq8Lp",
+        token: "tokVal3Rr9Mn",
+        field: "fieldTok5Ww2",
+        jsonKey: "jsKeyPw8Uu1",
+        email: "jo.shown@people.example",
+        phone: "+1 415 555 0199",
+        card: "4000 0012 3400 7011",
+        dbPw: "DbShownPw77",
+    };
+    const ORDINARY = "Ordinary page words";
+    function shownTrace(): Uint8Array {
+        const net = {
+            type: "resource-snapshot",
+            snapshot: {
+                request: { url: `https://app.example/api?email=${encodeURIComponent(SHOWN.email)}&page=2`, headers: [{ name: "cookie", value: `sid=${SHOWN.cookie}; theme=dark` }, { name: "x-api-key", value: SHOWN.header }] },
+                response: { headers: [{ name: "set-cookie", value: `remember=${SHOWN.setCookie}; Path=/; HttpOnly` }, { name: "x-session-token", value: `Bearer ${SHOWN.token}` }] },
+            },
+        };
+        const snapshot = { type: "frame-snapshot", snapshot: { html: ["BODY", {}, ["INPUT", { autocomplete: "one-time-code", id: "c1", value: SHOWN.field, __playwright_value_: SHOWN.field }], ["INPUT", { name: "city", value: "Springfield" }], ["P", {}, ORDINARY]] } };
+        const files = {
+            "1-trace.trace": strToU8([snapshot, { type: "console", text: `phone: ${SHOWN.phone}, card ${SHOWN.card}, restored ${SHOWN.setCookie}` }].map((x) => JSON.stringify(x)).join("\n")),
+            "1-trace.network": strToU8(JSON.stringify(net)),
+            "resources/aa.json": strToU8(JSON.stringify({ profile: { password: SHOWN.jsonKey, dsn: `postgres://shop:${SHOWN.dbPw}@db.internal/shop` } })),
+        };
+        return zipSync(Object.fromEntries(Object.entries(files).map(([k, v]) => [k, [v, { level: 6 }]])));
+    }
+    const allText = (z: Uint8Array) => Object.values(unzipSync(z)).map((b) => Buffer.from(b).toString("utf8")).join("\n");
+
+    it("cookies, secret-named headers and JSON keys, secret fields and what the shared redaction finds are masked; the rest stays", async () => {
+        const file = path.join(tmp, "shown.zip");
+        fs.writeFileSync(file, shownTrace());
+        const r = await scrubTraceFile(file, []);
+        expect(r.ok).toBe(true);
+        const text = allText(fs.readFileSync(file));
+        for (const [kind, v] of Object.entries(SHOWN)) expect(text.includes(v) || text.includes(encodeURIComponent(v)), kind).toBe(false);
+        for (const kept of [ORDINARY, "Springfield", "theme=dark", "page=2", "x-api-key"]) expect(text, kept).toContain(kept);
+    });
+
+    it("a run with no secrets of its own still has its traces cleaned", async () => {
+        const file = path.join(tmp, "shown-run.zip");
+        fs.writeFileSync(file, shownTrace());
+        const runs = [{ artifacts: [{ kind: "trace", path: file }] }];
+        expect(await scrubRunTraces(runs, [])).toBe(0);
+        expect(allText(fs.readFileSync(file)).includes(SHOWN.cookie)).toBe(false);
+    });
+});
