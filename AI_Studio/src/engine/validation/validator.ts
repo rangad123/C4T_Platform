@@ -540,7 +540,9 @@ export function deterministicFinding(spec: TestSpec, run: ScriptRun): string | u
 /**
  * Deterministic classification of API failures that are application findings, not test bugs:
  *  - any 5xx response (a server error is never the correct answer);
- *  - a "no credentials" test whose endpoint answered 2xx (documented auth not enforced).
+ *  - a "no credentials" test whose endpoint answered 2xx (documented auth not enforced);
+ *  - a documented case (C2, tag "documented") whose documented refusal status was answered with a success: the request breaks a rule the
+ *    API document states and the API accepted it. Another refusal status than the documented one stays with the repair loop.
  */
 export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     const failed = run.steps.find((s) => s.status === "failed");
@@ -555,6 +557,10 @@ export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     const noAuth = spec.steps.slice(0, failed.index + 1).some((s) => s.action === "request" && s.auth === "none");
     if (spec.tags.includes("auth") && noAuth && last.status >= 200 && last.status < 300) {
         return `Possible security issue: ${last.method} ${last.path} is documented as requiring authentication but returned ${last.status} without credentials.`;
+    }
+    const step = spec.steps[failed.index];
+    if (spec.tags.includes("documented") && step?.action === "assertResponse" && step.check === "status" && last.status >= 200 && last.status < 300) {
+        return `The API does not keep a rule its document states: its document says HTTP ${String(step.expected)} for this request, and ${last.method} ${last.path} accepted it with HTTP ${last.status} (step "${failed.title}").`;
     }
     return undefined;
 }

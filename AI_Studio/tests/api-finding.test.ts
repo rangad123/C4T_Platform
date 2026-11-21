@@ -35,6 +35,15 @@ describe("apiFinding", () => {
     it("flags a no-credentials test that got 2xx as a security issue", () => {
         expect(apiFinding(spec(["api", "auth"], "none"), run(200))).toMatch(/security issue/);
     });
+    it("a documented case (C2) whose documented status was answered with a success: the API does not keep a rule its document states", () => {
+        const documented = (tags: string[]) =>
+            TestSpecSchema.parse({ testId: "API-001", title: "POST /x: rejects", kind: "api", tags, steps: [{ action: "request", method: "POST", path: "/x" }, { action: "assertResponse", check: "status", expected: 400 }] });
+        expect(apiFinding(documented(["validation", "documented"]), run(201))).toMatch(/document says HTTP 400.*accepted.*HTTP 201/);
+        // another refusal than the documented one, an undocumented case, or a status-class check: left to the repair loop as before
+        expect(apiFinding(documented(["validation", "documented"]), run(422))).toBeUndefined();
+        expect(apiFinding(documented(["validation"]), run(201))).toBeUndefined();
+        expect(apiFinding(spec(["documented"], "default"), run(200))).toBeUndefined();
+    });
     it("leaves ordinary expectation mismatches to the repair loop", () => {
         expect(apiFinding(spec(["api"], "default"), run(404))).toBeUndefined();
         expect(apiFinding(spec(["api", "auth"], "none"), run(404))).toBeUndefined();
