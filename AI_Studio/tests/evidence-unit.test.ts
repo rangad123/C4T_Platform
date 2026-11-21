@@ -145,7 +145,8 @@ describe("sanitizeEvidence: an attachment is never trusted", () => {
         const forms = [Buffer.from(pw).toString("hex"), pw.toUpperCase(), "Hunt3r=21pw22", "Hunt3r\n!pw22"];
         const e = good();
         e.console[0]!.text = `echo ${forms.join(" | ")}`;
-        e.requests[1]!.path = `/api/echo/${forms[0]}`;
+        // Upper case in the path: the pattern rules would hide the long hex part of a path on their own, so only the run's secrets catch this.
+        e.requests[1]!.path = `/api/echo/${forms[1]}`;
         const out = JSON.stringify(sanitizeEvidence(e, [pw]));
         for (const f of forms) expect(out).not.toContain(JSON.stringify(f).slice(1, -1));
     });

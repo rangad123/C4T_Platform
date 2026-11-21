@@ -26,7 +26,6 @@ const FORMS: Record<string, string> = {
     "lower case": PW.toLowerCase(),
     "HTML decimal entity": "Hunt3r&#33;pw22",
     "HTML hex entity": "Hunt3r&#x21;pw22",
-    "twice URL-encoded": encodeURIComponent(encodeURIComponent(PW)),
     "split across a line": "Hunt3r\n!pw22",
     "split across a Windows line": "Hun\r\nt3r!pw22",
     "split, JSON-escaped": "Hunt3r!p\\nw22",
@@ -42,6 +41,13 @@ describe("T-9: every form of a run's secret is masked by value", () => {
             expect(maskAction(`navigate http://127.0.0.1:9/s/${form}`, [PW])).not.toContain(form);
         });
     }
+
+    it("twice URL-encoded (with a character that encoding changes: `!` stays as it is)", () => {
+        const pw = "Hunt3r#pw22";
+        const twice = encodeURIComponent(encodeURIComponent(pw));
+        expect(twice).toBe("Hunt3r%2523pw22");
+        expect(maskText(`the link was /go/${twice} again`, [pw])).toBe("the link was /go/[hidden] again");
+    });
 
     it("an HTML-escaped echo of a password with & and \" in it (named entities)", () => {
         const pw = `Tr0ub&dor"x9`;
