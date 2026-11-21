@@ -14,6 +14,7 @@ import { createdFileName } from "../cleanup/helper.js";
 import { EVIDENCE_ATTACHMENT } from "../evidence/capture.js";
 import { parseEvidence, secretsOfRun } from "../evidence/model.js";
 import { scrubRunTraces, traceSecretsOfRun } from "../evidence/trace-scrub.js";
+import { maskSnapshot } from "../evidence/observed-text.js";
 import { PROOF_SHOT_STYLE } from "../evidence/proof-style.js";
 import { parseCreatedLog, type CreatedLine } from "../cleanup/ledger.js";
 import { parseMetrics } from "../performance/specs.js";
@@ -582,7 +583,8 @@ export async function runScripts(
     const evidenceTexts = new Map<string, string>();
     const runs = await parseReport(runDir, scripts, stderr, timedOut, "Playwright", projects.map((p) => p.name), evidenceTexts);
     await storeEvidence(runDir, runs, evidenceTexts, [...secretsOfRun(env), ...extras.secrets]);
-    for (const run of runs) if (run.errorContext) run.errorContext = maskSecrets(run.errorContext, [...traceSecretsOfRun(env), ...extras.secrets]);
+    // The page snapshot at the failure is read by repair (an AI prompt): field values and the shared redaction's kinds go as well.
+    for (const run of runs) if (run.errorContext) run.errorContext = maskSnapshot(maskSecrets(run.errorContext, [...traceSecretsOfRun(env), ...extras.secrets]));
     // Failure traces keep what the test typed and what the browser sent: masked with the run's secrets, or not kept (../evidence/trace-scrub.ts).
     await scrubRunTraces(runs, [...traceSecretsOfRun(env), ...extras.secrets]);
     // Records data-changing API tests created: written as they happened, so a run that was killed still reports them.

@@ -18,7 +18,7 @@ export function normalizeApiPath(pathname: string): string {
  * Field and query-parameter names whose values are credentials or personal secrets. Short words only match the whole
  * name, so ordinary fields (postcode, author, spinner) keep their values.
  */
-const SECRET_NAME = /pass(word)?|secret|token|authoriz|api[-_]?key|session|signature|card|cvv|cvc|cookie|^(auth|sig|otp|pin|code)$/i;
+const SECRET_NAME = /pass(word)?|secret|token|bearer|authoriz|api[-_]?key|session|signature|card|cvv|cvc|cookie|^(auth|sig|otp|pin|code)$/i;
 
 const REDACTED = "[redacted]";
 /** How far into a JSON body the redaction and the shape description go, and how many array items a sample keeps. */

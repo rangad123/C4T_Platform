@@ -38,6 +38,8 @@ export default defineConfig({
             "tests/runner-owner-unit.test.ts",
             "tests/runner-reset-migration.test.ts",
             "tests/trace-scrub-unit.test.ts",
+            "tests/redact-widened-unit.test.ts",
+            "tests/scratch-cleanup-unit.test.ts",
             "tests/runner-resources-unit.test.ts",
             "tests/runner-untrusted-unit.test.ts",
             "tests/approval-deps.test.ts",
