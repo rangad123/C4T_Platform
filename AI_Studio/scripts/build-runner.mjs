@@ -38,7 +38,7 @@ export const NODE_MIN = 24;
 /** Packages whose code is copied into the bundle (everything esbuild followed into node_modules). */
 // Round 51: an exploration runs the engine on the runner (src/agent/explore-child.ts), which brings the AI SDK and what it imports.
 // @ai-sdk/provider-utils ships without a LICENSE file: it is part of the AI SDK, under the same Apache-2.0 licence as "ai" listed here.
-export const BUNDLED_LICENCES = ["zod", "yaml", "fflate", "ai", "@ai-sdk/gateway", "@ai-sdk/provider", "eventsource-parser", "@opentelemetry/api", "@vercel/oidc"];
+export const BUNDLED_LICENCES = ["zod", "yaml", "fflate", "ai", "@ai-sdk/gateway", "@ai-sdk/provider", "eventsource-parser", "@opentelemetry/api", "@vercel/oidc", "fast-check", "pure-rand"];
 
 /** A package's folder as Node finds it from `root`: root/node_modules first, then each parent folder's node_modules (as esbuild does). */
 function packageDir(name, root) {
