@@ -146,6 +146,23 @@ describe("OpenAPI document -> model fragment", () => {
         for (const e of f.model.entities) expect(e, e.name).toMatchObject({ sourceType: "openapi", explicitness: "explicit" });
     });
 
+    it("bench-shop's full served document, with its component schemas: each schema is an entity the document states, with its fields", () => {
+        const doc = benchShopOpenApi();
+        const f = openApiFragment(doc, { ref: "shop.json" });
+        expect(() => ModelFragmentSchema.parse(f)).not.toThrow();
+        const stated = f.model.entities.filter((e) => e.sourceType === "openapi");
+        expect(stated.map((e) => e.name).sort()).toEqual(Object.keys(doc.components.schemas).sort());
+        for (const e of stated) expect(e, e.name).toMatchObject({ explicitness: "explicit" });
+        // /api/cart/items/{productId} has no schema of that name ("Line" is not "cart item"), so it is still inferred from its path.
+        expect(f.model.entities.filter((e) => e.sourceType !== "openapi").map((e) => [e.name, e.explicitness])).toEqual([["cart item", "inferred"]]);
+        const order = f.model.entities.find((e) => e.name === "Order")!;
+        expect(order.evidence).toEqual([{ kind: "openapi", ref: "shop.json#/components/schemas/Order" }]);
+        expect(order.fields.find((x) => x.name === "status")).toEqual({ name: "status", type: "string", constraints: ["required", "one of: placed, paid, shipped, cancelled"] });
+        expect(order.fields.find((x) => x.name === "lines")!.type).toBe("Line[]");
+        expect(f.model.entities.find((e) => e.name === "Line")!.fields.find((x) => x.name === "quantity")!.constraints).toEqual(["required", "minimum 1", "maximum 10"]);
+        expect(f.model.entities.find((e) => e.name === "Profile")!.fields.find((x) => x.name === "address")!.constraints).toEqual(["required", "maxLength 200"]);
+    });
+
     it("without component schemas, a collection addressed by id is an entity inferred from its path, with the fields its request bodies name", () => {
         // bench-shop's document without its component schemas (it has them since the Phase 4 bench extension).
         const { components: _schemas, ...withoutSchemas } = benchShopOpenApi();
