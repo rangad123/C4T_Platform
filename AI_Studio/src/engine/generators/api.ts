@@ -16,6 +16,7 @@ import { dataDeclaration, dataRowsFor, dataSetDeclaration, expr, fileHeader, lit
 import { CLEANUP_HELPER_SOURCE, canCreateRecords, cleanupScriptSource, deleteOperationsOfSpec, mergeOperations } from "../cleanup/helper.js";
 import { CONTRACT_HELPER_SOURCE } from "../contracts/check.js";
 import { RELATION_HELPER_SOURCE } from "../validation/relation.js";
+import { PARALLEL_HELPER_SOURCE } from "../api/concurrency.js";
 import { DB_CHECK_NOT_YET } from "../web/checks.js";
 import { DRIFT_HELPER_SOURCE } from "../contracts/drift.js";
 import { ACCESS_API_HELPER_SOURCE, ACCESS_HELPER_SOURCE } from "../identity/access.js";
@@ -245,6 +246,10 @@ function renderStep(step: Step, declared: Set<string>, prev?: Extract<Step, { ac
             const extract = Object.entries(step.extract ?? {})
                 .map(([name, path]) => `\n        data[${lit(name)}] = capture(last, ${lit(name)}, ${lit(path)});`)
                 .join("");
+            if (step.parallel !== undefined) {
+                if (step.extract) throw new Error("A request sent several times at once cannot remember values (its answer is a summary)");
+                return `${guard}last = await parallelCall(${Number(step.parallel)}, () => ${callExpr(step)});`;
+            }
             return `${guard}last = await call(request, ${lit(step.method)}, ${expr(step.path)}, { query: ${recordExpr(step.query)}, headers: ${recordExpr(step.headers)}, body: ${
                 step.body === undefined ? "undefined" : jsonExpr(step.body)
             }, auth: ${step.auth === "default"} });${extract}`;
@@ -348,7 +353,7 @@ const IGNORE_HTTPS_ERRORS = ${passive};
 const DRIFT_OBSERVE = ${!passive};
 ${signs ? `/** The named test account the API calls sign in as when there is no token ("" = the project's own account). */\nconst API_SIGN_IN_AS = ${lit(signInAs(spec))};\n` : ""}${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec)}
 ${helpers}
-${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "relation") ? `\n${RELATION_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${signs ? `\n${API_SIGN_IN_SOURCE}${ACCESS_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupSource}` : ""}
+${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "relation") ? `\n${RELATION_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "request" && s.parallel !== undefined) ? `\n${PARALLEL_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${signs ? `\n${API_SIGN_IN_SOURCE}${ACCESS_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupSource}` : ""}
 
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ request }) => {
 ${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n    // Each row is judged on its own responses.\n    responses.length = 0;\n    calls.length = 0;\n` : ""}    ${hasLoad ? "// A load check runs for about 10 seconds (twice at most), may wait its turn behind another load check, and waits for slow answers: far more than the default time limit.\n    test.setTimeout(180_000);\n    " : ""}let last!: Call;
