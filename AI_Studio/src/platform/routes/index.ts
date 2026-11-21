@@ -55,6 +55,7 @@ import { registerLiveSessionRoutes } from "./live-session.js";
 import { registerRecorderRoutes } from "./recorder.js";
 import { registerReportRoutes } from "./reports.js";
 import { registerSentryRoutes } from "./sentry.js";
+import { registerCodeHostRoutes } from "./code-host.js";
 import { registerSharedIntegrationRoutes } from "./shared-integrations.js";
 import { registerUsageRoutes } from "./usage.js";
 import { registerStreamRoutes } from "./stream.js";
@@ -116,6 +117,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     // One findings list with the lifecycle, security findings read only (routes/findings.ts, testing-engine Phase 5).
     registerFindingRoutes(ctx);
     registerSentryRoutes(ctx);
+    // A project's code repository on GitHub, for change-aware testing (routes/code-host.ts, Phase 6).
+    registerCodeHostRoutes(ctx);
     // Integrations set up once for an organisation, and the projects that use them (routes/shared-integrations.ts).
     registerSharedIntegrationRoutes(ctx);
     registerRetentionRoutes(ctx);
