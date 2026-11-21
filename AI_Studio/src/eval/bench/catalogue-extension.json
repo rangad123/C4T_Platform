@@ -2,6 +2,9 @@
     "version": "2026-11-21.1",
     "extends": "2026-11-14.1",
     "note": "Read only by the benchmark controller. Never give any of this to the application under test or to the test-generation engine. The bench extension: added to catalogue.json's defects when a run names --catalogue 2026-11-21.1, and scored apart from them (the extension score).",
+    "reachable": {
+        "BS-09": "The base marks it unreachable (row 233: API tests got no token). With Phase 4's API sign-in (T4) the API tests sign in, and Phase 4 CP1 detected it in 5 of 5 trials."
+    },
     "defects": [
         {
             "id": "BS-13", "app": "bench-shop", "workflow": "cart", "category": "frontend-api-consistency", "set": "extension",

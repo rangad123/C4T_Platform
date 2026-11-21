@@ -38,7 +38,10 @@ describe("the catalogue a run names", () => {
         expect(loadCatalogueVersion("2026-11-14.1")).toEqual(base);
         const ext = loadCatalogueVersion("2026-11-21.1");
         expect(ext.version).toBe("2026-11-21.1");
-        expect(ext.defects.slice(0, 20)).toEqual(base.defects);
+        // BS-09: unreachable in the base (row 233, no token); the extension lifts the mark (T4's API sign-in reaches it), nothing else changes.
+        const { unreachable: bs09Why, ...bs09 } = base.defects.find((d) => d.id === "BS-09")!;
+        expect(bs09Why).toMatch(/row 233/);
+        expect(ext.defects.slice(0, 20)).toEqual(base.defects.map((d) => (d.id === "BS-09" ? bs09 : d)));
         expect(ext.defects.slice(20).map((d) => [d.id, d.set])).toEqual(["BS-13", "BS-14", "BS-15", "BS-16", "BS-17", "BS-18", "BS-19", "BS-20", "BR-09", "BR-10", "BR-11"].map((id) => [id, "extension"]));
         expect(ext.defects.filter((d) => d.storedDataOnly).map((d) => d.id)).toEqual(["BS-18", "BR-11"]);
         expect(ext.sha256).not.toBe(base.sha256);
@@ -57,6 +60,9 @@ describe("the catalogue a run names", () => {
         expect(() => loadCatalogueVersion("2026-11-21.1", CATALOGUE_FILE, write({ ...ext, extends: "2026-01-01.1" }))).toThrow(/extends 2026-01-01.1/);
         expect(() => loadCatalogueVersion("2026-11-21.1", CATALOGUE_FILE, write({ ...ext, defects: [{ ...ext.defects[0], id: "BS-01" }] }))).toThrow(/BS-01/);
         expect(() => loadCatalogueVersion("2026-11-21.1", CATALOGUE_FILE, write({ ...ext, defects: [{ ...ext.defects[0], set: undefined }] }))).toThrow(/BS-13/);
+        // it may lift only an unreachable mark the base sets
+        expect(() => loadCatalogueVersion("2026-11-21.1", CATALOGUE_FILE, write({ ...ext, reachable: { ...ext.reachable, "BS-01": "x" } }))).toThrow(/BS-01/);
+        expect(() => loadCatalogueVersion("2026-11-21.1", CATALOGUE_FILE, write({ ...ext, reachable: { "BS-99": "x" } }))).toThrow(/BS-99/);
     });
 
     it("the command takes --catalogue and --roles catalogue, and nothing else for --roles", () => {
@@ -172,7 +178,8 @@ describe("the extension score is apart from the original score", () => {
         const before = fs.readdirSync(d);
         const lines: string[] = [];
         expect(await benchReportMain(["--rescore", d], { log: (s) => lines.push(s) })).toBe(0);
-        expect(lines.join("\n")).toMatch(/\| [^|]*a-benchmark-discovery\.json \| v2 → v2 \| 1 → 1 \| 2 → 1 \|/);
+        // 2026-11-21.1 lifts BS-09's unreachable mark: both original seeds are reachable (2 → 2). The base catalogue keeps it (2 → 1).
+        expect(lines.join("\n")).toMatch(/\| [^|]*a-benchmark-discovery\.json \| v2 → v2 \| 1 → 1 \| 2 → 2 \|/);
         expect(lines.join("\n")).toMatch(/Extension seeds \(scored apart from the original ones\):[\s\S]*\| [^|]*a-benchmark-discovery\.json \| 1 → 1 \| 1 of 2 \|/);
         lines.length = 0;
         expect(await benchReportMain(["--layers", d], { log: (s) => lines.push(s) })).toBe(0);
@@ -186,6 +193,11 @@ describe("the extension score is apart from the original score", () => {
         expect(out).toContain("| BS-18 | extension | no | - |");
         expect(out).toContain("Original seeds detected: 1 of 2. Extension seeds detected: 1 of 2.");
         expect(fs.readdirSync(d)).toEqual(before);
+        const b = tmp();
+        fs.writeFileSync(path.join(b, "b-benchmark-discovery.json"), JSON.stringify(run(result(["BS-01", "BS-09"], "2026-11-14.1 (abcdef012345)"))));
+        lines.length = 0;
+        expect(await benchReportMain(["--rescore", b], { log: (s) => lines.push(s) })).toBe(0);
+        expect(lines.join("\n")).toMatch(/\| [^|]*b-benchmark-discovery\.json \| v2 → v2 \| 1 → 1 \| 2 → 1 \|/);
     });
 });
 

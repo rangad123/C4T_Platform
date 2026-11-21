@@ -76,7 +76,7 @@ export const defectsOf = (c: Catalogue, app: string): CatalogueDefect[] => c.def
 
 /**
  * The catalogue a run names: the base file's version (the default), or the extension's, which is the base defects plus the extension's
- * (each marked `set: "extension"`), with a sha256 over both files.
+ * (each marked `set: "extension"`), with a sha256 over both files. The extension's `reachable` lifts base unreachable marks for its runs only.
  */
 export function loadCatalogueVersion(version: string | undefined, file = CATALOGUE_FILE, extensionFile = EXTENSION_CATALOGUE_FILE): Catalogue {
     const base = loadCatalogue(file);
@@ -89,7 +89,12 @@ export function loadCatalogueVersion(version: string | undefined, file = CATALOG
     const ids = new Set(base.defects.map((d) => d.id));
     const twice = ext.defects.filter((d) => ids.has(d.id) || d.set !== "extension").map((d) => d.id);
     if (twice.length) throw new Error(`The catalogue ${ext.version} must add new defects marked "set": "extension" only: ${twice.join(", ")}`);
-    return { version: ext.version, sha256: crypto.createHash("sha256").update(base.sha256).update(ext.sha256).digest("hex"), defects: [...base.defects, ...ext.defects], accounts: base.accounts };
+    // `reachable`: base defects the extension makes reachable again (id -> why); it may only lift a mark the base sets.
+    const reachable = (JSON.parse(text) as { reachable?: Record<string, string> }).reachable ?? {};
+    const notMarked = Object.keys(reachable).filter((id) => !base.defects.some((d) => d.id === id && d.unreachable));
+    if (notMarked.length) throw new Error(`The catalogue ${ext.version} can lift only an unreachable mark of the base catalogue: ${notMarked.join(", ")}`);
+    const baseDefects = base.defects.map((d) => (Object.hasOwn(reachable, d.id) ? (({ unreachable: _lifted, ...rest }) => rest)(d) : d));
+    return { version: ext.version, sha256: crypto.createHash("sha256").update(base.sha256).update(ext.sha256).digest("hex"), defects: [...baseDefects, ...ext.defects], accounts: base.accounts };
 }
 
 export const isExtension = (d: Pick<CatalogueDefect, "set">): boolean => d.set === "extension";
