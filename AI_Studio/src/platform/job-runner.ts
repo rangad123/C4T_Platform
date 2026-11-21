@@ -25,6 +25,7 @@ import { loadTargetProblem } from "./load-guard.js";
 import { prepareEnvironmentRun } from "./environment-run.js";
 import { plainRequestOf, runPlainJob } from "./plain-run.js";
 import { afterCaseJob } from "./case-scripts.js";
+import { writeCasesFromRequirements } from "./case-agent.js";
 import { takeAgentOutcome } from "./agent-on-runner.js";
 import type { AgentOnRunnerRequest } from "../agent/agent-mode.js";
 import { runAgentJob } from "./agent-run.js";
@@ -320,6 +321,12 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     try {
         // The starter's key cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
         if (ai.blocked && !validateOnly) throw new Error(ai.blocked);
+        // A Test Case Generation run from the requirements alone (SPEC R16): no address, no browser; the requirements generator writes the cases.
+        if (o.requirementsOnly) {
+            const written = await writeCasesFromRequirements(repo, job.projectId, llm, emit, abort.signal);
+            await finish(written ? "COMPLETED" : "FAILED", written ? undefined : "The AI wrote no test cases from the requirements.");
+            return;
+        }
         const ctx: EngineContext = {
             config,
             llm,

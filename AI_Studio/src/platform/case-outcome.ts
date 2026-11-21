@@ -6,6 +6,7 @@
  *   - pages and navigation: the model in its plan (plan-store.ts), else its `app-model` artifact, else its `page_visited` events (a run
  *     stopped while exploring saved only those);
  *   - test cases: the test ideas of its plan, else its `scenario_planned` events;
+ *     (a run from the requirements alone, SPEC R16, has only those: its cases have no page and hang on a node per requirement area);
  *   - addresses that could not be opened: its `page_failed` events. They are never pages; they are counted once, as `notOpened`.
  *
  * Runs are merged oldest first (SPEC R10): a page is one node however many runs saw it (keyed by its path), and a later run's non-empty
@@ -31,8 +32,11 @@ export interface CaseRunPart {
     pages: CaseOutcomePage[];
     /** Navigation edges (from → to, by page path), in the order they were followed. */
     edges: Array<{ from: string; to: string }>;
-    /** The run's test cases; `page` is the start path as planned ("" when unknown). */
-    cases: Array<Omit<CaseOutcomeCase, "id">>;
+    /**
+     * The run's test cases; `page` is the start path as planned ("" when unknown). A case written from the requirements alone (SPEC R16)
+     * has an `area` (its requirement): its tree node is that area and its page stays empty.
+     */
+    cases: Array<Omit<CaseOutcomeCase, "id"> & { area?: string }>;
     /** Paths of the addresses that failed to load. */
     failed: string[];
 }
@@ -142,6 +146,8 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
 
     // ── test cases: one per normalised title and node; TC numbers by first appearance ──
     const cases = new Map<string, CaseOutcomeCase>();
+    /** By case key: the requirement area a case written from the requirements alone hangs on. */
+    const areaOf = new Map<string, string>();
     const runs: CaseOutcomeRun[] = [];
     const written = new Map<string, number>();
     const keysOf = new Map<string, Set<string>>();
@@ -155,12 +161,13 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
         }
         let addedCases = 0;
         const mine = new Set<string>();
-        for (const c of part.cases) {
+        for (const { area, ...c } of part.cases) {
             const title = c.title.trim();
             if (!title) continue;
-            const page = nodeOf(c.page);
-            const key = `${titleKey(title)}\u0000${page}`;
+            const page = area ? "" : nodeOf(c.page);
+            const key = `${titleKey(title)}\u0000${page}${area ? `\u0000${area}` : ""}`;
             mine.add(key);
+            if (area) areaOf.set(key, area);
             const had = cases.get(key);
             if (!had) {
                 addedCases++;
@@ -191,11 +198,14 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
 
     const count = new Map<string, number>();
     for (const c of cases.values()) count.set(c.page, (count.get(c.page) ?? 0) + 1);
+    // The requirement areas are nodes of their own, after the pages: no page, no parent (SPEC R16).
+    const areas = new Map<string, number>();
+    for (const a of areaOf.values()) areas.set(a, (areas.get(a) ?? 0) + 1);
     const list = [...pages.values()];
     return {
         runs: runs.reverse(),
         pages: list,
-        tree: list.map((pg) => ({ node: pg.path, parent: parent.get(pg.path) ?? null, page: pg.path, title: pg.title, cases: count.get(pg.path) ?? 0 })),
+        tree: [...list.map((pg) => ({ node: pg.path, parent: parent.get(pg.path) ?? null, page: pg.path, title: pg.title, cases: count.get(pg.path) ?? 0 })), ...[...areas].map(([a, n]) => ({ node: a, parent: null, page: "", title: a, cases: n }))],
         cases: [...cases.values()],
         notOpened: [...failed].filter((f) => !nodes.has(f)).length,
         written,
@@ -288,7 +298,10 @@ export async function readCaseRun(p: Platformish, job: JobRow): Promise<CaseRunP
             .filter((e) => e.kind === "scenario_planned")
             .map((e) => {
                 const m = /^\S+ \[[^/\]]*\/([a-z]+)\] (.*)$/.exec(e.message);
-                return { title: str(dataOf(e).title) || m?.[2] || "", type: "automated" as const, priority: priorityOf(m?.[1]), page: "", preconditions: [], steps: [], expected: [], requirement: "" };
+                const d = dataOf(e);
+                // A case written from the requirements alone (case-agent.ts writeCasesFromRequirements) also says its type, steps and area.
+                const steps = Array.isArray(d.steps) ? d.steps.map((s: { action?: unknown; expected?: unknown }) => ({ action: str(s?.action), expected: str(s?.expected) })).filter((s) => s.action) : [];
+                return { title: str(d.title) || m?.[2] || "", type: d.type === "manual" ? ("manual" as const) : ("automated" as const), priority: priorityOf(m?.[1]), page: "", preconditions: [], steps, expected: [], requirement: str(d.requirement), ...(str(d.area) ? { area: str(d.area) } : {}) };
             });
     }
     // An address that could not be loaded (crawler.ts page_failed "Could not load <url>: ..."); "Could not try ... again" kept its page.

@@ -139,7 +139,7 @@ export function setupItems(f: SetupFacts): SetupItem[] {
     const { platforms, testingModes } = f.setup;
     const items: SetupItem[] = [];
     if (platforms.includes("web"))
-        items.push({ key: "web-address", ok: f.hasWebAddress, text: f.hasWebAddress ? "Web tests have an address to test." : "Web tests need an environment or the address of the site to test." });
+        items.push({ key: "web-address", ok: f.hasWebAddress, text: f.caseAgent ? (f.hasWebAddress ? "The application has an address to explore." : "Add the application's address, or write the test cases from the requirements.") : f.hasWebAddress ? "Web tests have an address to test." : "Web tests need an environment or the address of the site to test." });
     if (platforms.includes("android"))
         items.push({ key: "android-app", ok: f.hasAndroidApp, text: f.hasAndroidApp ? "An Android app is set." : "Android tests need an app: upload one or give its package name." });
     if (platforms.includes("ios")) {
@@ -149,7 +149,8 @@ export function setupItems(f: SetupFacts): SetupItem[] {
     if (testingModes.includes("agent"))
         items.push({ key: "ai-model", ok: f.aiConfigured, text: f.aiConfigured ? "Your AI key is set up." : "Agent mode needs your AI key. Add your own in Settings, AI keys, or ask an admin to assign one." });
     const r = f.runner;
-    if (!f.runsHere && f.caseAgent) return items;
+    // A Test Case Generation project runs no tests (FX22, F3 review L5).
+    if (f.caseAgent) return items;
     items.push(
         !f.runsHere
             ? { key: "runner", ok: false, text: "Tests are switched off on this server, so no run starts here. Tests you make are kept." }
