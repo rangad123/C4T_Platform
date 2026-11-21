@@ -30,8 +30,8 @@ describe("a Test Case Generation run's line", () => {
         for (const s of CASE_STAGES) for (const st of ["pending", "running", "done"] as const) expect(JSON.stringify(caseStageText(s, st, { pagesDiscovered: 2, scenariosPlanned: 2 }))).not.toMatch(BANNED);
     });
 
-    it("promises before a stop that what the run found stays in the tree", () => {
-        expect(CASE_STOP_QUESTION.body).toContain("are kept in the project's tree");
+    it("promises before a stop only what a stopped run keeps: pages so far, test cases once written (F3 review L1)", () => {
+        expect(CASE_STOP_QUESTION.body).toContain("Pages found so far are kept. Test cases are kept once they have been written.");
         expect(CASE_STOP_QUESTION.body).not.toMatch(BANNED);
     });
 });
