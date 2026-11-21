@@ -81,6 +81,8 @@ export const DefectOutcomeSchema = z
         detected: z.boolean(),
         /** Detected only through a person's label on an unverified finding (not counted in the detection rate). */
         labeledOnly: z.boolean(),
+        /** The catalogue marks it unreachable in this bench set-up (scoring v2): it lowers the effective maximum. */
+        unreachable: z.boolean().optional(),
         findings: z.array(Text(100)).max(100),
     })
     .strict();
@@ -95,6 +97,10 @@ export const BenchMetricsSchema = z
         truePositives: Count,
         falsePositives: Count,
         unreproduced: Count,
+        /** Scoring v2 (metrics.ts); absent in v1 results. */
+        notReported: Count.optional(),
+        seenNotReproducible: Count.optional(),
+        reachable: Count.optional(),
         selectedForVerification: Count,
         reproduced: Count,
         detectionRate: Rate,
@@ -225,6 +231,8 @@ export type BenchConfig = z.infer<typeof BenchConfigSchema>;
 export const BenchmarkSchema = z
     .object({
         format: z.literal(1),
+        /** The scoring rules (metrics.ts SCORING_VERSION); absent: v1, before row 237. */
+        scoring: z.number().int().min(1).max(100).optional(),
         /** discovery: the engine explores the app with the defects in it (the primary measure). regression: it explores the correct app, then its tests run with the defects in. */
         mode: z.enum(["discovery", "regression"]),
         baseline: z.boolean(),
@@ -240,6 +248,8 @@ export type Benchmark = z.infer<typeof BenchmarkSchema>;
 export const BenchHeadlineSchema = z
     .object({
         mode: z.enum(["discovery", "regression"]),
+        /** The scoring rules the numbers follow (absent in older runs: 1); runs with different rules are not compared. */
+        scoring: z.number().int().min(1).max(100).optional(),
         seeded: Count,
         detected: Count,
         falsePositives: Count,

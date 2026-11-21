@@ -15,8 +15,21 @@
  *   cost per confirmed defect   estimated AI cost / detected defects                             (null when no cost or none detected)
  *
  * A finding a person labelled with a defect (only possible for an unreproduced finding) is counted in `detectedLabeled`, never in `detected`.
+ *
+ * Scoring rules v2 (SCORING_VERSION, queue row 237; ROW233-ROOT-CAUSE.md §4): detection is scored exactly as in v1. Changed and added:
+ *   false positive         as above, but never a test the engine itself did not report (NOT_REPORTED: its leftover and limits gates
+ *                          save such tests for review with that reason); those are counted in `notReported`
+ *   seen but not reproducible   the author stopped the test as a defect (source "authoring") and its saved test passed on the seeded
+ *                          app (`seenNotReproducible`; already inside `unreproduced`, never a false positive)
+ *   effective maximum      seeded defects minus those the catalogue marks unreachable (`reachable`); the detection rate stays / seeded
+ * A result without `scoring` was scored by v1 (false positives include the engine's unreported tests; no effective maximum).
  */
-import type { BenchFinding, BenchMetrics, FindingCategory, ReplayVerdict } from "./schema.js";
+import type { Benchmark, BenchFinding, BenchMetrics, FindingCategory, ReplayVerdict } from "./schema.js";
+
+export const SCORING_VERSION = 2;
+/** The reasons the engine's own gates give a test it saved for review but did not report (engine/orchestrator.ts keepAuthored). */
+const NOT_REPORTED = /^(Not reported as a finding|Not validated):/;
+export const notReportedByEngine = (f: BenchFinding): boolean => NOT_REPORTED.test(f.reason ?? "");
 
 const failing = (v: ReplayVerdict | null | undefined): boolean => v === "failed" || v === "finding";
 
@@ -52,6 +65,8 @@ export interface MetricInputs {
     outputTokens: number;
     cacheReadTokens: number;
     cacheWriteTokens: number;
+    /** Seeded defects the catalogue marks unreachable (no test can reach them in this bench set-up). */
+    unreachable?: string[];
 }
 
 export function benchMetrics(i: MetricInputs): BenchMetrics {
@@ -62,11 +77,16 @@ export function benchMetrics(i: MetricInputs): BenchMetrics {
     let fp = 0;
     let unreproduced = 0;
     let reproduced = 0;
+    let notReported = 0;
+    let seenNotReproducible = 0;
     let first: number | null = null;
     for (const f of i.findings) {
         if (failing(f.replay.seeded)) reproduced++;
         if (f.category === "confirmed" || f.category === "combined") tp++;
-        if (f.category === "false_positive" || (f.category === "unreproduced" && f.label === "false_positive")) fp++;
+        const unreported = notReportedByEngine(f);
+        if (unreported) notReported++;
+        else if (f.category === "false_positive" || (f.category === "unreproduced" && f.label === "false_positive")) fp++;
+        if (!unreported && f.source === "authoring" && f.replay.seeded === "passed") seenNotReproducible++;
         if (f.category === "unreproduced") unreproduced++;
         if (f.category === "confirmed") {
             for (const d of f.defects) if (seeded.has(d)) detected.add(d);
@@ -88,6 +108,9 @@ export function benchMetrics(i: MetricInputs): BenchMetrics {
         truePositives: tp,
         falsePositives: fp,
         unreproduced,
+        notReported,
+        seenNotReproducible,
+        reachable: [...seeded].filter((d) => !i.unreachable?.includes(d)).length,
         selectedForVerification: n,
         reproduced,
         detectionRate: rate(detected.size, seeded.size),
@@ -119,9 +142,12 @@ export function combineMetrics(parts: BenchMetrics[]): BenchMetrics {
     const s = Object.fromEntries(SUMMED.map((k) => [k, parts.reduce((n, m) => n + m[k], 0)])) as Record<(typeof SUMMED)[number], number>;
     const costs = parts.map((m) => m.cost).filter((c): c is number => c !== null);
     const cost = costs.length ? costs.reduce((a, b) => a + b, 0) : null;
+    // v2 counts, only when every part has them (a v1 part has none: never read as zero).
+    const added = Object.fromEntries((["notReported", "seenNotReproducible", "reachable"] as const).filter((k) => parts.every((m) => m[k] !== undefined)).map((k) => [k, parts.reduce((n, m) => n + m[k]!, 0)]));
     const times = parts.map((m) => m.detectionTimeMs).filter((t): t is number => t !== null);
     return {
         ...s,
+        ...added,
         detectionRate: rate(s.detected, s.seeded),
         precision: rate(s.truePositives, s.findings),
         precisionVerified: rate(s.truePositives, s.truePositives + s.falsePositives),
@@ -131,6 +157,19 @@ export function combineMetrics(parts: BenchMetrics[]): BenchMetrics {
         cost,
         costPerConfirmedDefect: cost === null || s.detected === 0 ? null : cost / s.detected,
     };
+}
+
+/**
+ * A saved result scored again by the current rules, offline: the categories the replays gave stay as they are, so detection cannot change;
+ * every count is recomputed from the findings, the other numbers (cost, time, tests) are kept. Returns a copy.
+ */
+export function rescored(b: Benchmark, unreachable: string[]): Benchmark {
+    const apps = b.apps.map((a) => {
+        const m = a.metrics;
+        const metrics = { ...benchMetrics({ ...m, seeded: a.seededDefects, findings: a.findings, startedAt: "1970-01-01T00:00:00.000Z", unreachable }), detectionTimeMs: m.detectionTimeMs };
+        return { ...a, metrics, defects: a.defects.map((d) => ({ ...d, ...(unreachable.includes(d.id) ? { unreachable: true } : {}) })) };
+    });
+    return { ...b, scoring: SCORING_VERSION, apps, metrics: combineMetrics(apps.map((a) => a.metrics)) };
 }
 
 /**

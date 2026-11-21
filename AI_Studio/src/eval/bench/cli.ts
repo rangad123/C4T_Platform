@@ -25,6 +25,7 @@ import { calibrationOf, estimate, estimateLines, loadPrices, tokenLimitsLeft } f
 import { engineVersion, promptFingerprints, writeBaseline } from "./record.js";
 import { bindLabels, migrateLabels, parseLabels } from "./labels.js";
 import { observedOf, trialProblem, withLabels } from "./observed.js";
+import { rescored, SCORING_VERSION } from "./metrics.js";
 import { benchMarkdown, observedMarkdown } from "./report.js";
 import { BenchmarkSchema, type Benchmark, type BenchAppResult, type BenchConfig, type PriceRow } from "./schema.js";
 
@@ -555,8 +556,11 @@ export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, dep
 }
 
 export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --observed <results folder or file> [<more>...] [--labels <file>]
+       node scripts/eval.mjs bench-report --rescore <results folder or file> [<more>...]
        node scripts/eval.mjs bench-report --migrate-labels <old labels file> --result <results file> --to <new file>
   Prints the "Observed vs fails on the seeded app" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
+  --rescore         scores each trial again by the current rules (metrics.ts SCORING_VERSION, the catalogue's unreachable defects) and prints
+                    a before → after table; detection must not change (the replays' categories are kept)
   Read-only: no platform, no app, no AI; nothing is written.
   --labels <file>   labels bound to their trial (src/eval/bench/labels.ts, format 2) for findings the replays could not verify;
                     a label made for another trial is ignored and the report says so
@@ -582,9 +586,11 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
     let result: string | undefined;
     let to: string | undefined;
     let observed = false;
+    let rescore = false;
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         if (k === "--observed") observed = true;
+        else if (k === "--rescore") rescore = true;
         else if (k === "--labels") labelsFile = argv[++i];
         else if (k === "--migrate-labels") migrate = argv[++i];
         else if (k === "--result") result = argv[++i];
@@ -606,6 +612,25 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
             const set = migrateLabels(JSON.parse(fs.readFileSync(migrate, "utf8")), JSON.parse(fs.readFileSync(result, "utf8")), result, path.basename(migrate));
             fs.writeFileSync(to, `${JSON.stringify(set, null, 2)}\n`, { flag: "wx" });
             log(`Wrote ${to}: ${Object.keys(set.trials[0]!.labels).length} labels bound to ${JSON.stringify(set.trials[0]!.projects)} (${result}).`);
+            return 0;
+        } catch (e) {
+            log(e instanceof Error ? e.message : String(e));
+            return 2;
+        }
+    }
+    if (rescore && targets.length) {
+        try {
+            const catalogue = loadCatalogue();
+            const unreachable = catalogue.defects.filter((d) => d.unreachable).map((d) => d.id);
+            const out = ["| Trial | Scoring | Detected | Effective maximum | False positives | Not reported by the engine | Seen but not reproducible |", "|---|---|---|---|---|---|---|"];
+            for (const t of targets) {
+                const file = trialFile(t);
+                const parsed = BenchmarkSchema.safeParse((JSON.parse(fs.readFileSync(file, "utf8")) as { benchmark?: unknown }).benchmark);
+                if (!parsed.success) throw new Error(`${file} is not a benchmark result: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
+                const [a, b] = [parsed.data.metrics, rescored(parsed.data, unreachable).metrics];
+                out.push(`| ${path.relative(process.cwd(), file) || file} | v${parsed.data.scoring ?? 1} → v${SCORING_VERSION} | ${a.detected} → ${b.detected} | ${a.reachable ?? a.seeded} → ${b.reachable} | ${a.falsePositives} → ${b.falsePositives} | ${b.notReported} | ${b.seenNotReproducible} |`);
+            }
+            log(out.join("\n"));
             return 0;
         } catch (e) {
             log(e instanceof Error ? e.message : String(e));

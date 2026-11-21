@@ -13,9 +13,17 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
     const out: string[] = [];
     out.push(`# Benchmark (${b.mode})${b.baseline ? ": baseline" : ""}`, "");
     out.push(`Started ${run.startedAt}, finished ${run.finishedAt}.`, "");
+    const scoring = b.scoring ?? 1;
+    out.push(`Scoring rules v${scoring}${scoring === 1 ? " (before row 237: the false positives include tests the engine itself did not report, and there is no effective maximum)" : ""}.`, "");
+    const unreachable = b.apps.flatMap((a) => a.defects.filter((d) => d.unreachable).map((d) => d.id));
     out.push("| Measure | Value |", "|---|---|");
-    out.push(`| Seeded defects | ${m.seeded} |`, `| Detected (confirmed by replay) | ${m.detected} |`, `| Missed | ${m.missed} |`, `| Detected only by a person's label | ${m.detectedLabeled} |`);
-    out.push(`| Detection rate | ${pct(m.detectionRate)} |`, `| Reported findings | ${m.findings} |`, `| True positives | ${m.truePositives} |`, `| False positives | ${m.falsePositives} |`, `| Not reproduced | ${m.unreproduced} |`);
+    out.push(`| Seeded defects | ${m.seeded} |`);
+    if (m.reachable !== undefined) out.push(`| Effective maximum (seeded defects a test can reach) | ${m.reachable} of ${m.seeded}${unreachable.length ? ` (unreachable: ${unreachable.join(", ")})` : ""} |`);
+    out.push(`| Detected (confirmed by replay) | ${m.detected} |`, `| Missed | ${m.missed} |`, `| Detected only by a person's label | ${m.detectedLabeled} |`);
+    out.push(`| Detection rate | ${pct(m.detectionRate)} |`, `| Reported findings | ${m.findings} |`, `| True positives | ${m.truePositives} |`, `| False positives | ${m.falsePositives} |`);
+    if (m.notReported !== undefined) out.push(`| Not reported by the engine (left out of false positives) | ${m.notReported} |`);
+    if (m.seenNotReproducible !== undefined) out.push(`| Seen but not reproducible (the author reported a defect; its saved test passes on the seeded app) | ${m.seenNotReproducible} |`);
+    out.push(`| Not reproduced | ${m.unreproduced} |`);
     out.push(`| Precision (all findings) | ${pct(m.precision)} |`, `| Precision (verified findings) | ${pct(m.precisionVerified)} |`, `| False-positive rate | ${pct(m.falsePositiveRate)} |`, `| Reproduction rate | ${pct(m.reproductionRate)} |`);
     out.push(`| Detection time | ${dur(m.detectionTimeMs)} |`, `| Execution time | ${dur(m.durationMs)} |`, `| AI calls | ${m.aiCalls} |`, `| Tokens in / out | ${m.inputTokens} / ${m.outputTokens} |`, `| Estimated AI cost | ${money(m.cost)} |`, `| Cost per confirmed defect | ${money(m.costPerConfirmedDefect)} |`);
     out.push(`| Tests generated | ${m.testsGenerated} |`, `| Workflows reached | ${m.workflowsCovered} of ${m.workflows} |`, `| Execution failures | ${m.executionFailures} |`, `| Flaky tests | ${m.flaky} |`, "");
@@ -34,7 +42,7 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
             continue;
         }
         out.push("| Defect | Category | Workflow | Severity | Detected | By |", "|---|---|---|---|---|---|");
-        for (const d of a.defects) out.push(`| ${d.id} | ${d.category} | ${d.workflow} | ${d.severity} | ${d.detected ? "yes" : d.labeledOnly ? "label only" : "no"} | ${d.findings.join(", ")} |`);
+        for (const d of a.defects) out.push(`| ${d.id} | ${d.category} | ${d.workflow} | ${d.severity} | ${d.detected ? "yes" : d.labeledOnly ? "label only" : d.unreachable ? "no (unreachable)" : "no"} | ${d.findings.join(", ")} |`);
         out.push("", "| Finding | Title | Source | Category | Defects |", "|---|---|---|---|---|");
         for (const f of a.findings) out.push(`| ${f.testKey} | ${f.title.replace(/\|/g, "/")} | ${f.source} | ${f.category}${f.label ? ` (labelled ${f.label})` : ""} | ${f.defects.join(", ")} |`);
         out.push("");

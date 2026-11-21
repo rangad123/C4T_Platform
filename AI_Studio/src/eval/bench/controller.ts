@@ -27,7 +27,7 @@ import { overallOf } from "../metrics.js";
 import type { EntryResult, EvalRun } from "../run.js";
 import { BenchAppHost, requirementsDocument, workflowsReached, type BenchApp, type Switches } from "./apps.js";
 import { defectsOf, type Catalogue } from "./catalogue.js";
-import { benchMetrics, categorize, combineMetrics } from "./metrics.js";
+import { benchMetrics, categorize, combineMetrics, SCORING_VERSION } from "./metrics.js";
 import { candidateOf, sessionsFromEvents } from "./observed.js";
 import type { BenchAppResult, BenchConfig, BenchFinding, BenchHeadline, Benchmark, ExplorationSession, ReplayVerdict } from "./schema.js";
 
@@ -144,7 +144,7 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
         stopMonitor();
     }
     const metrics = combineMetrics(results.map((r) => r.metrics));
-    const benchmark: Benchmark = { format: 1, mode: o.mode, baseline: o.baseline, config: o.config, apps: results, metrics, notes: notes.slice(0, 40) };
+    const benchmark: Benchmark = { format: 1, scoring: SCORING_VERSION, mode: o.mode, baseline: o.baseline, config: o.config, apps: results, metrics, notes: notes.slice(0, 40) };
     const overall = { ...overallOf(entries), benchmark: headlineOf(benchmark) };
     const run: EvalRun = {
         format: 1,
@@ -163,7 +163,7 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
 
 export function headlineOf(b: Benchmark): BenchHeadline {
     const m = b.metrics;
-    return { mode: b.mode, seeded: m.seeded, detected: m.detected, falsePositives: m.falsePositives, detectionRate: m.detectionRate, precision: m.precision, falsePositiveRate: m.falsePositiveRate, reproductionRate: m.reproductionRate, cost: m.cost };
+    return { mode: b.mode, scoring: b.scoring ?? 1, seeded: m.seeded, detected: m.detected, falsePositives: m.falsePositives, detectionRate: m.detectionRate, precision: m.precision, falsePositiveRate: m.falsePositiveRate, reproductionRate: m.reproductionRate, cost: m.cost };
 }
 
 function emptyMetrics(seeded: string[]) {
@@ -457,9 +457,11 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     const sessions: ExplorationSession[] = [];
     for (const id of [jobs.planJobId, ...jobs.createJobIds]) if (id) sessions.push(...sessionsFromEvents(id, await jobEvents(client, id)));
 
+    const catalogue = new Map(defectsOf(o.catalogue, app.id).map((d) => [d.id, d]));
     const metrics = benchMetrics({
         seeded,
         findings,
+        unreachable: seeded.filter((id) => catalogue.get(id)?.unreachable),
         startedAt: benchStart,
         cost: usage.cost,
         testsGenerated: tests.length,
@@ -474,12 +476,11 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         cacheReadTokens: usage.cacheReadTokens,
         cacheWriteTokens: usage.cacheWriteTokens,
     });
-    const catalogue = new Map(defectsOf(o.catalogue, app.id).map((d) => [d.id, d]));
     const defects = seeded.map((id) => {
         const d = catalogue.get(id)!;
         const by = findings.filter((f) => f.category === "confirmed" && f.defects.includes(id)).map((f) => f.testKey);
         const labeled = findings.filter((f) => f.label === id).map((f) => f.testKey);
-        return { id, category: d.category.slice(0, 60), workflow: d.workflow.slice(0, 120), severity: d.severity.slice(0, 20), detected: by.length > 0, labeledOnly: by.length === 0 && labeled.length > 0, findings: [...by, ...labeled].slice(0, 100) };
+        return { id, category: d.category.slice(0, 60), workflow: d.workflow.slice(0, 120), severity: d.severity.slice(0, 20), detected: by.length > 0, labeledOnly: by.length === 0 && labeled.length > 0, ...(d.unreachable ? { unreachable: true } : {}), findings: [...by, ...labeled].slice(0, 100) };
     });
     log(`  detected ${metrics.detected} of ${metrics.seeded}; ${metrics.falsePositives} false positives; ${metrics.unreproduced} not reproduced`);
     const version = o.config.apps.find((a) => a.id === app.id)?.version ?? "unknown";
