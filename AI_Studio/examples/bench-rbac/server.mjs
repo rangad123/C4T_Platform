@@ -8,6 +8,8 @@
 //   BENCH_DATA_TOKEN   enables GET /__bench/schema and GET /__bench/data (header x-bench-data must match): the stored data as tables
 //                      with keys, read-only, credentials and sessions left out. Without the variable or the header both routes are 404,
 //                      a wrong header is 403 and any method but GET is 405.
+//   BENCH_DB           also keeps the tables of /__bench/data in this node:sqlite file, rewritten before every response (read-only
+//                      checks of the stored data); the app still works from memory, so it behaves the same with or without it.
 // Roles: user (own notes, sharing), manager (also reads every note), admin (also manages people and roles). Data in memory, reset on start.
 import http from "node:http";
 import { randomBytes } from "node:crypto";
@@ -393,8 +395,55 @@ function benchData(req, res, pathname) {
     return sendJson(res, 200, { tables: tables.map(({ name, t, rows }) => ({ name, columns: t.columns, primaryKey: t.primaryKey, uniqueKeys: t.uniqueKeys, foreignKeys: t.foreignKeys, rowCount: rows.length })) });
 }
 
+// BENCH_DB=<file> (Phase 4 D-b): the tables of /__bench/data are also kept in that node:sqlite file, rewritten before every response, for a
+// read-only reader (the engine's bench-sqlite back end). The app keeps working from memory, so it behaves the same with or without the file.
+// shortcut: the file mirrors the in-memory tables (no SQL-backed storage); enough for read-only checks, revisit if a bench app needs SQL writes.
+const BENCH_DB = process.env.BENCH_DB ?? "";
+const store = BENCH_DB ? await openStore(BENCH_DB) : undefined;
+async function openStore(file) {
+    const { DatabaseSync } = await import("node:sqlite");
+    const d = new DatabaseSync(file);
+    const q = (n) => `"${n}"`;
+    d.exec("PRAGMA busy_timeout = 2000; BEGIN; DROP TABLE IF EXISTS bench_schema; CREATE TABLE bench_schema (name TEXT PRIMARY KEY, spec TEXT);");
+    const meta = d.prepare("INSERT INTO bench_schema (name, spec) VALUES (?, ?)");
+    const insert = {};
+    for (const [name, t] of Object.entries(TABLES)) {
+        // No column types and no constraints: values compare as they are, and a seeded duplicate or orphan is stored like any other row.
+        d.exec(`DROP TABLE IF EXISTS ${q(name)}; CREATE TABLE ${q(name)} (${t.columns.map(q).join(", ")});`);
+        meta.run(name, JSON.stringify({ columns: t.columns, primaryKey: t.primaryKey, uniqueKeys: t.uniqueKeys, foreignKeys: t.foreignKeys }));
+        insert[name] = d.prepare(`INSERT INTO ${q(name)} (${t.columns.map(q).join(", ")}) VALUES (${t.columns.map(() => "?").join(", ")})`);
+    }
+    d.exec("COMMIT;");
+    const save = () => {
+        d.exec("BEGIN;");
+        try {
+            for (const [name, t] of Object.entries(TABLES)) {
+                d.exec(`DELETE FROM ${q(name)};`);
+                for (const r of t.rows()) insert[name].run(...t.columns.map((c) => (typeof r[c] === "boolean" ? Number(r[c]) : (r[c] ?? null))));
+            }
+            d.exec("COMMIT;");
+        } catch (e) {
+            d.exec("ROLLBACK;");
+            process.stderr.write(`BENCH_DB: the tables were not saved (${e instanceof Error ? e.message : e})\n`);
+        }
+    };
+    save();
+    return { save };
+}
+/** With BENCH_DB, the tables are saved just before the response goes out, so a reader that has the answer also sees its rows. */
+function saveBeforeEnd(res) {
+    if (!store) return;
+    const end = res.end;
+    res.end = function (...args) {
+        res.end = end;
+        store.save();
+        return end.apply(this, args);
+    };
+}
+
 const server = http.createServer(async (req, res) => {
     try {
+        saveBeforeEnd(res);
         const url = new URL(req.url ?? "/", `http://127.0.0.1:${PORT}`);
         if (url.pathname === "/__bench/reset") {
             if (!RESET_TOKEN) return sendJson(res, 404, { error: "Not found." });

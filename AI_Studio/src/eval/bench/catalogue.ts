@@ -29,6 +29,8 @@ const DefectSchema = z
     })
     .passthrough();
 export type CatalogueDefect = z.infer<typeof DefectSchema>;
+/** No test can reach the seed in this trial: the catalogue says so, or it shows only in the stored data and the trial has no database back end. */
+export const isUnreachable = (d: Pick<CatalogueDefect, "unreachable" | "storedDataOnly">, withDatabase: boolean): boolean => !!d.unreachable || (!!d.storedDataOnly && !withDatabase);
 
 const CatalogueSchema = z
     .object({

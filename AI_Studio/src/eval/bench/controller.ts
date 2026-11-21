@@ -25,8 +25,9 @@ import type { CorpusEntry } from "../corpus.js";
 import { runCorpus } from "../harness.js";
 import { overallOf } from "../metrics.js";
 import type { EntryResult, EvalRun } from "../run.js";
-import { BenchAppHost, requirementsDocument, workflowsReached, type BenchApp, type Switches } from "./apps.js";
-import { defectsOf, isExtension, type Catalogue } from "./catalogue.js";
+import { registerBenchProbe } from "../../engine/database/bench-data.js";
+import { BenchAppHost, requirementsDocument, workflowsReached, type BenchApp, type BenchDatabase, type Switches } from "./apps.js";
+import { defectsOf, isExtension, isUnreachable, type Catalogue } from "./catalogue.js";
 import { benchMetrics, categorize, combineExtension, combineMetrics, extensionScore, layerCounts, SCORING_VERSION } from "./metrics.js";
 import { candidateOf, sessionsFromEvents } from "./observed.js";
 import type { BenchAppResult, BenchConfig, BenchFinding, BenchHeadline, Benchmark, ExplorationSession, ReplayVerdict } from "./schema.js";
@@ -83,6 +84,12 @@ export interface BenchOptions {
      * the way an owner adds them in Settings; every job of the project reads them. Only names, usernames and passwords.
      */
     roles?: (appId: string) => Array<{ name: string; username: string; password: string }>;
+    /**
+     * The trial's database back end (the command's --db; spec 4.4 D-a or D-b). Each app is started with it, the engine is handed a
+     * read-only probe of the app's stored data (by the app's address, in this process only), and the seeds seen only in the stored data
+     * count as reachable. None: as Phase 3.
+     */
+    database?: BenchDatabase;
 }
 
 export interface BenchOutcome {
@@ -114,7 +121,7 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
                 if (e) entries.push(e);
                 continue;
             }
-            const host = new BenchAppHost(app, port, undefined, o.login ?? "html");
+            const host = new BenchAppHost(app, port, undefined, o.login ?? "html", o.database);
             const all = defectsOf(o.catalogue, app.id);
             const seeded = (o.defects ? all.filter((d) => o.defects!.includes(d.id)) : all).map((d) => d.id);
             const version = o.config.apps.find((a) => a.id === app.id)?.version ?? "unknown";
@@ -126,6 +133,8 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
                 else results.push({ ...base, status: stopReason.value ? "stopped" : "skipped", reason: stopReason.value ?? "The benchmark was stopped before this app started.", metrics: emptyMetrics(originalOf(o.catalogue, app.id, seeded)) });
             } else {
                 log(`\n${app.id}: ${seeded.length} seeded behaviours, ${o.mode}`);
+                const probe = host.probe();
+                const forget = probe ? registerBenchProbe(host.url, probe) : undefined;
                 // The jobs of an app being continued, kept here so that a failure half way still knows the creations it started.
                 const carried: AppJobs | undefined = resumable ? { ...resumable.jobs!, createJobIds: [...resumable.jobs!.createJobIds], validationJobIds: [...(resumable.jobs!.validationJobIds ?? [])] } : undefined;
                 try {
@@ -140,6 +149,7 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
                     if (resumable) results.push({ ...resumable, jobs: carried!, reason: `stopped: could not be continued (${reason})`.slice(0, 1000) });
                     else results.push({ ...base, status: "failed", reason, metrics: emptyMetrics(originalOf(o.catalogue, app.id, seeded)) });
                 } finally {
+                    forget?.();
                     await host.stop();
                 }
             }
@@ -485,9 +495,8 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
 
     const catalogue = new Map(defectsOf(o.catalogue, app.id).map((d) => [d.id, d]));
     const extensionSeeds = seeded.filter((id) => catalogue.get(id)?.set === "extension");
-    // shortcut: the harness has no database back end yet, so a seed seen only in the stored data is unreachable in every trial; when the
-    // database option lands (spec 4.4, D-a/D-b), count it as reachable in trials that have one.
-    const unreachable = seeded.filter((id) => catalogue.get(id)?.unreachable || catalogue.get(id)?.storedDataOnly);
+    // A seed seen only in the stored data is reachable only in a trial with a database back end (spec 4.4, D-a/D-b).
+    const unreachable = seeded.filter((id) => catalogue.has(id) && isUnreachable(catalogue.get(id)!, !!o.database));
     const inputs = {
         seeded: seeded.filter((id) => !extensionSeeds.includes(id)),
         findings,
