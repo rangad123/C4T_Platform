@@ -4,12 +4,14 @@
  * body under that connection's webhook secret, compared in constant time. Then, in this order: the delivery must be for the connected
  * repository, at most WEBHOOK_LIMIT_PER_MINUTE are taken per project, and a delivery id already seen acts no more (GitHub's
  * redelivery and replays). A pull request opened or pushed to queues an impact analysis, unless it comes from a fork (its code must not
- * run with this project's secrets); a deployment that succeeded queues a re-verification of the project's findings.
+ * run with this project's secrets), and the analysis starts once the delivery is answered (pr-impact.ts); a deployment that succeeded
+ * queues a re-verification of the project's findings.
  * The API key check lets exactly this route through (isTriggerTokenRoute in trigger-store.ts); nothing GitHub sent is answered back.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { HttpError } from "../http-error.js";
 import type { RouteCtx } from "../routes/types.js";
+import { processPrEvent } from "./pr-impact.js";
 import type { CodeHostStore, PrEvent } from "./store.js";
 
 export const WEBHOOK_LIMIT_PER_MINUTE = 30;
@@ -43,7 +45,6 @@ export function decide(event: string, body: Json): Omit<PrEvent, "deliveryId"> {
         // A deleted fork has no repository; it is still not this one.
         if (!head || head.toLowerCase() !== str(pr?.base?.repo?.full_name)?.toLowerCase()) return { ...base, ignored: "from a fork: its code is not run with this project's secrets" };
         if (!base.pr || !base.headSha) return { ...base, ignored: "the pull request number or head commit is missing" };
-        // shortcut: no impact job kind until I2; the pr_events row with queued = 'impact' is the queued work, I2's worker takes it from there.
         return { ...base, queued: "impact" };
     }
     if (event === "deployment_status") {
@@ -95,6 +96,9 @@ export function registerCodeHostWebhook(ctx: RouteCtx, store: CodeHostStore): vo
             if (!take(repo.projectId)) return reply.header("retry-after", "60").code(429).send({ error: `At most ${WEBHOOK_LIMIT_PER_MINUTE} deliveries a minute are taken for a project.` });
             const what = decide(event, body);
             if (!store.recordEvent(repo.projectId, { deliveryId, ...what })) return reply.code(200).send({ duplicate: true });
+            // GitHub waits about ten seconds for an answer: the analysis runs after it (pr-impact.ts), and its failure is only logged.
+            // shortcut: a restart loses an analysis still running; its pr_events row stays, with no pr_selections row for that head. Upgrade to a job kind if that is seen.
+            if (what.queued === "impact") void processPrEvent(ctx.p, store, repo.projectId, { pr: what.pr!, headSha: what.headSha! }).catch((err) => console.error(`[code-host] impact analysis of pull request #${what.pr} failed:`, err instanceof Error ? err.message : err));
             return what.queued ? reply.code(202).send({ queued: what.queued }) : reply.code(200).send({ ignored: what.ignored });
         });
     });

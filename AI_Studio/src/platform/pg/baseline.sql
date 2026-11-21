@@ -1919,7 +1919,7 @@ CREATE TABLE pr_selections (
     reasons_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE INDEX idx_pr_selections_pr ON pr_selections (project_id, pr, head_sha);
+CREATE UNIQUE INDEX idx_pr_selections_pr ON pr_selections (project_id, pr, head_sha);
 
 CREATE TABLE candidate_findings (
     id TEXT PRIMARY KEY,

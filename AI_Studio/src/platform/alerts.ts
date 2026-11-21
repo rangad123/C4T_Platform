@@ -9,6 +9,7 @@ import type { Config } from "../config.js";
 import type { ApiChange } from "../engine/contracts/diff.js";
 import { ignoredNote } from "../engine/quarantine/rules.js";
 import type { Severity } from "../engine/validation/severity.js";
+import { redactText } from "../shared/redact-text.js";
 import type { Db, Row } from "./db.js";
 import { buildEmail, mergeSmtp, publicSmtp, sendEmail, type EmailDeliveryOptions, type MessageContent, type SmtpPatchT, type SmtpSettings } from "./alert-email.js";
 import { HttpError } from "./http-error.js";
@@ -18,8 +19,13 @@ import { assertAllowedTarget } from "./net-guard.js";
 import type { SecretBox } from "./secrets.js";
 import { isFailing, severityAtLeast, type Change, type RunSummary } from "./trends.js";
 
-export const ALERT_EVENTS = ["run_failed", "regression", "recovered", "flaky", "api_breaking_change"] as const;
+export const ALERT_EVENTS = ["run_failed", "regression", "recovered", "flaky", "api_breaking_change", "finding_confirmed", "finding_reopened", "pr_selection_ready"] as const;
 export type AlertEvent = (typeof ALERT_EVENTS)[number];
+/** Findings and pull request events (notifyEvent): a channel hears about them only when it chose them. */
+export const NOTICE_EVENTS = ["finding_confirmed", "finding_reopened", "pr_selection_ready"] as const satisfies readonly AlertEvent[];
+export type NoticeEvent = (typeof NOTICE_EVENTS)[number];
+/** What a channel hears about when it was made without choosing: runs only (the API-change alert and the notices are opt-in). */
+export const DEFAULT_EVENTS: AlertEvent[] = ALERT_EVENTS.filter((e) => e !== "api_breaking_change" && !(NOTICE_EVENTS as readonly string[]).includes(e));
 /** Not derived from a run's test results: sent by `notifyApiDrift` when the live API changed shape between two runs. */
 export const API_DRIFT_EVENT: AlertEvent = "api_breaking_change";
 export const CHANNEL_KINDS = ["webhook", "slack", "teams", "email"] as const;
@@ -318,7 +324,7 @@ export interface AlertSubject {
 }
 
 const PRIORITY: AlertEvent[] = ["regression", "run_failed", "flaky", "recovered"];
-const TITLE: Record<AlertEvent, string> = { regression: "Regression found", run_failed: "Test run failed", flaky: "Flaky tests detected", recovered: "Tests recovered", api_breaking_change: "API change that can break clients" };
+const TITLE: Record<AlertEvent, string> = { regression: "Regression found", run_failed: "Test run failed", flaky: "Flaky tests detected", recovered: "Tests recovered", api_breaking_change: "API change that can break clients", finding_confirmed: "Finding confirmed", finding_reopened: "Finding reopened", pr_selection_ready: "Tests chosen for a pull request" };
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export const primaryEvent = (events: AlertEvent[]): AlertEvent => PRIORITY.find((e) => events.includes(e)) ?? events[0]!;
@@ -690,6 +696,41 @@ export class AlertService {
             store.log({ projectId: subject.project.id, channelId: ch.id, channelName: ch.name, channelKind: ch.kind, event: API_DRIFT_EVENT, jobId: view.to.jobId, status: result.ok ? "sent" : "failed", httpStatus: result.status ?? null, attempts: result.attempts, error: result.error ?? null, summary: driftHeadline(subject, view) });
             if (result.ok) store.setState(ch.id, API_DRIFT_EVENT, print);
             sent.push({ channelId: ch.id, events: [API_DRIFT_EVENT], ok: result.ok });
+        }
+        return sent;
+    }
+
+    /**
+     * A finding or pull request notice (NOTICE_EVENTS) to every enabled channel that chose that event, logged like any delivery. Every
+     * text is masked first (shared/redact-text.ts): a finding's title or a reason can quote what the application showed.
+     */
+    async notifyEvent(subject: AlertSubject, n: { event: NoticeEvent; summary: string; items?: Array<{ title: string; reason?: string }>; link?: string }): Promise<SentAlert[]> {
+        const { store } = this.deps;
+        const summary = redactText(n.summary, 500);
+        const items = (n.items ?? []).slice(0, 10).map((i) => ({ title: redactText(i.title, 200), ...(i.reason ? { reason: redactText(i.reason, 300) } : {}) }));
+        const link = n.link ?? subject.link;
+        const title = `${TITLE[n.event]}: ${subject.project.name}`;
+        const sent: SentAlert[] = [];
+        for (const ch of store.list(subject.project.id)) {
+            if (!ch.enabled || !ch.events.includes(n.event)) continue;
+            const result = await this.send(
+                ch,
+                {
+                    slack: () => ({
+                        text: summary,
+                        blocks: [
+                            { type: "header", text: { type: "plain_text", text: title.slice(0, 150) } },
+                            { type: "section", text: { type: "mrkdwn", text: [esc(summary), ...items.map((i) => `• ${esc(i.title)}${i.reason ? `: ${esc(i.reason)}` : ""}`)].join("\n") } },
+                            { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "Open project" }, url: link }] },
+                        ],
+                    }),
+                    webhook: () => ({ event: n.event, events: [n.event], test: false, sentAt: nowIso(), project: subject.project, link, summary, run: null, newlyFailing: [], recovered: [], flaky: [], findings: items, error: null }),
+                    content: () => ({ title, headline: summary, subjectDetail: "", facts: [], findingsHeading: items.length ? "Details" : "", findings: items, link }),
+                },
+                this.deps.delivery,
+            );
+            store.log({ projectId: subject.project.id, channelId: ch.id, channelName: ch.name, channelKind: ch.kind, event: n.event, jobId: null, status: result.ok ? "sent" : "failed", httpStatus: result.status ?? null, attempts: result.attempts, error: result.error ?? null, summary });
+            sent.push({ channelId: ch.id, events: [n.event], ok: result.ok });
         }
         return sent;
     }

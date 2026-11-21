@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getAgentServices } from "../agent-services.js";
 import { ownerIdOfActor, makerIdOfActor } from "../agent-store.js";
 import { SEVERITIES } from "../../engine/validation/severity.js";
-import { ALERT_EVENTS, API_DRIFT_EVENT, type AlertChannel } from "../alerts.js";
+import { ALERT_EVENTS, DEFAULT_EVENTS, type AlertChannel } from "../alerts.js";
 import { assertSmtpHostAllowed, fromInput, mergeSmtp, NO_MAIL_SERVER_MESSAGE, publicSmtp, Recipients, serverSmtp, SmtpInput, SmtpPatch } from "../alert-email.js";
 import { ENV_NAME } from "../../engine/environments/env.js";
 import { PRODUCTION_CONFIRM_MESSAGE } from "../environment-run.js";
@@ -58,8 +58,8 @@ const ChannelBody = z.object({
     kind: z.enum(["webhook", "slack", "teams"]),
     name: z.string().trim().min(1).max(80).optional(),
     url: HttpUrl,
-    // The API-change alert is opt-in: a channel created before it existed (or without choosing) hears about runs only.
-    events: Events.default(ALERT_EVENTS.filter((e) => e !== API_DRIFT_EVENT)),
+    // The API-change alert and the findings and pull request notices are opt-in: a channel made without choosing hears about runs only.
+    events: Events.default(DEFAULT_EVENTS),
     minSeverity: z.enum(SEVERITIES).nullable().optional(),
     enabled: z.boolean().default(true),
 });
@@ -70,7 +70,7 @@ const EmailBody = z.object({
     name: z.string().trim().min(1).max(80).optional(),
     recipients: Recipients,
     smtp: SmtpInput.optional(),
-    events: Events.default(ALERT_EVENTS.filter((e) => e !== API_DRIFT_EVENT)),
+    events: Events.default(DEFAULT_EVENTS),
     minSeverity: z.enum(SEVERITIES).nullable().optional(),
     enabled: z.boolean().default(true),
 });

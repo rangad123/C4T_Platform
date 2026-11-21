@@ -21,6 +21,7 @@ import { securityStoreFor } from "../../security/store.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import { fromCandidate, fromSecurity, type TestOf } from "../findings/adapters.js";
 import { HttpError } from "../http-error.js";
+import { getScheduleServices } from "../schedule-services.js";
 import type { RouteCtx } from "./types.js";
 
 const SEVERITY_WORDS = ["critical", "high", "medium", "low", "info"] as const;
@@ -65,6 +66,15 @@ export function registerFindingRoutes(ctx: RouteCtx): void {
     const securityOf = (projectId: string, fid: string) => {
         const f = securityOn ? security.getFinding(fid) : undefined;
         return f && f.projectId === projectId ? f : undefined;
+    };
+
+    // The channels that chose these notices hear about a person's confirm and reopen (alerts.ts notifyEvent masks the texts); a delivery
+    // never holds up or fails the answer.
+    const notice = (projectId: string, event: "finding_confirmed" | "finding_reopened", f: Item, from: FindingState) => {
+        const { alerts } = getScheduleServices(p);
+        const proj = ctx.project(projectId);
+        const summary = event === "finding_confirmed" ? `${actorLabel()} confirmed the finding “${f.title}”.` : `${actorLabel()} reopened the finding “${f.title}” (it was ${from.replace(/_/g, " ")}).`;
+        void alerts.notifyEvent(alerts.subject({ id: projectId, name: String(proj.name), url: null }), { event, summary, items: [{ title: f.title, reason: f.observed }] }).catch((err) => console.error("[alerts] finding notice failed:", err));
     };
 
     app.get("/api/projects/:id/findings", async (req) => {
@@ -121,6 +131,8 @@ export function registerFindingRoutes(ctx: RouteCtx): void {
             return { finding: candidateItem((await store.get(id, fid))!) };
         }
         const to: FindingState = action === "confirm" ? "confirmed" : action === "not_a_bug" ? "not_a_bug" : reopenTo(r.state);
-        return { finding: candidateItem(await move(to)) };
+        const finding = candidateItem(await move(to));
+        if (action !== "not_a_bug") notice(id, action === "confirm" ? "finding_confirmed" : "finding_reopened", finding, r.state);
+        return { finding };
     });
 }

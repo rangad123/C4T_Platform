@@ -1,6 +1,7 @@
 /**
  * A project's GitHub repository, read over the REST API with a fine-grained personal access token (Phase 6, change-aware testing):
- * the pull request, its changed files with their patches, its commits, a branch. Read-only; nothing here writes to GitHub.
+ * the pull request, its changed files with their patches, its commits, a branch, and the repository's files at a commit (the source
+ * impact analysis reads). Read-only; nothing here writes to GitHub.
  *
  * Every call goes through the issue trackers' request (issues/http.ts): the address guard, no redirect followed, a short timeout and
  * plain-language errors that never hold the token. The token is only ever sent to api.github.com or to the GitHub Enterprise API
@@ -81,6 +82,13 @@ export interface PrCommit {
     date?: string;
 }
 
+export interface TreeFile {
+    path: string;
+    /** The blob's sha (blob() reads it). */
+    sha: string;
+    size: number;
+}
+
 export interface Branch {
     name: string;
     sha: string;
@@ -91,6 +99,11 @@ type Json = Record<string, any>;
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const fmt = (n: number) => n.toLocaleString("en-US");
+const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const sha = (s: string): string => {
+    if (!SHA.test(s)) throw new TrackerError("rejected", "A commit or file id is 40 (or 64) hexadecimal characters.");
+    return s;
+};
 
 export class GithubCodeHost {
     private readonly base: string;
@@ -194,5 +207,20 @@ export class GithubCodeHost {
         const b = (await this.get(`/branches/${encodeURIComponent(name)}`)) as Json | undefined;
         if (!b || typeof b.name !== "string") throw new TrackerError("rejected", "GitHub did not return the branch.");
         return { name: b.name, sha: str(b.commit?.sha) ?? "", protected: b.protected === true };
+    }
+
+    /** Every file of the repository at a commit, in one call; `truncated` when GitHub cut the list (it lists about 100,000 entries). */
+    async tree(commit: string): Promise<{ files: TreeFile[]; truncated: boolean }> {
+        const t = (await this.get(`/git/trees/${sha(commit)}?recursive=1`)) as Json | undefined;
+        if (!t || !Array.isArray(t.tree)) throw new TrackerError("rejected", "GitHub did not return the repository's files.");
+        const files = (t.tree as Json[]).flatMap((e) => (e.type === "blob" && str(e.path) && str(e.sha) && SHA.test(e.sha) ? [{ path: e.path as string, sha: e.sha as string, size: num(e.size) }] : []));
+        return { files, truncated: t.truncated === true };
+    }
+
+    /** A file's text by its blob id. */
+    async blob(id: string): Promise<string> {
+        const b = (await this.get(`/git/blobs/${sha(id)}`)) as Json | undefined;
+        if (!b || typeof b.content !== "string") throw new TrackerError("rejected", "GitHub did not return the file.");
+        return b.encoding === "base64" ? Buffer.from(b.content, "base64").toString("utf8") : b.content;
     }
 }

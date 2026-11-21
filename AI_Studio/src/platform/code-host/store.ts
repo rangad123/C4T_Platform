@@ -53,7 +53,7 @@ CREATE TABLE pr_selections (
     reasons_json TEXT NOT NULL,           -- per test, the evidence that chose it
     created_at TEXT NOT NULL
 );
-CREATE INDEX idx_pr_selections_pr ON pr_selections (project_id, pr, head_sha);
+CREATE UNIQUE INDEX idx_pr_selections_pr ON pr_selections (project_id, pr, head_sha);
 `;
 
 const now = () => new Date().toISOString();
@@ -91,6 +91,18 @@ export interface PrEvent {
     environment?: string;
     queued?: "impact" | "reverify";
     ignored?: string;
+}
+
+/** The tests chosen for one pull request head (code-host/pr-impact.ts): the proposed ids, the evidence per test, the run's mode. */
+export interface PrSelection {
+    id: string;
+    pr: number;
+    headSha: string;
+    /** The run that follows: full unless a person or the API asks for focused. */
+    mode: "focused" | "full";
+    selected: string[];
+    reasons: unknown;
+    createdAt: string;
 }
 
 /** The project's code repository (one per project; connecting again replaces it), with its token and webhook secret encrypted by the SecretBox. */
@@ -180,6 +192,28 @@ export class CodeHostStore {
         const r = this.row(projectId);
         if (!r || r.feedback !== 1) return undefined;
         return { apiUrl: allowedApiBase(r.api_url ?? undefined), owner: r.owner, repo: r.repo, token: this.secretOf(r).token };
+    }
+
+    /** The tests chosen for a pull request's head commit, if they were chosen already. */
+    selection(projectId: string, pr: number, headSha: string): PrSelection | undefined {
+        const r = this.db.get("SELECT * FROM pr_selections WHERE project_id = ? AND pr = ? AND head_sha = ?", projectId, pr, headSha);
+        return r ? { id: r.id, pr: r.pr, headSha: r.head_sha, mode: r.mode, selected: JSON.parse(r.selected_json), reasons: JSON.parse(r.reasons_json), createdAt: r.created_at } : undefined;
+    }
+
+    /** Keeps one selection per pull request head: false when that head already has one (nothing is written). */
+    saveSelection(projectId: string, s: Omit<PrSelection, "id" | "createdAt">): boolean {
+        const changes = this.db.run(
+            "INSERT INTO pr_selections (id, project_id, pr, head_sha, mode, selected_json, reasons_json, created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (project_id, pr, head_sha) DO NOTHING",
+            randomUUID(),
+            projectId,
+            s.pr,
+            s.headSha,
+            s.mode,
+            JSON.stringify(s.selected),
+            JSON.stringify(s.reasons),
+            now(),
+        ).changes;
+        return Number(changes) === 1;
     }
 
     /** Keeps a delivery once: false when this project already has that delivery id (nothing is written). */

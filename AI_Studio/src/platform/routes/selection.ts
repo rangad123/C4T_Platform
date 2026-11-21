@@ -13,13 +13,6 @@
  *        person (or the trigger API's explicit `selection` field) chooses focused; nothing picks it automatically.
  */
 import { z } from "zod";
-import { workflowSteps } from "../../engine/impact/analyze.js";
-import { AppIntelStore } from "../app-intel-store.js";
-import type { Platform } from "../bootstrap.js";
-import type { TestCoverage } from "../selection/coverage.js";
-import { quarantineGate, recentExecutions } from "../quarantine-store.js";
-import type { RiskFacts } from "../selection/risk.js";
-import { detectFlaky } from "../trends.js";
 import { ownerIdOfActor } from "../agent-store.js";
 import { actorOf } from "../auth/access.js";
 import { assertC4tOwnerMayRun } from "../c4t-service.js";
@@ -27,6 +20,7 @@ import { currentActor } from "../auth/actor.js";
 import { HttpError } from "../http-error.js";
 import { runnableTestIds } from "../scheduler.js";
 import { refuseUnlessRunsStart } from "../suite-run.js";
+import { riskFacts } from "../selection/risk-facts.js";
 import { detectedChanges, projectCoverage } from "../selection/facts.js";
 import { heldWhy } from "../selection/held.js";
 import { triggerParity } from "../selection/parity.js";
@@ -41,32 +35,6 @@ const PreviewBody = z
 const RunBody = z
     .object({ selection: z.enum(["focused", "full"]).default("full"), pages: z.array(Entry).max(MAX_CHANGES).optional(), endpoints: z.array(Entry).max(MAX_CHANGES).optional() })
     .strict();
-
-/** What the risk score (risk.ts) reads for each test: its priority, recent runs, quarantine and flakiness, and app-model workflows. */
-async function riskFacts(p: Platform, projectId: string, tests: TestCoverage[], apiPrefix?: string): Promise<Map<string, RiskFacts>> {
-    const priority = new Map(p.repo.listTests(projectId).map((t) => [t.id, t.priority]));
-    const recent = recentExecutions(p.db, tests.map((t) => t.testId));
-    const gate = quarantineGate(p.db, Date.now(), projectId);
-    const flaky = new Set(detectFlaky(p.db, projectId, 500).map((f) => f.id));
-    const model = (await new AppIntelStore(p.sql).latest(projectId))?.model;
-    const steps = model ? workflowSteps(model) : [];
-    const out = new Map<string, RiskFacts>();
-    for (const t of tests) {
-        const runs = recent.get(t.testId) ?? [];
-        const workflows = new Set(steps.filter((s) => t.items.some((i) => matchesChange({ ...s.item, given: s.text }, i, apiPrefix))).map((s) => s.workflow.id));
-        out.set(t.testId, {
-            priority: priority.get(t.testId),
-            runs: runs.length,
-            failed: runs.filter((r) => r.status !== "passed").length,
-            // shortcut: previous defects need Phase 5's findings API (S2); 0 until CP5-B, then count findings on the test's pages and endpoints.
-            defects: 0,
-            workflows: workflows.size,
-            quarantined: gate.has(t.testId),
-            flaky: flaky.has(t.testId),
-        });
-    }
-    return out;
-}
 
 /** Why a readable test is not in this person's runnable set (scheduler.ts runnableTestIds decides; this only puts it in words). */
 function cannotRunWhy(kind: string): string {

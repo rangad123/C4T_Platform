@@ -21,18 +21,14 @@ import { matchesChange, readChanges, type ChangeItem } from "../../platform/sele
 import { analyzeFile, type FileChangeInput } from "./diff.js";
 import { describeRoute, routesForChange, type RouteEntry } from "./routes.js";
 
-/**
- * A finding seen before, by where it happened.
- * shortcut: Phase 5's findings API (S2) is not built; callers pass this plain list (the platform passes none yet). Upgrade at CP5-B to
- * read the project's findings by endpoint and page.
- */
+/** A finding seen before, by where it happened (the platform reads them from the findings list: platform/findings/past.ts). */
 export interface PastFinding {
     id: string;
     title: string;
     /** "POST /api/orders" */
-    endpoint?: string;
+    endpoints?: string[];
     /** "/checkout" */
-    page?: string;
+    pages?: string[];
 }
 
 export interface ImpactInput {
@@ -220,7 +216,7 @@ export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis>
 
     const findings: Link[] = [];
     for (const f of input.findings ?? []) {
-        const { changes: cs } = readChanges({ ...(f.endpoint ? { endpoints: [f.endpoint] } : {}), ...(f.page ? { pages: [f.page] } : {}) });
+        const { changes: cs } = readChanges({ endpoints: f.endpoints ?? [], pages: f.pages ?? [] });
         const evidence = cs.flatMap((c) => {
             const e = routeOf(asItem(c));
             return e ? [`found on ${c.given}, handled by ${e.route}`] : [];

@@ -106,7 +106,7 @@ describe("no link from a similar name", () => {
             tests: suiteOf(SHOP),
             model: { pages: [], workflows: [{ id: "W1", name: "Cart items", steps: [{ order: 1, action: "Add to cart", endpoint: "POST /api/cart/items" }], preconditions: [], postconditions: [], roles: [], sourceType: "observed", evidence: [] }] },
             rules: [{ ref: "R-1", description: "Cart routes add items", endpoints: ["POST /api/cart/items"], workflows: [], entities: ["Cart"] }],
-            findings: [{ id: "F-1", title: "cart-routes", endpoint: "POST /api/cart/items" }],
+            findings: [{ id: "F-1", title: "cart-routes", endpoints: ["POST /api/cart/items"] }],
         });
         expect(r.endpoints).toEqual([]);
         expect([r.tests, r.workflows, r.rules, r.entities, r.findings, r.requirements]).toEqual([[], [], [], [], [], []]);
@@ -144,9 +144,9 @@ describe("from endpoints to workflows, rules, entities, requirements and past fi
         { ref: "R-3", description: "Orders list newest first", endpoints: ["GET /api/products"], workflows: ["W-browse"], entities: ["Product"] },
     ];
     const findings = [
-        { id: "F-1", title: "Order total wrong", endpoint: "POST /api/orders" },
-        { id: "F-2", title: "Review page blank", page: "/checkout/review" },
-        { id: "F-3", title: "Cart add fails", endpoint: "POST /api/cart/items" },
+        { id: "F-1", title: "Order total wrong", endpoints: ["POST /api/orders"] },
+        { id: "F-2", title: "Review page blank", pages: ["/checkout/review"] },
+        { id: "F-3", title: "Cart add fails", endpoints: ["POST /api/cart/items"] },
     ];
     const requirementLinks = [
         { requirement: "REQ-1", testId: "T POST /api/orders" },

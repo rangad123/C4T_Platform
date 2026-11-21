@@ -1,11 +1,12 @@
 /**
  * A local stand-in for the few GitHub REST endpoints the code-host client reads (repository, pull request, its files and commits, a
- * branch). The answers keep the shape and the extra fields of GitHub's documented responses (REST API 2022-11-28), so a client that
+ * branch, the git tree and blobs of `source`: the repository's files at every commit). The answers keep the shape and the extra fields of GitHub's documented responses (REST API 2022-11-28), so a client that
  * passes them on unfiltered would be caught. It listens on 127.0.0.1 on a free port; nothing here ever reaches github.com.
  *
  * Every request is recorded (method, path with query, the Authorization header) so a test can prove where a token was sent.
  * Only `Bearer <token>` is accepted; anything else gets GitHub's 401 "Bad credentials".
  */
+import { createHash } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -80,7 +81,7 @@ const commitBody = (c: FakeCommit) => ({
 });
 
 /** `checkRuns: "forbidden"` answers check runs as GitHub does for a personal access token (only GitHub Apps may create them). */
-export async function startFakeGithub(opts: { token: string; owner?: string; repo?: string; prs?: Record<number, Pr>; branches?: Record<string, { sha: string; protected?: boolean }>; checkRuns?: "ok" | "forbidden" }): Promise<FakeGithub> {
+export async function startFakeGithub(opts: { token: string; owner?: string; repo?: string; prs?: Record<number, Pr>; branches?: Record<string, { sha: string; protected?: boolean }>; checkRuns?: "ok" | "forbidden"; source?: Record<string, string> }): Promise<FakeGithub> {
     const owner = opts.owner ?? "acme";
     const repo = opts.repo ?? "shop";
     const requests: FakeGithub["requests"] = [];
@@ -95,6 +96,7 @@ export async function startFakeGithub(opts: { token: string; owner?: string; rep
         const p = Math.max(1, Number(q.get("page") ?? 1));
         return list.slice((p - 1) * per, p * per);
     };
+    const blobs = new Map(Object.entries(opts.source ?? {}).map(([p, text]) => [createHash("sha1").update(text).digest("hex"), { path: p, text }]));
     let port = 0;
     const server = http.createServer(async (req, res) => {
         const u = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -138,6 +140,23 @@ export async function startFakeGithub(opts: { token: string; owner?: string; rep
             // GitHub's own limits on these lists: 3,000 files and 250 commits, whatever the pull request holds.
             if (m[2] === "/files") return send(res, 200, page((pr.files ?? []).slice(0, 3000), u.searchParams).map(fileBody));
             return send(res, 200, page((pr.commits ?? []).slice(0, 250), u.searchParams).map(commitBody));
+        }
+        const blobs = new Map(Object.entries(opts.source ?? {}).map(([p, text]) => [createHash("sha1").update(text).digest("hex"), { path: p, text }]));
+        if (/^\/git\/trees\/[0-9a-f]{40}$/.test(rest) && u.searchParams.get("recursive") === "1")
+            return send(res, 200, { sha: rest.slice(-40), url: "https://api.github.example/tree", truncated: false, tree: [...blobs].map(([sha, b]) => ({ path: b.path, mode: "100644", type: "blob", sha, size: Buffer.byteLength(b.text), url: "https://api.github.example/blob" })) });
+        m = /^\/git\/blobs\/([0-9a-f]{40})$/.exec(rest);
+        if (m) {
+            const b = blobs.get(m[1]!);
+            if (!b) return send(res, 404, { message: "Not Found" });
+            return send(res, 200, { sha: m[1], size: Buffer.byteLength(b.text), encoding: "base64", content: Buffer.from(b.text).toString("base64").replace(/(.{60})/g, "$1\n") });
+        }
+        if (/^\/git\/trees\/[0-9a-f]{40}$/.test(rest) && u.searchParams.get("recursive") === "1")
+            return send(res, 200, { sha: rest.slice(-40), url: "https://api.github.example/tree", truncated: false, tree: [...blobs].map(([sha, b]) => ({ path: b.path, mode: "100644", type: "blob", sha, size: Buffer.byteLength(b.text), url: "https://api.github.example/blob" })) });
+        m = /^\/git\/blobs\/([0-9a-f]{40})$/.exec(rest);
+        if (m) {
+            const b = blobs.get(m[1]!);
+            if (!b) return send(res, 404, { message: "Not Found" });
+            return send(res, 200, { sha: m[1], size: Buffer.byteLength(b.text), encoding: "base64", content: Buffer.from(b.text).toString("base64").replace(/(.{60})/g, "$1\n") });
         }
         m = /^\/branches\/(.+)$/.exec(rest);
         if (m) {
