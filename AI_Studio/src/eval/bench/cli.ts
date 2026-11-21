@@ -19,7 +19,7 @@ import type { Platform } from "../../platform/bootstrap.js";
 import { inProcessClient, ok, remoteClient, type PlatformClient } from "../client.js";
 import type { EntryResult } from "../run.js";
 import { appVersion, BENCH_APPS, benchApp, requirementsDocument, type BenchApp } from "./apps.js";
-import { CATALOGUE_FILE, isExtension, loadCatalogue, loadCatalogueVersion, type Catalogue } from "./catalogue.js";
+import { CATALOGUE_FILE, isExtension, isUnreachable, loadCatalogue, loadCatalogueVersion, type Catalogue } from "./catalogue.js";
 import { catalogueRoles, plannedTestsLeft, runBenchmark, runUsageSoFar } from "./controller.js";
 import { calibrationOf, estimate, estimateLines, loadPrices, tokenLimitsLeft } from "./cost.js";
 import { engineVersion, promptFingerprints, writeBaseline } from "./record.js";
@@ -79,6 +79,9 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --out <dir>                where the results go (default eval/results/bench; other modes and --login js get their own folder:
                              eval/results/bench-regression, bench-login-js, bench-regression-login-js)
   --data-dir <dir>           data folder of the benchmark's platform (default a fresh folder under eval/.data-bench)
+  --db <back end>            a database back end for the stored-data checks: bench-data (the apps' read-only data routes, a random
+                             token per trial) or bench-sqlite (the apps' tables in SQLite under the data folder, opened read-only);
+                             the seeds seen only in the stored data then count as reachable (default none, as Phase 3)
   --yes                      start at once (no 5 second wait)`;
 
 interface Args {
@@ -106,6 +109,7 @@ interface Args {
     resume: boolean;
     out: string;
     dataDir?: string;
+    db?: "bench-data" | "bench-sqlite";
     yes: boolean;
     help: boolean;
 }
@@ -167,6 +171,11 @@ export function parseBenchArgs(argv: string[]): Args {
         else if (k === "--resume") a.resume = true;
         else if (k === "--out") a.out = path.resolve(value());
         else if (k === "--data-dir") a.dataDir = path.resolve(value());
+        else if (k === "--db") {
+            const d = value();
+            if (d !== "bench-data" && d !== "bench-sqlite") throw new Error("--db must be bench-data or bench-sqlite");
+            a.db = d;
+        }
         else if (k === "--yes") a.yes = true;
         else if (k === "--help" || k === "-h") a.help = true;
         else throw new Error(`Unknown option ${k}`);
@@ -331,6 +340,9 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
         if (!args.resume && fs.existsSync(stateFile(args.out))) throw new Error(`A stopped run is saved in ${args.out}: continue it with --resume, or use another --out folder.`);
         const other = otherKindIn(args.out, args.mode, args.login);
         if (other) throw new Error(`${args.out} holds results of another kind of run (${other}); this run (${args.mode}, ${args.login} sign-in) needs its own --out folder.`);
+        // The engine opens a bench database only under eval/.data-bench/<trial>/ (engine/database/bench-sqlite.ts).
+        const rel = path.relative(path.join(REPO_ROOT, "eval/.data-bench"), path.resolve(state?.dataDir ?? args.dataDir ?? path.join(REPO_ROOT, "eval/.data-bench/x")));
+        if (args.db === "bench-sqlite" && (!rel || rel.startsWith("..") || path.isAbsolute(rel))) throw new Error("--db bench-sqlite needs the data folder under eval/.data-bench (the default, or a --data-dir there)");
     } catch (e) {
         log(`${e instanceof Error ? e.message : String(e)}\n\n${BENCH_USAGE}`);
         return 2;
@@ -388,6 +400,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 mode: args.mode,
                 ...(args.roles ? { roles: args.roles } : {}),
                 ...(args.layersOnly ? { layersOnly: true } : {}),
+                ...(args.db ? { database: args.db } : {}),
                 ...configLimits(args).options,
             };
             config = {
@@ -484,6 +497,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             pollMs: deps.pollMs,
             ...(deps.root ? { root: deps.root } : {}),
             ...(args.roles ? { roles: (appId: string) => catalogueRoles(catalogue.accounts?.[appId] ?? []) } : {}),
+            ...(args.db ? { database: args.db === "bench-data" ? { kind: "bench-data" as const } : { kind: "bench-sqlite" as const, dir: path.join(dataDir, "bench-db") } } : {}),
             ...configLimits(args).run,
         });
 
@@ -692,7 +706,8 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
                 const file = trialFile(t);
                 const data = readResult(file);
                 const catalogue = catalogueOf(data);
-                const unreachable = catalogue.defects.filter((d) => d.unreachable || d.storedDataOnly).map((d) => d.id);
+                // A trial that ran with a database back end recorded it; trials before Phase 4 have none, so they score as before.
+                const unreachable = catalogue.defects.filter((d) => isUnreachable(d, typeof data.config.options.database === "string")).map((d) => d.id);
                 const r = rescored(data, unreachable, catalogue.defects.filter(isExtension).map((d) => d.id));
                 const [a, b] = [data.metrics, r.metrics];
                 const name = path.relative(process.cwd(), file) || file;

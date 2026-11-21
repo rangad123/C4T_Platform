@@ -11,6 +11,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "../../config.js";
+import { benchDataProbe } from "../../engine/database/bench-data.js";
+import { benchSqliteProbe } from "../../engine/database/bench-sqlite.js";
+import type { DatabaseProbe } from "../../engine/database/probe.js";
+
+/** A trial's database back end (spec 4.4): D-a, the apps' data routes, or D-b, their tables in a SQLite file under eval/.data-bench/<trial>/. */
+export type BenchDatabase = { kind: "bench-data" } | { kind: "bench-sqlite"; dir: string };
 
 export interface BenchApp {
     id: string;
@@ -112,6 +118,8 @@ const switchesEnv = (s: Switches): string => (Array.isArray(s) ? (s.length ? s.j
 export class BenchAppHost {
     private child?: ChildProcess;
     private readonly token = crypto.randomBytes(16).toString("hex");
+    /** The data routes' token (D-a), random per host: held here and in the probe only, never sent to the platform. */
+    private readonly dataToken = crypto.randomBytes(16).toString("hex");
     readonly url: string;
 
     constructor(
@@ -120,16 +128,42 @@ export class BenchAppHost {
         private readonly root = REPO_ROOT,
         /** How the app's sign-in form is sent: a plain HTML form (the default) or by script (BENCH_LOGIN=js, measured on its own). */
         private readonly login: "html" | "js" = "html",
+        /** The trial's database back end; none (the default) starts the app as Phase 3 did. */
+        readonly database?: BenchDatabase,
     ) {
         this.url = `http://127.0.0.1:${port}`;
+    }
+
+    /** The SQLite file the app keeps its tables in (D-b). */
+    get databaseFile(): string | undefined {
+        return this.database?.kind === "bench-sqlite" ? path.join(this.database.dir, `${this.app.id}.sqlite`) : undefined;
+    }
+
+    /** The engine's read-only view of this app's stored data, when the trial has a database back end. */
+    probe(): DatabaseProbe | undefined {
+        if (this.database?.kind === "bench-data") return benchDataProbe({ url: this.url, token: this.dataToken });
+        const file = this.databaseFile;
+        if (!file) return undefined;
+        // The file exists once the app has started, so the probe opens it on first use.
+        let p: DatabaseProbe | undefined;
+        const real = () => (p ??= benchSqliteProbe({ file }));
+        return { schema: () => real().schema(), check: (t, params) => real().check(t, params) };
     }
 
     /** Start (or restart) the app with these behaviours switched on; resolves when it answers. Its data starts fresh. */
     async start(switches: Switches): Promise<void> {
         await this.stop();
+        if (this.database?.kind === "bench-sqlite") fs.mkdirSync(this.database.dir, { recursive: true });
         const child = spawn(process.execPath, [path.join(this.root, this.app.script), String(this.port)], {
             stdio: "ignore",
-            env: { ...minimalEnv(), BENCH_DEFECTS: switchesEnv(switches), BENCH_RESET_TOKEN: this.token, BENCH_LOGIN: this.login },
+            env: {
+                ...minimalEnv(),
+                BENCH_DEFECTS: switchesEnv(switches),
+                BENCH_RESET_TOKEN: this.token,
+                BENCH_LOGIN: this.login,
+                ...(this.database?.kind === "bench-data" ? { BENCH_DATA_TOKEN: this.dataToken } : {}),
+                ...(this.databaseFile ? { BENCH_DB: this.databaseFile } : {}),
+            },
         });
         this.child = child;
         for (let i = 0; i < 100; i++) {
