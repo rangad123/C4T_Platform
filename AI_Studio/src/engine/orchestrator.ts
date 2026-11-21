@@ -703,6 +703,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const left = new Set(req.excludeIdeas ?? []);
             // Test ideas for a phone app (M-01...) belong to the phone branch, never to the browser.
             scenarios = wantWeb ? req.plan.scenarios.filter((x) => !left.has(x.scenarioId) && !/^M-\d+$/.test(x.scenarioId)) : [];
+            // Parsed in the plan job: without them no expected result citing a requirement is stated here (row 234).
+            requirementIds = req.plan.requirementIds ?? [];
             // The project's testing agents may have dropped the Test Case Generation Agent since the plan was made: its ideas are left out.
             if (req.functionalTests === false && scenarios.length) {
                 ctx.emit({ stage: "planning", kind: "functional_tests_off", message: `No functional test cases are created: this project's testing agents do not include the Test Case Generation Agent any more, so the plan's ${scenarios.length} test idea(s) are left out.` });
@@ -813,7 +815,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             // The person looks at the plan and chooses; nothing is generated or run until they do.
             await sink.phase("GENERATING", "generation", "skipped");
             await sink.phase("VALIDATING", "validation", "skipped");
-            summary.plan = { version: 1, createdAt: new Date().toISOString(), model, scenarios, analysed, specBaseTrusted, accessReach, apiAccess, warnings: [...summary.errors] };
+            summary.plan = { version: 1, createdAt: new Date().toISOString(), model, scenarios, analysed, ...(requirementIds.length ? { requirementIds } : {}), specBaseTrusted, accessReach, apiAccess, warnings: [...summary.errors] };
             await sink.counters({ llmInputTokens: ctx.llm.usage.inputTokens, llmOutputTokens: ctx.llm.usage.outputTokens });
             ctx.emit({ stage: "orchestration", kind: "plan_ready", message: `Plan ready: ${pages.length} pages, ${apis.length} API endpoints and ${scenarios.length} journeys planned. Nothing was created yet.` });
             return summary;

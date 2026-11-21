@@ -36,6 +36,8 @@ export interface StoredPlan {
     scenarios: Scenario[];
     /** True when the AI understanding step ran, so site memory may be updated when the tests are created. */
     analysed: boolean;
+    /** The ids of the requirements document parsed for this plan: the creation from it needs them to state its checks (web/author.ts statedSource, row 234). */
+    requirementIds?: string[];
     /** Only for an Android app explored on a phone: the test ideas with their finished tests (the same function counted them and will create them). */
     mobile?: PhonePlan;
     /** Whether the API description's own `servers` address may receive test traffic (decided during discovery). */

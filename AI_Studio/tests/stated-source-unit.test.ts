@@ -14,7 +14,7 @@ import { defectFinding } from "../src/engine/orchestrator.js";
 import { parseRequirementsDeterministic } from "../src/engine/requirements/parse.js";
 import type { KnowledgeRule } from "../src/engine/planning/planner.js";
 import { ScenarioSchema, type Scenario } from "../src/engine/spec/schema.js";
-import { statedSource, type AuthorOutcome } from "../src/engine/web/author.js";
+import { sourceOf, statedSource, type AuthorOutcome } from "../src/engine/web/author.js";
 
 const RULE: KnowledgeRule = { ref: "R-TOTAL", kind: "constraint" as KnowledgeRule["kind"], description: "The total is the sum of the line prices", expected: "Total = sum of lines", explicitness: "explicit", status: "unverified", workflows: [] };
 const GUESSED: KnowledgeRule = { ...RULE, ref: "R-GUESS", explicitness: "implicit" as KnowledgeRule["explicitness"] };
@@ -65,6 +65,20 @@ describe("statedSource: an expected result naming a requirement id", () => {
     const covering = (requirements: string[], expected: string): Scenario =>
         ScenarioSchema.parse({ scenarioId: "S-REQ", title: "Cart total", description: "d", category: "Cart", startPath: "/cart", requirements, expectedResults: ["The cart page is shown", expected] });
     const PROJECT = ["REQ-1", "REQ-2", "1.2"];
+
+    // Row 234: the writer gives the cited requirement id itself as a check's source.
+    it("sourceOf: a requirement id a stated expected result cites stands for that expected result", () => {
+        expect(sourceOf("REQ-1", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBe("expected:2");
+        expect(sourceOf("requirement 1.2", covering(["1.2"], "The total is $25.00 (requirement 1.2)."), undefined, PROJECT)).toBe("expected:2");
+        expect(sourceOf("1.2", covering(["1.2"], "The total is $25.00 (requirement 1.2)."), undefined, PROJECT)).toBe("expected:2");
+    });
+
+    it("sourceOf: refused when the id is not the job's, not the scenario's, or no expected result cites it", () => {
+        expect(sourceOf("REQ-1", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, [])).toBeUndefined();
+        expect(sourceOf("REQ-1", covering(["REQ-2"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBeUndefined();
+        expect(sourceOf("REQ-2", covering(["REQ-1", "REQ-2"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBeUndefined();
+        expect(sourceOf("REQ-10", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBeUndefined();
+    });
 
     it("is stated when the scenario covers that requirement and the project has it", () => {
         expect(statedSource("expected:2", covering(["REQ-1"], "The total is $25.00 (REQ-1)"), undefined, PROJECT)).toBe(true);

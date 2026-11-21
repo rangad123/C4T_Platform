@@ -226,6 +226,61 @@ describe("authoring keeps a failing sourced check", () => {
         seeded = true;
     }, 90_000);
 
+    // Row 234: the writer cites the requirement id itself ("R-001.b") as the check's source.
+    const reqScenario = { ...scenario, requirements: ["R-001.b"], expectedResults: ["The cart page is shown", "The total is $25.00 (requirement R-001.b)"] };
+    const failingTotal = (source?: string): Call => ({ tool: "assert", input: { check: "exactText", target: totalLocator, expected: "$25.00", ...(source ? { source } : {}) } });
+
+    it("a requirement id an expected result cites is accepted as that expected result's source, and the failing check is captured", async () => {
+        const actions: Array<{ tool: string; ok: boolean; observation: string }> = [];
+        const out = await authorWebSpec({
+            ctx: ctxFor(scripted([heading, failingTotal("R-001.b"), finishDefect])),
+            browser, baseUrl: BASE, model: emptyModel, scenario: reqScenario, requirementIds: ["R-001.b"], onAction: (a) => actions.push(a),
+        });
+        expect(actions.filter((a) => a.tool === "assert" && /is not a rule given/.test(a.observation))).toEqual([]);
+        expect(out).toMatchObject({ status: "defect", capture: "captured", capturedCheck: { source: "expected:2" } });
+        expect(out.steps.at(-1)).toMatchObject({ check: "exactText", source: "expected:2" });
+        // "requirement 1.1" names it too; an id the job does not have is still refused.
+        const numeric = { ...scenario, requirements: ["1.1"], expectedResults: ["The cart page is shown", "The total is $25.00 (requirement 1.1)"] };
+        const named = await authorWebSpec({ ctx: ctxFor(scripted([heading, failingTotal("requirement 1.1"), finishDefect])), browser, baseUrl: BASE, model: emptyModel, scenario: numeric, requirementIds: ["1.1"] });
+        expect(named).toMatchObject({ status: "defect", capture: "captured", capturedCheck: { source: "expected:2" } });
+        const unknown: typeof actions = [];
+        await authorWebSpec({ ctx: ctxFor(scripted([heading, failingTotal("R-001.b"), finishDefect])), browser, baseUrl: BASE, model: emptyModel, scenario: reqScenario, onAction: (a) => unknown.push(a) });
+        expect(unknown.filter((a) => a.tool === "assert" && /is not a rule given/.test(a.observation))).toHaveLength(1);
+    }, 90_000);
+
+    it("a defect reported without its failing check is pushed back once; the check added then is captured", async () => {
+        const actions: Array<{ tool: string; ok: boolean; observation: string }> = [];
+        const out = await authorWebSpec({
+            ctx: ctxFor(scripted([heading, finishDefect, failingTotal("expected:2"), finishDefect])),
+            browser, baseUrl: BASE, model: emptyModel, scenario: reqScenario, requirementIds: ["R-001.b"], onAction: (a) => actions.push(a),
+        });
+        const pushed = actions.filter((a) => a.tool === "finish" && !a.ok);
+        expect(pushed).toHaveLength(1);
+        expect(pushed[0]!.observation).toMatch(/failing check/);
+        expect(out).toMatchObject({ status: "defect", capture: "captured", capturedCheck: { source: "expected:2" } });
+    }, 90_000);
+
+    it("pushed back once only: still no failing check, or no step left after the push-back, is observed only (never blocked)", async () => {
+        const actions: Array<{ tool: string; ok: boolean; observation: string }> = [];
+        const again = await authorWebSpec({
+            ctx: ctxFor(scripted([heading, finishDefect, finishDefect])),
+            browser, baseUrl: BASE, model: emptyModel, scenario: reqScenario, requirementIds: ["R-001.b"], onAction: (a) => actions.push(a),
+        });
+        expect(actions.filter((a) => a.tool === "finish" && !a.ok)).toHaveLength(1);
+        expect(again).toMatchObject({ status: "defect", capture: "observed_only", explanation: "The total shows $30.00, not $25.00" });
+        // The writer stops after the push-back (or its steps run out): the defect it reported stands, observed only.
+        const stopped = await authorWebSpec({ ctx: ctxFor(scripted([heading, finishDefect])), browser, baseUrl: BASE, model: emptyModel, scenario: reqScenario, requirementIds: ["R-001.b"] });
+        expect(stopped).toMatchObject({ status: "defect", capture: "observed_only" });
+        expect(stopped.steps.map((s) => s.action)).toEqual(["navigate", "assert"]);
+    }, 90_000);
+
+    it("no push-back when nothing the scenario has is stated: the defect is observed only at once", async () => {
+        const actions: Array<{ tool: string; ok: boolean; observation: string }> = [];
+        const out = await authorWebSpec({ ctx: ctxFor(scripted([heading, finishDefect])), browser, baseUrl: BASE, model: emptyModel, scenario, onAction: (a) => actions.push(a) });
+        expect(actions.filter((a) => a.tool === "finish" && !a.ok)).toEqual([]);
+        expect(out).toMatchObject({ status: "defect", capture: "observed_only" });
+    }, 90_000);
+
     it("does not append a sourced check that failed once and then passed", async () => {
         const check = { check: "exactText", target: totalLocator, expected: "$25.00", source: "R-TOTAL" };
         const out = await authorWebSpec({
