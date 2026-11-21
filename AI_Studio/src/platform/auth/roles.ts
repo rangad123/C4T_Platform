@@ -54,6 +54,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/health": "own",
     "POST /api/triggers/:token/run": "own",
     "GET /api/triggers/:token/status/:jobId": "own",
+    "POST /api/code-host/github/:token": "own",
     "POST /api/agent/hello": "own",
     "POST /api/agent/poll": "own",
     "POST /api/agent/tasks/:id/heartbeat": "own",
@@ -326,6 +327,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "PUT /api/projects/:id/sentry": "ai_studio.ai_keys.manage",
     "DELETE /api/projects/:id/sentry": "ai_studio.ai_keys.manage",
     "POST /api/projects/:id/sentry/test": "ai_studio.ai_keys.manage",
+    "GET /api/projects/:id/code-host": "read",
+    "PUT /api/projects/:id/code-host": "ai_studio.ai_keys.manage",
+    "DELETE /api/projects/:id/code-host": "ai_studio.ai_keys.manage",
+    "POST /api/projects/:id/code-host/test": "ai_studio.ai_keys.manage",
     // Integrations set up once for an organisation (routes/shared-integrations.ts): setting one up is managing connections to other systems,
     // the code that guards the same connections inside a project (the handler keeps a customer to their organisation); which projects use
     // it is a project setting. Reading is narrowed by the handler.

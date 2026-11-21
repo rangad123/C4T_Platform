@@ -39,18 +39,21 @@ export const TOKEN_PREFIX = "aitt_";
 const TOKEN_CHARS = "[A-Za-z0-9_-]{16,128}";
 const RUN_ROUTE = new RegExp(`^/api/triggers/${TOKEN_CHARS}/run$`);
 const STATUS_ROUTE = new RegExp(`^/api/triggers/${TOKEN_CHARS}/status/[A-Za-z0-9-]{1,64}$`);
+/** GitHub's webhook for a connected repository: the address's token and the delivery's signature are its credentials (code-host/webhook.ts). */
+const CODE_HOST_HOOK_ROUTE = new RegExp(`^/api/code-host/github/${TOKEN_CHARS}$`);
 
 /**
- * The ONLY requests that may skip the API key: POST /api/triggers/<token>/run and GET /api/triggers/<token>/status/<job>.
+ * The ONLY requests that may skip the API key: POST /api/triggers/<token>/run, GET /api/triggers/<token>/status/<job> and
+ * POST /api/code-host/github/<token> (G2's webhook, which also needs the delivery's signature).
  * `decodedPath` is the path after percent-decoding and without the query, exactly what the router will act on; the match is
  * anchored and exact (no prefix, no case folding, no trailing slash), so path tricks fall through to the key check.
  */
 export function isTriggerTokenRoute(method: string, decodedPath: string): boolean {
-    return (method === "POST" && RUN_ROUTE.test(decodedPath)) || (method === "GET" && STATUS_ROUTE.test(decodedPath));
+    return (method === "POST" && (RUN_ROUTE.test(decodedPath) || CODE_HOST_HOOK_ROUTE.test(decodedPath))) || (method === "GET" && STATUS_ROUTE.test(decodedPath));
 }
 
-/** For request logs: the token in a trigger URL is a credential and must never be written down. */
-export const redactTriggerUrl = (url: string): string => url.replace(/(\/api\/triggers\/)[^/?#]+/i, "$1[token]");
+/** For request logs: the token in a trigger or code-host webhook URL is a credential and must never be written down. */
+export const redactTriggerUrl = (url: string): string => url.replace(/(\/api\/(?:triggers|code-host\/github)\/)[^/?#]+/i, "$1[token]");
 
 export const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex");
 export const newToken = (): string => TOKEN_PREFIX + randomBytes(32).toString("base64url");
