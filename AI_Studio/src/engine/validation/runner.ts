@@ -191,6 +191,10 @@ export function configFor(projects: RunnerProject[], testTimeoutMs?: number, bro
     return base.replace("import { defineConfig }", () => "import { defineConfig, devices }").replace("    use: {", () => `    projects: [\n${list}\n    ],\n    use: {`);
 }
 
+/** The run config before the proxy and the overall limit: no recording when the caller says `video: false` (verification attempts, spec Q6). */
+export const runConfigOf = (projects: RunnerProject[], opts: { testTimeoutMs?: number; browser?: BrowserLaunch; video?: false }): string =>
+    configFor(projects, opts.testTimeoutMs, opts.video === false ? { ...opts.browser, video: false } : opts.browser);
+
 /** One test finished (Playwright's list reporter, read from the runner's output). Only produced when a caller asks for progress. */
 export interface RunProgress {
     done: number;
@@ -460,7 +464,7 @@ export async function runScripts(
     scratchDir: string,
     scripts: ScriptInput[],
     env: RunEnv,
-    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** Called as each test and top-level step starts and ends, and when a failure screenshot is written (a runner agent's live view). Leaves the run itself untouched. */ onLive?: (e: LiveRunEvent) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch } = { workers: 2 },
+    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** Called as each test and top-level step starts and ends, and when a failure screenshot is written (a runner agent's live view). Leaves the run itself untouched. */ onLive?: (e: LiveRunEvent) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch; /** false: no recording (verification attempts, ExecutionOptions.video). */ video?: false } = { workers: 2 },
 ): Promise<ScriptRun[]> {
     if (scripts.length === 0) return [];
     if (opts.signal?.aborted) throw new Error("Job cancelled");
@@ -482,7 +486,7 @@ export async function runScripts(
     // --proxy-tests on a runner (AITP_PROXY_TESTS=1): the browser gets the proxy; otherwise the config is unchanged (engine/net/test-proxy.ts).
     const limit = opts.timeoutMs ?? Math.max(120_000, scripts.length * Math.max(1, projects.length) * (opts.testTimeoutMs ?? 60_000));
     // Just under the kill timer below: Playwright stops the run itself first and still writes report.json for every test.
-    const config = withGlobalTimeout(withTestProxy(configFor(projects, opts.testTimeoutMs, opts.browser), process.env), limit);
+    const config = withGlobalTimeout(withTestProxy(runConfigOf(projects, opts), process.env), limit);
     await fs.writeFile(path.join(runDir, "playwright.config.ts"), withReporters(config, [...(opts.onProgress ? ['["list"]'] : []), ...(opts.signal ? ['["./partial-reporter.mjs"]'] : []), ...(opts.onLive ? [`["./${LIVE_REPORTER_FILE}"]`] : [])]));
     if (opts.signal) await fs.writeFile(path.join(runDir, "partial-reporter.mjs"), PARTIAL_REPORTER);
     if (opts.onLive) await fs.writeFile(path.join(runDir, LIVE_REPORTER_FILE), LIVE_REPORTER);
