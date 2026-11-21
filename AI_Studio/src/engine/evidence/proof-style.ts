@@ -5,8 +5,10 @@
  * the style only while it takes the picture, inside frames and shadow roots too, and the page itself is never changed.
  *
  * The selector is a superset of the recorder's rule for each attribute on its own: every field the rule calls secret is covered (a test
- * keeps them agreeing), and a few more may be (an id holding "otp" inside a longer word). A value that is not in such a field (a stored
- * password typed into an ordinary text box) is not found: CSS cannot see what a field holds. Videos cannot be covered at all.
+ * keeps them agreeing), and a few more may be (an id holding "otp" inside a longer word). It also covers the fields that hold personal
+ * data or other secrets (PERSONAL_*: e-mail, phone, postal address, tokens, keys, sessions, connection strings), which the recorder types
+ * as they are. A value that is not in such a field (a stored password typed into an ordinary text box) is not found: CSS cannot see what a
+ * field holds. Text on the page itself is not covered. Videos cannot be covered at all.
  */
 
 const HINTS = ["name", "id", "aria-label", "placeholder"] as const;
@@ -28,13 +30,33 @@ const HINT_WORDS: ReadonlyArray<readonly string[]> = [
 
 const AUTOCOMPLETE = ["one-time-code", "cc-number", "cc-csc", "current-password", "new-password"];
 
+/** Fields of personal data and other secrets, by type, autocomplete and the words of the name, id, label or placeholder (case-insensitive). */
+const PERSONAL_TYPES = ["email", "tel"];
+const PERSONAL_AUTOCOMPLETE = ["email", "tel", "street-address", "address-line", "postal-code", "cc-"];
+const PERSONAL_WORDS = ["email", "e-mail", "phone", "mobile", "address", "token", "secret", "api_key", "api-key", "apikey", "api key", "session", "cookie", "dsn", "connection", "iban", "ssn"];
+
+/**
+ * Whether a field's attributes (as a page snapshot keeps them: name, id, type, autocomplete, aria-label, placeholder) mark it as secret or
+ * personal: the same rule as the cover below, for code that has the attributes rather than the element (evidence/trace-scrub.ts).
+ */
+export function isSensitiveField(attrs: Readonly<Record<string, unknown>>): boolean {
+    const a = (k: string) => (typeof attrs[k] === "string" ? (attrs[k] as string).toLowerCase() : "");
+    if (["password", ...PERSONAL_TYPES].includes(a("type"))) return true;
+    if ([...AUTOCOMPLETE, ...PERSONAL_AUTOCOMPLETE].some((v) => a("autocomplete").includes(v))) return true;
+    return HINTS.some((h) => [...HINT_WORDS, ...PERSONAL_WORDS.map((w) => [w])].some((words) => words.every((w) => a(h).includes(w))));
+}
+
 const attr = (name: string, value: string): string => `[${name}*=${JSON.stringify(value)} i]`;
 
 /** Every `input` that is secret by kind, as one CSS selector list. */
 export const PROOF_SECRET_FIELDS: string = [
     'input[type="password" i]',
-    ...AUTOCOMPLETE.map((v) => `input${attr("autocomplete", v)}`),
-    ...HINTS.flatMap((h) => HINT_WORDS.map((words) => `input${words.map((w) => attr(h, w)).join("")}`)),
+    ...PERSONAL_TYPES.map((t) => `input[type="${t}" i]`),
+    ...[...AUTOCOMPLETE, ...PERSONAL_AUTOCOMPLETE].map((v) => `input${attr("autocomplete", v)}`),
+    ...HINTS.flatMap((h) => [...HINT_WORDS, ...PERSONAL_WORDS.map((w) => [w])].map((words) => `input${words.map((w) => attr(h, w)).join("")}`)),
+    // A text area holding an address or a token is the same data.
+    ...PERSONAL_AUTOCOMPLETE.map((v) => `textarea${attr("autocomplete", v)}`),
+    ...HINTS.flatMap((h) => PERSONAL_WORDS.map((w) => `textarea${attr(h, w)}`)),
 ].join(",");
 
 const COVER = "#475569";
