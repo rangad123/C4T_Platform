@@ -47,7 +47,7 @@ import { buildScreenMap, coverWithTests, type CrawlTransition, type RoleCrawl } 
 import { asRole, roleCredentials, roleDifferences } from "./identity/role-differences.js";
 import { refusedBy } from "./memory/notes.js";
 import { createTestData } from "./testdata/generate.js";
-import { parseRequirements } from "./requirements/parse.js";
+import { parseRequirements, parseRequirementsDeterministic, type Requirement } from "./requirements/parse.js";
 import { assertCredentialsStayHome } from "./spec/credential-origin.js";
 import { TestSpecSchema, type Scenario, type TestSpec } from "./spec/schema.js";
 import { scenarioAccountLane } from "./validation/lanes.js";
@@ -79,6 +79,7 @@ import { usableRules, type AppKnowledge } from "./planning/planner.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 import { createThumbnailer } from "./discovery/thumbnails.js";
 import { layerOfSpec, layerReport, type Layer, type LayerReport } from "./validation/layers.js";
+import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
 export const TEST_CASES_NOT_RUN = "test_cases_not_run";
@@ -711,6 +712,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         let scenarios: Scenario[] = [];
         /** The ids of the job's requirements, as the planner keeps them: an expected result naming one its scenario covers is stated (author.ts statedSource). */
         let requirementIds: string[] = [];
+        /** The job's requirements as parsed for planning (C5 invariants cite them); unset when planning did not parse them here. */
+        let parsedRequirements: Requirement[] | undefined;
         let model: AppModel = summary.model!;
         const validatedScenarioIds = new Set<string>();
         /** Planned scenarios whose test ran in this job (passed or not). */
@@ -767,6 +770,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const warningsBefore = summary.errors.length;
                 const requirements = req.requirements ? await parseRequirements(ctx, req.requirements.text) : undefined;
                 requirementIds = requirements?.map((r) => r.id) ?? [];
+                parsedRequirements = requirements;
                 if (req.requirements) {
                     ctx.emit({ stage: "planning", kind: "requirements_parsed", message: `${requirements!.length} requirements extracted from ${req.requirements.name}` });
                 }
@@ -856,6 +860,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         /** What each new test was created with, so later additions (its strength) keep the rest. */
         const metas = new Map<string, Record<string, unknown>>();
+        /** C5: the invariants kept for the probe, and the proposal's report for summary.layers. */
+        let invariants: Invariant[] = [];
+        let invariantReport: InvariantReport | undefined;
         /** New tests per layer, for summary.layers (C12). */
         const layerTests: Partial<Record<Layer, number>> = {};
         const persistNew = async (spec: TestSpec, framework: Framework, validation: "PENDING" | "NEEDS_REVIEW", reason?: string, meta?: Record<string, unknown>) => {
@@ -1288,6 +1295,15 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
             ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
 
+            // 4b0. C5 invariants: one AI call proposes them from the stated requirements, and code keeps only the checkable ones.
+            const requirementList = parsedRequirements ?? (req.requirements ? parseRequirementsDeterministic(req.requirements.text) : []);
+            if (requirementList.length) {
+                const proposal = await proposeInvariants(ctx, { requirements: requirementList, apis, origins: new Set([origin, new URL(renderCtx.apiBaseUrl).origin]), dataChanges, secrets: authoringSecretsOf(req) });
+                invariants = proposal.invariants;
+                invariantReport = proposal.report;
+                ctx.emit({ stage: "generation", kind: "invariants_proposed", ...(proposal.report.error ? { level: "warn" as const } : {}), message: proposal.report.error ?? `${proposal.report.kept} of ${proposal.report.proposed} proposed invariants kept (${proposal.report.dropped.length} dropped)` });
+            }
+
             // 4b1. Access control for API endpoints (deterministic): a visitor or a lesser account must be refused.
             if (req.accessChecks !== false && (apiAccess.length || apiLists.length)) {
                 // A check made signed in without a token runs in a browser script (kind web); one with a token is an API script.
@@ -1600,7 +1616,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // Site memory: save what this analysis learned (and what changed since the last one). A cancelled run saved nothing
         // (its validation was partial); never fails the job.
         await memory.remember(scenarios.map((s) => ({ title: s.title, journey: s.journey, startPath: s.startPath, validated: validatedScenarioIds.has(s.scenarioId), ran: ranScenarioIds.has(s.scenarioId) })));
-        summary.layers = layerReport(layerTests, { web: wantWeb, api: wantApi, apiEndpoints: apis.length, dataChanges });
+        summary.layers = { ...layerReport(layerTests, { web: wantWeb, api: wantApi, apiEndpoints: apis.length, dataChanges }), ...(invariantReport ? { invariants: invariantReport } : {}) };
         ctx.emit({
             stage: "orchestration",
             kind: "job_summary",
