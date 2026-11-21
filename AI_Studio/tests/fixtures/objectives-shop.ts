@@ -155,7 +155,12 @@ export interface SavedTest {
  * One exploration of the shop through `runGeneration` with an in-memory sink: the web target only, every deterministic check and the
  * planned test cases off, so what is created comes from the objective stage alone.
  */
-export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial<import("../../src/engine/orchestrator.js").GenerationRequest>, o: { /** Saves through this sink instead (e.g. a runner's remote sink); `tests` and `images` stay empty. */ sink?: import("../../src/engine/orchestrator.js").GenerationSink } = {}) {
+export async function exploreShop(
+    site: ShopSite,
+    llm: LlmClient,
+    extra: Partial<import("../../src/engine/orchestrator.js").GenerationRequest>,
+    o: { /** Saves through this sink instead (e.g. a runner's remote sink); `tests` and `images` stay empty. */ sink?: import("../../src/engine/orchestrator.js").GenerationSink; /** The run's cancel signal, and a hook on each event (e.g. to cancel at one). */ signal?: AbortSignal; onEvent?: (kind: string) => void; /** Gets each coverage record the sink is asked to keep (row 231), even when the run then throws. */ explorations?: import("../../src/engine/orchestrator.js").ExplorationSummary[] } = {},
+) {
     const { loadConfig } = await import("../../src/config.js");
     const { runGeneration } = await import("../../src/engine/orchestrator.js");
     const events: Array<{ kind: string; message: string; data?: Record<string, unknown> }> = [];
@@ -176,6 +181,7 @@ export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial
         saveScript: async (h) => `script-${h.testId}`,
         recordExecution: async () => undefined,
         saveTextArtifact: async () => undefined,
+        saveExploration: async (e) => void o.explorations?.push(e),
         saveImageArtifact: async (kind, name, jpeg) => {
             const ref = `img-${images.size + 1}`;
             images.set(ref, { kind, name, bytes: jpeg.byteLength });
@@ -189,7 +195,7 @@ export async function exploreShop(site: ShopSite, llm: LlmClient, extra: Partial
     };
     const config = loadConfig({ CONCURRENCY: "1" } as never);
     const summary = await runGeneration(
-        { config, llm, emit: (e) => events.push({ kind: e.kind, message: e.message, ...(e.data ? { data: e.data } : {}) }) },
+        { config, llm, ...(o.signal ? { signal: o.signal } : {}), emit: (e) => (events.push({ kind: e.kind, message: e.message, ...(e.data ? { data: e.data } : {}) }), o.onEvent?.(e.kind)) },
         {
             url: site.url, targets: ["web"], maxPages: 5, maxDepth: 2, maxScenarios: 1, allowMutatingApiTests: false, useMemory: false,
             functionalTests: false, accessibility: false, healthChecks: false, securityChecks: false, inputChecks: false, contractChecks: false, accessChecks: false, visionChecks: false,

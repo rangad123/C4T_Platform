@@ -90,6 +90,16 @@ export function parseExploration(v: unknown): { ok: true; value: ExplorationReco
 const RAW_EXPLORATION_KEYS: ReadonlySet<string> = new Set(["id", "objectiveId", "kind", "stopReason", "operator", "operators", "authoring", "testKey"]);
 
 /**
+ * A transition's ref (`transition:<entity>:<from>-><to>`, objectives.ts and coverage.ts) has its entity and its states masked apart: the
+ * ref's own colon after an entity such as "Session" is not a `session: value` secret (row 232). Any other text is masked whole.
+ */
+const TRANSITION_REF = /^(transition:)([^:]*):(.*)$/s;
+const maskRef = (v: string, mask: (text: string) => string): string => {
+    const t = TRANSITION_REF.exec(v);
+    return t ? `${t[1]}${mask(t[2]!)}:${mask(t[3]!)}` : mask(v);
+};
+
+/**
  * CP3b R-4, CP3c T-5: the record with every string passed through `mask`, except the id-like fields (RAW_EXPLORATION_KEYS). A field
  * list let page paths, element names and endpoints through (`coverage.pages.unknown`, every `notExercised` list, an objective's
  * `source`): the next field added is masked without anyone listing it. Counts are left as they are. The action log's actions and states
@@ -99,7 +109,7 @@ const RAW_EXPLORATION_KEYS: ReadonlySet<string> = new Set(["id", "objectiveId", 
  */
 export function maskExplorationText<T>(e: T, mask: (text: string) => string): T {
     const walk = (v: unknown, key: string | undefined): unknown => {
-        if (typeof v === "string") return key !== undefined && RAW_EXPLORATION_KEYS.has(key) ? v : mask(v);
+        if (typeof v === "string") return key !== undefined && RAW_EXPLORATION_KEYS.has(key) ? v : maskRef(v, mask);
         if (Array.isArray(v)) return v.map((x) => walk(x, key));
         if (v && typeof v === "object") return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, walk(x, k)]));
         return v;

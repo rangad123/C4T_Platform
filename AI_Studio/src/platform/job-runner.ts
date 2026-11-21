@@ -604,8 +604,9 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
 
         // What the exploration produced is kept before the analysis below runs: a cancel during the analysis ends the job, never this.
         if (summary.plan) await sink.saveTextArtifact(PLAN_ARTIFACT, PLAN_FILE, JSON.stringify(summary.plan));
-        // How an objective-driven exploration went (coverage, stop reason, capped action log), for GET …/jobs/:jobId/coverage.
-        if (summary.exploration) await saveExploration(sink, summary.exploration);
+        // How an objective-driven exploration went (coverage, stop reason, capped action log), for GET …/jobs/:jobId/coverage. Here the
+        // engine kept it through the sink when its session ended (RepoSink.saveExploration); a runner's comes back in its summary.
+        if (summary.exploration && onRunner) await saveExploration(sink, summary.exploration);
 
         if (summary.model) {
             await sink.saveTextArtifact("app-model", "application-model.json", JSON.stringify(summary.model, null, 2));
