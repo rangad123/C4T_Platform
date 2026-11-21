@@ -1,17 +1,17 @@
 /**
  * C2 (Phase 4): documented cases. Each one breaks one rule the API document states and expects the status the document gives for it.
- * The documents are tests/fixtures/bench-openapi.ts (the bench apps' own, as the bench extension makes them). Expected values come from
- * those documents and the requirements, never from a run.
+ * The documents are the bench apps' own (fetched from examples/bench-*). Expected values come from those documents and the
+ * requirements, never from a run.
  */
 import { describe, expect, it } from "vitest";
 import { parseOpenApi } from "../src/engine/api/openapi.js";
 import { generateApiSpecs, type DraftSpec } from "../src/engine/api/test-specs.js";
 import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
-import { RBAC_OPENAPI, SHOP_OPENAPI } from "./fixtures/bench-openapi.js";
+import { benchOpenApi } from "./fixtures/bench-openapi.js";
 
-const SHOP = SHOP_OPENAPI;
-const RBAC = RBAC_OPENAPI;
+const SHOP = await benchOpenApi("bench-shop");
+const RBAC = await benchOpenApi("bench-rbac");
 
 const gen = (doc: object, allowMutating = true) => generateApiSpecs(parseOpenApi(doc, "http://127.0.0.1:9/openapi.json").operations, { allowMutating, maxPerEndpoint: 6 }).specs;
 const find = (specs: DraftSpec[], title: string) => {
@@ -63,6 +63,22 @@ describe("documented cases (C2)", () => {
         expect((b!.body as Record<string, string>).email).toBe("QA+{{unique}}@EXAMPLE.COM");
         expect(statusOf(s)?.expected).toBe(409);
         expect(statusOf(find(shop, "POST /api/register: rejects the same request twice (a duplicate)"))?.expected).toBe(409);
+    });
+
+    it("the case-folded email case is made only when a requirement or the API document says emails ignore letter case", () => {
+        const title = 'POST /api/register: rejects an "email" already used, in other letter case';
+        // bench-shop's document says so on its 409; bench-rbac's does not
+        expect(shop.map((s) => s.title)).toContain(title);
+        expect(rbac.map((s) => s.title)).not.toContain(title);
+        const doc: any = structuredClone(SHOP);
+        doc.paths["/api/register"].post.responses[409].description = "Email already used";
+        const plain = gen(doc);
+        expect(plain.map((s) => s.title)).not.toContain(title);
+        expect(plain.map((s) => s.title)).toContain("POST /api/register: rejects the same request twice (a duplicate)");
+        const stated = (text: string) => generateApiSpecs(parseOpenApi(doc, "http://127.0.0.1:9/openapi.json").operations, { allowMutating: true, maxPerEndpoint: 6, requirementsText: text }).specs.map((s) => s.title);
+        expect(stated("- 1.9 Email addresses are not case-sensitive and spaces around them are ignored.")).toContain(title);
+        // a case rule about something else is not a rule about emails
+        expect(stated("- 4.2 Codes are accepted in any letter case.\n- 1.1 Register with an email address.")).not.toContain(title);
     });
 
     it("BS-19: an order read with a real id from the list is checked against the documented schema (total in integer cents)", () => {

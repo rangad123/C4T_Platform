@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { REPO_ROOT, loadConfig } from "../src/config.js";
-import { MISSING_API_TOKEN_REASON, failureFacts, isMissingApiToken, missingApiTokenReason } from "../src/engine/evidence/failure-facts.js";
+import { MISSING_API_TOKEN_REASON, SIGNED_IN_401_REASON, failureFacts, isMissingApiToken, missingApiTokenReason } from "../src/engine/evidence/failure-facts.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -56,6 +56,11 @@ describe("reading expected and actual from a runner error", () => {
         expect(missingApiTokenReason(spec, run(500), {})).toBeUndefined();
         const noAuth = { kind: "api", steps: [{ action: "request", method: "GET", path: "/x", auth: "none", description: "" }, { action: "assertResponse", check: "status", expected: 401, description: "" }] } as never;
         expect(missingApiTokenReason(noAuth, run(401), {})).toBeUndefined();
+        // the script signed in for itself (C1): a 401 then is not a missing token, and it is said as what happened
+        const signed = missingApiTokenReason(spec, run(401), { signedIn: true });
+        expect(signed).toBe(SIGNED_IN_401_REASON);
+        expect(signed).not.toMatch(/API token, and none is saved/);
+        expect(isMissingApiToken(signed)).toBe(false);
         expect(isMissingApiToken(MISSING_API_TOKEN_REASON)).toBe(true);
         expect(MISSING_API_TOKEN_REASON).toMatch(/^The test needs the project's API token, and none is saved\./);
     });

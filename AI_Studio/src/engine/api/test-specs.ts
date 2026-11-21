@@ -25,6 +25,8 @@ export interface ApiGenOptions {
     /** Check real responses against the documented schema (default true). */
     contractChecks?: boolean;
     maxPerEndpoint: number;
+    /** The project's requirements document: a line saying emails ignore letter case makes the case-folded duplicate a stated expectation. */
+    requirementsText?: string;
 }
 
 export interface ApiGenResult {
@@ -193,6 +195,12 @@ function violations(schema: Schema): Array<{ what: string; value: unknown }> {
     }
     return out;
 }
+
+/** Words saying letter case does not matter ("not case-sensitive", "whatever the letter case", "differs only in letter case"). */
+const IGNORES_CASE = /\b(?:not|in)[- ]?case[- ]?(?:sensitive|insensitive)|\bcase[- ]insensitive|\b(?:any|whatever the|regardless of(?: the)?|ignor\w*(?: the)?) letter case|\bonly in letter case/i;
+/** Emails ignore letter case only where the API document (this endpoint, its conflict answer) or a requirement line about emails says so. */
+const emailCaseStated = (ep: ApiEndpointModel, conflict: string, requirements = "") =>
+    IGNORES_CASE.test(`${ep.summary ?? ""}\n${responseOf(ep, conflict)?.description ?? ""}`) || requirements.split(/\n/).some((line) => /e-?mail/i.test(line) && IGNORES_CASE.test(line));
 
 /** The same address in other letter case, placeholders kept as they are. */
 const otherCase = (v: string) => v.split(/(\{\{[^}]+\}\})/).map((part, i) => (i % 2 ? part : part.toUpperCase())).join("");
@@ -453,7 +461,7 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
             const first = [req(ep, filledPath, { query: queryObj, body: realBody }, "Send a valid request"), resp("statusClass", "2xx", undefined, "The first one is accepted")];
             documentedCases.push(documentedCase("rejects the same request twice (a duplicate)", conflict, [...first, req(ep, filledPath, { query: queryObj, body: realBody }, "Send the same request again")]));
             const email = Object.entries(props).find(([k, v]) => v.type === "string" && (v.format === "email" || /email/i.test(k)) && typeof (realBody as Record<string, unknown>)[k] === "string");
-            if (email) {
+            if (email && emailCaseStated(ep, conflict, opts.requirementsText)) {
                 const again = { ...realBody, [email[0]]: otherCase((realBody as Record<string, string>)[email[0]]!) };
                 documentedCases.push(documentedCase(`rejects an "${email[0]}" already used, in other letter case`, conflict, [...first, req(ep, filledPath, { query: queryObj, body: again }, `Send it again with "${email[0]}" in capitals`)]));
             }

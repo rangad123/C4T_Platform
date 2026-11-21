@@ -63,18 +63,21 @@ export function failureFacts(message: string | null | undefined, step?: Step): F
 /** The sentence that names a missing API token as the reason (the platform's wording; the UI shows it as it is). */
 export const MISSING_API_TOKEN_REASON = "The test needs the project's API token, and none is saved. Add it where the project keeps it (API access in What the agents need, on the Requirements tab, or the environment the test runs against, under Settings), then run the test again.";
 
+/** The sentence for a 401 when the test signed in for itself (C1) and still was not let in: no token is missing, the sign-in did not hold. */
+export const SIGNED_IN_401_REASON = "The application answered 401 (not signed in) although the test signed in first with the project's account. Check that this sign-in works and that the API accepts its session, or save an API token for the project, then run the test again.";
+
 /** True for a stored reason that is the missing-token sentence. */
 export const isMissingApiToken = (reason: string | null | undefined): boolean => !!reason && reason.startsWith("The test needs the project's API token, and none is saved.");
 
 /**
  * The reason a failed API test failed when it asked for a protected answer without any credential: the step that failed followed a
  * request that sends the project's API credential, the application answered 401, and no token (or auth header) is set for this run.
- * Undefined when that is not what happened.
+ * signedIn: the script signed in for its calls (C1), so the sentence says that instead of a missing token. Undefined when that is not what happened.
  */
 export function missingApiTokenReason(
     spec: { kind: string; steps: Step[] },
     run: { status: string; steps: Array<{ index: number; status: string }>; responses: Array<{ status: number }> },
-    credentials: { apiToken?: string; apiAuthHeader?: string },
+    credentials: { apiToken?: string; apiAuthHeader?: string; signedIn?: boolean },
 ): string | undefined {
     if (spec.kind !== "api" || run.status === "passed" || credentials.apiToken || credentials.apiAuthHeader) return undefined;
     const failed = run.steps.find((s) => s.status === "failed");
@@ -83,5 +86,5 @@ export function missingApiTokenReason(
     const last = requests.at(-1);
     const answer = run.responses[requests.length - 1];
     if (!last || !answer || answer.status !== 401 || last.auth === "none") return undefined;
-    return MISSING_API_TOKEN_REASON;
+    return credentials.signedIn ? SIGNED_IN_401_REASON : MISSING_API_TOKEN_REASON;
 }

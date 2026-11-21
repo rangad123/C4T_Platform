@@ -288,7 +288,10 @@ export async function validateBatch(
                 break;
             }
             // The application refused the request because no API token is saved for the project: name that, instead of a mismatch no repair could fix.
-            const noToken = missingApiTokenReason(t.spec, run, { apiToken: deps.env.apiToken, apiAuthHeader: deps.env.apiAuthHeader });
+            // With no token the script signs in for itself (C1) as the named account, or as the project's own when one is saved.
+            const signInAs = t.spec.testData.signInAs;
+            const signedIn = signInAs ? Boolean(deps.env.roles?.some((r) => r.name === signInAs)) : Boolean(deps.env.credentials);
+            const noToken = missingApiTokenReason(t.spec, run, { apiToken: deps.env.apiToken, apiAuthHeader: deps.env.apiAuthHeader, signedIn });
             if (noToken) {
                 outcome = { status: "FAILED_VALIDATION", reason: noToken, spec: t.spec, script, attempts: attempt, lastRun: run };
                 break;

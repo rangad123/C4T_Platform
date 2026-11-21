@@ -1263,7 +1263,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4b. API: deterministic from OpenAPI / observed traffic.
         if (wantApi && apis.length) {
-            const { specs, skippedMutating } = generateApiSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxPerEndpoint: 6, contractChecks: req.contractChecks !== false });
+            const { specs, skippedMutating } = generateApiSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxPerEndpoint: 6, contractChecks: req.contractChecks !== false, ...(req.requirements ? { requirementsText: req.requirements.text } : {}) });
             if (skippedMutating) {
                 ctx.emit({ stage: "generation", kind: "api_mutating_skipped", message: `Skipped ${skippedMutating} state-changing endpoints (enable allowMutatingApiTests to include them)` });
             }
