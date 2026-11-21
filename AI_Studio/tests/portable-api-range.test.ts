@@ -85,7 +85,7 @@ const apiSteps = [
     { action: "request", method: "POST", path: "/api/things", body: { name: "x-{{unique}}" }, extract: { thingId: "id" } },
     { action: "assertResponse", check: "status", expected: 201 },
     { action: "request", method: "GET", path: "/api/things/{{thingId}}", query: { full: "1" }, headers: { "x-trace": "1" }, auth: "none" },
-    // A database check is refused until the database layer exists (DB_CHECK_NOT_YET).
+    // A database check needs a name in its words and the run's check service (tests/db-checks-unit.test.ts covers it).
     ...RESPONSE_CHECKS.filter((c) => !["latency", "load", "statusDenied", "dbCheck"].includes(c)).map((check) => ({
         action: "assertResponse",
         check,
