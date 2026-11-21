@@ -35,6 +35,7 @@ export async function startRunbookForToken(p: Platform, presented: string, rawIn
     const ignored: string[] = [];
     if (input.url) ignored.push("url ignored: a runbook runs against the project’s own address or the environments it names");
     if (input.callbackUrl) ignored.push("callbackUrl ignored: ask for the result with the status route instead");
+    if (input.selection === "focused") ignored.push("selection ignored: a runbook runs the steps it names");
     await assertC4tOwnerMayRun(p, token.createdBy);
 
     let run;
