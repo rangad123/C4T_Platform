@@ -20,6 +20,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { EngineEvent } from "../context.js";
 import type { LlmClient, StructuredCounts, Usage } from "./provider.js";
+import { summariseCalls, type CallSample } from "./health.js";
 import { answeredSlot } from "./resilience.js";
 import { BudgetExceeded, SpendLimitExceeded, budgetTokens, capDetail, capMessage, decideBudget, estimateTokens, monthOf, normalisePurpose, warningMessage, type CapHit, type Caps, type LlmPurpose, type Used, type UsageBilling } from "./usage.js";
 
@@ -36,6 +37,8 @@ export interface MeterBackend {
      * what stops it (amounts in cents) and the sentence. Optional: a backend without one has no money limit.
      */
     spendBlock?(billing: UsageBilling | undefined, model: string, month: string): { usedCents: number; limitCents: number; message: string } | null;
+    /** What the job stored (its artifacts) and what its runners uploaded, in bytes, for the job's call summary. Optional. */
+    runBytes?(jobId: string): { artifactBytes: number; uploadBytes: number };
 }
 
 /** One structured call's repair (task R, R-f): wrapping removed, cut-off list closed, bad items dropped, re-asked, or failed after all that. */
@@ -93,6 +96,9 @@ export class JobMeter {
     private seen: Usage = { inputTokens: 0, outputTokens: 0 };
     private client?: LlmClient;
     private modelName = "unknown";
+    /** Every structured or text call of the job (task R, R4), summed per purpose into the job's call summary at `finish()`. */
+    private readonly samples: CallSample[] = [];
+    private summarised = false;
 
     constructor(private readonly opts: MeterOptions) {
         this.backend = opts.backend;
@@ -139,9 +145,22 @@ export class JobMeter {
         return wrapped;
     }
 
-    /** Write what the client has used since the last flush (call when the job ends, so a last agent step is not lost). */
+    /**
+     * Write what the client has used since the last flush (call when the job ends, so a last agent step is not lost), then tell the job its
+     * call summary: per purpose, latency and output tokens (median, 95th percentile) and the repairs answers needed, with the job's stored and
+     * uploaded bytes. It is a job event, so it is kept with the job without a new table.
+     */
     finish(): void {
         this.guard(() => this.flush(this.lastPurpose));
+        this.guard(() => {
+            const bytes = this.backend.runBytes?.(this.opts.jobId);
+            // Once per meter for the bytes alone (a job handed over may finish twice); again only for calls made since.
+            if (!this.samples.length && (this.summarised || (!bytes?.artifactBytes && !bytes?.uploadBytes))) return;
+            this.summarised = true;
+            const purposes = summariseCalls(this.samples.splice(0));
+            const calls = Object.values(purposes).reduce((n, p) => n + p.calls, 0);
+            this.opts.emit?.({ stage: "orchestration", kind: "ai_call_summary", message: `${calls} AI call(s) summarised by purpose.`, data: { purposes, ...(bytes ?? {}) } });
+        });
     }
 
     // ── the middleware for the authoring agent's direct model use ────────────
@@ -172,16 +191,17 @@ export class JobMeter {
 
     private async call<R>(purpose: LlmPurpose, incoming: number, images: number, run: () => Promise<R>, outputEstimate: (r: R) => number): Promise<R> {
         const token = this.enter(purpose, incoming);
+        const t0 = this.now().getTime();
         // The resilient model writes which model answered (a fallback, perhaps) into this slot: usage and cost are recorded per model.
         const slot: { model?: string } = {};
         try {
             const result = await answeredSlot.run(slot, run);
             this.answered(slot);
-            this.leave(token, purpose, { ok: true, images, count: true, estimate: true, incoming, outputEstimate: safe(() => outputEstimate(result)) });
+            this.leave(token, purpose, { ok: true, images, count: true, estimate: true, incoming, outputEstimate: safe(() => outputEstimate(result)), ms: this.now().getTime() - t0 });
             return result;
         } catch (e) {
             this.answered(slot);
-            this.leave(token, purpose, { ok: false, images, count: true, estimate: false });
+            this.leave(token, purpose, { ok: false, images, count: true, estimate: false, ms: this.now().getTime() - t0 });
             throw e;
         }
     }
@@ -214,7 +234,7 @@ export class JobMeter {
     private leave(
         token: { overlapped: boolean; startNo: number },
         purpose: LlmPurpose,
-        r: { ok: boolean; images: number; count: boolean; estimate: boolean; incoming?: number; outputEstimate?: number },
+        r: { ok: boolean; images: number; count: boolean; estimate: boolean; incoming?: number; outputEstimate?: number; ms?: number },
     ): void {
         this.inflight--;
         this.guard(() => {
@@ -228,6 +248,8 @@ export class JobMeter {
             const repair = repairOf(this.seen, this.client!.usage);
             this.seen = snapshot(this.client!.usage);
             this.record(purpose, { calls: r.count ? 1 : 0, failedCalls: r.ok ? 0 : 1, inputTokens, outputTokens, images: r.images, estimatedCalls: estimated ? 1 : 0, ...cacheOf(delta), ...repair });
+            // The authoring agent's direct model steps have no time of their own here (`ms` missing): only whole calls are sampled.
+            if (r.ms !== undefined) this.samples.push({ purpose, ms: r.ms, outputTokens, ok: r.ok, ...repair });
             this.callsSinceRefresh++;
             // A cap can be reached by this very call: say so now rather than at the next one.
             const d = decideBudget(this.used, this.caps, { warnPercent: this.warnPercent });
