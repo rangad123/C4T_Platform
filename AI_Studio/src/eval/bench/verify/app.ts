@@ -31,11 +31,14 @@ const listening = (port: number) =>
         s.on("error", () => resolve(false));
     });
 
-export async function startBenchApp(app: BenchApp, port: number, defects = "none", resetToken = "bench-reset", login: BenchLogin = "html"): Promise<RunningBenchApp> {
+/** The data routes' token the verifiers and tests start the apps with (GET /__bench/data and /__bench/schema; loopback test apps only). */
+export const BENCH_DATA_TEST_TOKEN = "bench-data";
+
+export async function startBenchApp(app: BenchApp, port: number, defects = "none", resetToken = "bench-reset", login: BenchLogin = "html", dataToken = BENCH_DATA_TEST_TOKEN): Promise<RunningBenchApp> {
     if (await listening(port)) throw new Error(`port ${port} is already in use`);
     const child: ChildProcess = spawn(process.execPath, [BENCH_SERVER[app], String(port)], {
         stdio: "ignore",
-        env: { PATH: process.env.PATH ?? "", BENCH_DEFECTS: defects, BENCH_RESET_TOKEN: resetToken, BENCH_LOGIN: login },
+        env: { PATH: process.env.PATH ?? "", BENCH_DEFECTS: defects, BENCH_RESET_TOKEN: resetToken, BENCH_LOGIN: login, ...(dataToken ? { BENCH_DATA_TOKEN: dataToken } : {}) },
     });
     let up = false;
     for (let i = 0; i < 80 && !up; i++) {

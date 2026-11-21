@@ -18,6 +18,7 @@ Each requirement is one numbered line; the numbers are stable.
 - 1.10 A new account is signed in straight away and has no default delivery address yet.
 - 1.11 A customer signs in with their email address and password; a wrong combination is refused with "Email or password is wrong." (API: 401).
 - 1.12 Signing out ends the session; the person is then a visitor again.
+- 1.13 Registering with an email address that differs from an existing account's only in letter case is refused like any other email address already in use (API: 409).
 
 ## 2. Products
 
@@ -42,6 +43,7 @@ Each requirement is one numbered line; the numbers are stable.
 - 3.9 The cart's subtotal is the sum of its line totals.
 - 3.10 The cart shows the subtotal, the discount, the shipping charge and the total; the total is the subtotal minus the discount plus the shipping charge.
 - 3.11 The discount code form and the Check out button appear only when the cart has at least one line.
+- 3.12 The cart page and the review step show the same subtotal, discount, shipping charge and total as the cart in the API.
 
 ## 4. Discounts and shipping
 
@@ -51,6 +53,7 @@ Each requirement is one numbered line; the numbers are stable.
 - 4.4 Shipping costs $5.00 per order.
 - 4.5 Shipping is free when the subtotal after the discount is $50.00 or more.
 - 4.6 An empty cart has no shipping charge.
+- 4.7 A refused discount code leaves the cart as it was: a code applied before stays applied, with its discount.
 
 ## 5. Checkout
 
@@ -64,6 +67,7 @@ Each requirement is one numbered line; the numbers are stable.
 - 5.8 Placing an order turns the cart into the order: afterwards the cart is empty and the next checkout starts again at step 1.
 - 5.9 An order keeps a copy of the cart's lines, subtotal, discount, shipping charge and total, the delivery address and the time it was placed, and gets a number of the form ord-NNNN.
 - 5.10 After placing an order the customer sees the new order's page.
+- 5.11 Placing an order removes the cart together with all of its lines: no stored cart line is ever left without its cart.
 
 ## 6. Orders
 
@@ -77,12 +81,14 @@ Each requirement is one numbered line; the numbers are stable.
 - 6.8 A customer can cancel an order until it ships: cancelling makes it Cancelled, and a Shipped order cannot be cancelled (API: 409).
 - 6.9 A Cancelled order cannot be cancelled again (API: 409).
 - 6.10 The order page offers Pay now for a Placed order and Cancel order for any order that is not Cancelled; the rules above decide whether the action succeeds.
+- 6.11 An order is paid once: when two payments of the same order arrive at the same time, one succeeds and the other is refused (API: 409).
 
 ## 7. Account
 
 - 7.1 The Account page shows the email address the customer signs in with; the email address cannot be changed.
 - 7.2 On the Account page the customer can change their name and default delivery address and save them; the name is required.
 - 7.3 Saving shows "Saved."; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting address of the next checkout.
+- 7.4 The default delivery address has at most 200 characters; a longer one is refused with "The address can have at most 200 characters." (API: 400), and the Account page shows that message instead of "Saved."
 
 ## 8. API
 
@@ -90,3 +96,5 @@ Each requirement is one numbered line; the numbers are stable.
 - 8.2 API operations other than listing products, reading a product, registering, signing in and signing out answer 401 with "Sign in first." to a visitor.
 - 8.3 API errors are JSON objects with an error message that can be shown to the customer.
 - 8.4 Request bodies larger than 64 KB are ignored.
+- 8.5 Every API response matches the response schema described at /openapi.json; amounts are whole numbers of cents.
+- 8.6 No API response ever contains a password or any other sign-in secret.

@@ -1,5 +1,6 @@
 /** The benchmark result as a short Markdown report (written beside the JSON). Numbers only from the result itself. */
 import type { EvalRun } from "../run.js";
+import type { Catalogue } from "./catalogue.js";
 import { observedOf, seriesOf, type Observed, type ObservedKind } from "./observed.js";
 import type { Benchmark } from "./schema.js";
 
@@ -20,7 +21,10 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
     out.push(`| Seeded defects | ${m.seeded} |`);
     if (m.reachable !== undefined) out.push(`| Effective maximum (seeded defects a test can reach) | ${m.reachable} of ${m.seeded}${unreachable.length ? ` (unreachable: ${unreachable.join(", ")})` : ""} |`);
     out.push(`| Detected (confirmed by replay) | ${m.detected} |`, `| Missed | ${m.missed} |`, `| Detected only by a person's label | ${m.detectedLabeled} |`);
-    out.push(`| Detection rate | ${pct(m.detectionRate)} |`, `| Reported findings | ${m.findings} |`, `| True positives | ${m.truePositives} |`, `| False positives | ${m.falsePositives} |`);
+    out.push(`| Detection rate | ${pct(m.detectionRate)} |`);
+    // The extension seeds are scored apart: never in the rows above.
+    if (b.extension) out.push(`| Extension seeds (scored apart): detected | ${b.extension.detected} of ${b.extension.seeded} (effective maximum ${b.extension.reachable}; ${pct(b.extension.detectionRate)}) |`);
+    out.push(`| Reported findings | ${m.findings} |`, `| True positives | ${m.truePositives} |`, `| False positives | ${m.falsePositives} |`);
     if (m.notReported !== undefined) out.push(`| Not reported by the engine (left out of false positives) | ${m.notReported} |`);
     if (m.seenNotReproducible !== undefined) out.push(`| Seen but not reproducible (the author reported a defect; its saved test passes on the seeded app) | ${m.seenNotReproducible} |`);
     out.push(`| Not reproduced | ${m.unreproduced} |`);
@@ -42,7 +46,7 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
             continue;
         }
         out.push("| Defect | Category | Workflow | Severity | Detected | By |", "|---|---|---|---|---|---|");
-        for (const d of a.defects) out.push(`| ${d.id} | ${d.category} | ${d.workflow} | ${d.severity} | ${d.detected ? "yes" : d.labeledOnly ? "label only" : d.unreachable ? "no (unreachable)" : "no"} | ${d.findings.join(", ")} |`);
+        for (const d of a.defects) out.push(`| ${d.id}${d.set ? " (extension)" : ""} | ${d.category} | ${d.workflow} | ${d.severity} | ${d.detected ? "yes" : d.labeledOnly ? "label only" : d.unreachable ? "no (unreachable)" : "no"} | ${d.findings.join(", ")} |`);
         out.push("", "| Finding | Title | Source | Category | Defects |", "|---|---|---|---|---|");
         for (const f of a.findings) out.push(`| ${f.testKey} | ${f.title.replace(/\|/g, "/")} | ${f.source} | ${f.category}${f.label ? ` (labelled ${f.label})` : ""} | ${f.defects.join(", ")} |`);
         out.push("");
@@ -141,4 +145,35 @@ export function e8Lines(trials: Observed[]): string[] {
         out.push(`- E8 ${what}: candidate median ${fmt[k](c.median)} (${c.n} trials, range ${fmt[k](c.min)}–${fmt[k](c.max)}), baseline median ${fmt[k](b.median)} (${b.n} trials)${ratio === null ? "" : `, ${Math.round(ratio * 100) / 100}×`}: ${pass ? "pass" : "fail"} (at most 2× the baseline median)`);
     }
     return out;
+}
+
+/**
+ * `bench-report --layers`: per app, the tests, findings, confirmed findings and false positives per layer (the engine's meta.layer), and
+ * per seed (original and extension apart) whether it was detected and by findings of which layers.
+ */
+export function layersMarkdown(name: string, b: Benchmark, catalogue: Pick<Catalogue, "defects">): string {
+    const ext = new Set(catalogue.defects.filter((d) => d.set === "extension").map((d) => d.id));
+    const out: string[] = [`## ${name}`, ""];
+    for (const a of b.apps) {
+        out.push(`### ${a.id}`, "");
+        if (a.status !== "done") {
+            out.push(`${a.status}: ${a.reason ?? ""}`, "");
+            continue;
+        }
+        if (!a.layers) out.push("Tests per layer: not available (this result was written before the benchmark recorded layers).", "");
+        else {
+            out.push("| Layer | Tests | Findings | Confirmed | False positives |", "|---|---|---|---|---|");
+            for (const [l, c] of Object.entries(a.layers).sort(([x], [y]) => x.localeCompare(y))) out.push(`| ${l} | ${c.tests} | ${c.findings} | ${c.confirmed} | ${c.falsePositives} |`);
+            out.push("");
+        }
+        out.push("| Seed | Set | Detected | By layers |", "|---|---|---|---|");
+        for (const d of a.defects) {
+            const by = [...new Set(a.findings.filter((f) => f.category === "confirmed" && f.defects.includes(d.id)).map((f) => f.layer ?? "unlabelled"))].sort();
+            out.push(`| ${d.id} | ${d.set ?? (ext.has(d.id) ? "extension" : "original")} | ${d.detected ? "yes" : d.unreachable ? "no (unreachable)" : "no"} | ${by.join(", ") || "-"} |`);
+        }
+        const score = (ids: string[]) => `${a.defects.filter((d) => ids.includes(d.id) && d.detected).length} of ${ids.length}`;
+        const isExt = (id: string) => ext.has(id) || a.defects.some((d) => d.id === id && d.set === "extension");
+        out.push("", `Original seeds detected: ${score(a.seededDefects.filter((id) => !isExt(id)))}. Extension seeds detected: ${score(a.seededDefects.filter(isExt))}.`, "");
+    }
+    return out.join("\n");
 }

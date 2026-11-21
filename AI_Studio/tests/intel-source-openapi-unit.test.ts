@@ -147,7 +147,9 @@ describe("OpenAPI document -> model fragment", () => {
     });
 
     it("without component schemas, a collection addressed by id is an entity inferred from its path, with the fields its request bodies name", () => {
-        const f = openApiFragment(benchShopOpenApi(), { ref: "shop.json" });
+        // bench-shop's document without its component schemas (it has them since the Phase 4 bench extension).
+        const { components: _schemas, ...withoutSchemas } = benchShopOpenApi();
+        const f = openApiFragment(withoutSchemas, { ref: "shop.json" });
         expect(() => ModelFragmentSchema.parse(f)).not.toThrow();
         // /api/products/{id}, /api/cart/items/{productId} (under /api/cart, itself documented) and /api/orders/{id}; nothing from
         // /api/register, /api/login, /api/profile or /api/cart, which address no collection by id.

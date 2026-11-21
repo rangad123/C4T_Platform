@@ -5,6 +5,9 @@
 //   BENCH_RESET_TOKEN  enables POST /__bench/reset (header x-bench-reset must match); the route is 404 without it.
 //   BENCH_LOGIN        html (default): sign-in and registration are plain HTML forms (POST, then a 303 to the next page);
 //                      js: the same forms are sent by the page script to the JSON API instead.
+//   BENCH_DATA_TOKEN   enables GET /__bench/schema and GET /__bench/data (header x-bench-data must match): the stored data as tables
+//                      with keys, read-only, credentials and sessions left out. Without the variable or the header both routes are 404,
+//                      a wrong header is 403 and any method but GET is 405.
 // Roles: user (own notes, sharing), manager (also reads every note), admin (also manages people and roles). Data in memory, reset on start.
 import http from "node:http";
 import { randomBytes } from "node:crypto";
@@ -19,8 +22,12 @@ const SWITCHES = new Set(
 const on = (id) => SWITCHES.has("all") || SWITCHES.has(id);
 const RESET_TOKEN = process.env.BENCH_RESET_TOKEN ?? "";
 const JS_LOGIN = process.env.BENCH_LOGIN === "js";
+const DATA_TOKEN = process.env.BENCH_DATA_TOKEN ?? "";
 const ROLES = ["user", "manager", "admin"];
 const MIN_PASSWORD = 8;
+/** Failed sign-ins: after FAILS_ALLOWED within a minute, every sign-in for that email is refused for a minute. */
+const FAILS_ALLOWED = 5;
+const MINUTE = 60_000;
 
 let db;
 function reset() {
@@ -37,6 +44,10 @@ function reset() {
             { id: "n2", ownerId: "u2", title: "Ben's salary review", body: "Private: discuss the raise with Mia.", sharedWith: [] },
             { id: "n3", ownerId: "u2", title: "Team lunch ideas", body: "Ramen place near the station.", sharedWith: ["u1"] },
         ],
+        /** Share rows whose note is gone (kept apart from the live notes). */
+        strayShares: [],
+        /** Failed sign-ins per email: { fails: [times], lockedUntil }. Wall-clock time; cleared by a reset. */
+        signIns: new Map(),
         nextUser: 5,
         nextNote: 4,
     };
@@ -127,8 +138,19 @@ function register(b) {
     return { user: u, cookie: session(u) };
 }
 function signIn(b) {
-    const u = db.users.find((x) => x.email === String(b.email ?? "").trim().toLowerCase() && x.password === String(b.password ?? ""));
-    return u ? { user: u, cookie: session(u) } : { error: "Email or password is wrong." };
+    const email = String(b.email ?? "").trim().toLowerCase();
+    const now = Date.now();
+    const s = db.signIns.get(email) ?? { fails: [], lockedUntil: 0 };
+    if (!on("BR-09") && now < s.lockedUntil) return { status: 429, error: "Too many failed sign-ins. Try again in a minute." };
+    const u = db.users.find((x) => x.email === email && x.password === String(b.password ?? ""));
+    if (u) return { user: u, cookie: session(u) };
+    s.fails = [...s.fails.filter((t) => now - t < MINUTE), now];
+    if (s.fails.length >= FAILS_ALLOWED) {
+        s.lockedUntil = now + MINUTE;
+        s.fails = [];
+    }
+    db.signIns.set(email, s);
+    return { status: 401, error: "Email or password is wrong." };
 }
 const safeNext = (next, fallback) => (typeof next === "string" && next.startsWith("/") && !next.startsWith("//") ? next : fallback);
 
@@ -146,7 +168,7 @@ async function api(req, res, url, user) {
     }
     if (p === "/api/login" && m === "POST") {
         const r = signIn(await bodyOf(req));
-        if (r.error) return sendJson(res, 401, { error: r.error });
+        if (r.error) return sendJson(res, r.status, { error: r.error });
         return sendJson(res, 200, userView(r.user), { "set-cookie": r.cookie });
     }
     if (p === "/api/logout" && m === "POST") {
@@ -189,6 +211,7 @@ async function api(req, res, url, user) {
         }
         if (m === "DELETE") {
             if (n.ownerId !== user.id) return sendJson(res, 403, { error: "Only the owner can delete this note." });
+            if (on("BR-11")) db.strayShares.push(...n.sharedWith.map((userId) => ({ noteId: n.id, userId })));
             db.notes = db.notes.filter((x) => x !== n);
             return sendJson(res, 200, { ok: true });
         }
@@ -260,7 +283,7 @@ async function formPosts(req, res, url) {
     if (url.pathname === "/login") {
         const r = signIn(b);
         const next = safeNext(b.next, "/notes");
-        if (r.error) return loginPage(res, undefined, next, r.error, String(b.email ?? ""), 400);
+        if (r.error) return loginPage(res, undefined, next, r.error, String(b.email ?? ""), r.status === 429 ? 429 : 400);
         res.writeHead(303, { location: next, "set-cookie": r.cookie, ...SECURITY });
         return res.end();
     }
@@ -294,7 +317,7 @@ function pages(req, res, url, user) {
         const edit = owner
             ? `<h2>Edit</h2><form data-api="/api/notes/${n.id}" data-method="PUT" data-success="Saved."><label>Title <input name="title" value="${esc(n.title)}"></label><label>Text <textarea name="body" rows="5">${esc(n.body)}</textarea></label><button type="submit">Save changes</button></form><h2>Share</h2><form data-api="/api/notes/${n.id}/share"><label>Colleague's email <input name="email"></label><button type="submit">Share</button></form><form data-api="/api/notes/${n.id}" data-method="DELETE" data-next="/notes"><button type="submit">Delete note</button></form>`
             : "";
-        return page(res, n.title || "Note", user, `<h1>${esc(n.title || "(untitled)")}</h1><p class="meta">Owner: ${esc(db.users.find((u) => u.id === n.ownerId)?.name)}</p><div class="body">${esc(n.body)}</div><h2>Shared with</h2>${shared.length ? `<ul>${shared.join("")}</ul>` : "<p>Nobody.</p>"}${edit}`);
+        return page(res, n.title || "Note", user, `<h1>${on("BR-10") ? n.title || "(untitled)" : esc(n.title || "(untitled)")}</h1><p class="meta">Owner: ${esc(db.users.find((u) => u.id === n.ownerId)?.name)}</p><div class="body">${esc(n.body)}</div><h2>Shared with</h2>${shared.length ? `<ul>${shared.join("")}</ul>` : "<p>Nobody.</p>"}${edit}`);
     }
     if (p === "/admin/users") {
         if (user.role !== "admin") return page(res, "Not allowed", user, `<h1>Not allowed</h1><p>Only admins can manage people.</p>`, 403);
@@ -329,18 +352,46 @@ const OPENAPI = {
     openapi: "3.0.3",
     info: { title: "BenchNotes API", version: "1.0.0", description: "Roles: user (own notes and notes shared with them), manager (reads every note), admin (also manages people and roles)." },
     paths: {
-        "/api/register": { post: { summary: "Create an account (valid email, password of at least 8 characters); new accounts are users", responses: { 201: { description: "Created and signed in" }, 400: { description: "Invalid input" }, 409: { description: "Email already used" } } } },
-        "/api/login": { post: { summary: "Sign in", responses: { 200: { description: "Signed in" }, 401: { description: "Wrong email or password" } } } },
-        "/api/logout": { post: { summary: "Sign out; the session stops working", responses: { 200: { description: "Signed out" } } } },
-        "/api/me": { get: { summary: "Who is signed in", responses: { 200: { description: "Person" }, 401: { description: "Not signed in" } } } },
-        "/api/notes": { get: { summary: "Notes you may read", responses: { 200: { description: "Notes" } } }, post: { summary: "Create a note (title required, at most 120 characters)", requestBody: { content: { "application/json": { schema: { type: "object", required: ["title"], properties: { title: { type: "string", minLength: 1, maxLength: 120 }, body: { type: "string" } } } } } }, responses: { 201: { description: "Created" }, 400: { description: "Missing title" } } } },
-        "/api/notes/{id}": { get: { summary: "Read a note (owner, people it is shared with, managers, admins)", responses: { 200: { description: "Note" }, 404: { description: "Not found or not visible to you" } } }, put: { summary: "Change a note (owner only)", responses: { 200: { description: "Changed" }, 403: { description: "Not the owner" }, 404: { description: "Not found" } } }, delete: { summary: "Delete a note (owner only)", responses: { 200: { description: "Deleted" }, 403: { description: "Not the owner" } } } },
-        "/api/notes/{id}/share": { post: { summary: "Share a note with a colleague by email (owner only)", responses: { 200: { description: "Shared" }, 404: { description: "No such person" } } } },
-        "/api/notes/{id}/share/{userId}": { delete: { summary: "Stop sharing (owner only); that person can no longer read the note", responses: { 200: { description: "No longer shared" } } } },
-        "/api/admin/users": { get: { summary: "Everyone with an account (admins only)", responses: { 200: { description: "People" }, 403: { description: "Not an admin" } } } },
-        "/api/admin/users/{id}": { patch: { summary: "Change someone's role (admins only)", responses: { 200: { description: "Changed" }, 403: { description: "Not an admin" } } } },
+        "/api/register": { post: { summary: "Create an account (valid email, password of at least 8 characters); new accounts are users", responses: { 201: { description: "Created and signed in", content: { "application/json": { schema: { $ref: "#/components/schemas/Person" } } } }, 400: { description: "Invalid input", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, 409: { description: "Email already used", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/login": { post: { summary: "Sign in; after 5 failed sign-ins within a minute, sign-in for that email is refused for a minute", responses: { 200: { description: "Signed in", content: { "application/json": { schema: { $ref: "#/components/schemas/Person" } } } }, 401: { description: "Wrong email or password", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, 429: { description: "Too many failed sign-ins", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/logout": { post: { summary: "Sign out; the session stops working", responses: { 200: { description: "Signed out", content: { "application/json": { schema: { $ref: "#/components/schemas/Ok" } } } } } } },
+        "/api/me": { get: { summary: "Who is signed in", responses: { 200: { description: "Person", content: { "application/json": { schema: { $ref: "#/components/schemas/Person" } } } }, 401: { description: "Not signed in", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/notes": { get: { summary: "Notes you may read", responses: { 200: { description: "Notes", content: { "application/json": { schema: { $ref: "#/components/schemas/NoteList" } } } } } }, post: { summary: "Create a note (title required, at most 120 characters)", requestBody: { content: { "application/json": { schema: { type: "object", required: ["title"], properties: { title: { type: "string", minLength: 1, maxLength: 120 }, body: { type: "string" } } } } } }, responses: { 201: { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/Note" } } } }, 400: { description: "Missing title", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/notes/{id}": { get: { summary: "Read a note (owner, people it is shared with, managers, admins)", responses: { 200: { description: "Note", content: { "application/json": { schema: { $ref: "#/components/schemas/Note" } } } }, 404: { description: "Not found or not visible to you", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } }, put: { summary: "Change a note (owner only)", responses: { 200: { description: "Changed", content: { "application/json": { schema: { $ref: "#/components/schemas/Note" } } } }, 403: { description: "Not the owner", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } }, 404: { description: "Not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } }, delete: { summary: "Delete a note (owner only); its shares go with it", responses: { 200: { description: "Deleted", content: { "application/json": { schema: { $ref: "#/components/schemas/Ok" } } } }, 403: { description: "Not the owner", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/notes/{id}/share": { post: { summary: "Share a note with a colleague by email (owner only)", responses: { 200: { description: "Shared", content: { "application/json": { schema: { $ref: "#/components/schemas/Note" } } } }, 404: { description: "No such person", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/notes/{id}/share/{userId}": { delete: { summary: "Stop sharing (owner only); that person can no longer read the note", responses: { 200: { description: "No longer shared", content: { "application/json": { schema: { $ref: "#/components/schemas/Note" } } } } } } },
+        "/api/admin/users": { get: { summary: "Everyone with an account (admins only)", responses: { 200: { description: "People", content: { "application/json": { schema: { $ref: "#/components/schemas/PersonList" } } } }, 403: { description: "Not an admin", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+        "/api/admin/users/{id}": { patch: { summary: "Change someone's role (admins only)", responses: { 200: { description: "Changed", content: { "application/json": { schema: { $ref: "#/components/schemas/Person" } } } }, 403: { description: "Not an admin", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } } } } },
+    },
+    components: {
+        schemas: {
+            Error: { type: "object", required: ["error"], properties: { error: { type: "string", minLength: 1 } } },
+            Ok: { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } },
+            Person: { type: "object", required: ["id", "email", "name", "role"], properties: { id: { type: "string" }, email: { type: "string", format: "email" }, name: { type: "string" }, role: { type: "string", enum: ["user", "manager", "admin"] } } },
+            PersonList: { type: "object", required: ["users"], properties: { users: { type: "array", items: { $ref: "#/components/schemas/Person" } } } },
+            Note: { type: "object", required: ["id", "title", "body", "owner", "sharedWith"], properties: { id: { type: "string" }, title: { type: "string", maxLength: 120 }, body: { type: "string" }, owner: { type: "string" }, sharedWith: { type: "array", items: { type: "object", required: ["id", "name"], properties: { id: { type: "string" }, name: { type: "string" } } } } } },
+            NoteList: { type: "object", required: ["notes"], properties: { notes: { type: "array", items: { $ref: "#/components/schemas/Note" } } } },
+        },
     },
 };
+
+/** The stored data as tables with keys (GET /__bench/schema, GET /__bench/data): read-only views, credentials and sessions left out. */
+const fk = (columns, table, keys) => ({ columns, references: { table, columns: keys } });
+const TABLES = {
+    users: { columns: ["id", "email", "name", "role"], primaryKey: ["id"], uniqueKeys: [{ columns: ["email"], ignoreCase: true }], foreignKeys: [], rows: () => db.users.map(({ id, email, name, role }) => ({ id, email, name, role })) },
+    notes: { columns: ["id", "ownerId", "title", "body"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [fk(["ownerId"], "users", ["id"])], rows: () => db.notes.map(({ id, ownerId, title, body }) => ({ id, ownerId, title, body })) },
+    note_shares: { columns: ["noteId", "userId"], primaryKey: ["noteId", "userId"], uniqueKeys: [], foreignKeys: [fk(["noteId"], "notes", ["id"]), fk(["userId"], "users", ["id"])], rows: () => [...db.notes.flatMap((n) => n.sharedWith.map((userId) => ({ noteId: n.id, userId }))), ...db.strayShares] },
+};
+/** 404 without the variable or the header (like an unknown path), 403 with a wrong token, 405 for anything but GET. */
+function benchData(req, res, pathname) {
+    const given = req.headers["x-bench-data"];
+    if (!DATA_TOKEN || given === undefined) return sendJson(res, 404, { error: "Not found." });
+    if (given !== DATA_TOKEN) return sendJson(res, 403, { error: "Forbidden." });
+    if (req.method !== "GET") return sendJson(res, 405, { error: "Method not allowed." }, { allow: "GET" });
+    const tables = Object.entries(TABLES).map(([name, t]) => ({ name, t, rows: t.rows() }));
+    if (pathname === "/__bench/data") return sendJson(res, 200, { tables: Object.fromEntries(tables.map((x) => [x.name, x.rows])) });
+    return sendJson(res, 200, { tables: tables.map(({ name, t, rows }) => ({ name, columns: t.columns, primaryKey: t.primaryKey, uniqueKeys: t.uniqueKeys, foreignKeys: t.foreignKeys, rowCount: rows.length })) });
+}
 
 const server = http.createServer(async (req, res) => {
     try {
@@ -351,6 +402,7 @@ const server = http.createServer(async (req, res) => {
             reset();
             return sendJson(res, 200, { ok: true });
         }
+        if (url.pathname === "/__bench/data" || url.pathname === "/__bench/schema") return benchData(req, res, url.pathname);
         if (url.pathname === "/app.js") {
             res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", ...SECURITY });
             return res.end(APP_JS);

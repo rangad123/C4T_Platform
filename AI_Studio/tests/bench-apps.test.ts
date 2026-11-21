@@ -184,6 +184,33 @@ describe("the pages work in a real browser (what the engine drives)", () => {
     }, 60_000);
 });
 
+describe("the account page with an over-long address (bench extension, requirement 7.4)", () => {
+    it.each([
+        ["none", "The address can have at most 200 characters.", 400],
+        // Seeded: the API fails (500) and the page still says the change was saved.
+        ["BS-16", "Saved.", 500],
+    ] as const)("defects %s: the page shows %j (the API answered %d)", async (defects, shown, status) => {
+        running = await startBenchApp("bench-shop", 9464, defects);
+        const browser = await chromium.launch();
+        try {
+            const page = await browser.newPage();
+            await page.goto(`${running.base}/login`);
+            await page.getByLabel("Email").fill("alice@example.test");
+            await page.getByLabel("Password").fill("Password1!");
+            await page.getByRole("button", { name: "Sign in" }).click();
+            await page.waitForURL(`${running.base}/`);
+            await page.goto(`${running.base}/account`);
+            await page.getByLabel("Default delivery address").fill("c".repeat(201));
+            const answer = page.waitForResponse((r) => r.url().endsWith("/api/profile") && r.request().method() === "PUT");
+            await page.getByRole("button", { name: "Save" }).click();
+            expect((await answer).status()).toBe(status);
+            await expect.poll(() => page.locator("[data-out]").textContent()).toBe(shown);
+        } finally {
+            await browser.close();
+        }
+    }, 60_000);
+});
+
 describe("signing in the conventional way (what the engine's own sign-in expects)", () => {
     it.each([
         ["bench-shop", "alice@example.test", 9467],

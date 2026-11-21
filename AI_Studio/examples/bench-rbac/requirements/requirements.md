@@ -28,6 +28,7 @@ document. Each requirement is one numbered line; the numbers are stable.
 - 2.11 A person signs in with their email address and password; a wrong combination is refused with "Email or password is wrong." (API: 401).
 - 2.12 Signing out ends the session: from then on that session gives no access at all, and the person is a visitor again.
 - 2.13 The Account page shows the person's name, email address and role.
+- 2.14 After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with "Too many failed sign-ins. Try again in a minute." (API: 429), even with the right password.
 
 ## 3. Notes
 
@@ -45,6 +46,8 @@ document. Each requirement is one numbered line; the numbers are stable.
 - 3.12 Saving changes to a note shows "Saved." and leaves its sharing as it was.
 - 3.13 Only the owner can delete a note; anyone else who may read it is refused (API: 403). After deleting it, the owner is back on the notes list.
 - 3.14 The edit, share and delete controls appear on a note's page for its owner only.
+- 3.15 A note's title and text are always shown as plain text, exactly as typed: characters such as < and > never become part of the page's markup.
+- 3.16 Deleting a note also deletes its sharing: no stored share is ever left for a note that no longer exists.
 
 ## 4. Sharing
 
