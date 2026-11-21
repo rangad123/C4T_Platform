@@ -119,12 +119,14 @@ describe("a finding's screenshots", () => {
     }, 60_000);
 
     it("a picture that cannot be taken or stored is left out, and the check stands", async () => {
-        const failing = await checkIndependence(browser, BASE, { steps }, { shoot: async () => Promise.reject(new Error("the store is away")) });
+        // Six replays whose checked Total fails by design, each waiting its step time: at the 10 s default (row 236) they pass 60 s.
+        const stepTimeoutMs = 5_000;
+        const failing = await checkIndependence(browser, BASE, { steps }, { stepTimeoutMs, shoot: async () => Promise.reject(new Error("the store is away")) });
         expect(failing).toMatchObject({ independence: "independent", screenshots: [] });
-        const none = await checkIndependence(browser, BASE, { steps }, { shoot: async () => undefined });
+        const none = await checkIndependence(browser, BASE, { steps }, { stepTimeoutMs, shoot: async () => undefined });
         expect(none).toMatchObject({ independence: "independent", screenshots: [] });
         // Without a sink that stores pictures there is nothing to list.
-        expect(await checkIndependence(browser, BASE, { steps })).not.toHaveProperty("screenshots");
+        expect(await checkIndependence(browser, BASE, { steps }, { stepTimeoutMs })).not.toHaveProperty("screenshots");
     }, 60_000);
 });
 
