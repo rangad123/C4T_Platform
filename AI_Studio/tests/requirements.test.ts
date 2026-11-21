@@ -106,6 +106,11 @@ describe("requirement parsing", () => {
         expect(reqs).toHaveLength(3);
     });
 
+    it("keeps numbered refs written as \"1.2: text\", as the project's own requirements reach an exploration (agent-inputs.ts)", () => {
+        const reqs = parseRequirementsDeterministic("Requirements\n\n1.1: Visitors can see the product list.\n1.2: The cart needs a signed-in customer.\n2.10: Signing out ends the session.");
+        expect(reqs.map((r) => [r.id, r.text])).toEqual([["1.1", "Visitors can see the product list."], ["1.2", "The cart needs a signed-in customer."], ["2.10", "Signing out ends the session."]]);
+    });
+
     it("falls back to the deterministic result when no model is configured", async () => {
         const reqs = await parseRequirements(ctxWith(unavailableLlmClient("no key")), MD);
         expect(reqs.map((r) => r.id)).toEqual(["REQ-1", "REQ-2", "REQ-3", "REQ-4"]);
