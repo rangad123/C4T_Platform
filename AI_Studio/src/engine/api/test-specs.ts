@@ -162,7 +162,7 @@ function idFromList(list: ApiEndpointModel, idPath: string, name: string): Step 
  * The reference fields of a body, each with a step that takes a real id for it (productId → the first record of GET /products) when a
  * list endpoint documents its ids. Without one the field keeps a made-up value, which the application would refuse as unknown.
  */
-function referenceIds(props: Record<string, Schema>, endpoints: ApiEndpointModel[]): Array<{ field: string; step?: Step }> {
+export function referenceIds(props: Record<string, Schema>, endpoints: ApiEndpointModel[]): Array<{ field: string; step?: Step }> {
     const out: Array<{ field: string; step?: Step }> = [];
     for (const [field, schema] of Object.entries(props)) {
         if (!REFERENCE.test(field) || (schema.type !== undefined && schema.type !== "string") || schema.enum || schema.example !== undefined) continue;
@@ -182,7 +182,7 @@ function pathFromList(ep: ApiEndpointModel, endpoints: ApiEndpointModel[]): { pa
 }
 
 /** Values that break one documented constraint of a field, with what they break. */
-function violations(schema: Schema): Array<{ what: string; value: unknown }> {
+export function violations(schema: Schema): Array<{ what: string; value: unknown }> {
     const out: Array<{ what: string; value: unknown }> = [];
     if (schema.type === "integer" || schema.type === "number") {
         if (typeof schema.maximum === "number") out.push({ what: `above its maximum (${schema.maximum})`, value: schema.maximum + 1 });
@@ -206,11 +206,19 @@ const emailCaseStated = (ep: ApiEndpointModel, conflict: string, requirements = 
 const otherCase = (v: string) => v.split(/(\{\{[^}]+\}\})/).map((part, i) => (i % 2 ? part : part.toUpperCase())).join("");
 
 /** The application's sign-up endpoint: a documented POST to /register or /signup with a body that has a password. */
-function signUpOf(endpoints: ApiEndpointModel[]): ApiEndpointModel | undefined {
+export function signUpOf(endpoints: ApiEndpointModel[]): ApiEndpointModel | undefined {
     return endpoints.find((e) => {
         const props = (e.spec?.requestBody?.schema as Schema | undefined)?.properties ?? {};
         return e.method === "POST" && SIGN_UP.test(e.path) && Object.keys(props).some((k) => /pass/i.test(k)) && e.spec!.responses.some((r) => /^2/.test(r.status));
     });
+}
+
+/** Steps that create and sign in a fresh account through the application's sign-up, or none when it has no documented one. */
+export function freshAccountSteps(endpoints: ApiEndpointModel[]): Step[] {
+    const signUp = signUpOf(endpoints);
+    return signUp
+        ? [req(signUp, signUp.path, { body: sample(signUp.spec!.requestBody!.schema as Schema) }, "Create a fresh account for this check"), resp("statusClass", "2xx", undefined, "The fresh account is created")]
+        : [];
 }
 
 export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOptions): ApiGenResult {
@@ -218,9 +226,7 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
     let skippedMutating = 0;
     // Documented cases run on an account of their own where the application has a sign-up, so leftovers of other tests cannot hide a defect.
     const signUp = signUpOf(endpoints);
-    const freshSteps: Step[] = signUp
-        ? [req(signUp, signUp.path, { body: sample(signUp.spec!.requestBody!.schema as Schema) }, "Create a fresh account for this check"), resp("statusClass", "2xx", undefined, "The fresh account is created")]
-        : [];
+    const freshSteps = freshAccountSteps(endpoints);
 
     for (const ep of endpoints) {
         if (!SAFE.has(ep.method) && !opts.allowMutating) {

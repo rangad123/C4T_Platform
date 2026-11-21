@@ -92,7 +92,11 @@ describe("workflow chain detection", () => {
         const [crud] = byTag(specs, "crud");
         expect(crud).toBeDefined();
         const reqs = requests(crud!);
-        expect(reqs.map((r) => `${r.method} ${r.path}`)).toEqual(["POST /pets", "GET /pets/{{petId}}", "PUT /pets/{{petId}}", "DELETE /pets/{{petId}}", "GET /pets/{{petId}}"]);
+        // C9 read-back: a second create, then the list holds both; the update is read back too.
+        expect(reqs.map((r) => `${r.method} ${r.path}`)).toEqual(["POST /pets", "GET /pets/{{petId}}", "POST /pets", "GET /pets", "PUT /pets/{{petId}}", "GET /pets/{{petId}}", "DELETE /pets/{{petId}}", "GET /pets/{{petId}}"]);
+        expect(reqs[2]!.extract).toEqual({ petId2: "id" });
+        expect(crud!.steps).toContainEqual(expect.objectContaining({ check: "relation", expression: "contains([*].id, $petId) and contains([*].id, $petId2)" }));
+        expect(crud!.steps).toContainEqual(expect.objectContaining({ check: "jsonPath", path: "name", expected: (reqs[4]!.body as { name: string }).name }));
         expect(reqs[0]!.extract).toEqual({ petId: "id" });
         // readOnly id is not sent in the create body; unique-ish strings avoid collisions between runs.
         expect(reqs[0]!.body).not.toHaveProperty("id");
