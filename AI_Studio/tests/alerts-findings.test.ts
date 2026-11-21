@@ -14,6 +14,7 @@ import { findingFingerprint, type CandidateFindingInput } from "../src/engine/ex
 import { DEFAULT_EVENTS } from "../src/platform/alerts.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
+import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { buildServer } from "../src/platform/server.js";
 
 const KEY = "alerts-findings-test-key-93ab";
@@ -112,5 +113,16 @@ describe("findings notices", () => {
             ["finding_reopened", "sent"],
         ]);
         expect(JSON.stringify(log)).not.toContain(CANARY);
+    });
+
+    it("mask every text they are given, whoever calls them", async () => {
+        const { alerts } = getScheduleServices(platform);
+        const sent = await alerts.notifyEvent(alerts.subject({ id: projectId, name: "Shop", url: null }), { event: "finding_confirmed", summary: `Seen with token=${CANARY}`, items: [{ title: `secret=${CANARY}`, reason: `password=${CANARY}` }] });
+        expect(sent).toEqual([expect.objectContaining({ ok: true, events: ["finding_confirmed"] })]);
+        const m = messages("confirmed").at(-1);
+        expect(m.summary).toContain("Seen with token=");
+        expect(m.findings[0].reason).toContain("password=");
+        expect(JSON.stringify(received)).not.toContain(CANARY);
+        expect(JSON.stringify(platform.db.all("SELECT * FROM alert_log"))).not.toContain(CANARY);
     });
 });
