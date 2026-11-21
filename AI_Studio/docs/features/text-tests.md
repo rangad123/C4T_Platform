@@ -181,6 +181,8 @@ The list below is generated from the grammar table (`tests/dsl-unit.test.ts` fai
 - `Expect the response header "content-type" to contain "json"`: A header of the answer contains this text.
 - `Expect the response body not to contain "error"`: The answer body does not contain this text.
 - `Expect the response body to contain "Mug"`: The answer body contains this text.
+- `Expect the relation "subtotal == sum(lines[*].lineTotal)" to hold as stated in "3.9"`: A relation between values of the latest answer (and $values of the test) holds, such as subtotal == sum(lines[*].lineTotal). Name the requirement it comes from with as stated in.
+- `Expect the database check "orders-have-lines" to pass`: A check of the stored data, run through the project's read-only database access.
 - `Expect the response to match the schema {"type":"object","required":["id"]}`: The answer matches a documented JSON schema (a subset of JSON Schema).
 
 ### Check the answer's safety and speed

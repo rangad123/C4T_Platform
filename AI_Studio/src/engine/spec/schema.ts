@@ -7,6 +7,7 @@
  */
 import { z } from "zod";
 import { DesktopTargetSchema } from "../desktop/target.js";
+import { parseRelation, RELATION_MAX_CHARS } from "../validation/relation.js";
 
 export const LOCATOR_STRATEGIES = [
     "role",
@@ -270,6 +271,13 @@ export const RESPONSE_CHECKS = [
      * A 2xx answer is a finding. `expected` is JSON: {"as","path","by","sev"}.
      */
     "statusDenied",
+    /**
+     * A relation the answer must satisfy (see ../validation/relation.ts), in `expression`: values of the latest answer's JSON body and
+     * the test's $values, such as `discount == round(subtotal * 0.10)`. `source` names the stated expectation (a requirement id).
+     */
+    "relation",
+    /** A database-layer check (C10) named by `name`. Its rendering comes with the database layer; until then it is refused with a reason. */
+    "dbCheck",
 ] as const;
 
 /** What a `clock` step does to the page's time (Playwright's page.clock). */
@@ -389,6 +397,11 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         until: z.enum(WAIT_UNTIL).optional(),
         value: z.string().max(500).optional(),
         locator: LocatorSchema.optional(),
+        /**
+         * until "response" only: keep the awaited answer as the test's latest answer (what the next response check judges) and capture
+         * values from its JSON body, as a request step's `extract` does: { varName: "dot.path" }. Without it the answer is not read.
+         */
+        extract: z.record(z.string(), z.string()).optional(),
         ...popupBase,
         ...base,
     }),
@@ -437,6 +450,20 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         expected: z.union([z.string(), z.number(), z.boolean()]).optional(),
         /** matchesSchema only: the documented response schema (a JSON-Schema subset), size-bounded by the generator. */
         schema: z.record(z.string(), z.unknown()).optional(),
+        /** relation only: the expression, refused unless it is inside the relation grammar. */
+        expression: z
+            .string()
+            .min(1)
+            .max(RELATION_MAX_CHARS)
+            .superRefine((text, ctx) => {
+                const r = parseRelation(text);
+                if (!r.ok) ctx.addIssue({ code: "custom", message: `Not a relation the grammar allows: ${r.error}` });
+            })
+            .optional(),
+        /** dbCheck only: the name of the database-layer check. */
+        name: z.string().min(1).max(100).optional(),
+        /** relation and dbCheck: the stated expectation the check proves (a requirement id such as "4.1"), named when it fails. */
+        source: z.string().min(1).max(500).optional(),
         ...base,
     }),
     // ── reusable steps (see ../blocks/*): expanded into the block's own steps before any script is rendered ──
@@ -720,7 +747,7 @@ function describePlainStep(step: Step): string {
             return "Close the application";
         case "wait":
             if (step.until === "url") return `Wait until the address matches "${step.value ?? ""}"`;
-            if (step.until === "response") return `Wait for the response from "${step.value ?? ""}"`;
+            if (step.until === "response") return `Wait for the response from "${step.value ?? ""}"${step.extract ? ` (capture ${Object.keys(step.extract).join(", ")})` : ""}`;
             if (step.until) return `Wait until ${loc(step.locator)} is ${step.until}`;
             return `Wait ${step.ms}ms`;
         case "remember":
@@ -748,6 +775,8 @@ function describePlainStep(step: Step): string {
         case "assertResponse":
             if (step.check === "load") return "Stays fast and error-free with several users at once (load check)";
             if (SECURITY_STEP_WORDING[step.check]) return SECURITY_STEP_WORDING[step.check]!;
+            if (step.check === "relation") return `Verify ${step.expression ?? ""}${step.source ? ` (${step.source})` : ""}`;
+            if (step.check === "dbCheck") return `Verify the database check "${step.name ?? ""}"${step.source ? ` (${step.source})` : ""}`;
             return `Verify response ${step.check}${step.path ? ` ${step.path}` : ""}${
                 step.expected !== undefined ? ` = ${step.expected}` : ""
             }`;

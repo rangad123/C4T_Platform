@@ -160,6 +160,7 @@ export default defineConfig({
             "tests/builder-diff-unit.test.ts",
             "tests/doctor-unit.test.ts",
             "tests/dsl-unit.test.ts",
+            "tests/relation.test.ts",
             "tests/credential-origin-unit.test.ts",
             "tests/guard-hardening.test.ts",
             "tests/guide-content.test.ts",
