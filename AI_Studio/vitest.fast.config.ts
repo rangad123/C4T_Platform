@@ -256,6 +256,7 @@ export default defineConfig({
             "tests/bench-understanding-report-unit.test.ts",
             "tests/bench-repeat-report-unit.test.ts",
             "tests/author-rules-unit.test.ts",
+            "tests/author-verdict-unit.test.ts",
             "tests/intel-source-existing-tests-unit.test.ts",
             "tests/intel-extract-rules-unit.test.ts",
             "tests/intel-extract-tests-pages-unit.test.ts",

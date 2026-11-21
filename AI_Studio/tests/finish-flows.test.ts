@@ -212,6 +212,24 @@ describe("server errors and bug verdicts", () => {
         expect(out.explanation).toMatch(/^Not reported as a bug \(2 of 3 reviews/);
         expect(events.some((e) => e.kind === "defect_unconfirmed")).toBe(true);
     }, 60_000);
+
+    it("reviews that give no verdict are no answer: the defect stands unreviewed, never logged as confirmed (row 236)", async () => {
+        const { model } = scripted(calls);
+        const cut = "Looking at this evidence carefully, the test writer reports that submitting the form";
+        const { ctx, events } = ctxFor(model, [cut, cut, cut]);
+        const out = await authorWebSpec({ ctx, browser, baseUrl: BASE, model: emptyModel(BASE), scenario: scenarioAt("S-502", "/form", "The form is saved") });
+        expect(out.status).toBe("defect");
+        expect(events.some((e) => e.kind === "defect_confirmed")).toBe(false);
+        expect(events.find((e) => e.kind === "defect_unreviewed")?.message).toMatch(/3 of 3 reviews gave no clear yes or no/);
+    }, 60_000);
+
+    it("the review asks for a fixed last line and has room to reason before it (row 236)", async () => {
+        const { model } = scripted(calls);
+        const { ctx, asked } = ctxFor(model, ["VERDICT: YES", "VERDICT: YES", "VERDICT: NO"]);
+        const out = await authorWebSpec({ ctx, browser, baseUrl: BASE, model: emptyModel(BASE), scenario: scenarioAt("S-503", "/form", "The form is saved") });
+        expect(out.status).toBe("defect");
+        expect(asked[0]).toMatch(/VERDICT: YES.*VERDICT: NO/s);
+    }, 60_000);
 });
 
 describe("exploring never accepts a dialog", () => {

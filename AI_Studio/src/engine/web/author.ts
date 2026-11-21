@@ -605,23 +605,28 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
     });
 }
 
-const VERDICT_SYSTEM = `You judge ONE suspected bug found by an automated test writer in a web application. Answer only "yes" when the evidence shows the application itself misbehaves (wrong result, error, crash, server error), or "no" when it is more likely the test writer's mistake (wrong element, wrong expectation, a step not done, timing).`;
+const VERDICT_SYSTEM = `You judge ONE suspected bug found by an automated test writer in a web application. The verdict is YES when the evidence shows the application itself misbehaves (wrong result, error, crash, server error), or NO when it is more likely the test writer's mistake (wrong element, wrong expectation, a step not done, timing). Reason in at most two short sentences, then end with one last line that is exactly "VERDICT: YES" or "VERDICT: NO".`;
 const VERDICT_TRIES = 3;
-/** One verdict answer: yes, no, or undefined when it says neither. */
-export const parseVerdict = (answer: string): boolean | undefined => (/^\W*yes\b/i.test(answer) ? true : /^\W*no\b/i.test(answer) ? false : undefined);
+/** One verdict answer: yes, no, or undefined when it gives no verdict (row 236: prose cut off before one is no answer, never a yes). */
+export function parseVerdict(answer: string): boolean | undefined {
+    // The fixed last line the prompt asks for; the last one wins over words in the reasoning.
+    const line = [...answer.matchAll(/\bverdict\W*(yes|no)\b/gi)].at(-1)?.[1];
+    if (line) return line.toLowerCase() === "yes";
+    return /^\W*yes\b/i.test(answer) ? true : /^\W*no\b/i.test(answer) ? false : undefined;
+}
 
 /**
  * Before a "defect" is stored: the review model is asked 3 times whether this is a real application bug (answers vary between tries),
  * and the majority is kept. A majority of "no" makes the outcome "blocked" (not reported as a bug); answers that say neither, or failed
- * calls, do not count, so without clear answers the defect stands.
+ * calls, are no answer: without a majority either way the defect stands, logged as unreviewed, never as confirmed (row 236).
  */
 async function confirmDefect(input: AuthorInput, out: Extract<AuthorOutcome, { status: "defect" }>): Promise<AuthorOutcome> {
     const { ctx, scenario } = input;
-    const prompt = `Scenario ${scenario.scenarioId}: ${scenario.title}\nDescription: ${scenario.description}\nExpected results:\n${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}\n\nWhat the test writer reports: ${out.explanation}\n\nSteps performed:\n${out.steps.map((s, i) => `${i + 1}. ${describeStep(s)}`).join("\n")}\n\nErrors the application reported:\n${out.evidence?.map((e) => `- ${e}`).join("\n") || "none"}\n\nIs this a real application bug? Answer yes or no.`;
+    const prompt = `Scenario ${scenario.scenarioId}: ${scenario.title}\nDescription: ${scenario.description}\nExpected results:\n${scenario.expectedResults.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}\n\nWhat the test writer reports: ${out.explanation}\n\nSteps performed:\n${out.steps.map((s, i) => `${i + 1}. ${describeStep(s)}`).join("\n")}\n\nErrors the application reported:\n${out.evidence?.map((e) => `- ${e}`).join("\n") || "none"}\n\nIs this a real application bug? End with a last line "VERDICT: YES" or "VERDICT: NO".`;
     let yes = 0;
     let no = 0;
     for (let i = 0; i < VERDICT_TRIES; i++) {
-        const v = await ctx.llm.text({ system: VERDICT_SYSTEM, prompt, maxOutputTokens: 20, purpose: "review" }).then(parseVerdict, () => undefined);
+        const v = await ctx.llm.text({ system: VERDICT_SYSTEM, prompt, maxOutputTokens: 200, purpose: "review" }).then(parseVerdict, () => undefined);
         if (v === true) yes++;
         else if (v === false) no++;
     }
@@ -629,7 +634,8 @@ async function confirmDefect(input: AuthorInput, out: Extract<AuthorOutcome, { s
         ctx.emit({ stage: "generation", kind: "defect_unconfirmed", level: "warn", message: `${scenario.scenarioId}: not reported as a bug: ${no} of ${VERDICT_TRIES} reviews said it is not a real application bug` });
         return { status: "blocked", steps: out.steps, testData: out.testData, explanation: `Not reported as a bug (${no} of ${VERDICT_TRIES} reviews said it is not a real application bug): ${out.explanation}`, ...(out.observations ? { observations: out.observations } : {}) };
     }
-    ctx.emit({ stage: "generation", kind: "defect_confirmed", message: `${scenario.scenarioId}: ${yes} of ${VERDICT_TRIES} reviews said this is a real application bug` });
+    if (yes > no) ctx.emit({ stage: "generation", kind: "defect_confirmed", message: `${scenario.scenarioId}: ${yes} of ${VERDICT_TRIES} reviews said this is a real application bug` });
+    else ctx.emit({ stage: "generation", kind: "defect_unreviewed", level: "warn", message: `${scenario.scenarioId}: reported without a review verdict: ${VERDICT_TRIES - yes - no} of ${VERDICT_TRIES} reviews gave no clear yes or no (yes ${yes}, no ${no})` });
     return out;
 }
 

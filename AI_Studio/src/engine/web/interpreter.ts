@@ -14,6 +14,7 @@ import { runInputCheck } from "../inputs/checks.js";
 import { runPageSpeed } from "../performance/checks.js";
 import { checkedAddress } from "../spec/run-address.js";
 import { armDialog } from "../discovery/browser.js";
+import { gotoOnceMore } from "../discovery/crawler.js";
 import { dialogProblem, downloadProblem, generatedSample } from "./interruptions.js";
 import { labelledField, LABEL_WAIT_MS, type FieldClue } from "./label-fallback.js";
 import { applyClock, applyCondition } from "./conditions.js";
@@ -173,7 +174,8 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
     switch (step.action) {
         case "navigate":
             // The AI writes a test by running its steps here, so its addresses meet the same check as a script's (spec/run-address.ts).
-            await page.goto(await checkedAddress(interpolate(step.url, data), baseUrl), { timeout: 30_000, waitUntil: "domcontentloaded" });
+            // A load cut off by the previous page's scripted redirect (net::ERR_ABORTED) is tried once more (row 236), as the crawler does.
+            await gotoOnceMore(page, await checkedAddress(interpolate(step.url, data), baseUrl));
             return;
         case "click":
             if (step.opensPopup) {
