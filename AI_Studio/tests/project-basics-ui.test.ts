@@ -100,6 +100,8 @@ describe("Create a project", () => {
         // AI agent with another agent only: still required.
         await form.getByRole("radio", { name: /^AI agent/ }).check();
         const picker = form.getByTestId("agent-picker");
+        // The agents arrive after the mode is chosen: wait for the default choice, or the loop below finds no box and stops at once.
+        await pwExpect(picker.getByRole("checkbox", { name: /^Test Case Generation Agent/ })).toBeChecked();
         const checked = picker.getByRole("checkbox", { checked: true });
         while ((await checked.count()) > 0) await checked.first().uncheck();
         await picker.getByRole("checkbox", { name: /^Accessibility Testing Agent/ }).check();
