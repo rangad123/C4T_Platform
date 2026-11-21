@@ -32,22 +32,36 @@ function writeLocator(l: unknown): string {
         if (Object.keys(l).some((k) => k !== "ref")) throw new Unwritable();
         return `the shared element ${quote(String(l.ref))}`;
     }
-    const { frame, ...rest } = l;
-    if (frame === undefined) return writePlainLocator(rest);
+    const { frame, within, filter, ...rest } = l;
+    const own = writePlainLocator(rest, filter === undefined ? undefined : writeFilter(filter)) + (within === undefined ? "" : ` inside ${writeContainer(within)}`);
+    if (frame === undefined) return own;
     // Frames follow the element, inner one first: the "Pay" button inside the frame "card" inside the frame "checkout".
     if (!Array.isArray(frame) || frame.length === 0 || frame.length > 3) throw new Unwritable();
     const words = [...frame].reverse().map((f: unknown) => {
         if (!record(f) || typeof f.value !== "string" || !(f.by === "name" || f.by === "title" || f.by === "url") || Object.keys(f).length !== 2) throw new Unwritable();
         return `inside the frame ${[...FRAME_LEAD[f.by], quote(f.value)].join(" ")}`;
     });
-    return `${writePlainLocator(rest)} ${words.join(" ")}`;
+    return `${own} ${words.join(" ")}`;
 }
 
-function writePlainLocator(l: Record<string, unknown>): string {
+/** Only a text filter has words (`with the text "x"`); the others are not written. */
+function writeFilter(f: unknown): string {
+    if (!record(f) || Object.keys(f).length !== 1 || typeof f.hasText !== "string") throw new Unwritable();
+    return `with the text ${quote(f.hasText)}`;
+}
+
+/** A container: a plain locator, never one whose role is the word that starts a frame. */
+function writeContainer(l: unknown): string {
+    if (!record(l) || l.role === "frame") throw new Unwritable();
+    return writePlainLocator(l);
+}
+
+function writePlainLocator(l: Record<string, unknown>, filter?: string): string {
     const extra = (): string => {
         const parts: string[] = [];
         if (l.exact === true) parts.push("exactly");
         else if (l.exact === false) parts.push("loosely");
+        if (filter) parts.push(filter);
         if (l.nth !== undefined) {
             if (typeof l.nth !== "number" || !Number.isInteger(l.nth) || l.nth < 0 || l.nth > 999) throw new Unwritable();
             parts.push(`number ${l.nth + 1}`);
@@ -114,12 +128,24 @@ function writeRequestOptions(step: Record<string, unknown>): string {
     if (step.body !== undefined) out.push(`with the body ${writeJson(step.body)}`);
     if (step.auth === "none") out.push("without signing in");
     else if (step.auth !== undefined && step.auth !== "default") throw new Unwritable();
-    if (step.extract !== undefined) for (const [k, v] of writeStringMap(step.extract)) out.push(`and remember ${quote(k)} from ${quote(v)}`);
-    return out.join(" ");
+    if (step.extract !== undefined) out.push(writeRemember(step.extract));
+    return out.filter(Boolean).join(" ");
+}
+
+/** `and remember "name" from "path"`, once per captured value. */
+function writeRemember(v: unknown): string {
+    return writeStringMap(v)
+        .map(([k, x]) => `and remember ${quote(k)} from ${quote(x)}`)
+        .join(" ");
 }
 
 function writeSlot(type: string, name: string, step: Record<string, unknown>): string {
     if (type === "reqopts") return writeRequestOptions(step);
+    if (type === "keep") {
+        const w = writeRemember(step[name]);
+        if (w === "") throw new Unwritable();
+        return w;
+    }
     const v = step[name];
     switch (type) {
         case "str":
@@ -215,8 +241,9 @@ function stable(v: unknown): string {
 export function printStep(step: Step): string | undefined {
     // Defaults the schema fills in (a box is ticked unless said otherwise) are part of the step before it is written.
     const parsed = StoredStepSchema.safeParse(step);
-    const { inPopup, ...live } = liveFields((parsed.success ? parsed.data : step) as unknown as Record<string, unknown>);
+    const { inPopup, source, ...live } = liveFields((parsed.success ? parsed.data : step) as unknown as Record<string, unknown>);
     if (inPopup !== undefined && inPopup !== true) return undefined;
+    if (source !== undefined && typeof source !== "string") return undefined;
     const want = normalizeStep(step);
     for (const phrase of PHRASES) {
         if (phrase.for === "desktop" || !describes(phrase, live)) continue;
@@ -224,6 +251,7 @@ export function printStep(step: Step): string | undefined {
         try {
             line = writeTemplate(compileTemplate(phrase.template), live).join(" ");
             if (inPopup) line += " in the popup";
+            if (source !== undefined) line += ` as stated in ${quote(source)}`;
             const note = live.description;
             if (note !== undefined) {
                 if (typeof note !== "string") continue;

@@ -11,7 +11,7 @@
  * `absent` are fields that must not be there for the phrase to describe a step.
  */
 
-export type SlotType = "str" | "url" | "int" | "scalar" | "loc" | "json" | "method" | "args" | "reqopts";
+export type SlotType = "str" | "url" | "int" | "scalar" | "loc" | "json" | "method" | "args" | "reqopts" | "keep";
 
 export interface PhraseDef {
     id: string;
@@ -86,6 +86,7 @@ export const PHRASES: readonly PhraseDef[] = [
     { id: "remember-value", group: ACT, for: "web", about: "Remember what a field holds under a name, to compare later or use as {{name}}.", template: "Remember the value of {locator:loc} as {name:str}", example: 'Remember the value of the "Quantity" field as "qty"', fixed: { action: "remember", from: "value" } },
     { id: "remember", group: ACT, for: "web", about: "Remember an element's text under a name (such as a price), to compare later or use as {{name}}.", template: "Remember the text of {locator:loc} as {name:str}", example: 'Remember the text of the test id "price" as "price"', fixed: { action: "remember", from: "text" } },
     { id: "wait-url", group: ACT, for: "web", about: "Wait until the address contains this text.", template: "Wait until the address contains {value:str}", example: 'Wait until the address contains "/cart"', fixed: { action: "wait", until: "url", ms: 0 } },
+    { id: "wait-response-keep", group: ACT, for: "web", about: "Wait for a response, keep it as the latest answer (for the checks that follow) and remember values of it for later steps.", template: "Wait for a response from {value:str}{extract:keep}", example: 'Wait for a response from "/api/cart" and remember "subtotal" from "subtotal"', fixed: { action: "wait", until: "response", ms: 0 } },
     { id: "wait-response", group: ACT, for: "web", about: "Wait for a response from an address that contains this text (the step before causes it).", template: "Wait for a response from {value:str}", example: 'Wait for a response from "/api/cart"', fixed: { action: "wait", until: "response", ms: 0 } },
     { id: "wait-hidden", group: ACT, for: "web", about: "Wait until an element is gone.", template: "Wait until {locator:loc} is gone", example: 'Wait until the text "Loading" is gone', fixed: { action: "wait", until: "hidden", ms: 0 } },
     { id: "wait-visible", group: ACT, for: "web", about: "Wait until an element shows.", template: "Wait until {locator:loc} shows", example: 'Wait until the text "Saved" shows', fixed: { action: "wait", until: "visible", ms: 0 } },
@@ -156,8 +157,8 @@ export const PHRASES: readonly PhraseDef[] = [
     { id: "answer-header", group: ANSWER, for: "api", about: "A header of the answer contains this text.", template: "Expect the response header {path:str} to contain {expected:scalar}", example: 'Expect the response header "content-type" to contain "json"', fixed: r("header") },
     { id: "answer-not-body", group: ANSWER, for: "api", about: "The answer body does not contain this text.", template: "Expect the response body not to contain {expected:scalar}", example: 'Expect the response body not to contain "error"', fixed: r("bodyNotContains") },
     { id: "answer-body", group: ANSWER, for: "api", about: "The answer body contains this text.", template: "Expect the response body to contain {expected:scalar}", example: 'Expect the response body to contain "Mug"', fixed: r("bodyContains") },
-    { id: "answer-relation", group: ANSWER, for: "both", about: "A relation between values of the latest answer (and $values of the test) holds, such as subtotal == sum(lines[*].lineTotal). Name the requirement it comes from with as stated in.", template: "Expect the relation {expression:str} to hold[ as stated in {source:str}]", example: 'Expect the relation "subtotal == sum(lines[*].lineTotal)" to hold as stated in "3.9"', fixed: r("relation") },
-    { id: "answer-db-check", group: ANSWER, for: "both", about: "A check of the stored data, run through the project's read-only database access.", template: "Expect the database check {name:str} to pass[ as stated in {source:str}]", example: 'Expect the database check "orders-have-lines" to pass', fixed: r("dbCheck") },
+    { id: "answer-relation", group: ANSWER, for: "both", about: "A relation between values of the latest answer (and $values of the test) holds, such as subtotal == sum(lines[*].lineTotal). End it with as stated in to name the requirement it comes from.", template: "Expect the relation {expression:str} to hold", example: 'Expect the relation "subtotal == sum(lines[*].lineTotal)" to hold', fixed: r("relation") },
+    { id: "answer-db-check", group: ANSWER, for: "both", about: "A check of the stored data, run through the project's read-only database access.", template: "Expect the database check {name:str} to pass", example: 'Expect the database check "orders-have-lines" to pass', fixed: r("dbCheck") },
     { id: "answer-schema", group: ANSWER, for: "api", about: "The answer matches a documented JSON schema (a subset of JSON Schema).", template: "Expect the response to match the schema {schema:json}", example: 'Expect the response to match the schema {"type":"object","required":["id"]}', fixed: r("matchesSchema") },
     { id: "safe-headers", group: ANSWER_SAFE, for: "api", about: "Browser security headers are set. The setting lists csp, frame, nosniff, referrer, hsts.", template: "Expect the browser security headers to be set[ for {expected:str}]", example: 'Expect the browser security headers to be set for "csp,hsts"', fixed: r("securityHeaders"), absent: ["path"] },
     { id: "safe-cookies", group: ANSWER_SAFE, for: "api", about: "Session cookies are protected (HttpOnly, Secure, SameSite). The setting lists httponly, secure, samesite.", template: "Expect session cookies to be protected[ by {expected:str}]", example: "Expect session cookies to be protected", fixed: r("cookieFlags"), absent: ["path"] },
@@ -246,6 +247,11 @@ export function readableTemplate(template: string): string {
 /** How a frame is written after an element: `inside the frame "name"`, `inside the frame titled "x"`, `inside the frame at "address part"`. */
 export const FRAME_LEAD: Record<"name" | "title" | "url", string[]> = { name: [], title: ["titled"], url: ["at"] };
 
+/** The words before the text a check ends with to name the stated expectation it proves (its `source`). */
+export const SOURCE_LEAD = ["as", "stated", "in"] as const;
+/** The steps that carry a `source`. */
+export const SOURCE_ACTIONS = new Set(["assert", "assertResponse"]);
+
 /** The words a step line ends with when the step works in the popup an earlier click opened. */
 export const POPUP_SUFFIX = ["in", "the", "popup"] as const;
 
@@ -259,6 +265,7 @@ export const SLOT_WORDS: Record<SlotType, string> = {
     method: "method",
     args: "values",
     reqopts: "options",
+    keep: "values to remember",
 };
 
 /** The fields a phrase's slots fill, in the order the template names them. */
@@ -313,7 +320,9 @@ export function phraseReference() {
             'Elements are written as: the "Email" field, the "Sign in" button, the text "Welcome", the test id "cart", the element "#id" (a CSS selector), the shared element "Cart / Checkout button". Another role works as the "Name" tab. An element with a role and no name is written the button, or the role "status" for a role whose word the grammar also uses. Add exactly or loosely, and number 2 to pick the second match.',
             'Texts are in double quotes. Write \\" for a quote, \\\\ for a backslash and \\n for a new line. Placeholders such as {{credentials.password}} and {{name}} are kept as they are.',
             'Add note "why" at the end of a step to keep a description with it.',
+            'End a check with as stated in "4.1" (before any note) to name the stated expectation it proves, such as a requirement.',
             'An element inside a frame is written with the frame after it: the "Pay" button inside the frame "checkout". A frame can also be named by its title (inside the frame titled "Payment") or a part of its address (inside the frame at "pay.example.com/form"). Frames in frames: the inner one first.',
+            'An element inside a container is written with the container after it: the "Remove" button inside the "Pocket Notebook" row. To keep only the matches that contain a text, add with the text: the listitem with the text "Headphones".',
             "End a step with in the popup to do it in the window that a step written Click ... and wait for the popup opened.",
             "Blank lines and lines that start with # are ignored, and are not kept when the test is saved.",
         ],

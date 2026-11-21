@@ -66,7 +66,7 @@ export function unsafeJsonKey(v: unknown): string | undefined {
 const lower = (t: Token | undefined) => (t && t.kind === "word" ? t.value.toLowerCase() : undefined);
 
 /** Reads `the ...` as a locator. Returns null (and records what was expected) when it is not one. */
-function readLocator(toks: Token[], ti: number, fx: Furthest): SlotRead | null {
+function readLocator(toks: Token[], ti: number, fx: Furthest, plain = false): SlotRead | null {
     const WANT = 'an element such as the "Email" field';
     if (lower(toks[ti]) !== "the") return fx.fail(ti, WANT, "the");
     const t1 = toks[ti + 1];
@@ -80,7 +80,7 @@ function readLocator(toks: Token[], ti: number, fx: Furthest): SlotRead | null {
         return null;
     };
     const w1 = lower(t1);
-    if (w1 === "shared") {
+    if (w1 === "shared" && !plain) {
         if (lower(toks[ti + 2]) !== "element") return fx.fail(ti + 2, '"element"', "element");
         const s = text(ti + 3, "the name of the shared element in double quotes");
         if (!s) return null;
@@ -134,11 +134,26 @@ function readLocator(toks: Token[], ti: number, fx: Furthest): SlotRead | null {
         loc.exact = false;
         next++;
     }
+    // `with the text "Headphones"`: keep the matches that contain the text (before the number, which picks among those).
+    if (!plain && lower(toks[next]) === "with" && lower(toks[next + 1]) === "the" && lower(toks[next + 2]) === "text") {
+        const s = text(next + 3, "the text in double quotes");
+        if (!s) return null;
+        loc.filter = { hasText: s.value };
+        next += 4;
+    }
     if (lower(toks[next]) === "number") {
         const n = toks[next + 1];
         if (!n || n.kind !== "word" || !/^\d+$/.test(n.value) || Number(n.value) < 1 || Number(n.value) > 1000) return fx.fail(next + 1, "a position from 1, such as number 2");
         loc.nth = Number(n.value) - 1;
         next += 2;
+    }
+    if (plain) return { value: loc, next };
+    // `inside the "Pocket Notebook" row`: the element inside a container (one level; frames come after it).
+    if (lower(toks[next]) === "inside" && lower(toks[next + 2]) !== "frame") {
+        const inner = readLocator(toks, next + 1, fx, true);
+        if (!inner) return null;
+        loc.within = inner.value;
+        next = inner.next;
     }
     // `inside the frame "checkout"` (by name), `inside the frame titled "Payment"`, `inside the frame at "pay.example.com"`: the inner frame first.
     const frames: Array<{ by: string; value: string }> = [];
@@ -246,6 +261,15 @@ function readSlot(type: SlotType, toks: Token[], ti: number, src: string, fx: Fu
             return readArgs(toks, ti, fx);
         case "reqopts":
             return readRequestOptions(toks, ti, src, fx);
+        case "keep": {
+            // Only `and remember "name" from "path"` parts: what a response wait keeps.
+            if (lower(toks[ti]) !== "and" || lower(toks[ti + 1]) !== "remember") return fx.fail(ti, '"and remember"', "and");
+            const r = readRequestOptions(toks, ti, src, fx);
+            if (!r) return null;
+            const v = r.value as Slots;
+            if (Object.keys(v).some((k) => k !== "extract")) return fx.fail(ti, '"and remember"', "and");
+            return { value: v.extract, next: r.next };
+        }
     }
 }
 

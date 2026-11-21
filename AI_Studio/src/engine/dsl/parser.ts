@@ -6,7 +6,7 @@
  */
 import { PRIORITIES, TEST_TYPES, TestSpecSchema, type TestSpec } from "../spec/schema.js";
 import { editDistance, tokenize, type Token } from "./lexer.js";
-import { HEADER_ALIASES, HEADER_KEYS, type HeaderKey, type PhraseDef } from "./grammar.js";
+import { HEADER_ALIASES, HEADER_KEYS, SOURCE_ACTIONS, SOURCE_LEAD, type HeaderKey, type PhraseDef } from "./grammar.js";
 import { buildStep, Furthest, matchAll, nearestPhrase, splitPopup } from "./match.js";
 
 export const DSL_LIMITS = { lines: 500, bytes: 50 * 1024, diagnostics: 50, lineLength: 25_000, title: [3, 160], category: 80, description: 2000, listItems: 20, listItemLength: 500, tag: 40, data: 30, dataValue: 500 } as const;
@@ -220,8 +220,10 @@ export function parseDsl(input: string): ParseResult {
             add(lineNo, col(toks[toks.length - 1]!.start), col(toks[toks.length - 1]!.end), "A note can have at most 500 characters.");
             continue;
         }
+        // Then a trailing  as stated in "4.1"  names what a check proves.
+        const stated = splitSource(used, trimmedBody);
         // A trailing  in the popup  does the step in the window an earlier click opened.
-        const popup = splitPopup(used, trimmedBody);
+        const popup = splitPopup(stated.used, stated.text);
         const fx = new Furthest();
         const found = matchAll(popup.used, popup.text, fx);
         if (!found.length) {
@@ -246,7 +248,12 @@ export function parseDsl(input: string): ParseResult {
             continue;
         }
         const step = buildStep(m);
+        if (stated.source !== undefined && !SOURCE_ACTIONS.has(String(step.action))) {
+            add(lineNo, col(toks[0]!.start), col(toks[toks.length - 1]!.end), "Only a check can say what it proves (as stated in ...).");
+            continue;
+        }
         if (popup.inPopup) step.inPopup = true;
+        if (stated.source !== undefined) step.source = stated.source;
         if (note !== undefined) step.description = note;
         steps.push(step);
         stepLines.push(lineNo);
@@ -305,17 +312,29 @@ function splitNote(toks: Token[], body: string): { used: Token[]; note: string |
     return { used: toks, note: undefined, text: body };
 }
 
+/** A step line may end with  as stated in "4.1"  (before any note): the stated expectation a check proves. */
+function splitSource(toks: Token[], body: string): { used: Token[]; source: string | undefined; text: string } {
+    const n = toks.length;
+    if (n >= 5 && toks[n - 1]!.kind === "str" && SOURCE_LEAD.every((w, i) => toks[n - 4 + i]!.kind === "word" && toks[n - 4 + i]!.value.toLowerCase() === w)) {
+        return { used: toks.slice(0, -4), source: toks[n - 1]!.value, text: body.slice(0, toks[n - 4]!.start) };
+    }
+    return { used: toks, source: undefined, text: body };
+}
+
 /** Reads one step line on its own (the printer uses it to prove that what it wrote reads back the same). */
 export function readStepLine(line: string): { step: Record<string, unknown>; phraseId: string } | undefined {
     const toks = tokenize(line);
     if (!toks.length || toks.some((t) => t.kind === "bad")) return undefined;
     const { used, note, text } = splitNote(toks, line);
-    const popup = splitPopup(used, text);
+    const stated = splitSource(used, text);
+    const popup = splitPopup(stated.used, stated.text);
     const found = matchAll(popup.used, popup.text, new Furthest());
     if (!found.length) return undefined;
     if (popup.inPopup && !popupStep(found[0]!.phrase)) return undefined;
     const step = buildStep(found[0]!);
+    if (stated.source !== undefined && !SOURCE_ACTIONS.has(String(step.action))) return undefined;
     if (popup.inPopup) step.inPopup = true;
+    if (stated.source !== undefined) step.source = stated.source;
     if (note !== undefined) step.description = note;
     return { step, phraseId: found[0]!.phrase.id };
 }

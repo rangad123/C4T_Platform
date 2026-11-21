@@ -27,7 +27,9 @@ Run the reusable steps "Open the cart" with item = "Mug"
 - Line based, UTF-8, at most 500 lines and 50 KB. Blank lines and lines that start with `#` are ignored and are **not kept** when a test is saved (comments do not round-trip).
 - Header lines come first: `Test:` (required, 3 to 160 characters), `Kind:` (web or api, default web), `Category:`, `Type:`, `Priority:`, `Description:`, and repeatable `Tag:`, `Precondition:`, `Result:` and `Data: name = "value"` (a value steps can use as `{{name}}`). `Title:` is read as `Test:`. A value is plain text, or in double quotes when it has leading or trailing spaces, starts with a quote or holds a line break.
 - One step per line. Words can be in any case, extra spaces are ignored. Texts are in double quotes with `\"`, `\\`, `\n`, `\r`, `\t` and `\uXXXX` escapes. Placeholders such as `{{credentials.password}}` and `{{name}}` are kept exactly as typed; nothing is evaluated, nothing is fetched, there are no includes.
+- An element inside a container is written with the container after it: the "Remove" button inside the "Pocket Notebook" row. Only the matches that contain a text: the listitem with the text "Headphones".
 - A step may end with `note "why"`, which keeps the step's description.
+- A check may end with `as stated in "4.1"` (before any note), which names the stated expectation it proves, such as a requirement.
 - An element with a role and **no name** is written `the button`. For a role whose word the grammar also uses (status, application, ...) it is `the role "status"`. Once there is a name, any role word works (`the "Cart updated" status`). Before this, the common generated check "the status message says Added to the cart" could not be written, so the Text view refused a plain 3-step generated test.
 - Elements are written once and used in every phrase: `the "Email" field` (a label), `the "Search" placeholder`, `the "Sign in" button` (any role: `the "Settings" tab`, or just `the button`), `the text "Welcome"`, `the test id "cart"`, `the element "#id"` (CSS selector), `the shared element "Cart / Checkout button"`. Add `exactly` or `loosely`, and `number 2` to pick the second match.
 - Requests: `Send a POST request to /api/orders with the query "a" = "1" with the header "X-Id" = "7" with the body {"sku":"A1"} without signing in and remember "orderId" from "id"`. The body and schemas are JSON on the same line.
@@ -109,6 +111,7 @@ The list below is generated from the grammar table (`tests/dsl-unit.test.ts` fai
 - `Remember the value of the "Quantity" field as "qty"`: Remember what a field holds under a name, to compare later or use as {{name}}.
 - `Remember the text of the test id "price" as "price"`: Remember an element's text under a name (such as a price), to compare later or use as {{name}}.
 - `Wait until the address contains "/cart"`: Wait until the address contains this text.
+- `Wait for a response from "/api/cart" and remember "subtotal" from "subtotal"`: Wait for a response, keep it as the latest answer (for the checks that follow) and remember values of it for later steps.
 - `Wait for a response from "/api/cart"`: Wait for a response from an address that contains this text (the step before causes it).
 - `Wait until the text "Loading" is gone`: Wait until an element is gone.
 - `Wait until the text "Saved" shows`: Wait until an element shows.
@@ -181,7 +184,7 @@ The list below is generated from the grammar table (`tests/dsl-unit.test.ts` fai
 - `Expect the response header "content-type" to contain "json"`: A header of the answer contains this text.
 - `Expect the response body not to contain "error"`: The answer body does not contain this text.
 - `Expect the response body to contain "Mug"`: The answer body contains this text.
-- `Expect the relation "subtotal == sum(lines[*].lineTotal)" to hold as stated in "3.9"`: A relation between values of the latest answer (and $values of the test) holds, such as subtotal == sum(lines[*].lineTotal). Name the requirement it comes from with as stated in.
+- `Expect the relation "subtotal == sum(lines[*].lineTotal)" to hold`: A relation between values of the latest answer (and $values of the test) holds, such as subtotal == sum(lines[*].lineTotal). End it with as stated in to name the requirement it comes from.
 - `Expect the database check "orders-have-lines" to pass`: A check of the stored data, run through the project's read-only database access.
 - `Expect the response to match the schema {"type":"object","required":["id"]}`: The answer matches a documented JSON schema (a subset of JSON Schema).
 
