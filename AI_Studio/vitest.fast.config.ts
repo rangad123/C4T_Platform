@@ -267,6 +267,8 @@ export default defineConfig({
             "tests/case-agent-view.test.ts",
             "tests/case-agent-requirements-only.test.ts",
             "tests/case-agent-wording-unit.test.ts",
+            // F3 round 2: requirement areas are not pages (pure).
+            "tests/case-outcome-counts-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

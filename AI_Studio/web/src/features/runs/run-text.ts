@@ -209,8 +209,9 @@ export interface CaseRunFacts {
 /** "Run 3": runs are numbered from the first, so "the second run made the tree bigger" can be read off the list. */
 export const caseRunTitle = (n: number | undefined): string => (n ? `Run ${n}` : "Run");
 
-/** "4 pages and 9 test cases". */
-export const addedText = (r: Pick<CaseRunFacts, "addedPages" | "addedCases">): string => `${plural(r.addedPages, "page")} and ${plural(r.addedCases, "test case")}`;
+/** "4 pages and 9 test cases"; a run that added no pages (a requirements-only run) names only its test cases. */
+export const addedText = (r: Pick<CaseRunFacts, "addedPages" | "addedCases">): string =>
+    r.addedPages ? `${plural(r.addedPages, "page")} and ${plural(r.addedCases, "test case")}` : plural(r.addedCases, "test case");
 
 /** The one line a run says about what it added to the tree; a stopped or unfinished run says that what it found is kept (Q4). */
 export function caseRunLine(r: CaseRunFacts): string {

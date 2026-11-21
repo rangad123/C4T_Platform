@@ -18,6 +18,9 @@ describe("a Test Case Generation run's line", () => {
         expect(caseRunLine({ status: "stopped", addedPages: 22, addedCases: 14 })).toBe("Stopped. What it found is kept: it added 22 pages and 14 test cases.");
         expect(caseRunLine({ status: "failed", addedPages: 2, addedCases: 0 })).toBe("Did not finish. What it found is kept: it added 2 pages and 0 test cases.");
         expect(caseRunLine({ status: "running", addedPages: 3, addedCases: 0 })).toBe("Added 3 pages and 0 test cases so far.");
+        // A requirements-only run adds no pages: it names only its test cases.
+        expect(caseRunLine({ status: "completed", addedPages: 0, addedCases: 6 })).toBe("Added 6 test cases.");
+        expect(caseRunLine({ status: "stopped", addedPages: 0, addedCases: 1 })).toBe("Stopped. What it found is kept: it added 1 test case.");
         expect(caseRunTitle(2)).toBe("Run 2");
         expect(caseRunTitle(undefined)).toBe("Run");
     });
