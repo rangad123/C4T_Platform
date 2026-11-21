@@ -16,6 +16,7 @@
 import { CONTRACT_MAX_SCHEMA_BYTES } from "../contracts/check.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
+import { resourceName, stripIdSuffix } from "./workflows.js";
 
 export type DraftSpec = Omit<TestSpec, "testId">;
 
@@ -128,9 +129,90 @@ function category(ep: ApiEndpointModel): string {
     return `API · ${seg ? seg[0]!.toUpperCase() + seg.slice(1) : "General"}`;
 }
 
+// ── Documented cases (C2) ────────────────────────────────────────────────────
+
+/** Most documented cases per endpoint. They have their own cap, so the generic cases above stay exactly as they were. */
+const MAX_DOCUMENTED = 6;
+/** A body field that names another record: productId, owner_id. */
+const REFERENCE = /^[a-z][a-zA-Z0-9]*(?:Id|_id)$/;
+const SIGN_UP = /\/(?:register|sign-?up)(?:\/|$)/i;
+const SIGN_IN_LIKE = /\/(?:auth|login|signin|sign-in|token|oauth|session|logout|signout|sign-out)(?:\/|$)/i;
+
+/** The first of these statuses the endpoint documents. */
+const documentedStatus = (ep: ApiEndpointModel, ...codes: string[]): string | undefined => codes.find((c) => ep.spec?.responses.some((r) => r.status === c));
+const responseOf = (ep: ApiEndpointModel, status: string) => ep.spec?.responses.find((r) => r.status === status);
+
+/** Where a list answer holds its first record's id ("0.id", or "<the one array property>.0.id"), from the documented 2xx schema. */
+function firstIdPath(ep: ApiEndpointModel): string | undefined {
+    const s = ep.spec?.responses.find((r) => /^2/.test(r.status))?.schema as Schema | undefined;
+    const withId = (items: Schema | undefined) => items?.type === "object" && items.properties?.id !== undefined;
+    if (s?.type === "array") return withId(s.items) ? "0.id" : undefined;
+    const arrays = Object.entries<Schema>(s?.type === "object" ? (s.properties ?? {}) : {}).filter(([, v]) => v.type === "array" && withId(v.items));
+    return arrays.length === 1 ? `${arrays[0]![0]}.0.id` : undefined;
+}
+
+/** A request step that takes a real record id from a documented list endpoint into {{name}}. */
+function idFromList(list: ApiEndpointModel, idPath: string, name: string): Step {
+    return req(list, list.path, { query: queryFor(list), extract: { [name]: idPath } }, `Take a real id from GET ${list.path}`);
+}
+
+/**
+ * The reference fields of a body, each with a step that takes a real id for it (productId → the first record of GET /products) when a
+ * list endpoint documents its ids. Without one the field keeps a made-up value, which the application would refuse as unknown.
+ */
+function referenceIds(props: Record<string, Schema>, endpoints: ApiEndpointModel[]): Array<{ field: string; step?: Step }> {
+    const out: Array<{ field: string; step?: Step }> = [];
+    for (const [field, schema] of Object.entries(props)) {
+        if (!REFERENCE.test(field) || (schema.type !== undefined && schema.type !== "string") || schema.enum || schema.example !== undefined) continue;
+        const resource = stripIdSuffix(field);
+        const list = endpoints.find((e) => e.method === "GET" && !e.path.includes("{") && resourceName(e.path) === resource && firstIdPath(e));
+        out.push({ field, ...(list ? { step: idFromList(list, firstIdPath(list)!, field) } : {}) });
+    }
+    return out;
+}
+
+/** The path of a record endpoint (/orders/{id}) with a real id from its own collection's list (GET /orders), when that documents its ids. */
+function pathFromList(ep: ApiEndpointModel, endpoints: ApiEndpointModel[]): { path: string; step: Step } | undefined {
+    const m = /^(.*)\/\{([^}]+)\}$/.exec(ep.path);
+    if (!m || m[1]!.includes("{")) return undefined;
+    const list = endpoints.find((e) => e.method === "GET" && e.path === m[1] && firstIdPath(e));
+    return list ? { path: `${m[1]}/{{${m[2]}}}`, step: idFromList(list, firstIdPath(list)!, m[2]!) } : undefined;
+}
+
+/** Values that break one documented constraint of a field, with what they break. */
+function violations(schema: Schema): Array<{ what: string; value: unknown }> {
+    const out: Array<{ what: string; value: unknown }> = [];
+    if (schema.type === "integer" || schema.type === "number") {
+        if (typeof schema.maximum === "number") out.push({ what: `above its maximum (${schema.maximum})`, value: schema.maximum + 1 });
+        if (typeof schema.minimum === "number") out.push({ what: `below its minimum (${schema.minimum})`, value: schema.minimum - 1 });
+    }
+    if (schema.type === "string" && !schema.enum) {
+        if (typeof schema.minLength === "number" && schema.minLength > 0) out.push({ what: schema.minLength === 1 ? "empty" : `shorter than ${schema.minLength} characters`, value: "a".repeat(schema.minLength - 1) });
+        if (typeof schema.maxLength === "number" && schema.maxLength <= 10_000) out.push({ what: `longer than ${schema.maxLength} characters`, value: "a".repeat(schema.maxLength + 1) });
+        if (schema.format === "email") out.push({ what: "not an email address", value: "not-an-email" });
+    }
+    return out;
+}
+
+/** The same address in other letter case, placeholders kept as they are. */
+const otherCase = (v: string) => v.split(/(\{\{[^}]+\}\})/).map((part, i) => (i % 2 ? part : part.toUpperCase())).join("");
+
+/** The application's sign-up endpoint: a documented POST to /register or /signup with a body that has a password. */
+function signUpOf(endpoints: ApiEndpointModel[]): ApiEndpointModel | undefined {
+    return endpoints.find((e) => {
+        const props = (e.spec?.requestBody?.schema as Schema | undefined)?.properties ?? {};
+        return e.method === "POST" && SIGN_UP.test(e.path) && Object.keys(props).some((k) => /pass/i.test(k)) && e.spec!.responses.some((r) => /^2/.test(r.status));
+    });
+}
+
 export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOptions): ApiGenResult {
     const specs: DraftSpec[] = [];
     let skippedMutating = 0;
+    // Documented cases run on an account of their own where the application has a sign-up, so leftovers of other tests cannot hide a defect.
+    const signUp = signUpOf(endpoints);
+    const freshSteps: Step[] = signUp
+        ? [req(signUp, signUp.path, { body: sample(signUp.spec!.requestBody!.schema as Schema) }, "Create a fresh account for this check"), resp("statusClass", "2xx", undefined, "The fresh account is created")]
+        : [];
 
     for (const ep of endpoints) {
         if (!SAFE.has(ep.method) && !opts.allowMutating) {
@@ -164,12 +246,23 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
         });
         const local: DraftSpec[] = [];
 
+        // Real ids instead of made-up ones: reference fields of the body, and a record path's id, from documented list endpoints.
+        const references = hasBody ? referenceIds(props, endpoints) : [];
+        const refs = references.filter((r): r is { field: string; step: Step } => r.step !== undefined);
+        const unresolved = references.filter((r) => !r.step).map((r) => r.field);
+        const realBody = refs.length && typeof validBody === "object" && validBody ? { ...(validBody as object), ...Object.fromEntries(refs.map((r) => [r.field, `{{${r.field}}}`])) } : validBody;
+        // A record path only for reads: a write would change (or delete) a record this test did not create.
+        const listed = filledPath || !SAFE.has(ep.method) ? undefined : pathFromList(ep, endpoints);
+        const happyPath = filledPath ?? listed?.path;
+
         // 1 ── Happy path
-        if (filledPath) {
+        if (happyPath) {
             const documented2xx = ep.spec?.responses.find((r) => /^2/.test(r.status));
             const okSchema = documented2xx?.schema as Schema | undefined;
             const steps: Step[] = [
-                req(ep, filledPath, { query: queryObj, ...(hasBody ? { body: validBody } : {}) }, `Send a valid ${ep.method} request`),
+                ...(listed ? [listed.step] : []),
+                ...refs.map((r) => r.step),
+                req(ep, happyPath, { query: queryObj, ...(hasBody ? { body: realBody } : {}) }, `Send a valid ${ep.method} request`),
                 resp(
                     "statusClass",
                     ep.source === "network" ? `${String(ep.statuses[0] ?? 200).charAt(0)}xx` : "2xx",
@@ -327,6 +420,45 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
         }
 
         specs.push(...local.slice(0, opts.maxPerEndpoint));
+
+        // 7 ── Documented cases (C2): each request breaks one documented rule and expects the status the API document gives for it.
+        // Only on endpoints that change data (they all send a body), so none runs with data changes off.
+        if (SAFE.has(ep.method) || !filledPath || !hasBody || typeof realBody !== "object" || !realBody) continue;
+        const documentedCases: DraftSpec[] = [];
+        const before: Step[] = [...(ep === signUp || SIGN_IN_LIKE.test(ep.path) ? [] : freshSteps), ...refs.map((r) => r.step)];
+        const expectStatus = (status: string): Step[] => {
+            const schema = responseOf(ep, status)?.schema as Schema | undefined;
+            const contract = opts.contractChecks !== false && ep.source === "openapi" && (schema?.type === "object" || schema?.type === "array") && JSON.stringify(schema).length <= CONTRACT_MAX_SCHEMA_BYTES;
+            return [resp("status", Number(status), undefined, `Answered with the documented HTTP ${status}`), ...(contract ? [{ action: "assertResponse" as const, check: "matchesSchema" as const, schema, description: "The answer matches the documented schema" }] : [])];
+        };
+        const documentedCase = (title: string, status: string, steps: Step[]) =>
+            make(title, "negative", "medium", [...before, ...steps, ...expectStatus(status)], [`HTTP ${status}${responseOf(ep, status)?.description ? ` (${responseOf(ep, status)!.description})` : ""}, as the API document says`], ["validation", "documented"]);
+        // A made-up reference would be refused as unknown before the rule is checked: those cases wait for a real id.
+        const invalid = unresolved.length ? undefined : documentedStatus(ep, "400", "422");
+        if (invalid) {
+            for (const [field, schema] of Object.entries(props)) {
+                for (const v of violations(schema)) {
+                    documentedCases.push(documentedCase(`rejects "${field}" ${v.what}`, invalid, [req(ep, filledPath, { query: queryObj, body: { ...realBody, [field]: v.value } }, `Send ${JSON.stringify(v.value).slice(0, 40)} for ${field}`)]));
+                }
+            }
+        }
+        const notFound = documentedStatus(ep, "404", "422");
+        if (notFound) {
+            for (const { field } of references.filter((r) => unresolved.every((u) => u === r.field))) {
+                documentedCases.push(documentedCase(`rejects an unknown "${field}"`, notFound, [req(ep, filledPath, { query: queryObj, body: { ...realBody, [field]: "does-not-exist-000" } }, `Use a ${field} that does not exist`)]));
+            }
+        }
+        const conflict = ep.method === "POST" && !unresolved.length ? documentedStatus(ep, "409") : undefined;
+        if (conflict) {
+            const first = [req(ep, filledPath, { query: queryObj, body: realBody }, "Send a valid request"), resp("statusClass", "2xx", undefined, "The first one is accepted")];
+            documentedCases.push(documentedCase("rejects the same request twice (a duplicate)", conflict, [...first, req(ep, filledPath, { query: queryObj, body: realBody }, "Send the same request again")]));
+            const email = Object.entries(props).find(([k, v]) => v.type === "string" && (v.format === "email" || /email/i.test(k)) && typeof (realBody as Record<string, unknown>)[k] === "string");
+            if (email) {
+                const again = { ...realBody, [email[0]]: otherCase((realBody as Record<string, string>)[email[0]]!) };
+                documentedCases.push(documentedCase(`rejects an "${email[0]}" already used, in other letter case`, conflict, [...first, req(ep, filledPath, { query: queryObj, body: again }, `Send it again with "${email[0]}" in capitals`)]));
+            }
+        }
+        specs.push(...documentedCases.slice(0, MAX_DOCUMENTED));
     }
     return { specs, skippedMutating };
 }
