@@ -64,6 +64,8 @@ describe("how much to explore", () => {
         await pwExpect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
         await page.goto(`${BASE}/#/projects/${shop}/settings`);
         const card = page.getByTestId("explore-level-setting");
+        // Unchanged outside Test Case Generation projects (F3 M2): Deep and Everything still say the AI screen review.
+        await pwExpect(card).toContainText("Uses more AI and takes longer. Includes the AI screen review when your model can read images");
         await pwExpect(card.getByRole("radio", { name: /Thorough/ })).toBeChecked();
         await pwExpect(card).toContainText("Up to 60 pages, 4 clicks deep, about 50 tests from the AI.");
         await pwExpect(card).toContainText("Up to 120 pages, 5 clicks deep, about 100 tests from the AI. Uses more AI and takes longer.");

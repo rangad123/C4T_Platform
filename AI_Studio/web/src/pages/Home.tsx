@@ -18,7 +18,7 @@ import { SeeHow } from "../features/guide/SeeHow";
 import type { FoldersAnswer } from "../features/workspace/FoldersPage";
 import { KIND_HELP, KIND_WORDS, KindTile, PlatformMark, ProjectTags, shortAgentName, type TagAgent } from "../components/ProjectKind";
 import { AgentAvatar, type AgentId, type AgentList } from "../features/testing-agents/testing-agents";
-import type { CaseOutcome } from "../features/outcome/outcome";
+import type { CaseOutcomeCounts } from "../features/outcome/outcome";
 
 /** "all", "grouped", "none" (not in a folder) or a folder id. */
 type FolderFilter = string;
@@ -29,22 +29,22 @@ const NOT_RUN = "Its test scripts have not been run yet.";
 const CASES_NOT_EXPLORED = "The agent has not explored this application yet, so it has no test cases.";
 
 /** "N test cases, M pages" for a Test Case Generation project's row (founder 2026-11-19 P5.2); null before its first run. */
-const caseCounts = (o: CaseOutcome): string | null => (o.runs.length ? `${plural(o.cases.length, "test case")}, ${plural(o.tree.length, "page")}` : null);
+const caseCounts = (o: CaseOutcomeCounts): string | null => (o.runs.length ? `${plural(o.counts.cases, "test case")}, ${plural(o.counts.pages, "page")}` : null);
 /** The row's job, in the Test Case Generation words (labels.ts caseJobLabel); the list has no error text, so a stopped run is told by the outcome. */
-const caseJob = (p: ProjectRow, o: CaseOutcome) => ({ status: p.last_job_status!, error: o.runs[0]?.status === "stopped" ? "Cancelled" : null, caseAgent: true });
+const caseJob = (p: ProjectRow, o: CaseOutcomeCounts) => ({ status: p.last_job_status!, error: o.runs[0]?.status === "stopped" ? "Cancelled" : null, caseAgent: true });
 
 /**
- * The outcomes of the listed Test Case Generation projects (GET /projects/:id/outcome, one request each, for the row's counts), asked again whenever the list
+ * The outcome counts of the listed Test Case Generation projects (GET /projects/:id/outcome?counts=1, one request each: no test cases are sent), asked again whenever the list
  * is (it polls while a project runs). A project whose outcome cannot be read is null: its row then shows what other agent rows show. A
  * project not in the map yet is still being asked about.
  */
-function useCaseOutcomes(ids: string[], list: unknown): Map<string, CaseOutcome | null> {
-    const [map, setMap] = useState<Map<string, CaseOutcome | null>>(new Map());
+function useCaseOutcomes(ids: string[], list: unknown): Map<string, CaseOutcomeCounts | null> {
+    const [map, setMap] = useState<Map<string, CaseOutcomeCounts | null>>(new Map());
     const key = ids.join(",");
     useEffect(() => {
         let cancelled = false;
         if (!key) return setMap(new Map());
-        void Promise.all(key.split(",").map((id) => api<CaseOutcome>(`/projects/${id}/outcome`).then((o) => [id, o.caseAgent ? o : null] as const, () => [id, null] as const))).then((got) => {
+        void Promise.all(key.split(",").map((id) => api<CaseOutcomeCounts>(`/projects/${id}/outcome?counts=1`).then((o) => [id, o.caseAgent ? o : null] as const, () => [id, null] as const))).then((got) => {
             if (!cancelled) setMap(new Map(got));
         });
         return () => {
@@ -317,7 +317,7 @@ function rowsOf(d: ProjectPage | ProjectRow[] | undefined): ProjectRow[] {
     return Array.isArray(d) ? d : (d?.projects ?? []);
 }
 
-function ProjectItem({ p, agents, names, outcome, pending }: { p: ProjectRow; agents: AgentId[] | undefined; names: Map<AgentId, string>; /** A Test Case Generation project's outcome. */ outcome?: CaseOutcome; /** Its state is not known yet: nothing is said about it. */ pending?: boolean }): ReactNode {
+function ProjectItem({ p, agents, names, outcome, pending }: { p: ProjectRow; agents: AgentId[] | undefined; names: Map<AgentId, string>; /** A Test Case Generation project's outcome. */ outcome?: CaseOutcomeCounts; /** Its state is not known yet: nothing is said about it. */ pending?: boolean }): ReactNode {
     const kind: ProjectKind = projectKind(p);
     const tagAgents: TagAgent[] | undefined = agents?.map((id) => ({ id, name: names.get(id) ?? id }));
     const cases = outcome ? { counts: caseCounts(outcome) } : null;

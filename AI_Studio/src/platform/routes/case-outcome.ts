@@ -10,6 +10,7 @@ import type { RouteCtx } from "./types.js";
  *
  *   GET /api/projects/:id/outcome            → CaseOutcome (case-outcome-types.ts); caseAgent false and empty lists for other projects
  *   GET /api/projects/:id/outcome?run=<job>  → the same shape for one run: what that run found (case-run-outcome.ts), 404 for a run that is not one of the project's
+ *   GET /api/projects/:id/outcome?counts=1   → CaseOutcomeCounts: the runs and two counts, for the Projects row
  *   GET /api/projects/:id/outcome/workbook   → the three-sheet workbook (case-workbook.ts), as `<project name> test cases.xlsx`
  *
  * Who may read the project gets its outcome; the workbook is a download and needs ai_studio.reports.export (auth/roles.ts). A project
@@ -37,6 +38,10 @@ export function registerCaseOutcomeRoutes(ctx: RouteCtx, appModel: AppModelReade
             const one = await caseRunOutcomeOf(p, id, run);
             if (!one) throw new HttpError(404, NO_SUCH_RUN);
             return one;
+        }
+        if ((req.query as { counts?: unknown }).counts === "1") {
+            const { caseAgent, runs, cases, tree } = await caseOutcomeOf(p, id, async () => undefined);
+            return { caseAgent, runs, counts: { cases: cases.length, pages: tree.length } };
         }
         return caseOutcomeOf(p, id, appModel);
     });

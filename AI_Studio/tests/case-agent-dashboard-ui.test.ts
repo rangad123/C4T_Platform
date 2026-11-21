@@ -369,6 +369,26 @@ describe("the Dashboard of a Test Case Generation project", () => {
         }
     });
 
+    it("an outcome that cannot be read shows its sentence and Try again, never the old agent Dashboard (F3 L4; the answer is made by the test)", async () => {
+        const sentence = "The outcome could not be read just now.";
+        const outcomeUrl = (u: URL) => u.pathname === `/api/projects/${store}/outcome`;
+        await page.route(outcomeUrl, (r) => r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: sentence }) }));
+        try {
+            await dashboard(store);
+            const failed = page.getByTestId("case-agent-dashboard").locator(".callout", { hasText: "The test cases could not be loaded" });
+            await pwExpect(failed).toBeVisible();
+            await pwExpect(failed).toContainText(sentence);
+            await shot("outcome-error.png");
+            const text = await contentText();
+            for (const banned of NOT_ON_TCG) expect(text, banned).not.toContain(banned);
+        } finally {
+            await page.unroute(outcomeUrl);
+        }
+        await page.getByRole("button", { name: "Try again" }).click();
+        await pwExpect(page.getByTestId("outcome-summary")).toBeVisible();
+        await pwExpect(page.getByText("The test cases could not be loaded")).toHaveCount(0);
+    });
+
     it("not explored yet: Start exploring, and no download", async () => {
         await dashboard(fresh);
         const outcome = page.getByTestId("case-outcome");
@@ -426,6 +446,26 @@ describe("the Projects row of a Test Case Generation project", () => {
         }
         await axe("projects");
         await page.locator(".pk-list").first().screenshot({ path: shots ? (fs.mkdirSync(shots, { recursive: true }), path.join(shots, "projects-row.png")) : path.join(dataDir, "rows.png") });
+    });
+
+    it("asks only for the outcome's counts, which match the full outcome (F3 L6)", async () => {
+        const asked: string[] = [];
+        const onRequest = (r: { url: () => string }) => void (r.url().includes("/outcome") && asked.push(r.url()));
+        page.on("request", onRequest);
+        try {
+            await visit("#/?page=all");
+            await pwExpect(row("Practice Store").getByTestId("row-cases")).toHaveText("5 test cases, 5 pages");
+        } finally {
+            page.off("request", onRequest);
+        }
+        expect(asked.length).toBeGreaterThan(0);
+        for (const u of asked) expect(new URL(u).searchParams.get("counts"), u).toBe("1");
+
+        const full = (await api("GET", `/api/projects/${store}/outcome`)).body;
+        const counts = await api("GET", `/api/projects/${store}/outcome?counts=1`);
+        expect(counts.status).toBe(200);
+        expect(counts.body).toEqual({ caseAgent: true, runs: full.runs, counts: { cases: full.cases.length, pages: full.tree.length } });
+        expect((await api("GET", `/api/projects/${access}/outcome?counts=1`)).body).toEqual({ caseAgent: false, runs: [], counts: { cases: 0, pages: 0 } });
     });
 
     it("rows of other projects are unchanged: pass counts and their ribbon", async () => {

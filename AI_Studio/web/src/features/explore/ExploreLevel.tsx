@@ -11,10 +11,13 @@ const NAME: Record<ExploreLevel, string> = { thorough: "Thorough", deep: "Deep",
 /** One plain line per level, from the engine's own table (engine/levels.ts). `caseAgent`: a Test Case Generation project, which writes test cases. */
 export function levelLine(level: ExploreLevel, caseAgent = false): string {
     const s = LEVEL_SETTINGS[level];
-    const base = `Up to ${s.maxPages} pages, ${s.maxDepth} clicks deep, about ${s.maxScenarios} ${caseAgent ? "test cases" : "tests"} from the AI.`;
+    const base = caseAgent
+        ? `Up to ${s.maxPages} pages in the tree, ${s.maxDepth} clicks deep, about ${s.maxScenarios} test cases from the AI.`
+        : `Up to ${s.maxPages} pages, ${s.maxDepth} clicks deep, about ${s.maxScenarios} tests from the AI.`;
+    // A Test Case Generation project has no screen review (P4.1; its exploration turns it off).
     return level === "thorough"
         ? `${base} The default.`
-        : `${base} Uses more AI and takes longer.${LEVEL_SETTINGS[level].visionByDefault ? " Includes the AI screen review when your model can read images: screenshots of key pages go to your AI provider." : ""}`;
+        : `${base} Uses more AI and takes longer.${s.visionByDefault && !caseAgent ? " Includes the AI screen review when your model can read images: screenshots of key pages go to your AI provider." : ""}`;
 }
 
 /** The level a project's saved settings hold (thorough when none is saved). */
