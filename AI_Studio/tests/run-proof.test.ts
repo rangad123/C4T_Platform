@@ -23,7 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Agent } from "../src/agent/agent.js";
 import { memoryLogger } from "../src/agent/log.js";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
-import { PROOF_SECRET_FIELDS } from "../src/engine/evidence/proof-style.js";
+import { isSensitiveField, PROOF_SECRET_FIELDS } from "../src/engine/evidence/proof-style.js";
 import { secretKindOfField, type FieldFacts } from "../src/engine/recorder/act.js";
 import { runScripts, type ScriptRun } from "../src/engine/validation/runner.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
@@ -136,7 +136,19 @@ describe("the secret-field cover", () => {
             { tag: "input", name: "cardNumber" },
             { tag: "input", name: "card_no" },
         ];
-        const ordinary: FieldFacts[] = [{ tag: "input", type: "email", name: "email" }, { tag: "input", name: "city" }, { tag: "input", type: "search", placeholder: "Search" }, { tag: "input", id: "username" }, { tag: "textarea", name: "password" }];
+        // Personal data and other secrets the recorder types as they are: covered in the picture too (P5 L-7).
+        const personal: FieldFacts[] = [
+            { tag: "input", type: "email", name: "email" },
+            { tag: "input", type: "tel", name: "phone" },
+            { tag: "input", autocomplete: "street-address" },
+            { tag: "input", name: "address" },
+            { tag: "input", name: "token" },
+            { tag: "input", name: "api_key" },
+            { tag: "input", ariaLabel: "Session" },
+            { tag: "input", name: "dsn" },
+            { tag: "textarea", name: "shipping_address" },
+        ];
+        const ordinary: FieldFacts[] = [{ tag: "input", name: "city" }, { tag: "input", type: "search", placeholder: "Search" }, { tag: "input", id: "username" }, { tag: "textarea", name: "password" }];
         for (const f of secret) expect(secretKindOfField(f), JSON.stringify(f)).not.toBe("");
         for (const f of ordinary) expect(secretKindOfField(f), JSON.stringify(f)).toBe("");
         const page = await browser.newPage();
@@ -152,9 +164,12 @@ describe("the secret-field cover", () => {
                         document.body.appendChild(el);
                         return el.matches(selector);
                     }),
-                { fields: [...secret, ...ordinary], selector: PROOF_SECRET_FIELDS },
+                { fields: [...secret, ...personal, ...ordinary], selector: PROOF_SECRET_FIELDS },
             );
-            expect(matched).toEqual([...secret.map(() => true), ...ordinary.map(() => false)]);
+            expect(matched).toEqual([...secret.map(() => true), ...personal.map(() => true), ...ordinary.map(() => false)]);
+            // The same rule for code that has a field's attributes, not the element (trace masking).
+            const attrsOf = (f: FieldFacts) => Object.fromEntries(Object.entries({ type: f.type, autocomplete: f.autocomplete, name: f.name, id: f.id, "aria-label": f.ariaLabel, placeholder: f.placeholder }).filter(([, v]) => v !== undefined));
+            expect([...secret, ...personal, ...ordinary].filter((f) => f.tag === "input").map((f) => isSensitiveField(attrsOf(f)))).toEqual([...secret, ...personal, ...ordinary].filter((f) => f.tag === "input").map((f) => !ordinary.includes(f)));
         } finally {
             await page.close();
         }
