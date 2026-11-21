@@ -909,6 +909,8 @@ export const ResultRequest = z.object({
              * objects of this result are not strict, so an unknown field is dropped, never refused.
              */
             exploration: z.unknown().optional(),
+            /** Phase 4 C12 (additive, optional): the engine's `summary.layers`, checked on arrival against LayerReportSchema; one that fails is dropped. */
+            layers: z.unknown().optional(),
         })
         .optional(),
 });

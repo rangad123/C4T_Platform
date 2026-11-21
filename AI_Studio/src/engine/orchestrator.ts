@@ -78,6 +78,7 @@ import { senderName } from "./explore/request-target.js";
 import { usableRules, type AppKnowledge } from "./planning/planner.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 import { createThumbnailer } from "./discovery/thumbnails.js";
+import { layerOfSpec, layerReport, type Layer, type LayerReport } from "./validation/layers.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
 export const TEST_CASES_NOT_RUN = "test_cases_not_run";
@@ -323,6 +324,8 @@ export interface GenerationSummary {
     testsCarried?: number;
     /** Set when the job explored by objectives (`GenerationRequest.objectives`): how the session ended and what each pursuit did. */
     exploration?: ExplorationSummary;
+    /** C12 (Phase 4): per layer, checked with how many tests, or not checked and why. Older summaries have none. */
+    layers?: LayerReport;
 }
 
 /** One objective-driven exploration session, as the job keeps it. */
@@ -853,6 +856,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         /** What each new test was created with, so later additions (its strength) keep the rest. */
         const metas = new Map<string, Record<string, unknown>>();
+        /** New tests per layer, for summary.layers (C12). */
+        const layerTests: Partial<Record<Layer, number>> = {};
         const persistNew = async (spec: TestSpec, framework: Framework, validation: "PENDING" | "NEEDS_REVIEW", reason?: string, meta?: Record<string, unknown>) => {
             // Stopped: nothing more is created (the authoring agents and the checks below all come through here).
             throwIfAborted(ctx.signal);
@@ -860,6 +865,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             assertCredentialsStayHome(spec, renderCtx);
             // Which model version of the application the test was made from, when the exploration had one.
             if (req.appKnowledge) meta = { ...meta, modelVersion: req.appKnowledge.modelVersionId };
+            const layer = layerOfSpec(spec);
+            meta = { ...meta, layer };
+            layerTests[layer] = (layerTests[layer] ?? 0) + 1;
             const h = await sink.createTest({ spec, framework, validation, reason, meta });
             // The host takes the key at save (another scenario may have saved under the one asked for): the spec, its script and
             // everything after go by the key the test was saved under.
@@ -1592,6 +1600,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // Site memory: save what this analysis learned (and what changed since the last one). A cancelled run saved nothing
         // (its validation was partial); never fails the job.
         await memory.remember(scenarios.map((s) => ({ title: s.title, journey: s.journey, startPath: s.startPath, validated: validatedScenarioIds.has(s.scenarioId), ran: ranScenarioIds.has(s.scenarioId) })));
+        summary.layers = layerReport(layerTests, { web: wantWeb, api: wantApi, apiEndpoints: apis.length, dataChanges });
         ctx.emit({
             stage: "orchestration",
             kind: "job_summary",

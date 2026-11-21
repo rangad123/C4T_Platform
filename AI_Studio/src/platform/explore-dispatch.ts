@@ -7,6 +7,7 @@ import type { ResultRequest, TaskOffer } from "../agent-protocol/schema.js";
 import { parseExploration } from "../agent-protocol/exploration.js";
 import type { EngineEvent } from "../engine/context.js";
 import type { GenerationSummary } from "../engine/orchestrator.js";
+import { LayerReportSchema } from "../engine/validation/layers.js";
 import { RunnerAgentError, type AgentService } from "./agent-services.js";
 import { refusalsOf } from "./agent-store.js";
 import { parkForHandover } from "./runner-handover.js";
@@ -155,7 +156,8 @@ export async function waitForExplore(svc: AgentService, taskId: string, job: Pic
             const record = s.exploration === undefined ? undefined : parseExploration(s.exploration);
             if (record && !record.ok) emit({ stage: "orchestration", kind: "exploration_record_dropped", level: "warn", message: `Your runner's coverage record for this ${WORDS[mode].noun} could not be kept (${record.problem}), so the run has no coverage record.` });
             const exploration: GenerationSummary["exploration"] = record?.ok ? record.value : undefined;
-            return { model: (s.model ?? null) as GenerationSummary["model"], testsGenerated: s.testsGenerated, testsValidated: s.testsValidated, testsFailedValidation: s.testsFailedValidation, testsNeedingReview: s.testsNeedingReview, ...(s.testsCarried ? { testsCarried: s.testsCarried } : {}), errors: s.errors, ...(s.plan ? { plan: s.plan as GenerationSummary["plan"] } : {}), ...(exploration ? { exploration } : {}) };
+            const layers = LayerReportSchema.safeParse(s.layers);
+            return { model: (s.model ?? null) as GenerationSummary["model"], testsGenerated: s.testsGenerated, testsValidated: s.testsValidated, testsFailedValidation: s.testsFailedValidation, testsNeedingReview: s.testsNeedingReview, ...(s.testsCarried ? { testsCarried: s.testsCarried } : {}), errors: s.errors, ...(s.plan ? { plan: s.plan as GenerationSummary["plan"] } : {}), ...(exploration ? { exploration } : {}), ...(layers.success ? { layers: layers.data } : {}) };
         } else if (t.status === "cancelled") {
             throw new Error("Job cancelled");
         } else {

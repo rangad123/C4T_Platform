@@ -607,6 +607,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         // How an objective-driven exploration went (coverage, stop reason, capped action log), for GET …/jobs/:jobId/coverage. Here the
         // engine kept it through the sink when its session ended (RepoSink.saveExploration); a runner's comes back in its summary.
         if (summary.exploration && onRunner) await saveExploration(sink, summary.exploration);
+        // C12: which layers the run checked, or why not (the job's "Checked layers"); a runner's comes back in its summary.
+        if (summary.layers) await sink.saveTextArtifact("layer-report", "layers.json", JSON.stringify(summary.layers));
 
         if (summary.model) {
             await sink.saveTextArtifact("app-model", "application-model.json", JSON.stringify(summary.model, null, 2));
