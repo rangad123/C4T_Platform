@@ -36,6 +36,9 @@ import { generatePerformanceSpecs, generateSignedInPerformanceSpecs } from "./pe
 import { generateSecuritySpecs } from "./security/specs.js";
 import { generateSignedInVisualSpecs, generateVisualSpecs } from "./visual/baseline.js";
 import { generateApiWorkflowSpecs } from "./api/workflows.js";
+import { fetchClient, probeInvariant, requesterClient, type ProbeEnv, type ProbeHttp } from "./api/probes.js";
+import { MAX_SEQUENCES, runSequences, stateCheckSpecs, stateModels } from "./api/stateful.js";
+import { maskSecrets } from "./frameworks/plugin.js";
 import { planScenarios, requirementsCoverage, rulesForScenario } from "./planning/planner.js";
 import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
@@ -1296,12 +1299,67 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
 
             // 4b0. C5 invariants: one AI call proposes them from the stated requirements, and code keeps only the checkable ones.
-            const requirementList = parsedRequirements ?? (req.requirements ? parseRequirementsDeterministic(req.requirements.text) : []);
+            // A run from an approved plan has no parsed requirements: read the document again, with the project's "ref: text" lines as the fallback.
+            const reparsed = req.requirements ? parseRequirementsDeterministic(req.requirements.text) : [];
+            const requirementList = parsedRequirements ?? (reparsed.length ? reparsed : (req.requirements?.text.match(/^[^\s:]{1,40}: .+$/gm) ?? []).map((l) => ({ id: l.slice(0, l.indexOf(":")), text: l.slice(l.indexOf(":") + 2) })));
             if (requirementList.length) {
                 const proposal = await proposeInvariants(ctx, { requirements: requirementList, apis, origins: new Set([origin, new URL(renderCtx.apiBaseUrl).origin]), dataChanges, secrets: authoringSecretsOf(req) });
                 invariants = proposal.invariants;
                 invariantReport = proposal.report;
                 ctx.emit({ stage: "generation", kind: "invariants_proposed", ...(proposal.report.error ? { level: "warn" as const } : {}), message: proposal.report.error ?? `${proposal.report.kept} of ${proposal.report.proposed} proposed invariants kept (${proposal.report.dropped.length} dropped)` });
+            }
+
+            // 4b0a. C5 probes: each kept invariant is tried on a fresh account with generated writes; the case is saved with its seed.
+            if (invariants.length && dataChanges) {
+                const headers = cleanupHeaders({ apiToken: req.credentials?.apiToken || req.credentials?.oauth2 ? await resolveApiToken(ctx, req.credentials) : undefined, apiAuthHeader: req.credentials?.apiAuthHeader });
+                const env: ProbeEnv = { apis, dataChanges, newClient: async () => fetchClient(renderCtx.apiBaseUrl, headers, req.cleanup?.fetch) };
+                for (const inv of invariants) {
+                    throwIfAborted(ctx.signal);
+                    const r = await probeInvariant(inv, env).catch((e: unknown) => ({ outcome: "skipped" as const, reason: `the probe could not reach the application: ${maskSecrets(e instanceof Error ? e.message : String(e), authoringSecretsOf(req)).slice(0, 200)}`, spec: undefined, held: 0, seed: 0 }));
+                    ctx.emit({
+                        stage: "generation",
+                        kind: "invariant_probed",
+                        ...(r.outcome === "skipped" ? { level: "warn" as const } : {}),
+                        message: `Requirement ${inv.requirementId}: ${r.outcome === "failed" ? `the relation failed (held ${r.held} time${r.held === 1 ? "" : "s"} before), seed ${r.seed}` : r.outcome === "held" ? `the relation held ${r.held} times, seed ${r.seed}` : `not probed: ${r.reason}`}`,
+                        data: { requirementId: inv.requirementId, outcome: r.outcome, held: r.held, seed: r.seed },
+                    });
+                    if (!r.spec || (await carried(r.spec))) continue;
+                    const spec = TestSpecSchema.parse({ ...r.spec, testId: await sink.nextTestKey("API") });
+                    await persistNew(spec, "playwright-api", "PENDING", undefined, { invariant: { requirementId: inv.requirementId, seed: r.seed, held: r.held, outcome: r.outcome } });
+                    pending.push({ spec, framework: "playwright-api" });
+                }
+            }
+
+            // 4b0b. C7 stateful sequences on a fresh account, then the states a new account cannot reach, on the project's account's records.
+            const states = dataChanges ? stateModels(apis, req.appKnowledge?.objectiveInputs?.transitions ?? []) : [];
+            if (states.length) {
+                const headers = cleanupHeaders({ apiToken: req.credentials?.apiToken || req.credentials?.oauth2 ? await resolveApiToken(ctx, req.credentials) : undefined, apiAuthHeader: req.credentials?.apiAuthHeader });
+                const env: ProbeEnv = { apis, dataChanges, newClient: async () => fetchClient(renderCtx.apiBaseUrl, headers, req.cleanup?.fetch) };
+                // The project's account reads its lists with its token, else signed in through the browser (as the access survey does).
+                const signed = !Object.keys(headers).length && creds ? await signedInRequests(ctx, browser, req.url, [{ name: "project", ...creds }]).catch(() => undefined) : undefined;
+                const viaBrowser = signed?.sessions.get("project");
+                const main: ProbeHttp | undefined = Object.keys(headers).length ? fetchClient(renderCtx.apiBaseUrl, headers, req.cleanup?.fetch) : viaBrowser ? requesterClient(viaBrowser, renderCtx.apiBaseUrl) : undefined;
+                const made: DraftSpec[] = [];
+                let left = MAX_SEQUENCES;
+                try {
+                    for (const sm of states) {
+                        throwIfAborted(ctx.signal);
+                        if (left <= 0) break;
+                        const r = await runSequences(sm, env, { maxSequences: left }).catch((e: unknown) => ({ outcome: "skipped" as const, reason: `the sequences could not reach the application: ${maskSecrets(e instanceof Error ? e.message : String(e), authoringSecretsOf(req)).slice(0, 200)}`, sequences: 0, seed: 0, seen: [] as string[], spec: undefined }));
+                        left -= r.sequences;
+                        ctx.emit({ stage: "generation", kind: "sequences_run", ...(r.outcome === "skipped" ? { level: "warn" as const } : {}), message: `${sm.entity}: ${r.outcome === "skipped" ? `no sequence run: ${r.reason}` : `${r.sequences} sequences, ${r.outcome === "failed" ? "one broke the documented states" : "all followed the documented states"} (seed ${r.seed})`}`, data: { entity: sm.entity, outcome: r.outcome, sequences: r.sequences, seed: r.seed } });
+                        if (r.spec) made.push(r.spec);
+                        if (main) made.push(...(await stateCheckSpecs(sm, main, r.seen, dataChanges).catch(() => [])));
+                    }
+                } finally {
+                    await signed?.close();
+                }
+                for (const d of made) {
+                    if (await carried(d)) continue;
+                    const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
+                    await persistNew(spec, "playwright-api", "PENDING", undefined, { stateful: true });
+                    pending.push({ spec, framework: "playwright-api" });
+                }
             }
 
             // 4b1. Access control for API endpoints (deterministic): a visitor or a lesser account must be refused.

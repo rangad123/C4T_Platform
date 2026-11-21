@@ -21,8 +21,18 @@ export const LAYERS_ONLY_EXPLORATION: Record<string, unknown> = {
     visionChecks: false,
 };
 
-/** The fixed answers, tried in order: the first the call's schema accepts is the answer (scenarios, requirements, the app summary). */
-const ANSWERS: unknown[] = [{ scenarios: [] }, { requirements: [] }, { siteType: "other", purpose: "A benchmark application", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] }];
+/**
+ * The invariant proposal's answer (C5, T13): bench-shop's three stated cart relations (requirements 3.9, 4.1 and 4.5), so the probe runs
+ * in a layers-only trial. On another app the engine drops them (their endpoints are not documented there), and the layer report says why.
+ */
+export const BENCH_SHOP_INVARIANTS = [
+    { requirementId: "3.9", endpoint: "POST /api/cart/items", setup: [], write: "POST /api/cart/items", expression: "subtotal == sum(lines[*].lineTotal)" },
+    { requirementId: "4.1", endpoint: "POST /api/cart/discount", setup: ["POST /api/cart/discount"], setupBodies: [{ code: "SAVE10" }], write: "POST /api/cart/items", expression: "discount == round(subtotal * 0.10)" },
+    { requirementId: "4.5", endpoint: "POST /api/cart/items", setup: [], write: "POST /api/cart/items", expression: "(subtotal - discount >= 5000) implies shipping == 0" },
+];
+
+/** The fixed answers, tried in order: the first the call's schema accepts is the answer (scenarios, requirements, the app summary, invariants). */
+const ANSWERS: unknown[] = [{ scenarios: [] }, { requirements: [] }, { siteType: "other", purpose: "A benchmark application", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] }, { invariants: BENCH_SHOP_INVARIANTS }];
 
 export function layersOnlyLlm(): LlmClient {
     return {

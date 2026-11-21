@@ -68,6 +68,12 @@ describe("invariant proposal: what is kept", () => {
         expect(r.invariants).toEqual([good, { ...good, read: undefined, expression: "count(items) >= 1 and items[0].price >= 0" }]);
         expect(r.report).toEqual({ proposed: 2, kept: 2, dropped: [] });
     });
+
+    it("a setup body with values the cited requirement states is kept", async () => {
+        const withBody = { ...good, setup: ["POST /api/cart/items"], setupBodies: [{ discount: "10%" }] };
+        const { ctx } = scripted(() => [withBody]);
+        expect((await proposeInvariants(ctx, base)).invariants).toEqual([withBody]);
+    });
 });
 
 describe("invariant proposal: each invalid kind is dropped with its reason", () => {
@@ -82,6 +88,8 @@ describe("invariant proposal: each invalid kind is dropped with its reason", () 
         ["a nested field the answer does not have", { expression: "items[0].sku != null" }, /the field items\[0\]\.sku is not in the answer/],
         ["a test value the write does not send", { expression: "subtotal >= $price" }, /\$price is not a field that POST \/api\/cart\/items sends/],
         ["a state-changing setup with data changes off", { setup: ["PUT /api/cart/items/{id}"], write: "GET /api/cart", expression: "discount >= 0" }, /PUT \/api\/cart\/items\/\{id\} changes data, and data changes are off/, { dataChanges: false }],
+        ["a setup value the requirement does not state", { setup: ["POST /api/cart/items"], setupBodies: [{ code: "FREE100" }] }, /the setup value FREE100 is not stated in requirement REQ-2/],
+        ["more setup bodies than setup operations", { setupBodies: [{ code: "10%" }] }, /more setup bodies than setup operations/],
         ["a state-changing write with data changes off", {}, /POST \/api\/cart\/items changes data, and data changes are off/, { dataChanges: false }],
     ];
     for (const [name, change, reason, input] of cases) {

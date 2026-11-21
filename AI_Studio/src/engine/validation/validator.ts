@@ -7,6 +7,7 @@
  *   NEEDS_REVIEW       failure is (or may be) a real application defect — a human should look
  *   FAILED_VALIDATION  could not be made to pass (environment problem, unfixable, attempts exhausted)
  */
+import { RELATION_FAILURE_PREFIX } from "./relation.js";
 import { captchaFinding } from "../auth/captcha-run.js";
 import type { Browser } from "playwright";
 import { mapLanes, type EngineContext } from "../context.js";
@@ -561,6 +562,10 @@ export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     const step = spec.steps[failed.index];
     if (spec.tags.includes("documented") && step?.action === "assertResponse" && step.check === "status" && last.status >= 200 && last.status < 300) {
         return `The API does not keep a rule its document states: its document says HTTP ${String(step.expected)} for this request, and ${last.method} ${last.path} accepted it with HTTP ${last.status} (step "${failed.title}").`;
+    }
+    // A C5 probe's case (tag "invariant"): the relation a requirement states failed on an answer the API accepted.
+    if (spec.tags.includes("invariant") && step?.action === "assertResponse" && step.check === "relation" && last.status >= 200 && last.status < 300 && failed.error?.includes(RELATION_FAILURE_PREFIX)) {
+        return `The API breaks a stated rule${step.source ? ` (requirement ${step.source})` : ""}: ${failed.error.slice(failed.error.indexOf(RELATION_FAILURE_PREFIX)).split("\n")[0]!.slice(0, 400)}`;
     }
     return undefined;
 }

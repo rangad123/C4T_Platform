@@ -40,7 +40,7 @@ const XSS = "<script>alert(1)</script>";
 
 type Schema = Record<string, any>;
 
-function sample(schema: Schema | undefined, name = "value", depth = 0): unknown {
+export function sample(schema: Schema | undefined, name = "value", depth = 0): unknown {
     if (!schema || depth > 4) return "test";
     if (schema.example !== undefined) return schema.example;
     if (schema.default !== undefined) return schema.default;
@@ -206,7 +206,7 @@ const emailCaseStated = (ep: ApiEndpointModel, conflict: string, requirements = 
 const otherCase = (v: string) => v.split(/(\{\{[^}]+\}\})/).map((part, i) => (i % 2 ? part : part.toUpperCase())).join("");
 
 /** The application's sign-up endpoint: a documented POST to /register or /signup with a body that has a password. */
-function signUpOf(endpoints: ApiEndpointModel[]): ApiEndpointModel | undefined {
+export function signUpOf(endpoints: ApiEndpointModel[]): ApiEndpointModel | undefined {
     return endpoints.find((e) => {
         const props = (e.spec?.requestBody?.schema as Schema | undefined)?.properties ?? {};
         return e.method === "POST" && SIGN_UP.test(e.path) && Object.keys(props).some((k) => /pass/i.test(k)) && e.spec!.responses.some((r) => /^2/.test(r.status));

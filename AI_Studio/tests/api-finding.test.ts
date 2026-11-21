@@ -44,6 +44,17 @@ describe("apiFinding", () => {
         expect(apiFinding(documented(["validation"]), run(201))).toBeUndefined();
         expect(apiFinding(spec(["documented"], "default"), run(200))).toBeUndefined();
     });
+    it("a probe case (C5, tag invariant) whose stated relation failed on an accepted answer: the API breaks a stated rule", () => {
+        const probe = (tags: string[]) =>
+            TestSpecSchema.parse({ testId: "API-001", title: "POST /x: requirement 3.9 holds", kind: "api", tags, steps: [{ action: "request", method: "POST", path: "/x" }, { action: "assertResponse", check: "relation", expression: "subtotal == sum(lines[*].lineTotal)", source: "3.9" }] });
+        const failedAt = (status: number, error: string): ScriptRun => ({ ...run(status), steps: [{ index: 0, title: "1. POST /x", status: "passed" }, { index: 1, title: "2. Verify", status: "failed", error }] });
+        const msg = "Error: Relation check failed (3.9): subtotal == sum(lines[*].lineTotal) is false\n    at x";
+        expect(apiFinding(probe(["api", "invariant"]), failedAt(201, msg))).toBe("The API breaks a stated rule (requirement 3.9): Relation check failed (3.9): subtotal == sum(lines[*].lineTotal) is false");
+        // not a probe case, a refused answer, or another error: left to the repair loop
+        expect(apiFinding(probe(["api"]), failedAt(201, msg))).toBeUndefined();
+        expect(apiFinding(probe(["api", "invariant"]), failedAt(400, msg))).toBeUndefined();
+        expect(apiFinding(probe(["api", "invariant"]), failedAt(201, "TypeError: x is undefined"))).toBeUndefined();
+    });
     it("leaves ordinary expectation mismatches to the repair loop", () => {
         expect(apiFinding(spec(["api"], "default"), run(404))).toBeUndefined();
         expect(apiFinding(spec(["api", "auth"], "none"), run(404))).toBeUndefined();
