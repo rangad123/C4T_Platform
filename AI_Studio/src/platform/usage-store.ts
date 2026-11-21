@@ -187,6 +187,14 @@ export class UsageStore {
         );
     }
 
+    /** The job's stored artifacts and the files its runners uploaded, in bytes (task R, R4: the job's call summary). */
+    runBytes(jobId: string): { artifactBytes: number; uploadBytes: number } {
+        const artifactBytes = this.db.get<{ b: number }>("SELECT COALESCE(SUM(size), 0) AS b FROM artifacts WHERE job_id = ?", jobId)?.b ?? 0;
+        const uploadBytes =
+            this.db.get<{ b: number }>("SELECT COALESCE(SUM(f.size), 0) AS b FROM agent_task_files f JOIN agent_tasks t ON t.id = f.task_id WHERE t.job_id = ? AND f.direction = 'out'", jobId)?.b ?? 0;
+        return { artifactBytes: Number(artifactBytes), uploadBytes: Number(uploadBytes) };
+    }
+
     // ── reading usage ────────────────────────────────────────────────────────
 
     /**
