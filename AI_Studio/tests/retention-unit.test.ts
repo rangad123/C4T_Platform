@@ -263,6 +263,47 @@ describe("retention rules: the size limit counts only what it may remove", () =>
     });
 });
 
+describe("retention rules: a finding holds its evidence (Phase 5 E2)", () => {
+    const MB = 1024 * 1024;
+    const onTest = <T extends RetentionExecution | RetentionArtifact>(x: T, testId: string): T => ({ ...x, testId });
+
+    it("an open finding keeps its test's failed runs (files and details) past every period and the size limit; a passed run of it still goes", () => {
+        const failed = onTest(exec(400, false), "t-open");
+        const passed = onTest(exec(400, true), "t-open");
+        const other = onTest(exec(400, false), "t-none");
+        const held = [onTest(art(failed, "trace", 100 * MB), "t-open"), onTest(art(failed, "video"), "t-open"), onTest(art(failed, "screenshot"), "t-open")];
+        const shot: RetentionArtifact = { id: `a${++n}`, kind: "screenshot", size: 10, executionId: null, at: NOW - 400 * DAY_MS, testId: "t-open" }; // a finding screenshot: no run
+        const pruned = [onTest(art(passed, "evidence"), "t-open"), onTest(art(other, "screenshot"), "t-none")];
+        // Not yet due and under the 1 MB limit: the 100 MB held trace must not push it out.
+        const recentRun = onTest(exec(1, false), "t-none");
+        const recent = onTest(art(recentRun, "screenshot"), "t-none");
+        const p = plan([failed, passed, other, recentRun], [...held, shot, ...pruned, recent], { findingHolds: new Map([["t-open", null]]), policy: policy({ maxArtifactMB: 1 }) });
+        expect(ids(p)).toEqual(pruned.map((a) => a.id).sort());
+        expect(p).toMatchObject({ findingHeld: 4, heldBytes: 100 * MB + 1000 * 2 + 10 });
+        expect(p.byReason["size-cap"]).toBe(0);
+        expect(p.expiredRuns).toEqual([passed.id, other.id].sort());
+    });
+
+    it("a closed finding keeps them exactly keepFailedDays after it was closed, and they go a moment later", () => {
+        const run = onTest(exec(60, false), "t");
+        const file = onTest(art(run, "screenshot"), "t");
+        const closedAt = (daysAgo: number, extra = 0) => new Map([["t", NOW - daysAgo * DAY_MS - extra]]);
+        const kept = plan([run], [file], { findingHolds: closedAt(7) });
+        expect({ files: kept.files, held: kept.findingHeld, runs: kept.expiredRuns }).toEqual({ files: 0, held: 1, runs: [] });
+        const gone = plan([run], [file], { findingHolds: closedAt(7, 1) });
+        expect({ files: ids(gone), held: gone.findingHeld, runs: gone.expiredRuns }).toEqual({ files: [file.id], held: 0, runs: [run.id] });
+        // The project's own period, not 7 days: 14 keeps a finding closed 10 days ago.
+        expect(plan([run], [file], { findingHolds: closedAt(10), policy: policy({ keepFailedDays: 14 }) }).findingHeld).toBe(1);
+    });
+
+    it("a closing time that cannot be read holds (fails towards keeping); no hold changes nothing", () => {
+        const run = onTest(exec(60, false), "t");
+        const file = onTest(art(run, "screenshot"), "t");
+        expect(plan([run], [file], { findingHolds: new Map([["t", 0]]) }).findingHeld).toBe(1);
+        expect(plan([run], [file]).files).toBe(1);
+    });
+});
+
 describe("retention rules: the plan", () => {
     it("lists files oldest first with totals, per-kind sums and dates", () => {
         const runs = [exec(300, false), exec(200), exec(100, false), exec(1)];

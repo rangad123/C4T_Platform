@@ -13,6 +13,9 @@
  *   3. passed run  traces and recordings: removed at the next pass (passed runs keep no full trace or recording);
  *                  everything else (its evidence record, screenshots...): removed after `keepDays`
  *   4. other run   (failed, broken, skipped...): everything removed after `keepFailedDays`
+ * Finding hold (Phase 5, spec §5.1 item 8): the files of a test's failed runs (and its run-less media) are evidence while a finding on that
+ * test is open, and are kept, with the runs' details, until the finding is closed plus `keepFailedDays` (`findingHolds`; counted in
+ * `findingHeld`, left out of the size limit). A passed run's files are not a finding's evidence and follow the rules below.
  * Nothing else keeps a run's files: not being the latest run, a failing test, an issue or a release. What a finding or an issue
  * says about a run (its rows, status and history) is never touched here; only the files go, and the reader then says they expired.
  * Then, when a size limit is set, the oldest files that are not yet due are removed until the project fits.
@@ -69,6 +72,8 @@ export interface RetentionExecution {
     passed: boolean;
     /** The row still holds details about the application (a failure message on the run or a step). Undefined counts as yes. */
     details?: boolean;
+    /** The run's test, for the finding hold. */
+    testId?: string | null;
 }
 
 export interface RetentionArtifact {
@@ -80,6 +85,8 @@ export interface RetentionArtifact {
     at: number;
     /** Epoch ms the file was stored (its row's creation); for the first-deploy grace. Unknown (0 or missing) counts as before it. */
     createdAt?: number;
+    /** The test the file belongs to, for the finding hold. */
+    testId?: string | null;
 }
 
 /** Days after the first deployment with retention during which files that existed before it are kept. */
@@ -93,6 +100,8 @@ export interface RetentionInput {
     artifacts: RetentionArtifact[];
     /** Epoch ms of the first deployment with retention (the start of the first-deploy grace); undefined: no grace. */
     graceFrom?: number;
+    /** Tests with a finding: test id -> when its last finding was closed (epoch ms), or null while one is open. */
+    findingHolds?: ReadonlyMap<string, number | null>;
 }
 
 export type KeepReason = "kind" | "no-run";
@@ -127,6 +136,8 @@ export interface PrunePlan {
     heldBytes: number;
     /** Runs past their period whose details the first-deploy grace keeps (they started before the first deployment). */
     graceRuns: number;
+    /** Files kept as an open (or lately closed) finding's evidence (findingHolds). Their bytes are in `heldBytes`. */
+    findingHeld: number;
 }
 
 /** A time the rules can age: a positive, finite epoch. 0 (what an unparseable date becomes) and NaN are unknown. */
@@ -143,6 +154,12 @@ export const graceHolds = (at: number, graceFrom: number | undefined, now: numbe
 
 export function planPrune(input: RetentionInput): PrunePlan {
     const { policy, now } = input;
+    // Held while the finding is open, then strictly more than keepFailedDays after it was closed, as for files.
+    const heldByFinding = (testId: string | null | undefined, passed: boolean | undefined): boolean => {
+        if (!testId || passed || !input.findingHolds?.has(testId)) return false;
+        const closed = input.findingHolds.get(testId);
+        return closed === null || closed === undefined || !known(closed) || now - closed <= policy.keepFailedDays * DAY_MS;
+    };
     const byId = new Map(input.executions.map((e) => [e.id, e]));
     const protectedFiles: Record<KeepReason, number> = { kind: 0, "no-run": 0 };
     const prune: PlannedPrune[] = [];
@@ -151,6 +168,7 @@ export function planPrune(input: RetentionInput): PrunePlan {
     let undated = 0;
     let grace = 0;
     let heldBytes = 0;
+    let findingHeld = 0;
 
     for (const a of input.artifacts) {
         if (NEVER_REMOVED.has(a.kind)) {
@@ -164,6 +182,11 @@ export function planPrune(input: RetentionInput): PrunePlan {
         }
         if (graceHolds(a.createdAt ?? 0, input.graceFrom, now)) {
             grace++; // existed before the first deployment: kept until the grace is over (not chosen by the size limit, not counted in it)
+            heldBytes += a.size;
+            continue;
+        }
+        if (heldByFinding(a.testId, exec?.passed)) {
+            findingHeld++; // a finding's evidence: kept until it is closed + keepFailedDays (not chosen by the size limit, not counted in it)
             heldBytes += a.size;
             continue;
         }
@@ -194,7 +217,7 @@ export function planPrune(input: RetentionInput): PrunePlan {
     // Strictly more than N whole days, as for files: a run exactly N days old keeps its details.
     const pastPeriod = input.executions.filter((e) => e.details !== false && known(e.startedAt) && now - e.startedAt > (e.passed ? policy.keepDays : policy.keepFailedDays) * DAY_MS);
     const expiredRuns = pastPeriod
-        .filter((e) => !graceHolds(e.startedAt, input.graceFrom, now))
+        .filter((e) => !graceHolds(e.startedAt, input.graceFrom, now) && !heldByFinding(e.testId, e.passed))
         .map((e) => e.id)
         .sort();
     const byKind: PrunePlan["byKind"] = {};
@@ -218,7 +241,8 @@ export function planPrune(input: RetentionInput): PrunePlan {
         undated,
         grace,
         heldBytes,
-        graceRuns: pastPeriod.length - expiredRuns.length,
+        graceRuns: pastPeriod.filter((e) => graceHolds(e.startedAt, input.graceFrom, now)).length,
+        findingHeld,
     };
 }
 
