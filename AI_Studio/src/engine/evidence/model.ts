@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { EVIDENCE_MAX_CONSOLE, EVIDENCE_MAX_REQUESTS, EVIDENCE_MAX_TEXT, loadEvidenceRuntime } from "./capture.js";
+import { maskText } from "../../platform/redact-text.js";
 import { runSecretValues, type RunSecretsEnv } from "./secret-policy.js";
 
 /** The stored file may not be larger than this (it is far below it unless every console line is huge). */
@@ -131,11 +132,13 @@ export function sanitizeEvidence(raw: unknown, secrets: string[] = []): Evidence
     const top = EvidenceSchema.safeParse(raw);
     if (!top.success) return undefined;
     const rt = loadEvidenceRuntime();
-    const mask = (s: string, max: number) => rt.evidenceText(s, secrets, max);
+    // The shared redaction too (e-mails also URL-encoded, phone numbers, addresses, cards, `bearer:` lines, secret query values once
+    // decoded): the script's own rules are a smaller set it carries with it.
+    const mask = (s: string, max: number) => rt.evidenceText(maskText(s), secrets, max);
     // A stored path goes through the same address cleaning as a live request (sensitive query values, tokens), not just the text rules.
     // A step's address is a path, or host + path for another site's page: cleaned like a request's.
     const cleanStepUrl = (u: string) => (u.startsWith("/") ? cleanPath(u) : mask(u, 500));
-    const cleanPath = (path: string) => rt.evidenceSplitUrl(`http://placeholder.invalid${path.startsWith("/") ? "" : "/"}${path}`, "placeholder.invalid", secrets).path;
+    const cleanPath = (path: string) => maskText(rt.evidenceSplitUrl(`http://placeholder.invalid${path.startsWith("/") ? "" : "/"}${path}`, "placeholder.invalid", secrets).path);
 
     const requests: EvidenceRequest[] = [];
     for (const r of top.data.requests) {
