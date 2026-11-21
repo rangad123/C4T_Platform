@@ -448,15 +448,18 @@ const SECRET_PARAM = /pass|secret|token|^auth|authoriz|api[-_]?key|session|signa
 const ID_PARAM = /^(?:id|uuid|guid)$|[_-](?:id|uuid|guid)$|[a-z](?:Id|ID|Uuid|Guid)$/;
 const SECRET_MASK = "•••";
 const isIdValue = (v: string) => /^\d+$/.test(v) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || /^[0-9a-f]{12,}$/i.test(v);
+/** A short prefix plus digits (ord-1001, n2): only a candidate, since v2, page3 and step-1 look the same (see prefixedKinds). */
+const isPrefixedId = (v: string) => /^[a-z]{1,6}[-_]?\d{1,12}$/i.test(v);
+const isId = (v: string, prefixed: boolean) => isIdValue(v) || (prefixed && isPrefixedId(v));
 
 /**
  * How a record read is kept: the address path with its query string (secret-named values masked), the secret names, and the kind of
  * record (ids in the path or in id-named query parameters become {}). Undefined when the address names no record.
  */
-export function apiRecordAddress(url: URL): { path: string; pattern: string; secrets: string[] } | undefined {
+export function apiRecordAddress(url: URL, prefixed = false): { path: string; pattern: string; secrets: string[] } | undefined {
     // "//other.example/x" would name another host when the check resolves it against the API host: never kept.
     if (/^\/[\/\\]/.test(url.pathname) || url.pathname.includes("\\")) return undefined;
-    const pathPattern = recordPattern(url.pathname);
+    const pathPattern = recordPattern(url.pathname, prefixed);
     const enc = encodeURIComponent;
     const text: string[] = [];
     const kind: string[] = [];
@@ -468,7 +471,7 @@ export function apiRecordAddress(url: URL): { path: string; pattern: string; sec
             text.push(`${enc(k)}=${SECRET_MASK}`);
             kind.push(`${enc(k)}=${SECRET_MASK}`);
         } else {
-            const id = ID_PARAM.test(k) && isIdValue(v);
+            const id = ID_PARAM.test(k) && isId(v, prefixed);
             scoped ||= id;
             text.push(`${enc(k)}=${enc(v)}`);
             kind.push(`${enc(k)}=${id ? "{}" : enc(v)}`);
@@ -486,7 +489,7 @@ async function noteApiRecord(res: Response, appUrl: string, apiHosts: string[], 
     const req = res.request();
     if (req.method() !== "GET" || !isApiRequest(req.url(), req.resourceType()) || !ownApiHost(req.url(), appUrl, apiHosts)) return;
     const u = new URL(req.url());
-    const addr = apiRecordAddress(u);
+    const addr = apiRecordAddress(u, true);
     if (!addr || res.status() < 200 || res.status() >= 300) return;
     const origin = u.origin === new URL(appUrl).origin ? undefined : u.origin;
     const seen: ApiRecordSeen = { path: addr.path, ...(origin ? { origin } : {}), ...(addr.secrets.length ? { secrets: addr.secrets } : {}), pattern: (origin ?? "") + addr.pattern, page: "/", values: [] };
@@ -610,14 +613,15 @@ export interface AccessGenOptions {
 
 /**
  * The kind of record an address shows ("/notes/{}"), or undefined when the address names no record (no id-like segment): an id is a
- * number, a UUID or a long hex string. Two accounts that each reach their own records of one kind are the evidence that records are owned.
+ * number, a UUID or a long hex string, and with prefixed also a short prefix plus digits (ord-1001). Two accounts that each reach their
+ * own records of one kind are the evidence that records are owned.
  */
-export function recordPattern(path: string): string | undefined {
+export function recordPattern(path: string, prefixed = false): string | undefined {
     let found = false;
     const out = path
         .split("/")
         .map((seg) => {
-            if (isIdValue(seg)) {
+            if (isId(seg, prefixed)) {
                 found = true;
                 return "{}";
             }
@@ -627,11 +631,60 @@ export function recordPattern(path: string): string | undefined {
     return found ? out : undefined;
 }
 
+/**
+ * The kind of each address under the prefixed-id rule: a kind that only prefixed values make (/orders/{} from /orders/ord-1001) counts
+ * when two accounts each reach an address of that kind the other does not, beyond what the strict ids already tell apart. Otherwise the
+ * strict kind stands, so v2, page3 or step-1 reached by one account (or by all alike) stay words.
+ */
+function prefixedKinds(addresses: string[][], loose: (a: string) => string | undefined, strict: (a: string) => string | undefined): (a: string) => string | undefined {
+    const byKind = addresses.map((list) => {
+        const m = new Map<string, Set<string>>();
+        for (const a of list) {
+            const k = loose(a);
+            if (!k || k === strict(a)) continue;
+            if (!m.has(k)) m.set(k, new Set());
+            m.get(k)!.add(strict(a) ?? a);
+        }
+        return m;
+    });
+    const counted = new Set<string>();
+    for (const [i, mine] of byKind.entries())
+        for (const [k, set] of mine)
+            for (const theirs of byKind.slice(i + 1)) {
+                const other = theirs.get(k);
+                if (other && [...set].some((x) => !other.has(x)) && [...other].some((x) => !set.has(x))) counted.add(k);
+            }
+    return (a) => {
+        const k = loose(a);
+        return k && counted.has(k) ? k : strict(a);
+    };
+}
+
 const GENERIC_HEADING = /^(home|welcome|index|menu|dashboard|untitled|page)$/i;
 
 export function generateAccessSpecs(given: Reach[], opts: AccessGenOptions = { maxSpecs: 8, maxOrdinary: 3 }): DraftSpec[] {
     const appUrl = opts.appUrl;
-    const reaches = appUrl ? given.map((r) => (r.api ? { ...r, api: r.api.filter((a) => !a.origin || ownApiHost(`${a.origin}/`, appUrl, opts.apiHosts ?? [])) } : r)) : given;
+    const hosted = appUrl ? given.map((r) => (r.api ? { ...r, api: r.api.filter((a) => !a.origin || ownApiHost(`${a.origin}/`, appUrl, opts.apiHosts ?? [])) } : r)) : given;
+    const signedIn = hosted.filter((r) => r.who !== "anonymous");
+    const kind = prefixedKinds(signedIn.map((r) => r.pages.map((p) => p.path)), (p) => recordPattern(p, true), (p) => recordPattern(p));
+    const recs = new Map(signedIn.flatMap((r) => r.api ?? []).map((x) => [recordKey(x), x]));
+    const apiKindOf = (prefixed: boolean) => (key: string) => {
+        const r = recs.get(key)!;
+        const a = apiRecordAddress(new URL(r.path, "http://h"), prefixed);
+        return a && (r.origin ?? "") + a.pattern;
+    };
+    const apiKind = prefixedKinds(signedIn.map((r) => (r.api ?? []).map(recordKey)), apiKindOf(true), apiKindOf(false));
+    // A record whose kind only prefixed values made takes the kind the evidence allows, or is dropped when that leaves no id.
+    const reaches = hosted.map((r) => {
+        if (!r.api) return r;
+        const api = r.api.flatMap((x) => {
+            const key = recordKey(x);
+            if (apiKindOf(false)(key) === apiKindOf(true)(key)) return [x];
+            const k = apiKind(key);
+            return k ? [{ ...x, pattern: k }] : [];
+        });
+        return { ...r, api };
+    });
     const byWho = new Map(reaches.map((r) => [r.who, r]));
     const viewers = reaches.map((r) => r.who);
     interface Candidate {
@@ -646,7 +699,7 @@ export function generateAccessSpecs(given: Reach[], opts: AccessGenOptions = { m
     // below), not a page reserved for a more privileged account.
     const named = reaches.filter((r) => r.who !== "anonymous");
     const horizontalOn = named.length >= 2;
-    const patternsOf = (r: Reach) => new Set(r.pages.map((p) => recordPattern(p.path)).filter((x): x is string => Boolean(x)));
+    const patternsOf = (r: Reach) => new Set(r.pages.map((p) => kind(p.path)).filter((x): x is string => Boolean(x)));
     for (const viewer of viewers) {
         const vReach = byWho.get(viewer)!;
         if (vReach.incomplete) continue;
@@ -659,8 +712,8 @@ export function generateAccessSpecs(given: Reach[], opts: AccessGenOptions = { m
             if (viewer !== "anonymous" && owner.pages.length <= vReach.pages.length) continue;
             for (const page of owner.pages) {
                 if (vPaths.has(page.path) || page.path === "/") continue;
-                const kind = recordPattern(page.path);
-                if (kind && vPatterns.has(kind)) continue;
+                const k = kind(page.path);
+                if (k && vPatterns.has(k)) continue;
                 const marker = page.heading;
                 // The marker must say something about this page: long enough, not generic, and not a heading the viewer already sees elsewhere.
                 if (marker.length < 4 || marker.length > 80 || GENERIC_HEADING.test(marker) || vHeadings.has(marker.toLowerCase())) continue;
@@ -673,7 +726,7 @@ export function generateAccessSpecs(given: Reach[], opts: AccessGenOptions = { m
     const privileged = candidates.filter((c) => c.privileged);
     const ordinary = candidates.filter((c) => !c.privileged).slice(0, opts.maxOrdinary);
     const vertical = [...privileged, ...ordinary].slice(0, opts.maxSpecs).map((c) => specFor(c));
-    return horizontalOn ? [...vertical, ...horizontalSpecs(named, opts.maxHorizontal ?? 4), ...horizontalApiSpecs(named, opts.maxApiHorizontal ?? 4)] : vertical;
+    return horizontalOn ? [...vertical, ...horizontalSpecs(named, opts.maxHorizontal ?? 4, kind), ...horizontalApiSpecs(named, opts.maxApiHorizontal ?? 4)] : vertical;
 }
 
 /**
@@ -682,22 +735,22 @@ export function generateAccessSpecs(given: Reach[], opts: AccessGenOptions = { m
  * one the viewer saw nowhere (a heading every record shares, or one both see, says nothing about who owns it). Without that evidence
  * nothing is generated. The check opens the address once, GET only, and fails only when the owner's heading is shown to the viewer.
  */
-function horizontalSpecs(named: Reach[], max: number): DraftSpec[] {
+function horizontalSpecs(named: Reach[], max: number, kind: (path: string) => string | undefined): DraftSpec[] {
     const out: Array<{ as: string; of: string; path: string; marker: string; pattern: string }> = [];
     for (const viewer of named) {
         if (viewer.incomplete) continue;
         const vPaths = new Set(viewer.pages.map((p) => p.path));
-        const vPatterns = new Set(viewer.pages.map((p) => recordPattern(p.path)).filter((x): x is string => Boolean(x)));
+        const vPatterns = new Set(viewer.pages.map((p) => kind(p.path)).filter((x): x is string => Boolean(x)));
         const vHeadings = new Set(viewer.pages.map((p) => p.heading.toLowerCase()));
         for (const owner of named) {
             if (owner.who === viewer.who) continue;
             for (const page of owner.pages) {
-                const pattern = recordPattern(page.path);
+                const pattern = kind(page.path);
                 if (!pattern || !vPatterns.has(pattern) || vPaths.has(page.path)) continue;
                 const marker = page.heading;
                 if (marker.length < 4 || marker.length > 80 || GENERIC_HEADING.test(marker) || vHeadings.has(marker.toLowerCase())) continue;
                 // A heading the owner's other records of this kind also carry is a page title, not the record's own content.
-                if (owner.pages.some((q) => q.path !== page.path && recordPattern(q.path) === pattern && q.heading.toLowerCase() === marker.toLowerCase())) continue;
+                if (owner.pages.some((q) => q.path !== page.path && kind(q.path) === pattern && q.heading.toLowerCase() === marker.toLowerCase())) continue;
                 if (out.some((c) => c.as === viewer.who && c.path === page.path)) continue;
                 out.push({ as: viewer.who, of: owner.who, path: page.path, marker, pattern });
             }
