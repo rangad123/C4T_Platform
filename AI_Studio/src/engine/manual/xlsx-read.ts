@@ -194,23 +194,59 @@ function decodeXml(s: string): string {
 
 const localName = (n: string) => n.slice(n.indexOf(":") + 1);
 
-/** Tags in document order. Comments, processing instructions and CDATA are handled; CDATA becomes text. */
+const TAG_NAME = /(\/?)([^\s/>!?<"'=]+)/y;
+const TAG_ATTR = /\s+([^\s=/>"']+)\s*=\s*(?:"([^"]*)"|'([^']*)')/y;
+const TAG_END = /\s*(\/?)$/y;
+
+/**
+ * Tags in document order. Comments, processing instructions and CDATA are handled; CDATA becomes text. Scanned with indexOf and sticky
+ * patterns so the time is linear in the part's length (F3 H1: a lazy regex per "<" was quadratic on hostile parts); anything never
+ * closed or not well formed is refused.
+ */
 function* tags(xml: string): Generator<Tag> {
-    const re = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<(\/?)([^\s/>!?]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
-    let last = 0;
+    let i = 0;
     let text = "";
-    for (let m = re.exec(xml); m; m = re.exec(xml)) {
-        text += decodeXml(xml.slice(last, m.index));
-        last = re.lastIndex;
-        if (m[1] !== undefined) {
-            text += m[1];
-            continue;
+    const skipTo = (from: number, close: string, what: string) => {
+        const at = xml.indexOf(close, from);
+        if (at < 0) throw damaged(`${what} is never closed`);
+        return at + close.length;
+    };
+    for (let lt = xml.indexOf("<"); lt >= 0; lt = xml.indexOf("<", i)) {
+        text += decodeXml(xml.slice(i, lt));
+        if (xml.startsWith("<!--", lt)) i = skipTo(lt + 4, "-->", "a comment");
+        else if (xml.startsWith("<?", lt)) i = skipTo(lt + 2, "?>", "a processing instruction");
+        else if (xml.startsWith("<![CDATA[", lt)) {
+            i = skipTo(lt + 9, "]]>", "a CDATA section");
+            text += xml.slice(lt + 9, i - 3);
+        } else {
+            // The tag ends at the first ">" outside a quoted attribute value; a "<" before it means it never closed.
+            let gt = lt + 1;
+            for (let quote = ""; gt < xml.length; gt++) {
+                const ch = xml[gt]!;
+                if (quote) {
+                    if (ch === quote) quote = "";
+                } else if (ch === '"' || ch === "'") quote = ch;
+                else if (ch === ">" || ch === "<") break;
+            }
+            if (xml[gt] !== ">") throw damaged("a tag is never closed");
+            const body = xml.slice(lt + 1, gt);
+            i = gt + 1;
+            TAG_NAME.lastIndex = 0;
+            const m = TAG_NAME.exec(body);
+            if (!m) throw damaged("a tag is not well formed");
+            const attrs: Record<string, string> = {};
+            TAG_ATTR.lastIndex = m[0].length;
+            let pos = TAG_ATTR.lastIndex;
+            for (let a = TAG_ATTR.exec(body); a; a = TAG_ATTR.exec(body)) {
+                attrs[a[1]!] = decodeXml(a[2] ?? a[3] ?? "");
+                pos = TAG_ATTR.lastIndex;
+            }
+            TAG_END.lastIndex = pos;
+            const end = TAG_END.exec(body);
+            if (!end) throw damaged("a tag is not well formed");
+            yield { name: localName(m[2]!), close: m[1] === "/", selfClose: end[1] === "/", attrs, textBefore: text };
+            text = "";
         }
-        if (!m[3]) continue; // comment or processing instruction
-        const attrs: Record<string, string> = {};
-        if (m[4]) for (const a of m[4].matchAll(/([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs[a[1]!] = decodeXml(a[2] ?? a[3] ?? "");
-        yield { name: localName(m[3]), close: m[2] === "/", selfClose: m[5] === "/", attrs, textBefore: text };
-        text = "";
     }
 }
 

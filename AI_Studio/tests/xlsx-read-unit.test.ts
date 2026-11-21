@@ -329,6 +329,32 @@ describe("refusing wrong or hostile files with a sentence", () => {
         expect(refusal(() => readSheet(enc, "Test cases"))).toMatch(/protected with a password/);
     });
 
+    // F3 review H1: a lazy regex per "<" made unclosed comments and processing instructions cost the square of the part's length, on the
+    // request thread (a 1 KB zip froze the server for 23 s). The reviewer's payloads, plus the other unclosed shapes, must be refused fast.
+    it("hostile XML that never closes (comments, processing instructions, CDATA, tags, quotes) is refused in linear time", () => {
+        const hostile = (body: string) => zip({ "[Content_Types].xml": CT, "_rels/.rels": ROOT_RELS, "xl/workbook.xml": `<?xml version="1.0"?><workbook>${body}</workbook>` });
+        const cases: Array<[string, RegExp]> = [
+            ["<!--".repeat(32_000), /\(a comment is never closed\)/], // 128 KB
+            ["<!--".repeat(128_000), /\(a comment is never closed\)/], // 512 KB unpacked, about 1 KB zipped
+            ["<?".repeat(64_000), /\(a processing instruction is never closed\)/], // 128 KB
+            ["<![CDATA[".repeat(30_000), /\(a CDATA section is never closed\)/],
+            ["<a".repeat(200_000), /\(a tag is never closed\)/],
+            ['<a x="'.repeat(80_000), /\(a tag is never closed\)/],
+            ["<a " + "b".repeat(400_000) + ">", /\(a tag is not well formed\)/],
+            ["<a" + " ".repeat(400_000) + "b", /\(a tag is never closed\)/],
+        ];
+        for (const [body, msg] of cases) {
+            const bytes = hostile(body);
+            const t0 = performance.now();
+            const text = refusal(() => readSheet(bytes, "Test cases"));
+            const ms = performance.now() - t0;
+            expect(text).toMatch(/^The workbook is damaged and cannot be read/);
+            expect(text).toMatch(msg);
+            expect(ms, `${body.slice(0, 12)}… × ${body.length} took ${Math.round(ms)} ms`).toBeLessThan(250);
+        }
+        expect(hostile("<!--".repeat(128_000)).length).toBeLessThan(2_000);
+    });
+
     it("a damaged cell: a shared string that is not there", () => {
         expect(refusal(() => readSheet(rawWorkbook(`<row r="1"><c r="A1" t="s"><v>5</v></c></row>`, { shared: ["only one"] }), "Test cases"))).toMatch(/^The workbook is damaged and cannot be read \(a cell points to text that is not there\)/);
     });

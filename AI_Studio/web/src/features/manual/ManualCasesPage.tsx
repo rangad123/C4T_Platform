@@ -107,9 +107,8 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     async function importFile(file: File) {
         setNotice(null);
         try {
-            // The test case workbook goes as base64 (the server reads its Test cases sheet); a JSON backup, as text.
-            const body = /\.json$/i.test(file.name) ? { format: "json", content: await file.text() } : /\.xlsx$/i.test(file.name) ? { format: "xlsx", content: await base64Of(file) } : { content: await file.text() };
-            const r = await api<ImportResult>(`/projects/${id}/manual-cases/import`, { method: "POST", body });
+            // The workbook is the only import here (owner, F3 L2); any file goes as one, and the server refuses what is not. JSON stays in the API.
+            const r = await api<ImportResult>(`/projects/${id}/manual-cases/import`, { method: "POST", body: { format: "xlsx", content: await base64Of(file) } });
             setNotice(importSummary(r));
             await reloadCounted();
         } catch (e) {
@@ -142,7 +141,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             actions={
                 canWrite ? (
                     <>
-                        <input ref={fileRef} type="file" accept=".xlsx,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/json" hidden aria-label="Choose a file to import" onChange={(e) => e.target.files?.[0] && void importFile(e.target.files[0])} />
+                        <input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden aria-label="Choose a file to import" onChange={(e) => e.target.files?.[0] && void importFile(e.target.files[0])} />
                         <Button icon={Upload} onClick={() => fileRef.current?.click()} tip={IMPORT_TIP}>
                             Import
                         </Button>
