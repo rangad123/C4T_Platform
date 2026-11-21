@@ -18,6 +18,7 @@
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
 import { freshAccountSteps, referenceIds, signUpOf, type DraftSpec } from "./test-specs.js";
+import { backendOpsChains } from "./backend-ops.js";
 
 export interface WorkflowGenOptions {
     allowMutating: boolean;
@@ -35,7 +36,7 @@ type Method = RequestStep["method"];
 
 const CATEGORY = "API · Workflows";
 // chain_detector.py `_AUTH_PATH`
-const AUTH_PATH = /\/(auth|login|signin|sign-in|token|oauth|session)(\/|$)/i;
+export const AUTH_PATH = /\/(auth|login|signin|sign-in|token|oauth|session)(\/|$)/i;
 // chain_detector.py `_TOKEN_FIELDS`, ordered, minus refresh tokens (not valid as a bearer credential).
 const TOKEN_FIELDS = ["access_token", "accessToken", "token", "jwt", "id_token", "idToken"];
 /** Path params that name "the id" without saying of what — chain_detector.py rejected these. */
@@ -43,7 +44,7 @@ const GENERIC_PARAMS = new Set(["id", "uuid", "slug", "key"]);
 /** Common envelope properties around the real payload. */
 const WRAPPERS = ["data", "item", "result", "results", "items", "records", "content", "payload", "rows"];
 
-interface Chain {
+export interface Chain {
     name: string;
     mutating: boolean;
     spec: DraftSpec;
@@ -90,15 +91,15 @@ function camel(s: string): string {
     return parts.map((p, i) => (i === 0 ? p.toLowerCase() : p[0]!.toUpperCase() + p.slice(1).toLowerCase())).join("") || "item";
 }
 
-const varFor = (resource: string) => `${camel(resource)}Id`;
+export const varFor = (resource: string) => `${camel(resource)}Id`;
 const pathParams = (path: string) => [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!);
-const trimSlash = (p: string) => p.replace(/\/+$/, "");
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+export const trimSlash = (p: string) => p.replace(/\/+$/, "");
+export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 
 // ── Schema inspection (`_get_id_field` / `_get_token_field`) ─────────────────
 
 /** 2xx response schemas, 200/201 first (chain_detector only looked at those two). */
-function okSchemas(ep: ApiEndpointModel): Schema[] {
+export function okSchemas(ep: ApiEndpointModel): Schema[] {
     if (ep.spec) {
         return ep.spec.responses
             .filter((r) => /^2/.test(r.status) && r.schema)
@@ -108,7 +109,7 @@ function okSchemas(ep: ApiEndpointModel): Schema[] {
     return ep.responseSchema ? [ep.responseSchema as Schema] : [];
 }
 
-function propsOf(schema: Schema | undefined): Record<string, Schema> {
+export function propsOf(schema: Schema | undefined): Record<string, Schema> {
     if (!schema || typeof schema !== "object") return {};
     const out: Record<string, Schema> = { ...(schema.properties ?? {}) };
     for (const part of schema.allOf ?? []) Object.assign(out, part?.properties ?? {});
@@ -126,7 +127,7 @@ function idFieldIn(props: Record<string, Schema>, resource: string, hint?: strin
 }
 
 /** Dot path to the id of a single-resource response (top level or inside one envelope). */
-function idPathIn(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
+export function idPathIn(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
     const props = propsOf(schema);
     const direct = idFieldIn(props, resource, hint);
     if (direct) return direct;
@@ -141,7 +142,7 @@ function idPathIn(schema: Schema | undefined, resource: string, hint?: string): 
 }
 
 /** Dot path to the id of the FIRST item of a collection response: `0.id` or `items.0.id`. */
-function listItemIdPath(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
+export function listItemIdPath(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
     if (!schema) return undefined;
     if (schema.type === "array" || schema.items) {
         const f = idPathIn(schema.items as Schema | undefined, resource, hint);
@@ -210,7 +211,7 @@ function fillPath(path: string, values: Record<string, string>): string | null {
     return ok ? out : null;
 }
 
-function queryFor(ep: ApiEndpointModel): Record<string, string> | undefined {
+export function queryFor(ep: ApiEndpointModel): Record<string, string> | undefined {
     const q: Record<string, string> = {};
     for (const p of ep.spec?.parameters ?? []) {
         if (p.location !== "query" || !p.required) continue;
@@ -351,7 +352,7 @@ function listIdsPath(itemPath: string): string | undefined {
 
 // ── Spec builders ────────────────────────────────────────────────────────────
 
-const req = (method: string, path: string, extra: Partial<RequestStep>, description: string): Step => ({
+export const req = (method: string, path: string, extra: Partial<RequestStep>, description: string): Step => ({
     action: "request",
     method: method as Method,
     path,
@@ -359,7 +360,7 @@ const req = (method: string, path: string, extra: Partial<RequestStep>, descript
     description,
     ...extra,
 });
-const resp = (check: Extract<Step, { action: "assertResponse" }>["check"], expected: string | number | boolean | undefined, path: string | undefined, description: string): Step => ({
+export const resp = (check: Extract<Step, { action: "assertResponse" }>["check"], expected: string | number | boolean | undefined, path: string | undefined, description: string): Step => ({
     action: "assertResponse",
     check,
     expected,
@@ -373,7 +374,7 @@ function originOf(eps: ApiEndpointModel[]): NonNullable<TestSpec["source"]>["ori
     return "network";
 }
 
-function draft(
+export function draft(
     eps: ApiEndpointModel[],
     title: string,
     description: string,
@@ -723,7 +724,7 @@ function nestedChains(endpoints: ApiEndpointModel[]): Chain[] {
  * of being generated unless `opts.allowMutating`.
  */
 export function generateApiWorkflowSpecs(endpoints: ApiEndpointModel[], opts: WorkflowGenOptions): WorkflowGenResult {
-    const all = [...listDetailChains(endpoints), ...crudChains(endpoints), ...writeReadChains(endpoints), ...authChains(endpoints), ...nestedChains(endpoints)];
+    const all = [...listDetailChains(endpoints), ...crudChains(endpoints), ...writeReadChains(endpoints), ...backendOpsChains(endpoints), ...authChains(endpoints), ...nestedChains(endpoints)];
     // Deduplicate by name (same resource may match several heuristics) — as chain_detector does.
     const seen = new Set<string>();
     const unique = all.filter((c) => (seen.has(c.name) ? false : (seen.add(c.name), true)));
