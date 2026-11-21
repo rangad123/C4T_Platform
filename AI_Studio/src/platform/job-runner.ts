@@ -322,7 +322,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         sink.writes.close();
         if (!repo.handOverJob(job.id, owner)) console.warn(`[job ${job.id.slice(0, 8)}] could not be handed over: its lease had moved on`);
         frameHub.drop(job.id);
-        meter?.finish();
+        // Usage written, but no call summary: the job has not ended, it goes on in the next process.
+        meter?.handOver();
     });
 
     // This job's scratch files (each run's folder: page snapshots, reports, traces, recordings) are its own and go when it ends.

@@ -99,6 +99,8 @@ export class JobMeter {
     /** Every structured or text call of the job (task R, R4), summed per purpose into the job's call summary at `finish()`. */
     private readonly samples: CallSample[] = [];
     private summarised = false;
+    /** Handed over to another process (runner-handover.ts): the job goes on there, so this meter never tells a summary. */
+    private handedOver = false;
 
     constructor(private readonly opts: MeterOptions) {
         this.backend = opts.backend;
@@ -152,6 +154,7 @@ export class JobMeter {
      */
     finish(): void {
         this.guard(() => this.flush(this.lastPurpose));
+        if (this.handedOver) return;
         this.guard(() => {
             const bytes = this.backend.runBytes?.(this.opts.jobId);
             // Once per meter for the bytes alone (a job handed over may finish twice); again only for calls made since.
@@ -161,6 +164,12 @@ export class JobMeter {
             const calls = Object.values(purposes).reduce((n, p) => n + p.calls, 0);
             this.opts.emit?.({ stage: "orchestration", kind: "ai_call_summary", message: `${calls} AI call(s) summarised by purpose.`, data: { purposes, ...(bytes ?? {}) } });
         });
+    }
+
+    /** The job is handed over, not ended: what was used is written, and no summary is told now or at this process's later `finish()`. */
+    handOver(): void {
+        this.handedOver = true;
+        this.finish();
     }
 
     // ── the middleware for the authoring agent's direct model use ────────────

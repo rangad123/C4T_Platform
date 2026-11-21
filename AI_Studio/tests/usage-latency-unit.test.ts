@@ -86,6 +86,18 @@ describe("the job's AI call summary", () => {
         expect(events.filter((e) => e.kind === "ai_call_summary")).toHaveLength(1);
     });
 
+    it("is not told by a job handed over to another process: its usage is written, the summary waits for the job's real end", async () => {
+        const clock = { t: 0 };
+        const events: EngineEvent[] = [];
+        const meter = new JobMeter({ backend: backend({ artifactBytes: 10, uploadBytes: 0 }), jobId: "j", projectId: "p", emit: (e) => void events.push(e), now: () => new Date(clock.t) });
+        const llm = meter.wrap(scripted([{ ms: 5, out: 1 }], clock));
+        await llm.object({ system: "s", prompt: "p", schema: {} as never, purpose: "planning" });
+        meter.handOver();
+        // The run's own end still calls finish(): nothing may land after the hand-over.
+        meter.finish();
+        expect(events.filter((e) => e.kind === "ai_call_summary")).toEqual([]);
+    });
+
     it("is kept with the job, with the bytes its artifacts and runner uploads take", async () => {
         const db = new Db(":memory:");
         const repo = new Repo(db, new SecretBox("", "a-test-secret-key-of-enough-length"));
