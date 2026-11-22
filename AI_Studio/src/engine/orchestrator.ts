@@ -40,7 +40,8 @@ import { generateApiWorkflowSpecs } from "./api/workflows.js";
 import { fetchClient, probeInvariant, requesterClient, type ProbeEnv, type ProbeHttp } from "./api/probes.js";
 import { MAX_SEQUENCES, runSequences, stateCheckSpecs, stateModels } from "./api/stateful.js";
 import { maskSecrets } from "./frameworks/plugin.js";
-import { generateConcurrencySpecs, type ConcurrencyGate } from "./api/concurrency.js";
+import { concurrencyAllowed, generateConcurrencySpecs, type ConcurrencyGate } from "./api/concurrency.js";
+import { handOverLine, rateLimitSpec, sensitiveFields, sensitiveFieldSpecs, storedInjectionSpec } from "./security/functional.js";
 import { planScenarios, requirementsCoverage, rulesForScenario } from "./planning/planner.js";
 import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
@@ -54,7 +55,7 @@ import { refusedBy } from "./memory/notes.js";
 import { createTestData } from "./testdata/generate.js";
 import { parseRequirements, parseRequirementsDeterministic, type Requirement } from "./requirements/parse.js";
 import { assertCredentialsStayHome } from "./spec/credential-origin.js";
-import { TestSpecSchema, type Scenario, type TestSpec } from "./spec/schema.js";
+import { TestSpecSchema, type Scenario, type Step, type TestSpec } from "./spec/schema.js";
 import { scenarioAccountLane } from "./validation/lanes.js";
 import { analyzeApplication } from "./understanding/analyzer.js";
 import type { ApiEndpointModel, AppModel } from "./understanding/app-model.js";
@@ -86,12 +87,14 @@ import { createThumbnailer } from "./discovery/thumbnails.js";
 import { layerOfSpec, layerReport, type Layer, type LayerReport } from "./validation/layers.js";
 import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
 import { benchProbeFor } from "./database/bench-data.js";
-import { DB_CHECKS_MAX, integrityChecks, withDatabaseChecks } from "./database/checks.js";
+import { DB_CHECKS_MAX, integrityChecks, webPersistenceChecks, withDatabaseChecks } from "./database/checks.js";
 import type { DbSchema } from "./database/probe.js";
 import { proposeRowRelations } from "./database/propose.js";
 import { dbServiceFor, type DbCheckService } from "./database/service.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
+/** C11 stored-markup tests a run makes at most (each is a written workflow run again). */
+const INJECTION_TESTS_MAX = 3;
 export const TEST_CASES_NOT_RUN = "test_cases_not_run";
 /** Whether a request also runs the test cases it writes: only when it says so (runTestCases true, evaluation only). */
 export const runsTestCases = (req: Pick<GenerationRequest, "runTestCases">): boolean => req.runTestCases === true;
@@ -889,6 +892,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         let db: { schema: DbSchema; absence: Array<{ name: string; source?: string }>; budget: { left: number } } | undefined;
         let dbLayer: { checks: number } | { unavailable: string } | undefined = dbProbe ? { checks: 0 } : undefined;
         let dbTests = 0;
+        /** The run's database checks left (DB_CHECKS_MAX in all), shared by the web tests' persistence checks and the API stage. */
+        const dbBudget = { left: DB_CHECKS_MAX };
+        let dbSchemaRead: Promise<DbSchema | undefined> | undefined;
+        /** The schema for the web tests' persistence checks (C10 after a C4 write), read once; the API stage reports a failure to read it. */
+        const dbSchemaOnce = () => (dbSchemaRead ??= dbProbe && dataChanges ? dbProbe.schema().catch(() => undefined) : Promise.resolve(undefined));
+        /** T25: functional security checks made from what authoring captured, by title (one each), and the stored-markup tests left. */
+        const securityMade = new Set<string>();
+        let injectionLeft = INJECTION_TESTS_MAX;
+        /** C3 list checks (identity/access.ts generateApiListSpecs): a failed one is a finding the cross-account hand-over names. */
+        const listCheckKeys = new Set<string>();
         /** New tests per layer, for summary.layers (C12). */
         const layerTests: Partial<Record<Layer, number>> = {};
         const persistNew = async (spec: TestSpec, framework: Framework, validation: "PENDING" | "NEEDS_REVIEW", reason?: string, meta?: Record<string, unknown>) => {
@@ -970,6 +983,33 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             return { scenario: freshAccountScenario(scenario), credentials: r.credentials };
         };
         /**
+         * T25 (C11) from what a test's writing captured: a GET that answered with a credential field becomes its own check, and a complete
+         * workflow that saved typed text is tried again with markup in that text (at most INJECTION_TESTS_MAX a run).
+         */
+        const securityFromAuthoring = async (written: { title: string; steps: Step[]; testData: Record<string, string> }, outcome: Exclude<AuthorOutcome, { status: "blocked" }>, asAccount: ReturnType<typeof roleCredentials>) => {
+            const calls = outcome.calls ?? [];
+            if (!calls.length) return;
+            const drafts = sensitiveFieldSpecs(sensitiveFields(calls), requirementList);
+            if (outcome.status === "complete" && injectionLeft > 0) {
+                const injection = storedInjectionSpec({ title: written.title, steps: written.steps, calls, requirements: requirementList, dataChanges });
+                if (injection) {
+                    injectionLeft--;
+                    // The workflow's own test data goes with its steps.
+                    const withData = { ...injection, testData: written.testData };
+                    drafts.push(asAccount ? asRole(withData, asAccount.name) : withData);
+                }
+            }
+            for (const d of drafts) {
+                if (securityMade.has(d.title)) continue;
+                securityMade.add(d.title);
+                if (await carried(d)) continue;
+                const web = d.kind === "web";
+                const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey(web ? "WEB" : "API") });
+                await persistNew(spec, web ? "playwright" : "playwright-api", "PENDING", undefined, { security: "functional" });
+                pending.push({ spec, framework: web ? "playwright" : "playwright-api" });
+            }
+        };
+        /**
          * Saves what the test writer made of a scenario: a defect test with its candidate finding (S1, replayed twice in fresh browsers
          * without AI) for review, or a complete test for validation. Returns the saved test's key.
          */
@@ -984,6 +1024,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const key = await sink.nextTestKey("WEB");
             const written = toSpec(scenario, outcome, key);
             const spec = TestSpecSchema.parse(asAccount ? asRole(written, asAccount.name) : written);
+            await securityFromAuthoring(written, outcome, asAccount);
             const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
             // The leftover check (web/leftovers.ts, no AI): a test that still acts on or checks an item its own steps never added or opened,
             // after its second try, leans on what the account held. Saved for review, never validated, and never a finding.
@@ -1075,6 +1116,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 });
                 return saved;
             }
+            // C10 after a C4 write: what the page saved is in the database (the test's own typed values only).
+            const dbSchema = outcome.calls?.length ? await dbSchemaOnce() : undefined;
+            const stored = dbSchema ? webPersistenceChecks(spec.steps, outcome.calls!, dbSchema, dbBudget) : [];
+            if (stored.length) {
+                spec.steps = [...spec.steps, ...stored];
+                if (dbLayer && "checks" in dbLayer) dbLayer.checks += stored.length;
+                dbTests++;
+            }
             await persistNew(spec, "playwright", "PENDING", undefined, meta);
             // Written, not run, unless the request asks (runTestCases, evaluation only): the same rule for an objective's pursuit.
             if (!runsTestCases(req)) notRun++;
@@ -1082,6 +1131,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             ctx.emit({ stage: "generation", kind: "script_generated", message: `${spec.testId} ${spec.title} (${spec.steps.length} steps)`, data: { scenarioId: scenario.scenarioId, testId: spec.testId } });
             return spec.testId;
         };
+
+        /** The job's requirements (C5 invariants, C10 rules and C11 checks cite them). */
+        const requirementList = parsedRequirements ?? (req.requirements ? parseRequirementsDeterministic(req.requirements.text) : []);
 
         // 4a. Web: author every scenario in a real browser, one agent run per scenario.
         if (scenarios.length) {
@@ -1322,7 +1374,6 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
 
             // 4b0. C5 invariants: one AI call proposes them from the stated requirements, and code keeps only the checkable ones.
-            const requirementList = parsedRequirements ?? (req.requirements ? parseRequirementsDeterministic(req.requirements.text) : []);
             if (requirementList.length) {
                 const proposal = await proposeInvariants(ctx, { requirements: requirementList, apis, origins: new Set([origin, new URL(renderCtx.apiBaseUrl).origin]), dataChanges, secrets: authoringSecretsOf(req) });
                 invariants = proposal.invariants;
@@ -1390,7 +1441,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     const schema = await dbProbe.schema();
                     const rows = await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req) });
                     if (rows.report.proposed || rows.report.error) ctx.emit({ stage: "generation", kind: "db_rules_proposed", ...(rows.report.error ? { level: "warn" as const } : {}), message: rows.report.error ?? `${rows.report.kept} of ${rows.report.proposed} proposed stored-data rules kept (${rows.report.dropped.length} dropped)` });
-                    db = { schema, absence: [...integrityChecks(schema).map((name) => ({ name })), ...rows.checks], budget: { left: DB_CHECKS_MAX } };
+                    db = { schema, absence: [...integrityChecks(schema).map((name) => ({ name })), ...rows.checks], budget: dbBudget };
                 } catch (e) {
                     const why = `the database could not be read (${(e instanceof Error ? e.message : String(e)).slice(0, 200)})`;
                     dbLayer = { unavailable: why };
@@ -1404,9 +1455,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const apiHost = req.apiBaseUrl ? new URL(req.apiBaseUrl).origin : undefined;
                 const offHost = apiHost && apiHost !== new URL(req.url).origin ? { origin: apiHost } : {};
                 const tokens = (req.roles ?? []).filter((r) => r.apiToken).map((r) => r.name);
+                const lists = generateApiListSpecs(apiLists, { tokens, ...offHost });
                 const access = [
                     ...generateApiAccessSpecs(apiAccess, { maxSpecs: 8, reach: accessReach, ...offHost }),
-                    ...generateApiListSpecs(apiLists, { tokens, ...offHost }),
+                    ...lists,
                     // C3e: writes as another or a lesser identity, only behind the Q4 gate (identity/identity-writes.ts).
                     ...generateIdentityWriteSpecs({ apis, lists: apiLists, access: apiAccess, ...offHost, dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate }),
                 ];
@@ -1415,6 +1467,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     const web = d.kind === "web";
                     const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey(web ? "WEB" : "API") });
                     await persistNew(spec, web ? "playwright" : "playwright-api", "PENDING", undefined, { access: true });
+                    if (lists.includes(d)) listCheckKeys.add(spec.testId);
                     pending.push({ spec, framework: web ? "playwright" : "playwright-api" });
                 }
                 if (access.length) ctx.emit({ stage: "generation", kind: "api_access_tests_generated", message: `${access.length} API access-control checks generated` });
@@ -1478,6 +1531,15 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
             if (cc.specs.length) ctx.emit({ stage: "generation", kind: "concurrency_tests_generated", message: `${cc.specs.length} concurrency checks generated` });
             else if (cc.refused) ctx.emit({ stage: "generation", kind: "concurrency_tests_skipped", message: `Concurrency checks ${cc.refused}` });
+
+            // 4c2. C11 sign-in limit (T25): once a run, only from a stated limit and behind the same gate as the concurrency checks.
+            const limit = rateLimitSpec({ apis, requirements: requirementList, gate: concurrencyAllowed({ dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate }).allowed });
+            if (limit.spec && !(await carried(limit.spec))) {
+                const spec = TestSpecSchema.parse({ ...limit.spec, testId: await sink.nextTestKey("API") });
+                await persistNew(spec, "playwright-api", "PENDING", undefined, { security: "functional" });
+                pending.push({ spec, framework: "playwright-api" });
+                ctx.emit({ stage: "generation", kind: "rate_limit_test_generated", message: `${spec.testId} ${spec.title}` });
+            } else if (limit.skipped && requirementList.length) ctx.emit({ stage: "generation", kind: "rate_limit_test_skipped", message: limit.skipped });
         }
 
         // 4d. Accessibility audits (deterministic, axe-core) for key discovered pages.
@@ -1672,6 +1734,21 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 testsFailedValidation: summary.testsFailedValidation,
                 testsNeedingReview: summary.testsNeedingReview,
             });
+            // C11 hand-over (T25): the two-account list evidence becomes a draft cross-account check in Security (written by the security
+            // module, never applied without a person); the list checks that found a problem carry the line that says so.
+            if (ctx.handOverCrossAccount && apiLists.length) {
+                const found = outcomes.filter((o) => o.status === "NEEDS_REVIEW" && listCheckKeys.has(o.spec.testId)).slice(0, 20);
+                let kept: { applicationName: string } | undefined;
+                try {
+                    kept = ctx.handOverCrossAccount({ origin, rows: apiLists, findings: found.map((o) => o.spec.testId) });
+                } catch (e) {
+                    ctx.emit({ stage: "validation", kind: "cross_account_hand_over_failed", level: "warn", message: `The cross-account draft for Security was not kept: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}` });
+                }
+                if (kept) {
+                    ctx.emit({ stage: "validation", kind: "cross_account_handed_over", message: handOverLine(kept.applicationName) });
+                    for (const o of found) await sink.updateTest(handles.get(o.spec.testId)!, { reason: `${o.reason ?? ""}\n${handOverLine(kept.applicationName)}`.trim() });
+                }
+            }
             // Opt-in: repeat the validated web tests on other browsers / screen sizes. Never changes a test's own status.
             if (req.variants?.length) {
                 throwIfAborted(ctx.signal);

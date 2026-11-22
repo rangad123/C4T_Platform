@@ -36,6 +36,12 @@ export interface EngineContext {
     sharedElements?: import("./locators/refs.js").ObjectIndex;
     /** Pauses the job to ask a person on the job page (a one-time code or captcha during a phone sign-in, mobile/explore/signin.ts). Unset: nobody can be asked. */
     askPerson?: import("./mobile/explore/signin.js").PersonGate;
+    /**
+     * C11 hand-over (Phase 4 T25): keeps the access stage's two-account list evidence as a draft cross-account check in the security module
+     * (written there, security/cross-account-store.ts writeDesignationDraft; a person confirms it). Returns the application it is kept for,
+     * or undefined (no evidence, or no security application at this origin). Unset: no hand-over (a runner, tests).
+     */
+    handOverCrossAccount?: (input: { origin: string; rows: readonly import("./identity/access.js").ApiListRow[]; findings: string[] }) => { applicationName: string } | undefined;
 }
 
 export function throwIfAborted(signal?: AbortSignal): void {

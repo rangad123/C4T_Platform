@@ -31,8 +31,8 @@ export const BENCH_SHOP_INVARIANTS = [
     { requirementId: "4.5", endpoint: "POST /api/cart/items", setup: [], write: "POST /api/cart/items", expression: "(subtotal - discount >= 5000) implies shipping == 0" },
 ];
 
-/** The fixed answers, tried in order: the first the call's schema accepts is the answer (scenarios, requirements, the app summary, invariants). */
-const ANSWERS: unknown[] = [{ scenarios: [] }, { requirements: [] }, { siteType: "other", purpose: "A benchmark application", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] }, { invariants: BENCH_SHOP_INVARIANTS }];
+/** The fixed answers, tried in order: the first the call's schema accepts is the answer (scenarios, requirements, the app summary, invariants, no stored-data rules). */
+const ANSWERS: unknown[] = [{ scenarios: [] }, { requirements: [] }, { siteType: "other", purpose: "A benchmark application", features: [], pagePurposes: [], journeys: [], authenticationMechanisms: [] }, { invariants: BENCH_SHOP_INVARIANTS }, { relations: [] }];
 
 export function layersOnlyLlm(): LlmClient {
     return {

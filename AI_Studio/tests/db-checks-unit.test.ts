@@ -5,7 +5,7 @@
  * Expected values come from PHASE_4_SPEC 4.4, section 5 (C10 at most 40 checks) and the bench apps' declared keys.
  */
 import { describe, expect, it } from "vitest";
-import { dbCheckName, DB_CHECKS_MAX, integrityChecks, parseDbCheck, persistenceCheck, resolveParams, withDatabaseChecks } from "../src/engine/database/checks.js";
+import { dbCheckName, DB_CHECKS_MAX, integrityChecks, parseDbCheck, persistenceCheck, resolveParams, webPersistenceChecks, withDatabaseChecks } from "../src/engine/database/checks.js";
 import { cleanSchema, type DatabaseProbe, type DbSchema } from "../src/engine/database/probe.js";
 import { proposeRowRelations, rowRelationPrompt } from "../src/engine/database/propose.js";
 import { startDbCheckService } from "../src/engine/database/service.js";
@@ -244,3 +244,35 @@ describe("the layer report counts the database checks", () => {
         expect(layerReport({ api: 3 }, { ...run, database: { unavailable: "the database could not be read (HTTP 403)" } }).database).toEqual({ status: "unavailable", reason: "Not checked: the database could not be read (HTTP 403)." });
     });
 });
+
+describe("persistence after a web test's write (C10 after C4, from the captured answers)", () => {
+    const fill = (value: string): Step => ({ action: "fill", locator: { by: "label", value: "Name" }, value, description: "Fill" }) as Step;
+    const click: Step = { action: "click", locator: { by: "role", value: "button", name: "Save" }, description: "Save" } as Step;
+    const put = (sent: Record<string, string | number>, extra: Record<string, unknown> = {}) => ({ step: 2, method: "PUT", path: "/api/profile", status: 200, sent, ...extra });
+
+    it("a 2xx PUT the page made: the fields the test itself typed are stored, in the one table that has them", () => {
+        const out = webPersistenceChecks([fill("Ada Lovelace"), fill("1 Analytical Way"), click], [put({ name: "Ada Lovelace", address: "1 Analytical Way" })], SCHEMA, { left: 5 });
+        expect(out).toEqual([expect.objectContaining({ action: "assertResponse", check: "dbCheck", name: dbCheckName({ kind: "exists", table: "users", where: ["name", "address"] }, { name: "Ada Lovelace", address: "1 Analytical Way" }) })]);
+    });
+
+    it("compares only values the test types as written: a templated, untyped or refused write gives no check", () => {
+        expect(webPersistenceChecks([fill("Ada {{unique}}"), click], [put({ name: "Ada 123" })], SCHEMA, { left: 5 })).toEqual([]);
+        expect(webPersistenceChecks([fill("Ada"), click], [put({ name: "Grace" })], SCHEMA, { left: 5 })).toEqual([]);
+        expect(webPersistenceChecks([fill("Ada"), click], [put({ name: "Ada" }, { status: 400 })], SCHEMA, { left: 5 })).toEqual([]);
+        expect(webPersistenceChecks([fill("Ada"), click], [put({ name: "Ada" }, { readBack: true })], SCHEMA, { left: 5 })).toEqual([]);
+        // A create's id differs in every run: not checked.
+        expect(webPersistenceChecks([fill("Ada"), click], [{ step: 1, method: "POST", path: "/api/orders", status: 201, sent: { name: "Ada" } }], SCHEMA, { left: 5 })).toEqual([]);
+    });
+
+    it("the path's last write only, and within the run's budget", () => {
+        const two = webPersistenceChecks([fill("Ada"), fill("Grace"), click], [put({ name: "Ada" }), put({ name: "Grace" })], SCHEMA, { left: 5 });
+        expect(two).toHaveLength(1);
+        expect((two[0] as { name: string }).name).toContain("Grace");
+        const budget = { left: 0 };
+        expect(webPersistenceChecks([fill("Ada"), click], [put({ name: "Ada" })], SCHEMA, budget)).toEqual([]);
+        const one = { left: 1 };
+        webPersistenceChecks([fill("Ada"), click], [put({ name: "Ada" })], SCHEMA, one);
+        expect(one.left).toBe(0);
+    });
+});
+

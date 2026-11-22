@@ -30,7 +30,7 @@ runbooks.recover();
 // EXECUTION_MODE=runners: this process may only hand runs to runners (the API process already does; a second one is safe, jobs are claimed
 // atomically), and security assessments, which use a browser here, do not run (runner-only.ts).
 const runners = runnersOnly(platform.config);
-const worker = runners ? Worker.dispatch({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS) : new Worker({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS);
+const worker = runners ? Worker.dispatch({ ...platform, onJobFinished: schedules.onJobFinished, handOverCrossAccount: schedules.handOverCrossAccount }, platform.config.WORKER_POLL_MS) : new Worker({ ...platform, onJobFinished: schedules.onJobFinished, handOverCrossAccount: schedules.handOverCrossAccount }, platform.config.WORKER_POLL_MS);
 worker.start();
 console.log(runners ? "[worker] standalone dispatch worker started: tests run only on runners" : "[worker] standalone worker started");
 // Security assessments run in their own loop (src/security), next to the functional worker, never inside it.

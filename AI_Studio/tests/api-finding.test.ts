@@ -59,4 +59,14 @@ describe("apiFinding", () => {
         expect(apiFinding(spec(["api"], "default"), run(404))).toBeUndefined();
         expect(apiFinding(spec(["api", "auth"], "none"), run(404))).toBeUndefined();
     });
+    it("a code-made security check (C11) whose stated check fails on an answer the API accepted: a finding without AI", () => {
+        const check = (origin: string, expected: unknown, check = "status") =>
+            TestSpecSchema.parse({ testId: "API-001", title: "Sign-in is limited", kind: "api", tags: ["security"], source: { origin }, steps: [{ action: "request", method: "POST", path: "/x" }, { action: "assertResponse", check, expected, source: "2.14" }] });
+        expect(apiFinding(check("security-check", 429), run(200))).toMatch(/stated rule \(2\.14\).*HTTP 200/);
+        expect(apiFinding(check("security-check", "undefined", "jsonType"), run(200))).toMatch(/stated rule \(2\.14\)/);
+        // Not when the API refused (another refusal goes to repair), and not for a test the AI wrote.
+        expect(apiFinding(check("security-check", 429), run(401))).toBeUndefined();
+        expect(apiFinding(check("browser-agent", 429), run(200))).toBeUndefined();
+    });
 });
+

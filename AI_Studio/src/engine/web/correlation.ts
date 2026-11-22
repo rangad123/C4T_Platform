@@ -41,6 +41,8 @@ export interface CapturedCall {
     status: number;
     /** The body, masked (the run's secrets, secret-named fields, e-mail addresses) and cut at CAPTURE_MAX. */
     body: string;
+    /** The request's top-level text and number fields that masking leaves unchanged, sign-in details left out (C10 persistence after a C4 write). */
+    sent?: Record<string, string | number>;
     readBack?: boolean;
 }
 

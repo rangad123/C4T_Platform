@@ -1389,6 +1389,17 @@ async function shownValues(page: Page): Promise<ShownValue[]> {
     }
 }
 
+/** A sent JSON body's top-level text (at most 500 characters, unchanged by masking) and number fields, sign-in details left out. */
+export function sentFields(v: unknown, unmasked: (x: string) => boolean): Record<string, string | number> | undefined {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+    const out: Record<string, string | number> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        if (/pass|secret|token|otp|pin$|key$/i.test(k)) continue;
+        if ((typeof x === "string" && x.length <= 500 && unmasked(x)) || (typeof x === "number" && Number.isFinite(x))) out[k] = x;
+    }
+    return Object.keys(out).length ? out : undefined;
+}
+
 /**
  * The finished test with its captured answers (masked, tied to the saved steps), and, when a UI–API check disagreed on a complete test,
  * that test as a defect: its steps up to the action, then the correlation's check citing the first stated check the writer made after
@@ -1405,7 +1416,8 @@ function correlated(
     const mask = (t: string, max = 1_000) => redactText(maskObservedText(t, masks, max), max);
     const kept: CapturedCall[] = calls.map((c) => {
         const at = out.steps.indexOf(recorded[c.step]!);
-        return { ...(at >= 0 ? { step: at } : {}), method: c.method, path: mask(c.path, 500), status: c.status, body: mask(c.text, CAPTURE_MAX), ...(c.readBack ? { readBack: true } : {}) };
+        const sent = sentFields(c.sent, (x) => mask(x, 500) === x);
+        return { ...(at >= 0 ? { step: at } : {}), method: c.method, path: mask(c.path, 500), status: c.status, body: mask(c.text, CAPTURE_MAX), ...(sent ? { sent } : {}), ...(c.readBack ? { readBack: true } : {}) };
     });
     const withCalls = kept.length ? { ...out, calls: kept } : out;
     const d = out.status === "complete" ? disagreements.find((x) => out.steps.includes(x.action)) : undefined;

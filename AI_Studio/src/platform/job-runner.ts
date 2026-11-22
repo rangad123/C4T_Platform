@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import type { ApiListRow } from "../engine/identity/access.js";
 import { effectiveLimits, levelOf } from "../engine/levels.js";
 import path from "node:path";
 import type { Config } from "../config.js";
@@ -91,6 +92,8 @@ export interface RunnerDeps {
     openDevice?: DeviceOpener;
     /** Called once after a job's final status is recorded (run summaries, alerts). Failures here never reach the job. */
     onJobFinished?: (job: JobRow) => void | Promise<void>;
+    /** C11 hand-over (schedule-services.ts, a security wiring point): keeps a run's cross-account evidence as a draft in Security. Unset: none. */
+    handOverCrossAccount?: (input: { projectId: string; origin: string; rows: readonly ApiListRow[]; source: { runId: string; findings: string[] } }) => { applicationName: string } | undefined;
 }
 
 /** The heartbeat failing this many times in a row counts as a lost lease: about half a lease, so the job stops before another worker takes it. */
@@ -343,6 +346,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             // Where this job's scripts run: this machine today (see engine/frameworks/executor.ts).
             executor: executorFor({ projectId: job.projectId, jobId: job.id, mode: job.options.mode }),
             emit,
+            ...(deps.handOverCrossAccount ? { handOverCrossAccount: ({ origin, rows, findings }) => deps.handOverCrossAccount!({ projectId: job.projectId, origin, rows, source: { runId: job.id, findings } }) } : {}),
         };
         // Retries, fallback models, paused providers and which model answered are told to this job (ai-model-reliability.md).
         rawLlm.setEventSink?.((e) => ctx.emit(e));

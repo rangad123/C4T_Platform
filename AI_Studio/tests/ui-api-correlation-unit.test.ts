@@ -12,6 +12,7 @@ import { comparableSpec, printSpec } from "../src/engine/dsl/printer.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import { checkRelation } from "../src/engine/validation/relation.js";
 import { displayedCheck, errorShown, fitsTemplate, readBackCheck, readBackOf, type RawCall } from "../src/engine/web/correlation.js";
+import { sentFields } from "../src/engine/web/author.js";
 
 const apis = [
     { method: "GET", path: "/api/profile" },
@@ -170,3 +171,13 @@ describe("displayed values against the action's answer (C4b, requirement 3.12)",
         expect(checkRelation("number($t) == 0", { body: {}, vars: { t: "Free" } })).toMatchObject({ held: false, message: expect.stringContaining('$t holds no number (it is "Free")') });
     });
 });
+
+describe("what a captured write sent (kept for the database layer's persistence check)", () => {
+    it("top-level text and numbers only; sign-in details and masked values are left out", () => {
+        const unmasked = (x: string) => !x.includes("secret-pw");
+        expect(sentFields({ name: "Ada", quantity: 2, password: "Pw-12345678", apiToken: "t", note: "has secret-pw inside", nested: { a: 1 }, ok: true, big: "x".repeat(501) }, unmasked)).toEqual({ name: "Ada", quantity: 2 });
+        expect(sentFields(["a"], unmasked)).toBeUndefined();
+        expect(sentFields({ password: "x" }, unmasked)).toBeUndefined();
+    });
+});
+

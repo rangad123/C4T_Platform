@@ -27,6 +27,9 @@ describe("--layers-only", () => {
         expect(await call(z.object({ requirements: z.array(z.unknown()) }))).toEqual({ requirements: [] });
         expect(await call(z.object({ siteType: z.string(), purpose: z.string() }).passthrough())).toMatchObject({ siteType: "other" });
         await expect(call(z.object({ steps: z.array(z.string()).min(1) }))).rejects.toThrow(/no scripted answer/);
+        // Every Phase 4 proposal call is answered, so a free trial completes: the invariants (T12) and the stored-data rules (T23, none).
+        expect(await call(z.object({ invariants: z.array(z.unknown()) }))).toMatchObject({ invariants: expect.any(Array) });
+        expect(await call(z.object({ relations: z.array(z.unknown()) }))).toEqual({ relations: [] });
         expect(llm.modelName).toBe("scripted");
     });
 });

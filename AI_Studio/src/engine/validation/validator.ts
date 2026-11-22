@@ -563,6 +563,10 @@ export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     if (spec.tags.includes("documented") && step?.action === "assertResponse" && step.check === "status" && last.status >= 200 && last.status < 300) {
         return `The API does not keep a rule its document states: its document says HTTP ${String(step.expected)} for this request, and ${last.method} ${last.path} accepted it with HTTP ${last.status} (step "${failed.title}").`;
     }
+    // A C11 check the engine made itself (security/functional.ts): a stated check that failed on an answer the API accepted is a fact.
+    if (spec.source.origin === "security-check" && step?.action === "assertResponse" && step.source && last.status >= 200 && last.status < 300) {
+        return `The API breaks a stated rule (${step.source.slice(0, 200)}): ${last.method} ${last.path} answered HTTP ${last.status}, and the check "${failed.title}" failed: ${(failed.error ?? "").split("\n")[0]!.slice(0, 300)}`;
+    }
     // A C5 probe's case (tag "invariant"): the relation a requirement states failed on an answer the API accepted.
     if (spec.tags.includes("invariant") && step?.action === "assertResponse" && step.check === "relation" && last.status >= 200 && last.status < 300 && failed.error?.includes(RELATION_FAILURE_PREFIX)) {
         return `The API breaks a stated rule${step.source ? ` (requirement ${step.source})` : ""}: ${failed.error.slice(failed.error.indexOf(RELATION_FAILURE_PREFIX)).split("\n")[0]!.slice(0, 400)}`;

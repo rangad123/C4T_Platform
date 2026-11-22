@@ -183,6 +183,34 @@ export function withDatabaseChecks(steps: readonly Step[], schema: DbSchema, abs
     return out;
 }
 
+/**
+ * The persistence checks of a written web test (C10 after a C4 write): from the answers its actions caused while it was written
+ * (web/correlation.ts CapturedCall). Only fields sent with a value the test itself types (a literal fill or select value) are compared, so
+ * a replay writes the same value; a create is not checked (its id differs in every run). Each path's last write only, since a later write
+ * may change what an earlier one stored. The checks go at the end of the test, after every step that may still be saving.
+ */
+export function webPersistenceChecks(
+    steps: readonly Step[],
+    calls: ReadonlyArray<{ step?: number; method: string; path: string; status: number; sent?: Record<string, string | number>; readBack?: boolean }>,
+    schema: DbSchema,
+    budget: { left: number },
+): Step[] {
+    const typed = new Set(steps.flatMap((s) => ((s.action === "fill" || s.action === "select") && !s.value.includes("{{") ? [s.value] : [])));
+    const last = new Map<string, (typeof calls)[number]>();
+    for (const c of calls) if (c.step !== undefined && !c.readBack && WRITES.has(c.method.toUpperCase()) && c.status >= 200 && c.status <= 299) last.set(`${c.method.toUpperCase()} ${c.path.split(/[?#]/)[0]}`, c);
+    const out: Step[] = [];
+    for (const c of last.values()) {
+        if (budget.left <= 0) break;
+        const body = Object.fromEntries(Object.entries(c.sent ?? {}).filter(([, v]) => typed.has(String(v))));
+        if (!Object.keys(body).length) continue;
+        const name = persistenceCheck({ action: "request", method: c.method.toUpperCase(), path: c.path.split(/[?#]/)[0]!, body } as Request, schema);
+        if (!name || name.length > DB_CHECK_NAME_MAX || out.some((s) => (s as { name?: string }).name === name)) continue;
+        out.push(dbStep(name, "What the page saved is stored in the database"));
+        budget.left--;
+    }
+    return out;
+}
+
 /** The script helper (pasted into API and web scripts that have a database check). */
 export const DB_CHECK_HELPER_SOURCE = `
 /** Database checks (C10): sent by name to this run's database check service; the answer is counts and fingerprints, never row contents. */

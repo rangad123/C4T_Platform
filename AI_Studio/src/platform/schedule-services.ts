@@ -1,5 +1,7 @@
 import { fireDueSecuritySchedules } from "../security/schedules.js";
 import { assessmentLoopOf } from "../security/routes/assessments.js";
+import { writeDesignationDraft } from "../security/cross-account-store.js";
+import type { RunnerDeps } from "./job-runner.js";
 import type { Platform } from "./bootstrap.js";
 import { AlertService, AlertStore, isAlertable, type DeliveryOptions } from "./alerts.js";
 import { serverSmtp } from "./alert-email.js";
@@ -32,6 +34,8 @@ export interface ScheduleServices {
     scheduler: Scheduler;
     /** Pass to the worker (RunnerDeps.onJobFinished): records the run summary and sends alerts. Never throws. */
     onJobFinished: (job: JobRow) => Promise<void>;
+    /** Pass to the worker (RunnerDeps.handOverCrossAccount): a run's cross-account evidence kept as a draft in Security, never applied. */
+    handOverCrossAccount: NonNullable<RunnerDeps["handOverCrossAccount"]>;
     /**
      * Start a schedule's job now, whether or not it is due. Throws OverlapError / Error with a plain message. `startedBy` (a "Run now" from a
      * request: the clicker's user id, or null for a key) becomes the run's owner instead of the schedule's maker.
@@ -96,6 +100,7 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
         alertStore,
         alerts,
         scheduler,
+        handOverCrossAccount: (input) => writeDesignationDraft(p.db, input),
         async onJobFinished(job) {
             // A deploy trigger may have asked to be told how its run ended (cancelled runs included); runs in the background like alerts.
             track(getTriggerServices(p, { clock: opts.clock, delivery: opts.delivery }).onJobFinished(job));
