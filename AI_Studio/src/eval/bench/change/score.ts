@@ -26,11 +26,8 @@ export interface FixCheckRecord {
     linked: number;
     delivery?: number;
     jobId?: string;
-    findings: Array<{ id: string; test: string | null; state: string; stillReproduces: boolean; inRegressionSuite: boolean; reopened?: boolean; stateAfterReturn?: string; reopenedWithLinkOpen?: boolean }>;
+    findings: Array<{ id: string; test: string | null; state: string; stillReproduces: boolean; inRegressionSuite: boolean; reopened?: boolean; stateAfterReturn?: string }>;
     returned?: { jobId: string | null; failed: string[] };
-    /** The same return while the issue link was still open (its test then expects the failure). */
-    returnedWithLinkOpen?: { jobId: string | null; failed: string[] };
-    linksRemoved?: number;
 }
 export interface PrStep {
     number: number;
@@ -223,9 +220,6 @@ export function scoreChange(setup: SetupRecord, steps: PrStep[]): ChangeReport {
             ...(noFinding.length ? [`No confirmed finding to fix (nothing failed, or verification did not reproduce it): ${noFinding.join(", ")}.`] : []),
             ...fixF.filter((f) => f.state !== "fixed").map((f) => `${f.test}: ${f.state} after its fix PR.`),
             ...fixed.filter((f) => !f.reopened).map((f) => `${f.test}: not reopened when the bug came back (${f.stateAfterReturn ?? "not checked"}).`),
-            ...(fixed.some((f) => f.reopenedWithLinkOpen !== undefined)
-                ? [`With the bug's issue link still open, the return reopened ${fixed.filter((f) => f.reopenedWithLinkOpen).length} of ${fixed.length}: the open link makes the test expect the failure, and nothing in the product removes a link.`]
-                : []),
         ],
     });
 

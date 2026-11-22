@@ -422,7 +422,7 @@ async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, ma
             for (const arm of order) step.runs.push({ repeat: r, arm, ...(await runTests(s, host, proj.id, arm === "focused" ? focused : full, keyOf)) });
         }
     };
-    // A fix PR is measured after its fix check and after its issue is closed (below): an open issue link makes its tests expect failure.
+    // A fix PR is measured after its fix check (below): until then its tests' open issue links make them expect the failure.
     if (pr.kind !== "claim" && pr.kind !== "fix") await measure();
 
     if (pr.kind === "seed") {
@@ -475,23 +475,13 @@ async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, ma
                 const testId = detail.finding.testId as string | undefined;
                 check.findings.push({ id, test: testId ? keyOf.get(testId) ?? testId : null, state: detail.finding.state, stillReproduces: history.some((h) => h.startsWith(STILL_REPRODUCES) && h.includes(`#${pr.number}`)), inRegressionSuite: Boolean(testId && inSuite.has(testId)) });
             }
-            if (pr.kind === "fix") {
-                // The bug comes back while its issue is still open (the product has no way to close the link): the run expects the failure.
-                const fixed = check.findings.filter((f) => f.state === "fixed");
-                if (fixed.length && seedStep) {
-                    const r = await returnRun(fixed);
-                    check.returnedWithLinkOpen = r;
-                    for (const f of fixed) f.reopenedWithLinkOpen = r.reopened.includes(f.id);
-                }
-            }
         }
         if (pr.kind === "fix") {
-            // shortcut: the person closes the issue once the fix is in, written as a row delete (no route removes an issue link); upgrade when one exists.
-            check.linksRemoved = Number(s.platform.db.run("DELETE FROM issue_links WHERE id LIKE ?", `bench-${pr.seed}-%`).changes);
+            // Measured after the fix check: the Fixed findings' issue links are resolved by then (job-runner.ts knownBugsOf).
             await measure();
             const fixed = check.findings.filter((f) => f.state === "fixed");
             if (fixed.length && seedStep) {
-                // The bug comes back with its issue closed: the run must reopen the fixed findings.
+                // The bug comes back: the run must reopen the fixed findings.
                 const r = await returnRun(fixed);
                 check.returned = { jobId: r.jobId, failed: r.failed };
                 for (const f of fixed) {

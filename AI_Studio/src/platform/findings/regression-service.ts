@@ -140,6 +140,9 @@ export async function checkFix(p: Platform, job: JobRow, o: { execute: VerifyDep
         }
         const reason = `Fixed: it passed in ${n} of ${n} attempts (${r.account.note}) ${on}, after the fix ${claim.source} claimed.`;
         await store.transition(job.projectId, f.id, { to: "fixed", by: "engine", reason });
+        // Its issue links stay, resolved: the test no longer expects the failure (job-runner.ts knownBugsOf), until a reopen.
+        const issues = p.db.all<{ external_id: string }>("SELECT DISTINCT external_id FROM issue_links WHERE test_case_id = ? ORDER BY external_id", test.id).map((r) => r.external_id);
+        if (issues.length) await store.note(job.projectId, f.id, { by: "engine", reason: `Its issue ${issues.join(", ")} no longer marks ${test.testKey} as expected to fail: resolved by the fix in ${claim.headSha ? claim.headSha.slice(0, 7) : "the application as it is now"}. A reopen makes it count again.` });
         await promoteToRegression(p, job.projectId, test.id);
         const related = await relatedTests(p, job.projectId, f.id, test.id);
         await store.note(job.projectId, f.id, { by: "engine", reason: `Its test ${test.testKey} is in the “${REGRESSION_SUITE}” suite now. ${related.note}` });

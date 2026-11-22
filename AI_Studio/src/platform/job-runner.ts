@@ -149,11 +149,22 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
 /** The project's notes for the AI as an exploration request field (none: no field). */
 /**
  * Bugs filed for the tests of a run (issue links): such a test renders as `test.fail()` with the bug's reference, so it stays green while
- * the bug is there and says "seems fixed" when it passes. A link is open until a person removes it (the tracker's own state is not read).
+ * the bug is there and says "seems fixed" when it passes. A link is open until a person removes it (the tracker's own state is not read),
+ * or until the test's finding is Fixed (regression-service.ts checkFix) with none of its findings open: the link is kept, resolved, and the
+ * test runs normally, so a bug that comes back fails it and reopens the finding, which makes the link count again.
  */
-function knownBugsOf(db: Repo["db"], tests: TestToValidate[]): { knownBugs?: Record<string, string> } {
+/** States in which a finding no longer waits for anything (a verdict or a closing state). */
+const SETTLED = ["fixed", "accepted_risk", "not_a_bug", "duplicate"];
+/** The test has a Fixed finding and no open one: its issue links are resolved. */
+export function resolvedByFix(db: Repo["db"], testId: string): boolean {
+    const states = db.all<{ state: string }>("SELECT state FROM candidate_findings WHERE test_id = ?", testId).map((r) => r.state);
+    return states.includes("fixed") && states.every((x) => SETTLED.includes(x));
+}
+
+export function knownBugsOf(db: Repo["db"], tests: TestToValidate[]): { knownBugs?: Record<string, string> } {
     const out: Record<string, string> = {};
     for (const t of tests) {
+        if (resolvedByFix(db, t.handle.id)) continue;
         const link = db.all<{ external_id: string; url: string }>("SELECT external_id, url FROM issue_links WHERE test_case_id = ? ORDER BY created_at DESC LIMIT 1", t.handle.id)[0];
         if (link) out[t.handle.testId] = `${link.external_id} ${link.url}`.trim();
     }
