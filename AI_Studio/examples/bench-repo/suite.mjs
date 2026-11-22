@@ -5,6 +5,9 @@
 const req = (method, path, body, extract) => ({ action: "request", method, path, ...(body !== undefined ? { body } : {}), ...(extract ? { extract } : {}) });
 const status = (n) => ({ action: "assertResponse", check: "status", expected: n });
 const json = (path, expected) => ({ action: "assertResponse", check: "jsonPath", path, expected });
+const type = (path, expected) => ({ action: "assertResponse", check: "jsonType", path, expected });
+const has = (expected) => ({ action: "assertResponse", check: "bodyContains", expected });
+const lacks = (expected) => ({ action: "assertResponse", check: "bodyNotContains", expected });
 const spec = (title, category, requirements, steps, priority = "medium") => ({ title, kind: "api", category, priority, source: { origin: "requirements", requirements }, steps });
 
 const PW = "Password1!";
@@ -44,6 +47,14 @@ const shop = [
     spec("A cancelled order cannot be cancelled again", "Orders", ["6.8", "6.9"], [...newAccount("cancel"), ...add("p3", 1), ...address, req("POST", "/api/orders", undefined, { order: "id" }), status(201), req("POST", "/api/orders/{{order}}/cancel"), status(200), req("POST", "/api/orders/{{order}}/cancel"), status(409)]),
     spec("A saved name and address are the account's", "Account", ["7.2", "7.3"], [...newAccount("profile"), req("PUT", "/api/profile", { name: "Bench Renamed", address: "9 New Street, Hull" }), status(200), req("GET", "/api/profile"), status(200), json("name", "Bench Renamed"), json("address", "9 New Street, Hull")]),
     spec("The API description is served", "API", ["8.1"], [req("GET", "/openapi.json"), status(200)]),
+    // Requirements the Phase 4 extension added (catalogue-extension.json), one test each.
+    spec("Registering with an existing email in other letter case is refused", "Accounts", ["1.13"], [req("POST", "/api/register", { name: "Bench", email: "ALICE@EXAMPLE.TEST", password: PW }), status(409)]),
+    spec("The cart page shows the cart's total after the discount", "Cart", ["3.12"], [...newAccount("page"), ...add("p1", 2), req("POST", "/api/cart/discount", { code: "SAVE10" }), status(200), json("total", 2750), req("GET", "/cart"), status(200), has('data-testid="total">$27.50<')]),
+    spec("A refused discount code leaves the applied one", "Discounts", ["4.7"], [...newAccount("keep"), ...add("p1", 2), req("POST", "/api/cart/discount", { code: "SAVE10" }), status(200), req("POST", "/api/cart/discount", { code: "FREE100" }), status(400), req("GET", "/api/cart"), status(200), json("code", "SAVE10"), json("discount", 250)]),
+    spec("Two payments of one order at the same time: one succeeds", "Orders", ["6.11"], [...newAccount("twice"), ...add("p3", 1), ...address, req("POST", "/api/orders", undefined, { order: "id" }), status(201), { ...req("POST", "/api/orders/{{order}}/pay"), parallel: 2 }, { action: "assertResponse", check: "relation", expression: "ok == 1 and refused == 1" }], "high"),
+    spec("A default address over 200 characters is refused", "Account", ["7.4"], [...newAccount("longaddr"), req("PUT", "/api/profile", { name: "Bench", address: "{{repeat.a.201}}" }), status(400), json("error", "The address can have at most 200 characters.")]),
+    spec("An order's total is a whole number of cents", "API", ["8.5"], [...newAccount("cents"), ...add("p3", 1), ...address, req("POST", "/api/orders", undefined, { order: "id" }), status(201), req("GET", "/api/orders/{{order}}"), status(200), type("total", "number")]),
+    spec("The profile answer holds no password", "API", ["8.6"], [...newAccount("secret"), req("GET", "/api/profile"), status(200), lacks('"password"')], "critical"),
 ];
 
 const NOTE = "{{note}}";
@@ -74,6 +85,9 @@ const rbac = [
     spec("A manager cannot change roles", "People", ["5.4"], [...newAccount("target"), ...login("mia@example.test"), req("PATCH", "/api/admin/users/{{me}}", { role: "manager" }), status(403)], "critical"),
     spec("A role outside user, manager and admin is refused", "People", ["5.5"], [...login("ada@example.test"), req("PATCH", "/api/admin/users/u1", { role: "boss" }), status(400)]),
     spec("Changing an unknown person's role is refused", "People", ["5.6"], [...login("ada@example.test"), req("PATCH", "/api/admin/users/u999", { role: "user" }), status(404)]),
+    // Requirements the Phase 4 extension added (catalogue-extension.json), one test each.
+    spec("Five failed sign-ins lock the email for a minute", "Accounts", ["2.14"], [...newAccount("locked"), req("POST", "/api/logout"), status(200), ...[1, 2, 3, 4, 5].flatMap(() => [req("POST", "/api/login", { email: "locked-{{unique}}@example.test", password: "wrong-password" }), status(401)]), req("POST", "/api/login", { email: "locked-{{unique}}@example.test", password: PW }), status(429)], "high"),
+    spec("A note's title is shown as plain text", "Notes", ["3.15"], [...newAccount("markup"), req("POST", "/api/notes", { title: "<b>Bold</b> plan" }, { note: "id" }), status(201), req("GET", `/notes/${NOTE}`), status(200), has("&lt;b&gt;Bold&lt;/b&gt; plan"), lacks("<b>Bold</b>")], "high"),
     spec("A changed role applies from the next request", "People", ["5.7"], [...newAccount("promoted"), ...login("ada@example.test"), req("PATCH", "/api/admin/users/{{me}}", { role: "manager" }), status(200), req("POST", "/api/login", { email: "promoted-{{unique}}@example.test", password: PW }), status(200), req("GET", "/api/me"), json("role", "manager")]),
 ];
 

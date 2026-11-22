@@ -328,7 +328,7 @@ export async function changeMain(argv: string[], deps: { log?: (s: string) => vo
     process.env.CODE_HOST_GITHUB_API_URL = gh.url;
     fs.mkdirSync(args.out, { recursive: true });
     const { startPlatform } = await import("../cli.js");
-    const started = await startPlatform(path.join(args.out, "platform"), { ...process.env, VERIFY_FINDINGS: "true", SCHEDULER_ENABLED: "false" }, { makeLlm: countingNoModel(counter), jobHooks: true });
+    const started = await startPlatform(path.join(args.out, "platform"), { ...process.env, VERIFY_FINDINGS: "true", SCHEDULER_ENABLED: "false", BENCH_RISKY_CHECKS: "true" }, { makeLlm: countingNoModel(counter), jobHooks: true });
     const s: Side = started;
     const hosts = new Map<string, BenchAppHost>();
     const hostFor = async (app: string, root: string) => {
@@ -416,7 +416,8 @@ async function doSetup(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>,
  * documented endpoint templates the selection matches captured path parts against. Returns what the model holds, or why there is none.
  */
 async function describeApp(s: Side, projectId: string, openApiUrl: string): Promise<string> {
-    const put = await s.client.call("PUT", `/api/projects/${projectId}/agent-inputs`, { openApiUrl });
+    // Data changes on, as every benchmark trial: the suite writes only data it creates, and its concurrency test needs them.
+    const put = await s.client.call("PUT", `/api/projects/${projectId}/agent-inputs`, { openApiUrl, allowMutatingApiTests: true });
     if (put.status >= 300) return `no OpenAPI address: ${JSON.stringify(put.body).slice(0, 200)}`;
     const started = await s.client.call("POST", `/api/projects/${projectId}/intel/analyse`);
     if (started.status !== 202) return `no analysis: ${JSON.stringify(started.body).slice(0, 200)}`;
