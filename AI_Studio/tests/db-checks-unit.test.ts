@@ -82,6 +82,9 @@ describe("generated checks", () => {
         expect(persistenceCheck(req("POST", "/api/orders", { extract: { orderId: "id" } }), SCHEMA)).toBe("exists orders where id = '{{orderId}}'");
         expect(persistenceCheck(req("PUT", "/api/profile", { body: { name: "Test {{unique}}", address: "1 Road {{unique}}" } }), SCHEMA)).toBe("exists users where name = 'Test {{unique}}', address = '1 Road {{unique}}'");
         expect(persistenceCheck(req("PUT", "/api/users/{{userId}}", { body: { name: "N", password: "Secret1!" } }), SCHEMA)).toBe("exists users where id = '{{userId}}', name = 'N'");
+        // A stored password column is never compared, even when the write sends one.
+        const withPassword = cleanSchema({ tables: [{ name: "accounts", columns: ["id", "name", "password"], primaryKey: ["id"] }] });
+        expect(persistenceCheck(req("PUT", "/api/accounts/{{accountId}}", { body: { name: "N", password: "Secret1!" } }), withPassword)).toBe("exists accounts where id = '{{accountId}}', name = 'N'");
         // No id returned; a field no table has; a GET.
         expect(persistenceCheck(req("POST", "/api/orders"), SCHEMA)).toBeUndefined();
         expect(persistenceCheck(req("PUT", "/api/profile", { body: { nickname: "x" } }), SCHEMA)).toBeUndefined();
