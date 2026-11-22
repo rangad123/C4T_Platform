@@ -81,4 +81,24 @@ describe("a creation job's findings are verified", () => {
         expect(["reproduced", "confirmed", "classified"]).toContain(rows[0]!.state);
         expect(rows[0]!.findingClass).toBe("app_defect");
     });
+
+    it("takes the job's findings from the caller when their statuses changed since (the benchmark reruns and replays its tests first)", async () => {
+        const projectId = String(platform.repo.createProject({ name: "Rerun shop" }).id);
+        const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5593", { ...DEFAULT_JOB_OPTIONS }) as string;
+        const suiteId = platform.repo.getOrCreateSuite(projectId, "API", "api");
+        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "generate" });
+        // Both were findings when the job ended; a later replay moved them on.
+        const kept = platform.repo.insertTest({ projectId, suiteId, jobId: job.id, spec: api("API-011"), framework: "playwright-api", validationStatus: "VALIDATED", meta: { layer: "api" } });
+        const other = platform.repo.insertTest({ projectId, suiteId, jobId: job.id, spec: api("API-012"), framework: "playwright-api", validationStatus: "VALIDATED", meta: { layer: "api" } });
+        for (const [id, key] of [[kept, "API-011"], [other, "API-012"]] as const) {
+            const r = failing(key);
+            platform.repo.addExecution({ testId: id, scriptId: null, jobId: job.id, attempt: 1, status: "failed", durationMs: 1, error: r.steps[1]!.error, startedAt: new Date().toISOString(), steps: r.steps });
+        }
+        platform.repo.setJobStatus(job.id, "COMPLETED");
+        const execute: VerifyDeps["execute"] = async (_a, batch, _e, opts) => Array.from({ length: opts.attempts ?? 1 }, () => failing(batch.scripts[0]!.testId));
+        await verifyAfterJob(platform, platform.repo.getJob(job.id)!, { execute, attempts: 3, findingTests: new Set([kept]) });
+        const rows = await new CandidateFindingStore(platform.sql).list(projectId);
+        expect(rows.map((r) => r.testId)).toEqual([kept]);
+        expect(rows[0]!.attempts).toHaveLength(3);
+    });
 });

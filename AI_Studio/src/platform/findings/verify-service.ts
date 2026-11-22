@@ -274,7 +274,16 @@ export function modelFacts(model: unknown): { signupPath?: string; loginPath?: s
 export async function verifyAfterJob(
     p: Platform,
     job: JobRow,
-    o: { budget?: VerifyBudget; signal?: AbortSignal; attempts?: number; execute?: VerifyDeps["execute"]; ranOn?: string; harvested?: boolean } = {},
+    o: {
+        budget?: VerifyBudget;
+        signal?: AbortSignal;
+        attempts?: number;
+        execute?: VerifyDeps["execute"];
+        ranOn?: string;
+        harvested?: boolean;
+        /** The tests a creation job left as findings, when their statuses have changed since (the benchmark reruns and replays first). */
+        findingTests?: ReadonlySet<string>;
+    } = {},
 ): Promise<(VerifyResult & { queuedJobId?: string }) | undefined> {
     const mode = job.options.mode ?? "generate";
     if ((mode !== "validate" && mode !== "generate") || job.options.planOnly || job.error === "Cancelled") return undefined;
@@ -285,7 +294,8 @@ export async function verifyAfterJob(
     const testOf = testsOf(p, job.projectId);
     // A run's failed tests are findings; a creation job's are only the ones it left as findings (Needs review: Phase 4 layer checks among
     // them), not the tests it could not make pass for their own reasons.
-    const failed = o.harvested ? [] : failedRunsOf(p, job, testOf).filter((x) => mode === "validate" || p.repo.getTest(x.test.id)?.validationStatus === "NEEDS_REVIEW");
+    const isFinding = (id: string) => (o.findingTests ? o.findingTests.has(id) : p.repo.getTest(id)?.validationStatus === "NEEDS_REVIEW");
+    const failed = o.harvested ? [] : failedRunsOf(p, job, testOf).filter((x) => mode === "validate" || isFinding(x.test.id));
     if (failed.length) await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed });
     // This run's new findings first, then older ones still waiting, oldest first. withinBudget caps the whole list; findings it cannot
     // verify (another kind of test) cost no budget, so the older ones are read past them.

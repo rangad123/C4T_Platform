@@ -92,7 +92,7 @@ export interface BenchOptions {
      */
     database?: BenchDatabase;
     /** `--verify-attempts`: verifies the findings of the app's jobs (with its defects in) and returns what it left (cli.ts verifierOf). */
-    verify?: (projectId: string, jobIds: string[]) => Promise<Verification>;
+    verify?: (projectId: string, jobIds: string[], findingTests?: ReadonlySet<string>) => Promise<Verification>;
 }
 
 export interface BenchOutcome {
@@ -466,7 +466,9 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     let verification: Verification | undefined;
     if (o.verify && !replaySignal.signal.aborted) {
         await host.start(seeded);
-        verification = await o.verify(projectId, [jobs.planJobId, ...jobs.createJobIds, ...(jobs.validationJobIds ?? [])].filter((x): x is string => Boolean(x)));
+        // The creation's findings as collected: the harness's rerun and the replays have moved their statuses on since the job ended.
+        const findingTests = o.mode === "discovery" ? new Set(candidates.map((t) => t.id)) : undefined;
+        verification = await o.verify(projectId, [jobs.planJobId, ...jobs.createJobIds, ...(jobs.validationJobIds ?? [])].filter((x): x is string => Boolean(x)), findingTests);
     }
 
     const findings: BenchFinding[] = [];

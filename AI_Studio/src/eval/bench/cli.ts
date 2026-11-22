@@ -591,13 +591,13 @@ export function previousCalibration(dir: string): ReturnType<typeof calibrationO
 }
 
 /** `--verify-attempts`: the jobs' findings verified as onJobFinished does (verify-service.ts; no AI), then what the platform recorded. */
-export const verifierOf = (platform: Platform, attempts: number) => async (projectId: string, jobIds: string[]): Promise<Verification> => {
+export const verifierOf = (platform: Platform, attempts: number) => async (projectId: string, jobIds: string[], findingTests?: ReadonlySet<string>): Promise<Verification> => {
     const { verifyAfterJob } = await import("../../platform/findings/verify-service.js");
     const { CandidateFindingStore } = await import("../../platform/candidate-finding-store.js");
     const t0 = Date.now();
     for (const id of jobIds) {
         const job = platform.repo.getJob(id);
-        if (job) await verifyAfterJob(platform, job, { attempts });
+        if (job) await verifyAfterJob(platform, job, { attempts, ...(findingTests ? { findingTests } : {}) });
     }
     return verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
 };
