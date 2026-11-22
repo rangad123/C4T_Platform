@@ -243,7 +243,7 @@ describe("stored-data rules over rows (C5 over the database)", () => {
 
     // paid-rbac-1 API-034 / API-035: "relation notes: title <= 120" (3.5) compared a text column with a number, so every row broke it
     // and any test that wrote a note failed on the clean app. Ill-formed rules are dropped at the proposal, judged once on the rows there.
-    it("drops a rule the stored rows cannot be judged by (text compared with a number), and keeps the well-formed ones", async () => {
+    it("drops a rule no stored row can keep (text compared with a number), and keeps the well-formed ones", async () => {
         const notesSchema = cleanSchema({
             tables: [
                 { name: "users", columns: ["id", "email", "name", "role"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [], rowCount: 1 },
@@ -273,11 +273,11 @@ describe("stored-data rules over rows (C5 over the database)", () => {
         const r = await proposeRowRelations(scripted(answer, []), { requirements: reqs, schema: notesSchema, secrets: [], probe: notesProbe });
         expect(r.checks.map((c) => c.source)).toEqual(["3.4", "1.2"]);
         expect(r.report).toMatchObject({ proposed: 3, kept: 2 });
-        expect(r.report.dropped).toEqual([{ requirementId: "3.5", table: "notes", reason: expect.stringMatching(/cannot be judged on the stored rows/) }]);
+        expect(r.report.dropped).toEqual([{ requirementId: "3.5", table: "notes", reason: expect.stringMatching(/every stored row of "notes" already breaks it/) }]);
         // The reason names no stored value.
         for (const v of ["Ana's travel plans", "Team lunch ideas"]) expect(r.report.dropped[0]!.reason).not.toContain(v);
-        // At run time the same rule is refused, never counted as rows that break it.
-        await expect(notesProbe.check({ kind: "relation", table: "notes", where: [], expression: "title <= 120" })).rejects.toThrow(/cannot be judged on the stored rows/);
+        // At run time the checks keep their definition (spec 4.4: a row the expression does not hold on counts): both rows break it.
+        expect((await notesProbe.check({ kind: "relation", table: "notes", where: [], expression: "title <= 120" })).count).toBe(2);
         expect((await notesProbe.check({ kind: "relation", table: "notes", where: [], expression: 'title != ""' })).count).toBe(0);
     });
 

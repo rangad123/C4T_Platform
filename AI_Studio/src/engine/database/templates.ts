@@ -105,17 +105,8 @@ type Row = Record<string, unknown>;
 const own = (r: Row, k: string): unknown => (Object.prototype.hasOwnProperty.call(r, k) ? r[k] : undefined);
 const isNull = (v: unknown) => v === null || v === undefined;
 const fold = (v: unknown) => (typeof v === "string" ? v.toLowerCase() : v);
-/** First words of the refusal of a rule the stored rows cannot be judged by. */
-export const RELATION_UNJUDGED = "the rule cannot be judged on the stored rows";
-/**
- * Whether a relation holds on a row: the expression's paths read the row's columns. Its message (which shows values) is dropped.
- * A row it cannot be judged on (text compared with a number, a missing column) refuses the check: an ill-formed rule, not a broken row.
- */
-export const relationHolds = (expression: string, row: Row): boolean => {
-    const r = checkRelation(expression, { body: row });
-    if (!r.held && r.error) throw new DatabaseCheckRefused(`${RELATION_UNJUDGED} (a value of another type than the rule compares, such as text with a number, or no value)`);
-    return r.held;
-};
+/** Whether a relation holds on a row: the expression's paths read the row's columns. Its message (which shows values) is dropped. */
+export const relationHolds = (expression: string, row: Row): boolean => checkRelation(expression, { body: row }).held;
 
 /**
  * Runs a validated check over rows held in memory (the D-a back end's tables). A value matches as same-value.ts says (trimmed, e-mail

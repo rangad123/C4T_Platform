@@ -78,10 +78,11 @@ export async function proposeRowRelations(
             try {
                 const template = { kind: "relation" as const, table: p.table, where: [], expression: p.expression };
                 validateCheck(template, {}, input.schema);
-                // Judged once on the rows there before any test writes: a rule they cannot be judged by is refused (templates.ts), and so is
-                // one that every stored row already breaks (it misreads how the data is stored, as "Placed" for a stored "placed"; a defect
-                // breaks some rows, not all). Each later write would add a broken row, on any app.
+                // Judged once on the rows there before any test writes: a rule every stored row already breaks misreads how the data is
+                // stored ("Placed" for a stored "placed", or a text column compared with a number, which no row can keep; a defect breaks
+                // some rows, not all). Each later write would add a broken row, on any app.
                 const rows = input.schema.tables.find((t) => t.name === p.table)?.rowCount ?? 0;
+                // A probe that cannot be read now judges nothing: the rule is kept. A refusal drops it.
                 const r = await input.probe?.check(template).catch((e: unknown) => {
                     if (e instanceof DatabaseCheckRefused) throw e;
                 });
