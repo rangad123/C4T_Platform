@@ -234,7 +234,8 @@ function ifRoutes(file: string, src: string, scan: JsScan): RouteEntry[] {
     const pathExprs = new Set(["url.pathname", "req.url", "request.url", "req.path"]);
     const methodExprs = new Set(["req.method", "request.method"]);
     for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[A-Za-z_$][\w$.]*\.pathname|(?:req|request)\.(?:url|path))\b/g)) pathExprs.add(m[1]!);
-    for (const m of code.matchAll(/\b(?:const|let|var)\s*\{[^}]*\bpathname\b[^}]*\}\s*=/g)) pathExprs.add("pathname");
+    // One brace pair without nesting, then a look inside: two `[^}]*` around the word backtracked cubically on a file without a `}`.
+    if ([...code.matchAll(/\b(?:const|let|var)\s*\{([^{}]*)\}\s*=/g)].some((m) => /\bpathname\b/.test(m[1]!))) pathExprs.add("pathname");
     for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:req|request)\.method\b/g)) methodExprs.add(m[1]!);
     const pathAlt = [...pathExprs].map(escapeRe).join("|");
     const methodAlt = [...methodExprs].map(escapeRe).join("|");
