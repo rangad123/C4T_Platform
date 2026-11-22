@@ -1,3 +1,4 @@
+import type { KnownBugFailure } from "../engine/generators/types.js";
 import fs from "node:fs/promises";
 import { concurrencyAllowed, riskyGateFor } from "../engine/api/concurrency.js";
 import type { ApiListRow } from "../engine/identity/access.js";
@@ -9,7 +10,7 @@ import type { JobMeter } from "../engine/llm/metered.js";
 import { executorFor, isBuiltInAdapterId, type ScriptExecutor } from "../engine/frameworks/index.js";
 import { createLlmClientOrUnavailable, type LlmClient } from "../engine/llm/provider.js";
 import { runGeneration, type ExploreCheckpoint, type GenerationRequest, type GenerationSummary } from "../engine/orchestrator.js";
-import type { Scenario } from "../engine/spec/schema.js";
+import type { Scenario, TestSpec } from "../engine/spec/schema.js";
 import { runValidationOnly, type TestToValidate } from "../engine/validate-only.js";
 import { runVariantsJob, type VariantTest } from "../engine/validation/variants.js";
 import { runEnvironmentJob } from "../engine/environments/run.js";
@@ -163,17 +164,65 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
 }
 
 /** The project's notes for the AI as an exploration request field (none: no field). */
+/** States in which a finding no longer waits for anything (a verdict or a closing state). */
+const SETTLED = ["fixed", "accepted_risk", "not_a_bug", "duplicate"];
+/** The test has a Fixed finding and no open one: its issue links are resolved. */
+export function resolvedByFix(db: Repo["db"], testId: string): boolean {
+    const states = db.all<{ state: string }>("SELECT state FROM candidate_findings WHERE test_id = ?", testId).map((r) => r.state);
+    return states.includes("fixed") && states.every((x) => SETTLED.includes(x));
+}
+
+/**
+ * How the test's open findings failed it (V1's same-failure rule, engine/findings/classify.ts): the step their attempts failed at most,
+ * when that step is still the same check with the same expected value, else the first line of their error.
+ */
+export function trackedFailures(db: Repo["db"], testId: string, spec: TestSpec): KnownBugFailure[] {
+    const rows = db.all<{ state: string; attempts_json: string; finding_json: string }>("SELECT state, attempts_json, finding_json FROM candidate_findings WHERE test_id = ?", testId);
+    const out: KnownBugFailure[] = [];
+    for (const r of rows.filter((x) => !SETTLED.includes(x.state))) {
+        let attempts: Array<{ outcome?: string; failedStep?: number; check?: string; value?: string; error?: string }> = [];
+        let observed = "";
+        try {
+            attempts = JSON.parse(r.attempts_json);
+            observed = String((JSON.parse(r.finding_json) as { observed?: unknown }).observed ?? "");
+        } catch {
+            /* unreadable: no way known */
+        }
+        const failed = attempts.filter((a) => a.outcome === "failed");
+        const counts = new Map<number, number>();
+        for (const a of failed) if (a.failedStep) counts.set(a.failedStep, (counts.get(a.failedStep) ?? 0) + 1);
+        const step = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+        const at = step !== undefined ? (spec.steps[step - 1] as Record<string, unknown> | undefined) : undefined;
+        const a = failed.find((x) => x.failedStep === step);
+        const same = at && a && (a.check ?? "") === String(at.check ?? "") && (a.value === undefined || a.value === String(at.expected ?? ""));
+        if (step !== undefined && same) out.push({ step });
+        else {
+            const firstLine = (a?.error ?? failed[0]?.error ?? observed).split("\n")[0]!.trim();
+            if (firstLine) out.push({ firstLine: firstLine.slice(0, 500) });
+        }
+    }
+    return out;
+}
+
 /**
  * Bugs filed for the tests of a run (issue links): such a test renders as `test.fail()` with the bug's reference, so it stays green while
- * the bug is there and says "seems fixed" when it passes. A link is open until a person removes it (the tracker's own state is not read).
+ * the bug is there and says "seems fixed" when it passes. Only a failure the way its open findings failed it is the expected one
+ * (trackedFailures); another failure is reported as a failure of its own. A link is open until a person removes it (the tracker's own state
+ * is not read), or until the test's finding is Fixed (regression-service.ts checkFix) with none of its findings open: the link is kept,
+ * resolved, and the test runs normally, so a bug that comes back fails it and reopens the finding, which makes the link count again.
  */
-function knownBugsOf(db: Repo["db"], tests: TestToValidate[]): { knownBugs?: Record<string, string> } {
+export function knownBugsOf(db: Repo["db"], tests: TestToValidate[]): { knownBugs?: Record<string, string>; knownBugFailures?: Record<string, KnownBugFailure[]> } {
     const out: Record<string, string> = {};
+    const how: Record<string, KnownBugFailure[]> = {};
     for (const t of tests) {
+        if (resolvedByFix(db, t.handle.id)) continue;
         const link = db.all<{ external_id: string; url: string }>("SELECT external_id, url FROM issue_links WHERE test_case_id = ? ORDER BY created_at DESC LIMIT 1", t.handle.id)[0];
-        if (link) out[t.handle.testId] = `${link.external_id} ${link.url}`.trim();
+        if (!link) continue;
+        out[t.handle.testId] = `${link.external_id} ${link.url}`.trim();
+        const ways = t.spec ? trackedFailures(db, t.handle.id, t.spec) : [];
+        if (ways.length) how[t.handle.testId] = ways;
     }
-    return Object.keys(out).length ? { knownBugs: out } : {};
+    return { ...(Object.keys(out).length ? { knownBugs: out } : {}), ...(Object.keys(how).length ? { knownBugFailures: how } : {}) };
 }
 
 async function siteNotesOf(repo: Repo, projectId: string): Promise<{ siteNotes?: SiteNote[] }> {

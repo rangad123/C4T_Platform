@@ -7,6 +7,7 @@
  * `test.step` so the validator can pinpoint the failing step, and keeps secrets out of the file.
  */
 import { riskyGateLine, riskyKindOf } from "../validation/risky.js";
+import { KNOWN_BUG_FAILURE } from "./types.js";
 import { A11Y_FAILURE_PREFIX, A11Y_MAX_RULES, A11Y_MAX_TARGETS, a11yThreshold, WCAG_TAGS } from "../a11y/audit.js";
 import { EVIDENCE_HELPER_SOURCE } from "../evidence/capture.js";
 import { CLEANUP_HELPER_SOURCE, runTagOf, webCleanupScriptSource } from "../cleanup/helper.js";
@@ -347,7 +348,11 @@ export function testDetails(spec: TestSpec): string {
 /** First line of the test body for a test linked to an open bug: Playwright expects it to fail, and a pass says the bug seems fixed. */
 export function knownBugLine(spec: TestSpec, ctx: RenderContext): string {
     const bug = ctx.knownBugs?.[spec.testId];
-    return bug ? `    test.fail(true, ${lit(`Tracks the open bug ${bug.slice(0, 300)}`)});\n` : "";
+    if (!bug) return "";
+    const failures = ctx.knownBugFailures?.[spec.testId];
+    // How the bug fails the test travels with the run (runner.ts reads it back): a different failure is not the expected one.
+    const how = failures?.length ? `    test.info().annotations.push({ type: ${lit(KNOWN_BUG_FAILURE)}, description: ${lit(JSON.stringify(failures.slice(0, 10)))} });\n` : "";
+    return `    test.fail(true, ${lit(`Tracks the open bug ${bug.slice(0, 300)}`)});\n${how}`;
 }
 
 export const playwrightGenerator: ScriptGenerator = {

@@ -70,7 +70,8 @@ export async function projectCoverage(repo: Repo, store: ArtifactStore, projectI
     const appRow = repo.getLatestApplicationPublic(projectId);
     const apiBase = (appRow?.config as { apiBaseUrl?: unknown } | undefined)?.apiBaseUrl;
     const apiHost = hostOf(apiBase);
-    const app: AppFacts = { appHost: hostOf(appRow?.url), ...(apiHost ? { apiHosts: [apiHost] } : {}) };
+    const endpoints = modelEndpoints(repo, projectId);
+    const app: AppFacts = { appHost: hostOf(appRow?.url), ...(apiHost ? { apiHosts: [apiHost] } : {}), ...(endpoints.length ? { endpoints } : {}) };
     const apiPrefix = prefixOf(apiBase);
     // The application's address over time (a changed address is a new row): a run opened the address in force when it started.
     const addresses = repo.db
@@ -172,6 +173,17 @@ export async function projectCoverage(repo: Repo, store: ArtifactStore, projectI
         tests.push(extractCoverage(facts, app));
     }
     return { tests, app, ...(apiPrefix ? { apiPrefix } : {}), freshDays, held };
+}
+
+/** The documented and observed endpoint templates of the project's latest app model (engine/intel/model.ts); none when it has no model. */
+function modelEndpoints(repo: Repo, projectId: string): Array<{ method: string; path: string }> {
+    const row = repo.db.get<{ model_json: string }>("SELECT model_json FROM app_model_versions WHERE project_id = ? ORDER BY version DESC LIMIT 1", projectId);
+    try {
+        const list = (JSON.parse(row?.model_json ?? "{}") as { endpoints?: unknown }).endpoints;
+        return Array.isArray(list) ? list.flatMap((e) => (e && typeof e.method === "string" && typeof e.path === "string" ? [{ method: e.method, path: e.path }] : [])) : [];
+    } catch {
+        return [];
+    }
 }
 
 /**

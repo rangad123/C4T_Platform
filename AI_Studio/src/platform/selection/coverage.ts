@@ -179,6 +179,8 @@ export interface AppFacts {
     appHost?: string;
     /** Hosts of the application's API (its API base address): the application's own, not "external". */
     apiHosts?: string[];
+    /** The application's documented or observed endpoint templates (the app model): what a captured path part can resolve to. */
+    endpoints?: ReadonlyArray<{ method: string; path: string }>;
 }
 
 const PLACEHOLDER = /\{\{[^}]*\}\}/g;
@@ -276,6 +278,12 @@ function pathVariables(raw: string): string[] {
  * column) may hold several parts, so it is not taken as one.
  */
 const oneSegment = (value: unknown): boolean => (typeof value === "string" || typeof value === "number") && /^[^/?#\\]+$/.test(String(value));
+
+/** The names of the `{{variables}}` that are a whole part of the address's path (`/orders/{{id}}/pay`, not `/orders/ord-{{id}}`). */
+function wholeSegmentVariables(raw: string): Set<string> {
+    const rest = raw.trim().replace(/^(?:\{\{[^}]*\}\})+/, "").replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, "");
+    return new Set(rest.split(/[?#]/)[0]!.split("/").flatMap((seg) => /^\{\{\s*([^}]*?)\s*\}\}$/.exec(seg)?.slice(1, 2) ?? []));
+}
 
 function queryNames(q: string): string[] {
     const out: string[] = [];
@@ -399,6 +407,14 @@ export function extractCoverage(t: TestFacts, app: AppFacts = {}): TestCoverage 
     let accessChecks = 0;
     let linkChecks = 0;
     let variablePath = false;
+    // Values an earlier request step captured (`extract`); they hold what the application answered, one value each.
+    const captured = new Set<string>();
+    const templates = (app.endpoints ?? []).map((e) => ({ method: e.method.toUpperCase(), segs: normalisePath(e.path).split("/") }));
+    // The step's path fits a template: each part is the template's, or stands where the template has a variable (`/share/u2`, `/share/{}`).
+    const fits = (method: string, path: string) => {
+        const segs = path.split("/");
+        return templates.some((t) => t.method === method && t.segs.length === segs.length && t.segs.every((x, i) => x === segs[i] || x === "{}"));
+    };
     if (!steps) {
         limits.push(t.specUnreadable ? "The test's stored steps could not be read." : "The test has no readable steps.");
     } else {
@@ -423,11 +439,16 @@ export function extractCoverage(t: TestFacts, app: AppFacts = {}): TestCoverage 
                     if (a.leadingVariable) prefixedRequest = true;
                     // `/{{ordersPath}}` with test data ordersPath = "orders/list": the variable stands for several parts of the path (or for
                     // none), so the endpoint read from the step (`/{}`) is not the one called.
-                    if (pathVariables(s.path).some((n) => !oneSegment(testData[n]))) variablePath = true;
+                    // A captured value that is a whole part of the path resolves to the application's template of that endpoint, if it has one.
+                    const whole = wholeSegmentVariables(s.path);
+                    const resolved = fits(method, a.path);
+                    const knownCapture = (n: string) => !(n in testData) && captured.has(n) && whole.has(n) && resolved;
+                    if (pathVariables(s.path).some((n) => !oneSegment(testData[n]) && !knownCapture(n))) variablePath = true;
                     const q = new Set(a.query);
                     if (s.query && typeof s.query === "object") for (const n of Object.keys(s.query as object)) if (n.length <= 60) q.add(n);
                     add({ kind: "endpoint", method: method as (typeof HTTP_METHODS)[number], path: a.path, ...(a.host ? { host: a.host } : {}), query: [...q], source: "declared" }, where);
                 } else dynamicRequest = true;
+                if (s.extract && typeof s.extract === "object") for (const n of Object.keys(s.extract as object)) captured.add(n);
             }
             // An access check opens its page (or calls its API address) in a browser of its own, signed in as another account: the run's
             // record never sees that traffic. Its target is read from the check's settings; what the page loads there stays unknown.
