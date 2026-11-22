@@ -3,7 +3,7 @@
  * (mode "verify"), whose attempts go to the starter's runner through hook H1. A runner-only platform with its dispatch worker, the real runner
  * agent from source and bench-shop with seed BS-02 from a dirty start (the shared account's cart holds leftovers):
  *  - after the run, verifyAfterJob writes the failed tests as findings and queues a verification job instead of leaving them waiting;
- *  - the dispatch worker runs that job on the runner: the seed is Reproduced 3 of 3, the state-bound test Unconfirmed, with the reasons;
+ *  - the dispatch worker runs that job on the runner: the seed is Reproduced 3 of 3 (then Confirmed at high confidence), the state-bound test Unconfirmed, with the reasons;
  *  - nothing ran on the server (its guard refused nothing).
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -138,7 +138,7 @@ describe("verification of a runner project's findings", () => {
             const byKey = (k: string) => findings.find((f) => platform.repo.getTest(f.testId!)?.testKey === k)!;
             const s = (await store.get(project, byKey("WEB-021").id))!;
             const b = (await store.get(project, byKey("WEB-022").id))!;
-            expect(s).toMatchObject({ state: "reproduced", findingClass: "app_defect" });
+            expect(s).toMatchObject({ state: "confirmed", findingClass: "app_defect" });
             expect(s.attempts).toHaveLength(3);
             expect((await store.history(project, s.id)).at(-1)!.reason).toMatch(/3 of 3 attempts, on a newly registered account each time/);
             expect(b.state).toBe("unconfirmed");

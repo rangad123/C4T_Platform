@@ -2,7 +2,7 @@
  * Reproduction on bench-shop from a dirty start (Phase 5 V1, browser lock): a run of saved tests left two failed tests on the shared test
  * account, whose cart already holds what earlier tests put there. After the run, verifyAfterJob writes them as execution findings and runs
  * each 3 times through the real Playwright runner, each attempt in a fresh browser as an account it registers first, with no video:
- *  - the seed (BS-02: the cart's last line is counted once, whatever its quantity) fails the same check 3 of 3: Reproduced;
+ *  - the seed (BS-02: the cart's last line is counted once, whatever its quantity) fails the same check 3 of 3: Reproduced, then Confirmed at high confidence;
  *  - the state-bound test (it expects one line's total, and failed only because of the shared cart's leftovers) passes 3 of 3 on new
  *    accounts: Unconfirmed, with the reason;
  *  - each attempt keeps an evidence package, video off, and no AI call is made (counted).
@@ -110,7 +110,7 @@ describe("verification on bench-shop from a dirty start", () => {
         const s = (await store.get(project, byKey("WEB-021").id))!;
         const b = (await store.get(project, byKey("WEB-022").id))!;
         expect(result?.verified.find((v) => v.id === s.id), JSON.stringify(result)).toMatchObject({ to: "reproduced", reason: expect.stringMatching(/3 of 3 attempts, on a newly registered account each time/) });
-        expect(s).toMatchObject({ state: "reproduced", findingClass: "app_defect" });
+        expect(s).toMatchObject({ state: "confirmed", findingClass: "app_defect" });
         expect(s.attempts).toHaveLength(3);
         expect(s.attempts.every((a) => (a as { outcome: string; failedStep?: number }).outcome === "failed" && (a as { failedStep?: number }).failedStep === seed.steps.length)).toBe(true);
         expect(b.state, JSON.stringify(result)).toBe("unconfirmed");
