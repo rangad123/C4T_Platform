@@ -326,6 +326,7 @@ export default defineConfig({
             "tests/bench-change-unit.test.ts",
             "tests/coverage-captured-segment-unit.test.ts",
             "tests/fixed-known-bug-unit.test.ts",
+            "tests/known-bug-two-seeds-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

@@ -22,6 +22,17 @@ export interface RenderContext {
     notes?: readonly import("../memory/notes.js").SiteNote[];
     /** Open bugs linked to tests (test id -> the bug's reference, e.g. "PROJ-12 https://..."): such a test renders as `test.fail()`, so it stays green while the bug is there. */
     knownBugs?: Record<string, string>;
+    /** How each tracked bug made its test fail (the linked findings): only such a failure is the expected one; another is a new failure. */
+    knownBugFailures?: Record<string, KnownBugFailure[]>;
+}
+
+/** The annotation a tracked test's script carries with KnownBugFailure[] as JSON. */
+export const KNOWN_BUG_FAILURE = "known-bug-failure";
+
+/** One way a tracked bug fails its test: the failing step (1-based), else the first line of its error (V1's same-failure rule). */
+export interface KnownBugFailure {
+    step?: number;
+    firstLine?: string;
 }
 
 export interface RenderedScript {

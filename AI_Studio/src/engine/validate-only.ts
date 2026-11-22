@@ -57,6 +57,8 @@ export interface ValidationOnlyRequest {
     stopOnFirstFailure?: boolean;
     /** Open bugs linked to tests (test id -> the bug's reference): those tests render as `test.fail()` (see generators/types.ts). */
     knownBugs?: Record<string, string>;
+    /** How each tracked bug fails its test (see generators/types.ts KnownBugFailure). */
+    knownBugFailures?: Record<string, import("./generators/types.js").KnownBugFailure[]>;
     /** The project's notes for the AI: the overlays they name are closed in the rendered web scripts (see generators/types.ts). */
     siteNotes?: import("./memory/notes.js").SiteNote[];
 }
@@ -87,7 +89,7 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
 
     const origin = new URL(req.url).origin;
     const model = req.model && req.model.origin === origin ? req.model : stubModel(req.url, origin);
-    const renderCtx: RenderContext = { baseUrl: origin, apiBaseUrl: apiBase(req, model, origin), ...(req.dataSets ? { dataSets: req.dataSets } : {}), ...(req.knownBugs ? { knownBugs: req.knownBugs } : {}), ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}), deleteOps: mergeOperations(deleteOperationsOf(model.apis), req.deleteOps, ...tests.map((t) => deleteOperationsOfSpec(t.spec))) };
+    const renderCtx: RenderContext = { baseUrl: origin, apiBaseUrl: apiBase(req, model, origin), ...(req.dataSets ? { dataSets: req.dataSets } : {}), ...(req.knownBugs ? { knownBugs: req.knownBugs } : {}), ...(req.knownBugFailures ? { knownBugFailures: req.knownBugFailures } : {}), ...(req.siteNotes?.length ? { notes: req.siteNotes } : {}), deleteOps: mergeOperations(deleteOperationsOf(model.apis), req.deleteOps, ...tests.map((t) => deleteOperationsOfSpec(t.spec))) };
     const creds = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password, ...(req.credentials.totpSecret ? { totpSecret: req.credentials.totpSecret } : {}) } : undefined;
 
     const mobile = resolveMobile(ctx, req.mobile, undefined, phoneMemoryOf(sink, req.mobile));

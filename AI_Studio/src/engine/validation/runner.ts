@@ -5,6 +5,7 @@
  * Scripts are written to an isolated directory *inside the repo tree* (config.scratchDir) so they
  * resolve `@playwright/test` from this project's node_modules.
  */
+import { KNOWN_BUG_FAILURE, type KnownBugFailure } from "../generators/types.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -714,6 +715,29 @@ interface Hit {
     annotations?: Array<{ type: string; description?: string }>;
 }
 
+/** The ways the tracked bug fails this test, from its script's annotation; undefined when the script carries none (any failure is it). */
+function knownFailuresOf(annotations: Hit["annotations"]): KnownBugFailure[] | undefined {
+    const raw = annotations?.find((x) => x.type === KNOWN_BUG_FAILURE)?.description;
+    if (!raw) return undefined;
+    try {
+        const v = JSON.parse(raw) as unknown;
+        return Array.isArray(v) ? v.filter((x): x is KnownBugFailure => Boolean(x) && typeof x === "object") : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+const firstLineOf = (s: string | undefined) => (s ?? "").replace(ANSI, "").split("\n")[0]!.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * V1's same-failure rule for a tracked test: the same failing step (the step is the check, its target and expected value), else, for a
+ * bug known only by its error, the same first error line. No known ways: any failure is the tracked one, as before.
+ */
+export function failsAsTracked(known: readonly KnownBugFailure[] | undefined, failedIndex: number | undefined, error: string | undefined): boolean {
+    if (!known?.length) return true;
+    return known.some((k) => (k.step !== undefined ? failedIndex !== undefined && k.step === failedIndex + 1 : Boolean(k.firstLine) && firstLineOf(k.firstLine) === firstLineOf(error)));
+}
+
 /** The start of the error of a run that tracks a known bug and passed: the bug seems fixed. */
 export const KNOWN_BUG_FIXED = "The bug this test tracks seems fixed";
 
@@ -902,12 +926,15 @@ export async function parseReport(runDir: string, scripts: ScriptInput[], stderr
             else if (a.name.endsWith("-actual.png")) artifacts.push({ kind: "visual-actual", path: a.path });
             else if (a.name.endsWith("-diff.png")) artifacts.push({ kind: "visual-diff", path: a.path });
         }
-        // A test marked test.fail() tracks a known bug: failing is its expected result, and passing says the bug seems fixed.
+        // A test marked test.fail() tracks a known bug: failing the way that bug does is its expected result, and passing says the bug
+        // seems fixed. Failing another way is a failure of its own (a new finding).
         if (hit.expectedStatus === "failed") {
             const bug = hit.annotations?.find((x) => x.type === "fail" && x.description)?.description ?? "a known bug";
             if (status === "passed") {
                 status = "failed";
                 error = `${KNOWN_BUG_FIXED} (${bug}): the test passed, but it is marked to fail until that bug is fixed. Check the bug, then remove its link from this test.`;
+            } else if (status === "failed" && !failsAsTracked(knownFailuresOf(hit.annotations), failed?.index, failed?.error ?? error)) {
+                notes.push(`It failed another way than the bug it tracks (${bug}): this is a failure of its own.`);
             } else if (status === "failed") {
                 status = "passed";
                 notes.push(`Failed as expected: the bug this test tracks (${bug}) is still there.`);
