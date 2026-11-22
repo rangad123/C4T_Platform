@@ -36,6 +36,8 @@ export interface EngineContext {
     sharedElements?: import("./locators/refs.js").ObjectIndex;
     /** Pauses the job to ask a person on the job page (a one-time code or captcha during a phone sign-in, mobile/explore/signin.ts). Unset: nobody can be asked. */
     askPerson?: import("./mobile/explore/signin.js").PersonGate;
+    /** C10: the project's read-only database access (its database probe, platform/db-probe-store.ts). Unset: none set up, or a benchmark's own. */
+    dbProbe?: import("./database/probe.js").DatabaseProbe;
 }
 
 export function throwIfAborted(signal?: AbortSignal): void {

@@ -22,6 +22,7 @@ import { registerProjectAccessRoutes } from "./project-access.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerProjectSettingsRoutes } from "./project-settings.js";
 import { registerProjectAiModelRoutes } from "./project-ai-model.js";
+import { registerDbProbeRoutes } from "./db-probe.js";
 import { registerProjectFolderRoutes } from "./project-folders.js";
 import { registerLibraryRoutes } from "./libraries.js";
 import { registerLlmHealthRoutes } from "../llm-health-routes.js";
@@ -159,6 +160,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerMemberRoutes(ctx);
     registerProjectSettingsRoutes(ctx);
     registerProjectAiModelRoutes(ctx);
+    // A project's database checks: the customer's probe address and token (routes/db-probe.ts, Phase 4 D-c).
+    registerDbProbeRoutes(ctx);
     registerProjectFolderRoutes(ctx);
     // Testing agents and the agents chosen for a project (routes/testing-agents.ts, round 37).
     registerTestingAgentRoutes(ctx);
