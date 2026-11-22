@@ -102,6 +102,14 @@ export const jobOverTime = (minutes: number) => `This job was stopped because it
  * One tick of a job's lease timer. A throw from here would have no one to catch it (and take the whole worker down), so a database that fails is
  * counted instead, and only a run of failures gives the job up.
  */
+/**
+ * The Q4 gate of a job's risky checks (C8, C3e), from this server's own setting only: a job's options never set it, so no customer job can
+ * ask for "bench" or "fixture". shortcut: "authorization" (a current client authorization record) is not wired yet; T26 adds it.
+ */
+export function riskyChecksGateOf(config: Pick<Config, "BENCH_RISKY_CHECKS">): GenerationRequest["riskyChecksGate"] {
+    return config.BENCH_RISKY_CHECKS ? "bench" : undefined;
+}
+
 export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boolean; lost: () => void; cancel: () => void }): () => void {
     let failures = 0;
     return () => {
@@ -551,6 +559,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 targets: o.targets,
                 ...(o.targets?.includes("mobile") && MobileTargetSchema.safeParse(app.config.mobile).success ? { mobile: MobileTargetSchema.parse(app.config.mobile) } : {}),
                 allowMutatingApiTests: o.allowMutatingApiTests,
+                riskyChecksGate: riskyChecksGateOf(config),
                 openApiUrl: o.openApiUrl,
                 apiBaseUrl: o.apiBaseUrl,
                 ...(o.functionalTests === false ? { functionalTests: false } : {}),

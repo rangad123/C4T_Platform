@@ -40,6 +40,15 @@ const EnvSchema = z.object({
         .string()
         .default("false")
         .transform((v) => v === "true"),
+    /**
+     * Phase 4 Q4: this platform is the benchmark's own (the bench harness starts it with "true"). Its jobs may then run the risky checks
+     * (C8 concurrency, C3e writes as another identity) on applications that answer on loopback. Off unless exactly "true"; read here
+     * only, and never from a job's options (job-runner.ts riskyChecksGateOf).
+     */
+    BENCH_RISKY_CHECKS: z
+        .string()
+        .default("false")
+        .transform((v) => v === "true"),
     /** Run the queue worker inside the API process. Set false to run `npm run worker` separately. */
     WORKER_EMBEDDED: z
         .string()

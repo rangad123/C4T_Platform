@@ -291,6 +291,7 @@ export const FIELDS: Record<string, FieldDef[]> = {
         { name: "body", kind: "json", label: "Body (JSON, optional)" },
         { name: "auth", kind: "auth", label: "Sign-in" },
         { name: "extract", kind: "map", label: "Remember from the answer (optional)", help: "Name on the left, where in the answer on the right. Later steps use {{name}}." },
+        { name: "parallel", kind: "number", label: "Send at once (optional, 2 to 5)", help: "Concurrency check: the same request sent this many times at the same moment. The answer is a summary: ok, refused, failed and statuses." },
     ],
     assertResponse: [{ name: "check", kind: "responseCheck", label: "What to check", required: true }],
     launchApp: [],

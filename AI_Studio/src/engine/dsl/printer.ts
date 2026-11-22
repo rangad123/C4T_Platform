@@ -19,7 +19,7 @@ export interface PrintResult {
 
 const NUMBER = /^-?\d+(\.\d+)?$/;
 const PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
-const REQUEST_FIELDS = ["query", "headers", "body", "auth", "extract"];
+const REQUEST_FIELDS = ["query", "headers", "body", "auth", "extract", "parallel"];
 
 class Unwritable extends Error {}
 
@@ -129,6 +129,10 @@ function writeRequestOptions(step: Record<string, unknown>): string {
     if (step.auth === "none") out.push("without signing in");
     else if (step.auth !== undefined && step.auth !== "default") throw new Unwritable();
     if (step.extract !== undefined) out.push(writeRemember(step.extract));
+    if (step.parallel !== undefined) {
+        if (typeof step.parallel !== "number" || !Number.isInteger(step.parallel)) throw new Unwritable();
+        out.push(`sent ${step.parallel} times at once`);
+    }
     return out.filter(Boolean).join(" ");
 }
 

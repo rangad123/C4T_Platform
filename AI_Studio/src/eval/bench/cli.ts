@@ -369,7 +369,8 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             if (env.AITP_EVAL_URL?.trim() && !scripted) log("The benchmark runs on a platform of its own; the result will also be kept on AITP_EVAL_URL.");
             // Data-changing operators are on for the benchmark's own platform only (its apps reset for every exploration and replay); the
             // platform's own default stays off.
-            const started = await startPlatform(dataDir, { ...env, EXPLORE_DATA_OPERATORS: "true" }, deps);
+            // The risky checks (C8, C3e; Q4) run on the benchmark's own platform only, against its loopback apps.
+            const started = await startPlatform(dataDir, { ...env, EXPLORE_DATA_OPERATORS: "true", BENCH_RISKY_CHECKS: "true" }, deps);
             stop = started.stop;
             client = started.client;
             const cfg = ok(await client.call("GET", "/api/config"), "Reading the platform's settings");

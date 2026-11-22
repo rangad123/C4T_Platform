@@ -39,6 +39,7 @@ import { generateApiWorkflowSpecs } from "./api/workflows.js";
 import { fetchClient, probeInvariant, requesterClient, type ProbeEnv, type ProbeHttp } from "./api/probes.js";
 import { MAX_SEQUENCES, runSequences, stateCheckSpecs, stateModels } from "./api/stateful.js";
 import { maskSecrets } from "./frameworks/plugin.js";
+import { generateConcurrencySpecs, type ConcurrencyGate } from "./api/concurrency.js";
 import { planScenarios, requirementsCoverage, rulesForScenario } from "./planning/planner.js";
 import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
@@ -107,6 +108,12 @@ export interface GenerationRequest {
     /** The app the "mobile" target explores (package, optional APK and emulator). */
     mobile?: MobileTarget;
     allowMutatingApiTests: boolean;
+    /**
+     * Phase 4 Q4: who allows the risky checks (C8 concurrency, C3e writes as another identity). "bench" or "fixture" only for an application
+     * on loopback; "authorization" for a current client authorization. Set by the platform from its own setting, never from a job's
+     * options (job-runner.ts riskyChecksGateOf). Absent: those checks are not generated.
+     */
+    riskyChecksGate?: ConcurrencyGate;
     openApiUrl?: string;
     apiBaseUrl?: string;
     credentials?: { username?: string; password?: string; totpSecret?: string; apiToken?: string; apiAuthHeader?: string; oauth2?: OAuth2ClientCredentials };
@@ -1418,6 +1425,17 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     message: `${wf.specs.length} API workflow tests generated${wf.skippedMutating ? `; ${wf.skippedMutating} state-changing workflows skipped` : ""}`,
                 });
             }
+
+            // 4c1. C8 controlled concurrency (lane D slot, T24): k identical writes at once, only behind the Q4 gate (api/concurrency.ts).
+            const cc = generateConcurrencySpecs(apis, { dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate });
+            for (const d of cc.specs) {
+                if (await carried(d)) continue;
+                const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
+                await persistNew(spec, "playwright-api", "PENDING", undefined, { concurrency: true });
+                pending.push({ spec, framework: "playwright-api" });
+            }
+            if (cc.specs.length) ctx.emit({ stage: "generation", kind: "concurrency_tests_generated", message: `${cc.specs.length} concurrency checks generated` });
+            else if (cc.refused) ctx.emit({ stage: "generation", kind: "concurrency_tests_skipped", message: `Concurrency checks ${cc.refused}` });
         }
 
         // 4d. Accessibility audits (deterministic, axe-core) for key discovered pages.

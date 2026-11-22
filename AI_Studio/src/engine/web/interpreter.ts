@@ -294,6 +294,7 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
             await executeAssert(page, step, data, timeout);
             return;
         case "request": {
+            if (step.parallel !== undefined) throw new Error("A request sent several times at once runs only in a saved API script, not step by step.");
             // Through the page's own request context: the browser's cookies for that site go with it, and only to the application's own site.
             const target = await checkedAddress(interpolate(step.path, data), baseUrl);
             if (new URL(target).origin !== new URL(baseUrl).origin) throw new Error(`${WEB_REQUEST_RULE} (this request went to ${new URL(target).origin}). Nothing was sent.`);

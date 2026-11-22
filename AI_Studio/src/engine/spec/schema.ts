@@ -440,6 +440,8 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
          * This is what makes multi-request workflow tests (list → detail, create → read → delete) possible.
          */
         extract: z.record(z.string(), z.string()).optional(),
+        /** C8 concurrency (API scripts only): send this request 2 to 5 times at the same moment; the answer is a summary (api/concurrency.ts). */
+        parallel: z.number().int().min(2).max(5).optional(),
         ...base,
     }),
     z.object({
@@ -771,7 +773,7 @@ function describePlainStep(step: Step): string {
                 step.expected !== undefined ? ` = ${step.expected}` : ""
             }`;
         case "request":
-            return `${step.method} ${step.path}${step.extract ? ` (capture ${Object.keys(step.extract).join(", ")})` : ""}`;
+            return `${step.method} ${step.path}${step.parallel ? ` (${step.parallel} at once)` : ""}${step.extract ? ` (capture ${Object.keys(step.extract).join(", ")})` : ""}`;
         case "assertResponse":
             if (step.check === "load") return "Stays fast and error-free with several users at once (load check)";
             if (SECURITY_STEP_WORDING[step.check]) return SECURITY_STEP_WORDING[step.check]!;

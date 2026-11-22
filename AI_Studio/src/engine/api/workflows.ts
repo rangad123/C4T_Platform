@@ -17,7 +17,8 @@
  */
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
-import type { DraftSpec } from "./test-specs.js";
+import { freshAccountSteps, referenceIds, signUpOf, type DraftSpec } from "./test-specs.js";
+import { backendOpsChains } from "./backend-ops.js";
 
 export interface WorkflowGenOptions {
     allowMutating: boolean;
@@ -35,7 +36,7 @@ type Method = RequestStep["method"];
 
 const CATEGORY = "API · Workflows";
 // chain_detector.py `_AUTH_PATH`
-const AUTH_PATH = /\/(auth|login|signin|sign-in|token|oauth|session)(\/|$)/i;
+export const AUTH_PATH = /\/(auth|login|signin|sign-in|token|oauth|session)(\/|$)/i;
 // chain_detector.py `_TOKEN_FIELDS`, ordered, minus refresh tokens (not valid as a bearer credential).
 const TOKEN_FIELDS = ["access_token", "accessToken", "token", "jwt", "id_token", "idToken"];
 /** Path params that name "the id" without saying of what — chain_detector.py rejected these. */
@@ -43,7 +44,7 @@ const GENERIC_PARAMS = new Set(["id", "uuid", "slug", "key"]);
 /** Common envelope properties around the real payload. */
 const WRAPPERS = ["data", "item", "result", "results", "items", "records", "content", "payload", "rows"];
 
-interface Chain {
+export interface Chain {
     name: string;
     mutating: boolean;
     spec: DraftSpec;
@@ -90,15 +91,15 @@ function camel(s: string): string {
     return parts.map((p, i) => (i === 0 ? p.toLowerCase() : p[0]!.toUpperCase() + p.slice(1).toLowerCase())).join("") || "item";
 }
 
-const varFor = (resource: string) => `${camel(resource)}Id`;
+export const varFor = (resource: string) => `${camel(resource)}Id`;
 const pathParams = (path: string) => [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!);
-const trimSlash = (p: string) => p.replace(/\/+$/, "");
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+export const trimSlash = (p: string) => p.replace(/\/+$/, "");
+export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 
 // ── Schema inspection (`_get_id_field` / `_get_token_field`) ─────────────────
 
 /** 2xx response schemas, 200/201 first (chain_detector only looked at those two). */
-function okSchemas(ep: ApiEndpointModel): Schema[] {
+export function okSchemas(ep: ApiEndpointModel): Schema[] {
     if (ep.spec) {
         return ep.spec.responses
             .filter((r) => /^2/.test(r.status) && r.schema)
@@ -108,7 +109,7 @@ function okSchemas(ep: ApiEndpointModel): Schema[] {
     return ep.responseSchema ? [ep.responseSchema as Schema] : [];
 }
 
-function propsOf(schema: Schema | undefined): Record<string, Schema> {
+export function propsOf(schema: Schema | undefined): Record<string, Schema> {
     if (!schema || typeof schema !== "object") return {};
     const out: Record<string, Schema> = { ...(schema.properties ?? {}) };
     for (const part of schema.allOf ?? []) Object.assign(out, part?.properties ?? {});
@@ -126,7 +127,7 @@ function idFieldIn(props: Record<string, Schema>, resource: string, hint?: strin
 }
 
 /** Dot path to the id of a single-resource response (top level or inside one envelope). */
-function idPathIn(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
+export function idPathIn(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
     const props = propsOf(schema);
     const direct = idFieldIn(props, resource, hint);
     if (direct) return direct;
@@ -141,7 +142,7 @@ function idPathIn(schema: Schema | undefined, resource: string, hint?: string): 
 }
 
 /** Dot path to the id of the FIRST item of a collection response: `0.id` or `items.0.id`. */
-function listItemIdPath(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
+export function listItemIdPath(schema: Schema | undefined, resource: string, hint?: string): string | undefined {
     if (!schema) return undefined;
     if (schema.type === "array" || schema.items) {
         const f = idPathIn(schema.items as Schema | undefined, resource, hint);
@@ -210,7 +211,7 @@ function fillPath(path: string, values: Record<string, string>): string | null {
     return ok ? out : null;
 }
 
-function queryFor(ep: ApiEndpointModel): Record<string, string> | undefined {
+export function queryFor(ep: ApiEndpointModel): Record<string, string> | undefined {
     const q: Record<string, string> = {};
     for (const p of ep.spec?.parameters ?? []) {
         if (p.location !== "query" || !p.required) continue;
@@ -284,9 +285,74 @@ function bodyFor(ep: ApiEndpointModel, credentials = false): unknown {
 
 const hasBody = (m: string) => m === "POST" || m === "PUT" || m === "PATCH";
 
+// ── Read-back (C9) helpers ───────────────────────────────────────────────────
+
+const SIGN_UP = /\/(?:register|sign-?up)(?:\/|$)/i;
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** The same values with a different {{unique}} ("{{unique}}w"), so a second write is told apart from the first one. */
+export function marked(body: unknown, mark: string): unknown {
+    return body === undefined ? undefined : JSON.parse(JSON.stringify(body).replaceAll("{{unique}}", `{{unique}}${mark}`));
+}
+
+/** A write's body with real ids for its reference fields (productId from GET /products), and the steps that take them. */
+export function writeBody(ep: ApiEndpointModel, endpoints: ApiEndpointModel[], mark = ""): { before: Step[]; body: unknown } {
+    const body = marked(bodyFor(ep), mark);
+    const props = propsOf(ep.spec?.requestBody?.schema as Schema | undefined);
+    const refs = referenceIds(props, endpoints).filter((r): r is { field: string; step: Step } => r.step !== undefined);
+    if (!refs.length || !body || typeof body !== "object") return { before: [], body };
+    return { before: refs.map((r) => r.step), body: { ...(body as object), ...Object.fromEntries(refs.map((r) => [r.field, `{{${r.field}}}`])) } };
+}
+
+/**
+ * What a write needs first, as its documented refusals say ("Cart empty or no address"): for each word of a 4xx answer that names
+ * another documented POST (cart → POST /cart/items, address → POST /checkout/address), that write, sent with a documented or observed
+ * body. At most 3, in the order the words come.
+ */
+export function setupFor(target: ApiEndpointModel, endpoints: ApiEndpointModel[]): Step[] {
+    const refusals = (target.spec?.responses ?? []).filter((r) => /^4/.test(r.status)).map((r) => r.description ?? "").join(" ");
+    const words = [...new Set((refusals.toLowerCase().match(/[a-z]+/g) ?? []).map(singular))];
+    const segs = (e: ApiEndpointModel) => trimSlash(e.path).split("/").filter(Boolean).map(singular);
+    const steps: Step[] = [];
+    const used = new Set<ApiEndpointModel>();
+    for (const w of words) {
+        if (used.size >= 3) break;
+        const candidates = endpoints.filter(
+            (e) => e.method === "POST" && e !== target && !used.has(e) && !e.path.includes("{") && !AUTH_PATH.test(e.path) && !SIGN_UP.test(e.path) && segs(e).includes(w) && bodyFor(e) !== undefined,
+        );
+        // The write the word names most directly: its last path part, then one with a documented body.
+        candidates.sort((a, b) => Number(segs(b).at(-1) === w) - Number(segs(a).at(-1) === w) || Number(Boolean(b.spec?.requestBody)) - Number(Boolean(a.spec?.requestBody)));
+        const pick = candidates[0];
+        if (!pick) continue;
+        used.add(pick);
+        const { before, body } = writeBody(pick, endpoints);
+        steps.push(...before, req("POST", trimSlash(pick.path), { query: queryFor(pick), body }, `Set up what the write needs: POST ${pick.path}`), resp("statusClass", "2xx", undefined, `POST ${pick.path} is accepted`));
+    }
+    return steps;
+}
+
+const PASSWORDISH = /pass|secret|token/i;
+
+/** One check per written scalar field the read answer documents: the read returns what was written. */
+export function writtenChecks(body: unknown, read: ApiEndpointModel, what: string): Step[] {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return [];
+    const props = first(okSchemas(read), (s) => (Object.keys(propsOf(s)).length ? propsOf(s) : undefined)) ?? {};
+    return Object.entries(body as Record<string, unknown>)
+        .filter(([k, v]) => k in props && !props[k]!.writeOnly && !PASSWORDISH.test(k) && ["string", "number", "boolean"].includes(typeof v))
+        .map(([k, v]) => resp("jsonPath", v as string | number | boolean, k, `${what} returns the written ${k}`));
+}
+
+/** "orders.0.id" → "orders[*].id": the ids of every listed record, as a relation path; undefined if a part is not a plain name. */
+function listIdsPath(itemPath: string): string | undefined {
+    const parts = itemPath.split(".");
+    const i = parts.indexOf("0");
+    if (i < 0 || parts.some((p, j) => j !== i && !NAME.test(p))) return undefined;
+    return parts.map((p, j) => (j === i ? "[*]" : j ? `.${p}` : p)).join("");
+}
+
 // ── Spec builders ────────────────────────────────────────────────────────────
 
-const req = (method: string, path: string, extra: Partial<RequestStep>, description: string): Step => ({
+export const req = (method: string, path: string, extra: Partial<RequestStep>, description: string): Step => ({
     action: "request",
     method: method as Method,
     path,
@@ -294,7 +360,7 @@ const req = (method: string, path: string, extra: Partial<RequestStep>, descript
     description,
     ...extra,
 });
-const resp = (check: Extract<Step, { action: "assertResponse" }>["check"], expected: string | number | boolean | undefined, path: string | undefined, description: string): Step => ({
+export const resp = (check: Extract<Step, { action: "assertResponse" }>["check"], expected: string | number | boolean | undefined, path: string | undefined, description: string): Step => ({
     action: "assertResponse",
     check,
     expected,
@@ -308,7 +374,7 @@ function originOf(eps: ApiEndpointModel[]): NonNullable<TestSpec["source"]>["ori
     return "network";
 }
 
-function draft(
+export function draft(
     eps: ApiEndpointModel[],
     title: string,
     description: string,
@@ -394,10 +460,16 @@ function listDetailChains(endpoints: ApiEndpointModel[]): Chain[] {
     return chains;
 }
 
-/** MUTATING: `_detect_crud_chains` — POST → GET → PUT/PATCH → DELETE → GET expects 4xx. */
+/**
+ * MUTATING: `_detect_crud_chains` — POST → GET → PUT/PATCH → DELETE → GET expects 4xx, with C9 read-back (Phase 4): on a fresh account
+ * where the application has a sign-up, after what the create's refusals say it needs; the read returns the written fields; a second
+ * create, then the list holds both new ids (so a list that drops its newest record is caught); after the update, the read returns the
+ * updated fields.
+ */
 function crudChains(endpoints: ApiEndpointModel[]): Chain[] {
     const chains: Chain[] = [];
     const order: Record<string, number> = { GET: 0, PUT: 1, PATCH: 2, DELETE: 3 };
+    const signUp = signUpOf(endpoints);
     for (const creator of endpoints) {
         if (creator.method !== "POST") continue;
         const base = trimSlash(creator.path);
@@ -418,11 +490,18 @@ function crudChains(endpoints: ApiEndpointModel[]): Chain[] {
         const read = byMethod("GET");
         const update = byMethod("PUT") ?? byMethod("PATCH");
         const del = byMethod("DELETE");
+        const setup = setupFor(creator, endpoints);
+        const create = (mark: string, into: string): Step[] => {
+            const { before, body } = writeBody(creator, endpoints, mark);
+            return [
+                ...setup,
+                ...before,
+                req("POST", createPath, { query: queryFor(creator), body, extract: { [into]: idPath } }, `Create a ${resource} and capture its ${idField} as {{${into}}}`),
+                resp("statusClass", "2xx", undefined, `${resource} is created`),
+            ];
+        };
 
-        const steps: Step[] = [
-            req("POST", createPath, { query: queryFor(creator), body: bodyFor(creator), extract: { [v]: idPath } }, `Create a ${resource} and capture its ${idField} as {{${v}}}`),
-            resp("statusClass", "2xx", undefined, `${resource} is created`),
-        ];
+        const steps: Step[] = [...(signUp && creator !== signUp ? freshAccountSteps(endpoints) : []), ...create("", v)];
         const used = [creator];
         const readPath = read && pathOf(read);
         if (read && readPath) {
@@ -431,15 +510,32 @@ function crudChains(endpoints: ApiEndpointModel[]): Chain[] {
             steps.push(req("GET", readPath, { query: queryFor(read.ep) }, `Read the created ${resource}`), resp("statusClass", "2xx", undefined, `Created ${resource} is readable`));
             // chain_test_generator.py round-trip: the GET returns the id we created.
             if (readIdPath) steps.push(resp("jsonPath", `{{${v}}}`, readIdPath, `Read returns the created ${resource}`));
+            steps.push(...writtenChecks(writeBody(creator, endpoints).body, read.ep, "The read"));
+        }
+        // C9: the collection lists every new record. Two are created, so a list that drops its newest record is caught too.
+        // shortcut: a string id made only of digits reads as a number in a relation and would not match; such lists need a text compare.
+        const list = endpoints.find((e) => e.method === "GET" && trimSlash(e.path) === base);
+        const listItem = list && first(okSchemas(list), (s) => listItemIdPath(s, resource, consumers[0]!.param));
+        const ids = listItem && listIdsPath(listItem);
+        if (list && ids) {
+            const v2 = `${v}2`;
+            steps.push(
+                ...create("b", v2),
+                req("GET", base, { query: queryFor(list) }, `List ${resource} items`),
+                resp("statusClass", "2xx", undefined, "List request succeeds"),
+                { action: "assertResponse", check: "relation", expression: `contains(${ids}, $${v}) and contains(${ids}, $${v2})`, description: `The list holds both new ${resource} records` },
+            );
         }
         const updatePath = update && pathOf(update);
         if (update && updatePath) {
             used.push(update.ep);
-            const body = bodyFor(update.ep);
+            const body = marked(bodyFor(update.ep), "u");
             steps.push(
                 req(update.ep.method, updatePath, { query: queryFor(update.ep), ...(body !== undefined ? { body } : {}) }, `Update the created ${resource}`),
                 resp("statusClass", "2xx", undefined, `${resource} is updated`),
             );
+            const back = read && readPath ? writtenChecks(body, read.ep, "The read after the update") : [];
+            if (back.length) steps.push(req("GET", readPath!, { query: queryFor(read!.ep) }, `Read the updated ${resource} back`), resp("statusClass", "2xx", undefined, `Updated ${resource} is readable`), ...back);
         }
         const delPath = del && pathOf(del);
         if (del && delPath) {
@@ -462,7 +558,46 @@ function crudChains(endpoints: ApiEndpointModel[]): Chain[] {
                 ["Mutating API tests are allowed — this test creates" + (del ? " and deletes" : "") + " data"],
                 steps,
                 [`A created ${resource} can be read${update ? ", updated" : ""}${del ? " and deleted, and is gone afterwards" : ""}`],
-                ["crud", "mutating"],
+                ["crud", "mutating", "readback"],
+            ),
+        });
+    }
+    return chains;
+}
+
+/** MUTATING, C9: PUT/PATCH a record that has a GET at the same path (/profile), then read it back: the written fields are stored. */
+function writeReadChains(endpoints: ApiEndpointModel[]): Chain[] {
+    const chains: Chain[] = [];
+    const signUp = signUpOf(endpoints);
+    for (const ep of endpoints) {
+        if (ep.method !== "PUT" && ep.method !== "PATCH") continue;
+        const read = endpoints.find((e) => e.method === "GET" && trimSlash(e.path) === trimSlash(ep.path));
+        const path = read && fillPath(ep.path, { ...paramValues(read), ...paramValues(ep) });
+        if (!read || !path) continue;
+        const { before, body } = writeBody(ep, endpoints, "w");
+        const back = writtenChecks(body, read, "The read");
+        if (!back.length) continue;
+        chains.push({
+            name: `readback_${slug(ep.method + "_" + ep.path)}`,
+            mutating: true,
+            spec: draft(
+                [ep, read],
+                `Workflow: what is written is read back (${ep.method} ${ep.path} → GET ${read.path})`,
+                `Writes new values with ${ep.method} ${ep.path} and reads ${read.path} back: the read returns what was written.`,
+                "high",
+                ["Mutating API tests are allowed — this test changes data"],
+                [
+                    ...(signUp ? freshAccountSteps(endpoints) : []),
+                    ...setupFor(ep, endpoints),
+                    ...before,
+                    req(ep.method, path, { query: queryFor(ep), body }, `Write new values with ${ep.method}`),
+                    resp("statusClass", "2xx", undefined, "The write is accepted"),
+                    req("GET", path, { query: queryFor(read) }, "Read the same record back"),
+                    resp("statusClass", "2xx", undefined, "The read succeeds"),
+                    ...back,
+                ],
+                ["The written values are stored: the read returns them"],
+                ["readback", "mutating"],
             ),
         });
     }
@@ -589,7 +724,7 @@ function nestedChains(endpoints: ApiEndpointModel[]): Chain[] {
  * of being generated unless `opts.allowMutating`.
  */
 export function generateApiWorkflowSpecs(endpoints: ApiEndpointModel[], opts: WorkflowGenOptions): WorkflowGenResult {
-    const all = [...listDetailChains(endpoints), ...crudChains(endpoints), ...authChains(endpoints), ...nestedChains(endpoints)];
+    const all = [...listDetailChains(endpoints), ...crudChains(endpoints), ...writeReadChains(endpoints), ...backendOpsChains(endpoints), ...authChains(endpoints), ...nestedChains(endpoints)];
     // Deduplicate by name (same resource may match several heuristics) — as chain_detector does.
     const seen = new Set<string>();
     const unique = all.filter((c) => (seen.has(c.name) ? false : (seen.add(c.name), true)));

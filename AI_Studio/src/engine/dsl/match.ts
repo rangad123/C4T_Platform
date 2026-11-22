@@ -303,6 +303,7 @@ function readRequestOptions(toks: Token[], ti: number, src: string, fx: Furthest
     const extract = new Map<string, string>();
     let body: { v: unknown } | undefined;
     let auth: "none" | undefined;
+    let parallel: number | undefined;
     let i = ti;
     const START = 'with the query / header / body, "without signing in" or "and remember"';
     for (;;) {
@@ -341,6 +342,15 @@ function readRequestOptions(toks: Token[], ti: number, src: string, fx: Furthest
             i = j + 3;
             continue;
         }
+        if (w === "sent" && j === i) {
+            const n = toks[j + 1];
+            if (!n || n.kind !== "word" || !/^[2-5]$/.test(n.value)) return fx.fail(j + 1, "how many times at once (2 to 5)");
+            if (lower(toks[j + 2]) !== "times" || lower(toks[j + 3]) !== "at" || lower(toks[j + 4]) !== "once") return fx.fail(j + 2, '"times at once"', "times");
+            if (parallel !== undefined) return fx.fail(j, START, undefined, "How many times at once is given twice.");
+            parallel = Number(n.value);
+            i = j + 5;
+            continue;
+        }
         if (w === "remember" && j > i) {
             const k = toks[j + 1];
             if (!k || k.kind !== "str") return fx.fail(j + 1, "the name to remember in double quotes");
@@ -363,6 +373,7 @@ function readRequestOptions(toks: Token[], ti: number, src: string, fx: Furthest
     if (body) value.body = body.v;
     if (auth) value.auth = auth;
     if (extract.size) value.extract = Object.fromEntries(extract);
+    if (parallel !== undefined) value.parallel = parallel;
     return { value, next: i };
 }
 
