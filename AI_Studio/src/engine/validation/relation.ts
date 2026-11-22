@@ -14,6 +14,7 @@
  *            | $name suffix*          a test value ({{name}}): number text reads as a number, JSON object or array text as JSON
  *            | name suffix* | suffix+ a path into the latest answer's JSON body
  *            | round(x[, digits]) | sum(list) | count(list) | contains(textOrList, value)
+ *            | number(textOrNumber)   the first amount in a text a page shows ("−$62.75" is -62.75, "$1,234.50" is 1234.5)
  *            | "(" expr ")"
  *   suffix  := "." name | "[" digits "]" | "[*]"     ([*] maps the rest of the path over every element; nested ones flatten)
  *
@@ -31,7 +32,7 @@ export const RELATION_FAILURE_PREFIX = "Relation check failed";
 
 export const RELATION_HELPER_SOURCE = String.raw`const RELATION_PREFIX = ${JSON.stringify(RELATION_FAILURE_PREFIX)};
 const RELATION_CAPS = { chars: ${RELATION_MAX_CHARS}, tokens: 120, depth: 20, parts: 12, list: 1000 };
-const RELATION_FNS = { round: [1, 2], sum: [1, 1], count: [1, 1], contains: [2, 2] };
+const RELATION_FNS = { round: [1, 2], sum: [1, 1], count: [1, 1], contains: [2, 2], number: [1, 1] };
 const RELATION_WORDS = ["and", "or", "implies", "true", "false", "null"];
 const relationOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 function relationLex(text) {
@@ -151,7 +152,7 @@ function relationParseTree(text) {
             if (RELATION_WORDS.indexOf(t.v) >= 0) throw new Error("unexpected " + JSON.stringify(t.v) + " " + where());
             p++;
             if (isOp("(")) {
-                if (!relationOwn(RELATION_FNS, t.v)) throw new Error("unknown function " + JSON.stringify(t.v) + " (round, sum, count and contains exist)");
+                if (!relationOwn(RELATION_FNS, t.v)) throw new Error("unknown function " + JSON.stringify(t.v) + " (round, sum, count, contains and number exist)");
                 p++;
                 const args = [deeper(expr)];
                 while (isOp(",")) { p++; args.push(deeper(expr)); }
@@ -282,6 +283,14 @@ function relationRun(tree, text, body, vars, seen) {
                 }
                 if (n.name === "sum") return note(n, list(a[0], ev(a[0])).reduce((t, x) => t + num(a[0], x), 0));
                 if (n.name === "count") return note(n, list(a[0], ev(a[0])).length);
+                if (n.name === "number") {
+                    const x = ev(a[0]);
+                    if (typeof x === "number") return note(n, num(a[0], x));
+                    if (typeof x !== "string") throw new Error(src(a[0]) + " is not text or a number (it is " + relationShow(x) + ")");
+                    const m = /(-)?[^\d-]{0,3}?(\d+(?:\.\d+)?)/.exec(x.replace(/\u2212/g, "-").replace(/(\d),(?=\d{3}(?!\d))/g, "$1"));
+                    if (!m) throw new Error(src(a[0]) + " holds no number (it is " + relationShow(x) + ")");
+                    return note(n, (m[1] ? -1 : 1) * Number(m[2]));
+                }
                 const hay = ev(a[0]);
                 const needle = ev(a[1]);
                 if (typeof hay === "string") {

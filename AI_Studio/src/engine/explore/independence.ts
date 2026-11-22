@@ -83,7 +83,8 @@ const MESSAGE_MAX = 300;
 /** A picture of the stopped page gets at most this long. */
 const SHOT_MS = 10_000;
 
-const isSourcedCheck = (s: Step | undefined): boolean => s?.action === "assert" && Boolean(s.source);
+/** A page check, or an answer check (a relation a UI–API read-back ends on, Phase 4 C4), that names its stated source. */
+const isSourcedCheck = (s: Step | undefined): boolean => (s?.action === "assert" || s?.action === "assertResponse") && Boolean(s.source);
 
 /** The 1-based step of the captured check: the last check citing `capturedSource` (when given), else the last sourced check; undefined when none. */
 function capturedStep(test: DefectTest): number | undefined {
@@ -104,6 +105,10 @@ export function failureKind(message: string, opts: { plainIsValue?: boolean } = 
     // An ARIA snapshot check (web/interpreter.ts): the value is the whole received snapshot, spacing folded (CP3d U-6).
     const snapshot = /^\s*The structure of the region does not match its snapshot\.[\s\S]*?\bReceived:\s*([\s\S]*)$/.exec(message);
     if (snapshot) return { kind: "value", value: snapshot[1]!.replace(/\s+/g, " ").trim() };
+    // A relation check (validation/relation.ts) that failed: the same relation failing is the same value, whatever this run's own values
+    // were (a new id each replay); one that could not be judged ("$x is not a number") keeps its reason in the value.
+    const relation = /^\s*(Relation check failed\b[\s\S]*?)\. Values: /.exec(message);
+    if (relation) return { kind: "value", value: relation[1]!.replace(/\s+/g, " ").trim() };
     // On its own line in Playwright's message; the kept observation has its lines joined (author.ts redactText).
     const received = /\bReceived(?: [a-z]+)?:\s*("(?:[^"\\]|\\.)*"|\S+)/.exec(message);
     if (received) return { kind: "value", value: received[1]! };
@@ -193,7 +198,7 @@ async function replay(
                 await within(executeStep(session.page, step, data, baseUrl, i + 1 === captured ? Math.max(ms - 250, ms / 2) : ms, { near: nearbyTargets(test.steps, i) }), ms);
                 if (left() > 0) await within(settle(session.page, Math.min(SETTLE_MS, left())), left()).catch(() => undefined);
             } catch (e) {
-                const what = isSourcedCheck(step) ? `the check of ${step.action === "assert" ? step.source : ""}` : step.action === "assert" ? "a check with no stated source" : "a step that is not a check";
+                const what = isSourcedCheck(step) ? `the check of ${(step as { source?: string }).source ?? ""}` : step.action === "assert" ? "a check with no stated source" : "a step that is not a check";
                 const screenshot = shoot ? await within(shoot(session.page), SHOT_MS).catch(() => undefined) : undefined;
                 const raw = e instanceof Error ? e.message.split(/\n\s*Call log:/)[0]! : String(e);
                 let failure: FailureKind = e instanceof OutOfTime ? { kind: "timeout" } : failureKind(raw);

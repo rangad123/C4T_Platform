@@ -47,6 +47,7 @@ import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testd
 import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, startingIdsOf } from "./leftovers.js";
 import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 import { engineWordingIn } from "../explore/perturb.js";
+import { CALLS_MAX, CAPTURE_MAX, displayedCheck, errorShown, readBackCheck, readBackOf, type CapturedCall, type Disagreement, type LayerSays, type RawCall, type ShownValue } from "./correlation.js";
 
 export interface AuthorInput {
     ctx: EngineContext;
@@ -301,14 +302,20 @@ const runSecretsOf = (input: Pick<AuthorInput, "credentials" | "secrets">): stri
     [input.credentials?.password, ...(input.secrets ?? [])].filter((s): s is string => typeof s === "string" && s.length >= 4);
 
 /** `observations`: screens the vision model judged to look wrong while authoring (only when `vision` was on). */
+/**
+ * `calls`: the own-origin API answers the test's actions caused while it was written (C4 capture), masked and cut, each tied to its step.
+ * `layers` (a defect): which layers disagreed (the page, the API, the stored data read through the API), when a UI–API check found it.
+ */
 export type AuthorOutcome =
-    | { status: "complete"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[] }
+    | { status: "complete"; steps: Step[]; testData: Record<string, string>; explanation: string; observations?: string[]; calls?: CapturedCall[] }
     | {
           status: "defect";
           steps: Step[];
           testData: Record<string, string>;
           explanation: string;
           observations?: string[];
+          calls?: CapturedCall[];
+          layers?: LayerSays[];
           /** Errors the app reported while the agent worked (console, failed requests). */
           evidence?: string[];
           /**
@@ -611,7 +618,8 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
                 if (findLeftoverUse(out.steps, starting).length) return out;
             }
         }
-        if (out.status === "defect") out = await confirmDefect(input, out);
+        // A disagreement between layers (C4) is judged by code on the real answers, like a documented case the API accepted: no AI verdict.
+        if (out.status === "defect" && !out.layers) out = await confirmDefect(input, out);
         return out;
     });
 }
@@ -727,8 +735,13 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     // seconds after it before the next one starts (a submit the page sends late), is told to the gate as that action's. What the page
     // sends on its own at other times (a timer's beacon while a check waits) is not the engine's and is not counted.
     const actingFor = { from: 0, until: 0 };
+    /** The recorded index the acting action gets (its API answers are tied to it). */
+    let actingStep = 0;
     const acting = (read: boolean) => {
-        if (!read) Object.assign(actingFor, { from: Date.now(), until: Number.POSITIVE_INFINITY });
+        if (!read) {
+            Object.assign(actingFor, { from: Date.now(), until: Number.POSITIVE_INFINITY });
+            actingStep = recorded.length;
+        }
         return () => {
             if (!read) actingFor.until = Date.now() + REQUEST_AFTER_ACTION_MS;
         };
@@ -745,6 +758,38 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             }
         });
     }
+    // C4 capture: the page's own API answers (fetch / XHR to its own origin) in the acting window, read through a route so a page that moves
+    // on right after (a form that redirects) cannot take the body away. Everything else falls through to the session's own route.
+    const calls: RawCall[] = [];
+    const capturing = new Set<Promise<void>>();
+    const ownOrigin = new URL(baseUrl).origin;
+    await session.context.route(
+        (u) => u.origin === ownOrigin,
+        (route) => {
+            const req = route.request();
+            const type = req.resourceType();
+            if ((type !== "fetch" && type !== "xhr") || !actingFor.from || Date.now() > actingFor.until || calls.length >= CALLS_MAX) return route.fallback();
+            const step = actingStep;
+            const work = (async () => {
+                const res = await route.fetch({ maxRedirects: 0 }).catch(() => undefined);
+                if (!res) return void (await route.abort("failed").catch(() => undefined));
+                const body = await res.body().catch(() => Buffer.alloc(0));
+                await route.fulfill({ response: res, body }).catch(() => undefined);
+                const u = new URL(req.url());
+                const json = (t: string | null | undefined) => {
+                    try {
+                        return t ? (JSON.parse(t) as unknown) : undefined;
+                    } catch {
+                        return undefined;
+                    }
+                };
+                const text = body.subarray(0, CAPTURE_MAX).toString("utf8");
+                calls.push({ step, method: req.method().toUpperCase(), path: u.pathname + u.search, status: res.status(), sent: json(req.postData()), json: body.length <= CAPTURE_MAX ? json(text) : undefined, text });
+            })().catch(() => undefined);
+            capturing.add(work);
+            return work.finally(() => capturing.delete(work));
+        },
+    );
     page.setDefaultTimeout(6_000);
     /** The new tab the agent works in (a click opened it), else the page the test started on. */
     let tab: Page | undefined;
@@ -753,6 +798,8 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
     const evidence: string[] = [];
 
     const recorded: Step[] = [];
+    /** UI–API disagreements found after actions (C4), each with the recorded step it came at. */
+    const disagreements: Array<Disagreement & { action: Step }> = [];
     /** Sourced checks that ran and failed (with what the page showed instead); the last one still failing ends a defect test. */
     const failedChecks: Array<{ step: Step; observed: string; at: number }> = [];
     const masks = observedTextSecrets(runSecretsOf(input));
@@ -842,6 +889,49 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             }
         }
 
+        /**
+         * C4 after an action (the step just recorded at `at`): its writes that failed while the page shows a status message, and (data
+         * changes on) one read-back GET of a successful write, asked of the exploration's bound first. Disagreements are kept for the end.
+         */
+        const correlate = async (action: Step, at: number) => {
+            await Promise.race([Promise.allSettled([...capturing]), new Promise((r) => setTimeout(r, 3_000))]);
+            const writes = calls.filter((c) => c.step === at && !c.readBack && STATE_CHANGING_METHODS.has(c.method));
+            const failed = writes.find((c) => c.status >= 400);
+            if (failed) {
+                const shown = await statusMessage(here());
+                if (shown) disagreements.push({ action, ...errorShown(failed, shown) });
+                return;
+            }
+            // C4b: what the page shows now under a label, against the same-named fields of this action's answers.
+            const answers = writes.filter((c) => c.status < 300 && c.json !== undefined);
+            const shown = answers.length ? await shownValues(here()) : [];
+            for (const w of answers.length && shown.length ? answers : []) {
+                const d = displayedCheck(w, shown);
+                if (d) {
+                    disagreements.push({ action, ...d });
+                    break;
+                }
+            }
+            if (!input.allowPurchases) return;
+            for (const w of writes) {
+                const plan = readBackOf(w, model.apis);
+                if (!plan) continue;
+                if (input.gate && !input.gate.replay(1, `a read-back of GET ${plan.path}`)) return;
+                const got = await session.context.request.get(new URL(plan.path, ownOrigin).href, { maxRedirects: 0, failOnStatusCode: false, timeout: 10_000 }).catch(() => undefined);
+                if (!got) return;
+                const text = (await got.body().catch(() => Buffer.alloc(0))).subarray(0, CAPTURE_MAX).toString("utf8");
+                let json: unknown;
+                try {
+                    json = JSON.parse(text);
+                } catch {
+                    json = undefined;
+                }
+                calls.push({ step: at, method: "GET", path: plan.path, status: got.status(), json, text, readBack: true });
+                const check = readBackCheck(w, { status: got.status(), json });
+                if (check?.disagreement) disagreements.push({ action, ...check.disagreement });
+                return;
+            }
+        };
         const refuse = refusedBy(input.notes);
         let notesShownFor = pathOf(page.url());
         const record = async (step: Step, toolName: string, args: unknown) => {
@@ -898,7 +988,9 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
             const snapshot = await snapshotFor(7_000);
             if (r.ok) {
                 // A click that opened a new tab is recorded as one that waits for it, so a replay and the script follow it too.
-                recorded.push({ ...step, ...(told.popup && step.action === "click" ? { opensPopup: true } : {}), description: step.description || describeStep(step) } as Step);
+                const saved = { ...step, ...(told.popup && step.action === "click" ? { opensPopup: true } : {}), description: step.description || describeStep(step) } as Step;
+                recorded.push(saved);
+                if (!read) await correlate(saved, recorded.length - 1);
                 await show(step, credentials ? [credentials.password] : []);
             } else if (recorded.at(-1)?.action === "dialog") {
                 // The answer armed for a dialog belongs right before the action that opens it: an action that failed drops it.
@@ -1206,8 +1298,9 @@ ${snapshot}`;
                     kind: "steps_pruned",
                     message: `${scenario.scenarioId}: dropped ${pruned.dropped} stale step(s) left over from abandoned attempts`,
                 });
-                return { ...result, steps: pruned.steps };
             }
+            // After pruning: the correlation's own steps (a kept answer a redirect takes away in a replay) are not the replay's to drop.
+            return correlated(input, pruned.dropped > 0 ? { ...result, steps: pruned.steps } : result, recorded, calls, disagreements, masks);
         }
         return result;
         })());
@@ -1215,6 +1308,122 @@ ${snapshot}`;
         if (traced) await keepBlockedTrace(input, session, finished);
         await session.close();
     }
+}
+
+/** The text of a visible status message (role=status or an output element), when no alert is shown beside it. */
+async function statusMessage(page: Page): Promise<string | undefined> {
+    try {
+        return await page.evaluate(() => {
+            // No helper functions in here (tests/page-scripts-under-tsx.test.ts).
+            const out: string[] = [];
+            let alert = false;
+            for (const e of Array.from(document.querySelectorAll('[role="status"], output, [role="alert"]'))) {
+                const box = e.getBoundingClientRect();
+                const text = ((e as HTMLElement).innerText || "").replace(/\s+/g, " ").trim();
+                if (!text || box.width === 0 || box.height === 0) continue;
+                if (e.getAttribute("role") === "alert") alert = true;
+                else out.push(text);
+            }
+            return alert || !out.length ? undefined : out[0]!.slice(0, 200);
+        });
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * The labelled values the page shows (C4b): a term and its definition, a row header and its cell, a "Label: value" text; each once, with a
+ * locator that finds only its value (its test id, its id, or a selector by its label).
+ */
+async function shownValues(page: Page): Promise<ShownValue[]> {
+    try {
+        const found = await page.evaluate(() => {
+            // No helper functions in here (tests/page-scripts-under-tsx.test.ts).
+            const out: Array<{ label: string; text: string; testId: string; id: string; css: string }> = [];
+            const fold = /\s+/g;
+            for (const el of Array.from(document.querySelectorAll("dt, tr, p, li, span, div"))) {
+                if (out.length >= 40) break;
+                let label = "";
+                let value: Element | null = null;
+                let css = "";
+                const tag = el.tagName.toLowerCase();
+                if (tag === "dt") {
+                    label = (el.textContent ?? "").replace(fold, " ").trim();
+                    value = el.nextElementSibling?.tagName === "DD" ? el.nextElementSibling : null;
+                    css = `dt:text-is(${JSON.stringify(label)}) + dd`;
+                } else if (tag === "tr") {
+                    const cells = Array.from(el.children);
+                    if (cells.length !== 2 || cells[0]!.tagName !== "TH" || cells[1]!.tagName !== "TD") continue;
+                    label = (cells[0]!.textContent ?? "").replace(fold, " ").trim();
+                    value = cells[1]!;
+                    css = `tr:has(> th:text-is(${JSON.stringify(label)})) > td`;
+                } else {
+                    if (el.children.length) continue;
+                    const m = /^([A-Za-z][A-Za-z0-9 ()%_-]{0,40}):\s*(\S.*)$/.exec((el.textContent ?? "").replace(fold, " ").trim());
+                    if (!m) continue;
+                    label = m[1]!.trim();
+                    value = el;
+                    css = `${tag}:text-matches(${JSON.stringify(`^\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`)})`;
+                }
+                if (!label || !value || label.length > 40) continue;
+                const box = value.getBoundingClientRect();
+                const text = (value.textContent ?? "").replace(fold, " ").trim();
+                if (!text || text.length > 80 || box.width === 0 || box.height === 0) continue;
+                out.push({ label, text, testId: value.getAttribute("data-testid") ?? "", id: value.id, css });
+            }
+            return out;
+        });
+        const seen = new Map<string, number>();
+        for (const f of found) seen.set(f.label.toLowerCase(), (seen.get(f.label.toLowerCase()) ?? 0) + 1);
+        const out: ShownValue[] = [];
+        for (const f of found) {
+            if (seen.get(f.label.toLowerCase())! > 1) continue;
+            const locator: ShownValue["locator"] = f.testId ? { by: "testId", value: f.testId } : { by: "css", value: f.id ? `#${f.id.replace(/[^\w-]/g, "\\$&")}` : f.css };
+            // Only a locator that finds this one element.
+            const n = await (locator.by === "testId" ? page.getByTestId(locator.value) : page.locator(locator.value)).count().catch(() => 0);
+            if (n === 1) out.push({ label: f.label, text: f.text, locator });
+        }
+        return out;
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * The finished test with its captured answers (masked, tied to the saved steps), and, when a UI–API check disagreed on a complete test,
+ * that test as a defect: its steps up to the action, then the correlation's check citing the first stated check the writer made after
+ * that action (captured). Without such a check the test is kept as written and the defect is observed only.
+ */
+function correlated(
+    input: AuthorInput,
+    out: Extract<AuthorOutcome, { status: "complete" | "defect" }>,
+    recorded: readonly Step[],
+    calls: readonly RawCall[],
+    disagreements: ReadonlyArray<Disagreement & { action: Step }>,
+    masks: readonly string[],
+): AuthorOutcome {
+    const mask = (t: string, max = 1_000) => redactText(maskObservedText(t, masks, max), max);
+    const kept: CapturedCall[] = calls.map((c) => {
+        const at = out.steps.indexOf(recorded[c.step]!);
+        return { ...(at >= 0 ? { step: at } : {}), method: c.method, path: mask(c.path, 500), status: c.status, body: mask(c.text, CAPTURE_MAX), ...(c.readBack ? { readBack: true } : {}) };
+    });
+    const withCalls = kept.length ? { ...out, calls: kept } : out;
+    const d = out.status === "complete" ? disagreements.find((x) => out.steps.includes(x.action)) : undefined;
+    if (!d) return withCalls;
+    const at = out.steps.indexOf(d.action);
+    const stated = (s: Step) => s.action === "assert" && !!s.source && statedSource(s.source, input.scenario, input.rules, input.requirementIds);
+    const source = (out.steps.slice(at + 1).find(stated) as { source?: string } | undefined)?.source;
+    const base = {
+        status: "defect" as const,
+        testData: out.testData,
+        explanation: mask(d.explanation),
+        evidence: d.requests.map((l) => mask(l, 300)),
+        layers: d.layers.map((l) => ({ layer: l.layer, observed: mask(l.observed, 400) })),
+        ...(out.observations ? { observations: out.observations } : {}),
+        ...(kept.length ? { calls: kept } : {}),
+    };
+    if (!source) return { ...base, steps: out.steps, capture: "observed_only" };
+    return { ...base, steps: [...out.steps.slice(0, at + 1), ...d.steps(source)], capture: "captured", capturedCheck: { source, observed: mask(d.observed(source), 400) } };
 }
 
 /** Where blocked authoring traces are kept, inside the scratch folder. On a runner that folder is the task's own and goes with the task. */

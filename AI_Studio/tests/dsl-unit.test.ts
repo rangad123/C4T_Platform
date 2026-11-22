@@ -293,7 +293,9 @@ describe("header lines", () => {
 
     it("a step for the other kind of test says so", () => {
         expect(parseDsl("Test: Wrong kind\nKind: api\nGo to /\n").diagnostics[0]!.message).toContain("works on a page");
-        expect(parseDsl("Test: Wrong kind\nSend a GET request to /x\n").diagnostics[0]!.message).toContain("calls an API");
+        expect(parseDsl("Test: Wrong kind\nExpect the status to be 200\n").diagnostics[0]!.message).toContain("calls an API");
+        // A web test may send a request in the browser's session (a read-back after a page's write, Phase 4 C4).
+        expect(parseDsl("Test: Web read-back\nSend a GET request to /x\n").diagnostics).toEqual([]);
     });
 
     it("refuses desktop steps in text", () => {
