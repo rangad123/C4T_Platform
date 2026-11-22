@@ -12,6 +12,7 @@ import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import { benchOpenApi } from "./fixtures/bench-openapi.js";
 
 const SHOP = parseOpenApi(await benchOpenApi("bench-shop"), "http://127.0.0.1:9602/openapi.json").operations;
+const RBAC = parseOpenApi(await benchOpenApi("bench-rbac"), "http://127.0.0.1:9603/openapi.json").operations;
 const requests = (s: DraftSpec) => s.steps.filter((x): x is Extract<Step, { action: "request" }> => x.action === "request");
 const line = (s: DraftSpec) => requests(s).map((r) => `${r.method} ${r.path}`);
 const checks = (s: DraftSpec) => s.steps.filter((x): x is Extract<Step, { action: "assertResponse" }> => x.action === "assertResponse");
@@ -60,5 +61,13 @@ describe("C9 read-back chains on bench-shop", () => {
 
     it("with data changes off, no read-back chain is generated", () => {
         expect(gen(false).filter((s) => s.tags.includes("readback") || requests(s).some((r) => r.method !== "GET"))).toEqual([]);
+    });
+
+    it("an update without a documented body sends the create's body: bench-rbac's PUT /api/notes/{id} gets a title (a bodiless PUT is refused on the clean app)", () => {
+        const s = generateApiWorkflowSpecs(RBAC, { allowMutating: true, maxWorkflows: 50 }).specs.find((x) => x.title.startsWith("Workflow: note lifecycle"));
+        expect(s).toBeDefined();
+        const put = requests(s!).find((r) => r.method === "PUT")!;
+        expect(put.path).toBe("/api/notes/{{noteId}}");
+        expect((put.body as { title?: string }).title).toContain("{{unique}}u");
     });
 });

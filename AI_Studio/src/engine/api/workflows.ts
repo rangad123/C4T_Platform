@@ -529,7 +529,8 @@ function crudChains(endpoints: ApiEndpointModel[]): Chain[] {
         const updatePath = update && pathOf(update);
         if (update && updatePath) {
             used.push(update.ep);
-            const body = marked(bodyFor(update.ep), "u");
+            // An update that documents no body of its own takes the create's fields (a bodiless PUT is refused by any app that validates it).
+            const body = marked(bodyFor(update.ep) ?? bodyFor(creator), "u");
             steps.push(
                 req(update.ep.method, updatePath, { query: queryFor(update.ep), ...(body !== undefined ? { body } : {}) }, `Update the created ${resource}`),
                 resp("statusClass", "2xx", undefined, `${resource} is updated`),
