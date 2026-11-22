@@ -58,7 +58,7 @@ export function SelectionPreviewCard({ projectId }: { projectId: string }) {
             </div>
             <PullRequests projectId={projectId} />
             <div className="card-pad stack-sm">
-                <p className="t-secondary">Name the pages and endpoints a release changes. The preview shows which tests open or call them, and why. It never runs or skips a test: a deploy still runs every runnable test.</p>
+                <p className="t-secondary">Name the pages and endpoints a release changes. The preview shows which tests open or call them, and why. The preview runs nothing, and a deploy still runs every runnable test.</p>
                 <div className="field">
                     <label htmlFor="sel-pages">Changed pages, one per line</label>
                     <textarea id="sel-pages" className="input" rows={3} maxLength={20_000} value={pages} placeholder={"/checkout\n/orders/{id}"} onChange={(e) => setPages(e.target.value)} />
@@ -228,7 +228,7 @@ function PullRequests({ projectId }: { projectId: string }) {
                             <code className="t-meta">{p.headSha.slice(0, 7)}</code>
                             <span className="t-meta">{plural(p.proposed, "test")} proposed</span>
                         </div>
-                        {p.fullRunRecommended && <p className="t-secondary">Full run recommended: {p.fullRunReasons.join(" ")}</p>}
+                        {p.fullRunRecommended && <p className="t-secondary">Full run recommended. {p.fullRunReasons.join(" ")}</p>}
                         {p.tests.length > 0 && (
                             <ul className="t-secondary" aria-label={`Why tests were proposed for pull request #${p.pr}`}>
                                 {p.tests.map((t) => (

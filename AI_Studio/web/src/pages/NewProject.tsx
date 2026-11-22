@@ -131,13 +131,11 @@ export function NewProject({ projectId }: { projectId: string }) {
                 </div>
                 <LevelChoice value={chosenLevel} onChange={setLevel} />
                 {!screenReviewOff && <ScreenReviewChoice level={chosenLevel} canReadImages={aiReady === true} value={screenReview} onChange={setScreenReview} />}
-                <label className="row" style={{ alignItems: "flex-start" }}>
+                <label className="check">
                     <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />
                     <span>
-                        Explore every page again
-                        <span className="t-meta" style={{ display: "block" }}>
-                            Pages unchanged since the last exploration are normally reused. This sends every page to the AI again.
-                        </span>
+                        <span className="title">Explore every page again</span>
+                        <span className="hint">Pages unchanged since the last exploration are normally reused. This sends every page to the AI again.</span>
                     </span>
                 </label>
 

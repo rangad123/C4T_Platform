@@ -87,7 +87,7 @@ export function DbProbeCard({ projectId }: { projectId: string }) {
                 <label htmlFor="db-probe-url">Probe address</label>
                 <input id="db-probe-url" className="input mono" disabled={ro || busy} value={url} placeholder="https://db-probe.example.com" autoComplete="off" spellCheck={false} aria-describedby="db-probe-url-hint" onChange={(e) => (setUrl(e.target.value), setNote(null))} />
                 <p className="hint" id="db-probe-url-hint">
-                    Starts with https://. Leave it empty and save to remove the setting.
+                    Starts with https://; http:// only for a probe on this computer. Leave it empty and save to remove the setting.
                 </p>
             </div>
             <div className="field">

@@ -173,7 +173,7 @@ describe("pull request lines on Runs, After a deploy", () => {
         await pwExpect(pr).toContainText("Pull request #42");
         await pwExpect(pr).toContainText("dddddd");
         await pwExpect(pr).toContainText("1 test proposed");
-        await pwExpect(pr).toContainText("Full run recommended:");
+        await pwExpect(pr).toContainText("Full run recommended. Shared code changed");
         await pwExpect(pr).toContainText("Shared code changed: src/db.ts reaches every request.");
         await pwExpect(pr).toContainText("WEB-001 Cart total: The change names GET /cart, and its steps open /cart (step 1).");
         await pwExpect(pr).toContainText("Run of this commit: 1 of 2 failed.");
