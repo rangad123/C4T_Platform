@@ -78,10 +78,14 @@ export async function proposeRowRelations(
             try {
                 const template = { kind: "relation" as const, table: p.table, where: [], expression: p.expression };
                 validateCheck(template, {}, input.schema);
-                // Judged once on the rows there before any test writes: a rule they cannot be judged by is refused (templates.ts).
-                await input.probe?.check(template).catch((e: unknown) => {
+                // Judged once on the rows there before any test writes: a rule they cannot be judged by is refused (templates.ts), and so is
+                // one that every stored row already breaks (it misreads how the data is stored, as "Placed" for a stored "placed"; a defect
+                // breaks some rows, not all). Each later write would add a broken row, on any app.
+                const rows = input.schema.tables.find((t) => t.name === p.table)?.rowCount ?? 0;
+                const r = await input.probe?.check(template).catch((e: unknown) => {
                     if (e instanceof DatabaseCheckRefused) throw e;
                 });
+                if (r && rows > 0 && r.count >= rows) throw new Error(`every stored row of ${JSON.stringify(p.table.slice(0, 63))} already breaks it, so it does not read the data as it is stored`);
             } catch (e) {
                 reason = e instanceof Error ? e.message : String(e);
             }

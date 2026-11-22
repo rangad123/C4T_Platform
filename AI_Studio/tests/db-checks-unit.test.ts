@@ -281,6 +281,40 @@ describe("stored-data rules over rows (C5 over the database)", () => {
         expect((await notesProbe.check({ kind: "relation", table: "notes", where: [], expression: 'title != ""' })).count).toBe(0);
     });
 
+    // paid-shop-1 API-061 (the BS-12 read-back): the model's "orders: status == \"Placed\" or ..." used the page's labels, while the rows
+    // store "placed" and "shipped". Every stored row broke it, so every test that placed an order failed on the clean app too.
+    it("drops a rule every stored row already breaks; keeps one that only some rows break", async () => {
+        const shopSchema = cleanSchema({
+            tables: [{ name: "orders", columns: ["id", "status", "subtotal", "discount", "shipping", "total"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [], rowCount: 3 }],
+        });
+        const rows = {
+            orders: [
+                { id: "ord-1000", status: "shipped", subtotal: 850, discount: 0, shipping: 500, total: 1350 },
+                { id: "ord-1001", status: "placed", subtotal: 3450, discount: 0, shipping: 500, total: 3950 },
+                // One row a defect left: its total is wrong.
+                { id: "ord-1002", status: "placed", subtotal: 1000, discount: 0, shipping: 500, total: 1000 },
+            ],
+        };
+        const shopProbe: DatabaseProbe = { schema: async () => shopSchema, check: async (t, p) => runOnRows(validateCheck(t, p, shopSchema), rows, Buffer.alloc(32, 7)) };
+        const reqs = [
+            { id: "6.1", text: "An order is Placed, Paid, Shipped or Cancelled." },
+            { id: "3.10", text: "The total is the subtotal less the discount plus shipping." },
+        ];
+        const answer = {
+            relations: [
+                { requirementId: "6.1", table: "orders", expression: 'status == "Placed" or status == "Paid" or status == "Shipped" or status == "Cancelled"' },
+                { requirementId: "3.10", table: "orders", expression: "total == subtotal - discount + shipping" },
+            ],
+        };
+        const r = await proposeRowRelations(scripted(answer, []), { requirements: reqs, schema: shopSchema, secrets: [], probe: shopProbe });
+        expect(r.checks).toEqual([{ name: "relation orders: total == subtotal - discount + shipping", source: "3.10" }]);
+        expect(r.report.dropped).toEqual([{ requirementId: "6.1", table: "orders", reason: expect.stringMatching(/every stored row of "orders" already breaks it/) }]);
+        // An empty table judges nothing: the rule is kept.
+        const empty = cleanSchema({ tables: [{ ...shopSchema.tables[0]!, rowCount: 0 }] });
+        const none: DatabaseProbe = { schema: async () => empty, check: async (t, p) => runOnRows(validateCheck(t, p, empty), { orders: [] }, Buffer.alloc(32, 7)) };
+        expect((await proposeRowRelations(scripted(answer, []), { requirements: reqs, schema: empty, secrets: [], probe: none })).checks).toHaveLength(2);
+    });
+
     it("no requirement, no call", async () => {
         const prompts: string[] = [];
         expect((await proposeRowRelations(scripted({ relations: [] }, prompts), { requirements: [], schema: SCHEMA, secrets: [] })).checks).toEqual([]);
