@@ -18,7 +18,10 @@ import type { RouteCtx } from "./types.js";
 const StartBody = z
     .object({
         testIds: z.array(z.string().min(1).max(100)).min(1, "Choose at least one test").max(2000).optional(),
-        /** Data changes are allowed for this run (else the project's setting decides): risky saved checks need it (engine/validation/risky.ts). */
+        /**
+         * Data changes for this run, honoured only on the benchmark's own server (BENCH_RISKY_CHECKS); elsewhere the project's "Include API
+         * tests that change data" decides, so a run starter cannot change data on a customer app. Risky saved checks need it (validation/risky.ts).
+         */
         allowMutatingApiTests: z.boolean().optional(),
         /** Run each failing test once more straight away: a pass after a fail is reported as unreliable, not as a regression. */
         retryFailures: z.number().int().min(0).max(1).optional(),
@@ -67,7 +70,7 @@ export function registerRunRoutes(ctx: RouteCtx): void {
             mode: "validate",
             testIds: willRun.map((t) => t.id),
             ...(body.retryFailures ? { retryFailures: body.retryFailures } : {}),
-            ...(body.allowMutatingApiTests !== undefined ? { allowMutatingApiTests: body.allowMutatingApiTests } : {}),
+            allowMutatingApiTests: ctx.p.config.BENCH_RISKY_CHECKS && body.allowMutatingApiTests !== undefined ? body.allowMutatingApiTests : repo.getLatestApplicationPublic(id)?.config?.allowMutatingApiTests === true,
             ...(variants ? { variants } : {}),
         });
         return reply.code(202).send({ jobId: job.id, status: job.status, testCount: willRun.length, tests: willRun.map((t) => ({ id: t.id, testId: t.testKey })), skipped });

@@ -362,6 +362,7 @@ export default defineConfig({
             "tests/coverage-captured-segment-unit.test.ts",
             "tests/fixed-known-bug-unit.test.ts",
             "tests/known-bug-two-seeds-unit.test.ts",
+            "tests/run-data-changes-gate.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
