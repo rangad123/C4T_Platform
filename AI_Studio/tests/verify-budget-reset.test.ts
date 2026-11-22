@@ -103,14 +103,45 @@ describe("a finding whose attempts are cut by the job's signal", () => {
 });
 
 describe("findings past the per-run budget", () => {
-    it("keep their state, and the stop sentence does not promise the next run", async () => {
-        const s = await project("Over budget", 2);
-        const execute: VerifyDeps["execute"] = async (_a, b) => [1, 2, 3].map((i) => run(b.scripts[0]!.testId, "fail", i, 3));
-        const r1 = await verifyAfterJob(platform, s.job, { execute, harvested: true, budget: { findingsPerRun: 1, minutesEach: 10 } });
-        // shortcut: findings past the budget are verified only when a later run finds them again; verifying older ones needs an owner decision.
-        expect(r1?.stopped).toBe("The verification budget of 1 finding per run was used: 1 more is not verified in this run.");
-        const states = await Promise.all(s.findings.map(async (f) => (await store.get(s.projectId, f.id))!.state));
-        expect(states.sort()).toEqual(["candidate", "reproduced"]);
+    it("are verified by later runs, after each run's own new findings, oldest first, never past the budget", async () => {
+        const s = await project("Over budget", 3);
+        const ran: string[][] = [];
+        let now: string[] = [];
+        const execute: VerifyDeps["execute"] = async (_a, b) => (now.push(b.scripts[0]!.testId), [1, 2, 3].map((i) => run(b.scripts[0]!.testId, "fail", i, 3)));
+        const budget = { findingsPerRun: 1, minutesEach: 10 };
+        const state = async (id: string) => (await store.get(s.projectId, id))!.state;
+        const verifyRun = async (job: typeof s.job) => {
+            now = [];
+            const r = await verifyAfterJob(platform, job, { execute, harvested: true, budget });
+            ran.push(now);
+            return r;
+        };
+        const r1 = await verifyRun(s.job);
+        expect(r1?.stopped).toBe("The verification budget of 1 finding per run was used: 2 more are not verified in this run.");
+        const waiting = (await Promise.all(s.findings.map(async (f) => ({ f, st: await state(f.id) })))).filter((x) => x.st === "candidate").map((x) => x.f);
+        expect(waiting).toHaveLength(2);
+        const oldest = [...waiting].sort((a, b) => a.firstSeenAt.localeCompare(b.firstSeenAt) || a.id.localeCompare(b.id));
+
+        // A later run with a new finding of its own: that one goes first, and the budget leaves the older ones waiting.
+        const later = await platform.repo.createJob(s.projectId, s.appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
+        const suiteId = platform.repo.getOrCreateSuite(s.projectId, "Cart", "cart");
+        const id = platform.repo.insertTest({ projectId: s.projectId, suiteId, jobId: null, spec: web("WEB-200"), framework: "playwright", validationStatus: "VALIDATED" });
+        const t = platform.repo.getTest(id)!;
+        const [mine] = await harvestExecutionFindings(store, { projectId: s.projectId, jobId: later.id, failed: [{ test: { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework }, run: run(t.testKey, "fail") }] });
+        platform.repo.setJobStatus(later.id, "COMPLETED");
+        await verifyRun(platform.repo.getJob(later.id)!);
+        expect(await state(mine!.id)).toBe("reproduced");
+        expect((await Promise.all(oldest.map((f) => state(f.id))))).toEqual(["candidate", "candidate"]);
+
+        // Runs with nothing new pick up the waiting ones, oldest first, one per run.
+        for (const f of oldest) {
+            const next = await platform.repo.createJob(s.projectId, s.appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
+            platform.repo.setJobStatus(next.id, "COMPLETED");
+            await verifyRun(platform.repo.getJob(next.id)!);
+            expect(await state(f.id)).toBe("reproduced");
+        }
+        expect(ran.every((r) => r.length <= budget.findingsPerRun)).toBe(true);
+        expect(ran.map((r) => r.length)).toEqual([1, 1, 1, 1]);
     });
 });
 

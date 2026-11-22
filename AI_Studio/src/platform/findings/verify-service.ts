@@ -31,7 +31,7 @@ import { tryResolveSpecRefs } from "../../engine/locators/refs.js";
 import { getAgentServices } from "../agent-services.js";
 import { blocksFor } from "../block-store.js";
 import type { Platform } from "../bootstrap.js";
-import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
+import { CANDIDATE_FINDINGS_LIST_MAX, CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import { IdentityStore } from "../identity-store.js";
 import { LocatorStore } from "../locator-store.js";
 import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
@@ -284,20 +284,25 @@ export async function verifyAfterJob(
     const store = new CandidateFindingStore(p.sql);
     const testOf = testsOf(p, job.projectId);
     if (mode === "validate" && !o.harvested) await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed: failedRunsOf(p, job, testOf) });
-    const findings = (await store.list(job.projectId, { jobId: job.id })).filter((f) => isVerifiable(f.state) && f.testId);
+    // This run's new findings first, then older ones still waiting, oldest first. withinBudget caps the whole list; findings it cannot
+    // verify (another kind of test) cost no budget, so the older ones are read past them.
+    const own = (await store.list(job.projectId, { jobId: job.id })).filter((f) => isVerifiable(f.state) && f.testId);
+    const older = (await store.waiting(job.projectId, CANDIDATE_FINDINGS_LIST_MAX)).filter((f) => !own.some((x) => x.id === f.id));
+    const findings = [...own, ...older];
     if (findings.length === 0) return undefined;
     if (!o.execute && getAgentServices(p).routesToAgent(job.projectId)) {
-        const n = `${findings.length} finding${findings.length === 1 ? "" : "s"}`;
+        const batch = findings.slice(0, Math.max(0, Math.floor((o.budget ?? VERIFY_BUDGET).findingsPerRun)));
+        const n = `${batch.length} finding${batch.length === 1 ? "" : "s"}`;
         try {
             // The run's starter's runner does the attempts, as it ran the run (agent-services.ts assertJobAllowed picks it).
-            const testIds = [...new Set(findings.map((f) => f.testId!))];
+            const testIds = [...new Set(batch.map((f) => f.testId!))];
             const queued = await p.repo.createJob(job.projectId, job.applicationId, { ...DEFAULT_JOB_OPTIONS, mode: "verify", verifyJobId: job.id, testIds, ...(job.options.startedBy ? { startedBy: job.options.startedBy } : {}) });
             emit(`${n} will be verified on the runner (verification run ${queued.id.slice(0, 8)}).`);
             return { verified: [], skipped: [], queuedJobId: queued.id };
         } catch (e) {
             const why = redactText(e instanceof Error ? e.message : String(e), 400);
-            emit(`${n} wait${findings.length === 1 ? "s" : ""} for verification: the verification run on the runner could not start. ${why}`, "warn");
-            return { verified: [], skipped: findings.map((f) => ({ id: f.id, why })) };
+            emit(`${n} wait${batch.length === 1 ? "s" : ""} for verification: the verification run on the runner could not start. ${why}`, "warn");
+            return { verified: [], skipped: batch.map((f) => ({ id: f.id, why })) };
         }
     }
     return verifyFindings({

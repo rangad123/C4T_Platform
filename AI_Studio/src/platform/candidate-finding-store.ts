@@ -230,6 +230,15 @@ export class CandidateFindingStore {
      * A project's findings, newest seen first; with `jobId`, those that run found first or last. At most `limit` of them, and never more
      * than CANDIDATE_FINDINGS_LIST_MAX (a limit that is not a positive whole number is the cap).
      */
+    /** A project's findings that wait for verification (Candidate or Verification pending, with a test), oldest found first, at most `limit`. */
+    async waiting(projectId: string, limit: number): Promise<CandidateFindingRecord[]> {
+        const rows = await this.sql.all<FindingRow>(
+            "SELECT * FROM candidate_findings WHERE project_id = ? AND state IN ('candidate', 'verification_pending') AND test_id IS NOT NULL ORDER BY first_seen_at, id LIMIT ?",
+            projectId, Math.max(0, Math.floor(limit)),
+        );
+        return rows.map(toRecord);
+    }
+
     async list(projectId: string, opts: { jobId?: string; limit?: number } = {}): Promise<CandidateFindingRecord[]> {
         const limit = Number.isInteger(opts.limit) && opts.limit! > 0 ? Math.min(opts.limit!, CANDIDATE_FINDINGS_LIST_MAX) : CANDIDATE_FINDINGS_LIST_MAX;
         const rows = opts.jobId
