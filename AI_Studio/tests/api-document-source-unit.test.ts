@@ -58,4 +58,48 @@ describe("withStatedSources", () => {
         withStatedSources(s, APIS);
         expect(sources(s)).toEqual([null, "4.1, 4.2", "4.5"]);
     });
+
+    it("names the standard rule a behaviour check proves, and only the six rules of the list", () => {
+        const acc = (o: Record<string, unknown>) => ({ action: "assert", check: "accessDenied", expected: JSON.stringify({ as: "a", path: "/x/1", sev: "high", ...o }) });
+        const access = spec([acc({ sessionEnd: true }), acc({ identityWrite: "revoke", by: "b" }), acc({ identityWrite: "owner", method: "PUT" }), acc({ by: "b", of: "b", marker: "M" }), acc({ identityWrite: "role", method: "PATCH" })], { origin: "access-check" });
+        withStatedSources(access, APIS);
+        expect(sources(access)).toEqual(["standard rule: a session ends on sign-out", "standard rule: a revoked share is gone", "standard rule: a non-owner cannot read or write", "standard rule: a non-owner cannot read or write", null]);
+
+        const behaviour = TestSpecSchema.parse({
+            testId: "API-002",
+            title: "A behaviour check",
+            kind: "api",
+            category: "API",
+            tags: ["api", "workflow", "readback"],
+            steps: [
+                { action: "request", method: "PUT", path: "/api/profile", body: { name: "N" } },
+                { action: "assertResponse", check: "relation", expression: "name == $recordBefore.name" },
+                { action: "request", method: "POST", path: "/api/orders", parallel: 3 },
+                { action: "assertResponse", check: "relation", expression: "ok == 1 and refused == 2" },
+                { action: "request", method: "GET", path: "/api/orders" },
+                { action: "assertResponse", check: "relation", expression: "count(orders) == count($listBefore) + 1" },
+                { action: "assertResponse", check: "jsonPath", path: "name", expected: "N" },
+                { action: "assertResponse", check: "dbCheck", name: "exists users where name = 'N'" },
+                { action: "assertResponse", check: "dbCheck", name: "orphans carts(userId) -> users(id)" },
+                { action: "assertResponse", check: "statusClass", expected: "2xx" },
+            ],
+        });
+        withStatedSources(behaviour, APIS);
+        expect(sources(behaviour)).toEqual([
+            null,
+            "standard rule: a refused write changes nothing",
+            null,
+            "standard rule: one request acts once",
+            null,
+            "standard rule: one request acts once",
+            "standard rule: read-back equals what was written",
+            "standard rule: read-back equals what was written",
+            null,
+            null,
+        ]);
+        // The same value check outside a read-back test proves no rule of the list.
+        const plain = spec([{ action: "request", method: "GET", path: "/api/x" }, { action: "assertResponse", check: "jsonPath", path: "name", expected: "N" }]);
+        withStatedSources(plain, APIS);
+        expect(sources(plain)).toEqual([null, null]);
+    });
 });
