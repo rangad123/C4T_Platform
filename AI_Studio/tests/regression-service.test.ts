@@ -212,3 +212,35 @@ describe("what links a fix", () => {
         expect(JSON.parse(refused.body).error).toMatch(/A fix is checked on a confirmed finding; this one is Candidate/);
     });
 });
+
+describe("one fix check at a time", () => {
+    const active = (projectId: string) => platform.repo.listJobs(projectId).filter((j) => !["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status));
+    const call = (s: Seed, body: unknown) => server.inject({ method: "POST", url: `/api/projects/${s.projectId}/findings/${s.findingId}/transition`, headers: { "x-api-key": KEY }, payload: body as object });
+
+    it("a double-clicked Check the fix queues one check, and the second click says why", async () => {
+        const s = await seed("Double click shop");
+        expect((await call(s, { action: "check_fix" })).statusCode).toBe(200);
+        const again = await call(s, { action: "check_fix" });
+        expect(again.statusCode).toBe(409);
+        expect(again.json().error).toMatch(/still/);
+        expect(active(s.projectId)).toHaveLength(1);
+        expect((await reasons(s)).filter((r) => r.startsWith("Fix claimed by"))).toHaveLength(1);
+    });
+
+    it("Check the fix while another run of the project is going is refused (one active job per project)", async () => {
+        const s = await seed("Busy shop");
+        const appId = platform.repo.getLatestApplicationPublic(s.projectId)!.id as string;
+        await platform.repo.createJob(s.projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [s.related] });
+        expect((await call(s, { action: "check_fix" })).statusCode).toBe(409);
+        expect(active(s.projectId)).toHaveLength(1);
+    });
+
+    it("two successful deployments of the same head (two deliveries) queue one check", async () => {
+        const s = await seed("Two env shop");
+        prOpened(s.projectId);
+        const host = codeHost(["Fixes #12"]);
+        expect((await checkFixesOfDeployment(platform, host, s.projectId, HEAD))?.jobId).toBeTruthy();
+        await checkFixesOfDeployment(platform, host, s.projectId, HEAD);
+        expect(active(s.projectId)).toHaveLength(1);
+    });
+});

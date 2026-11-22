@@ -19,7 +19,7 @@ import { redactText } from "../../shared/redact-text.js";
 import type { Platform } from "../bootstrap.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import type { CodeHostStore } from "../code-host/store.js";
-import { DEFAULT_JOB_OPTIONS, type JobOptions, type JobRow } from "../repo.js";
+import { DEFAULT_JOB_OPTIONS, TERMINAL_STATES, type JobOptions, type JobRow } from "../repo.js";
 import { projectCoverage } from "../selection/facts.js";
 import { previewSelection, readChanges, RECOMMENDATION_NOTE } from "../selection/preview.js";
 import { SuiteStore } from "../suite-store.js";
@@ -80,6 +80,9 @@ export async function claimFix(
         else ok.push(f);
     }
     if (!ok.length) return { refused };
+    // One active job per project, as every run start: a second click, a second deployment of the same build, or a run still going waits.
+    const busy = p.repo.listJobs(projectId).find((j) => !TERMINAL_STATES.includes(j.status));
+    if (busy) return { refused: [...refused, ...ok.map((f) => ({ id: f.id, why: `Run ${busy.id.slice(0, 8)} of this project is still ${busy.status.toLowerCase()}; check the fix when it has finished.` }))] };
     const appId = p.repo.getLatestApplicationPublic(projectId)?.id as string | undefined;
     if (!appId) return { refused: [...refused, ...ok.map((f) => ({ id: f.id, why: "The project has no application to check the fix on." }))] };
     // A pull request's claim runs as the person whose run found the bug (their runner); a person's claim runs as that person (createJob).
