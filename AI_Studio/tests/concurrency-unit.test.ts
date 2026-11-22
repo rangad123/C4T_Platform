@@ -40,9 +40,12 @@ describe("C8 gate", () => {
     it("the job runner takes the bench gate from the server's own setting, never from the job's options", () => {
         expect(riskyChecksGateOf({ BENCH_RISKY_CHECKS: true })).toBe("bench");
         expect(riskyChecksGateOf({ BENCH_RISKY_CHECKS: false })).toBeUndefined();
-        // The request's gate is that function of the server's setting, and no job option of that name is ever read.
+        // A current client authorization (read by the security module, Q4) gives "authorization"; the bench setting still wins.
+        expect(riskyChecksGateOf({ BENCH_RISKY_CHECKS: false }, true)).toBe("authorization");
+        expect(riskyChecksGateOf({ BENCH_RISKY_CHECKS: true }, true)).toBe("bench");
+        // The request's gate is that function of the server's setting and the project's records, and no job option of that name is ever read.
         const src = readFileSync(new URL("../src/platform/job-runner.ts", import.meta.url), "utf8");
-        expect(src).toContain("riskyChecksGate: riskyChecksGateOf(config)");
+        expect(src).toContain("riskyChecksGate: riskyChecksGateOf(config, deps.hasCurrentAuthorization?.(job.projectId, app.url) ?? false)");
         expect(src).not.toMatch(/\b(o|options|job\.options)\.riskyChecksGate\b/);
     });
 });
