@@ -101,4 +101,39 @@ describe("a creation job's findings are verified", () => {
         expect(rows.map((r) => r.testId)).toEqual([kept]);
         expect(rows[0]!.attempts).toHaveLength(3);
     });
+
+    it("confirms a reproduced finding at high confidence, leaves a lower one Reproduced, and groups two sightings of one failure", async () => {
+        const projectId = String(platform.repo.createProject({ name: "Confirm shop" }).id);
+        const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5594", { ...DEFAULT_JOB_OPTIONS }) as string;
+        const suiteId = platform.repo.getOrCreateSuite(projectId, "API", "api");
+        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "generate" });
+        // Two checks of the same stated rule on the same request, and one whose failing check states no source (inferred: low confidence).
+        const unsourced = TestSpecSchema.parse({ ...api("API-023"), steps: [{ action: "request", method: "GET", path: "/api/orders" }, { action: "assertResponse", check: "status", expected: 200 }] });
+        const ids = [
+            platform.repo.insertTest({ projectId, suiteId, jobId: job.id, spec: api("API-021"), framework: "playwright-api", validationStatus: "NEEDS_REVIEW", meta: { layer: "api" } }),
+            platform.repo.insertTest({ projectId, suiteId, jobId: job.id, spec: api("API-022"), framework: "playwright-api", validationStatus: "NEEDS_REVIEW", meta: { layer: "api" } }),
+            platform.repo.insertTest({ projectId, suiteId, jobId: job.id, spec: unsourced, framework: "playwright-api", validationStatus: "NEEDS_REVIEW", meta: { layer: "api" } }),
+        ];
+        const fail = (key: string): ScriptRun =>
+            key === "API-023"
+                ? { ...failing(key), steps: [{ index: 0, title: "1. request", status: "passed" }, { index: 1, title: "2. status", status: "failed", error: "Expected status 200, received 500" }] }
+                : failing(key);
+        for (const [id, key] of ids.map((id, i) => [id, `API-02${i + 1}`] as const)) {
+            const r = fail(key);
+            platform.repo.addExecution({ testId: id, scriptId: null, jobId: job.id, attempt: 1, status: "failed", durationMs: 1, error: r.steps[1]!.error, startedAt: new Date().toISOString(), steps: r.steps });
+        }
+        platform.repo.setJobStatus(job.id, "COMPLETED");
+        const execute: VerifyDeps["execute"] = async (_a, batch, _e, opts) => Array.from({ length: opts.attempts ?? 1 }, () => fail(batch.scripts[0]!.testId));
+        await verifyAfterJob(platform, platform.repo.getJob(job.id)!, { execute, attempts: 3 });
+        const store = new CandidateFindingStore(platform.sql);
+        const byTest = new Map((await store.list(projectId)).map((r) => [r.testId, r]));
+        const [a, b, c] = ids.map((id) => byTest.get(id)!);
+        expect([a!.state, b!.state]).toEqual(["confirmed", "confirmed"]);
+        expect(c!.state).toBe("reproduced");
+        expect(c!.confidenceDetail?.confidence).not.toBe("high");
+        expect(a!.groupId).toBeTruthy();
+        expect(b!.groupId).toBe(a!.groupId);
+        expect(c!.groupId).not.toBe(a!.groupId);
+        expect((await store.history(projectId, a!.id)).at(-1)).toMatchObject({ to: "confirmed", by: "engine" });
+    });
 });

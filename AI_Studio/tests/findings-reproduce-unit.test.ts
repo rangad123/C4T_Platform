@@ -187,10 +187,11 @@ describe("verifyFindings", () => {
         expect(asked[0]).toMatchObject({ attempts: 3, video: false, freshAccount: { signupPath: "/register", loginPath: "/login" }, workers: 1 });
         expect(r.verified).toEqual([{ id: f!.id, to: "reproduced", reason: expect.stringMatching(/3 of 3 attempts/) }]);
         const stored = (await store.get("p1", f!.id))!;
-        expect(stored).toMatchObject({ state: "reproduced", findingClass: "app_defect" });
+        // Reproduced 3 of 3 at high confidence, so the engine then confirms it.
+        expect(stored).toMatchObject({ state: "confirmed", findingClass: "app_defect" });
         expect(stored.attempts).toHaveLength(3);
         expect(stored.confidenceDetail?.factors.reproduction.value).toBe("high");
-        expect((await store.history("p1", f!.id)).map((e) => e.to)).toEqual(["verification_pending", "reproduced"]);
+        expect((await store.history("p1", f!.id)).map((e) => e.to)).toEqual(["verification_pending", "reproduced", "confirmed"]);
         expect(events.join("\n")).toMatch(/WEB-007: reproduced/);
         expect(ai.calls - before).toBe(0);
     });

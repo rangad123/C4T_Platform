@@ -13,6 +13,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { cleanReplayPlan, signupPathOf } from "../../engine/explore/clean-account.js";
+import { dedupe } from "../../engine/findings/dedupe.js";
 import { attemptsSetting, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type BudgetRun, type VerifyBudget } from "../../engine/findings/reproduce.js";
 import { confidenceScore } from "../../engine/findings/score.js";
 import type { Attempt } from "../../engine/findings/view.js";
@@ -140,7 +141,33 @@ export async function verifyFindings(d: VerifyDeps): Promise<VerifyResult> {
         out.stopped = run.stopped;
         d.emit(run.stopped, "warn");
     }
+    await confirmAndGroup(d, out);
     return out;
+}
+
+/**
+ * After the attempts: the engine confirms each finding it reproduced at high confidence (the lifecycle refuses it below), and the project's
+ * findings that are in no group yet are grouped as duplicates (findings/dedupe.ts: same source and two strong signals, never on the
+ * message alone). Grouping is a convenience: a failure to group leaves each finding on its own.
+ */
+async function confirmAndGroup(d: VerifyDeps, out: VerifyResult): Promise<void> {
+    for (const v of out.verified) {
+        if (v.to !== "reproduced") continue;
+        const r = await d.store.get(d.projectId, v.id);
+        if (r?.state !== "reproduced" || r.confidenceDetail?.confidence !== "high") continue;
+        await d.store.transition(d.projectId, v.id, { to: "confirmed", by: "engine", reason: "Reproduced at high confidence." });
+    }
+    try {
+        // shortcut: a new sighting that matches an existing group starts its own group; upgrade with a store method that adds members.
+        const loose = (await d.store.list(d.projectId)).filter((r) => !r.groupId);
+        const views = loose.map((r) => {
+            const t = r.testId ? d.testOf(r.testId) : undefined;
+            return fromCandidate(r, t ? { id: t.id, title: t.title, spec: t.spec, meta: t.meta } : undefined);
+        });
+        for (const g of dedupe(views)) if (g.memberIds.length > 1) await d.store.group(d.projectId, g.memberIds, { why: g.why });
+    } catch (e) {
+        d.emit(`The findings were not grouped as duplicates: ${redactText(e instanceof Error ? e.message : String(e), 300)}`, "warn");
+    }
 }
 
 /** Moves a finding that waits in Verification pending to `to` with only a reason (an attempt that could not run). */

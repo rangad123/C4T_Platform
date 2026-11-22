@@ -130,7 +130,8 @@ describe("findings past the per-run budget", () => {
         const [mine] = await harvestExecutionFindings(store, { projectId: s.projectId, jobId: later.id, failed: [{ test: { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework }, run: run(t.testKey, "fail") }] });
         platform.repo.setJobStatus(later.id, "COMPLETED");
         await verifyRun(platform.repo.getJob(later.id)!);
-        expect(await state(mine!.id)).toBe("reproduced");
+        // Reproduced 3 of 3 against a stated rule: high confidence, so the engine confirms it.
+        expect(await state(mine!.id)).toBe("confirmed");
         expect((await Promise.all(oldest.map((f) => state(f.id))))).toEqual(["candidate", "candidate"]);
 
         // Runs with nothing new pick up the waiting ones, oldest first, one per run.
@@ -138,7 +139,7 @@ describe("findings past the per-run budget", () => {
             const next = await platform.repo.createJob(s.projectId, s.appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
             platform.repo.setJobStatus(next.id, "COMPLETED");
             await verifyRun(platform.repo.getJob(next.id)!);
-            expect(await state(f.id)).toBe("reproduced");
+            expect(await state(f.id)).toBe("confirmed");
         }
         expect(ran.every((r) => r.length <= budget.findingsPerRun)).toBe(true);
         expect(ran.map((r) => r.length)).toEqual([1, 1, 1, 1]);
