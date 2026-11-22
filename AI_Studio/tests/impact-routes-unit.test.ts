@@ -115,7 +115,8 @@ describe("the bench apps: every seed reaches its route", () => {
         const r = reach(RBAC, line);
         expect(r.hits).toEqual([]);
         const use = RBAC.split("\n").findIndex((l) => l.includes("const user = userOf(req);")) + 1;
-        expect(r.unresolved).toEqual([`server.mjs:${line} is in userOf() (server.mjs:75-80); userOf is used at server.mjs:${use}, outside every route handler.`]);
+        const from = RBAC.split("\n").findIndex((l) => l.startsWith("function userOf(")) + 1;
+        expect(r.unresolved).toEqual([`server.mjs:${line} is in userOf() (server.mjs:${from}-${from + 5}); userOf is used at server.mjs:${use}, outside every route handler.`]);
     });
 
     it("finds the bench's whole route table, the static files and the HTML form posts included", () => {

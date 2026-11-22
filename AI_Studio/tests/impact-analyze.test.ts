@@ -26,14 +26,23 @@ const SHOP: Record<string, { exact: boolean; routes: string[]; tests?: string[] 
     "BS-03": { exact: true, routes: ["POST /api/cart/items", "PATCH /api/cart/items/{}"] },
     "BS-10": { exact: true, routes: ["POST /api/orders", "* /checkout/review"] },
     "BS-07": { exact: true, routes: ["POST /api/orders"] },
-    // the any-method cancel route also serves BS-05's POST cancel test
-    "BS-08": { exact: true, routes: ["* /api/orders/{}", "* /api/orders/{}/cancel", "* /api/orders/{}/pay", "* /orders/{}"], tests: ["POST /api/orders/{}/cancel"] },
+    // the any-method order routes also serve BS-05's POST cancel test, BS-19's GET order test and BS-14's POST pay test
+    "BS-08": { exact: true, routes: ["* /api/orders/{}", "* /api/orders/{}/cancel", "* /api/orders/{}/pay", "* /orders/{}"], tests: ["POST /api/orders/{}/cancel", "GET /api/orders/{}", "POST /api/orders/{}/pay"] },
     "BS-05": { exact: true, routes: ["POST /api/orders/{}/cancel"] },
     "BS-01": { exact: false, routes: ["POST /api/cart/discount", "GET /api/cart"] },
     "BS-02": { exact: false, routes: ["GET /api/cart"] },
     "BS-11": { exact: false, routes: ["GET /api/cart", "POST /api/orders", "POST /api/cart/items", "PATCH /api/cart/items/{}", "DELETE /api/cart/items/{}"] },
     "BS-12": { exact: false, routes: ["GET /api/orders", "* /orders"] },
     "BS-04": { exact: false, routes: ["POST /api/register", "POST /register"] },
+    // Phase 4 extension seeds (catalogue-extension.json), checked by hand against the source.
+    "BS-13": { exact: false, routes: ["* /cart", "* /checkout/review"] },
+    "BS-14": { exact: false, routes: ["POST /api/orders/{}/pay"] },
+    "BS-15": { exact: false, routes: ["POST /api/cart/discount"] },
+    "BS-16": { exact: false, routes: ["PUT /api/profile"] },
+    "BS-17": { exact: false, routes: ["POST /api/register", "POST /register"] },
+    "BS-18": { exact: false, routes: ["POST /api/orders"] },
+    "BS-19": { exact: false, routes: ["GET /api/orders/{}"] },
+    "BS-20": { exact: false, routes: ["GET /api/profile"] },
 };
 const RBAC: typeof SHOP = {
     "BR-08": { exact: true, routes: ["POST /api/notes"] },
@@ -43,6 +52,9 @@ const RBAC: typeof SHOP = {
     "BR-01": { exact: false, routes: ["* /api/notes/{}", "* /api/notes/{}/share", "* /api/notes/{}/share/{}", "* /notes/{}"] },
     "BR-02": { exact: false, routes: ["PUT /api/notes/{}"] },
     "BR-07": { exact: false, routes: ["POST /api/register", "POST /register"] },
+    "BR-09": { exact: false, routes: ["POST /api/login", "* /login"] },
+    "BR-10": { exact: false, routes: ["* /notes/{}"] },
+    "BR-11": { exact: false, routes: ["DELETE /api/notes/{}"] },
 };
 const suiteOf = (truth: typeof SHOP) => [...new Set(Object.values(truth).flatMap((t) => t.routes))].map(testFor).concat(test("T unrelated", [ep("GET", "/api/version"), pg("/about")]));
 const keyOf = (e: { method: string; path: string }) => `${e.method} ${e.path}`;

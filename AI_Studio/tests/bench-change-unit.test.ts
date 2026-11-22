@@ -31,10 +31,10 @@ afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 const app = (name: string) => fs.readFileSync(path.join(import.meta.dirname, "..", "examples", name, "server.mjs"), "utf8");
 
 describe("the bench repository", () => {
-    it("holds the §6.2 PR set: 12 + 8 single-seed PRs, a fix and a false fix claim for each, 3 refactors, 1 decoy, 1 unmapped", () => {
+    it("holds the §6.2 PR set: 12 + 8 single-seed PRs plus the 8 + 3 Phase 4 extension seeds, a fix and a false fix claim for each, 3 refactors, 1 decoy, 1 unmapped", () => {
         const count = (k: string) => manifest.prs.filter((p) => p.kind === k).length;
-        expect([count("seed"), count("fix"), count("claim"), count("refactor"), count("decoy"), count("unmapped")]).toEqual([20, 20, 20, 3, 1, 1]);
-        expect(manifest.prs.filter((p) => p.kind === "seed" && p.app === "bench-shop")).toHaveLength(12);
+        expect([count("seed"), count("fix"), count("claim"), count("refactor"), count("decoy"), count("unmapped")]).toEqual([31, 31, 31, 3, 1, 1]);
+        expect(manifest.prs.filter((p) => p.kind === "seed" && p.app === "bench-shop")).toHaveLength(20);
         expect(manifest.prs.map((p) => p.number)).toEqual(manifest.prs.map((_, i) => i + 1));
         // Each seed's claim and fix come after it and say they fix the same issue.
         for (const s of manifest.prs.filter((p) => p.kind === "seed")) {
