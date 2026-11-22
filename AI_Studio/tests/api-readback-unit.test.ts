@@ -90,3 +90,15 @@ describe("a sub-resource, then its parent deleted (the stored data must not keep
         expect(generateApiWorkflowSpecs(RBAC, { allowMutating: false, maxWorkflows: 50 }).specs.some((x) => x.tags.includes("subresource"))).toBe(false);
     });
 });
+
+describe("the list check on a paged list (a page may not hold the new records)", () => {
+    it("with paging documented, each new record is read by its own address instead; without paging the list check stays", () => {
+        const paged = SHOP.map((e) => (e.method === "GET" && e.path === "/api/orders" ? { ...e, spec: { ...e.spec!, parameters: [...(e.spec?.parameters ?? []), { name: "page", location: "query" as const, required: false, type: "integer" }] } } : e));
+        const s = generateApiWorkflowSpecs(paged, { allowMutating: true, maxWorkflows: 50 }).specs.find((x) => x.title.startsWith("Workflow: order lifecycle"))!;
+        expect(checks(s).some((c) => c.check === "relation" && /contains\(orders/.test(String(c.expression)))).toBe(false);
+        expect(line(s).slice(-2)).toEqual(["GET /api/orders/{{orderId}}", "GET /api/orders/{{orderId2}}"]);
+        expect(checks(s).at(-1)).toMatchObject({ check: "jsonPath", path: "id", expected: "{{orderId2}}" });
+        // The shop's own list has no paging: the list check (BS-12) is kept.
+        expect(checks(named("Workflow: order lifecycle")).at(-1)).toMatchObject({ check: "relation" });
+    });
+});

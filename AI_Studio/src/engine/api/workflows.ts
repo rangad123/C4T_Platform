@@ -91,6 +91,8 @@ function camel(s: string): string {
     return parts.map((p, i) => (i === 0 ? p.toLowerCase() : p[0]!.toUpperCase() + p.slice(1).toLowerCase())).join("") || "item";
 }
 
+/** Query parameters that page a list. */
+const PAGING = /^(page|page_?number|page_?size|per_?page|limit|size|cursor|after|before|offset|skip|start)$/i;
 export const varFor = (resource: string) => `${camel(resource)}Id`;
 const pathParams = (path: string) => [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!);
 export const trimSlash = (p: string) => p.replace(/\/+$/, "");
@@ -519,12 +521,22 @@ function crudChains(endpoints: ApiEndpointModel[]): Chain[] {
         const ids = listItem && listIdsPath(listItem);
         if (list && ids) {
             const v2 = `${v}2`;
-            steps.push(
-                ...create("b", v2),
-                req("GET", base, { query: queryFor(list) }, `List ${resource} items`),
-                resp("statusClass", "2xx", undefined, "List request succeeds"),
-                { action: "assertResponse", check: "relation", expression: `contains(${ids}, $${v}) and contains(${ids}, $${v2})`, description: `The list holds both new ${resource} records` },
-            );
+            // A paged list may hold the new records on a later page: each is then read by its own address instead (no list check).
+            const paged = (list.spec?.parameters ?? []).some((p) => p.location === "query" && PAGING.test(p.name));
+            const readIdPath = read && first(okSchemas(read.ep), (s) => idPathIn(s, resource, read.param));
+            if (paged && read && readIdPath) {
+                steps.push(...create("b", v2));
+                for (const x of [v, v2]) {
+                    const at = fillPath(read.ep.path, { ...values, [read.param]: `{{${x}}}` })!;
+                    steps.push(req("GET", at, { query: queryFor(read.ep) }, `Read the new ${resource} {{${x}}}`), resp("statusClass", "2xx", undefined, `The new ${resource} is found`), resp("jsonPath", `{{${x}}}`, readIdPath, `It is the new ${resource}`));
+                }
+            } else if (!paged)
+                steps.push(
+                    ...create("b", v2),
+                    req("GET", base, { query: queryFor(list) }, `List ${resource} items`),
+                    resp("statusClass", "2xx", undefined, "List request succeeds"),
+                    { action: "assertResponse", check: "relation", expression: `contains(${ids}, $${v}) and contains(${ids}, $${v2})`, description: `The list holds both new ${resource} records` },
+                );
         }
         const updatePath = update && pathOf(update);
         if (update && updatePath) {
