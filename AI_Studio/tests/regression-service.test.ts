@@ -33,7 +33,8 @@ let store: CandidateFindingStore;
 beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-regression-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dir, SECRET_KEY: "regression-test-secret-key-0123456789", API_KEY: KEY, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false" }));
+    // Findings verification (on by default) would settle a reopened finding at once here (no app to run against); these tests check the moves themselves.
+    platform = bootstrap(loadConfig({ DATA_DIR: dir, SECRET_KEY: "regression-test-secret-key-0123456789", API_KEY: KEY, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", VERIFY_FINDINGS: "false" }));
     server = await buildServer(platform);
     await server.ready();
     store = new CandidateFindingStore(platform.sql);
