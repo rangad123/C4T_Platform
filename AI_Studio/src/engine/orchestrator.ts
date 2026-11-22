@@ -26,6 +26,7 @@ import { cleanupHeaders, type CleanupRequest } from "./cleanup/run.js";
 import { generateA11ySpecs } from "./a11y/specs.js";
 import { generateHealthSpecs } from "./health/specs.js";
 import { generateAccessSpecs, generateApiAccessSpecs, generateApiListSpecs, rolePageBudget, signedInRequests, surveyAccess, surveyApiAccess, surveyApiLists, type ApiAccessRow, type ApiListRow, type ApiRequester, type Reach, type RoleLogin } from "./identity/access.js";
+import { generateIdentityWriteSpecs } from "./identity/identity-writes.js";
 import { generateSessionEndSpecs } from "./identity/session-end.js";
 import { generateInputSpecs } from "./inputs/specs.js";
 import { generateVisionSpecs } from "./vision/specs.js";
@@ -1373,7 +1374,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const apiHost = req.apiBaseUrl ? new URL(req.apiBaseUrl).origin : undefined;
                 const offHost = apiHost && apiHost !== new URL(req.url).origin ? { origin: apiHost } : {};
                 const tokens = (req.roles ?? []).filter((r) => r.apiToken).map((r) => r.name);
-                const access = [...generateApiAccessSpecs(apiAccess, { maxSpecs: 8, reach: accessReach, ...offHost }), ...generateApiListSpecs(apiLists, { tokens, ...offHost })];
+                const access = [
+                    ...generateApiAccessSpecs(apiAccess, { maxSpecs: 8, reach: accessReach, ...offHost }),
+                    ...generateApiListSpecs(apiLists, { tokens, ...offHost }),
+                    // C3e: writes as another or a lesser identity, only behind the Q4 gate (identity/identity-writes.ts).
+                    ...generateIdentityWriteSpecs({ apis, lists: apiLists, access: apiAccess, ...offHost, dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate }),
+                ];
                 for (const d of access) {
                     if (await carried(d)) continue;
                     const web = d.kind === "web";

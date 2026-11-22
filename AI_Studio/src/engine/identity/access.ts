@@ -26,6 +26,7 @@ import { isApiRequest } from "../discovery/network.js";
 import { ownAppHost } from "../../shared/app-host.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ScriptRun } from "../validation/runner.js";
+import { IDENTITY_WRITES_HELPER_SOURCE } from "./identity-writes.js";
 import { SESSION_END_HELPER_SOURCE } from "./session-end.js";
 
 /** First words of every access-control failure; the finding classifier keys on it. */
@@ -94,6 +95,7 @@ async function accessSignIn(p, base, role) {
 async function accessAssert(page, base, spec) {
     const cfg = JSON.parse(spec);
     if (cfg.sessionEnd) return await accessSessionEndAssert(page, base, cfg);
+    if (cfg.identityWrite) return await accessWriteAssert(page, base, cfg);
     if (cfg.api) return await accessApiAssert(page, base, cfg);
     // The page must be one of the application's own (the address the run was started for): a path that names its own host
     // ("//other.example/x", "http://10.0.0.5/") or a scheme is refused before anything is opened, like a request step's address.
@@ -259,7 +261,7 @@ async function accessApiRead(page, base, cfg, who, origin, target, where) {
         await ctx.close().catch(() => undefined);
     }
 }
-${SESSION_END_HELPER_SOURCE}`;
+${SESSION_END_HELPER_SOURCE}${IDENTITY_WRITES_HELPER_SOURCE}`;
 
 /** Script-side check for API endpoints: the answer to a request must be a refusal. */
 export const ACCESS_API_HELPER_SOURCE = String.raw`const ACCESS_API_PREFIX = ${JSON.stringify(ACCESS_FAILURE_PREFIX)};
