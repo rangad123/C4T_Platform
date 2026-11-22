@@ -26,6 +26,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 let seeded = true;
 /** /qty shows its quantity form while open: the authoring session saw it, a later fresh browser does not (state the session left). */
 let qtyOpen = true;
+/** /build offers "Add lamp" while open (the authoring session); a later replay on the same app does not get it (paid-shop-1 WEB-065). */
+let buildOpen = true;
 let server: http.Server;
 let browser: Browser;
 
@@ -34,6 +36,7 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         // /recalc shows the wrong total until "Recalculate" is pressed.
         if (req.url === "/qty") return void res.end(qtyOpen ? `<!doctype html><title>Cart</title><h1>Cart</h1><label>Quantity <input aria-label="Quantity"></label><button onclick="document.querySelector('#msg').textContent='Quantity must be at most 99'">Update</button><p id="msg" role="alert"></p>` : `<!doctype html><title>Cart</title><h1>Cart</h1><p>Your cart is empty</p><p id="msg" role="alert"></p>`);
+        if (req.url === "/build") return void res.end(`<!doctype html><title>Cart</title><h1>Cart</h1><p>Subtotal: <output aria-label="Subtotal">$0.00</output></p>${buildOpen ? `<button onclick="document.querySelector('output').textContent='$47.00'">Add lamp</button>` : ""}`);
         if (req.url === "/recalc") return void res.end(`<!doctype html><title>Cart</title><h1>Cart</h1><p>Total: <output aria-label="Total">$30.00</output></p><button onclick="document.querySelector('output').textContent='$25.00'">Recalculate</button>`);
         res.end(`<!doctype html><title>Cart</title><h1>Cart</h1><ul><li>Mug $10.00</li><li>Plate $15.00</li></ul><p>Total: <output id="total" aria-label="Total">${seeded ? "$30.00" : "$25.00"}</output></p>`);
     });
@@ -320,7 +323,7 @@ describe("stored tests and pruning", () => {
                 { action: "assert", check: "exactText", locator: totalLocator, expected: "$25.00", source: "R-TOTAL" },
             ],
         }).steps;
-        const pruned = await pruneByReplay(browser, BASE, steps, undefined, false);
+        const pruned = await pruneByReplay(browser, BASE, steps, undefined, false, undefined, 'expect(locator).toHaveText(expected) failed Expected: "$25.00" Received: "$30.00"');
         expect(pruned.dropped).toBe(1);
         expect(pruned.steps.map((s) => s.action)).toEqual(["navigate", "assert", "assert"]);
         expect(pruned.steps.at(-1)).toMatchObject({ source: "R-TOTAL" });
@@ -358,8 +361,32 @@ describe("stored tests and pruning", () => {
                 { action: "assert", check: "exactText", locator: totalLocator, expected: "$25.00", source: "R-TOTAL" },
             ],
         }).steps;
-        const pruned = await pruneByReplay(browser, BASE, steps, undefined, false);
+        const pruned = await pruneByReplay(browser, BASE, steps, undefined, false, undefined, 'expect(locator).toHaveText(expected) failed Expected: "$25.00" Received: "$30.00"');
         expect(pruned.dropped).toBe(0);
         expect(pruned.steps).toEqual(steps);
+    }, 60_000);
+
+    // paid-shop-1 WEB-065 (and WEB-022, -044, -045, -061, -062; rbac WEB-063): the setup that built the cart failed on the pruning replay
+    // (the account the test registers already existed there), was dropped, and the captured check still failed, now on an empty cart.
+    // The saved test then failed the same way on every fresh app, and verification confirmed it high.
+    it("pruneByReplay of a captured defect test keeps its setup when, without it, the captured check no longer fails the way it was captured", async () => {
+        const steps = TestSpecSchema.parse({
+            testId: "WEB-065", title: "Subtotal is the sum of line totals", kind: "web", category: "c", source: { origin: "browser-agent" },
+            steps: [
+                { action: "navigate", url: "/build" },
+                { action: "click", locator: { by: "role", role: "button", value: "Add lamp" } },
+                { action: "assert", check: "exactText", locator: { by: "label", value: "Subtotal" }, expected: "$81.50", source: "expected:1" },
+            ],
+        }).steps;
+        buildOpen = false;
+        try {
+            const pruned = await pruneByReplay(browser, BASE, steps, undefined, false, undefined, 'expect(locator).toHaveText(expected) failed Expected: "$81.50" Received: "$47.00"');
+            expect(pruned.dropped).toBe(0);
+            expect(pruned.steps).toEqual(steps);
+            // Without the captured failure there is nothing to compare with: nothing is dropped either.
+            expect((await pruneByReplay(browser, BASE, steps, undefined, false)).dropped).toBe(0);
+        } finally {
+            buildOpen = true;
+        }
     }, 60_000);
 });

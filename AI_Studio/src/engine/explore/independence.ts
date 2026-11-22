@@ -129,6 +129,18 @@ function normalValue(v: string): string {
     }
     return s.replace(/\s+/g, " ").trim();
 }
+/**
+ * Whether a replay's failure of the captured check is the captured failure itself, judged as the independence check judges it: the same
+ * kind (never "other"), and for an assertion that saw a value, the same value. Without the captured text, never.
+ */
+export function failsAsCaptured(capturedObserved: string | undefined, replayed: string | undefined): boolean {
+    if (capturedObserved === undefined || replayed === undefined) return false;
+    const want = failureKind(capturedObserved, { plainIsValue: true });
+    const got = failureKind(asKept(replayed, []));
+    if (got.kind !== want.kind || got.kind === "other") return false;
+    return got.kind !== "value" || normalValue(got.value) === normalValue((want as { value: string }).value);
+}
+
 /** A value as a replay summary shows it. */
 const shown = (v: string): string => {
     const n = normalValue(v);
