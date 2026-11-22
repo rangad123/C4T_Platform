@@ -165,7 +165,7 @@ describe("the quality routes", () => {
         event("qf2", "reproduced", "confirmed", iso(30));
         event("qf3", "reproduced", "confirmed", iso(1900));
 
-        // Three runs: /cart failed in two of them; the newest one ran for the pull request's head commit (a trigger with its short hash).
+        // Three runs in the window and one before it: /cart failed in two of them; the newest one ran for the pull request's head commit (a trigger with its short hash).
         const summary = async (hoursAgo: number, passRate: number, results: Array<{ id: string; s: "p" | "f" }>) => {
             const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate" });
             db.run(
@@ -174,6 +174,7 @@ describe("the quality routes", () => {
             );
             return job.id;
         };
+        await summary(1000, 100, [{ id: tA, s: "p" }, { id: tB, s: "p" }]); // before the window: a run for stability, not for discovery
         await summary(60, 50, [{ id: tA, s: "f" }, { id: tB, s: "p" }]);
         await summary(30, 100, [{ id: tA, s: "p" }, { id: tB, s: "p" }]);
         const latest = await summary(5, 50, [{ id: tA, s: "f" }, { id: tB, s: "p" }]);
@@ -187,8 +188,8 @@ describe("the quality routes", () => {
         expect(res.statusCode, res.body).toBe(200);
         const { card, history } = res.json();
         // Confirmed in the window: qf1 (70 h ago, 30 h after first seen) and qf2 (30 h ago, 10 h after) → 2, median 20 h. qf3 is older.
-        // Reopened: qf1 once. Pass rate (50 + 100 + 50) / 3 = 66.7. Pull requests: 2. No exploration, so no workflow coverage.
-        expect(card.numbers).toEqual({ confirmed: 2, reopened: 1, passRate: 66.7, workflowSteps: null, hoursToConfirm: 20, pullRequests: 2 });
+        // Reopened: qf1 once. Pass rate of the latest 10 runs (100 + 50 + 100 + 50) / 4 = 75. Pull requests: 2. No exploration, so no workflow coverage.
+        expect(card.numbers).toEqual({ confirmed: 2, reopened: 1, passRate: 75, workflowSteps: null, hoursToConfirm: 20, pullRequests: 2 });
         expect(card.areas).toEqual({ total: 1, items: [{ area: "/cart", runs: 2, tests: 1, testId: tA }] });
         expect(history.discovery).toEqual({ confirmed: 2, runs: 3, perRun: 0.67, medianHoursToConfirm: 20 });
 
