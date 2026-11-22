@@ -16,6 +16,7 @@ import { REPO_ROOT, type Config } from "../../config.js";
 import { LEVEL_SETTINGS, LEVELS, type ExploreLevel } from "../../engine/levels.js";
 import type { LlmClient } from "../../engine/llm/provider.js";
 import type { Platform } from "../../platform/bootstrap.js";
+import type { FastifyInstance } from "fastify";
 import { inProcessClient, ok, remoteClient, type PlatformClient } from "../client.js";
 import type { EntryResult } from "../run.js";
 import { appVersion, BENCH_APPS, benchApp, requirementsDocument, type BenchApp } from "./apps.js";
@@ -42,6 +43,8 @@ export interface BenchDeps {
     /** Tests only: the apps (with their scripts) instead of the shipped ones. */
     apps?: BenchApp[];
     root?: string;
+    /** The finished-job hook the product's worker has (alerts, verification of a run's findings, reopening fixed ones): the PR bench needs it. */
+    jobHooks?: boolean;
     /** Tests only: more exploration options (to switch check families off around a stand-in app). */
     exploration?: Record<string, unknown>;
 }
@@ -268,6 +271,11 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
     if (modeAt >= 0 && argv[modeAt + 1] === "repeat") {
         const { repeatMain } = await import("./repeat/run.js");
         return repeatMain(argv, deps);
+    }
+    // The PR bench (change/run.ts): one step per command, deterministic and free.
+    if (modeAt >= 0 && argv[modeAt + 1] === "change") {
+        const { changeMain } = await import("./change/run.js");
+        return changeMain(argv, deps);
     }
     const log = deps.log ?? ((s: string) => console.log(s));
     const env = deps.env ?? process.env;
@@ -550,7 +558,7 @@ export const verifierOf = (platform: Platform, attempts: number) => async (proje
     return verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
 };
 
-export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, deps: BenchDeps): Promise<{ client: PlatformClient; platform: Platform; stop: () => Promise<void> }> {
+export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, deps: BenchDeps): Promise<{ client: PlatformClient; platform: Platform; server: FastifyInstance; stop: () => Promise<void> }> {
     const { loadConfig } = await import("../../config.js");
     const { bootstrap } = await import("../../platform/bootstrap.js");
     const { buildServer } = await import("../../platform/server.js");
@@ -562,11 +570,13 @@ export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, dep
     const platform = bootstrap(config);
     if (deps.makeLlm) platform.llm = deps.makeLlm(config);
     const server = await buildServer(platform);
-    const worker = new Worker({ ...platform, ...(deps.makeLlm ? { makeLlm: deps.makeLlm } : {}) }, deps.pollMs ?? 300);
+    const hooks = deps.jobHooks ? { onJobFinished: (await import("../../platform/schedule-services.js")).getScheduleServices(platform).onJobFinished } : {};
+    const worker = new Worker({ ...platform, ...hooks, ...(deps.makeLlm ? { makeLlm: deps.makeLlm } : {}) }, deps.pollMs ?? 300);
     worker.start();
     return {
         client: inProcessClient(server, config.API_KEY),
         platform,
+        server,
         stop: async () => {
             await worker.stop();
             await server.close();
