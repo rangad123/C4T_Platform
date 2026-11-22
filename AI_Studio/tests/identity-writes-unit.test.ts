@@ -66,6 +66,15 @@ describe("C3e writes as another identity", () => {
         for (const s of specs) expect(renderScript(TestSpecSchema.parse({ ...s, testId: "WEB-001" }), "playwright", { baseUrl: "http://127.0.0.1:9000" }).content).toContain("accessWriteAssert(page, base, cfg)");
     });
 
+    it("stops a share only on a bench or fixture app: under a client authorization a revoke is never sent (it is not undone)", () => {
+        const kinds = (gate: Partial<Input>) => generateIdentityWriteSpecs({ apis: doc(PATHS), lists: LISTS, access: ACCESS }, gate).map((s) => cfg(s).identityWrite);
+        expect(kinds({})).toContain("revoke");
+        expect(kinds({ gate: "fixture", appUrl: "http://localhost:3000" })).toContain("revoke");
+        const authorized = kinds({ gate: "authorization", appUrl: "https://shop.example" });
+        expect(authorized.length).toBeGreaterThan(0);
+        expect(authorized).not.toContain("revoke");
+    });
+
     it("keeps to the write budget however many accounts were refused", () => {
         const many = Object.fromEntries([...Array(10).keys()].map((i) => [`u${i}`, 403]));
         const specs = generateIdentityWriteSpecs({ apis: doc(PATHS), lists: LISTS, access: [{ ...ACCESS[0]!, status: { ...many, ada: 200 } }] });

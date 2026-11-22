@@ -5,7 +5,8 @@
  *    sends the record's own values back with PUT/PATCH, so an accepted write changes nothing;
  *  - role: an account the vertical survey refused gives itself the role value of the account that was allowed; an accepted change is
  *    changed back at once;
- *  - revoke: the record's owner stops sharing it with the reader, then the reader reads it again and expects the documented 404.
+ *  - revoke: the record's owner stops sharing it with the reader, then the reader reads it again and expects the documented 404 (bench
+ *    and fixture apps only: the share is not given back).
  * Writes, so only behind the Q4 gate (concurrencyAllowed, lane A2's T24) and at most MAX_IDENTITY_WRITES writes a run. Each check runs in the access
  * helper the generated scripts carry: fresh browser contexts signed in per account, the app's own API host only, no values stored.
  */
@@ -204,8 +205,9 @@ export function generateIdentityWriteSpecs(input: { apis: ApiEndpointModel[]; li
         }
     }
 
-    // The owner stops sharing, then the reader is refused the record.
-    if (whoAmI)
+    // The owner stops sharing, then the reader is refused the record. Only on a bench or fixture app: the share is not given back, so under a
+    // client authorization it would change the customer's data for good.
+    if (whoAmI && (input.gate === "bench" || input.gate === "fixture"))
         for (const row of input.lists) {
             const pair = sharedPairs(row).find((p) => p.owner);
             const readRefusal = apis.find((a) => a.method === "GET" && a.path === row.detail)?.statuses?.filter((s) => s === 403 || s === 404);
