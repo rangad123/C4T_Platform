@@ -68,5 +68,24 @@ describe("apiFinding", () => {
         expect(apiFinding(check("security-check", 429), run(401))).toBeUndefined();
         expect(apiFinding(check("browser-agent", 429), run(200))).toBeUndefined();
     });
+    it("C9 read-back, C6 backend and C8 concurrency checks and database checks are judged by code: a failure on an accepted answer is a finding", () => {
+        const made = (tags: string[], check: Record<string, unknown>) =>
+            TestSpecSchema.parse({ testId: "API-001", title: "Workflow: x", kind: "api", tags, steps: [{ action: "request", method: "POST", path: "/x" }, { action: "assertResponse", ...check }] });
+        const failedAt = (status: number, error: string): ScriptRun => ({ ...run(status), steps: [{ index: 0, title: "1. POST /x", status: "passed" }, { index: 1, title: "2. Check", status: "failed", error }] });
+        const rel = { check: "relation", expression: "ok == 1" };
+        const relErr = "Error: Relation check failed: ok == 1. Values: ok = 3.";
+        for (const tag of ["readback", "backend", "concurrency"]) expect(apiFinding(made(["api", "workflow", tag], rel), failedAt(200, relErr))).toMatch(/breaks a stated rule.*ok == 1/);
+        expect(apiFinding(made(["api", "workflow", "backend", "duplicate"], { check: "status", expected: 409 }), failedAt(201, "expect(received).toBe(expected)"))).toMatch(/HTTP 409.*accepted.*HTTP 201/);
+        const dbErr = "Error: Database check failed: exists users where name = 'N': no stored row matches what the write sent.";
+        expect(apiFinding(made(["api", "workflow"], { check: "dbCheck", name: "exists users where name = 'N'" }), failedAt(200, dbErr))).toMatch(/stored data.*no stored row matches/);
+        // Not for other tests, a refused answer, or another error: left to the repair loop.
+        expect(apiFinding(made(["api", "workflow"], rel), failedAt(200, relErr))).toBeUndefined();
+        expect(apiFinding(made(["api", "readback"], rel), failedAt(400, relErr))).toBeUndefined();
+        expect(apiFinding(made(["api", "readback"], rel), failedAt(200, "TypeError: x"))).toBeUndefined();
+        expect(apiFinding(made(["api", "workflow"], { check: "dbCheck", name: "exists users where name = 'N'" }), failedAt(200, "fetch failed"))).toBeUndefined();
+        expect(apiFinding(made(["api", "readback"], { check: "status", expected: 409 }), failedAt(409, "x"))).toBeUndefined();
+        // A status check that expects a success is not a refusal the API skipped.
+        expect(apiFinding(made(["api", "readback"], { check: "status", expected: 200 }), failedAt(201, "x"))).toBeUndefined();
+    });
 });
 

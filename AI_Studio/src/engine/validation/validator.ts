@@ -8,6 +8,7 @@
  *   FAILED_VALIDATION  could not be made to pass (environment problem, unfixable, attempts exhausted)
  */
 import { RELATION_FAILURE_PREFIX } from "./relation.js";
+
 import { captchaFinding } from "../auth/captcha-run.js";
 import type { Browser } from "playwright";
 import { mapLanes, type EngineContext } from "../context.js";
@@ -49,6 +50,9 @@ import { secretsOfRun } from "../evidence/model.js";
 import { KNOWN_BUG_FIXED, markUnfinishedAsNotRun, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
 // A phone run the phone itself could not carry out (device/infra.ts): said plainly, never a failing test of the app, never repaired.
 import { isPhoneInfrastructure } from "../mobile/device/infra.js";
+
+/** How a failed database check starts (database/checks.ts DB_CHECK_HELPER_SOURCE). */
+const DB_FAILURE_PREFIX = "Database check failed";
 
 export type ValidationStatus = "VALIDATED" | "FAILED_VALIDATION" | "NEEDS_REVIEW";
 
@@ -567,8 +571,17 @@ export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     if (spec.source.origin === "security-check" && step?.action === "assertResponse" && step.source && last.status >= 200 && last.status < 300) {
         return `The API breaks a stated rule (${step.source.slice(0, 200)}): ${last.method} ${last.path} answered HTTP ${last.status}, and the check "${failed.title}" failed: ${(failed.error ?? "").split("\n")[0]!.slice(0, 300)}`;
     }
-    // A C5 probe's case (tag "invariant"): the relation a requirement states failed on an answer the API accepted.
-    if (spec.tags.includes("invariant") && step?.action === "assertResponse" && step.check === "relation" && last.status >= 200 && last.status < 300 && failed.error?.includes(RELATION_FAILURE_PREFIX)) {
+    // Checks judged by code on answers the API accepted are facts, not tests to repair: a database check (C10), and in a C5 probe case
+    // (tag "invariant"), a C9 read-back, a C6 backend operation or a C8 concurrency check, its relation or its documented refusal.
+    const accepted = last.status >= 200 && last.status < 300;
+    if (accepted && step?.action === "assertResponse" && step.check === "dbCheck" && failed.error?.includes(DB_FAILURE_PREFIX)) {
+        return `The stored data does not match what the API accepted: ${failed.error.slice(failed.error.indexOf(DB_FAILURE_PREFIX)).split("\n")[0]!.slice(0, 400)}`;
+    }
+    const codeJudged = ["invariant", "readback", "backend", "concurrency"].some((t) => spec.tags.includes(t));
+    if (codeJudged && accepted && step?.action === "assertResponse" && step.check === "status" && Number(step.expected) >= 400 && Number(step.expected) < 500) {
+        return `The API does not keep a rule its document states: it says HTTP ${String(step.expected)} here, and ${last.method} ${last.path} accepted it with HTTP ${last.status} (step "${failed.title}").`;
+    }
+    if (codeJudged && step?.action === "assertResponse" && step.check === "relation" && accepted && failed.error?.includes(RELATION_FAILURE_PREFIX)) {
         return `The API breaks a stated rule${step.source ? ` (requirement ${step.source})` : ""}: ${failed.error.slice(failed.error.indexOf(RELATION_FAILURE_PREFIX)).split("\n")[0]!.slice(0, 400)}`;
     }
     return undefined;
