@@ -116,7 +116,8 @@ describe("there is no way to pass SQL text", () => {
         expect(refused({ kind: "relation", table: "orders", where: [], expression: "[0] == 1" }, {})).toBe(true);
         expect(refused({ kind: "relation", table: "orders", where: [], expression: "total; DROP TABLE orders" }, {})).toBe(true);
         fc.assert(
-            fc.property(fc.string({ maxLength: 60 }).filter((s) => /[;'`]/.test(s)), (expr) => refused({ kind: "relation", table: "orders", where: [], expression: expr }, {})),
+            // Without double quotes: `";"` is a string literal the grammar allows (a value, never SQL text), so it proves nothing here.
+            fc.property(fc.string({ maxLength: 60 }).filter((s) => /[;'`]/.test(s) && !s.includes('"')), (expr) => refused({ kind: "relation", table: "orders", where: [], expression: expr }, {})),
             { numRuns: 300 },
         );
     });
