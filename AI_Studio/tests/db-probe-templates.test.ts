@@ -174,6 +174,7 @@ describe("what each template counts (from the spec's definitions)", () => {
         expect(run(t, { users: people }, { email: "Jane.Doe@Example.com" })).toBe(1);
         expect(run(t, { users: people }, { email: " jane.doe@example.com " })).toBe(1);
         expect(run({ kind: "exists", table: "users", where: ["name"] }, { users: people }, { name: " Jane " })).toBe(1);
+        expect(run({ kind: "exists", table: "users", where: ["name"] }, { users: [{ id: "u8", email: null, name: "Jane  " }] }, { name: "Jane" })).toBe(1);
         // Not an e-mail address: letter case still counts.
         expect(run({ kind: "exists", table: "users", where: ["name"] }, { users: people }, { name: "jane" })).toBe(0);
         const dates = { users: [{ id: "u9", email: "2030-01-01T00:00:00.000Z", name: "1990-05-01" }] };

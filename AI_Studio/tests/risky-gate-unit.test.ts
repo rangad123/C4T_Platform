@@ -58,6 +58,25 @@ describe("risky saved tests skip themselves without the gate", () => {
         expect(outcomes[0]!.status).toBe("NOT_RUN");
         expect(events.find((e) => e.kind === "risky_check_skipped")?.message).toBe(`API-001: ${RISKY_SKIPPED}`);
     });
+
+    it("a failing risky test is not run again straight away (a scheduled run's retry would send its writes twice)", async () => {
+        const config = loadConfig({});
+        const runs: string[] = [];
+        const executor = {
+            name: "fake",
+            async execute(_a: unknown, batch: { scripts: Array<{ testId: string }> }) {
+                runs.push(...batch.scripts.map((s) => s.testId));
+                return batch.scripts.map((s) => ({ testId: s.testId, status: "failed" as const, durationMs: 1, failedStepIndex: 1, steps: [{ index: 0, title: "1. POST", status: "passed" as const }, { index: 1, title: "2. One succeeds", status: "failed" as const, error: "Relation check failed: ok == 1" }], artifacts: [], responses: [{ method: "POST", path: "/orders", status: 201 }] }));
+            },
+        };
+        await validateBatch(
+            { config, llm: undefined as never, emit: () => undefined },
+            { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, model: { pages: [], apis: [] } as never, maxRepairAttempts: 0, workers: 1, retryFailures: 2, executor: executor as never },
+            [{ spec: parallel, framework: "playwright-api" }],
+            { async onAttempt() {}, async onFinal() {} },
+        );
+        expect(runs).toEqual(["API-001"]);
+    });
 });
 
 describe("the identity-write helper holds its rules for an edited test", () => {
