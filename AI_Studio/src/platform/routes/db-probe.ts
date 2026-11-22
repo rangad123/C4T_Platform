@@ -4,7 +4,8 @@
  *   GET /api/projects/:id/db-probe   → { enabled, url, tokenSaved }   off by default; the token is never returned
  *   PUT /api/projects/:id/db-probe   { enabled, url, token? } → the same answer
  *
- * `token` left out keeps the saved one; an empty `url` removes the setting. Switching it on needs an address and a token. The address is
+ * Changing it needs ai_studio.ai_keys.manage (auth/roles.ts), as every connection holding another system's secret. `token` left out
+ * keeps the saved one; an empty `url` removes the setting. Switching it on needs an address and a token. The address is
  * the customer's own probe: https:// (plain http:// only on a loopback address), no user name or query, and with BLOCK_PRIVATE_TARGETS
  * on it must resolve to a public address (as an application's address must).
  */

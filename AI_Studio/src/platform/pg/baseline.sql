@@ -1981,9 +1981,11 @@ CREATE TABLE pr_events (
     environment TEXT,
     queued TEXT,
     ignored TEXT,
+    body_sha TEXT,
     received_at TEXT NOT NULL,
     UNIQUE (project_id, delivery_id)
 );
+CREATE UNIQUE INDEX idx_pr_events_body ON pr_events (project_id, body_sha);
 CREATE INDEX idx_pr_events_pr ON pr_events (project_id, pr);
 
 CREATE TABLE pr_selections (

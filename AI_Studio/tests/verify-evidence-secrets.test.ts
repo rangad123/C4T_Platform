@@ -17,7 +17,11 @@ import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 const PW = "plain-river-canary-pw";
 const TOK = "cnrytok-apitoken-7q";
 const HDRV = "cnryhdr-value-9w";
-const CANARIES = { password: PW, apiToken: TOK, authHeaderValue: HDRV };
+// Test data named after a secret with more after the word (a confirmation field, a value of a key) is hidden too.
+const NEWPW = "cnry-newpw-5521x";
+const NEWPW2 = "cnry-newpw-7731y";
+const APIK = "cnry-apikey-v-4410";
+const CANARIES = { password: PW, apiToken: TOK, authHeaderValue: HDRV, password_confirmation: NEWPW, passwordConfirm: NEWPW2, apiKeyValue: APIK };
 
 let platform: Platform;
 let dir = "";
@@ -43,7 +47,7 @@ it("no run secret reaches the stored evidence package, finding row or events", a
         kind: "web",
         category: "Account",
         source: { origin: "browser-agent", requirements: ["R-1"] },
-        testData: { password: PW, apiToken: TOK },
+        testData: { password: PW, apiToken: TOK, password_confirmation: NEWPW, passwordConfirm: NEWPW2, "x-api-key-value": APIK },
         steps: [{ action: "navigate", url: "/profile" }, { action: "assert", check: "exactText", locator: { by: "testId", value: "name" }, expected: "QA", source: "R-1" }],
     });
     const testId = platform.repo.insertTest({ projectId, suiteId, jobId: null, spec, framework: "playwright", validationStatus: "VALIDATED" });

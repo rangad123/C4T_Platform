@@ -2,13 +2,13 @@
  * GitHub's webhook for a connected repository (Phase 6, G2): `POST /api/code-host/github/:token`. The address's token says which
  * connection a delivery is for (only its hash is stored); the delivery counts only when `X-Hub-Signature-256` is the HMAC of the exact
  * body under that connection's webhook secret, compared in constant time. Then, in this order: the delivery must be for the connected
- * repository, at most WEBHOOK_LIMIT_PER_MINUTE are taken per project, and a delivery id already seen acts no more (GitHub's
- * redelivery and replays). A pull request opened or pushed to queues an impact analysis, unless it comes from a fork (its code must not
- * run with this project's secrets), and the analysis starts once the delivery is answered (pr-impact.ts); a deployment that succeeded
- * queues a re-verification of the project's findings.
- * The API key check lets exactly this route through (isTriggerTokenRoute in trigger-store.ts); nothing GitHub sent is answered back.
+ * repository, at most WEBHOOK_LIMIT_PER_MINUTE are taken per project, and a delivery id or a body already seen acts no more (GitHub's
+ * redelivery, and a captured delivery replayed under a made-up id: the id is not signed). A pull request opened or pushed to queues an
+ * impact analysis, unless it comes from a fork (its code must not run with this project's secrets), and the analysis starts once the
+ * delivery is answered (pr-impact.ts); a deployment that succeeded queues a re-verification of the project's findings. The API key
+ * check lets exactly this route through (isTriggerTokenRoute in trigger-store.ts); nothing GitHub sent is answered back.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { HttpError } from "../http-error.js";
 import type { RouteCtx } from "../routes/types.js";
 import { processPrEvent } from "./pr-impact.js";
@@ -97,7 +97,7 @@ export function registerCodeHostWebhook(ctx: RouteCtx, store: CodeHostStore): vo
             if (str(body.repository?.full_name)?.toLowerCase() !== `${repo.owner}/${repo.repo}`.toLowerCase()) throw new HttpError(400, "This delivery is for another repository than the one connected to this project.");
             if (!take(repo.projectId)) return reply.header("retry-after", "60").code(429).send({ error: `At most ${WEBHOOK_LIMIT_PER_MINUTE} deliveries a minute are taken for a project.` });
             const what = decide(event, body);
-            if (!store.recordEvent(repo.projectId, { deliveryId, ...what })) return reply.code(200).send({ duplicate: true });
+            if (!store.recordEvent(repo.projectId, { deliveryId, bodySha: createHash("sha256").update(raw).digest("hex"), ...what })) return reply.code(200).send({ duplicate: true });
             // GitHub waits about ten seconds for an answer: the analysis runs after it (pr-impact.ts), and its failure is only logged.
             // shortcut: a restart loses an analysis still running; its pr_events row stays, with no pr_selections row for that head. Upgrade to a job kind if that is seen.
             if (what.queued === "reverify") void checkFixesOfDeployment(ctx.p, store, repo.projectId, what.headSha!).catch((err) => console.error(`[code-host] the fix check of deployment ${what.headSha!.slice(0, 7)} failed:`, err instanceof Error ? err.message : err));

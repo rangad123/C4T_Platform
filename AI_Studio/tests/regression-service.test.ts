@@ -16,7 +16,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import type { CodeHostStore } from "../src/platform/code-host/store.js";
 import { checkFix, checkFixesOfDeployment, claimFix, findingsFixedBy, fixReferences, reopenReturned, REGRESSION_SUITE, STILL_REPRODUCES } from "../src/platform/findings/regression-service.js";
-import { harvestExecutionFindings, type VerifyDeps } from "../src/platform/findings/verify-service.js";
+import { harvestExecutionFindings, verifyAfterJob, type VerifyDeps } from "../src/platform/findings/verify-service.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { RECOMMENDATION_NOTE } from "../src/platform/selection/preview.js";
@@ -210,5 +210,116 @@ describe("what links a fix", () => {
         const refused = await call(fresh, { action: "check_fix" });
         expect(refused.statusCode).toBe(409);
         expect(JSON.parse(refused.body).error).toMatch(/A fix is checked on a confirmed finding; this one is Candidate/);
+    });
+});
+
+describe("one fix check at a time", () => {
+    const active = (projectId: string) => platform.repo.listJobs(projectId).filter((j) => !["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status));
+    const call = (s: Seed, body: unknown) => server.inject({ method: "POST", url: `/api/projects/${s.projectId}/findings/${s.findingId}/transition`, headers: { "x-api-key": KEY }, payload: body as object });
+
+    it("a double-clicked Check the fix queues one check, and the second click says why", async () => {
+        const s = await seed("Double click shop");
+        expect((await call(s, { action: "check_fix" })).statusCode).toBe(200);
+        const again = await call(s, { action: "check_fix" });
+        expect(again.statusCode).toBe(409);
+        expect(again.json().error).toMatch(/still/);
+        expect(active(s.projectId)).toHaveLength(1);
+        expect((await reasons(s)).filter((r) => r.startsWith("Fix claimed by"))).toHaveLength(1);
+    });
+
+    it("Check the fix while another run of the project is going is refused (one active job per project)", async () => {
+        const s = await seed("Busy shop");
+        const appId = platform.repo.getLatestApplicationPublic(s.projectId)!.id as string;
+        await platform.repo.createJob(s.projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [s.related] });
+        expect((await call(s, { action: "check_fix" })).statusCode).toBe(409);
+        expect(active(s.projectId)).toHaveLength(1);
+    });
+
+    it("two successful deployments of the same head (two deliveries) queue one check", async () => {
+        const s = await seed("Two env shop");
+        prOpened(s.projectId);
+        const host = codeHost(["Fixes #12"]);
+        expect((await checkFixesOfDeployment(platform, host, s.projectId, HEAD))?.jobId).toBeTruthy();
+        await checkFixesOfDeployment(platform, host, s.projectId, HEAD);
+        expect(active(s.projectId)).toHaveLength(1);
+    });
+});
+
+describe("reopen in a project with many findings", () => {
+    it("a Fixed finding whose test fails again is reopened even when 500 newer findings exist", async () => {
+        const s = await seed("Busy findings shop");
+        const claimed = await claimFix(platform, s.projectId, { findingIds: [s.findingId], by: "person", source: "Ana" });
+        await checkFix(platform, platform.repo.getJob(claimed.jobId!)!, { execute: scripted(["pass", "pass", "pass"]) });
+        platform.repo.setJobStatus(claimed.jobId!, "COMPLETED");
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("fixed");
+        const base = (await store.get(s.projectId, s.findingId))!.finding;
+        await new Promise((r) => setTimeout(r, 5));
+        for (let i = 0; i < 500; i++) await store.upsert({ projectId: s.projectId, finding: { ...base, fingerprint: i.toString(16).padStart(64, "0") } });
+        const appId = platform.repo.getLatestApplicationPublic(s.projectId)!.id as string;
+        const later = await platform.repo.createJob(s.projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [s.bug] });
+        platform.repo.addExecution({ testId: s.bug, scriptId: null, jobId: later.id, attempt: 1, status: "failed", durationMs: 1, startedAt: new Date().toISOString(), steps: [] });
+        platform.repo.setJobStatus(later.id, "COMPLETED");
+        await reopenReturned(platform, platform.repo.getJob(later.id)!);
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("verification_pending");
+    }, 120_000);
+});
+
+describe("two runs of one project finish close together", () => {
+    /** A candidate finding of WEB-001 found by run A, and a later run B; both finished, so each one's verification may start. */
+    async function candidate(name: string) {
+        const projectId = String(platform.repo.createProject({ name }).id);
+        const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5591", { ...DEFAULT_JOB_OPTIONS });
+        const suiteId = platform.repo.getOrCreateSuite(projectId, "Cart", "cart");
+        const bug = platform.repo.insertTest({ projectId, suiteId, jobId: null, spec: web("WEB-001", "Cart total of two lines", "/cart"), framework: "playwright", validationStatus: "VALIDATED" });
+        const jobA = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [bug] });
+        const t = platform.repo.getTest(bug)!;
+        const [f] = await harvestExecutionFindings(store, { projectId, jobId: jobA.id, failed: [{ test: { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework }, run: run("WEB-001", "fail", 1, 1) }] });
+        platform.repo.setJobStatus(jobA.id, "COMPLETED");
+        const jobB = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [bug] });
+        platform.repo.setJobStatus(jobB.id, "COMPLETED");
+        return { projectId, findingId: f!.id, jobA: platform.repo.getJob(jobA.id)!, jobB: platform.repo.getJob(jobB.id)! };
+    }
+    const gate = () => {
+        let open!: () => void;
+        const p = new Promise<void>((r) => (open = r));
+        return { p, open };
+    };
+    /** Attempts that wait for the gate, and are counted. */
+    const gated = (g: Promise<void>, outcomes: Array<"pass" | "fail">, calls: { n: number }): VerifyDeps["execute"] => async (_a, batch) => {
+        calls.n++;
+        await g;
+        const id = batch.scripts[0]!.testId;
+        return outcomes.map((o, i) => run(id, o, i + 1, outcomes.length));
+    };
+
+    it("a verification job given up after three lost workers settles its findings as Unconfirmed, with why", async () => {
+        const s = await candidate("Lost worker shop");
+        const vj = await platform.repo.createJob(s.projectId, s.jobA.applicationId, { ...DEFAULT_JOB_OPTIONS, mode: "verify", verifyJobId: s.jobA.id, testIds: [platform.repo.getTest((await store.get(s.projectId, s.findingId))!.testId!)!.id] });
+        // Its third worker claimed it and moved the finding to Verification pending, then the process died.
+        platform.db.run("UPDATE generation_jobs SET status = 'VALIDATING', attempts = 3, lease_owner = 'gone', lease_until = ? WHERE id = ?", Date.now() - 1000, vj.id);
+        await store.transition(s.projectId, s.findingId, { to: "verification_pending", by: "engine" });
+        platform.repo.reclaimStaleJobs();
+        expect(platform.repo.getJob(vj.id)!.status).toBe("FAILED");
+        for (let i = 0; i < 100 && (await store.get(s.projectId, s.findingId))!.state === "verification_pending"; i++) await new Promise((r) => setTimeout(r, 20));
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("unconfirmed");
+        expect((await store.history(s.projectId, s.findingId)).at(-1)!.reason).toMatch(/lost track of its verification run/);
+    });
+
+    it("their verifications take turns: the finding is verified once and its verdict stands", async () => {
+        const s = await candidate("Together shop");
+        const gA = gate();
+        const gB = gate();
+        const calls = { n: 0 };
+        const pA = verifyAfterJob(platform, s.jobA, { execute: gated(gA.p, ["fail", "fail", "fail"], calls) });
+        const pB = verifyAfterJob(platform, s.jobB, { execute: gated(gB.p, ["fail", "fail", "fail"], calls) });
+        await new Promise((r) => setTimeout(r, 100));
+        gA.open();
+        gB.open();
+        const [rA] = await Promise.all([pA, pB]);
+        expect(rA?.verified.map((v) => v.to)).toEqual(["reproduced"]);
+        expect(calls.n).toBe(1);
+        const h = await store.history(s.projectId, s.findingId);
+        expect(h.map((e) => e.to)).not.toContain("unconfirmed");
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("confirmed");
     });
 });

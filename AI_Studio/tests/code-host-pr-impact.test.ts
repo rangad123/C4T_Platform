@@ -173,7 +173,8 @@ describe("a signed pull request delivery", () => {
 
     it("acts once for the same delivery twice, and once for another delivery of the same head commit", async () => {
         expect(await deliver(hooks.On!, "pr-d-1")).toBe(200);
-        expect(await deliver(hooks.On!, "pr-d-2")).toBe(202);
+        // GitHub's next delivery for the same head is other bytes (here: the opened event); the same bytes again would be a replay.
+        expect(await deliver(hooks.On!, "pr-d-2", delivery().replace('"action":"synchronize"', '"action":"opened"'))).toBe(202);
         // Give a second analysis time to run, were one started.
         await new Promise((r) => setTimeout(r, 500));
         expect(selections("On")).toHaveLength(1);

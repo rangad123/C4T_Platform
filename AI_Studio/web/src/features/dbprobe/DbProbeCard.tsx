@@ -25,7 +25,7 @@ export function DbProbeCard({ projectId }: { projectId: string }) {
     const [busy, setBusy] = useState(false);
     const [note, setNote] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
     const here = useHere(projectId);
-    const ro = Boolean(here.why("ai_studio.project.settings"));
+    const ro = Boolean(here.why("ai_studio.ai_keys.manage"));
     const saved = data.data;
     useEffect(() => {
         setEnabled(saved?.enabled ?? false);
@@ -99,7 +99,7 @@ export function DbProbeCard({ projectId }: { projectId: string }) {
             </div>
             {note && <Callout tone={note.tone}>{note.text}</Callout>}
             {ro ? (
-                <p className="t-meta">{here.why("ai_studio.project.settings")}</p>
+                <p className="t-meta">{here.why("ai_studio.ai_keys.manage")}</p>
             ) : (
                 <div>
                     <Button variant="primary" icon={Save} loading={busy} disabled={busy || !changed} onClick={() => void save()}>

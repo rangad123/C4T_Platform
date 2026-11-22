@@ -192,9 +192,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     // A project's AI model (routes/project-ai-model.ts): the choices are the asking person's own; changing it is a project setting.
     "GET /api/projects/:id/ai-model": "read",
     "PUT /api/projects/:id/ai-model": "ai_studio.project.settings",
-    // A project's database checks (routes/db-probe.ts): the token is never returned; changing it is a project setting.
+    // A project's database checks (routes/db-probe.ts): the token is never returned; setting it holds another system's secret, so it
+    // needs the same permission as every other connection.
     "GET /api/projects/:id/db-probe": "read",
-    "PUT /api/projects/:id/db-probe": "ai_studio.project.settings",
+    "PUT /api/projects/:id/db-probe": "ai_studio.ai_keys.manage",
     "POST /api/projects/:id/mobile-app/apk": "ai_studio.project.settings",
     // The app by platform (round 37, routes/project-app.ts): store links and an uploaded iPhone app.
     "GET /api/projects/:id/app-details": "read",

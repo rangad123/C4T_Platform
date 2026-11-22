@@ -39,10 +39,12 @@ CREATE TABLE pr_events (
     environment TEXT,                     -- deployment_status: the deployment's environment
     queued TEXT,                          -- impact reverify, or null when the delivery asked for nothing
     ignored TEXT,                         -- why nothing was queued
+    body_sha TEXT,                        -- SHA-256 of the signed body: the delivery id is not signed, so a replay under a new id is caught here
     received_at TEXT NOT NULL,
     UNIQUE (project_id, delivery_id)
 );
 CREATE INDEX idx_pr_events_pr ON pr_events (project_id, pr);
+CREATE UNIQUE INDEX idx_pr_events_body ON pr_events (project_id, body_sha);
 CREATE TABLE pr_selections (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -84,6 +86,8 @@ interface StoredSecret {
 /** One webhook delivery, as kept in pr_events. */
 export interface PrEvent {
     deliveryId: string;
+    /** SHA-256 (hex) of the delivery's exact bytes. */
+    bodySha?: string;
     event: string;
     action?: string;
     pr?: number;
@@ -216,13 +220,15 @@ export class CodeHostStore {
         return Number(changes) === 1;
     }
 
-    /** Keeps a delivery once: false when this project already has that delivery id (nothing is written). */
+    /** Keeps a delivery once: false when this project already has that delivery id or that body (nothing is written). */
     recordEvent(projectId: string, e: PrEvent): boolean {
         const changes = this.db.run(
-            "INSERT INTO pr_events (id, project_id, delivery_id, event, action, pr, head_sha, environment, queued, ignored, received_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (project_id, delivery_id) DO NOTHING",
+            // Either unique key (the delivery id, or the signed body) makes it a duplicate.
+            "INSERT INTO pr_events (id, project_id, delivery_id, body_sha, event, action, pr, head_sha, environment, queued, ignored, received_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
             randomUUID(),
             projectId,
             e.deliveryId,
+            e.bodySha ?? null,
             e.event,
             e.action ?? null,
             e.pr ?? null,
