@@ -509,7 +509,7 @@ describe("AI work on your runner in runners mode", () => {
         // Round 51: exploring runs on the person's own runner (tests/explore-on-runner-ui.test.ts has its states).
         await visit(`#/new?project=${projectId}`);
         await pwExpect(page.getByTestId("explore-on-hint")).toContainText("Explores on your runner, Office laptop.");
-        await pwExpect(page.getByRole("button", { name: "Explore again" })).toBeEnabled();
+        await pwExpect(page.getByRole("button", { name: "Start exploring" })).toBeEnabled();
     }, 120_000);
 });
 

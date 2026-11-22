@@ -406,7 +406,7 @@ describe("input handling option", () => {
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         const made = platform.repo.createProject({ name: "Input shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
         await page.goto(`${base}/#/new?project=${made}`);
-        await pwExpect(page.getByRole("heading", { name: "Explore again" })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Start exploring" })).toBeVisible();
         await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
         await pwExpect(page.getByRole("checkbox", { name: /Check how forms handle unusual input/ })).toHaveCount(0);
         await pwExpect(page.locator("summary", { hasText: "Advanced options" })).toHaveCount(0);

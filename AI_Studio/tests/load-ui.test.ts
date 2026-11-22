@@ -65,7 +65,7 @@ describe("the new-project form", () => {
             sent.push(route.request().postDataJSON());
             return route.continue();
         });
-        await page.getByRole("button", { name: "Explore again" }).click();
+        await page.getByRole("button", { name: "Start exploring" }).click();
         await page.waitForURL((u) => u.hash.startsWith("#/projects/"));
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]).not.toHaveProperty("loadChecks");

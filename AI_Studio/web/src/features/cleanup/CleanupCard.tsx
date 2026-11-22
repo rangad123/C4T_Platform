@@ -30,6 +30,8 @@ function Item({ item }: { item: CleanupItem }) {
  */
 export function CleanupCard({ projectId, variant = "card", onClose }: { projectId: string; variant?: "card" | "panel"; onClose?: () => void }) {
     const data = useFetch<ProjectCleanup>(`/projects/${projectId}/cleanup`);
+    const inputs = useFetch<{ allowMutatingApiTests?: boolean }>(`/projects/${projectId}/agent-inputs`);
+    const changesOn = inputs.data?.allowMutatingApiTests === true;
     const [busy, setBusy] = useState<"" | "retry" | "switch">("");
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
@@ -122,7 +124,7 @@ export function CleanupCard({ projectId, variant = "card", onClose }: { projectI
             {head}
             {d.dataChangingTests === 0 && !latest && (
                 <p className="t-secondary" data-testid="cleanup-none">
-                    None of this project’s tests change data, so there is nothing to clean up.
+                    {changesOn ? "No test of this project changes data yet. The tests the next exploration makes may; what they create is listed here." : "None of this project’s tests change data, so there is nothing to clean up."}
                 </p>
             )}
             {d.dataChangingTests > 0 && !latest && (

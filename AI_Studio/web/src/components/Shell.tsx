@@ -102,7 +102,7 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
                         <Button className="menu-btn" variant="ghost" iconOnly icon={open ? X : Menu} aria-label="Toggle navigation" onClick={() => setOpen((o) => !o)} />
                         <nav className="crumbs" aria-label="Breadcrumb">
                             {meta.crumbs.map((c, i) => (
-                                <span key={i} style={{ display: "contents" }}>
+                                <span key={i} className={i > 0 && i < meta.crumbs.length - 1 ? "crumb mid" : "crumb"}>
                                     {i > 0 && <ChevronRight size={14} className="sep" aria-hidden />}
                                     {c.href && i < meta.crumbs.length - 1 ? <a href={c.href}>{c.label}</a> : <span className={i === meta.crumbs.length - 1 ? "here truncate" : ""}>{c.label}</span>}
                                 </span>

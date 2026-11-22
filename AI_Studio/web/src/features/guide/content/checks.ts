@@ -258,6 +258,23 @@ export const checks: Topic[] = [
         moreDoc: "docs/features/vision-judgement.md",
     },
     {
+        id: "database-checks",
+        group: "checks",
+        title: "Check what the database stored",
+        what: "After a test changes data, the platform asks your database, through a small probe you run, whether the data was really stored.",
+        why: "A page can say Saved while nothing was saved.",
+        steps: [
+            step("Ask whoever runs your database to start the read-only probe."),
+            step("In the project's Settings, open Test data and find Database checks.", "Settings", "Test data", "Database checks"),
+            step("Tick Check the database after tests that change data, give the Probe address and Probe token, and save.", "Check the database after tests that change data", "Probe address", "Probe token"),
+        ],
+        goodToKnow: ["It needs Include API tests that change data on the Requirements tab.", "Only counts are kept, never your data."],
+        words: ["api-token"],
+        related: ["api-tests", "test-data", "requirements-coverage"],
+        keywords: ["database", "stored data", "probe", "data check", "saved", "records", "db", "persistence"],
+        moreDoc: "docs/features/database-checks.md",
+    },
+    {
         id: "requirements-coverage",
         group: "checks",
         title: "Check every requirement has a test",

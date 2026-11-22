@@ -161,7 +161,7 @@ describe("before the click", () => {
             const note = page.getByTestId("explore-runner-problem");
             await pwExpect(note).toContainText(why);
             await pwExpect(note.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", SETTINGS);
-            await pwExpect(page.getByRole("button", { name: "Explore again" })).toBeDisabled();
+            await pwExpect(page.getByRole("button", { name: "Start exploring" })).toBeDisabled();
             await pwExpect(page.getByTestId("explore-on-hint")).toHaveCount(0);
         }
         await axeBoth();
@@ -174,7 +174,7 @@ describe("before the click", () => {
         await pwExpect(page.getByTestId("explore-on-hint")).toHaveText(exploresOnRunner("Office laptop"));
         await pwExpect(page.getByTestId("explore-runner-problem")).toHaveCount(0);
         await page.locator("#url").fill("https://shop.example.test");
-        await page.getByRole("button", { name: "Explore again" }).click();
+        await page.getByRole("button", { name: "Start exploring" }).click();
         await pwExpect.poll(() => starts.length).toBe(1);
         expect(starts[0]).toMatchObject({ url: `/api/projects/${projectId}/test-generation`, body: { url: "https://shop.example.test/", plan: true } });
         await axeBoth();
@@ -186,7 +186,7 @@ describe("before the click", () => {
         try {
             await exploreAgain();
             await page.locator("#url").fill("https://shop.example.test");
-            await page.getByRole("button", { name: "Explore again" }).click();
+            await page.getByRole("button", { name: "Start exploring" }).click();
             const err = page.getByTestId("run-start-error");
             await pwExpect(err).toContainText(SERVER_OFFLINE);
             await pwExpect(err.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", SETTINGS);

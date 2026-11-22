@@ -227,8 +227,9 @@ describe("the first screen", () => {
         const pid = (await api("POST", "/api/projects", { name: "Explore target", platforms: ["web"], testingModes: ["agent"] })).body.id as string;
         await visit(`#/new?project=${pid}`);
         await pwExpect(page).toHaveURL(new RegExp(`#/new\\?project=${pid}$`));
-        await pwExpect(page.getByRole("heading", { name: "Explore again", level: 1 })).toBeVisible();
-        await pwExpect(page.getByRole("button", { name: "Explore again", exact: true })).toBeVisible();
+        // Never explored: the page is Start exploring.
+        await pwExpect(page.getByRole("heading", { name: "Start exploring", level: 1 })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "Start exploring", exact: true })).toBeVisible();
     });
 
     it("the first screen: keyboard reaches Create a project, 375 px, 44 px target, axe in both themes", async () => {
@@ -278,7 +279,7 @@ describe("explore, then a plan, then the tests (real jobs, scripted model)", () 
         projectId = (await api("POST", "/api/projects", { name: "Explored shop", platforms: ["web"], testingModes: ["agent"] })).body.id as string;
         await visit(`#/new?project=${projectId}`);
         await page.getByLabel("Application URL").fill(SITE);
-        await page.getByRole("button", { name: "Explore again", exact: true }).click();
+        await page.getByRole("button", { name: "Start exploring", exact: true }).click();
         await page.waitForURL((u) => u.hash === `#/projects/${projectId}`);
         await pwExpect(page.getByRole("heading", { name: "Exploring your application" })).toBeVisible({ timeout: 20_000 });
         // The visible sentence on the page (the job badge's closed tooltip says it too, hidden, and must not count).

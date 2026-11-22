@@ -83,7 +83,7 @@ describe("UI journey", () => {
         await page.goto(`http://127.0.0.1:${UI_PORT}/#/projects/${id}`);
         await page.getByRole("link", { name: "Start exploring", exact: true }).click();
         await page.getByLabel("Application URL").fill("notaurl");
-        await page.getByRole("button", { name: "Explore again", exact: true }).click();
+        await page.getByRole("button", { name: "Start exploring", exact: true }).click();
         await pwExpect(page.getByText("That doesn’t look like a complete address")).toBeVisible();
         await pwExpect(page.getByLabel("Application URL")).toHaveAttribute("aria-invalid", "true");
     });
@@ -94,7 +94,7 @@ describe("UI journey", () => {
         await page.getByLabel("Application URL").fill(`127.0.0.1:${APP_PORT}`);
         // No AI model here: the page says so and explores only the API, which needs none.
         await pwExpect(page.getByText("only the application’s API is explored here", { exact: false })).toBeVisible();
-        await page.getByRole("button", { name: "Explore again", exact: true }).click();
+        await page.getByRole("button", { name: "Start exploring", exact: true }).click();
 
         await pwExpect(page.getByRole("heading", { name: /Exploring your application/ })).toBeVisible({ timeout: 15_000 });
         // UX-E: the exploration ends at a plan; the tests are created when the person says so.
