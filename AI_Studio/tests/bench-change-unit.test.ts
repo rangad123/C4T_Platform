@@ -186,6 +186,9 @@ describe("the PR bench's scores", () => {
         const broken = STEPS.map((p) => (p.number === 1 ? { ...p, runs: [...p.runs.slice(0, 3), { ...p.runs[3]!, notRun: ["T2"] }] } : p.number === 3 ? { ...p, runs: p.runs.slice(0, 2) } : p));
         const r = scoreChange(SETUP, broken);
         expect(r.notes).toEqual(["1 run(s) with tests not run, findings left unverified, or no wall time.", "The full run's failing tests differ between repeats for #1.", "1 PR(s) do not have 2 focused and 2 full runs."]);
+        const masked = STEPS.map((p) => (p.number === 1 ? { ...p, runs: p.runs.map((r, i) => (i === 1 ? { ...r, reported: [] } : r)) } : p));
+        expect(scoreChange(SETUP, masked).notes[0]).toBe("1 run(s) reported other failures than the app's checks gave (a test tracking an open bug runs as an expected failure); the scores use the app's outcome.");
+        expect(crit(masked, "G1").value).toBe(crit(STEPS, "G1").value);
         const md = renderChangeMd(scoreChange(SETUP, STEPS));
         expect(md).toContain("| G1 | Recall");
         expect(md.match(/^\| #\d+ \|/gm)).toHaveLength(6);

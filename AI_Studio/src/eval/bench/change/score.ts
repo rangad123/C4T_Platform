@@ -10,8 +10,10 @@ export interface RunRecord {
     tests: number;
     /** Wall time of the run's job (started to finished), ms. */
     ms: number;
-    /** Test keys that failed. */
+    /** Test keys whose checks failed against the app (an expected failure of a tracked bug counts; a "seems fixed" pass does not). */
     failed: string[];
+    /** What the run reported as failed, when it differs (tests tracking an open bug run as expected failures). */
+    reported?: string[];
     /** Test keys that did not pass or fail (not run, skipped). */
     notRun: string[];
     /** The focused set was empty: nothing ran. */
@@ -242,6 +244,8 @@ export function scoreChange(setup: SetupRecord, steps: PrStep[]): ChangeReport {
     const allRuns = measured.flatMap((p) => p.runs);
     const problems = allRuns.filter((r) => r.notRun.length || r.unsettled || !Number.isFinite(r.ms));
     if (problems.length) notes.push(`${problems.length} run(s) with tests not run, findings left unverified, or no wall time.`);
+    const masked = allRuns.filter((r) => r.reported !== undefined);
+    if (masked.length) notes.push(`${masked.length} run(s) reported other failures than the app's checks gave (a test tracking an open bug runs as an expected failure); the scores use the app's outcome.`);
     const flaky = measured.filter((p) => new Set(p.runs.filter((r) => r.arm === "full").map((r) => r.failed.join(","))).size > 1);
     if (flaky.length) notes.push(`The full run's failing tests differ between repeats for ${flaky.map((p) => `#${p.number}`).join(", ")}.`);
     const missing = measured.filter((p) => repeatsOf(p).length !== setup.repeat || p.runs.length !== 2 * setup.repeat);

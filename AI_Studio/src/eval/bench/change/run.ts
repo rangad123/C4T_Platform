@@ -23,6 +23,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { REPO_ROOT, type Config } from "../../../config.js";
 import { unavailableLlmClient, type LlmClient } from "../../../engine/llm/provider.js";
+import { KNOWN_BUG_FIXED } from "../../../engine/validation/runner.js";
 import { REGRESSION_SUITE, STILL_REPRODUCES } from "../../../platform/findings/regression-service.js";
 import { SuiteStore } from "../../../platform/suite-store.js";
 import { ok, type PlatformClient } from "../../client.js";
@@ -206,11 +207,19 @@ async function runTests(s: Side, host: BenchAppHost, projectId: string, ids: str
     const job = s.platform.repo.getJob(started.jobId)!;
     const detail = ok(await s.client.call("GET", `/api/projects/${projectId}/runs/${started.jobId}`), "Reading a run");
     const states = new Map<string, string>(((detail.tests ?? []) as Array<{ id: string; state: string }>).map((t) => [t.id, t.state]));
-    const failed = ids.filter((id) => FAILING.has(states.get(id) ?? "")).map((id) => keyOf.get(id)!);
+    const reported = ids.filter((id) => FAILING.has(states.get(id) ?? "")).map((id) => keyOf.get(id)!);
+    // What the app did: a test whose check failed against it. A test tracking an open bug runs as an expected failure, so the run reports
+    // it passed while its check failed (and failed, "seems fixed", while every check passed); the app's outcome is its steps'.
+    const failedHere = new Set(
+        s.platform.db
+            .all<{ test_case_id: string }>("SELECT DISTINCT e.test_case_id FROM test_executions e JOIN test_execution_steps st ON st.execution_id = e.id WHERE e.job_id = ? AND st.status = 'failed'", started.jobId)
+            .map((r) => r.test_case_id),
+    );
+    const failed = ids.filter((id) => failedHere.has(id) || (FAILING.has(states.get(id) ?? "") && !s.platform.db.get("SELECT 1 AS x FROM test_executions WHERE job_id = ? AND test_case_id = ? AND error LIKE ?", started.jobId, id, `${KNOWN_BUG_FIXED}%`))).map((id) => keyOf.get(id)!);
     const notRun = ids.filter((id) => !["passed", ...FAILING].includes(states.get(id) ?? "")).map((id) => keyOf.get(id)!);
     const ms = job.startedAt && job.finishedAt ? Date.parse(job.finishedAt) - Date.parse(job.startedAt) : NaN;
-    const quiet = await settled(s, projectId, failed.length > 0, started.jobId);
-    return { tests: ids.length, ms, failed: failed.sort(), notRun: notRun.sort(), jobId: started.jobId, ...(quiet ? {} : { unsettled: true }) };
+    const quiet = await settled(s, projectId, reported.length > 0, started.jobId);
+    return { tests: ids.length, ms, failed: failed.sort(), ...(reported.join() !== failed.join() ? { reported: reported.sort() } : {}), notRun: notRun.sort(), jobId: started.jobId, ...(quiet ? {} : { unsettled: true }) };
 }
 
 /**
