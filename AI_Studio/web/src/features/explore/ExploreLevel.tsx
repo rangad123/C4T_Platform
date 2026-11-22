@@ -41,8 +41,8 @@ export function LevelChoice({ value, onChange, name = "explore-level" }: { value
 }
 
 /**
- * "AI screen review" for one exploration. Its default comes from the level and whether the AI model can read images; `value` is
- * null until the person changes it, and only then is visionChecks sent (true or false), so an untouched box leaves it to the level.
+ * "AI screen review" for one exploration, shown only at a level that includes it (Deep, Everything) with a model that can read images.
+ * `value` is null until the person changes it, and only then is visionChecks sent, so an untouched box leaves it to the level.
  */
 export function ScreenReviewChoice({ level, canReadImages, value, onChange }: { level: ExploreLevel; canReadImages: boolean; value: boolean | null; onChange: (v: boolean) => void }) {
     const checked = value ?? (LEVEL_SETTINGS[level].visionByDefault && canReadImages);
@@ -51,7 +51,7 @@ export function ScreenReviewChoice({ level, canReadImages, value, onChange }: { 
             <input type="checkbox" data-testid="screen-review" checked={checked} onChange={(e) => onChange(e.target.checked)} />
             <span>
                 <span className="title">AI screen review (screenshots go to your AI provider)</span>
-                <span className="hint">A model that can read images looks at key pages for overlapping or cut-off elements and broken pictures. On by default at Deep and Everything when your model can read images.</span>
+                <span className="hint">A model that can read images looks at key pages for overlapping or cut-off elements and broken pictures. This level includes it; untick it to keep the screenshots from your AI provider.</span>
             </span>
         </label>
     );

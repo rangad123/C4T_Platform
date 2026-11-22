@@ -17,14 +17,32 @@ interface Quality {
     history: { stability: { runs: number } };
 }
 
-const hours = (h: number | null) => (h === null ? "–" : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
-
-/** The project dashboard's quality card: six numbers and two lists, each row a link to the test to look at. Hidden until there is history. */
+/**
+ * The project dashboard's quality card: up to five numbers and two lists, each row a link to the test to look at. Hidden until there is
+ * history. Workflow steps and pull requests show only when there is something to count; "Bugs confirmed" opens the run that found the
+ * latest confirmed bug, where the findings are.
+ */
 export function QualityCard({ projectId }: { projectId: string }) {
     const q = useFetch<Quality>(`/projects/${projectId}/quality`);
+    const confirmed = q.data?.card.numbers.confirmed ?? 0;
+    // Newest seen first; the run it was last seen in lists it among Confirmed.
+    const findings = useFetch<{ findings: Array<{ state: string; lastJobId: string | null }> }>(confirmed ? `/projects/${projectId}/candidate-findings` : null);
     if (!q.data) return null;
     const { numbers: n, areas, flaky, weeks, runs } = q.data.card;
     if (!q.data.history.stability.runs && !n.confirmed && !n.pullRequests) return null;
+    const latestRun = findings.data?.findings.find((f) => f.state === "confirmed" && f.lastJobId)?.lastJobId;
+    const metrics = [
+        <Metric
+            key="confirmed"
+            value={latestRun ? <a href={routes.run(projectId, latestRun)} data-testid="quality-confirmed-link">{n.confirmed}</a> : n.confirmed}
+            label="Bugs confirmed"
+            tip={latestRun ? "Findings that were checked again and failed the same way. The number opens the run that found the latest one." : "Findings that were checked again and failed the same way."}
+        />,
+        <Metric key="reopened" value={n.reopened} label="Came back after a fix" tone={n.reopened ? "warn" : undefined} tip="Bugs marked fixed that failed again later." />,
+        <Metric key="pass" value={n.passRate === null ? "–" : `${n.passRate}%`} label={`Pass rate, last ${runs} runs`} tip="The average of the latest runs' pass rates." />,
+        n.workflowSteps && <Metric key="workflow" value={`${n.workflowSteps.exercised} of ${n.workflowSteps.total}`} label="Workflow steps tried" tip="Steps of the application's workflows that the latest exploration tried." />,
+        n.pullRequests > 0 && <Metric key="prs" value={n.pullRequests} label="Pull requests checked" tip="Pull requests whose tests were chosen from the change." />,
+    ].filter(Boolean);
     return (
         <section className="card divided" aria-labelledby="quality-title" data-testid="quality-card">
             <div className="card-head">
@@ -34,13 +52,8 @@ export function QualityCard({ projectId }: { projectId: string }) {
                 </h2>
                 <span className="t-meta">Last {weeks} weeks</span>
             </div>
-            <div className="metrics quality-metrics">
-                <Metric value={n.confirmed} label="Bugs confirmed" tip="Findings that were checked again and failed the same way." />
-                <Metric value={n.reopened} label="Came back after a fix" tone={n.reopened ? "warn" : undefined} tip="Bugs marked fixed that failed again later." />
-                <Metric value={n.passRate === null ? "–" : `${n.passRate}%`} label={`Pass rate, last ${runs} runs`} tip="The average of the latest runs' pass rates." />
-                <Metric value={n.workflowSteps ? `${n.workflowSteps.exercised} of ${n.workflowSteps.total}` : "–"} label="Workflow steps tried" tip="Steps of the application's workflows that the latest exploration tried." />
-                <Metric value={hours(n.hoursToConfirm)} label="Time to confirm" tip="The middle time from a bug first seen to confirmed." />
-                <Metric value={n.pullRequests} label="Pull requests checked" tip="Pull requests whose tests were chosen from the change." />
+            <div className="metrics quality-metrics" data-count={metrics.length}>
+                {metrics}
             </div>
             <div className="quality-lists">
                 <div data-testid="quality-areas">

@@ -242,6 +242,9 @@ describe("rules to confirm and inputs for the analysis", () => {
 
     it("adds a database schema file, says why one is refused, and removes it", async () => {
         const inputs = page.getByTestId("source-inputs");
+        // Closed to one line until opened.
+        await pwExpect(inputs.locator("#schema-file")).toHaveCount(0);
+        await inputs.getByRole("button", { name: "More for application understanding" }).click();
         await inputs.locator("#schema-file").setInputFiles({ name: "shop.sql", mimeType: "text/plain", buffer: Buffer.from("CREATE TABLE orders (id INT PRIMARY KEY, total INT NOT NULL);\n") });
         await inputs.getByRole("button", { name: "Add schema file" }).click();
         await pwExpect(inputs.getByRole("list", { name: "Database schema files" })).toContainText("shop.sql");
@@ -254,7 +257,7 @@ describe("rules to confirm and inputs for the analysis", () => {
         expect((await intel.sources(shop)).filter((s) => s.kind === "db_schema")).toEqual([]);
     });
 
-    it("saves a version label, and says why when there is no analysis to label", async () => {
+    it("saves a version label, and offers none when there is no analysis to label", async () => {
         const inputs = page.getByTestId("source-inputs");
         await inputs.getByLabel("Version label").fill("3.0.0");
         await inputs.getByRole("button", { name: "Save label" }).click();
@@ -263,9 +266,10 @@ describe("rules to confirm and inputs for the analysis", () => {
 
         await page.goto(`${BASE}/#/projects/${fresh}/requirements`);
         const other = page.getByTestId("source-inputs");
-        await other.getByLabel("Version label").fill("1.0");
-        await other.getByRole("button", { name: "Save label" }).click();
-        await pwExpect(other.getByTestId("source-inputs-error")).toHaveText("There is nothing to label yet. Read the application first.");
+        await other.getByRole("button", { name: "More for application understanding" }).click();
+        // Nothing was read yet, so there is no version to label.
+        await pwExpect(other.getByRole("button", { name: "Choose a schema file" })).toBeVisible();
+        await pwExpect(other.getByLabel("Version label")).toHaveCount(0);
         await pwExpect(page.getByRole("heading", { name: "Rules to confirm" })).toHaveCount(0);
         expect(await axeClean(page)).toEqual([]);
     });
@@ -276,6 +280,7 @@ describe("rules to confirm and inputs for the analysis", () => {
         await pwExpect(vic.getByRole("article", { name: "Prices are never negative" })).toBeVisible();
         await pwExpect(vic.getByRole("article", { name: "Browse the shop" })).toBeVisible();
         for (const name of ["Confirm", "Reject", "Undo the decision", "Confirm again", "Confirm the workflow", "Add schema file", "Save label", "Choose a schema file"]) await pwExpect(vic.getByRole("button", { name })).toHaveCount(0);
+        await vic.getByTestId("source-inputs").getByRole("button", { name: "More for application understanding" }).click();
         await pwExpect(vic.getByTestId("source-inputs")).toContainText("The latest reading describes version 3.0.0.");
     });
 });

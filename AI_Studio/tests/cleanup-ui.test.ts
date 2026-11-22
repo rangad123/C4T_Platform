@@ -191,16 +191,17 @@ describe("test data cleanup in the UI", () => {
         expect((await call("GET", `/api/projects/${projectId}/cleanup`)).body.enabled).toBe(true);
     });
 
-    it("the Requirements tab's inputs offer the choice next to tests that change data, with a plain warning when it is off", async () => {
+    it("the Requirements tab's inputs say whether cleanup is on next to tests that change data, and point to Settings → Test data", async () => {
         // The card is collapsed to one line unless something is missing (round 38); its own link opens it.
         await page.goto(`${base}/#/projects/${projectId}/requirements?inputs=open`);
         const change = page.getByTestId("agent-inputs").getByRole("checkbox", { name: /Include API tests that change data/ });
         await change.check();
-        const remove = page.getByRole("checkbox", { name: /Remove the records these tests create afterwards/ });
-        await pwExpect(remove).toBeChecked();
-        await remove.uncheck();
-        await pwExpect(page.getByText(/Cleanup is off: the records the tests create will stay in the application/)).toBeVisible();
+        // The switch itself lives in one place only: Settings → Test data (switched back on above).
+        await pwExpect(page.getByRole("checkbox", { name: /Remove the records/ })).toHaveCount(0);
+        const line = page.getByTestId("agent-inputs-cleanup");
+        await pwExpect(line).toHaveText("The records these tests create are removed after each run. Change it in Settings → Test data.");
+        await pwExpect(line.getByRole("link", { name: "Settings → Test data" })).toHaveAttribute("href", `#/projects/${projectId}/settings?section=data`);
         await change.uncheck();
-        await pwExpect(page.getByRole("checkbox", { name: /Remove the records these tests create afterwards/ })).toHaveCount(0);
+        await pwExpect(page.getByTestId("agent-inputs-cleanup")).toHaveCount(0);
     });
 });

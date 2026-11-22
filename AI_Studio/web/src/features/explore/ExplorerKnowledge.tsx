@@ -6,7 +6,7 @@ import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { reusedWord, siteTree, type Knowledge, type SiteNode } from "./knowledge";
+import { reusedWord, type Knowledge, type KnowledgePage } from "./knowledge";
 import "./explore-tree.css";
 import "./knowledge.css";
 
@@ -29,77 +29,72 @@ function Thumb({ id, path }: { id?: string; path: string }) {
     return <img className="xk-thumb" src={artifactUrl(id)} alt={`Picture of ${path}`} loading="lazy" width={160} height={100} onError={() => setBroken(true)} data-testid="xk-thumb" />;
 }
 
-function SitePage({ node, projectId }: { node: SiteNode; projectId: string }) {
-    const [open, setOpen] = useState(true);
-    const listId = useId();
-    const p = node.page;
+function TestedPage({ page }: { page: KnowledgePage }) {
     return (
-        <li className="xk-node" data-testid={`xk-page:${node.path}`}>
-            <div className="xk-row">
-                <Thumb id={p?.thumbnail} path={node.path} />
-                <div className="xk-what">
-                    <span className="xk-path">{node.path}</span>
-                    {p ? (
-                        <>
-                            {p.title && <span className="xk-title">{p.title}</span>}
-                            {p.reusedFrom && (
-                                <span className="xt-badge is-info" data-testid="xk-reused">
-                                    <History size={12} aria-hidden />
-                                    {reusedWord(p.reusedFrom)}
-                                </span>
-                            )}
-                            {p.tests.length ? (
-                                <span className="xk-tests">
-                                    Tested by{" "}
-                                    {p.tests.map((t, i) => (
-                                        <span key={t.id}>
-                                            {i > 0 && ", "}
-                                            <a href={routes.test(t.id)}>
-                                                {t.testKey} {t.title}
-                                            </a>
-                                        </span>
-                                    ))}
-                                </span>
-                            ) : (
-                                <span className="t-meta">No test made in this exploration starts on this page.</span>
-                            )}
-                        </>
-                    ) : (
-                        <span className="t-meta">No page at this address itself; the pages under it were found.</span>
-                    )}
-                </div>
+        <li className="xk-row" data-testid={`xk-page:${page.path}`}>
+            <Thumb id={page.thumbnail} path={page.path} />
+            <div className="xk-what">
+                <span className="xk-path">{page.path}</span>
+                {page.title && <span className="xk-title">{page.title}</span>}
+                {page.reusedFrom && <ReusedBadge since={page.reusedFrom} />}
+                <span className="xk-tests">
+                    Tested by{" "}
+                    {page.tests.map((t, i) => (
+                        <span key={t.id}>
+                            {i > 0 && ", "}
+                            <a href={routes.test(t.id)}>
+                                {t.testKey} {t.title}
+                            </a>
+                        </span>
+                    ))}
+                </span>
             </div>
-            {node.children.length > 0 && (
-                <>
-                    <button type="button" className="xt-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
-                        <ChevronRight size={14} className="chev" aria-hidden />
-                        {open ? "Hide" : "Show"} {plural(node.children.length, "page")} under {node.path}
-                    </button>
-                    <ul id={listId} className="xk-list" hidden={!open}>
-                        {node.children.map((c) => (
-                            <SitePage key={c.path} node={c} projectId={projectId} />
-                        ))}
-                    </ul>
-                </>
-            )}
         </li>
     );
 }
 
-function SiteMap({ k, projectId }: { k: Knowledge; projectId: string }) {
-    const tree = siteTree(k.siteMap.pages);
-    if (!tree.length) return <p className="t-secondary">No pages were found yet.</p>;
+const ReusedBadge = ({ since }: { since: string }) => (
+    <span className="xt-badge is-info" data-testid="xk-reused">
+        <History size={12} aria-hidden />
+        {reusedWord(since)}
+    </span>
+);
+
+/** The pages that tests start on, with their pictures; the other pages as one folded list of addresses. */
+function SiteMap({ k }: { k: Knowledge }) {
+    const pages = [...k.siteMap.pages].sort((a, b) => a.path.localeCompare(b.path));
+    if (!pages.length) return <p className="t-secondary">No pages were found yet.</p>;
+    const tested = pages.filter((p) => p.tests.length);
+    const rest = pages.filter((p) => !p.tests.length);
     return (
         <div className="stack-sm">
             <p className="t-secondary" data-testid="xk-map-counts">
-                {plural(k.siteMap.pages.length, "page")} found
-                {k.thumbnails.count ? `, ${plural(k.thumbnails.count, "picture")} kept` : k.thumbnails.keep ? "" : ". Page pictures are switched off in Settings → General"}.
+                {tested.length ? `Tests start on ${tested.length} of the ${plural(pages.length, "page")}.` : "No test starts on these pages yet."}
+                {!k.thumbnails.count && !k.thumbnails.keep && " Page pictures are switched off in Settings → General."}
             </p>
-            <ul className="xk-list xk-top" aria-label="Pages found">
-                {tree.map((n) => (
-                    <SitePage key={n.path} node={n} projectId={projectId} />
-                ))}
-            </ul>
+            {tested.length > 0 && (
+                <ul className="xk-list" aria-label="Pages tests start on">
+                    {tested.map((p) => (
+                        <TestedPage key={p.path} page={p} />
+                    ))}
+                </ul>
+            )}
+            {rest.length > 0 && (
+                <details className="disclosure" data-testid="xk-other-pages">
+                    <summary>
+                        <ChevronRight size={16} className="chev" aria-hidden />
+                        {tested.length ? `${plural(rest.length, "other page")}` : `The ${plural(rest.length, "page")} found`}
+                    </summary>
+                    <ul className="xk-paths" aria-label="Other pages found">
+                        {rest.map((p) => (
+                            <li key={p.path} data-testid={`xk-page:${p.path}`}>
+                                <span className="xk-path">{p.path}</span>
+                                {p.title && <span className="xk-title"> {p.title}</span>} {p.reusedFrom && <ReusedBadge since={p.reusedFrom} />}
+                            </li>
+                        ))}
+                    </ul>
+                </details>
+            )}
         </div>
     );
 }
@@ -169,9 +164,9 @@ function Reused({ k }: { k: Knowledge }) {
 }
 
 /**
- * "What the explorer knows" for one exploration: its site map (the pages found, with their covered pictures and the tests that start on
- * each) and what it reused from the last exploration and why, with the AI cache figures for people who may see AI usage. One tab shows
- * at a time. Read while the exploration runs, every few seconds.
+ * "What the explorer knows" for one exploration: its site map (the pages tests start on, with their covered pictures and tests; the other
+ * pages as a folded list of addresses) and what it reused from the last exploration and why, with the AI cache figures for people who
+ * may see AI usage. One tab shows at a time. Read while the exploration runs, every few seconds.
  */
 export function ExplorerKnowledge({ projectId, jobId, active }: { projectId: string; jobId: string; active: boolean }) {
     const k = useFetch<Knowledge>(`/projects/${projectId}/jobs/${jobId}/knowledge`, () => (active ? 5000 : null));
@@ -232,7 +227,7 @@ export function ExplorerKnowledge({ projectId, jobId, active }: { projectId: str
                 ))}
             </div>
             <div role="tabpanel" id={`${base}-panel-${tab}`} aria-labelledby={`${base}-tab-${tab}`} data-testid={`xk-panel-${tab}`}>
-                {tab === "map" ? <SiteMap k={d} projectId={projectId} /> : <Reused k={d} />}
+                {tab === "map" ? <SiteMap k={d} /> : <Reused k={d} />}
             </div>
         </section>
     );

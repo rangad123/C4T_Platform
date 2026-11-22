@@ -118,17 +118,34 @@ describe("how much to explore", () => {
         await pwExpect(page.getByTestId("explore-level-setting")).toBeVisible();
     });
 
-    it("the Explore page starts from the project's level, and the choice reaches the job", async () => {
+    it("the Explore page starts from the project's level, and the choice reaches the job; a first exploration is Start exploring, with nothing to explore again", async () => {
         await page.goto(`${BASE}/#/new?project=${shop}`);
         const levels = page.getByTestId("explore-level");
         await pwExpect(levels.getByRole("radio", { name: /Deep/ })).toBeChecked();
-        await pwExpect(page.getByTestId("full-exploration")).not.toBeChecked();
+        await pwExpect(page.getByRole("heading", { name: "Start exploring", level: 1 })).toBeVisible();
+        await pwExpect(page.getByTestId("full-exploration")).toHaveCount(0);
         expect(await axeClean(page)).toEqual([]);
         await levels.getByRole("radio", { name: /Everything/ }).check();
-        await page.getByTestId("full-exploration").check();
-        await page.getByRole("button", { name: "Explore again" }).click();
+        await page.getByRole("button", { name: "Start exploring" }).click();
         await pwExpect.poll(() => platform.repo.listJobs(shop).length).toBe(1);
-        expect(platform.repo.listJobs(shop)[0]!.options).toMatchObject({ level: "everything", maxPages: 250, maxDepth: 6, maxScenarios: 150, fullExploration: true });
+        expect(platform.repo.listJobs(shop)[0]!.options).toMatchObject({ level: "everything", maxPages: 250, maxDepth: 6, maxScenarios: 150 });
+        expect(platform.repo.listJobs(shop)[0]!.options.fullExploration).toBeFalsy();
+    });
+
+    it("once explored, the page is Explore again and offers Explore every page again", async () => {
+        await page.goto(`${BASE}/#/new?project=${shop}`);
+        await pwExpect(page.getByRole("heading", { name: "Explore again", level: 1 })).toBeVisible();
+        await pwExpect(page.getByTestId("full-exploration")).not.toBeChecked();
+        await page.getByTestId("full-exploration").check();
+        const sent: Array<Record<string, unknown>> = [];
+        await page.route("**/api/projects/*/test-generation", (route) => {
+            sent.push(route.request().postDataJSON());
+            return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "Already exploring." }) });
+        });
+        await page.getByRole("button", { name: "Explore again" }).click();
+        await pwExpect.poll(() => sent.length).toBe(1);
+        expect(sent[0]).toMatchObject({ fullExploration: true });
+        await page.unroute("**/api/projects/*/test-generation");
     });
 
     it("AI screen review: Deep shows it checked when the model can read images, and unchecking sends visionChecks:false", async () => {
@@ -142,8 +159,9 @@ describe("how much to explore", () => {
         await p2.route("**/api/me/ai", (route) => route.fulfill({ json: { chosen: null, problem: null, personal: [], organisational: [], canManageOrganisational: false, openServer: { configured: true, provider: "anthropic", model: "stand-in" } } }));
         await p2.goto(`${BASE}/#/new?project=${shop}`);
         const levels = p2.getByTestId("explore-level");
+        // Thorough leaves the screen review out, so it offers no box; Deep includes it, and the box lets a person leave it out.
         await levels.getByRole("radio", { name: /Thorough/ }).check();
-        await pwExpect(p2.getByTestId("screen-review")).not.toBeChecked();
+        await pwExpect(p2.getByTestId("screen-review")).toHaveCount(0);
         await levels.getByRole("radio", { name: /Deep/ }).check();
         await pwExpect(p2.getByRole("checkbox", { name: /AI screen review \(screenshots go to your AI provider\)/ })).toBeChecked();
         expect(await axeClean(p2)).toEqual([]);

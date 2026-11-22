@@ -419,9 +419,10 @@ describe("after the run", () => {
         await noSidewaysScroll();
     }, 120_000);
 
-    it("an older run without a coverage record says so in one sentence", async () => {
+    it("an older run without a coverage record leaves the card out", async () => {
         await visit(`#/projects/${projectId}/runs/${olderRun}`);
-        await pwExpect(page.getByTestId("run-coverage-unavailable")).toHaveText("This run has no coverage record: it did not explore by objectives, or it ran before coverage was recorded.");
+        await pwExpect(page.getByTestId("run-findings")).toBeVisible();
+        await pwExpect(page.getByTestId("run-coverage")).toHaveCount(0);
         await shot("older-run");
     }, 60_000);
 

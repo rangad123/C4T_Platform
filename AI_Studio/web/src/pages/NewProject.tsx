@@ -14,16 +14,19 @@ import { ExploreOnRunnerNote, ExploreStartError } from "../features/runs/Explore
 import { useReadiness } from "../features/runners/my-runner";
 import { aiProblemOf, aiReadyOf, useMyAi } from "../features/aiconfig/aiconfig";
 import { LevelChoice, projectLevel, ScreenReviewChoice } from "../features/explore/ExploreLevel";
-import type { ExploreLevel } from "../../../src/engine/levels";
+import { LEVEL_SETTINGS, type ExploreLevel } from "../../../src/engine/levels";
 
 /**
- * Explore an existing project's application (`#/new?project=`): Start exploring and Explore again. A new project is made on Create a
- * project (`#/create`); the old `#/new` without a project is redirected there (lib/aliases.ts).
+ * Explore an existing project's application (`#/new?project=`): Start exploring the first time, Explore again after (with Explore every
+ * page again). A new project is made on Create a project (`#/create`); the old `#/new` without a project is redirected there (lib/aliases.ts).
  */
 export function NewProject({ projectId }: { projectId: string }) {
-    useDocumentTitle("Explore again");
     const existing = useFetch<ProjectDetail>(`/projects/${projectId}`);
-    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: existing.data?.name ?? "Project", href: routes.project(projectId) }, { label: "Explore again" }], nav: "projects" });
+    // A project that never ran anything is explored for the first time: there is nothing to explore "again" or to reuse.
+    const first = existing.data ? !existing.data.latestJob : false;
+    const title = first ? "Start exploring" : "Explore again";
+    useDocumentTitle(title);
+    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: existing.data?.name ?? "Project", href: routes.project(projectId) }, { label: title }], nav: "projects" });
     const config = useConfig();
     // What the project's testing agents need lives on its Requirements tab (round 38); here only whether something mandatory is missing.
     const inputs = useFetch<AgentInputs>(`/projects/${projectId}/agent-inputs`);
@@ -64,6 +67,8 @@ export function NewProject({ projectId }: { projectId: string }) {
     const myAi = useMyAi().data;
     const aiReady = aiReadyOf(myAi);
     const aiMissing = aiReady === false;
+    // The AI screen review is the level's: offered only where the level turns it on, as a way to keep screenshots from the AI provider.
+    const offerReview = !screenReviewOff && LEVEL_SETTINGS[chosenLevel].visionByDefault && aiReady === true;
     const agents = inputs.data?.applies && inputs.data.agents ? inputs.data.agents : null;
 
     function submit(e: React.FormEvent) {
@@ -86,7 +91,7 @@ export function NewProject({ projectId }: { projectId: string }) {
             // sign-in, API access, OpenAPI document and requirements are the ones kept on the Requirements tab.
             await api(`/projects/${id}/test-generation`, {
                 method: "POST",
-                body: { url: n.url, plan: true, ...(aiMissing ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration ? { fullExploration: true } : {}), ...(screenReview !== null && !screenReviewOff ? { visionChecks: screenReview } : {}) },
+                body: { url: n.url, plan: true, ...(aiMissing ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}) },
             });
             go(routes.project(id));
         } catch (err) {
@@ -130,14 +135,16 @@ export function NewProject({ projectId }: { projectId: string }) {
                     <input id="scope" className="input" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Everything — or e.g. “search and checkout only”" />
                 </div>
                 <LevelChoice value={chosenLevel} onChange={setLevel} />
-                {!screenReviewOff && <ScreenReviewChoice level={chosenLevel} canReadImages={aiReady === true} value={screenReview} onChange={setScreenReview} />}
-                <label className="check">
-                    <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />
-                    <span>
-                        <span className="title">Explore every page again</span>
-                        <span className="hint">Pages unchanged since the last exploration are normally reused. This sends every page to the AI again.</span>
-                    </span>
-                </label>
+                {offerReview && <ScreenReviewChoice level={chosenLevel} canReadImages value={screenReview} onChange={setScreenReview} />}
+                {!first && (
+                    <label className="check">
+                        <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />
+                        <span>
+                            <span className="title">Explore every page again</span>
+                            <span className="hint">Pages unchanged since the last exploration are normally reused. This sends every page to the AI again.</span>
+                        </span>
+                    </label>
+                )}
 
                 {aiMissing && (
                     <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.aiKeys}>Open AI keys</LinkButton>}>
@@ -155,7 +162,7 @@ export function NewProject({ projectId }: { projectId: string }) {
 
                 <div className="row">
                     <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} disabled={blocked}>
-                        {busy ? "Starting…" : "Explore again"}
+                        {busy ? "Starting…" : title}
                     </Button>
                     {agents && (
                         <span className="hint" data-testid="explore-agents">
@@ -178,8 +185,8 @@ export function NewProject({ projectId }: { projectId: string }) {
     return (
         <div style={{ maxWidth: 720 }}>
             <PageHeader
-                title="Explore again"
-                subtitle="Explore this application again. Existing tests are kept."
+                title={title}
+                subtitle={first ? "Explore this application for the first time. You see a plan before anything is created." : "Explore this application again. Existing tests are kept."}
                 actions={
                     <LinkButton href={routes.project(projectId)} variant="ghost">
                         Cancel

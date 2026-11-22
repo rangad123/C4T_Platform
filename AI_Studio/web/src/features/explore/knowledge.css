@@ -5,9 +5,6 @@
 .xk-tab[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--text-brand); }
 .xk-tab svg { color: var(--status-warning-fg); }
 .xk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.xk-list .xk-list { padding-left: 20px; margin: 4px 0 0 11px; border-left: 1px solid var(--border-default); }
-.xk-list[hidden] { display: none; }
-.xk-node { min-width: 0; }
 .xk-row { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
 .xk-thumb { flex: none; width: 160px; height: 100px; object-fit: cover; object-position: top; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--surface-sunken); }
 .xk-thumb.is-none { display: grid; place-items: center; color: var(--text-muted); }
@@ -16,11 +13,11 @@
 .xk-title { color: var(--text-secondary); overflow-wrap: anywhere; }
 .xk-tests { font-size: var(--type-body-sm-size); overflow-wrap: anywhere; }
 .xk-tests a { display: inline-block; min-height: 24px; }
-.xk-list .xt-toggle { margin-left: 0; }
+.xk-paths { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); }
+.xk-paths li { overflow-wrap: anywhere; }
 .xk-reused, .xk-lines { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .xk-reused li, .xk-lines li { overflow-wrap: anywhere; }
 @media (max-width: 640px) {
     .xk-row { flex-direction: column; gap: 6px; }
     .xk-thumb { width: 100%; max-width: 320px; height: auto; aspect-ratio: 16 / 10; }
-    .xk-list .xk-list { padding-left: 12px; margin-left: 4px; }
 }

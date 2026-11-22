@@ -19,10 +19,12 @@ Only websites the AI agent explores show it (a project tested only by code scrip
   - each source with its state (waiting, processed, failed) and, for a failed one, the sentence saying why;
   - what is missing: plain sentences naming what the analysis could not work out and which source would answer it (for example
     "No API description: 14 observed endpoints have no response schema. Add the OpenAPI document to fill them in.");
-  - "Read again" ("Read now" before the first one) while nothing runs, "Stop" while one runs.
+  - "Read again" while nothing runs, "Stop" while one runs.
+  - Before the first reading (none done, none running, none failed) the card is not shown: the first exploration reads the application.
 - **Requirements tab, "Rules to confirm"** (`RulesToConfirm.tsx`): the rules no person has decided yet, plus any rule whose evidence a
   later analysis no longer found.
-- **Requirements tab, "More for application understanding"** (`SourceInputs.tsx`): database schema files and the version label.
+- **Requirements tab, "More for application understanding"** (`SourceInputs.tsx`), closed to one line until opened: database schema
+  files, and the version label once something has been read.
 
 People who may only look at the project see all of it without the buttons. A refusal from the server (for example "There is no analysis
 to label yet. Analyse the application first.") is shown as its sentence next to the control that caused it.

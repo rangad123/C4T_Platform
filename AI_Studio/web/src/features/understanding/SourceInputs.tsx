@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Save, Trash2, Upload } from "lucide-react";
+import { ChevronRight, Save, Trash2, Upload } from "lucide-react";
 import { api } from "../../api";
 import { Badge, Button, Callout, FilePicker } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
@@ -11,8 +11,8 @@ import "./understanding.css";
 
 /**
  * More for application understanding of the application, on the Requirements tab of a project tested by the AI agent: database schema files
- * (SQL or Prisma, read as text, never run) and the version label of the build the latest analysis describes. People who may only
- * look see what is there without the controls.
+ * (SQL or Prisma, read as text, never run) and, once something was read, the version label of the build the latest analysis describes.
+ * Closed to one line until opened. People who may only look see what is there without the controls.
  */
 export function SourceInputs({ projectId }: { projectId: string }) {
     const sources = useFetch<SourcesAnswer>(`/projects/${projectId}/intel/sources`);
@@ -23,6 +23,8 @@ export function SourceInputs({ projectId }: { projectId: string }) {
     const [busy, setBusy] = useState<"upload" | "label" | string | null>(null);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
+    // Closed to one line: optional and advanced, on the page people use to add requirements.
+    const [open, setOpen] = useState(false);
     const schemas = (sources.data?.sources ?? []).filter((s) => s.kind === "db_schema");
     const noAnalysis = latest.none;
     const shownLabel = label ?? latest.data?.appVersion.label ?? "";
@@ -45,7 +47,7 @@ export function SourceInputs({ projectId }: { projectId: string }) {
             await uploadSchema(projectId, file!);
             setFile(null);
             await sources.reload();
-            return "Schema file added. Choose Read again on the Dashboard to use it.";
+            return noAnalysis ? "Schema file added. The next exploration reads it." : "Schema file added. Choose Read again on the Dashboard to use it.";
         });
     const remove = (id: string, name: string) =>
         run(id, async () => {
@@ -67,13 +69,23 @@ export function SourceInputs({ projectId }: { projectId: string }) {
         <section aria-labelledby="source-inputs-title" className="card card-pad stack-sm" data-testid="source-inputs">
             <div>
                 <h2 className="t-section" id="source-inputs-title">
-                    More for application understanding
+                    <button type="button" className="inputs-toggle" aria-expanded={open} aria-controls="source-inputs-body" onClick={() => setOpen((o) => !o)}>
+                        <ChevronRight size={18} className="chev" aria-hidden />
+                        More for application understanding
+                    </button>
                 </h2>
                 <p className="t-secondary">
-                    Optional. A database schema file describes the application’s data; a version label says which build was read. After a change, choose Read again on the{" "}
-                    <a href={routes.project(projectId)}>Dashboard</a>.
+                    Optional. A database schema file describes the application’s data{noAnalysis ? "" : "; a version label says which build was read"}.
+                    {open && !noAnalysis && (
+                        <>
+                            {" "}
+                            After a change, choose Read again on the <a href={routes.project(projectId)}>Dashboard</a>.
+                        </>
+                    )}
                 </p>
             </div>
+            {open && (
+            <div className="stack-sm" id="source-inputs-body">
             {notice && <Callout tone="success">{notice}</Callout>}
             {error && (
                 <Callout tone="warning">
@@ -117,9 +129,9 @@ export function SourceInputs({ projectId }: { projectId: string }) {
                 )}
             </div>
 
+            {!noAnalysis && (
             <form className="understanding-group" onSubmit={saveLabel} aria-label="Application version">
                 <h3 className="t-card">Application version</h3>
-                {noAnalysis && <p className="t-secondary">Nothing has been read yet, so there is nothing to label.</p>}
                 {canWrite ? (
                     <div className="understanding-form">
                         <div className="field">
@@ -131,9 +143,12 @@ export function SourceInputs({ projectId }: { projectId: string }) {
                         </Button>
                     </div>
                 ) : (
-                    !noAnalysis && <p className="t-secondary">{shownLabel ? `The latest reading describes version ${shownLabel}.` : "The latest reading has no version label."}</p>
+                    <p className="t-secondary">{shownLabel ? `The latest reading describes version ${shownLabel}.` : "The latest reading has no version label."}</p>
                 )}
             </form>
+            )}
+            </div>
+            )}
         </section>
     );
 }

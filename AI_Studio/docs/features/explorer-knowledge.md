@@ -16,8 +16,10 @@ and only the chosen one shows.
 
 ### Site map
 
-The pages the exploration found, as a tree by address, with each page's title and type. Each page lists the tests of this exploration that
-start on it, as links. A page that took its probe results from an earlier exploration has a **Reused &lt;date&gt;** badge. A page tried
+A line first: "Tests start on 2 of the 29 pages." The pages a test of this exploration starts on follow, by address, each with its
+picture, its title and its tests as links. The other pages are one folded list of addresses with their titles ("27 other pages"), with
+no pictures: a picture of every page, each saying no test starts there, was a long page of repetition (P7-3 review). A page that took
+its probe results from an earlier exploration has a **Reused &lt;date&gt;** badge in either list. A page tried
 again after reuse went off loses the badge. The map comes from the model the exploration saved. While it runs, the map comes from the pages
 its events name.
 
@@ -29,7 +31,7 @@ its events name.
   picture is taken. This is the same covering the Explorer view uses. **It fails closed:** a page that cannot be covered gets no picture.
 * Stored as job artifacts (kind `screenshot`, `thumb-<n>.jpg`), served as `image/jpeg` by `GET /api/artifacts/:id` to people who may see the
   project (another project's picture is a `404`). They expire with the project's screenshots under its retention policy; the map names a
-  picture only while its file is kept.
+  picture only while its file is kept. Only the pages tests start on show theirs.
 
 **The switch.** Project **Settings → General → Keep page thumbnails** (owner decision 2026-11-21): **on by default**. Off means later
 explorations take and store no pictures. Pictures kept before stay until they expire. Only people who may change the project's settings
