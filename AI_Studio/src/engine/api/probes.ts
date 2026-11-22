@@ -237,8 +237,12 @@ export function aimedCases(plan: Pick<Plan, "write" | "refs" | "numbers" | "othe
     return out;
 }
 
-/** The expression with each $name replaced by the value the write sent, for the saved test (its `data` holds no per-write values). */
-export function withValues(expression: string, vars: Record<string, unknown>): string {
+/**
+ * The expression with each $name replaced by the value the write sent, for the saved test (its `data` holds no per-write values).
+ * A text value with a placeholder ("test-title-{{unique}}") is resolved only when the script runs: `bind` names the test value that
+ * holds it, and the expression refers to that name instead of the unresolved text.
+ */
+export function withValues(expression: string, vars: Record<string, unknown>, bind?: (name: string, value: string) => string): string {
     return expression
         .split(/("(?:[^"\\]|\\.)*")/)
         .map((part, i) =>
@@ -247,7 +251,7 @@ export function withValues(expression: string, vars: Record<string, unknown>): s
                 : part.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, name: string) => {
                       const v = vars[name];
                       if (typeof v === "number" && Number.isFinite(v)) return `(${v})`;
-                      if (typeof v === "string") return JSON.stringify(v);
+                      if (typeof v === "string") return bind && v.includes("{{") ? "$" + bind(name, v) : JSON.stringify(v);
                       return m;
                   }),
         )
@@ -284,7 +288,7 @@ async function runCase(plan: Plan, inv: Invariant, writes: readonly ProbeWrite[]
             accepted.push(is2xx(r.status));
             if (!is2xx(r.status)) continue;
             const checked = plan.read ? await send("GET", plan.read.path) : r;
-            const v = checkRelation(inv.expression, { body: checked.json, vars: w.vars }, inv.requirementId);
+            const v = checkRelation(inv.expression, { body: checked.json, vars: uniqueNow(w.vars, tag) as Record<string, unknown> }, inv.requirementId);
             if (!v.held) return { failed: true, held, requests, accepted, message: v.message, at: i };
             held++;
         }
@@ -414,12 +418,13 @@ function specOf(inv: Invariant, plan: Plan, writes: readonly ProbeWrite[], seed:
     const call = (ep: ApiEndpointModel, path: string, body: unknown, description: string): Step => ({ action: "request", method: ep.method.toUpperCase() as Extract<Step, { action: "request" }>["method"], path, auth, description, ...(body === undefined ? {} : { body }) });
     const ok = (description: string): Step => ({ action: "assertResponse", check: "statusClass", expected: "2xx", description });
     const steps: Step[] = [];
+    const bound: Record<string, string> = {};
     if (plan.signUp) steps.push(call(plan.signUp.ep, plan.signUp.ep.path, plan.signUp.body, "Create a fresh account for this check"), ok("The fresh account is created"));
     for (const s of plan.setup) steps.push(call(s.ep, s.ep.path, s.body, `Setup: ${s.ep.method.toUpperCase()} ${s.ep.path}`), ok("The setup is accepted"));
     writes.forEach((w, i) => {
         steps.push(call(plan.write, w.path, w.body, `Write ${i + 1} of ${writes.length}${w.body ? `: ${JSON.stringify(w.body).slice(0, 80)}` : ""}`), ok("The write is accepted"));
         if (plan.read) steps.push(call(plan.read, plan.read.path, undefined, "Read the result back"));
-        steps.push({ action: "assertResponse", check: "relation", expression: withValues(inv.expression, w.vars), source: inv.requirementId, description: `Requirement ${inv.requirementId} holds` });
+        steps.push({ action: "assertResponse", check: "relation", expression: withValues(inv.expression, w.vars, (name, v) => ((bound[`write${i + 1}_${name}`] = v), `write${i + 1}_${name}`)), source: inv.requirementId, description: `Requirement ${inv.requirementId} holds` });
     });
     const label = `${plan.write.method.toUpperCase()} ${plan.write.path}`;
     return {
@@ -432,7 +437,7 @@ function specOf(inv: Invariant, plan: Plan, writes: readonly ProbeWrite[], seed:
         preconditions: [],
         steps,
         expectedResults: [`${inv.expression} (requirement ${inv.requirementId})`],
-        testData: { probeSeed: String(seed) },
+        testData: { ...bound, probeSeed: String(seed) },
         tags: ["api", "invariant", "probe"],
         source: { origin: "requirements", requirements: [inv.requirementId] },
     };

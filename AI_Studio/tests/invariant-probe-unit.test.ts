@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { parseOpenApi } from "../src/engine/api/openapi.js";
 import { aimedCases, expressionConstants, fetchClient, generateCase, MAX_PROBE_WRITES, MAX_SHRINK_REQUESTS, probeInvariant, withValues, type ProbeEnv, type ProbeHttp } from "../src/engine/api/probes.js";
-import { TestSpecSchema } from "../src/engine/spec/schema.js";
+import { interpolate, TestSpecSchema } from "../src/engine/spec/schema.js";
 import { checkRelation, parseRelation } from "../src/engine/validation/relation.js";
 import type { Invariant } from "../src/engine/validation/invariants.js";
 
@@ -172,5 +172,63 @@ describe("invariant probe", () => {
         expect(text).toBe('lineTotal == (3) * unitPrice and name != "$quantity"');
         expect(parseRelation(text).ok).toBe(true);
         expect(checkRelation(withValues("x == $q", { q: -2 }), { body: { x: -2 } }).held).toBe(true);
+    });
+    // paid-rbac-1 API-030 / API-031: the write sent "test-title-<unique>" but the relation compared with the literal "test-title-{{unique}}".
+    it("a write with {{unique}} is checked against the value it sent, at probe time and in the saved test", async () => {
+        const NOTES_DOC = {
+            openapi: "3.0.3",
+            info: { title: "Notes", version: "1" },
+            paths: {
+                "/api/register": { post: { requestBody: json({ type: "object", required: ["email", "password"], properties: { name: { type: "string" }, email: { type: "string", format: "email" }, password: { type: "string", minLength: 8 } } }), responses: { 201: { description: "Created" } } } },
+                "/api/notes": {
+                    get: { responses: { 200: { description: "Notes", ...json({ type: "object", properties: { notes: { type: "array", items: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } } } } } }) } } },
+                    post: { requestBody: json({ type: "object", required: ["title"], properties: { title: { type: "string", maxLength: 120 }, body: { type: "string" } } }), responses: { 201: { description: "Created", ...json({ type: "object", properties: { id: { type: "string" }, title: { type: "string" }, body: { type: "string" } } }) } } },
+                },
+            },
+        };
+        const notes: Array<{ id: string; title: string; body: string }> = [];
+        const env: ProbeEnv = {
+            apis: parseOpenApi(NOTES_DOC, "http://notes.test/openapi.json").operations,
+            dataChanges: true,
+            async newClient() {
+                return {
+                    async send(method, path, body) {
+                        const b = (body ?? {}) as Record<string, string>;
+                        if (path === "/api/register") return { status: 201, json: {} };
+                        if (method === "POST" && path === "/api/notes") {
+                            const n = { id: `n${notes.length + 1}`, title: b.title!, body: b.body ?? "" };
+                            notes.push(n);
+                            return { status: 201, json: n };
+                        }
+                        if (method === "GET" && path === "/api/notes") return { status: 200, json: { notes } };
+                        return { status: 404, json: {} };
+                    },
+                };
+            },
+        };
+        const invs: Invariant[] = [
+            { requirementId: "3.3", endpoint: "POST /api/notes", setup: [], write: "POST /api/notes", expression: "title == $title and body == $body" },
+            { requirementId: "3.1", endpoint: "POST /api/notes", setup: [], write: "POST /api/notes", read: "GET /api/notes", expression: "contains(notes[*].title, $title)" },
+        ];
+        for (const inv of invs) {
+            const r = await probeInvariant(inv, env, { seed: 477012884 });
+            expect(r.outcome, r.message).toBe("held");
+            const spec = TestSpecSchema.parse({ ...r.spec, testId: "API-030" });
+            const relations = spec.steps.filter((s) => s.action === "assertResponse" && s.check === "relation");
+            expect(relations.length).toBeGreaterThan(0);
+            // Replay: the script's own unique value fills the body and the test data alike; the relation must hold against what was stored.
+            const unique = "1763830000000";
+            const data: Record<string, string> = { unique };
+            for (const [k, v] of Object.entries(spec.testData)) data[k] = interpolate(v, { unique });
+            const write = spec.steps.find((s) => s.action === "request" && s.path === "/api/notes" && s.method === "POST") as { body: Record<string, string> };
+            const sent = JSON.parse(interpolate(JSON.stringify(write.body), data)) as { title: string; body: string };
+            const stored = { id: "n1", ...sent };
+            for (const step of relations) {
+                const expression = (step as { expression: string }).expression;
+                expect(expression).not.toContain("{{");
+                expect(checkRelation(expression, { body: inv.read ? { notes: [stored] } : stored, vars: data }).held, expression).toBe(true);
+                expect(checkRelation(expression, { body: inv.read ? { notes: [{ ...stored, title: "other" }] } : { ...stored, title: "other" }, vars: data }).held).toBe(false);
+            }
+        }
     });
 });
