@@ -29,7 +29,7 @@ import { SuiteStore } from "../../../platform/suite-store.js";
 import { ok, type PlatformClient } from "../../client.js";
 import { BenchAppHost, benchApp } from "../apps.js";
 import { startFakeGithub } from "../../../../tests/fixtures/fake-github.js";
-import { renderChangeMd, scoreChange, type FixCheckRecord, type PrStep, type RunRecord, type SetupRecord } from "./score.js";
+import { renderChangeMd, scoreChange, type FixCheckRecord, type HistoryRecord, type PrStep, type RunRecord, type SetupRecord } from "./score.js";
 
 export const CHANGE_USAGE = `Usage: node scripts/eval.mjs bench --mode change --repo <dir> --out <dir> [options]
   --repo <dir>       the repository examples/bench-repo/build.mjs made (with its prs.json)
@@ -69,6 +69,8 @@ interface State {
     setup: SetupRecord;
     projects: Record<string, { id: string; tests: Record<string, string>; hookPath: string }>;
     done: number[];
+    /** G7: what X2's quality history said per app once every PR had run. */
+    history?: HistoryRecord;
 }
 
 export interface ChangeArgs {
@@ -292,7 +294,7 @@ export async function changeMain(argv: string[], deps: { log?: (s: string) => vo
         if (!fs.existsSync(stateFile)) throw new Error(`Nothing has run in ${args.out} yet.`);
         const state = JSON.parse(fs.readFileSync(stateFile, "utf8")) as State;
         const steps = readJsonl(stepsFile);
-        const report = scoreChange(state.setup, steps);
+        const report = scoreChange(state.setup, steps, state.history);
         fs.writeFileSync(path.join(args.out, "pr-bench.json"), JSON.stringify({ format: 1, writtenAt: new Date().toISOString(), setup: state.setup, report, steps }, null, 2));
         fs.writeFileSync(path.join(args.out, "pr-bench.md"), renderChangeMd(report));
         return report;
@@ -351,7 +353,16 @@ export async function changeMain(argv: string[], deps: { log?: (s: string) => vo
         state.done.push(next!.number);
         fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
         log(`#${next!.number} ${next!.kind} ${next!.seed ?? next!.branch}: ${step.selection ? `${step.selection.selected.length}/${step.selection.total} selected` : "no selection"}${step.runs.length ? `, full failed ${step.runs.filter((r) => r.arm === "full").map((r) => r.failed.length).join("/")}` : ""}${step.fixCheck ? `, fix check: ${step.fixCheck.findings.map((f) => f.state).join(",")}` : ""}`);
-        if (!manifest.prs.some((p) => !state.done.includes(p.number))) writeReport();
+        if (!manifest.prs.some((p) => !state.done.includes(p.number))) {
+            // G7: the projects' quality history (Phase 6 X2), read through its route as the dashboard reads it.
+            state.history = {};
+            for (const [app, p] of Object.entries(state.projects)) {
+                const h = ok(await s.client.call("GET", `/api/projects/${p.id}/quality`), "Reading the quality history").history;
+                state.history[app] = { confirmed: h.discovery.confirmed, reopened: h.regressions.reopened, reopenedFindings: h.regressions.findings };
+            }
+            fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+            writeReport();
+        }
         return 0;
     } catch (e) {
         log(`The step failed: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`);

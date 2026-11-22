@@ -134,6 +134,21 @@ const STEPS: PrStep[] = [
 ];
 const crit = (steps: PrStep[], id: string, setup = SETUP) => scoreChange(setup, steps).criteria.find((c) => c.id === id)!;
 
+describe("the PR bench's G7: X2's quality history against the bench's own count", () => {
+    // f1 is confirmed at its seed PR, Fixed by its fix PR, comes back once (reopened) and is confirmed again: 2 confirmations, 1 reopen.
+    const steps = STEPS.map((p) => (p.number === 1 ? { ...p, confirmed: { issue: 101, findings: ["f1"], failingTests: ["T1"] } } : p));
+    it("meets when the history's confirmations, reopens and reopened findings equal the bench's, per app", () => {
+        const g7 = scoreChange(SETUP, steps, { "bench-shop": { confirmed: 2, reopened: 1, reopenedFindings: 1 } }).criteria.find((c) => c.id === "G7")!;
+        expect(g7).toMatchObject({ verdict: "meets", value: "bench-shop: confirmed 2 = 2, reopened 1 = 1, reopened findings 1 = 1" });
+    });
+    it("misses on any difference, and is not measured without a history", () => {
+        const g7 = scoreChange(SETUP, steps, { "bench-shop": { confirmed: 3, reopened: 1, reopenedFindings: 1 } }).criteria.find((c) => c.id === "G7")!;
+        expect(g7.verdict).toBe("misses");
+        expect(g7.notes).toContain("bench-shop: the history says 3 confirmations, the bench counted 2.");
+        expect(scoreChange(SETUP, steps).criteria.find((c) => c.id === "G7")!.verdict).toBe("not measured");
+    });
+});
+
 describe("the PR bench's scores", () => {
     it("G1 is judged per repeat on PRs whose full run fails: 1 of 2 caught each time, so 50%, and the seed PR that missed is named", () => {
         expect([caught(STEPS[0]!, 1), caught(STEPS[1]!, 1), caught(STEPS[2]!, 1)]).toEqual([true, false, undefined]);

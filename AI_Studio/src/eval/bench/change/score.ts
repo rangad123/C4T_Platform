@@ -110,7 +110,10 @@ export function caught(p: PrStep, r: number): boolean | undefined {
     return full.failed.some((k) => selected.has(k));
 }
 
-export function scoreChange(setup: SetupRecord, steps: PrStep[]): ChangeReport {
+/** Per app, what X2's quality history (GET /api/projects/:id/quality) says after the series (run.ts reads it at the end). */
+export type HistoryRecord = Record<string, { confirmed: number; reopened: number; reopenedFindings: number }>;
+
+export function scoreChange(setup: SetupRecord, steps: PrStep[], history?: HistoryRecord): ChangeReport {
     const measured = steps.filter((p) => MEASURED.includes(p.kind));
     const repeats = [...new Set(measured.flatMap(repeatsOf))].sort((a, b) => a - b);
     const criteria: Criterion[] = [];
@@ -228,13 +231,29 @@ export function scoreChange(setup: SetupRecord, steps: PrStep[]): ChangeReport {
         ],
     });
 
+    // G7: the bench's own count, per app: a seed PR's confirmed findings, and each fixed finding that came back is reopened once and
+    // confirmed once more (run.ts returnRun); X2's history must say the same.
+    const g7Notes: string[] = [];
+    const g7Values: string[] = [];
+    let g7Ok = true;
+    for (const app of history ? Object.keys(history).sort() : []) {
+        const mine = steps.filter((p) => p.app === app);
+        const back = mine.flatMap((p) => (p.kind === "fix" ? (p.fixCheck?.findings ?? []).filter((f) => f.reopened) : []));
+        const want = { confirmed: mine.reduce((n, p) => n + (p.kind === "seed" ? (p.confirmed?.findings.length ?? 0) : 0), 0) + back.length, reopened: back.length, reopenedFindings: new Set(back.map((f) => f.id)).size };
+        const got = history![app]!;
+        g7Values.push(`${app}: confirmed ${got.confirmed} = ${want.confirmed}, reopened ${got.reopened} = ${want.reopened}, reopened findings ${got.reopenedFindings} = ${want.reopenedFindings}`);
+        if (got.confirmed !== want.confirmed) g7Notes.push(`${app}: the history says ${got.confirmed} confirmations, the bench counted ${want.confirmed}.`);
+        if (got.reopened !== want.reopened) g7Notes.push(`${app}: the history says ${got.reopened} reopens, the bench counted ${want.reopened}.`);
+        if (got.reopenedFindings !== want.reopenedFindings) g7Notes.push(`${app}: the history says ${got.reopenedFindings} reopened findings, the bench counted ${want.reopenedFindings}.`);
+        g7Ok &&= !g7Notes.some((n) => n.startsWith(`${app}:`));
+    }
     criteria.push({
         id: "G7",
         name: "History numbers equal hand-computed values on a fixture history",
         target: "exact",
-        verdict: "not measured",
-        value: "—",
-        notes: [`The quality history (Phase 6 X2, trends.ts) is not on this base; the bench's own history to compare it with: ${fixed.length} Fixed, ${fixed.filter((f) => f.reopened).length} reopened, ${steps.filter((p) => p.selection).length} PRs analysed, ${steps.filter((p) => p.confirmed?.findings.length).reduce((n, p) => n + p.confirmed!.findings.length, 0)} findings confirmed.`],
+        verdict: !history || !Object.keys(history).length ? "not measured" : g7Ok ? "meets" : "misses",
+        value: g7Values.join("; ") || "—",
+        notes: history ? g7Notes : ["This run recorded no quality history (it ran before the bench read one)."],
     });
 
     const calls = steps.map((p) => p.aiCalls);
