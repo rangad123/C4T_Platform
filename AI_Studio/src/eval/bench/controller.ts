@@ -289,7 +289,7 @@ export async function attachRequirements(client: PlatformClient, projectId: stri
     log(`  requirements: ${saved.created} imported from ${doc.file} (sha256 ${doc.sha256.slice(0, 12)})`);
 }
 
-type Usage = Awaited<ReturnType<typeof jobsUsage>>;
+type Usage = { aiCalls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cost: number | null };
 type AppJobs = NonNullable<BenchAppResult["jobs"]>;
 
 /** An app the daily cap or the rate limit stopped: nothing is judged yet; its jobs are kept so `--resume` continues it in the same project. */
@@ -513,23 +513,24 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     const extensionSeeds = seeded.filter((id) => catalogue.get(id)?.set === "extension");
     // A seed seen only in the stored data is reachable only in a trial with a database back end (spec 4.4, D-a/D-b).
     const unreachable = seeded.filter((id) => catalogue.has(id) && isUnreachable(catalogue.get(id)!, !!o.database));
+    const spent = await spentOf(client, projectId, benchStart, usage);
     const inputs = {
         seeded: seeded.filter((id) => !extensionSeeds.includes(id)),
         findings,
         unreachable,
         startedAt: benchStart,
-        cost: usage.cost,
+        cost: spent.cost,
         testsGenerated: tests.length,
         workflows: app.workflows.length,
         workflowsCovered: reached.length,
         executionFailures: tests.filter((t) => t.validationStatus === "FAILED_VALIDATION").length,
         flaky,
         durationMs: Date.now() - t0,
-        aiCalls: usage.aiCalls,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cacheReadTokens: usage.cacheReadTokens,
-        cacheWriteTokens: usage.cacheWriteTokens,
+        aiCalls: spent.aiCalls,
+        inputTokens: spent.inputTokens,
+        outputTokens: spent.outputTokens,
+        cacheReadTokens: spent.cacheReadTokens,
+        cacheWriteTokens: spent.cacheWriteTokens,
     };
     const metrics = benchMetrics(inputs);
     const extension = extensionSeeds.length ? extensionScore({ ...inputs, seeded: extensionSeeds }) : undefined;
@@ -587,22 +588,41 @@ async function jobEvents(client: PlatformClient, jobId: string): Promise<unknown
     return all;
 }
 
+/** A usage answer's totals added to `t`. */
+function addTotals(t: Usage, x: { calls?: number; inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; cost?: unknown }): Usage {
+    t.aiCalls += x.calls ?? 0;
+    t.inputTokens += x.inputTokens ?? 0;
+    t.outputTokens += x.outputTokens ?? 0;
+    t.cacheReadTokens += x.cacheReadTokens ?? 0;
+    t.cacheWriteTokens += x.cacheWriteTokens ?? 0;
+    if (typeof x.cost === "number") t.cost = (t.cost ?? 0) + x.cost;
+    return t;
+}
+const noUsage = (): Usage => ({ aiCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: null });
+
 /** The AI use of these jobs from the platform's usage records (for an app stopped before the harness could add it up). */
-async function jobsUsage(client: PlatformClient, jobIds: Array<string | undefined>) {
-    const t = { aiCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: null as number | null };
+async function jobsUsage(client: PlatformClient, jobIds: Array<string | undefined>): Promise<Usage> {
+    const t = noUsage();
     for (const id of jobIds) {
         if (!id) continue;
         const u = await client.call("GET", `/api/jobs/${id}/usage`);
-        if (u.status !== 200) continue;
-        const x = u.body?.totals ?? {};
-        t.aiCalls += x.calls ?? 0;
-        t.inputTokens += x.inputTokens ?? 0;
-        t.outputTokens += x.outputTokens ?? 0;
-        t.cacheReadTokens += x.cacheReadTokens ?? 0;
-        t.cacheWriteTokens += x.cacheWriteTokens ?? 0;
-        if (typeof x.cost === "number") t.cost = (t.cost ?? 0) + x.cost;
+        if (u.status === 200) addTotals(t, u.body?.totals ?? {});
     }
     return t;
+}
+
+/**
+ * An app's AI use: its project's usage records over the trial's days, so the reruns, the replays' repairs, verification and root cause
+ * count as well as the plan and creation jobs (paid-shop-1 reported 1,112 calls and $2.84; the records held 1,710 and $4.29). The jobs'
+ * own figures are kept when the records cannot be read or count fewer calls.
+ */
+export async function spentOf(client: PlatformClient, projectId: string, startedAt: string, jobs: Usage): Promise<Usage> {
+    const from = (Number.isNaN(Date.parse(startedAt)) ? new Date() : new Date(startedAt)).toISOString().slice(0, 10);
+    const to = today();
+    const u = await client.call("GET", `/api/usage?projectId=${encodeURIComponent(projectId)}&from=${from > to ? to : from}&to=${to}`).catch(() => undefined);
+    if (u?.status !== 200) return jobs;
+    const all = addTotals(noUsage(), u.body?.totals ?? {});
+    return all.aiCalls >= jobs.aiCalls ? all : jobs;
 }
 
 /**
