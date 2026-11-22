@@ -74,6 +74,17 @@ describe("the Database checks setting", () => {
         expect(new SecretBox(dir, SECRET).decrypt(String((await platform.sql.get<{ token_enc: string }>("SELECT token_enc FROM project_db_probes WHERE project_id = ?", pid))!.token_enc))).toBe(TOKEN);
     });
 
+    it("a new host needs the token again: the saved token never follows the address to another host", async () => {
+        expect((await call("PUT", { enabled: true, url: "https://probe.example.com", token: TOKEN })).status).toBe(200);
+        const moved = await call("PUT", { enabled: true, url: "https://other.example.com" });
+        expect(moved.status).toBe(400);
+        expect(moved.text).toMatch(/token again/);
+        expect((await call("GET")).body).toMatchObject({ url: "https://probe.example.com" });
+        // The same host on another path keeps it; a new host with its token is fine.
+        expect((await call("PUT", { enabled: true, url: "https://probe.example.com/v2" })).status).toBe(200);
+        expect((await call("PUT", { enabled: true, url: "https://other.example.com", token: "another-token-0123456789abcdef" })).status).toBe(200);
+    });
+
     it("an empty address removes the setting, token and all", async () => {
         expect((await call("PUT", { enabled: false, url: "" })).body).toEqual({ enabled: false, url: "", tokenSaved: false });
         expect(await platform.sql.get("SELECT * FROM project_db_probes WHERE project_id = ?", pid)).toBeUndefined();

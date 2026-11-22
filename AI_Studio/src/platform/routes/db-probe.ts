@@ -49,6 +49,8 @@ export function registerDbProbeRoutes(ctx: RouteCtx): void {
         }
         const saved = await store.get(id);
         if (body.enabled && (!body.url || (!body.token && !saved.tokenSaved))) throw new HttpError(400, "Database checks need the probe's address and its token.");
+        // The saved token belongs to the probe it was given for: a probe on another host gets its own, never the saved one.
+        if (body.url && !body.token && saved.tokenSaved && new URL(body.url).origin !== new URL(saved.url).origin) throw new HttpError(400, "A probe at a new address needs its token again.");
         await store.set(id, body);
         const actor = actorOf(req) ?? currentActor();
         control.users.addActivity({
