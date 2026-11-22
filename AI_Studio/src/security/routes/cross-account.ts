@@ -1,8 +1,11 @@
 /**
  * The read-only cross-account designation of an application (assessment/cross-account.ts):
  *
- *   GET    /api/v1/security/applications/:appId/cross-account   viewer   { designation | null, ready: { ok, problems[] }, signIns: { A, B } }
- *   PUT    /api/v1/security/applications/:appId/cross-account   editor   Designation -> the same answer
+ *   GET    /api/v1/security/applications/:appId/cross-account   viewer   { designation | null, ready: { ok, problems[] }, signIns: { A, B }, draft }
+ *   PUT    /api/v1/security/applications/:appId/cross-account   editor   Designation -> the same answer (saving settles the draft)
+ *
+ * `draft` (or null): a designation drafted from a test run's two-account evidence, with the run and findings it came from. It is never
+ * used until a person saves it here.
  *   DELETE /api/v1/security/applications/:appId/cross-account   editor   { deleted }
  *
  * Refused when saved (400, with the reason): an application not marked development or staging, an account that is not one of the project's,
@@ -13,7 +16,7 @@ import { HttpError } from "../../platform/http-error.js";
 import { DesignationSchema, environmentProblem, refusalOf, type Designation } from "../assessment/cross-account.js";
 import { withSensitiveExclusions } from "../assessment/runner.js";
 import type { SecurityApplication } from "../contract.js";
-import { deleteDesignation, readDesignation, writeDesignation } from "../cross-account-store.js";
+import { deleteDesignation, readDesignation, readDesignationDraft, writeDesignation } from "../cross-account-store.js";
 import { inScope } from "../scope.js";
 import { accountNames, signInLabel, signInStatus } from "../signin.js";
 import { SECURITY_API, type SecurityRouteCtx } from "./context.js";
@@ -36,7 +39,7 @@ export function registerSecurityCrossAccountRoutes(ctx: SecurityRouteCtx): void 
 
     app.get(`${SECURITY_API}/applications/:appId/cross-account`, async (req) => {
         const a = ctx.application(appIdOf(req), req);
-        return view(a, readDesignation(db, a.id));
+        return { ...view(a, readDesignation(db, a.id)), draft: readDesignationDraft(db, a.id) ?? null };
     });
 
     app.put(`${SECURITY_API}/applications/:appId/cross-account`, async (req) => {
@@ -63,7 +66,7 @@ export function registerSecurityCrossAccountRoutes(ctx: SecurityRouteCtx): void 
             objectId: a.id,
             summary: `Set the read-only cross-account check of “${a.name}”: account A ${signInLabel(d.accountA)}, account B ${signInLabel(d.accountB)}, ${d.resources.length} resource${d.resources.length === 1 ? "" : "s"} (${owners("B")} of B's, ${owners("A")} of A's, ${owners("shared")} shared, ${owners("public")} public).`,
         });
-        return view(a, d);
+        return { ...view(a, d), draft: null };
     });
 
     app.delete(`${SECURITY_API}/applications/:appId/cross-account`, async (req) => {
