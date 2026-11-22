@@ -307,8 +307,9 @@ export async function validateBatch(
                 break;
             }
             // Health / security checks are deterministic: a model cannot "repair" a page that did not load or a
-            // request that could not be made, so such a run is reported as it is.
-            if (isLoadSpec(t.spec) || t.spec.source.origin === "health-check" || t.spec.source.origin === "security-check" || t.spec.source.origin === "performance-check" || t.spec.source.origin === "input-check" || t.spec.source.origin === "access-check" || t.spec.source.origin === "vision-check") {
+            // request that could not be made, so such a run is reported as it is. A C8 concurrency check is not run again either: its
+            // parallel writes count against the run's caps once.
+            if (isLoadSpec(t.spec) || t.spec.tags.includes("concurrency") || t.spec.source.origin === "health-check" || t.spec.source.origin === "security-check" || t.spec.source.origin === "performance-check" || t.spec.source.origin === "input-check" || t.spec.source.origin === "access-check" || t.spec.source.origin === "vision-check") {
                 outcome = { status: "FAILED_VALIDATION", reason: summarise(run), spec: t.spec, script, attempts: attempt, lastRun: run };
                 break;
             }

@@ -124,3 +124,35 @@ describe("C8 checks from bench-shop's API document", () => {
         await expect(executeStep({} as never, step, {}, "http://127.0.0.1:9604", 1000)).rejects.toThrow("A request sent several times at once runs only in a saved API script, not step by step.");
     });
 });
+
+describe("risky write checks run once per validation (the write caps hold per run)", () => {
+    it("a failing C8 concurrency or C3e identity-write check is never repaired, confirmed again or repeated", async () => {
+        const { loadConfig } = await import("../src/config.js");
+        const { validateBatch } = await import("../src/engine/validation/validator.js");
+        const config = loadConfig({});
+        const cc = generateConcurrencySpecs(SHOP, LOCAL).specs[0]!;
+        const concurrency = TestSpecSchema.parse({ ...cc, testId: "API-001" });
+        const identity = TestSpecSchema.parse({
+            testId: "WEB-001", title: "“ana” account: cannot change its own role", kind: "web", tags: ["security", "identity-write"], source: { origin: "access-check" },
+            steps: [{ action: "navigate", url: "/" }, { action: "assert", check: "accessDenied", expected: "{}" }],
+        });
+        const runs: string[] = [];
+        let asked = 0;
+        const executor = {
+            name: "fake",
+            async execute(_a: unknown, batch: { scripts: Array<{ testId: string }> }) {
+                runs.push(...batch.scripts.map((s) => s.testId));
+                return batch.scripts.map((s) => ({ testId: s.testId, status: "failed" as const, durationMs: 1, failedStepIndex: 1, error: "Expected 1", steps: [{ index: 0, title: "1. step", status: "passed" as const }, { index: 1, title: "2. check", status: "failed" as const, error: "Expected 1" }], artifacts: [], responses: [{ method: "POST", path: "/x", status: 409 }] }));
+            },
+        };
+        const llm = { modelName: "spy", usage: { inputTokens: 0, outputTokens: 0 }, object: async () => (asked++, Promise.reject(new Error("no repair here"))), text: async () => (asked++, "") };
+        await validateBatch(
+            { config, llm: llm as never, emit: () => undefined },
+            { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, model: { pages: [], apis: [] } as never, maxRepairAttempts: 3, workers: 1, confirmFailures: true, repeatPasses: 2, executor: executor as never },
+            [{ spec: concurrency, framework: "playwright-api" }, { spec: identity, framework: "playwright" }],
+            { async onAttempt() {}, async onFinal() {} },
+        );
+        expect(runs.sort()).toEqual(["API-001", "WEB-001"]);
+        expect(asked).toBe(0);
+    });
+});
