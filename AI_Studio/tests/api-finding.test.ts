@@ -87,5 +87,10 @@ describe("apiFinding", () => {
         // A status check that expects a success is not a refusal the API skipped.
         expect(apiFinding(made(["api", "readback"], { check: "status", expected: 200 }), failedAt(201, "x"))).toBeUndefined();
     });
+    it("counts each copy of a request sent several times at once: the answer judged is the one before the failing check", () => {
+        const spec = TestSpecSchema.parse({ testId: "API-001", title: "Concurrency: x", kind: "api", tags: ["api", "workflow", "concurrency"], steps: [{ action: "request", method: "POST", path: "/x", parallel: 3 }, { action: "request", method: "GET", path: "/x" }, { action: "assertResponse", check: "relation", expression: "count(items) == 1" }] });
+        const r: ScriptRun = { ...run(200), failedStepIndex: 2, steps: [{ index: 0, title: "1. POST", status: "passed" }, { index: 1, title: "2. GET", status: "passed" }, { index: 2, title: "3. One record", status: "failed", error: "Error: Relation check failed: count(items) == 1. Values: count(items) = 3." }], responses: [{ method: "POST", path: "/x", status: 201 }, { method: "POST", path: "/x", status: 409 }, { method: "POST", path: "/x", status: 201 }, { method: "GET", path: "/x", status: 200 }] };
+        expect(apiFinding(spec, r)).toMatch(/breaks a stated rule/);
+    });
 });
 

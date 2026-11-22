@@ -559,7 +559,8 @@ export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     const failed = run.steps.find((s) => s.status === "failed");
     if (!failed) return undefined;
     // Responses received up to and including the failing step.
-    const upTo = spec.steps.slice(0, failed.index + 1).filter((s) => s.action === "request").length;
+    // A request sent several times at once (C8 `parallel`) records each copy's answer.
+    const upTo = spec.steps.slice(0, failed.index + 1).reduce((n, s) => n + (s.action === "request" ? (s.parallel ?? 1) : 0), 0);
     const last = run.responses.slice(0, upTo).at(-1);
     if (!last) return undefined;
     if (last.status >= 500) {
