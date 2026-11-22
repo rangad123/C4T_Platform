@@ -157,6 +157,22 @@ describe("what a delivery queues", () => {
         expect(events("A")).toEqual([{ delivery_id: "11111111-aaaa-bbbb-cccc-000000000001", event: "pull_request", action: "opened", pr: 7, head_sha: HEAD, environment: null, queued: "impact", ignored: null }]);
     });
 
+    it("a captured delivery sent again under a new delivery id acts zero times (the id is not signed; the body is)", async () => {
+        const connect = async (name: string) => {
+            ids[name] = platform.repo.createProject({ name }).id as string;
+            const r = await app.inject({ method: "PUT", url: `/api/projects/${ids[name]}/code-host`, headers: { "x-api-key": KEY }, payload: { owner: "acme", repo: "shop", token: TOKEN, webhookSecret: SECRET_A, apiUrl: gh.url } });
+            return r.json().webhookUrl as string;
+        };
+        const [d, e] = [await connect("D"), await connect("E")];
+        const body = { deployment_status: { state: "success" }, deployment: { id: 4141, sha: HEAD, environment: "staging" }, repository: { full_name: "acme/shop" } };
+        expect(await deliver(d, "deployment_status", body, { delivery: "41414141-aaaa-bbbb-cccc-000000000001" })).toEqual({ status: 202, body: { queued: "reverify" } });
+        expect(await deliver(d, "deployment_status", body, { delivery: "41414141-aaaa-bbbb-cccc-000000000002" })).toEqual({ status: 200, body: { duplicate: true } });
+        expect(await deliver(d, "deployment_status", body, { delivery: "made-up-id-3" })).toEqual({ status: 200, body: { duplicate: true } });
+        expect(events("D")).toHaveLength(1);
+        // The same bytes on another project's address are that project's own first delivery.
+        expect((await deliver(e, "deployment_status", body, { delivery: "41414141-aaaa-bbbb-cccc-000000000004" })).status).toBe(202);
+    });
+
     it("queues one for synchronize; ignores a closed one and one from a fork or a deleted fork", async () => {
         expect((await deliver(hooks.A!, "pull_request", prBody("synchronize", { n: 8 }))).body).toEqual({ queued: "impact" });
         expect((await deliver(hooks.A!, "pull_request", prBody("closed", { n: 8 }))).body).toEqual({ ignored: "pull request closed: nothing to analyse" });
@@ -185,7 +201,7 @@ describe("what a delivery queues", () => {
     });
 
     it(`takes at most ${WEBHOOK_LIMIT_PER_MINUTE} deliveries a minute for a project, and keeps none past it`, async () => {
-        for (let i = 0; i < WEBHOOK_LIMIT_PER_MINUTE; i++) expect((await deliver(hooks.C!, "ping", { repository: { full_name: "acme/shop" } })).status).toBe(200);
+        for (let i = 0; i < WEBHOOK_LIMIT_PER_MINUTE; i++) expect((await deliver(hooks.C!, "ping", { zen: `ping ${i}`, repository: { full_name: "acme/shop" } })).status).toBe(200);
         const over = await deliver(hooks.C!, "pull_request", prBody("opened"));
         expect(over.status).toBe(429);
         expect(events("C")).toHaveLength(WEBHOOK_LIMIT_PER_MINUTE);
