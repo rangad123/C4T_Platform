@@ -365,6 +365,7 @@ export default defineConfig({
             "tests/run-data-changes-gate.test.ts",
             "tests/verify-creation-findings.test.ts",
             "tests/api-document-source-unit.test.ts",
+            "tests/quality-confirmations.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

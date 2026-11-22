@@ -141,6 +141,13 @@ describe("the PR bench's G7: X2's quality history against the bench's own count"
         const g7 = scoreChange(SETUP, steps, { "bench-shop": { confirmed: 2, reopened: 1, reopenedFindings: 1 } }).criteria.find((c) => c.id === "G7")!;
         expect(g7).toMatchObject({ verdict: "meets", value: "bench-shop: confirmed 2 = 2, reopened 1 = 1, reopened findings 1 = 1" });
     });
+    it("counts the reopen of a Fixed finding whose test fails again in a later seed's PR (one test, several seeds)", () => {
+        const fixedAgain = steps.map((p) => (p.number === 3 ? { ...p, fixCheck: { ...p.fixCheck!, findings: p.fixCheck!.findings.map((f) => ({ ...f, fixedAgain: true })) } } : p));
+        const later: PrStep = { ...base, number: 7, kind: "seed", seed: "BS-03", selection: sel(["T1"]), runs: [], confirmed: { issue: 102, findings: ["f1"], failingTests: ["T1"] } };
+        // f1: confirmed at #1, reopened and confirmed again at #3's return, Fixed again, then reopened by #7's runs and confirmed there.
+        const g7 = scoreChange(SETUP, [...fixedAgain, later], { "bench-shop": { confirmed: 3, reopened: 2, reopenedFindings: 1 } }).criteria.find((c) => c.id === "G7")!;
+        expect(g7).toMatchObject({ verdict: "meets", value: "bench-shop: confirmed 3 = 3, reopened 2 = 2, reopened findings 1 = 1" });
+    });
     it("misses on any difference, and is not measured without a history", () => {
         const g7 = scoreChange(SETUP, steps, { "bench-shop": { confirmed: 3, reopened: 1, reopenedFindings: 1 } }).criteria.find((c) => c.id === "G7")!;
         expect(g7.verdict).toBe("misses");

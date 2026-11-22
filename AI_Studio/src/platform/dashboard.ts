@@ -480,8 +480,9 @@ const areaKey = (i: { kind: "page" | "endpoint"; path: string; method?: string }
 export async function projectQuality(p: Platform, projectId: string, now = Date.now()): Promise<{ card: QualityCard; history: QualityHistory }> {
     const since = new Date(now - HISTORY_WEEKS * 7 * DAY_MS).toISOString();
     const db = p.db;
+    // A move to Confirmed: the engine's notes on a finding that stays Confirmed (a fix claimed, still reproduces) are not one.
     const confirmations = db
-        .all<Row>("SELECT e.finding_id, e.at, f.first_seen_at FROM finding_events e JOIN candidate_findings f ON f.id = e.finding_id WHERE e.project_id = ? AND e.to_state = 'confirmed' AND e.at >= ?", projectId, since)
+        .all<Row>("SELECT e.finding_id, e.at, f.first_seen_at FROM finding_events e JOIN candidate_findings f ON f.id = e.finding_id WHERE e.project_id = ? AND e.to_state = 'confirmed' AND (e.from_state IS NULL OR e.from_state <> 'confirmed') AND e.at >= ?", projectId, since)
         .map((r) => ({ findingId: r.finding_id as string, at: r.at as string, firstSeenAt: r.first_seen_at as string }));
     const reopens = db
         .all<Row>("SELECT finding_id, at FROM finding_events WHERE project_id = ? AND from_state = 'fixed' AND to_state = 'verification_pending' AND at >= ?", projectId, since)
