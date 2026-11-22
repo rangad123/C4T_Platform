@@ -382,7 +382,7 @@ function withProgressReporter(config: string): string {
  */
 /** The risky-check gate for a run's scripts: on, its kind, and the folder that counts the run's identity writes (at most 8). */
 export function riskyEnv(env: Pick<RunEnv, "riskyChecks">, runDir: string): Record<string, string> {
-    return env.riskyChecks ? { AITP_RISKY_CHECKS: "1", AITP_RISKY_GATE: env.riskyChecks, AITP_RISKY_DIR: path.join(runDir, "risky") } : {};
+    return env.riskyChecks ? { TEST_RISKY_CHECKS: "1", TEST_RISKY_GATE: env.riskyChecks, TEST_RISKY_DIR: path.join(runDir, "risky") } : {};
 }
 
 export async function reportFromPartialResults(runDir: string): Promise<boolean> {

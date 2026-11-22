@@ -23,5 +23,5 @@ export function riskyKindOf(spec: Pick<TestSpec, "steps" | "tags">): RiskyKind |
 
 /** The first line of a risky test's body: it skips itself unless the run was given the gate. Empty for any other test. */
 export function riskyGateLine(spec: Pick<TestSpec, "steps" | "tags">): string {
-    return riskyKindOf(spec) ? `    test.skip(process.env.AITP_RISKY_CHECKS !== "1", ${JSON.stringify(RISKY_SKIPPED)});\n` : "";
+    return riskyKindOf(spec) ? `    test.skip(process.env.TEST_RISKY_CHECKS !== "1", ${JSON.stringify(RISKY_SKIPPED)});\n` : "";
 }

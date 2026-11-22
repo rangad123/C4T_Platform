@@ -27,14 +27,14 @@ describe("risky saved tests skip themselves without the gate", () => {
     });
 
     it("every risky script starts with the gate line; other scripts do not", () => {
-        const gate = 'test.skip(process.env.AITP_RISKY_CHECKS !== "1"';
+        const gate = 'test.skip(process.env.TEST_RISKY_CHECKS !== "1"';
         for (const [s, fw] of [[parallel, "playwright-api"], [rateLimit, "playwright-api"], [identity, "playwright"]] as const) expect(renderScript(s, fw, { baseUrl: "http://127.0.0.1:9000" }).content).toContain(gate);
         expect(renderScript(plain, "playwright-api", { baseUrl: "http://127.0.0.1:9000" }).content).not.toContain(gate);
     });
 
-    it("the run's gate reaches the script only through the job: AITP_RISKY_CHECKS, the gate kind and the run's write counter folder", () => {
+    it("the run's gate reaches the script only through the job: TEST_RISKY_CHECKS, the gate kind and the run's write counter folder", () => {
         expect(riskyEnv({}, "/run")).toEqual({});
-        expect(riskyEnv({ riskyChecks: "bench" }, "/run")).toEqual({ AITP_RISKY_CHECKS: "1", AITP_RISKY_GATE: "bench", AITP_RISKY_DIR: path.join("/run", "risky") });
+        expect(riskyEnv({ riskyChecks: "bench" }, "/run")).toEqual({ TEST_RISKY_CHECKS: "1", TEST_RISKY_GATE: "bench", TEST_RISKY_DIR: path.join("/run", "risky") });
     });
 
     it("a skipped risky test is not run again and keeps its result (NOT_RUN), with the sentence", async () => {
@@ -89,19 +89,19 @@ describe("the identity-write helper holds its rules for an edited test", () => {
     it("stops a share only on a bench or fixture run", async () => {
         setAccounts(["ana", "ben"]);
         const revoke = { identityWrite: "revoke", as: "ana", by: "ben", method: "DELETE", path: "/api/notes/n3/share/{userId}", param: "userId", read: "/api/notes/n3" };
-        process.env.AITP_RISKY_GATE = "authorization";
+        process.env.TEST_RISKY_GATE = "authorization";
         const r = await run(revoke);
         expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/^Not run: stopping a share is not undone/) });
         expect(r.b.calls.some((c) => c.method === "DELETE")).toBe(false);
-        process.env.AITP_RISKY_GATE = "bench";
+        process.env.TEST_RISKY_GATE = "bench";
         expect((await run(revoke)).b.calls.some((c) => c.method === "DELETE")).toBe(true);
-        delete process.env.AITP_RISKY_GATE;
+        delete process.env.TEST_RISKY_GATE;
     });
 
     it("sends at most 8 writes in one run, counted across the run's scripts", async () => {
         setAccounts(["ana"]);
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "risky-"));
-        process.env.AITP_RISKY_DIR = dir;
+        process.env.TEST_RISKY_DIR = dir;
         try {
             const owner = { identityWrite: "owner", as: "ana", method: "PATCH", path: "/api/notes/n3" };
             let sent = 0;
@@ -114,7 +114,7 @@ describe("the identity-write helper holds its rules for an edited test", () => {
             expect(sent).toBe(8);
             expect(refused).toBe(2);
         } finally {
-            delete process.env.AITP_RISKY_DIR;
+            delete process.env.TEST_RISKY_DIR;
             fs.rmSync(dir, { recursive: true, force: true });
         }
     });

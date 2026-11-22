@@ -25,6 +25,8 @@ export const MAX_IDENTITY_WRITES = 8;
  * Paths must be on the application's own API host; a check that cannot be judged throws a plain sentence, which is not a finding.
  */
 export const IDENTITY_WRITES_HELPER_SOURCE = String.raw`
+/** The writes this script sent as another account when the run gives no counter folder (TEST_RISKY_DIR). */
+const IDENTITY_WRITES_TAKEN = new Set();
 async function accessWriteAssert(page, base, cfg) {
     const browser = page.context().browser();
     const what = cfg.method + " " + cfg.path;
@@ -41,14 +43,14 @@ async function accessWriteAssert(page, base, cfg) {
     if (!(cfg.identityWrite === "revoke" ? cfg.method === "DELETE" : cfg.identityWrite === "owner" ? cfg.method === "PATCH" || cfg.method === "PUT" : cfg.method === "PUT" || cfg.method === "PATCH")) throw new Error("The method " + cfg.method + " is not one this check sends, so nothing was called.");
     for (const p of [cfg.path, cfg.read, cfg.whoAmI]) if (p !== undefined && !own(String(p).replace("{" + cfg.param + "}", "x"))) throw new Error("The addresses in this check are not the application's own, so nothing was called.");
     // An edited test keeps the rules too: stopping a share is not undone, so it runs only on a benchmark or fixture app.
-    if (cfg.identityWrite === "revoke" && !["bench", "fixture"].includes(String(process.env.AITP_RISKY_GATE || ""))) throw new Error("Not run: stopping a share is not undone, so this check runs only on a benchmark or fixture app.");
+    if (cfg.identityWrite === "revoke" && !["bench", "fixture"].includes(String(process.env.TEST_RISKY_GATE || ""))) throw new Error("Not run: stopping a share is not undone, so this check runs only on a benchmark or fixture app.");
     // At most 8 writes as another account in one run, counted across the run's scripts (one file per write in the run's folder).
     const claim = async (n) => {
         // riskyFs: the script's own "node:fs" import (generators/playwright.ts adds it to scripts with these checks).
         const fs = typeof riskyFs !== "undefined" ? riskyFs : undefined;
-        const dir = fs ? process.env.AITP_RISKY_DIR : undefined;
+        const dir = fs ? process.env.TEST_RISKY_DIR : undefined;
         if (dir) fs.mkdirSync(dir, { recursive: true });
-        const taken = (globalThis.__identityWrites ??= new Set());
+        const taken = IDENTITY_WRITES_TAKEN;
         for (let k = 0; k < n; k++) {
             let got = false;
             for (let i = 1; i <= 8 && !got; i++) {
