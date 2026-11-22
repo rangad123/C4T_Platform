@@ -47,10 +47,10 @@ jobs:
         run: npx playwright install-deps chromium
 
       - name: Typecheck the server
-        run: npx tsc --noEmit
+        run: NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit
 
       - name: Typecheck the web app
-        run: npx tsc --noEmit -p web
+        run: NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit -p web
 
       - name: Build the web app
         run: npm run build:web

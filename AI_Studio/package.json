@@ -24,7 +24,7 @@
     "build:runner": "node scripts/build-runner.mjs",
     "build:installer": "node scripts/build-installer.mjs",
     "dev:web": "vite web",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit",
     "test": "vitest run",
     "demo:sample-app": "node examples/sample-app/server.mjs",
     "demo:e2e": "tsx --env-file-if-exists=.env scripts/e2e.ts",
