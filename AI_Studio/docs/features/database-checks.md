@@ -34,7 +34,7 @@ change data (**Include API tests that change data** on, on the Requirements tab)
 - **Probe token**: the token you gave the probe, at least 24 characters. It is stored encrypted (the platform's `SECRET_KEY`) and never
   shown again; the field then says a token is saved. Type a new one to replace it.
 
-Saving with an empty address removes the setting. Changing it needs "Change project settings". The routes are
+Saving with an empty address removes the setting. Changing it needs "Manage keys and connections to other systems", as every connection that holds another system's secret. The routes are
 `GET` and `PUT /api/projects/:id/db-probe` (`src/platform/routes/db-probe.ts`); the answer is `{ enabled, url, tokenSaved }`, never the
 token.
 

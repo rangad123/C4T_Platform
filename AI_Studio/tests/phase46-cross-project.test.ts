@@ -28,6 +28,7 @@ let B: Seed;
 let fid = "";
 let onlyB = "";
 let artifactA = "";
+let editor = "";
 
 const finding = (): CandidateFindingInput => ({
     objective: { id: "obj-1", kind: "rule", source: "R-4" },
@@ -71,6 +72,8 @@ beforeAll(async () => {
     const u = control.users.create({ email: "only-b@example.com", name: "Only B", role: "editor" });
     control.projects.store.set(u.id, { mode: "only", projects: [{ projectId: B.projectId, role: "editor" }] });
     onlyB = control.users.createToken(u.id, { name: "t", role: "editor" }).token;
+    const e = control.users.create({ email: "editor@example.com", name: "Editor", role: "editor" });
+    editor = control.users.createToken(e.id, { name: "t", role: "editor" }).token;
 });
 
 afterAll(async () => {
@@ -111,5 +114,17 @@ describe("Phase 4–6 routes keep each project's data to itself", () => {
         const art = await get(`/api/artifacts/${artifactA}`, as);
         expect(art.status).toBe(404);
         expect(art.body).not.toContain(MARK);
+    });
+});
+
+describe("the database check's token is a connection's secret", () => {
+    it("an editor can read the setting but not set it; setting it needs the manage permission, like every other connection", async () => {
+        const as = { authorization: `Bearer ${editor}` };
+        const put = (headers: Record<string, string>) =>
+            app.inject({ method: "PUT", url: `/api/projects/${B.projectId}/db-probe`, headers, payload: { enabled: true, url: "https://probe.b.example.test/db", token: "editor-set-probe-token-0123456789abcdef" } });
+        expect((await get(`/api/projects/${B.projectId}/db-probe`, as)).status).toBe(200);
+        expect((await put(as)).statusCode).toBe(403);
+        expect((await get(`/api/projects/${B.projectId}/db-probe`)).body).toContain('"tokenSaved":false');
+        expect((await put({ "x-api-key": KEY })).statusCode).toBe(200);
     });
 });

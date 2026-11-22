@@ -1,6 +1,6 @@
 /**
  * Phase 4 T26: Settings, Test data, Database checks (web/src/features/dbprobe/DbProbeCard.tsx). In a real browser against a real
- * platform: off by default with an empty address; a person who may change project settings switches it on with the probe's address
+ * platform: off by default with an empty address; a person who may manage connections switches it on with the probe's address
  * and token and saves; after a reload the token field is empty and says a token is saved (the token is never sent back); a refusal
  * from the server (an address that is not https://) is shown as its sentence; a person who may only look sees the setting read-only.
  * Axe in light and dark, no sideways scroll at phone width.
@@ -141,7 +141,7 @@ describe("Settings, Test data, Database checks", () => {
         await axeBoth();
     }, 60_000);
 
-    it("is read-only for a person who may not change project settings", async () => {
+    it("is read-only for a person who may not manage connections", async () => {
         access = { projectAdmin: false, permissions: ["ai_studio.access"] };
         try {
             await open();
