@@ -317,13 +317,15 @@ async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
     if (!write) return `${inv.write} is not a documented operation`;
     const read = inv.read ? endpointOf(inv.read, env.apis) : undefined;
     const setup: Plan["setup"] = [];
+    const up = signUpOf([...env.apis]);
     for (const [i, text] of inv.setup.entries()) {
         const ep = endpointOf(text, env.apis);
         if (!ep || ep.path.includes("{")) return `the setup ${text.slice(0, 80)} cannot be sent (it is not documented, or needs an id)`;
+        // The probe signs up its fresh account itself: a setup that names the sign-up again would register the same account twice (HTTP 409).
+        if (ep === up) continue;
         const schema = bodySchema(ep);
         setup.push({ ep, body: inv.setupBodies?.[i] ?? (schema ? sample(schema) : undefined) });
     }
-    const up = signUpOf([...env.apis]);
     const signUp = up ? { ep: up, body: sample(bodySchema(up)) } : undefined;
     const props: Record<string, Schema> = bodySchema(write)?.properties ?? {};
     const names = [...Object.keys(props).filter((k) => REFERENCE.test(k) && (props[k]!.type ?? "string") === "string" && !props[k]!.enum), ...[...write.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!)];

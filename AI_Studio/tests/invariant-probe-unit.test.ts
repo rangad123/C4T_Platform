@@ -231,4 +231,32 @@ describe("invariant probe", () => {
             }
         }
     });
+
+    // paid-shop-1: the model put the sign-up in each invariant's setup ("POST /api/register"). The probe signs up its fresh account
+    // itself, so the setup registered the same account again, got HTTP 409, and all 5 invariants were skipped (BS-02 and BS-11 missed).
+    it("a setup that repeats the sign-up is the probe's own sign-up: it is not sent twice, and the invariant is probed", async () => {
+        const base = shop("BS-02");
+        const emails = new Set<string>();
+        const env: ProbeEnv = {
+            ...base,
+            async newClient(credential) {
+                const c = await base.newClient(credential);
+                return {
+                    async send(method, path, body) {
+                        if (path === "/api/register") {
+                            const email = String((body as { email?: unknown } | undefined)?.email);
+                            if (emails.has(email)) return { status: 409, json: { error: "An account with this email already exists." } };
+                            emails.add(email);
+                        }
+                        return c.send(method, path, body);
+                    },
+                };
+            },
+        };
+        const r = await probeInvariant({ ...SUM, setup: ["POST /api/register"] }, env, { seed: 1 });
+        expect(r.reason).toBeUndefined();
+        expect(r.outcome).toBe("failed");
+        const spec = TestSpecSchema.parse({ ...r.spec, testId: "API-001" });
+        expect(spec.steps.filter((s) => s.action === "request" && s.path === "/api/register")).toHaveLength(1);
+    });
 });
