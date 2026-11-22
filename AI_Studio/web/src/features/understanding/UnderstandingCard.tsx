@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Square, Telescope, RefreshCw } from "lucide-react";
 import { api } from "../../api";
-import { Badge, Button, Callout, Metric, Skeleton } from "../../components/ui";
+import { Badge, Button, Callout, Metric } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { useFetch, useOnFinish } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
@@ -12,7 +12,8 @@ import "./understanding.css";
 /**
  * "Application understanding" on the Dashboard of a project tested by the AI agent: what the latest analysis of the application found
  * (pages, workflows, endpoints, rules), the sources it came from and which failed, what it could not work out, when it ran and which
- * version of the application it describes. A person who may change tests can analyse again or stop a running analysis.
+ * version of the application it describes. A person who may change tests can analyse again or stop a running analysis. Hidden until
+ * there is something to say: a reading, one running, or one that failed.
  */
 export function UnderstandingCard({ projectId }: { projectId: string }) {
     const sources = useFetch<SourcesAnswer>(`/projects/${projectId}/intel/sources`, (d) => (d?.running ? 3000 : null));
@@ -45,19 +46,15 @@ export function UnderstandingCard({ projectId }: { projectId: string }) {
             </h2>
         </div>
     );
-    if (sources.loading || latest.loading) {
-        return (
-            <section className="stack-sm" aria-labelledby="understanding-title">
-                {head}
-                <Skeleton h={90} />
-            </section>
-        );
-    }
+    // Nothing while loading: the card is often hidden, and a placeholder that then disappears would move the page.
+    if (sources.loading || latest.loading) return null;
     const loadError = sources.error ?? latest.error ?? rules.error;
     const v = latest.data;
     const last = sources.data?.last;
     const list = rules.data?.rules ?? [];
     const version = v?.appVersion.label ? `, version ${v.appVersion.label}` : v ? ", no version label" : "";
+    // Nothing read, nothing reading and nothing failed: the card would only say "not read yet", and exploring reads it anyway.
+    if (!v && !running && !last?.error && !loadError) return null;
 
     return (
         <section aria-labelledby="understanding-title" data-testid="understanding">
@@ -69,7 +66,7 @@ export function UnderstandingCard({ projectId }: { projectId: string }) {
                             ? `Reading the application, started ${relativeTime(running.since)}.`
                             : v
                               ? `Last read ${relativeTime(last?.at ?? v.createdAt)}${version}.`
-                              : "Not read yet. Exploring the application reads it."}
+                              : "Not read yet. The next exploration reads it."}
                     </p>
                     <span className="spacer" />
                     {canWrite && running && (

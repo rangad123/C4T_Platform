@@ -7,9 +7,14 @@ trigger API's explicit `selection` field) asks for one.
 
 ## The path of a pull request
 
-1. **Connect a repository** with `PUT /api/projects/:id/code-host`: owner, repository name, a fine-grained personal access token and,
-   optionally, a webhook secret. The token and secret are stored encrypted (`platform/code-host/store.ts`) and never sent back. Only
-   `api.github.com` or a configured GitHub Enterprise host is called. The answer gives the webhook address once; only its hash is kept.
+1. **Connect a repository** on **Integrations**, card **Connect GitHub** (`web/src/features/integrations/GithubCodeCard.tsx`): the
+   project, the repository (owner/name), a fine-grained personal access token, and **Pull request feedback** on or off. Changing it needs
+   the permission to manage keys and connections. The card calls `PUT /api/projects/:id/code-host` (and `POST .../code-host/test`,
+   `DELETE .../code-host`); on the first connect it makes a random webhook secret in the browser and sends it along, because the webhook
+   refuses unsigned deliveries. The token and secret are stored encrypted (`platform/code-host/store.ts`) and never sent back. Only
+   `api.github.com` or a configured GitHub Enterprise host is called (the card offers github.com only; the API takes `apiUrl`). The
+   answer gives the webhook address once, and the card shows it with the secret once, with the events to choose in GitHub (Pull requests
+   and Deployment statuses); only the address token's hash is kept.
 2. **The webhook** (`POST /api/code-host/github/:token`, `platform/code-host/webhook.ts`) counts a delivery only when its
    `X-Hub-Signature-256` matches under the connection's secret, compared in constant time. The delivery must be for the connected
    repository, and at most 30 per minute are taken per project. A delivery id that was already seen does nothing more. A pull request
@@ -25,7 +30,9 @@ trigger API's explicit `selection` field) asks for one.
    the CLI writes) and, after a run, a check on the head commit (a commit status when the token may not create check runs). Channels
    that chose it get the `pr_selection_ready` notice (`platform/alerts.ts`).
 6. **Runs, After a deploy**, card **Which tests a change calls for**: the latest pull requests are listed with their head commit, the
-   number of proposed tests, the full-run reasons, why the first tests were proposed, and the run of that commit. Each has two buttons:
+   number of proposed tests, the full-run reasons, why the first tests were proposed, and the run of that commit. Naming changed pages
+   and endpoints by hand is then folded under them ("Or name the changed pages and endpoints yourself"); without pull request lines it
+   is the card's content, as before. Each has two buttons:
    **Run all tests** (the default) and **Run only the proposed tests**. Both use `POST /api/projects/:id/selection-run` and need the
    permission to run tests. The focused run sends the routes the change reached and gets the same proposal again from current coverage.
 
@@ -46,16 +53,15 @@ no AI.
 
 | On the card | How it is counted |
 |---|---|
-| Bugs confirmed | moves of a finding to Confirmed (`finding_events`) in the last 4 weeks |
+| Bugs confirmed | moves of a finding to Confirmed (`finding_events`) in the last 4 weeks; the number links to the run the newest confirmed finding was last seen in |
 | Came back after a fix | moves from Fixed back to Verification pending in the last 4 weeks |
 | Pass rate, last 10 runs | the average pass rate of the latest 10 runs that have one |
-| Workflow steps tried | exercised of all workflow steps in the latest exploration's coverage record |
-| Time to confirm | the median hours from a finding first seen to its confirmation, over the confirmations in the window |
-| Pull requests checked | pull requests whose tests were chosen in the last 4 weeks |
+| Workflow steps tried | exercised of all workflow steps in the latest exploration's coverage record; left off the card when there is no record |
+| Pull requests checked | pull requests whose tests were chosen in the last 4 weeks; left off the card when there are none |
 | Areas that keep failing | pages and endpoints (from test coverage) where a test did not pass in at least 2 of the latest 10 runs; quarantined tests left out; each links to a test that failed there |
 | Unreliable tests to fix | the existing flaky-test rule (`detectFlaky`); each links to the test |
 
-The history in the same answer also has the bugs confirmed per week, bugs confirmed per run, and the pull requests with the run of their
+The answer also has the median time to confirm (`hoursToConfirm`), which the card does not show. The history in the same answer also has the bugs confirmed per week, bugs confirmed per run, and the pull requests with the run of their
 head commit. A run counts for a pull request when a deploy trigger ran it with a commit label of at least 7 characters that starts the
 head commit's hash. `GET /api/projects/:id/pull-requests` returns the same pull request list for the selection card.
 
@@ -78,4 +84,4 @@ What each kind of integration needs, and what was built:
 ## Not built
 
 - Automatic choice of a focused run for deploys, schedules or pipelines. Full runs stay the default everywhere.
-- GitLab and Bitbucket connectors, a GitHub App installation, and a settings screen for the repository connection (the API sets it).
+- GitLab and Bitbucket connectors, a GitHub App installation, and a GitHub Enterprise address on the Connect GitHub card (the API takes it).

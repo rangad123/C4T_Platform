@@ -94,7 +94,6 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
     const canEdit = can("ai_studio.project.settings") && data.application !== null;
     const [openApiUrl, setOpenApiUrl] = useState(data.openApiUrl ?? "");
     const [allowMutating, setAllowMutating] = useState(data.allowMutatingApiTests);
-    const [cleanupAfter, setCleanupAfter] = useState(data.cleanupAfter);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     // Closed to one line, unless something the agents cannot work without is missing, the person came here to add it, or just saved.
@@ -121,7 +120,6 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                 body: {
                     openApiUrl,
                     allowMutatingApiTests: allowMutating,
-                    cleanupAfter,
                 },
             });
             setBusy(false);
@@ -198,27 +196,11 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                                 </span>
                             </label>
                             {allowMutating && (
-                                <label className="check">
-                                    <input type="checkbox" checked={cleanupAfter} disabled={!canEdit} onChange={(e) => setCleanupAfter(e.target.checked)} />
-                                    <span>
-                                        <span className="title">Remove the records these tests create afterwards</span>
-                                        <span className="hint">
-                                            Only records a test created in that run are removed, and only where the application describes how to remove them. Anything left behind is listed with its tag.
-                                            {!cleanupAfter && " Cleanup is off: the records the tests create will stay in the application."}
-                                        </span>
-                                    </span>
-                                </label>
+                                <p className="hint" data-testid="agent-inputs-cleanup">
+                                    {data.cleanupAfter ? "The records these tests create are removed after each run." : "Cleanup is off: the records these tests create stay in the application."} Change it in{" "}
+                                    <a href={routes.projectSettings(projectId, "data")}>Settings → Test data</a>.
+                                </p>
                             )}
-                        </div>
-
-                        <div className="stack-sm opt-group">
-                            <div className="t-card">Requirements</div>
-                            <p className="hint" data-testid="agent-inputs-requirements">
-                                {data.requirements.active > 0
-                                    ? `Exploring plans tests for the ${plural(data.requirements.active, "active requirement")} listed below.`
-                                    : "Exploring plans tests for the active requirements listed below, when there are some."}{" "}
-                                Add them one at a time, or use Import to bring them from a requirements document (.txt, .md, .pdf or .docx).
-                            </p>
                         </div>
                     </div>
 

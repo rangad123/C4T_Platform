@@ -700,7 +700,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Open an agent to see what it checks, which platforms it works on, what it needs and which of your projects use it.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
             { text: "Pick a project's agents when you create it. Change them later in its Settings → General, then use Save agents.", button: "Open projects", to: here("projects"), ui: ["Save agents"] },
-            { text: "An agent marked Not available yet cannot be chosen: AI Studio cannot do that kind of testing yet.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
+            { text: "Only the agents AI Studio has are listed; one that works on another platform than the project's cannot be ticked, and says why.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
         ],
         words: ["test", "exploration"],
         next: [{ text: "Explore a project's application to run the checks its agents turn on.", button: "Read how exploring works", to: { topic: "explore-my-app" } }],

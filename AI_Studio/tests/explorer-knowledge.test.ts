@@ -11,7 +11,6 @@
  * - "Keep page thumbnails": on when never saved, off once saved off, and a sign-in saved afterwards does not turn it back on; the request a
  *   job is given follows it.
  * - Retention: a thumbnail (a screenshot with no test run) expires as a failed run's screenshots do.
- * - The site map's tree (web/src/features/explore/knowledge.ts siteTree).
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -30,7 +29,7 @@ import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { RepoSink } from "../src/platform/repo-sink.js";
 import { buildServer } from "../src/platform/server.js";
 import { UsageStore } from "../src/platform/usage-store.js";
-import { siteTree, type KnowledgePage } from "../web/src/features/explore/knowledge.js";
+import type { KnowledgePage } from "../web/src/features/explore/knowledge.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;
 const KEY = "knowledge-owner-key-5c1d77ab";
@@ -280,14 +279,5 @@ describe('"Keep page thumbnails"', () => {
         const res = await as("t-viewer", "PUT", `/api/projects/${PA}/agent-inputs`, { keepThumbnails: false });
         expect(res.status).toBe(403);
         expect((await asKey("GET", `/api/projects/${PA}/agent-inputs`)).body.keepThumbnails).toBe(true);
-    });
-});
-
-describe("the site map's tree", () => {
-    const page = (p: string): KnowledgePage => ({ path: p, title: p, type: "other", depth: 0, tests: [] });
-    it("nests pages under the page of their parent address, groups under an address with no page, and lifts a group of one", () => {
-        const tree = siteTree([page("/products/7"), page("/"), page("/products"), page("/help/faq"), page("/help/contact"), page("/a/b/c")]);
-        const show = (ns: ReturnType<typeof siteTree>): unknown => ns.map((n) => (n.children.length ? { [`${n.path}${n.page ? "" : " (group)"}`]: show(n.children) } : `${n.path}${n.page ? "" : " (group)"}`));
-        expect(show(tree)).toEqual(["/", "/a/b/c", { "/help (group)": ["/help/contact", "/help/faq"] }, { "/products": ["/products/7"] }]);
     });
 });

@@ -91,11 +91,11 @@ export function confidenceMeaning(f: Pick<CandidateFinding, "confidence" | "inde
 
 const EXPECTED_N = /^expected:(\d+)$/;
 
-/** Where the expected result comes from: a rule or requirement by its reference, one of the test's planned expected results, or nowhere stated. */
+/** Where the expected result comes from, in words: the requirements or rules, one of the test's planned expected results, or nowhere stated. */
 export function sourceText(source: string | null): string {
     if (source === null) return "No stated source: the AI’s own expectation";
     const n = EXPECTED_N.exec(source);
-    return n ? `Expected result ${n[1]} of the test’s plan` : `Stated in ${source}`;
+    return n ? `Expected result ${n[1]} of the test’s plan` : "Stated in the application’s requirements or rules";
 }
 
 const RANK: Record<Confidence, number> = { high: 0, medium: 1, low: 2 };

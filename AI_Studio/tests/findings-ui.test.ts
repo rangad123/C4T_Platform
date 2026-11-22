@@ -92,7 +92,7 @@ const STEPS = [
 
 describe("the rules (no browser)", () => {
     it("names where the expected result comes from", () => {
-        expect(sourceText("R-checkout-total")).toBe("Stated in R-checkout-total");
+        expect(sourceText("R-checkout-total")).toBe("Stated in the application’s requirements or rules");
         expect(sourceText("expected:2")).toBe("Expected result 2 of the test’s plan");
         expect(sourceText(null)).toBe("No stated source: the AI’s own expectation");
     });
@@ -334,8 +334,8 @@ describe("a finished exploration with findings", () => {
         await crit.getByText(/^Evidence/).click();
         await pwExpect(crit.getByTestId("finding-reasons").getByRole("listitem")).toHaveText([/^Critical severity/, "High confidence: the same failure in 2 of 3 attempts"]);
         await crit.getByText(/^Evidence/).click();
-        // No code source: the likely cause is said once above the list, not on each row; no model line on a row.
-        await pwExpect(section().getByTestId("run-findings-no-cause")).toHaveText("Likely cause not shown: no code source is connected to this project, so no code location can be checked.");
+        // No code source: no likely cause and no line about it (nothing on screen can connect one yet); no model line on a row.
+        await pwExpect(section().getByTestId("run-findings-no-cause")).toHaveCount(0);
         await pwExpect(section().getByTestId("finding-cause")).toHaveCount(0);
         await pwExpect(section()).not.toContainText("model-7");
         await crit.getByTestId("finding-actions").click();
@@ -360,11 +360,12 @@ describe("a finished exploration with findings", () => {
         const f = row(CAPTURED.observed);
         await pwExpect(f).toHaveAttribute("data-capture", "captured");
         await pwExpect(f.getByTestId("finding-status")).toHaveText("Candidate");
-        await pwExpect(f.getByTestId("finding-capture")).toHaveText("Captured: kept as a failing check");
-        await pwExpect(f.getByTestId("finding-objective")).toHaveText("Rule R-checkout-total · Invalid input");
+        // A kept failing check is the usual case: no badge says so. The objective is in words; its reference is under Evidence.
+        await pwExpect(f.getByTestId("finding-capture")).toHaveCount(0);
+        await pwExpect(f.getByTestId("finding-objective")).toHaveText("Rule · Invalid input");
         await pwExpect(f.getByTestId("finding-actions")).toHaveText("2 steps");
         await pwExpect(f.getByTestId("finding-expected")).toHaveText(CAPTURED.expected.text);
-        await pwExpect(f.getByTestId("finding-source")).toHaveText("Stated in R-checkout-total");
+        await pwExpect(f.getByTestId("finding-source")).toHaveText("Stated in the application’s requirements or rules");
         await pwExpect(f.getByTestId("finding-confidence")).toContainText(/^(High|Medium|Low) confidence · ./);
         await pwExpect(f.getByRole("link", { name: /Open the saved test/ })).toHaveAttribute("href", `#/tests/${capturedTest}`);
         // Its two screenshots as thumbnails on the row, each opening larger from the keyboard.
@@ -383,6 +384,7 @@ describe("a finished exploration with findings", () => {
         // The rest of the evidence: requests and console lines as recorded, behind one disclosure.
         await f.getByText(/^Evidence/).click();
         const ev = f.getByTestId("finding-evidence");
+        await pwExpect(ev.getByTestId("finding-reference")).toHaveText("Source reference: R-checkout-total");
         await pwExpect(ev.getByTestId("finding-requests")).toHaveText(CAPTURED.evidence.requests[0]!);
         await pwExpect(ev.getByTestId("finding-console")).toHaveText(CAPTURED.evidence.console[0]!);
         await pwExpect(ev).toContainText("Replayed from a fresh start: failed at step 6. Stopped at the total check.");
@@ -397,7 +399,7 @@ describe("a finished exploration with findings", () => {
         const f = row(OBSERVED.observed);
         await pwExpect(f).toHaveAttribute("data-capture", "observed_only");
         await pwExpect(f.getByTestId("finding-capture")).toHaveText("Seen, not kept as a check");
-        await pwExpect(f.getByTestId("finding-objective")).toHaveText("Workflow WF-checkout");
+        await pwExpect(f.getByTestId("finding-objective")).toHaveText("Workflow");
         await pwExpect(f.getByTestId("finding-source")).toHaveText("No stated source: the AI’s own expectation");
         await pwExpect(f.getByTestId("finding-confidence")).toContainText(/^Low confidence · /);
         await pwExpect(f.getByRole("link", { name: /Open the saved test/ })).toHaveAttribute("href", `#/tests/${observedTest}`);
@@ -449,6 +451,10 @@ describe("a person's actions, from the keyboard", () => {
         await tabTo(f.getByRole("button", { name: "Confirm" }));
         await page.keyboard.press("Enter");
         await pwExpect(f.getByTestId("finding-status")).toHaveText("Possible low bug, needs review");
+        // One sentence says why a confirmed finding still reads "Possible".
+        await pwExpect(f.getByTestId("finding-possible-why")).toHaveText("It is confirmed, but its confidence is medium, so it reads “Possible”: only a high-confidence finding is labelled Confirmed.");
+        // A tracker is connected here, so no line asks for one.
+        await pwExpect(section().getByTestId("run-findings-no-tracker")).toHaveCount(0);
         await pwExpect(section().getByTestId("findings-confirmed").getByTestId("finding")).toHaveCount(2);
         expect((await store.get(projectId, ids.review))!.state).toBe("confirmed");
         await v6();

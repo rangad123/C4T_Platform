@@ -2,26 +2,32 @@
 
 > Notion is also supported as a tracker (a page is created in a database): see [notion-and-sentry.md](notion-and-sentry.md).
 
-When a test finds a problem — or cannot be made to pass — you can file an issue in your tracker with one click, from the test's
-page. The issue already contains what failed, how severe it is and why, the steps, how to reproduce it and a link back to the test.
+When exploration finds a bug, or a test finds a problem or cannot be made to pass, you can file an issue in your tracker with one
+click. The issue already contains what failed, how severe it is and why, the steps, how to reproduce it and a link back.
 
 ## For a user
 
-1. Open the project's **Tests** tab → **⋯ More actions → Issue tracker**.
-2. Choose **GitHub** or **Jira** and fill in:
-   * **GitHub**: the repository (`owner/name`, or paste its address) and an access token that can create issues in it (a fine-grained
-     token with *Issues: read and write* is enough). Only for GitHub Enterprise Server: the API address, under *GitHub Enterprise Server*.
-   * **Jira (Cloud)**: your Jira address (`https://yourcompany.atlassian.net`), the project key (for example `SHOP`), the issue type
-     (default *Bug*), your Atlassian account email and an API token (Atlassian account → Security → API tokens).
-3. **Connect.** The platform checks the address and token with a real call before saving anything, and explains a problem in plain
-   words ("GitHub did not accept the token…", "…could not find it. Check the owner and repository name…", "…is limiting how fast we can
-   send requests"). **Test connection** repeats the check later (for example after a token was renewed); **Remove** deletes the
-   connection (issues already created stay where they are, and stay linked on the test page).
-4. Open a test that found something (*Needs review*) or that could not be validated and choose **Create issue**. With several
-   connections you pick one. The link to the new issue (for example *GitHub #12*, *Jira SHOP-7*) appears as a chip on the test page.
+1. **Connect a tracker.** Open **Integrations** (left sidebar) and choose **Set up GitHub Issues** or **Set up Jira** (or **Set up
+   Notion**). Fill in:
+   * **GitHub**: the **Owner** and **Repository**, and an **Access token** that can create issues in it (a fine-grained token with
+     *Issues: read and write* is enough). Only for GitHub Enterprise Server: the **GitHub Enterprise API address**.
+   * **Jira (Cloud)**: your **Jira address** (`https://yourcompany.atlassian.net`), the **Project key** (for example `SHOP`), the
+     **Account email**, an **API token** (Atlassian account → Security → API tokens) and the **Issue type** (default *Bug*).
+2. **Set up …** checks the address and token with a real call before saving anything, and explains a problem in plain words ("GitHub
+   did not accept the token…", "…could not find it. Check the owner and repository name…"). **Test the connection** repeats the check
+   later; **Remove** deletes a connection no project uses.
+3. **Use it in a project:** under **Use in a project**, choose the project and **Use it**. The connection then shows in the project's
+   **Settings → Connections**, under **Issue tracker** ("Shared from Integrations"). A project can also connect a tracker of its own
+   there, with **Connect another**.
+4. **File from a finding:** on an exploration's run page, under **Findings to check**, choose **File issue** on a confirmed finding or
+   one that needs manual review. The row then shows "Filed as GitHub #12". Until the project has a tracker, the card says where to connect
+   one, and there is no File issue button.
+5. **File from a test:** open a test that found something (*Needs a look*) or that could not be validated and choose **Create issue**.
+   With several connections you pick one. The link to the new issue (for example *GitHub #12*, *Jira SHOP-7*) appears as a chip on the
+   test page.
 
-Asking again never creates a duplicate: if the test already has an issue in that tracker, the existing link is returned. A passing or
-never-run test has nothing to report, so there is no button for it.
+Asking again never creates a duplicate: if the finding or test already has an issue in that tracker, the existing link is returned. A
+passing or never-run test has nothing to report, so there is no button for it.
 
 ### What the issue contains
 

@@ -43,15 +43,15 @@ If you can, test a staging copy of your application (a spare copy used for testi
 ## Start in 10 minutes
 
 1. Open the platform in your browser. On your own computer the address is usually `http://127.0.0.1:4000`. On a shared server, your admin gives you the address.
-2. On your first visit, or when you choose **New project** on the Projects page, you see three cards under **Ways to start**. Use the first one, **Explore my app**.
-3. Type the **Application URL**, the address of the site you want to test. If the site has a sign-in page, add a test account afterwards on the project's **Requirements** tab, under **What the agents need**, and explore again. The platform can then see what is behind the sign-in page.
-4. Choose **Explore my app** (or **Start exploring** if you chose **Choose what to test first**, which also lets you give the AI a **Focus**). The AI looks around your application. Nothing is created or run yet. **Stop exploring** is always visible.
-5. Read the plan on the project's Overview. It says what was found and what the platform will create, for example "We found 4 pages and 2 API endpoints. We will create about 18 tests." (An API endpoint is a place where programs, not people, talk to your app.) Open **Edit the plan** to switch kinds of test on or off, or to leave out single ideas. The numbers change as you edit.
+2. On the Projects page choose **Create a project** (on your first visit) or **New project**. Give it a name, choose **Web** and **AI agent**, type the **Application URL** (the address of the site you want to test), and choose **Create project**.
+3. If the site has a sign-in page, add a test account in the project's **Settings**, then **Sign-in**. The platform can then see what is behind the sign-in page. You can also do this later and explore again.
+4. On the project's **Dashboard** choose **Start exploring**. The Explore page has the address, an optional **Focus** such as "search and checkout only", and **How much to explore**. Choose **Start exploring** again. The AI looks around your application. Nothing is created or run yet. **Stop exploring** is always visible.
+5. Read the plan on the project's Dashboard. It says what was found and what the platform will create, for example "We found 4 pages and 2 API endpoints. We will create about 18 tests." (An API endpoint is a place where programs, not people, talk to your app.) Open **Edit the plan** to switch kinds of test on or off, or to leave out single ideas. The numbers change as you edit.
 6. Choose **Create the tests**. Or choose **Discard the plan** to forget it.
 7. Watch **Creating your tests**. Each test appears with its status. This takes a few minutes, and you can leave the page and come back.
-8. Read the result on the **Overview**. Each test is **Passing**, **Failing**, **Needs a look** or **Not run yet**. Expect a few **Needs a look** on a first run. Real sites nearly always have small problems, such as a missing security setting. That shows the checks work.
+8. Read the result on the **Dashboard**. Each test is **Passing**, **Failing**, **Needs a look** or **Not run yet**. Expect a few **Needs a look** on a first run. Real sites nearly always have small problems, such as a missing security setting. That shows the checks work.
 9. Choose **View tests** on the Dashboard, then open one test that is not passing. The page says which step failed, what was expected and what came back.
-10. Choose **Run** to run the tests again. The **Next steps** list on the Overview then suggests what to do: set a schedule, add sign-in details, connect a runner.
+10. Choose **Run** to run the tests again. The **Next steps** list on the Dashboard then suggests what to do: set a schedule, add sign-in details, connect a runner.
 
 ---
 
@@ -98,6 +98,7 @@ You never need to leave the platform to find out how something works.
 | I want to... | Use... | Read |
 |---|---|---|
 | Get tests for my app without writing any | Explore my app | [Explore my app](#explore-my-app) |
+| Check what the AI found, and confirm or dismiss it | Findings to check | [Findings](#findings) |
 | Add one test by describing it | Describe it | [Describe a test in plain English](#describe-a-test-in-plain-english) |
 | Make a test by clicking through my app | Record (Test development) | [Record a test](#record-a-test) |
 | Build a test step by step | Build steps by hand | [Build steps by hand](#build-steps-by-hand) |
@@ -112,6 +113,8 @@ You never need to leave the platform to find out how something works.
 | Run tests now, or only some of them | Run | [The Run panel](#the-run-panel) |
 | Run tests every night | Schedules | [Schedules](#schedules) |
 | Run tests when a new version goes live | After a deploy | [Run after a deploy](#run-after-a-deploy) |
+| Run only the tests a pull request calls for | Connect GitHub | [Pull requests](#pull-requests) |
+| Check what my database stored after a test | Database checks | [Database checks](#database-checks) |
 | Test against staging and production | Environments | [Environments](#environments) |
 | Run tests inside my company network | Your runner | [Your runner](#your-runner-your-own-computer) |
 | See if my app breaks on Firefox or a phone | Other browsers | [Other browsers and screen sizes](#other-browsers-and-screen-sizes) |
@@ -119,9 +122,10 @@ You never need to leave the platform to find out how something works.
 | Know if my API changed | API changes, API contracts | [API changes between runs](#api-changes-between-runs) |
 | Stop a flaky test from raising alarms | Quarantine | [Quarantine](#quarantine) |
 | Share a report with people outside the platform | Export | [Reports and sharing](#reports-and-sharing) |
+| See confirmed bugs and failing areas over the last weeks | Quality card | [The quality card](#the-quality-card) |
 | Decide whether we can ship | Release sign-off | [Release sign-off and manual checks](#release-sign-off-and-manual-checks) |
 | Be told when something breaks | Alerts | [Alerts](#alerts) |
-| File a problem in GitHub, Jira or Notion | Create issue | [Issue trackers](#issue-trackers) |
+| File a problem in GitHub, Jira or Notion | File issue, Create issue | [Issue trackers](#issue-trackers) |
 | Test a phone app or a Windows program | Mobile app, Windows apps | [Phones and emulators](#phones-and-emulators), [Windows desktop apps](#windows-desktop-apps) |
 | Have the AI tap through my Android app and plan tests | Explore with AI | [Phones and emulators](#phones-and-emulators) |
 | Test on a real phone on my desk | A runner with the phone on USB | [Phones on a runner](#phones-on-a-runner) |
@@ -152,11 +156,11 @@ You never need to leave the platform to find out how something works.
 *The AI looks around your application and builds tests for it.*
 
 - **Why you'd use it:** It is the fastest way to a first set of tests.
-- **How:** Choose **Explore my app** on the welcome page, or **Explore again** on an AI agent project's Dashboard. Enter the address. Read the plan, then choose **Create the tests**. Choose **Choose what to test first** to give the AI a **Focus** before exploring.
-- **Which checks run:** the project's **Testing agents** decide, in **Settings**, then **General**. A new project starts with the API, Accessibility, Security, UX and Test Case Generation agents. Visual changes come with Responsive UI, speed checks with Performance. The load check is asked for per exploration through the API or an AI assistant. The AI screen review is on at **Deep** and **Everything** when the project has the UX agent and your model can read images (screenshots of key pages go to your AI provider); the Explore page has an **AI screen review** box beside **How much to explore** to turn it on or off for one exploration. Each check is explained in [What the platform checks besides clicks](#what-the-platform-checks-besides-clicks).
-- **What the agents need:** on the project's **Requirements** tab, keep a test account under **Sign in**, so the platform can see pages behind a sign-in. For an API that needs a sign-in, add a **Bearer token** (a secret code that lets a program use your API) or OAuth2 details (another way for programs to sign in), and the **OpenAPI document URL** (your API's description document). They are saved only there: exploring uses them and never changes them. The requirements on the same tab are what the AI plans tests from. When an agent needs something that is missing, Explore asks for it first. An exploration started through the API, the command line or an AI assistant that names another API address or OpenAPI document while sign-in details or API credentials are saved is refused (409) with the reason, so saved credentials never go to another site. The Explore page itself has one optional field, a **Focus** such as "search and checkout only", and the choice of how much to explore.
-- **Include API tests that change data:** this is off, because those tests create and delete real records. Turn it on (under **What the agents need**) only for a test environment.
-- **How much to explore:** on the Explore page, and as the project's default in **Settings**, then **General**. **Thorough** (the default and the least any exploration does): up to 60 pages, 4 clicks deep, about 50 tests from the AI, with accessibility, page health and visual checks on 12 key pages. **Deep**: up to 120 pages, 5 clicks deep, about 100 tests, about twice the key pages. **Everything**: up to 250 pages, 6 clicks deep, about 150 tests, checks on every key page. Deep and Everything use more AI and take longer. Schedules and runner explorations use the project's choice. **Explore every page again** (on **Explore again**, off by default) sends every page to the AI again instead of reusing pages unchanged since the last exploration. More: [ux-first-run.md](features/ux-first-run.md).
+- **How:** On an AI agent project's Dashboard choose **Start exploring** (the first time) or **Explore again** (after that). Check the address, give an optional **Focus**, and choose how much to explore. Read the plan, then choose **Create the tests**.
+- **Which checks run:** the project's **Testing agents** decide, in **Settings**, then **General**. A new project starts with the API, Accessibility, Security, UX and Test Case Generation agents. Visual changes come with Responsive UI, speed checks with Performance. The load check is asked for per exploration through the API or an AI assistant. The AI screen review is on at **Deep** and **Everything** when the project has the UX agent and your model can read images (screenshots of key pages go to your AI provider); at those levels the Explore page shows an **AI screen review** box, ticked, so you can leave it out for one exploration. Each check is explained in [What the platform checks besides clicks](#what-the-platform-checks-besides-clicks).
+- **What the agents need:** in the project's **Settings**, then **Sign-in**, keep a test account, so the platform can see pages behind a sign-in. For an API that needs a sign-in, add a **Bearer token** (a secret code that lets a program use your API) or OAuth2 details (another way for programs to sign in) there too. The **OpenAPI document URL** (your API's description document) goes on the **Requirements** tab, under **What the agents need**. They are saved only there: exploring uses them and never changes them. The requirements on the Requirements tab are what the AI plans tests from. When an agent needs something that is missing, Explore asks for it first. An exploration started through the API, the command line or an AI assistant that names another API address or OpenAPI document while sign-in details or API credentials are saved is refused (409) with the reason, so saved credentials never go to another site. The Explore page itself has one optional field, a **Focus** such as "search and checkout only", and the choice of how much to explore.
+- **Include API tests that change data:** this is off, because those tests create and delete real records. Turn it on (under **What the agents need**) only for a test environment. Whether the records are removed afterwards is set in **Settings**, then **Test data**.
+- **How much to explore:** on the Explore page, and as the project's default in **Settings**, then **General**. **Thorough** (the default and the least any exploration does): up to 60 pages, 4 clicks deep, about 50 tests from the AI, with accessibility, page health and visual checks on 12 key pages. **Deep**: up to 120 pages, 5 clicks deep, about 100 tests, about twice the key pages. **Everything**: up to 250 pages, 6 clicks deep, about 150 tests, checks on every key page. Deep and Everything use more AI and take longer. Schedules and runner explorations use the project's choice. **Explore every page again** (on **Explore again** only, off by default; a first exploration has nothing to reuse) sends every page to the AI again instead of reusing pages unchanged since the last exploration. More: [ux-first-run.md](features/ux-first-run.md).
 - **Good to know:** Pages behind a sign-in are in the plan only if you gave sign-in details. After you create the tests, the platform runs each one, tries to fix failures by itself and keeps what it could not fix as **Failing**. Web tests need the AI. **Stop exploring** keeps the tests already created.
 
 #### Watch the AI explore
@@ -338,6 +342,14 @@ You never need to leave the platform to find out how something works.
 - **Why you'd use it:** It answers "what happened last night?"
 - **How:** Open **Runs**, then **All runs**. Open a run to see every test (failures first, with the reason), who started it (a person, a schedule, a deploy or a run sequence), what changed since the last run, and **Run failing tests again** or **Run these tests again**.
 - **Good to know:** "Changed since the last run" compares each test with its own previous result. It covers runs of your existing tests, not environment runs, browser checks or explorations. Progress updates live, including from a runner. If the live connection is lost, the page refreshes every few seconds and says so. More: [live-stream.md](features/live-stream.md).
+
+#### Findings
+
+*What an exploration found wrong in your application, checked again before it is called a bug.*
+
+- **Why you'd use it:** A finding is a possible bug. The platform replays it from a fresh start before it says **Confirmed**, so you spend your time on the real ones.
+- **How:** Open **Runs** and the exploration's run, or choose the **Bugs confirmed** number on the Dashboard's **Quality** card. Under **Findings to check**, confirmed bugs come first, worst severity first, then those that need a person (**Needs manual review**). The rest are folded by state, for example **Reproduced** or **Candidate**. Each finding shows what was observed, what was expected and where that comes from, how sure the platform is, and **Evidence** (screenshots, requests, console lines). Choose **Confirm**, or **Not a bug** with a reason, and **File issue** once an issue tracker is connected.
+- **Good to know:** Only a high-confidence finding is labelled **Confirmed**. When you confirm one of medium confidence it reads "Possible ... bug, needs review", and a sentence under it says why. More: [bug-verification.md](features/bug-verification.md).
 
 #### Other browsers and screen sizes
 
@@ -566,6 +578,14 @@ On a first exploration most of these checks are on by default. Each finding says
 - **How:** On when an API is found. The platform tries valid requests, missing and invalid fields, wrong types, unknown ids, extreme values, odd text, access without signing in, and multi-step flows such as list then detail.
 - **Good to know:** Server errors, and access that should have been refused, are reported as findings. Tests that create, change or delete records are off until you switch on **Include API tests that change data**. Add an API token or sign-in details so tests of protected calls work.
 
+#### Database checks
+
+*After a test changes data, check what your database actually stored.*
+
+- **Why you'd use it:** A page can say "Saved" while nothing was saved. This check asks your database.
+- **How:** Whoever runs your database starts a small read-only probe (the steps are in the document below). In the project's **Settings**, then **Test data**, under **Database checks**, tick **Check the database after tests that change data**, give the **Probe address** and **Probe token**, and save. It needs **Include API tests that change data** on the Requirements tab.
+- **Good to know:** Only counts are kept, never your data, and the token is stored encrypted. More: [database-checks.md](features/database-checks.md).
+
 #### API changes between runs
 
 *Notices when your API changed shape.*
@@ -651,6 +671,14 @@ On a first exploration most of these checks are on by default. Each finding says
 - **How:** With two or more projects, the **Projects** page shows each one as **ready**, **needs attention**, **blocked** or **unknown**, with reasons in words ("2 high-severity findings", "last run 12 days ago"), a ribbon and a recent trend. "How readiness is decided" lists every rule.
 - **Good to know:** A project is blocked by any critical or high finding, or when its latest run failed. The page is read-only and starts nothing. More: [dashboard.md](features/dashboard.md).
 
+#### The quality card
+
+*How the project has done over the last weeks, on its Dashboard.*
+
+- **Why you'd use it:** It answers "are we finding bugs, and do they come back?"
+- **How:** Open the project's **Dashboard**. **Quality** shows **Bugs confirmed** (choose the number to open the run with the latest one), **Came back after a fix**, the pass rate of the latest runs, and, when there is something to count, **Workflow steps tried** and **Pull requests checked**. Under them, **Areas that keep failing** and **Unreliable tests to fix**, each a link to the test to look at.
+- **Good to know:** The card appears once the project has run history. More: [change-aware-testing.md](features/change-aware-testing.md).
+
 #### Trends and unreliable tests
 
 *How results develop over time, and which tests flip between pass and fail.*
@@ -690,8 +718,16 @@ On a first exploration most of these checks are on by default. Each finding says
 *Turn a problem a test found into an issue in GitHub, Jira or Notion.*
 
 - **Why you'd use it:** You hand a problem to the people who fix it, with the evidence.
-- **How:** Open **Setup**, then **Issue tracker**. Connect GitHub (repository and **Access token**), Jira (your Jira address, project key, Atlassian account email and **API token**) or Notion (**Notion database** link and **Notion integration token**). A token is a secret code you create in that tool so the platform can act for you. The platform tests the connection before saving. Then open a failing test, or one that needs a look, and choose **Create issue**.
-- **Good to know:** The title starts with the severity. The body has what failed, the steps and a link back. Choosing twice never creates a duplicate. More: [issues.md](features/issues.md), [notion-and-sentry.md](features/notion-and-sentry.md).
+- **How:** Open **Integrations** and choose **Set up GitHub Issues**, **Set up Jira** or **Set up Notion**. Fill in GitHub (owner, repository and **Access token**), Jira (your Jira address, project key, account email and **API token**) or Notion (database link and **Integration token**). A token is a secret code you create in that tool so the platform can act for you. The platform tests the connection before saving. Then, under **Use in a project**, choose the project and **Use it**. A project can also connect its own tracker in its **Settings**, then **Connections**, under **Issue tracker**. To file: on an exploration's run page, choose **File issue** on a confirmed finding or one that needs manual review; or open a failing test, or one that needs a look, and choose **Create issue**.
+- **Good to know:** Until a tracker is connected, the findings card says where to connect one. The title starts with the severity. The body has what failed, the steps and a link back. Choosing twice never creates a duplicate. More: [issues.md](features/issues.md), [notion-and-sentry.md](features/notion-and-sentry.md).
+
+#### Pull requests
+
+*Connect a project's GitHub repository, so each pull request gets the tests its change calls for.*
+
+- **Why you'd use it:** You see before the merge which tests a change touches, and can run just those.
+- **How:** Open **Integrations** and find **Connect GitHub**. Choose the project, type the **Repository** (owner/name) and an **Access token** that can read its pull requests, and choose whether **Pull request feedback** (a comment and a check on each pull request) is on. Choose **Connect GitHub**. The page shows the webhook's **Payload URL** and **Secret** once: add them in the repository's Settings, Webhooks, with the events Pull requests and Deployment statuses.
+- **Good to know:** Each pull request then shows on **Runs**, then **After a deploy**, with the proposed tests and why, and **Run all tests** or **Run only the proposed tests**. Nothing runs until you choose. More: [change-aware-testing.md](features/change-aware-testing.md).
 
 #### Sentry
 

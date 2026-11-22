@@ -212,12 +212,14 @@ The job also keeps the session's limits, each objective with its priority, the s
   stop reason "Cancelled". Which operators did not run, and why, is shown once the run is over.
 - People who may only look at the project see the same list without **Stop**.
 - **On the run's results**, the stop reason, the limits used and the coverage record, then **Findings to check**: each finding
-  with what was observed, its objective (kind and source), the expected result and its source, its evidence (screenshots, requests
+  with what was observed, what it checked (the objective's kind and operator in words), the expected result and where it comes from (in
+  words; the source's own reference is under Evidence), its evidence (screenshots, requests
   and console lines) and a link to the saved test. Its status, severity, confidence, reproduction, likely cause, order and the
   actions a person can take are described in [Bug verification](bug-verification.md). Up to three screenshots (where a fresh replay
   stopped, with password fields and stored secrets covered) show as thumbnails that open larger; a finding without one says "No
-  screenshot was saved for this finding." Each captured finding is labelled "Captured: kept as a failing check" and each other one
-  "Seen, not kept as a check", which also has a dashed border. An older run without findings says so in one sentence.
+  screenshot was saved for this finding." A finding with no kept failing check is labelled "Seen, not kept as a check" and has a
+  dashed border; a captured one (the usual case) has no extra label. An older run without findings says so in one sentence. A run with
+  no coverage record has no "How the exploration went" card, unless it has checked layers to show.
 - With an older runner, the view says in one sentence that the runner needs downloading again.
 - A refusal from the server is shown as its sentence.
 

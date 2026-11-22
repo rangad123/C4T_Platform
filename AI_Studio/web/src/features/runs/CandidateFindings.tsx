@@ -16,12 +16,19 @@ import "./findings.css";
 
 const NONE = "This run has no findings to check: the AI found none, or the run is from before findings were recorded.";
 
+/** What the finding checked, in words; the engine's reference to its source is under Evidence. */
 function objectiveText(o: FindingRecord["finding"]["objective"]): string {
-    if (!o) return "None: it came from a planned test";
-    return `${kindWord(o.kind)} ${o.source}${o.operator ? ` · ${operatorWord(o.operator)}` : ""}`;
+    if (!o) return "A planned test";
+    return `${kindWord(o.kind)}${o.operator ? ` · ${operatorWord(o.operator)}` : ""}`;
 }
 
 const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+
+/** Why a confirmed finding reads "Possible …, needs review" (findings/score.ts `label`): below high confidence, or a serious security issue not reproduced. */
+const possibleWhy = (rv: FindingRecord["review"]): string =>
+    rv.confidence !== "high"
+        ? `It is confirmed, but its confidence is ${rv.confidence}, so it reads “Possible”: only a high-confidence finding is labelled Confirmed.`
+        : "It is confirmed, but a critical or high security issue is labelled Confirmed only once the platform has reproduced it, so it reads “Possible”.";
 
 const STATUS_TONE = { confirmed: "danger", review: "warning", rest: "neutral" } as const;
 
@@ -125,6 +132,8 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
     const ev = f.evidence;
     const rv = rec.review;
     const h = `run-finding-${n}`;
+    // The source's own reference (a rule or requirement id), for someone tracing the finding back; a plan's "expected:N" says nothing more.
+    const ref = f.expected.source && !f.expected.source.startsWith("expected:") ? f.expected.source : (f.objective?.source ?? null);
     return (
         <li className={`fnd-item is-${f.capture}`} data-testid="finding" data-capture={f.capture} data-state={rec.state} aria-labelledby={h}>
             <div className="fnd-head">
@@ -138,13 +147,16 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                     <Badge tone={rv.severity === "critical" || rv.severity === "high" ? "danger" : rv.severity === "medium" ? "warning" : "neutral"}>
                         <span data-testid="finding-severity">{SEVERITY_WORD[rv.severity]} severity</span>
                     </Badge>
-                    <Badge tone={f.capture === "captured" ? "info" : "neutral"}>
-                        <span data-testid="finding-capture">{CAPTURE_WORD[f.capture]}</span>
-                    </Badge>
+                    {/* A kept failing check is the usual case; only a finding without one says so. */}
+                    {f.capture !== "captured" && (
+                        <Badge tone="neutral">
+                            <span data-testid="finding-capture">{CAPTURE_WORD[f.capture]}</span>
+                        </Badge>
+                    )}
                 </div>
             </div>
             <dl className="run-facts fnd-facts">
-                <dt>Objective</dt>
+                <dt>What it checked</dt>
                 <dd data-testid="finding-objective">{objectiveText(f.objective)}</dd>
                 <dt>Steps in its test</dt>
                 <dd>
@@ -189,6 +201,11 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                     </>
                 )}
             </dl>
+            {rv.label.startsWith("Possible ") && (
+                <p className="t-secondary" data-testid="finding-possible-why">
+                    {possibleWhy(rv)}
+                </p>
+            )}
             {ev.screenshots.length > 0 && (
                 <ul className="fnd-shots" data-testid="finding-screenshots">
                     {ev.screenshots.map((id, i) => (
@@ -207,6 +224,11 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                     Evidence ({plural(ev.screenshots.length, "screenshot")}, {plural(ev.requests.length, "request")}, {plural(ev.console.length, "console line")})
                 </summary>
                 <div className="stack-sm fnd-evidence" data-testid="finding-evidence">
+                    {ref && (
+                        <p className="t-meta" data-testid="finding-reference">
+                            Source reference: <span className="mono">{ref}</span>
+                        </p>
+                    )}
                     <ul className="fnd-replays" data-testid="finding-reasons">
                         <li>
                             {SEVERITY_WORD[rv.severity]} severity{rv.severityBasis ? `: ${rv.severityBasis}` : ""}
@@ -284,8 +306,6 @@ export function CandidateFindings({ projectId, jobId, explores }: { projectId: s
     const sections = useMemo(() => findingSections(got.data?.findings ?? []), [got.data]);
     if (got.loading || (!got.data && !got.error)) return null;
     if (!got.error && list.length === 0 && !explores) return null;
-    // Said once for the list, not on every finding.
-    const noCause = list.find((r) => !r.review.cause)?.review.noCause ?? null;
     const act: Act = { write, tracker: trackers.data?.[0], onChanged: () => void got.reload() };
     let n = 0;
     const rows = (rs: FindingRecord[]) => (
@@ -309,9 +329,9 @@ export function CandidateFindings({ projectId, jobId, explores }: { projectId: s
             ) : (
                 <>
                     <p className="t-secondary">Found by the AI. Confirmed bugs come first, then findings a person needs to check. Open a finding’s saved test to see what it does.</p>
-                    {noCause && (
-                        <p className="t-meta" data-testid="run-findings-no-cause">
-                            Likely cause not shown: {lowerFirst(noCause)}
+                    {write && trackers.data?.length === 0 && (
+                        <p className="t-meta" data-testid="run-findings-no-tracker">
+                            To file a finding as an issue, connect an issue tracker in <a href={routes.projectSettings(projectId, "connections")}>Settings → Connections</a>.
                         </p>
                     )}
                     {sections.confirmed.length > 0 && (

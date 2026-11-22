@@ -174,7 +174,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
 
                 {explored && !active && <CandidateFindings projectId={id} jobId={jobId} explores={explores} />}
 
-                {explored && !active && <RunCoverage coverage={coverage} explores={explores} />}
+                {explored && !active && <RunCoverage coverage={coverage} />}
 
                 {!job.cancelled && problems.map((e) => (
                     <Callout key={e.title + e.body} tone={nothingRan(job) ? "info" : job.status === "FAILED" ? "danger" : "warning"} title={e.title}>

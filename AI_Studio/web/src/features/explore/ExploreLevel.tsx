@@ -25,16 +25,14 @@ export function projectLevel(project: ProjectDetail | null | undefined): Explore
 /** "How much to explore": Thorough, Deep or Everything, each with its line. */
 export function LevelChoice({ value, onChange, name = "explore-level" }: { value: ExploreLevel; onChange: (l: ExploreLevel) => void; name?: string }) {
     return (
-        <fieldset className="stack-sm" data-testid="explore-level">
+        <fieldset className="stack-sm" data-testid="explore-level" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
             <legend className="t-section">How much to explore</legend>
             {LEVELS.map((l) => (
-                <label className="row" key={l} style={{ alignItems: "flex-start" }}>
+                <label className="check" key={l}>
                     <input type="radio" name={name} value={l} checked={value === l} onChange={() => onChange(l)} />
                     <span>
-                        <span className="t-card">{NAME[l]}</span>
-                        <span className="t-meta" style={{ display: "block" }}>
-                            {levelLine(l)}
-                        </span>
+                        <span className="title">{NAME[l]}</span>
+                        <span className="hint">{levelLine(l)}</span>
                     </span>
                 </label>
             ))}
@@ -43,19 +41,17 @@ export function LevelChoice({ value, onChange, name = "explore-level" }: { value
 }
 
 /**
- * "AI screen review" for one exploration. Its default comes from the level and whether the AI model can read images; `value` is
- * null until the person changes it, and only then is visionChecks sent (true or false), so an untouched box leaves it to the level.
+ * "AI screen review" for one exploration, shown only at a level that includes it (Deep, Everything) with a model that can read images.
+ * `value` is null until the person changes it, and only then is visionChecks sent, so an untouched box leaves it to the level.
  */
 export function ScreenReviewChoice({ level, canReadImages, value, onChange }: { level: ExploreLevel; canReadImages: boolean; value: boolean | null; onChange: (v: boolean) => void }) {
     const checked = value ?? (LEVEL_SETTINGS[level].visionByDefault && canReadImages);
     return (
-        <label className="row" style={{ alignItems: "flex-start" }}>
+        <label className="check">
             <input type="checkbox" data-testid="screen-review" checked={checked} onChange={(e) => onChange(e.target.checked)} />
             <span>
-                AI screen review (screenshots go to your AI provider)
-                <span className="t-meta" style={{ display: "block" }}>
-                    A model that can read images looks at key pages for overlapping or cut-off elements and broken pictures. On by default at Deep and Everything when your model can read images.
-                </span>
+                <span className="title">AI screen review (screenshots go to your AI provider)</span>
+                <span className="hint">A model that can read images looks at key pages for overlapping or cut-off elements and broken pictures. This level includes it; untick it to keep the screenshots from your AI provider.</span>
             </span>
         </label>
     );

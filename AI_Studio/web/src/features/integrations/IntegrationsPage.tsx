@@ -7,6 +7,7 @@ import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { plural, relativeTime } from "../../lib/format";
 import { routes, type SettingsSection } from "../../lib/router";
+import { GithubCodeCard } from "./GithubCodeCard";
 import "./integrations.css";
 
 /** What can be set up once and shared; every other kind on this page is set up inside each project. */
@@ -59,6 +60,8 @@ interface Entry {
 }
 
 const TOKEN_HINT = "Stored encrypted. It is never shown again.";
+/** The group that also holds Connect GitHub (a project's repository, GithubCodeCard.tsx). */
+const CODE_GROUP = "Code, devices and mail";
 const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
     {
         title: "Issue trackers",
@@ -156,7 +159,7 @@ const GROUPS: Array<{ title: string; icon: LucideIcon; entries: Entry[] }> = [
         ],
     },
     {
-        title: "Code, devices and mail",
+        title: CODE_GROUP,
         icon: Network,
         entries: [
             { kind: "git", name: "Git import", icon: GitBranch, what: "Import Playwright tests from a GitHub, GitLab or other Git repository. The access token is used for that download and never stored, so there is nothing to share.", where: { label: "Test scripts", scripts: true } },
@@ -199,6 +202,7 @@ export function IntegrationsPage() {
                                     {g.title}
                                 </h2>
                                 <div className="int-grid">
+                                    {g.title === CODE_GROUP && <GithubCodeCard canManage={data.canManage} />}
                                     {g.entries.map((e) => (
                                         <IntegrationCard key={e.kind} entry={e} data={data} reload={page.reload} />
                                     ))}

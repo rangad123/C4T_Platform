@@ -101,7 +101,7 @@ describe("what the agents need", () => {
         await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
         await pwExpect(page.getByTestId("explore-agents")).toHaveText("Checked by this project’s testing agents: API Testing Agent, Test Case Generation Agent.");
         await pwExpect(page.getByTestId("inputs-note").getByRole("link", { name: "Requirements" })).toHaveAttribute("href", `#/projects/${shop}/requirements`);
-        await page.getByRole("button", { name: "Explore again" }).click();
+        await page.getByRole("button", { name: "Start exploring" }).click();
         await pwExpect(dialog()).toBeVisible();
         expect(platform.repo.listJobs(shop)).toHaveLength(0);
         await dialog().getByRole("button", { name: "Open Requirements" }).click();
@@ -142,7 +142,7 @@ describe("what the agents need", () => {
         await page.goto(`${BASE}/#/new?project=${shop}`);
         await page.getByLabel(/^Focus/).fill("search and checkout only");
         await pwExpect(dialog()).toHaveCount(0);
-        await page.getByRole("button", { name: "Explore again" }).click();
+        await page.getByRole("button", { name: "Start exploring" }).click();
         await page.waitForURL((u) => u.hash === `#/projects/${shop}`);
         const job = platform.repo.listJobs(shop)[0]!;
         expect(job.options).toMatchObject({ scope: "search and checkout only", openApiUrl: "https://shop.example/openapi.json", planOnly: true });

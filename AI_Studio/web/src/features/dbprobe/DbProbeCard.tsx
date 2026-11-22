@@ -19,6 +19,9 @@ export interface DbProbeSetting {
  */
 export function DbProbeCard({ projectId }: { projectId: string }) {
     const data = useFetch<DbProbeSetting>(`/projects/${projectId}/db-probe`);
+    // The checks run after tests that change data, so the hint names that switch only while it is off.
+    const inputs = useFetch<{ allowMutatingApiTests?: boolean }>(`/projects/${projectId}/agent-inputs`);
+    const changesOff = inputs.data !== null && inputs.data !== undefined && inputs.data.allowMutatingApiTests !== true;
     const [enabled, setEnabled] = useState(false);
     const [url, setUrl] = useState("");
     const [token, setToken] = useState("");
@@ -80,19 +83,19 @@ export function DbProbeCard({ projectId }: { projectId: string }) {
                 <input type="checkbox" disabled={ro || busy} checked={enabled} onChange={(e) => (setEnabled(e.target.checked), setNote(null))} />
                 <span>
                     <span className="title">Check the database after tests that change data</span>
-                    <span className="hint">Needs “Include API tests that change data” on the Requirements tab.</span>
+                    {changesOff && <span className="hint" data-testid="db-probe-needs">Needs “Include API tests that change data” on the Requirements tab.</span>}
                 </span>
             </label>
             <div className="field">
                 <label htmlFor="db-probe-url">Probe address</label>
-                <input id="db-probe-url" className="input mono" disabled={ro || busy} value={url} placeholder="https://db-probe.example.com" autoComplete="off" spellCheck={false} aria-describedby="db-probe-url-hint" onChange={(e) => (setUrl(e.target.value), setNote(null))} />
+                <input id="db-probe-url" className="input" disabled={ro || busy} value={url} placeholder="https://db-probe.example.com" autoComplete="off" spellCheck={false} aria-describedby="db-probe-url-hint" onChange={(e) => (setUrl(e.target.value), setNote(null))} />
                 <p className="hint" id="db-probe-url-hint">
-                    Starts with https://. Leave it empty and save to remove the setting.
+                    Starts with https://; http:// only for a probe on this computer. Leave it empty and save to remove the setting.
                 </p>
             </div>
             <div className="field">
                 <label htmlFor="db-probe-token">Probe token</label>
-                <input id="db-probe-token" className="input mono" type="password" disabled={ro || busy} value={token} placeholder={saved.tokenSaved ? "•••••••• saved" : ""} autoComplete="new-password" spellCheck={false} aria-describedby="db-probe-token-hint" onChange={(e) => (setToken(e.target.value), setNote(null))} />
+                <input id="db-probe-token" className="input" type="password" disabled={ro || busy} value={token} placeholder={saved.tokenSaved ? "•••••••• saved" : ""} autoComplete="new-password" spellCheck={false} aria-describedby="db-probe-token-hint" onChange={(e) => (setToken(e.target.value), setNote(null))} />
                 <p className="hint" id="db-probe-token-hint" data-testid="db-probe-token-state">
                     {saved.tokenSaved ? "A token is saved, stored encrypted and never shown again. Type a new one to replace it." : "The token you gave the probe, at least 24 characters. Stored encrypted and never shown again."}
                 </p>

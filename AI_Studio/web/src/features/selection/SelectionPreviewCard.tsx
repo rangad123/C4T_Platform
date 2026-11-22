@@ -1,4 +1,4 @@
-import { GitBranch, GitPullRequest, Play, ScanSearch } from "lucide-react";
+import { ChevronRight, GitBranch, GitPullRequest, Play, ScanSearch } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../api";
 import { Badge, Button, Callout, Metric } from "../../components/ui";
@@ -49,6 +49,34 @@ export function SelectionPreviewCard({ projectId }: { projectId: string }) {
         }
     };
     const empty = linesOf(pages).length === 0 && linesOf(endpoints).length === 0;
+    // With pull request lines, they answer the question; naming the changes by hand is folded under them.
+    const prs = useFetch<{ pullRequests: PullRequestSelection[] }>(`/projects/${projectId}/pull-requests`);
+    const prList = prs.data?.pullRequests.slice(0, 3) ?? [];
+
+    const manual = (
+        <div className="card-pad stack-sm">
+            <p className="t-secondary">Name the pages and endpoints a release changes. The preview shows which tests open or call them, and why. The preview runs nothing, and a deploy still runs every runnable test.</p>
+            <div className="field">
+                <label htmlFor="sel-pages">Changed pages, one per line</label>
+                <textarea id="sel-pages" className="input" rows={3} maxLength={20_000} value={pages} placeholder={"/checkout\n/orders/{id}"} onChange={(e) => setPages(e.target.value)} />
+            </div>
+            <div className="field">
+                <label htmlFor="sel-endpoints">Changed endpoints, one per line (a method and a path)</label>
+                <textarea id="sel-endpoints" className="input" rows={3} maxLength={20_000} value={endpoints} placeholder={"POST /api/orders\nGET /api/orders/{id}"} onChange={(e) => setEndpoints(e.target.value)} />
+            </div>
+            <div className="row wrap">
+                <Button variant="primary" icon={ScanSearch} loading={busy === "preview"} disabled={empty || busy !== null} tip={empty ? "Name at least one changed page or endpoint first." : undefined} onClick={() => void preview()}>
+                    Preview the tests
+                </Button>
+                <Button icon={GitBranch} loading={busy === "detected"} disabled={busy !== null} tip="Fill in what earlier runs and analyses saw change: API responses and the pages the last analysis found different." onClick={() => void useDetected()}>
+                    Use detected changes
+                </Button>
+            </div>
+            {note && <p className="t-meta" data-testid="selection-detected-note">{note}</p>}
+            {error && <Callout tone="danger">{error}</Callout>}
+            {result && <PreviewResult r={result} />}
+        </div>
+    );
 
     return (
         <section className="card" aria-labelledby="selection-title" data-testid="selection-preview">
@@ -56,29 +84,18 @@ export function SelectionPreviewCard({ projectId }: { projectId: string }) {
                 <ScanSearch size={18} aria-hidden />
                 <h2 className="t-section" id="selection-title">Which tests a change calls for</h2>
             </div>
-            <PullRequests projectId={projectId} />
-            <div className="card-pad stack-sm">
-                <p className="t-secondary">Name the pages and endpoints a release changes. The preview shows which tests open or call them, and why. It never runs or skips a test: a deploy still runs every runnable test.</p>
-                <div className="field">
-                    <label htmlFor="sel-pages">Changed pages, one per line</label>
-                    <textarea id="sel-pages" className="input" rows={3} maxLength={20_000} value={pages} placeholder={"/checkout\n/orders/{id}"} onChange={(e) => setPages(e.target.value)} />
-                </div>
-                <div className="field">
-                    <label htmlFor="sel-endpoints">Changed endpoints, one per line (a method and a path)</label>
-                    <textarea id="sel-endpoints" className="input" rows={3} maxLength={20_000} value={endpoints} placeholder={"POST /api/orders\nGET /api/orders/{id}"} onChange={(e) => setEndpoints(e.target.value)} />
-                </div>
-                <div className="row wrap">
-                    <Button variant="primary" icon={ScanSearch} loading={busy === "preview"} disabled={empty || busy !== null} tip={empty ? "Name at least one changed page or endpoint first." : undefined} onClick={() => void preview()}>
-                        Preview the tests
-                    </Button>
-                    <Button icon={GitBranch} loading={busy === "detected"} disabled={busy !== null} tip="Fill in what earlier runs and analyses saw change: API responses and the pages the last analysis found different." onClick={() => void useDetected()}>
-                        Use detected changes
-                    </Button>
-                </div>
-                {note && <p className="t-meta" data-testid="selection-detected-note">{note}</p>}
-                {error && <Callout tone="danger">{error}</Callout>}
-                {result && <PreviewResult r={result} />}
-            </div>
+            <PullRequests projectId={projectId} list={prList} />
+            {prList.length > 0 ? (
+                <details className="disclosure" data-testid="selection-by-hand">
+                    <summary className="card-pad">
+                        <ChevronRight size={16} className="chev" aria-hidden />
+                        Or name the changed pages and endpoints yourself
+                    </summary>
+                    {manual}
+                </details>
+            ) : (
+                manual
+            )}
         </section>
     );
 }
@@ -193,12 +210,10 @@ function Group({ title, tests, testId, collapsed }: { title: string; tests: Sele
 }
 
 /** The latest pull requests whose tests were chosen from the change (code-host/pr-impact.ts), each with why and both runs. Nothing runs until a person picks one; a full run is the default. */
-function PullRequests({ projectId }: { projectId: string }) {
-    const prs = useFetch<{ pullRequests: PullRequestSelection[] }>(`/projects/${projectId}/pull-requests`);
+function PullRequests({ projectId, list }: { projectId: string; list: PullRequestSelection[] }) {
     const [busy, setBusy] = useState<string | null>(null);
     const [started, setStarted] = useState<{ key: string; jobId: string; testCount: number } | null>(null);
     const [error, setError] = useState<{ key: string; text: string } | null>(null);
-    const list = prs.data?.pullRequests.slice(0, 3) ?? [];
     if (!list.length) return null;
 
     const start = async (p: PullRequestSelection, selection: "full" | "focused") => {
@@ -228,7 +243,7 @@ function PullRequests({ projectId }: { projectId: string }) {
                             <code className="t-meta">{p.headSha.slice(0, 7)}</code>
                             <span className="t-meta">{plural(p.proposed, "test")} proposed</span>
                         </div>
-                        {p.fullRunRecommended && <p className="t-secondary">Full run recommended: {p.fullRunReasons.join(" ")}</p>}
+                        {p.fullRunRecommended && <p className="t-secondary">Full run recommended. {p.fullRunReasons.join(" ")}</p>}
                         {p.tests.length > 0 && (
                             <ul className="t-secondary" aria-label={`Why tests were proposed for pull request #${p.pr}`}>
                                 {p.tests.map((t) => (

@@ -180,10 +180,10 @@ export function useCoverage(projectId: string, jobId: string, enabled: boolean):
 
 /**
  * On a finished exploration's page: why the session stopped, what it used of its limits, and its coverage record (what it exercised,
- * what it left unexplored and what did not run, with why). A run without a record says so in one sentence, when the project explores
- * by objectives. A refusal from the server is shown as its sentence.
+ * what it left unexplored and what did not run, with why). A run without a record shows only the layers it checked, or nothing. A refusal
+ * from the server is shown as its sentence.
  */
-export function RunCoverage({ coverage, explores }: { coverage: Fetched<CoverageAnswer>; explores: boolean }) {
+export function RunCoverage({ coverage }: { coverage: Fetched<CoverageAnswer> }) {
     const can = useCan();
     if (coverage.loading || (!coverage.data && !coverage.error)) return null;
     if (coverage.error)
@@ -197,18 +197,14 @@ export function RunCoverage({ coverage, explores }: { coverage: Fetched<Coverage
         );
     const a = coverage.data!;
     if (!a.available) {
-        if (!explores && !a.layers) return null;
+        // No coverage record: a card that would only explain its own emptiness is left out.
+        if (!a.layers) return null;
         return (
             <section className="card card-pad stack-sm" aria-labelledby="run-coverage-h" data-testid="run-coverage">
                 <h2 className="t-section" id="run-coverage-h">
                     How the exploration went
                 </h2>
-                {a.layers && <CheckedLayers layers={a.layers} />}
-                {explores && (
-                    <p className="t-secondary" data-testid="run-coverage-unavailable">
-                        {a.message}
-                    </p>
-                )}
+                <CheckedLayers layers={a.layers} />
             </section>
         );
     }

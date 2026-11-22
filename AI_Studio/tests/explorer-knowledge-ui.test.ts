@@ -3,8 +3,8 @@
  * usage and its page thumbnails are recorded as an exploration records them).
  *
  * - The run page's progress tree marks the reused page "Reused <date>" and says, as a warning, that reuse was switched off and why.
- * - "What the explorer knows" on the run page and on the project page: one tab at a time. Site map: the pages as a tree by address with
- *   their titles, their thumbnails (loaded through GET /api/artifacts/:id) and links to the tests that start on them. "Reused and why":
+ * - "What the explorer knows" on the run page and on the project page: one tab at a time. Site map: the pages tests start on, with their
+ *   titles, thumbnails (loaded through GET /api/artifacts/:id) and test links; the other pages as one folded list of addresses. "Reused and why":
  *   the reused pages with their dates, the reason reuse was switched off, and the cache figures (this person may see AI usage).
  * - Settings → General has "Keep page thumbnails", on.
  * - No accessibility violations in light and dark (the app is light-only: dark is emulated to prove nothing breaks), and a phone-sized
@@ -141,15 +141,19 @@ describe("the run page of a repeat exploration", () => {
         const products = page.getByTestId("xk-page:/products");
         expect(await products.innerText()).toContain("All products");
         expect(await products.getByRole("link", { name: "WEB-001 Browse the product list" }).getAttribute("href")).toBe(`#/tests/${testId}`);
-        // /products/7 sits under /products; /help is a group of one page, lifted.
-        expect(await products.getByTestId("xk-page:/products/7").count()).toBe(1);
-        expect(await page.getByTestId("xk-page:/help/faq").count()).toBe(1);
-        expect(await page.getByTestId("xk-page:/").getByTestId("xk-reused").innerText()).toBe("Reused 2026-11-10");
-        // The thumbnails load through the artifact route.
+        // Only the page a test starts on is shown with its picture; the other three are one folded list of addresses.
+        expect(await page.getByTestId("xk-map-counts").innerText()).toBe("Tests start on 1 of the 4 pages.");
+        const others = page.getByTestId("xk-other-pages");
+        expect(await others.getAttribute("open")).toBeNull();
+        await others.locator("summary").click();
+        expect(await others.locator("summary").innerText()).toBe("3 other pages");
+        for (const p of ["/", "/help/faq", "/products/7"]) expect(await others.getByTestId(`xk-page:${p}`).count()).toBe(1);
+        expect(await others.getByTestId("xk-page:/").getByTestId("xk-reused").innerText()).toBe("Reused 2026-11-10");
+        // The thumbnail loads through the artifact route; pages no test starts on show none.
         const imgs = k.getByTestId("xk-thumb");
-        await expect.poll(() => imgs.count(), { timeout: 15_000 }).toBe(2);
-        await expect.poll(() => imgs.evaluateAll((els) => els.map((e) => (e as HTMLImageElement).complete && (e as HTMLImageElement).naturalWidth)), { timeout: 15_000 }).toEqual([320, 320]);
-        expect(await imgs.first().getAttribute("alt")).toBe("Picture of /");
+        await expect.poll(() => imgs.count(), { timeout: 15_000 }).toBe(1);
+        await expect.poll(() => imgs.evaluateAll((els) => els.map((e) => (e as HTMLImageElement).complete && (e as HTMLImageElement).naturalWidth)), { timeout: 15_000 }).toEqual([320]);
+        expect(await imgs.first().getAttribute("alt")).toBe("Picture of /products");
         expect(await axe('[data-testid="explorer-knowledge"]')).toEqual([]);
         await k.scrollIntoViewIfNeeded();
         await shot("knowledge-map-wide.png");
@@ -198,7 +202,7 @@ describe("the project page and its settings", () => {
         await page.goto(`${BASE}/#/projects/${projectId}`);
         const k = page.getByTestId("explorer-knowledge");
         await k.waitFor({ timeout: 20_000 });
-        await expect.poll(() => k.getByTestId("xk-thumb").count(), { timeout: 15_000 }).toBe(2);
+        await expect.poll(() => k.getByTestId("xk-thumb").count(), { timeout: 15_000 }).toBe(1);
         const wide = await page.evaluate(() => document.documentElement.scrollWidth);
         expect(wide).toBeLessThanOrEqual(390);
         expect(await axe('[data-testid="explorer-knowledge"]')).toEqual([]);

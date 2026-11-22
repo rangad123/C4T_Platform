@@ -12,7 +12,6 @@ import { exploreAgainHref, phoneJobOf } from "../features/phone/phone";
 import { HelpPlace } from "../features/guide/HelpContext";
 import { ApiChangesCard } from "../features/contracts/ApiChangesCard";
 import { SiteMemoryCard } from "../features/memory/SiteMemoryCard";
-import { ScreenMapCard } from "../features/explore/ScreenMapCard";
 import { ExplorerKnowledge } from "../features/explore/ExplorerKnowledge";
 import { CleanupCard } from "../features/cleanup/CleanupCard";
 import { SlowestPages } from "../features/performance/SlowestPages";
@@ -171,7 +170,8 @@ export function ProjectOverview({ id }: { id: string }) {
                 }
                 actions={
                     <>
-                        {!code && (
+                        {/* Before the first exploration the page's own Start exploring is the one way in. */}
+                        {!code && job && (
                             <LinkButton href={exploreAgainHref(job, id)} icon={RefreshCw}>
                                 Explore again
                             </LinkButton>
@@ -188,6 +188,9 @@ export function ProjectOverview({ id }: { id: string }) {
             {p.archived_at && <ArchivedNote id={id} />}
 
             <div className="stack">
+                {/* What is happening now comes first. */}
+                {job && active && <JobProgress job={job} onChanged={project.reload} />}
+
                 {/* What the project's platforms and modes still need (US-010); hidden when all is set. */}
                 <SetupChecklist id={id} />
                 {!job && !code && (
@@ -228,8 +231,6 @@ export function ProjectOverview({ id }: { id: string }) {
                         {storage.data!.needsSecrets.map((n) => n.label).join("; ")}. They are never part of a backup.
                     </Callout>
                 )}
-
-                {job && active && <JobProgress job={job} onChanged={project.reload} />}
 
                 {/* The last picture of the Explorer view stays on screen after the exploration (only when this tab was watching). */}
                 {job && !active && <ExplorerWatch job={job} />}
@@ -275,8 +276,6 @@ export function ProjectOverview({ id }: { id: string }) {
                 )}
 
                 {job && settled && <ApiChangesCard projectId={id} />}
-
-                {job && settled && !code && <ScreenMapCard key={`screens-${job.jobId}`} projectId={id} />}
 
                 {/* The latest exploration's site map and what it reused (sheet #8), a plan-only one too; nothing for a run of tests. */}
                 {job && !active && !code && (job.mode ?? "generate") === "generate" && !(job.targets?.includes("mobile") ?? false) && <ExplorerKnowledge key={`knows-${job.jobId}`} projectId={id} jobId={job.jobId} active={false} />}

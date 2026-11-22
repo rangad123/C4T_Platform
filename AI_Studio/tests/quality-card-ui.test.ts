@@ -1,6 +1,6 @@
 /**
  * The quality card on a project's dashboard and the pull request lines on Runs, After a deploy (Phase 6 U2), in a real browser against
- * the real built UI (web/dist) and a real platform (port 9617, no worker, no AI). The card: six numbers and two lists whose rows link to a
+ * the real built UI (web/dist) and a real platform (port 9617, no worker, no AI). The card: up to five numbers and two lists whose rows link to a
  * test; hidden for a project with no history. The pull request lines: the reasons, the run of the commit, and two buttons, full first;
  * nothing is sent until a person clicks, and the focused run sends the change's routes. Axe in both colour schemes, phone width, and
  * screenshots at both widths in SCREENSHOTS (when set).
@@ -33,6 +33,7 @@ let emptyId: string;
 let cartTest: string;
 let flakyTest: string;
 let latestRun: string;
+let confirmedRun: string;
 
 const iso = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
 
@@ -78,7 +79,12 @@ beforeAll(async () => {
 
     // One bug confirmed 12 hours after it was first seen, later fixed, and back.
     const at = iso(80);
-    db.run("INSERT INTO candidate_findings (id, project_id, fingerprint, status, confidence, capture, finding_json, first_seen_at, last_seen_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", "qui-f1", projectId, "fp-qui", "candidate", "high", "screenshot", "{}", at, at, at, at);
+    const finding = (observed: string) =>
+        JSON.stringify({ objective: null, actions: { stepCount: 1 }, expected: { text: "The total adds up.", source: null }, observed, evidence: { screenshots: [], requests: [], console: [] }, capture: "captured", independence: "independent", confidence: "high", fingerprint: `fp-${observed.length}`, modelVersion: null, replays: [] });
+    db.run("INSERT INTO candidate_findings (id, project_id, fingerprint, status, confidence, capture, finding_json, first_seen_at, last_seen_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", "qui-f1", projectId, "fp-qui", "candidate", "high", "screenshot", finding("The total is wrong."), at, at, at, at);
+    // The bug confirmed now, found by an exploration: "Bugs confirmed" opens that run (its own events are left out, so the count stays 1).
+    confirmedRun = (await repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "generate" })).id;
+    db.run("INSERT INTO candidate_findings (id, project_id, fingerprint, status, confidence, capture, finding_json, first_seen_at, last_seen_at, created_at, updated_at, state, first_job_id, last_job_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", "qui-f2", projectId, "fp-qui-2", "candidate", "high", "captured", finding("The delivery fee is missing."), iso(2), iso(2), iso(2), iso(2), "confirmed", confirmedRun, confirmedRun);
     const ev = (seq: number, from: string, to: string, hoursAgo: number) => db.run("INSERT INTO finding_events (id, project_id, finding_id, seq, at, actor, by_kind, from_state, to_state) VALUES (?,?,?,?,?,?,?,?,?)", `qui-e${seq}`, projectId, "qui-f1", seq, iso(hoursAgo), "Engine", "engine", from, to);
     ev(1, "reproduced", "confirmed", 68);
     ev(2, "confirmed", "fixed", 40);
@@ -124,18 +130,20 @@ const shot = async (selector: string, name: string) => {
 };
 
 describe("the quality card", () => {
-    it("shows six numbers and two lists whose rows open the test", async () => {
+    it("shows the numbers there is something for, Bugs confirmed opening its run, and two lists whose rows open the test", async () => {
         await page.goto(`${BASE}/#/projects/${projectId}`);
         const card = page.getByTestId("quality-card");
         await pwExpect(card).toBeVisible({ timeout: 20_000 });
-        await pwExpect(card.locator(".metric")).toHaveCount(6);
+        // No workflow coverage was recorded, so that number is left out rather than shown as "–"; time to confirm is not on the card.
+        await pwExpect(card.locator(".metric")).toHaveCount(4);
         const metric = (label: string) => card.locator(".metric").filter({ hasText: label }).locator(".num");
         await pwExpect(metric("Bugs confirmed")).toHaveText("1");
+        await pwExpect(metric("Bugs confirmed").getByRole("link")).toHaveAttribute("href", `#/projects/${projectId}/runs/${confirmedRun}`);
         await pwExpect(metric("Came back after a fix")).toHaveText("1");
         await pwExpect(metric("Pass rate, last 10 runs")).toHaveText("66.7%");
-        await pwExpect(metric("Workflow steps tried")).toHaveText("–");
-        await pwExpect(metric("Time to confirm")).toHaveText("12 h");
         await pwExpect(metric("Pull requests checked")).toHaveText("1");
+        await pwExpect(card).not.toContainText("Workflow steps tried");
+        await pwExpect(card).not.toContainText("Time to confirm");
         const area = card.getByTestId("quality-areas").getByRole("link");
         await pwExpect(area).toHaveCount(1);
         await pwExpect(area).toContainText("/cart");
@@ -173,7 +181,7 @@ describe("pull request lines on Runs, After a deploy", () => {
         await pwExpect(pr).toContainText("Pull request #42");
         await pwExpect(pr).toContainText("dddddd");
         await pwExpect(pr).toContainText("1 test proposed");
-        await pwExpect(pr).toContainText("Full run recommended:");
+        await pwExpect(pr).toContainText("Full run recommended. Shared code changed");
         await pwExpect(pr).toContainText("Shared code changed: src/db.ts reaches every request.");
         await pwExpect(pr).toContainText("WEB-001 Cart total: The change names GET /cart, and its steps open /cart (step 1).");
         await pwExpect(pr).toContainText("Run of this commit: 1 of 2 failed.");
@@ -184,6 +192,12 @@ describe("pull request lines on Runs, After a deploy", () => {
         await shot('[data-testid="selection-prs"]', "pr-lines-desktop.png");
         await axeBoth('[data-testid="selection-prs"]');
         expect(sent).toEqual([]);
+        // With pull request lines, naming the changes by hand is folded under them.
+        const byHand = page.getByTestId("selection-by-hand");
+        await pwExpect(byHand.locator("summary")).toHaveText("Or name the changed pages and endpoints yourself");
+        await pwExpect(page.getByRole("button", { name: "Preview the tests" })).toBeHidden();
+        await byHand.locator("summary").click();
+        await pwExpect(page.getByRole("button", { name: "Preview the tests" })).toBeVisible();
 
         await buttons.first().click();
         await pwExpect(pr.getByRole("status")).toContainText("Started a run of 2 tests.");

@@ -176,13 +176,15 @@ describe("New project form", () => {
         const made = platform.repo.createProject({ name: "Vision project 1", platforms: ["web"], testingModes: ["agent"] }).id as string;
         await page.goto(`${BASE}/#/new?project=${made}`);
         await page.getByLabel("Application URL").fill(dead);
-        await pwExpect(page.getByRole("checkbox", { name: /AI screen review/ })).not.toBeChecked();
+        // Thorough leaves the AI screen review out: no box is offered.
+        await pwExpect(page.getByTestId("explore-level").getByRole("radio", { name: /Thorough/ })).toBeChecked();
+        await pwExpect(page.getByRole("checkbox", { name: /AI screen review/ })).toHaveCount(0);
         const sent: Array<Record<string, unknown>> = [];
         await page.route("**/api/projects/*/test-generation", (route) => {
             sent.push(route.request().postDataJSON());
             return route.continue();
         });
-        await page.getByRole("button", { name: "Explore again" }).click();
+        await page.getByRole("button", { name: "Start exploring" }).click();
         await page.waitForURL((u) => u.hash.startsWith("#/projects/"));
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]!.visionChecks).toBeUndefined();

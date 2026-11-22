@@ -153,7 +153,8 @@ export function Home() {
                         />
                     </>
                 }
-                actions={<NewProjectLink />}
+                /* An empty Projects page has its own Create a project; one button is enough. */
+                actions={data && !firstRun ? <NewProjectLink /> : null}
             />
             {!firstRun && tools}
             {loading && !data ? (
@@ -189,7 +190,7 @@ export function Home() {
                     )}
                 </nav>
             )}
-            {rows.length > 0 && <Legend agents={(catalogue.data?.agents ?? []).map((a) => ({ id: a.id, name: shortAgentName(a.name), available: a.available }))} />}
+            {rows.length > 0 && <Legend agents={(catalogue.data?.agents ?? []).filter((a) => a.available).map((a) => ({ id: a.id, name: shortAgentName(a.name), available: a.available }))} />}
         </>
     );
 }
