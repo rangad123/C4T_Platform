@@ -2,7 +2,7 @@
  * C3e writes as a second or lesser identity (no LLM). A write endpoint that documents a refusal for "not the owner" or "not an admin" is
  * sent as an account the survey evidence says lacks the right, and the documented refusal is expected:
  *  - owner: an account that reads another account's record through sharing (it lists that record, but not every record of that owner)
- *    sends the record's own values back with PUT/PATCH, so an accepted write changes nothing;
+ *    sends the record's own plain values back with PATCH (never PUT, which would replace the record), so an accepted write changes nothing;
  *  - role: an account the vertical survey refused gives itself the role value of the account that was allowed; an accepted change is
  *    changed back at once;
  *  - revoke: the record's owner stops sharing it with the reader, then the reader reads it again and expects the documented 404 (bench
@@ -37,7 +37,7 @@ async function accessWriteAssert(page, base, cfg) {
         return /^\/(?![\/\\])/.test(String(path)) && !/\\/.test(String(path)) && u.origin === origin ? u.toString() : null;
     };
     // The settings can be edited: each kind sends only its own method.
-    if (!(cfg.identityWrite === "revoke" ? cfg.method === "DELETE" : cfg.method === "PUT" || cfg.method === "PATCH")) throw new Error("The method " + cfg.method + " is not one this check sends, so nothing was called.");
+    if (!(cfg.identityWrite === "revoke" ? cfg.method === "DELETE" : cfg.identityWrite === "owner" ? cfg.method === "PATCH" : cfg.method === "PUT" || cfg.method === "PATCH")) throw new Error("The method " + cfg.method + " is not one this check sends, so nothing was called.");
     for (const p of [cfg.path, cfg.read, cfg.whoAmI]) if (p !== undefined && !own(String(p).replace("{" + cfg.param + "}", "x"))) throw new Error("The addresses in this check are not the application's own, so nothing was called.");
     const opts = { maxRedirects: 0, failOnStatusCode: false, timeout: 30000 };
     const call = async (ctx, method, path, data) => {
@@ -76,7 +76,7 @@ async function accessWriteAssert(page, base, cfg) {
             const w = await call(ctx, cfg.method, cfg.path, body);
             if (refused(w.status)) return;
             if (!ok(w.status)) throw cannot(what + " answered HTTP " + w.status);
-            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not the owner\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user, who reads this record but does not own it, sent " + what + " and it was accepted (HTTP " + w.status + ")" + doc + ". The record's own values were sent, so nothing was changed. This is possible broken access control: check that only the owner can change the record");
+            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not the owner\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user, who reads this record but does not own it, sent " + what + " and it was accepted (HTTP " + w.status + ")" + doc + ". Only the record's own plain values were sent with " + cfg.method + ", so its content stayed as it was. This is possible broken access control: check that only the owner can change the record");
         }
         if (cfg.identityWrite === "role") {
             const top = await me(await as(cfg.by), cfg.by);
@@ -188,7 +188,9 @@ export function generateIdentityWriteSpecs(input: { apis: ApiEndpointModel[]; li
     for (const row of input.lists) {
         const pair = sharedPairs(row)[0];
         if (!pair) continue;
-        for (const w of apis.filter((a) => (a.method === "PUT" || a.method === "PATCH") && a.path === row.detail)) {
+        // PATCH only: it sends back the record's own plain fields, so an accepted write changes nothing; a PUT replaces the record and could
+        // wipe the fields it does not send.
+        for (const w of apis.filter((a) => a.method === "PATCH" && a.path === row.detail)) {
             const documented = documents(w, OWNER_WORD);
             if (!documented) continue;
             const path = fill(row.detail, pair.id);

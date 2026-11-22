@@ -18,6 +18,7 @@ const PATHS = {
     "/api/notes/{id}": {
         get: { responses: { 200: err("Note"), 404: err("Not found or not visible to you") } },
         put: { summary: "Change a note (owner only)", responses: { 200: err("Changed"), 403: err("Not the owner"), 404: err("Not found") } },
+        patch: { summary: "Change some fields of a note (owner only)", responses: { 200: err("Changed"), 403: err("Not the owner"), 404: err("Not found") } },
         delete: { responses: { 200: err("Deleted"), 403: err("Not the owner") } },
     },
     "/api/notes/{id}/share/{userId}": { delete: { responses: { 200: err("No longer shared") } } },
@@ -56,7 +57,7 @@ describe("C3e writes as another identity", () => {
     it("makes the owner write as the sharing reader, the revoke by the owner, and the role change per refused account, within 8 writes", () => {
         const specs = generateIdentityWriteSpecs({ apis: doc(PATHS), lists: LISTS, access: ACCESS });
         expect(specs.map(cfg)).toEqual([
-            { identityWrite: "owner", as: "ana", method: "PUT", path: "/api/notes/n3", documented: "403 or 404", sev: "high" },
+            { identityWrite: "owner", as: "ana", method: "PATCH", path: "/api/notes/n3", documented: "403 or 404", sev: "high" },
             { identityWrite: "revoke", as: "ana", by: "ben", method: "DELETE", path: "/api/notes/n3/share/{userId}", param: "userId", read: "/api/notes/n3", whoAmI: "/api/me", documented: "404", sev: "high" },
             ...["ana", "ben", "mia"].map((as) => ({ identityWrite: "role", as, by: "ada", method: "PATCH", path: "/api/admin/users/{id}", param: "id", whoAmI: "/api/me", documented: "403", sev: "high" })),
         ]);
@@ -75,6 +76,13 @@ describe("C3e writes as another identity", () => {
         expect(authorized).not.toContain("revoke");
     });
 
+    it("sends the owner write as PATCH only: with only a PUT documented there is no owner write (a wrongly accepted PUT could wipe fields)", () => {
+        const { patch: _p, ...putOnly } = PATHS["/api/notes/{id}"];
+        const kinds = generateIdentityWriteSpecs({ apis: doc({ ...PATHS, "/api/notes/{id}": putOnly }), lists: LISTS, access: ACCESS }).map((s) => [cfg(s).identityWrite, cfg(s).method]);
+        expect(kinds.filter(([k]) => k === "owner")).toEqual([]);
+        expect(kinds.some(([, m]) => m === "PUT")).toBe(false);
+    });
+
     it("keeps to the write budget however many accounts were refused", () => {
         const many = Object.fromEntries([...Array(10).keys()].map((i) => [`u${i}`, 403]));
         const specs = generateIdentityWriteSpecs({ apis: doc(PATHS), lists: LISTS, access: [{ ...ACCESS[0]!, status: { ...many, ada: 200 } }] });
@@ -83,7 +91,7 @@ describe("C3e writes as another identity", () => {
     });
 
     it("needs the evidence: documented refusal words, a who-am-I endpoint, a reader that does not read everything", () => {
-        const plain = { ...PATHS, "/api/notes/{id}": { ...PATHS["/api/notes/{id}"], put: { responses: { 200: err("Changed"), 403: err("Forbidden") } } }, "/api/admin/users/{id}": { patch: { responses: { 200: err("Changed"), 403: err("Forbidden") } } } };
+        const plain = { ...PATHS, "/api/notes/{id}": { ...PATHS["/api/notes/{id}"], put: { responses: { 200: err("Changed"), 403: err("Forbidden") } }, patch: { responses: { 200: err("Changed"), 403: err("Forbidden") } } }, "/api/admin/users/{id}": { patch: { responses: { 200: err("Changed"), 403: err("Forbidden") } } } };
         expect(generateIdentityWriteSpecs({ apis: doc(plain), lists: LISTS, access: ACCESS }).map((s) => cfg(s).identityWrite)).toEqual(["revoke"]);
         const { "/api/me": _me, ...noMe } = PATHS;
         expect(generateIdentityWriteSpecs({ apis: doc(noMe), lists: LISTS, access: ACCESS }).map((s) => cfg(s).identityWrite)).toEqual(["owner"]);
@@ -99,10 +107,10 @@ describe("C3e writes as another identity", () => {
         let contexts = 0;
         const page = { context: () => ({ browser: () => ({ newContext: async () => (contexts++, {}) }) }) };
         for (const c of [{ origin: "http://evil.example" }, { path: "//evil.example/api/notes/n3" }, { whoAmI: "http://evil.example/me" }]) {
-            const run = { identityWrite: "owner", as: "ana", method: "PUT", path: "/api/notes/n3", sev: "high", ...c };
+            const run = { identityWrite: "owner", as: "ana", method: "PATCH", path: "/api/notes/n3", sev: "high", ...c };
             await expect(accessHelper.accessAssert(page, "http://127.0.0.1:9000/", JSON.stringify(run))).rejects.toThrow(/not the application's own( address)?, so nothing was called/);
         }
-        for (const c of [{ method: "DELETE" }, { method: "POST" }, { identityWrite: "revoke", method: "PUT" }]) {
+        for (const c of [{ method: "DELETE" }, { method: "POST" }, { method: "PUT" }, { identityWrite: "revoke", method: "PUT" }]) {
             const run = { identityWrite: "owner", as: "ana", path: "/api/notes/n3", sev: "high", ...c };
             await expect(accessHelper.accessAssert(page, "http://127.0.0.1:9000/", JSON.stringify(run))).rejects.toThrow(/is not one this check sends, so nothing was called/);
         }

@@ -1,7 +1,7 @@
 /**
  * C3e writes as a second or lesser identity, on bench-rbac in a real browser: the checks are generated from the signed-in API survey (lists
  * and the vertical survey) and the API description, then run through the access helper the generated scripts carry, one at a time.
- * Each must be red on its own seed (BR-02 a shared reader edits, BR-04 a manager makes itself admin, BR-06 a revoked share is still
+ * Each must be red on its own seed (BR-02 a shared reader edits: not checked any more, the owner write needs a documented PATCH; BR-04 a manager makes itself admin, BR-06 a revoked share is still
  * readable) and green on the clean app, within 8 writes. The bench reset between tests is verified: what the checks wrote is gone after
  * it. The bench servers run on loopback ports and are stopped by this test.
  */
@@ -100,10 +100,10 @@ async function reset(base: string): Promise<void> {
     expect((await fetch(`${base}/__bench/reset`, { method: "POST", headers: { "x-bench-reset": RESET } })).status).toBe(200);
 }
 
-const OWNER = "“ana” account: cannot change a record it does not own (PUT /api/notes/n3)";
 const REVOKE = "“ben” account stops sharing /api/notes/n3 with “ana”: “ana” can no longer read it";
 const ROLE = (who: string) => `“${who}” account: cannot change its own role (PATCH /api/admin/users/{id})`;
-const TITLES = [OWNER, REVOKE, ROLE("ana"), ROLE("ben"), ROLE("mia")];
+// No owner write: bench-rbac documents only PUT /api/notes/{id}, and the owner check sends PATCH only (a PUT could wipe fields).
+const TITLES = [REVOKE, ROLE("ana"), ROLE("ben"), ROLE("mia")];
 
 describe("writes as a second or lesser identity (bench-rbac)", () => {
     it("is green on the clean app within 8 writes, and the bench reset puts back what the checks wrote", async () => {
@@ -117,7 +117,7 @@ describe("writes as a second or lesser identity (bench-rbac)", () => {
         expect(await snapshot(clean.base)).toBe(clean.before);
     }, 240_000);
 
-    it("is red on BR-02, BR-04 and BR-06, each on its own seed only", async () => {
+    it("is red on BR-04 and BR-06, each on its own seed only (BR-02 needs a documented PATCH, which bench-rbac does not have)", async () => {
         const opened = async (seed: string) => {
             const r = await checksOn(seed);
             expect(r.checks.map((c) => c.title)).toEqual(TITLES);
@@ -131,9 +131,7 @@ describe("writes as a second or lesser identity (bench-rbac)", () => {
             expect(await snapshot(r.base)).toBe(r.before);
             return r.checks.filter((c) => c.open);
         };
-        const br02 = await opened("BR-02");
-        expect(br02.map((c) => c.title)).toEqual([OWNER]);
-        expect(br02[0]!.message).toMatch(/^Access control check failed: 1 write may be open to an account that is not the owner\n- \[high\] A signed-in “ana” user, who reads this record but does not own it, sent PUT \/api\/notes\/n3 and it was accepted \(HTTP 200\) \(documented: HTTP 403 or 404\)/);
+        expect(await opened("BR-02")).toEqual([]);
         expect((await opened("BR-04")).map((c) => c.title)).toEqual([ROLE("mia")]);
         const br06 = await opened("BR-06");
         expect(br06.map((c) => c.title)).toEqual([REVOKE]);
