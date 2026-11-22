@@ -53,7 +53,7 @@ let worker: Worker | undefined;
 if (runnersOnly(platform.config)) {
     // EXECUTION_MODE=runners (the hosted platform): this process never runs test code or opens a browser for a run. The dispatch worker
     // hands every run to a runner and looks after several at once; it runs here even with WORKER_EMBEDDED=false (runner-only.ts).
-    worker = Worker.dispatch({ ...platform, onJobFinished: schedules.onJobFinished, handOverCrossAccount: schedules.handOverCrossAccount }, platform.config.WORKER_POLL_MS);
+    worker = Worker.dispatch({ ...platform, onJobFinished: schedules.onJobFinished, handOverCrossAccount: schedules.handOverCrossAccount, hasCurrentAuthorization: schedules.hasCurrentAuthorization }, platform.config.WORKER_POLL_MS);
     worker.start();
     console.log(`[worker] dispatch worker started: tests run only on runners, up to ${platform.config.DISPATCH_CONCURRENCY} runs at once`);
     if (platform.config.SCHEDULER_ENABLED) {
@@ -64,7 +64,7 @@ if (runnersOnly(platform.config)) {
         setInterval(() => void agents.maintain().catch((err) => console.error("[agents] housekeeping failed:", err)), platform.config.SCHEDULER_TICK_MS).unref();
     }
 } else if (platform.config.WORKER_EMBEDDED) {
-    worker = new Worker({ ...platform, onJobFinished: schedules.onJobFinished, handOverCrossAccount: schedules.handOverCrossAccount }, platform.config.WORKER_POLL_MS);
+    worker = new Worker({ ...platform, onJobFinished: schedules.onJobFinished, handOverCrossAccount: schedules.handOverCrossAccount, hasCurrentAuthorization: schedules.hasCurrentAuthorization }, platform.config.WORKER_POLL_MS);
     worker.start();
     console.log("[worker] embedded worker started");
     if (platform.config.SCHEDULER_ENABLED) {

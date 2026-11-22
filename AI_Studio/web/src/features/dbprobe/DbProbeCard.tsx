@@ -74,7 +74,7 @@ export function DbProbeCard({ projectId }: { projectId: string }) {
         <section className="card card-pad stack-sm" aria-labelledby="db-probe-title" data-testid="db-probe">
             {head}
             <p className="t-secondary">
-                Optional. After a test changes data, the run also checks what your database stored: the new row is there, and no row points at a missing one or repeats a unique value. It reads through a small probe you run next to your database, with your own read-only database user. AI Studio keeps only the probe’s address and token, never your database password, and the results are counts, never your data.
+                Optional: after a test changes data, check what your database stored, through a small read-only probe you run. Only counts are kept.
             </p>
             <label className="check">
                 <input type="checkbox" disabled={ro || busy} checked={enabled} onChange={(e) => (setEnabled(e.target.checked), setNote(null))} />

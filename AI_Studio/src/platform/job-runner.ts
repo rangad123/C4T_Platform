@@ -94,6 +94,8 @@ export interface RunnerDeps {
     /** Called once after a job's final status is recorded (run summaries, alerts). Failures here never reach the job. */
     onJobFinished?: (job: JobRow) => void | Promise<void>;
     /** C11 hand-over (schedule-services.ts, a security wiring point): keeps a run's cross-account evidence as a draft in Security. Unset: none. */
+    /** The Q4 gate's "authorization" value (schedule-services.ts, a security wiring point): a current client authorization for the application. Unset: never. */
+    hasCurrentAuthorization?: (projectId: string, appUrl: string) => boolean;
     handOverCrossAccount?: (input: { projectId: string; origin: string; rows: readonly ApiListRow[]; source: { runId: string; findings: string[] } }) => { applicationName: string } | undefined;
 }
 
@@ -108,10 +110,11 @@ export const jobOverTime = (minutes: number) => `This job was stopped because it
  */
 /**
  * The Q4 gate of a job's risky checks (C8, C3e), from this server's own setting only: a job's options never set it, so no customer job can
- * ask for "bench" or "fixture". shortcut: "authorization" (a current client authorization record) is not wired yet; T26 adds it.
+ * ask for "bench" or "fixture". "authorization": the project holds a current client authorization for the job's application
+ * (security/authorization-gate.ts, through RunnerDeps.hasCurrentAuthorization), read from the project's records when the job starts.
  */
-export function riskyChecksGateOf(config: Pick<Config, "BENCH_RISKY_CHECKS">): GenerationRequest["riskyChecksGate"] {
-    return config.BENCH_RISKY_CHECKS ? "bench" : undefined;
+export function riskyChecksGateOf(config: Pick<Config, "BENCH_RISKY_CHECKS">, authorized = false): GenerationRequest["riskyChecksGate"] {
+    return config.BENCH_RISKY_CHECKS ? "bench" : authorized ? "authorization" : undefined;
 }
 
 export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boolean; lost: () => void; cancel: () => void }): () => void {
@@ -567,7 +570,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 targets: o.targets,
                 ...(o.targets?.includes("mobile") && MobileTargetSchema.safeParse(app.config.mobile).success ? { mobile: MobileTargetSchema.parse(app.config.mobile) } : {}),
                 allowMutatingApiTests: o.allowMutatingApiTests,
-                riskyChecksGate: riskyChecksGateOf(config),
+                riskyChecksGate: riskyChecksGateOf(config, deps.hasCurrentAuthorization?.(job.projectId, app.url) ?? false),
                 openApiUrl: o.openApiUrl,
                 apiBaseUrl: o.apiBaseUrl,
                 ...(o.functionalTests === false ? { functionalTests: false } : {}),
