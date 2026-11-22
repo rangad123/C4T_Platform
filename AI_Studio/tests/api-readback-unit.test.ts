@@ -71,3 +71,22 @@ describe("C9 read-back chains on bench-shop", () => {
         expect((put.body as { title?: string }).title).toContain("{{unique}}u");
     });
 });
+
+describe("a sub-resource, then its parent deleted (the stored data must not keep the sub-resource)", () => {
+    it("bench-rbac: a second person, a fresh account, a note shared with that person, the note deleted and gone", () => {
+        const s = generateApiWorkflowSpecs(RBAC, { allowMutating: true, maxWorkflows: 50 }).specs.find((x) => x.title.startsWith("Workflow: delete a note that has a share"));
+        expect(s).toBeDefined();
+        expect(line(s!)).toEqual(["POST /api/register", "POST /api/register", "POST /api/notes", "POST /api/notes/{{noteId}}/share", "DELETE /api/notes/{{noteId}}", "GET /api/notes/{{noteId}}"]);
+        const [other, , , share] = requests(s!);
+        // The sub-resource names the other person, made first, by the address it registered with.
+        expect((share!.body as { email: string }).email).toBe((other!.body as { email: string }).email);
+        expect(s!.tags).toEqual(expect.arrayContaining(["mutating", "subresource"]));
+        expect(checks(s!).at(-1)).toMatchObject({ check: "statusClass", expected: "4xx" });
+    });
+
+    it("is not made without a documented body for the sub-resource, or without data changes", () => {
+        const noBody = RBAC.map((e) => (e.path === "/api/notes/{id}/share" && e.method === "POST" ? { ...e, spec: { ...e.spec!, requestBody: undefined } } : e));
+        expect(generateApiWorkflowSpecs(noBody, { allowMutating: true, maxWorkflows: 50 }).specs.some((x) => x.tags.includes("subresource"))).toBe(false);
+        expect(generateApiWorkflowSpecs(RBAC, { allowMutating: false, maxWorkflows: 50 }).specs.some((x) => x.tags.includes("subresource"))).toBe(false);
+    });
+});

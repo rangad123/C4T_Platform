@@ -724,8 +724,82 @@ function nestedChains(endpoints: ApiEndpointModel[]): Chain[] {
  * Safe list → detail chains come first; mutating chains are counted in `skippedMutating` instead
  * of being generated unless `opts.allowMutating`.
  */
+/**
+ * MUTATING, C10: a record that documents a sub-resource create (POST /notes/{id}/share) and a delete: create the record, add the
+ * sub-resource, delete the record, and it is gone. The database checks withDatabaseChecks appends then show whether the sub-resource's
+ * stored rows were left behind (orphans). A field of the sub-resource that takes an email names another person, registered first through
+ * the sign-up (so it exists); then a fresh account does the rest.
+ */
+function subResourceChains(endpoints: ApiEndpointModel[]): Chain[] {
+    const chains: Chain[] = [];
+    const signUp = signUpOf(endpoints);
+    for (const creator of endpoints) {
+        if (creator.method !== "POST" || creator === signUp) continue;
+        const base = trimSlash(creator.path);
+        const resource = resourceName(base);
+        const consumers = consumersOf(base, resource, endpoints);
+        const del = consumers.find((c) => c.ep.method === "DELETE");
+        const read = consumers.find((c) => c.ep.method === "GET");
+        if (!del) continue;
+        const detail = trimSlash(del.ep.path);
+        const sub = endpoints.find((e) => e.method === "POST" && trimSlash(e.path).startsWith(`${detail}/`) && /^[^/{}]+$/.test(trimSlash(e.path).slice(detail.length + 1)) && e.spec?.requestBody?.schema);
+        const idPath = first(okSchemas(creator), (s) => idPathIn(s, resource, del.param));
+        const createPath = fillPath(creator.path, paramValues(creator));
+        if (!sub || !idPath || !createPath) continue;
+        const v = varFor(resource);
+        const at = (ep: ApiEndpointModel) => fillPath(ep.path, { ...paramValues(ep), [del.param]: `{{${v}}}` });
+        const subPath = at(sub);
+        const delPath = at(del.ep);
+        if (!subPath || !delPath) continue;
+        const subBody = bodyFor(sub);
+        if (!subBody || typeof subBody !== "object" || Array.isArray(subBody)) continue;
+        const props = ((sub.spec!.requestBody!.schema as Schema).properties ?? {}) as Record<string, Schema>;
+        const emailField = Object.keys(props).find((k) => props[k]?.format === "email" || /e-?mail/i.test(k));
+        // The other person must exist: registered first with the address the sub-resource then names.
+        let person: Step[] = [];
+        let body = subBody as Record<string, unknown>;
+        if (emailField) {
+            const up = signUp && (marked(bodyFor(signUp), "p") as Record<string, unknown> | undefined);
+            const upEmail = up && Object.keys(up).find((k) => /e-?mail/i.test(k));
+            if (!up || !upEmail) continue;
+            person = [req("POST", trimSlash(signUp!.path), { body: up }, "Register the person the record is shared with"), resp("statusClass", "2xx", undefined, "That person is registered")];
+            body = { ...body, [emailField]: up[upEmail] };
+        }
+        const { before, body: createBody } = writeBody(creator, endpoints);
+        const steps: Step[] = [
+            ...person,
+            ...(signUp ? freshAccountSteps(endpoints) : []),
+            ...setupFor(creator, endpoints),
+            ...before,
+            req("POST", createPath, { query: queryFor(creator), body: createBody, extract: { [v]: idPath } }, `Create a ${resource} and capture its id as {{${v}}}`),
+            resp("statusClass", "2xx", undefined, `${resource} is created`),
+            req("POST", subPath, { query: queryFor(sub), body }, `Add to it: POST ${sub.path}`),
+            resp("statusClass", "2xx", undefined, `POST ${sub.path} is accepted`),
+            req("DELETE", delPath, { query: queryFor(del.ep) }, `Delete the ${resource}`),
+            resp("statusClass", "2xx", undefined, `${resource} is deleted`),
+            ...(read ? [req("GET", at(read.ep)!, { query: queryFor(read.ep) }, `Read the deleted ${resource} again`), resp("statusClass", "4xx", undefined, `Deleted ${resource} is no longer found`)] : []),
+        ];
+        const what = trimSlash(sub.path).split("/").pop()!;
+        chains.push({
+            name: `subresource_${slug(base)}_${slug(what)}`,
+            mutating: true,
+            spec: draft(
+                [creator, sub, del.ep, ...(read ? [read.ep] : [])],
+                `Workflow: delete a ${resource} that has a ${what} (POST ${creator.path} → POST ${sub.path} → DELETE ${del.ep.path})`,
+                `A ${resource} with a ${what} is deleted; it must be gone, and with read-only database access, no stored ${what} may be left pointing at it.`,
+                "medium",
+                ["Mutating API tests are allowed — this test creates and deletes data"],
+                steps,
+                [`A deleted ${resource} is gone, with its ${what}`],
+                ["mutating", "subresource"],
+            ),
+        });
+    }
+    return chains;
+}
+
 export function generateApiWorkflowSpecs(endpoints: ApiEndpointModel[], opts: WorkflowGenOptions): WorkflowGenResult {
-    const all = [...listDetailChains(endpoints), ...crudChains(endpoints), ...writeReadChains(endpoints), ...backendOpsChains(endpoints), ...authChains(endpoints), ...nestedChains(endpoints)];
+    const all = [...listDetailChains(endpoints), ...crudChains(endpoints), ...writeReadChains(endpoints), ...backendOpsChains(endpoints), ...authChains(endpoints), ...nestedChains(endpoints), ...subResourceChains(endpoints)];
     // Deduplicate by name (same resource may match several heuristics) — as chain_detector does.
     const seen = new Set<string>();
     const unique = all.filter((c) => (seen.has(c.name) ? false : (seen.add(c.name), true)));
