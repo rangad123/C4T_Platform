@@ -76,7 +76,7 @@ describe("migration 67", () => {
         oldDatabase(file);
         const db = new Db(file);
         expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(knownSchemaVersion());
-        expect(db.all("SELECT version FROM schema_version WHERE version >= 66 ORDER BY version")).toEqual([{ version: 66 }, { version: 67 }, { version: 68 }]);
+        expect(db.all("SELECT version FROM schema_version WHERE version BETWEEN 66 AND 68 ORDER BY version")).toEqual([{ version: 66 }, { version: 67 }, { version: 68 }]);
         expect(db.all("SELECT id FROM projects")).toEqual([{ id: "p1" }]);
         expect(db.all("SELECT id, status FROM generation_jobs")).toEqual([{ id: "j1", status: "done" }]);
         expect(db.all("SELECT id, validation_status FROM test_cases")).toEqual([{ id: "t1", validation_status: "NEEDS_REVIEW" }]);
@@ -104,7 +104,7 @@ describe("migration 67", () => {
         const file = path.join(dir, "main66.db");
         mainDatabaseAt66(file);
         const db = new Db(file);
-        expect(db.all("SELECT version FROM schema_version ORDER BY version").map((r) => r.version).slice(-4)).toEqual([65, 66, 67, 68]);
+        expect(db.all("SELECT version FROM schema_version WHERE version <= 68 ORDER BY version").map((r) => r.version).slice(-4)).toEqual([65, 66, 67, 68]);
         expect(db.all("SELECT id, ai_provider, ai_model FROM projects")).toEqual([{ id: "p1", ai_provider: "anthropic", ai_model: "claude-sonnet" }]);
         expect(db.all("SELECT status, decided_name FROM app_workflow_decisions")).toEqual([{ status: "confirmed", decided_name: "Checkout" }]);
         expect(db.all("SELECT * FROM candidate_findings")).toEqual([]);
@@ -115,7 +115,7 @@ describe("migration 67", () => {
         expect(db.all("SELECT fingerprint FROM candidate_findings")).toEqual([{ fingerprint: "b".repeat(64) }]);
         db.close();
         const again = new Db(file);
-        expect(again.all("SELECT version FROM schema_version WHERE version >= 66")).toHaveLength(3);
+        expect(again.all("SELECT version FROM schema_version WHERE version BETWEEN 66 AND 68")).toHaveLength(3);
         expect(again.all("SELECT ai_model FROM projects")).toEqual([{ ai_model: "claude-sonnet" }]);
         again.close();
     });
@@ -131,7 +131,7 @@ describe("migration 67", () => {
         raw.prepare("INSERT INTO llm_response_cache (project_id, cache_key, call_id, answer_json, bytes, created_at, last_used_at) VALUES (?,?,?,?,?,?,?)").run("p1", "k", "rules", "{}", 2, at, at);
         raw.close();
         const db = new Db(file);
-        expect(db.all("SELECT version FROM schema_version WHERE version >= 66 ORDER BY version")).toEqual([{ version: 66 }, { version: 67 }, { version: 68 }]);
+        expect(db.all("SELECT version FROM schema_version WHERE version BETWEEN 66 AND 68 ORDER BY version")).toEqual([{ version: 66 }, { version: 67 }, { version: 68 }]);
         expect(db.all("SELECT * FROM candidate_findings")).toEqual([]);
         const fresh = new Db(":memory:");
         expect(schemaOf(db)).toEqual(schemaOf(fresh));
@@ -143,7 +143,7 @@ describe("migration 67", () => {
         db.close();
         const again = new Db(file);
         expect(again.all("SELECT fingerprint FROM candidate_findings")).toEqual([{ fingerprint: "c".repeat(64) }]);
-        expect(again.all("SELECT version FROM schema_version WHERE version >= 66")).toHaveLength(3);
+        expect(again.all("SELECT version FROM schema_version WHERE version BETWEEN 66 AND 68")).toHaveLength(3);
         again.close();
     });
 
@@ -158,7 +158,7 @@ describe("migration 67", () => {
         const db = new Db(file);
         expect(db.all("SELECT id, ai_provider, ai_model FROM projects")).toEqual([{ id: "p1", ai_provider: null, ai_model: null }]);
         expect(db.all("SELECT fingerprint FROM candidate_findings")).toEqual([{ fingerprint: "e".repeat(64) }]);
-        expect(db.all("SELECT version FROM schema_version WHERE version >= 66 ORDER BY version")).toEqual([{ version: 66 }, { version: 67 }, { version: 68 }]);
+        expect(db.all("SELECT version FROM schema_version WHERE version BETWEEN 66 AND 68 ORDER BY version")).toEqual([{ version: 66 }, { version: 67 }, { version: 68 }]);
         db.close();
     });
 

@@ -147,6 +147,11 @@ export interface ScriptExecutor {
     readonly name: string;
     /** True when the scripts run on another machine (a runner agent): devices and addresses are then that machine's, not this one's. */
     readonly remote?: boolean;
+    /**
+     * false when the machine that runs the scripts is known to be older than runner capability `validationSteps` 1 (Phase 4): the tests
+     * then run without their relation, kept-response and database steps (validation/layers.ts). Unset: they run as they are.
+     */
+    readonly validationSteps?: boolean;
     execute(adapterId: string, batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions): Promise<ScriptRun[]>;
 }
 

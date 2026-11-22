@@ -33,6 +33,8 @@ export interface DbCheckResult {
 }
 
 export interface DatabaseProbe {
+    /** false: the back end does not judge relations over rows (a customer's probe), so none is proposed for it. */
+    rowRelations?: false;
     schema(): Promise<DbSchema>;
     check(template: DbTemplate, params?: DbParams): Promise<DbCheckResult>;
 }

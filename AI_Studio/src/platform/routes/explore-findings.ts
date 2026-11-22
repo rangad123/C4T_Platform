@@ -12,11 +12,12 @@
  *                                                     actionLogOmitted } of a run that explored by objectives (exploration-store.ts);
  *                                                     only these fields, never the outcomes' or objectives' text. { available: false,
  *                                                     message } for a run without one. Another project's run answers 404.
+ *                                                     Either answer carries `layers` (C12, the layer report) when the run has one.
  */
 import { levelSettings } from "../../engine/levels.js";
 import { objectivesFrom } from "../../engine/explore/objectives.js";
 import { CandidateFindingStore } from "../candidate-finding-store.js";
-import { loadExploration } from "../exploration-store.js";
+import { loadExploration, loadLayerReport } from "../exploration-store.js";
 import { HttpError } from "../http-error.js";
 import { appKnowledgeOf } from "../job-runner.js";
 import type { RouteCtx } from "./types.js";
@@ -58,7 +59,9 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
         ctx.project(id);
         if (repo.getJob(jobId)?.projectId !== id) throw new HttpError(404, "Run not found");
         const e = await loadExploration(repo, p.store, jobId);
-        if (!e) return { available: false, message: NO_COVERAGE };
-        return { available: true, stopReason: e.stopReason, stopDetail: e.stopDetail, budgets: e.budgets, usage: e.usage, coverage: e.coverage, actionLog: e.actionLog, actionLogOmitted: e.actionLogOmitted };
+        // C12: which layers the run checked (any exploration since Phase 4), with or without a coverage record.
+        const layers = await loadLayerReport(repo, p.store, jobId);
+        if (!e) return { available: false, message: NO_COVERAGE, ...(layers ? { layers } : {}) };
+        return { ...(layers ? { layers } : {}), available: true, stopReason: e.stopReason, stopDetail: e.stopDetail, budgets: e.budgets, usage: e.usage, coverage: e.coverage, actionLog: e.actionLog, actionLogOmitted: e.actionLogOmitted };
     });
 }

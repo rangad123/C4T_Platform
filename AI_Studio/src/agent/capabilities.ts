@@ -16,6 +16,7 @@ import { deviceSessionProblem } from "../engine/mobile/device/capability.js";
 import { resolvedAllowList } from "../engine/desktop/policy.js";
 import { probeDesktop, type DesktopProbeResult } from "../engine/desktop/probe.js";
 import { describeBrowser } from "../engine/browsers/choice.js";
+import { VALIDATION_STEPS_VERSION } from "../engine/validation/layers.js";
 import type { BrowserReport } from "./browser-setup.js";
 import type { PhoneToolsReport } from "./phone-tools.js";
 
@@ -294,6 +295,8 @@ export class CapabilityProbe {
         // Phase 3 (P3-21): and its explorations can explore by objectives (the engine's objective stage); not a job kind of its own.
         caps.exploreModes = ["plain", "agent", "mobile", "assessment", "objectives"];
         caps.explorerFrames = true;
+        // Phase 4: and the checks across layers in its scripts (relation, kept-response and database steps).
+        caps.validationSteps = VALIDATION_STEPS_VERSION;
         // Row 208: and carries on from a stopped one (the request's `resume` and `carry`, explore-child.ts), so a Continue makes nothing twice.
         caps.exploreResume = true;
 

@@ -42,6 +42,8 @@ export interface EngineContext {
      * or undefined (no evidence, or no security application at this origin). Unset: no hand-over (a runner, tests).
      */
     handOverCrossAccount?: (input: { origin: string; rows: readonly import("./identity/access.js").ApiListRow[]; findings: string[] }) => { applicationName: string } | undefined;
+    /** C10: the project's read-only database access (its database probe, platform/db-probe-store.ts). Unset: none set up, or a benchmark's own. */
+    dbProbe?: import("./database/probe.js").DatabaseProbe;
 }
 
 export function throwIfAborted(signal?: AbortSignal): void {

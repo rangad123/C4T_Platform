@@ -55,3 +55,31 @@ export function layerReport(
     const database = state("database");
     return { page: state("page"), api: state("api"), storedData: state("storedData"), database: database.status === "ran" && run.database && "checks" in run.database ? { ...database, checks: run.database.checks } : database };
 }
+
+/**
+ * Runner capability `validationSteps` (Phase 4): version 1 runs the checks across layers in scripts: a kept response (`wait` with
+ * `extract`, C4 and C9), a relation (C5 and C7) and a database check (C10). A runner older than that gets the tests without those steps,
+ * and the run says so in this one sentence. Deploy the platform before the runner.
+ */
+export const VALIDATION_STEPS_VERSION = 1;
+export const VALIDATION_STEPS_SKIPPED = "Your runner is older than the checks across layers, so the relation, kept-response and database steps were left out of the tests it ran. Download the runner again to run them.";
+
+/** Whether a test has a step only `validationSteps` 1 understands. */
+export const hasValidationSteps = (spec: { steps: readonly Step[] }): boolean =>
+    spec.steps.some((s) => (s.action === "assertResponse" && (s.check === "relation" || s.check === "dbCheck")) || (s.action === "wait" && s.extract !== undefined));
+
+/**
+ * The test as an older runner runs it: without its relation and database steps, and its kept responses as plain waits.
+ * shortcut: a later step that uses a value only a kept response captured still names it; only C4 tests do, and their relation goes too.
+ */
+export function withoutValidationSteps<T extends { steps: Step[] }>(spec: T): T {
+    if (!hasValidationSteps(spec)) return spec;
+    const steps = spec.steps
+        .filter((s) => !(s.action === "assertResponse" && (s.check === "relation" || s.check === "dbCheck")))
+        .map((s) => {
+            if (s.action !== "wait" || s.extract === undefined) return s;
+            const { extract: _kept, ...plain } = s;
+            return plain as Step;
+        });
+    return { ...spec, steps };
+}

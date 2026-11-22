@@ -48,6 +48,7 @@ import { nothingRanMessage, pinRunVersions, ReviewStore, withJobStarter } from "
 import { deviceOpenerFor } from "./phone-device.js";
 import { MobileTargetSchema } from "../engine/mobile/target.js";
 import type { DeviceOpener } from "../engine/mobile/explore/types.js";
+import { DbProbeStore } from "./db-probe-store.js";
 import { SecretBox } from "./secrets.js";
 import { AgentInputsStore } from "./agent-inputs-store.js";
 import { envSecrets } from "./agent-routing.js";
@@ -348,6 +349,9 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             emit,
             ...(deps.handOverCrossAccount ? { handOverCrossAccount: ({ origin, rows, findings }) => deps.handOverCrossAccount!({ projectId: job.projectId, origin, rows, source: { runId: job.id, findings } }) } : {}),
         };
+        // C10: the project's database probe, when a person set one up and switched it on (Settings, Test data; db-probe-store.ts).
+        const dbProbe = await new DbProbeStore(repo.db.sql, new SecretBox(config.dataDir, config.SECRET_KEY)).probeFor(job.projectId);
+        if (dbProbe) ctx.dbProbe = dbProbe;
         // Retries, fallback models, paused providers and which model answered are told to this job (ai-model-reliability.md).
         rawLlm.setEventSink?.((e) => ctx.emit(e));
 

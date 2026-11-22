@@ -10,6 +10,7 @@ import type { Fetched } from "../../lib/hooks";
 import { useFetch } from "../../lib/hooks";
 import { StopRun } from "./StopDialog";
 import { announceRunsChanged } from "./runs";
+import { layersLine, type LayerReport } from "./layers";
 import { explorationNote, kindWord, OBJECTIVE_EVENT_KINDS, objectiveRows, operatorWord, pursuitOf, STATE_WORD, stopWord, tallyText, type CoverageAnswer, type ObjectiveRow, type ObjectivesAnswer, type ObjectiveState } from "./objectives";
 import "./objectives.css";
 
@@ -151,6 +152,27 @@ export function LiveObjectives({ projectId, job, active, explores, canStop, cove
     );
 }
 
+/** C12: the "Checked layers" line, and each layer not checked with why (features/runs/layers.ts). */
+function CheckedLayers({ layers }: { layers: LayerReport }) {
+    const line = layersLine(layers);
+    return (
+        <div className="stack-sm" data-testid="run-checked-layers">
+            <p>
+                <strong>Checked layers:</strong> {line.checked}
+            </p>
+            {line.notChecked.length > 0 && (
+                <ul className="obj-reasons t-meta" aria-label="Layers not checked">
+                    {line.notChecked.map((n) => (
+                        <li key={n.layer}>
+                            <span className="obj-what">{n.layer}</span>: not checked, {n.reason}
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
 /** A finished run's coverage record, read once (null while the run goes). */
 export function useCoverage(projectId: string, jobId: string, enabled: boolean): Fetched<CoverageAnswer> {
     return useFetch<CoverageAnswer>(enabled ? `/projects/${projectId}/jobs/${jobId}/coverage` : null);
@@ -175,15 +197,18 @@ export function RunCoverage({ coverage, explores }: { coverage: Fetched<Coverage
         );
     const a = coverage.data!;
     if (!a.available) {
-        if (!explores) return null;
+        if (!explores && !a.layers) return null;
         return (
             <section className="card card-pad stack-sm" aria-labelledby="run-coverage-h" data-testid="run-coverage">
                 <h2 className="t-section" id="run-coverage-h">
                     How the exploration went
                 </h2>
-                <p className="t-secondary" data-testid="run-coverage-unavailable">
-                    {a.message}
-                </p>
+                {a.layers && <CheckedLayers layers={a.layers} />}
+                {explores && (
+                    <p className="t-secondary" data-testid="run-coverage-unavailable">
+                        {a.message}
+                    </p>
+                )}
             </section>
         );
     }
@@ -203,6 +228,7 @@ export function RunCoverage({ coverage, explores }: { coverage: Fetched<Coverage
             <h2 className="t-section" id="run-coverage-h">
                 How the exploration went
             </h2>
+            {a.layers && <CheckedLayers layers={a.layers} />}
             <p className="obj-stop" data-testid="run-stop-reason">
                 <Badge tone={a.stopReason === "objectives_done" ? "success" : a.stopReason === "cancelled" ? "neutral" : "warning"}>{stopWord(a.stopReason)}</Badge> <span>{a.stopDetail}</span>
             </p>

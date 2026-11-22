@@ -89,7 +89,7 @@ import { proposeInvariants, type Invariant, type InvariantReport } from "./valid
 import { benchProbeFor } from "./database/bench-data.js";
 import { DB_CHECKS_MAX, integrityChecks, webPersistenceChecks, withDatabaseChecks } from "./database/checks.js";
 import type { DbSchema } from "./database/probe.js";
-import { proposeRowRelations } from "./database/propose.js";
+import { proposeRowRelations, type RowRelationReport } from "./database/propose.js";
 import { dbServiceFor, type DbCheckService } from "./database/service.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
@@ -888,7 +888,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
          * C10: the database layer, on when a person set up read-only access for this application (the benchmark's --db, or the project's
          * probe): its schema, the absence checks every data-changing test ends with, the run's remaining checks, and what was made.
          */
-        const dbProbe = benchProbeFor(origin);
+        const dbProbe = ctx.dbProbe ?? benchProbeFor(origin);
         let db: { schema: DbSchema; absence: Array<{ name: string; source?: string }>; budget: { left: number } } | undefined;
         let dbLayer: { checks: number } | { unavailable: string } | undefined = dbProbe ? { checks: 0 } : undefined;
         let dbTests = 0;
@@ -1439,7 +1439,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             if (dbProbe && dataChanges) {
                 try {
                     const schema = await dbProbe.schema();
-                    const rows = await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req) });
+                    // A customer's probe runs the key and persistence checks only: no relation over rows is proposed for it.
+                    const rows = dbProbe.rowRelations === false ? { report: { proposed: 0, kept: 0, dropped: [] } as RowRelationReport, checks: [] } : await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req) });
                     if (rows.report.proposed || rows.report.error) ctx.emit({ stage: "generation", kind: "db_rules_proposed", ...(rows.report.error ? { level: "warn" as const } : {}), message: rows.report.error ?? `${rows.report.kept} of ${rows.report.proposed} proposed stored-data rules kept (${rows.report.dropped.length} dropped)` });
                     db = { schema, absence: [...integrityChecks(schema).map((name) => ({ name })), ...rows.checks], budget: dbBudget };
                 } catch (e) {

@@ -46,6 +46,7 @@ import { PROJECT_APP_MIGRATION } from "./project-app.js";
 import { APP_INTEL_MIGRATION, APP_INTEL_V2_MIGRATION, APP_WORKFLOW_DECISIONS_MIGRATION } from "./app-intel-store.js";
 import { agentInputsMigration } from "./agent-inputs-store.js";
 import { RESPONSE_CACHE_MIGRATION } from "./llm-response-cache.js";
+import { DB_PROBE_MIGRATION } from "./db-probe-store.js";
 import { sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { sqliteSql, type Sql } from "./sql.js";
 
@@ -321,6 +322,8 @@ ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
     // LATE_FILLED_SLOTS (told by its table).
     /* 67: candidate findings from exploration, one per project and fingerprint, shaped like security_findings, status candidate only (schema lives in candidate-finding-store.ts; existing projects have none) */ CANDIDATE_FINDINGS_MIGRATION,
     /* 68: the AI response cache: answers of allowed reading calls per project, by a hash of the whole question, and the cached-call counts on AI usage rows (schema lives in llm-response-cache.ts; existing projects start with none, existing usage rows with 0) */ RESPONSE_CACHE_MIGRATION,
+    /* 69: reserved (main's test case workbook fields) */ `-- reserved`,
+    /* 70: a project's database checks: the address of the customer's database probe, its SecretBox-encrypted token and the on switch (schema lives in db-probe-store.ts; existing projects have none, so off) */ DB_PROBE_MIGRATION,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */
@@ -351,6 +354,8 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string; column?: s
     { slot: 66, table: "projects", column: "ai_provider" },
     // Main recorded 67 as `-- reserved` before candidate findings joined it, so a database main opened lacks the table.
     { slot: 67, table: "candidate_findings" },
+    // Phase 5 branches recorded 70 as `-- reserved` before the probe setting joined it.
+    { slot: 70, table: "project_db_probes" },
 ];
 
 export type Row = Record<string, any>;

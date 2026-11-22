@@ -208,7 +208,7 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
         if (noServerBrowser && wantsRepairBrowser) ctx.emit({ stage: "validation", kind: "repair_browser_skipped", message: "Repair suggestions that need a browser are not made for this run: tests run only on runners here, and the platform opens no browser of its own." });
         const browser = !agentOnlyTarget && !noServerBrowser && wantsRepairBrowser ? await launchChromium(ctx.config.HEADLESS) : undefined;
         // C10: database check steps reach the read-only access set up for this application through a service for this run.
-        const dbService = await dbServiceFor(benchProbeFor(origin), pending.map((t) => t.spec), ctx.executor?.remote === true);
+        const dbService = await dbServiceFor(ctx.dbProbe ?? benchProbeFor(origin), pending.map((t) => t.spec), ctx.executor?.remote === true);
         try {
             const apiToken = await resolveApiToken(ctx, req.credentials);
             const batch = (items: TestUnderValidation[]): Promise<ValidationOutcome[]> => validateBatch(
