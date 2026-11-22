@@ -6,28 +6,16 @@
  *  - role: an account the vertical survey refused gives itself the role value of the account that was allowed; an accepted change is
  *    changed back at once;
  *  - revoke: the record's owner stops sharing it with the reader, then the reader reads it again and expects the documented 404.
- * Writes, so only behind the gate (identityWritesAllowed) and at most MAX_IDENTITY_WRITES writes a run. Each check runs in the access
+ * Writes, so only behind the Q4 gate (concurrencyAllowed, lane A2's T24) and at most MAX_IDENTITY_WRITES writes a run. Each check runs in the access
  * helper the generated scripts carry: fresh browser contexts signed in per account, the app's own API host only, no values stored.
  */
+import { concurrencyAllowed, type ConcurrencyGate } from "../api/concurrency.js";
 import type { DraftSpec } from "../api/test-specs.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
 import type { ApiAccessRow, ApiListRow } from "./access.js";
 import { WHO_AM_I } from "./session-end.js";
 
 export const MAX_IDENTITY_WRITES = 8;
-
-/** The Q4 gate: data changes on, and a current client authorization, or a bench or fixture app on a loopback address. */
-export function identityWritesAllowed(req: { allowMutatingApiTests: boolean; riskyChecksGate?: "bench" | "fixture" | "authorization"; url: string }): boolean {
-    if (req.allowMutatingApiTests !== true || !req.riskyChecksGate) return false;
-    if (req.riskyChecksGate === "authorization") return true;
-    let host = "";
-    try {
-        host = new URL(req.url).hostname;
-    } catch {
-        return false;
-    }
-    return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-}
 
 /**
  * Script-side check, appended to the access helper (it uses ACCESS_PREFIX, accessSignIn and accessOwnApi from there).
@@ -177,9 +165,11 @@ function spec(title: string, description: string, accounts: string[], cfg: Recor
 
 /**
  * C3e checks from the survey evidence: the documented list endpoints each account read (owner and revoke), the vertical survey (role),
- * and the API description. Generated only when the caller's gate allows writes (identityWritesAllowed); at most MAX_IDENTITY_WRITES writes.
+ * and the API description. Nothing without the Q4 gate (data changes on, and a client authorization or a bench/fixture app on loopback);
+ * at most MAX_IDENTITY_WRITES writes.
  */
-export function generateIdentityWriteSpecs(input: { apis: ApiEndpointModel[]; lists: ApiListRow[]; access: ApiAccessRow[]; origin?: string }): DraftSpec[] {
+export function generateIdentityWriteSpecs(input: { apis: ApiEndpointModel[]; lists: ApiListRow[]; access: ApiAccessRow[]; origin?: string; dataChanges: boolean; appUrl: string; gate?: ConcurrencyGate }): DraftSpec[] {
+    if (!concurrencyAllowed({ dataChanges: input.dataChanges, appUrl: input.appUrl, gate: input.gate }).allowed) return [];
     const { apis } = input;
     const at = input.origin ? { origin: input.origin } : {};
     const whoAmI = apis.find((a) => a.method === "GET" && !a.path.includes("{") && a.statuses?.includes(401) && WHO_AM_I.test(a.path))?.path;

@@ -26,7 +26,7 @@ import { cleanupHeaders, type CleanupRequest } from "./cleanup/run.js";
 import { generateA11ySpecs } from "./a11y/specs.js";
 import { generateHealthSpecs } from "./health/specs.js";
 import { generateAccessSpecs, generateApiAccessSpecs, generateApiListSpecs, rolePageBudget, signedInRequests, surveyAccess, surveyApiAccess, surveyApiLists, type ApiAccessRow, type ApiListRow, type ApiRequester, type Reach, type RoleLogin } from "./identity/access.js";
-import { generateIdentityWriteSpecs, identityWritesAllowed } from "./identity/identity-writes.js";
+import { generateIdentityWriteSpecs } from "./identity/identity-writes.js";
 import { generateSessionEndSpecs } from "./identity/session-end.js";
 import { generateInputSpecs } from "./inputs/specs.js";
 import { generateVisionSpecs } from "./vision/specs.js";
@@ -1322,7 +1322,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     ...generateApiAccessSpecs(apiAccess, { maxSpecs: 8, reach: accessReach, ...offHost }),
                     ...generateApiListSpecs(apiLists, { tokens, ...offHost }),
                     // C3e: writes as another or a lesser identity, only behind the Q4 gate (identity/identity-writes.ts).
-                    ...(identityWritesAllowed(req) ? generateIdentityWriteSpecs({ apis, lists: apiLists, access: apiAccess, ...offHost }) : []),
+                    ...generateIdentityWriteSpecs({ apis, lists: apiLists, access: apiAccess, ...offHost, dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate }),
                 ];
                 for (const d of access) {
                     if (await carried(d)) continue;

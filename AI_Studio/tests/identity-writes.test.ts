@@ -79,7 +79,7 @@ async function checksOn(defects: string): Promise<{ base: string; before: string
         expect([...sessions.keys()].sort()).toEqual(["anonymous", ...NAMES].sort());
         const lists = await surveyApiLists(roles.map((r) => ({ name: r.name, request: sessions.get(r.name)! })), base, endpoints);
         const access = await surveyApiAccess(sessions.get("anonymous")!, base, endpoints, roles, 12, sessions);
-        specs = generateIdentityWriteSpecs({ apis, lists, access });
+        specs = generateIdentityWriteSpecs({ apis, lists, access, dataChanges: true, appUrl: base, gate: "bench" });
     } finally {
         await close();
     }

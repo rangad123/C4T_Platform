@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { parseOpenApi } from "../src/engine/api/openapi.js";
 import { ACCESS_HELPER_SOURCE, type ApiAccessRow, type ApiListRow } from "../src/engine/identity/access.js";
-import { generateIdentityWriteSpecs, identityWritesAllowed, MAX_IDENTITY_WRITES } from "../src/engine/identity/identity-writes.js";
+import { generateIdentityWriteSpecs as generate, MAX_IDENTITY_WRITES } from "../src/engine/identity/identity-writes.js";
 import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { accessHelper } from "./identity-fake-browser.js";
@@ -36,18 +36,21 @@ const LISTS: ApiListRow[] = [
 const ACCESS: ApiAccessRow[] = [{ method: "GET", path: "/api/admin/users", called: "/api/admin/users", status: { anonymous: 401, ana: 403, ben: 403, mia: 403, ada: 200 }, signedIn: ["ana", "ben", "mia", "ada"], documented: [403] }];
 const cfg = (s: { steps: unknown[] }) => JSON.parse(String((s.steps[1] as { expected: string }).expected)) as Record<string, unknown>;
 const WRITES: Record<string, number> = { owner: 1, role: 2, revoke: 1 };
+type Input = Parameters<typeof generate>[0];
+/** On a bench app on loopback with data changes on: the gate is open. */
+const generateIdentityWriteSpecs = (i: Pick<Input, "apis" | "lists" | "access">, gate: Partial<Input> = {}) => generate({ ...i, dataChanges: true, appUrl: "http://127.0.0.1:9000", gate: "bench", ...gate });
 
 describe("C3e writes as another identity", () => {
     it("is not generated without the gate: data changes on, and authorization or a bench/fixture app on loopback", () => {
-        const at = (o: Partial<Parameters<typeof identityWritesAllowed>[0]>) => identityWritesAllowed({ allowMutatingApiTests: true, url: "http://127.0.0.1:9000/", ...o });
-        expect(at({})).toBe(false);
-        expect(at({ riskyChecksGate: "bench", allowMutatingApiTests: false })).toBe(false);
-        expect(at({ riskyChecksGate: "bench", url: "https://shop.example/" })).toBe(false);
-        expect(at({ riskyChecksGate: "fixture", url: "http://10.0.0.5/" })).toBe(false);
-        expect(at({ riskyChecksGate: "authorization", allowMutatingApiTests: false })).toBe(false);
-        expect(at({ riskyChecksGate: "bench" })).toBe(true);
-        expect(at({ riskyChecksGate: "fixture", url: "http://localhost:3000/" })).toBe(true);
-        expect(at({ riskyChecksGate: "authorization", url: "https://shop.example/" })).toBe(true);
+        const at = (gate: Partial<Input>) => generateIdentityWriteSpecs({ apis: doc(PATHS), lists: LISTS, access: ACCESS }, gate).length > 0;
+        expect(at({ gate: undefined })).toBe(false);
+        expect(at({ dataChanges: false })).toBe(false);
+        expect(at({ appUrl: "https://shop.example" })).toBe(false);
+        expect(at({ gate: "fixture", appUrl: "http://10.0.0.5" })).toBe(false);
+        expect(at({ gate: "authorization", dataChanges: false })).toBe(false);
+        expect(at({})).toBe(true);
+        expect(at({ gate: "fixture", appUrl: "http://localhost:3000" })).toBe(true);
+        expect(at({ gate: "authorization", appUrl: "https://shop.example" })).toBe(true);
     });
 
     it("makes the owner write as the sharing reader, the revoke by the owner, and the role change per refused account, within 8 writes", () => {
