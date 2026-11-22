@@ -110,6 +110,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/config": "read",
     "GET /api/mobile/emulator-setup": "read",
     "GET /api/dashboard": "read",
+    // One project's quality card and its pull requests' chosen tests (routes/dashboard.ts): reads only.
+    "GET /api/projects/:id/quality": "read",
+    "GET /api/projects/:id/pull-requests": "read",
     "GET /api/storage": "read",
     "GET /api/usage": "ai_studio.usage.view",
     "GET /api/usage/prices": "ai_studio.usage.view",

@@ -36,3 +36,21 @@
     .dash-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
     .dash-figs > :last-child { grid-column: 1 / -1; }
 }
+
+/* A project's quality card (QualityCard.tsx): six numbers in three columns, then two lists side by side. */
+.metrics.quality-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.metrics.quality-metrics .metric:nth-child(4) { border-left: 0; }
+.metrics.quality-metrics .metric:nth-child(n + 4) { border-top: 1px solid var(--border-default); }
+.quality-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.quality-lists > div + div { border-left: 1px solid var(--border-default); }
+.quality-lists h3, .quality-lists p { margin: 0; padding: var(--space-4) var(--space-6) var(--space-1); }
+.quality-lists p { padding-bottom: var(--space-4); }
+@media (max-width: 640px) {
+    .metrics.quality-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .metrics.quality-metrics .metric:nth-child(4) { border-left: 1px solid var(--border-default); }
+    .metrics.quality-metrics .metric:nth-child(odd) { border-left: 0; }
+    .metrics.quality-metrics .metric:nth-child(n + 3) { border-top: 1px solid var(--border-default); }
+    .quality-lists { grid-template-columns: minmax(0, 1fr); }
+    .quality-lists > div + div { border-left: 0; border-top: 1px solid var(--border-default); }
+    .quality-lists h3, .quality-lists p { padding-left: var(--space-5); padding-right: var(--space-5); }
+}

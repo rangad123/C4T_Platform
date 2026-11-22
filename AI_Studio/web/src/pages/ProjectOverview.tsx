@@ -23,6 +23,7 @@ import { SecurityProjectTab } from "../features/security/TestingType";
 import { SecuritySummaryCard } from "../features/security/SecurityPage";
 import { SetupChecklist } from "../features/workspace/SetupChecklist";
 import { RequirementsCoverageCard } from "../features/requirements/CoverageCard";
+import { QualityCard } from "../features/dashboard/QualityCard";
 import { UnderstandingCard } from "../features/understanding/UnderstandingCard";
 import { understandsApp } from "../features/understanding/understanding";
 import { usePage } from "../components/Shell";
@@ -215,6 +216,9 @@ export function ProjectOverview({ id }: { id: string }) {
 
                 {/* Coverage by requirement (RP-02): passing, failing, covered, not covered. */}
                 <RequirementsCoverageCard projectId={id} />
+
+                {/* Confirmed bugs, regressions, stability and pull requests over the last weeks (Phase 6); hidden until there is history. */}
+                <QualityCard projectId={id} />
 
                 {/* What was learnt about the application, for a website the AI agent explores. */}
                 {understandsApp(p) && <UnderstandingCard projectId={id} />}

@@ -395,3 +395,171 @@ export function flakyCountsByProject(db: Db, skip?: (testId: string) => boolean)
     for (const [id, list] of byProject) out.set(id, flakyFromRows(list, Number.MAX_SAFE_INTEGER).filter((f) => !skip?.(f.id)).length);
     return out;
 }
+
+// ── quality history (testing-engine Phase 6, spec §6 item 5) ─────────────────
+
+/** The history's window: four weeks, counted back from now in whole weeks. */
+export const HISTORY_WEEKS = 4;
+/** Runs looked at for failure areas and stability. */
+export const HISTORY_RUNS = 10;
+const WEEK_MS = 7 * 86_400_000;
+
+/** One pull request's tests (pr_selections) and what the run of its head commit said, newest first. */
+export interface PrChange {
+    pr: number;
+    headSha: string;
+    createdAt: string;
+    proposed: number;
+    fullRunRecommended: boolean;
+    fullRunReasons: string[];
+    /** The proposed tests, highest risk first, each with its first reason (at most 5). */
+    tests: Array<{ testKey: string; title: string; why: string }>;
+    /** The routes the change reached, as the selection preview reads them (for a focused run of the same change). */
+    change: { pages: string[]; endpoints: string[] };
+    /** The newest finished run triggered for the head commit; null when none ran yet. */
+    outcome: { jobId: string; passRate: number | null; total: number; failed: number } | null;
+}
+
+/** "GET /cart (src/app.ts:12)" (impact/routes.ts describeRoute) → the change set impact/analyze.ts routeChanges made of it. */
+export function changeOfRoutes(routes: string[]): PrChange["change"] {
+    const pages = new Set<string>();
+    const endpoints = new Set<string>();
+    for (const r of routes) {
+        const m = /^([A-Z]+) (\S+)/.exec(r);
+        if (!m) continue;
+        endpoints.add(m[1] === "ANY" ? m[2]! : `${m[1]} ${m[2]}`);
+        if (m[1] === "ANY" || m[1] === "GET") pages.add(m[2]!);
+    }
+    return { pages: [...pages], endpoints: [...endpoints] };
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+/** The project's latest pull request selections with their outcomes. The stored reasons are read defensively (an older row may lack a field). */
+export function prChanges(db: Db, projectId: string, limit = HISTORY_RUNS): PrChange[] {
+    const rows = db.all<Row>(`SELECT pr, head_sha, selected_json, reasons_json, created_at FROM pr_selections WHERE project_id = ? ORDER BY created_at DESC, ${db.dialect.insertionOrder()} DESC LIMIT ?`, projectId, limit);
+    return rows.map((r) => {
+        let reasons: Record<string, unknown> = {};
+        try {
+            const parsed = JSON.parse(r.reasons_json) as unknown;
+            if (parsed && typeof parsed === "object") reasons = parsed as Record<string, unknown>;
+        } catch {
+            /* unreadable reasons: the PR still shows, without them */
+        }
+        const tests = (Array.isArray(reasons.tests) ? reasons.tests : []) as Array<Record<string, unknown>>;
+        // A trigger's commit label may be the short hash: at least 7 characters of the head commit.
+        const run = db.get<Row>(
+            `SELECT s.job_id, s.pass_rate, s.total, s.failed FROM trigger_runs t JOIN run_summaries s ON s.job_id = t.job_id
+              WHERE s.project_id = ? AND t.commit_sha IS NOT NULL AND LENGTH(t.commit_sha) >= 7 AND ? LIKE t.commit_sha || '%' ORDER BY s.finished_at DESC LIMIT 1`,
+            projectId,
+            r.head_sha,
+        );
+        let selected = 0;
+        try {
+            selected = (JSON.parse(r.selected_json) as unknown[]).length;
+        } catch {
+            selected = tests.length;
+        }
+        return {
+            pr: Number(r.pr),
+            headSha: r.head_sha,
+            createdAt: r.created_at,
+            proposed: selected,
+            fullRunRecommended: reasons.fullRunRecommended === true,
+            fullRunReasons: strings(reasons.fullRunReasons),
+            tests: tests.slice(0, 5).map((t) => ({ testKey: String(t.testKey ?? ""), title: String(t.title ?? ""), why: String(strings(t.reasons)[0] ?? t.why ?? "") })),
+            change: changeOfRoutes(strings(reasons.endpoints)),
+            outcome: run ? { jobId: run.job_id, passRate: run.pass_rate ?? null, total: Number(run.total), failed: Number(run.failed) } : null,
+        };
+    });
+}
+
+/** What the quality history is computed from (dashboard.ts projectQuality reads it). */
+export interface QualityFacts {
+    /** Every move of a finding to Confirmed, with when the finding was first seen. */
+    confirmations: Array<{ findingId: string; at: string; firstSeenAt: string }>;
+    /** Every move of a finding from Fixed back to Verification pending: the bug came back. */
+    reopens: Array<{ findingId: string; at: string }>;
+    /** The latest finished runs, newest first, with the tests that did not pass (quarantined ones left out). */
+    runs: Array<{ jobId: string; finishedAt: string; passRate: number | null; notPassing: string[] }>;
+    /** Finished runs in the window (discovery per run). */
+    runsInWindow: number;
+    /** The pages and endpoints each of those tests touches. */
+    areasOf: ReadonlyMap<string, string[]>;
+    flaky: FlakyTest[];
+    prs: PrChange[];
+    /** The latest exploration's workflow steps (Phase 3 coverage record); null when there is none. */
+    workflowSteps: { total: number; exercised: number } | null;
+}
+
+export interface QualityHistory {
+    /** Start of the window. */
+    since: string;
+    /** Bugs confirmed per week, oldest week first. */
+    defects: Array<{ weekStart: string; confirmed: number }>;
+    /** Pages and endpoints where tests failed in at least 2 of the latest runs, most runs first. */
+    failureAreas: Array<{ area: string; runs: number; testIds: string[] }>;
+    /** Bugs that came back after a fix, in the window. */
+    regressions: { reopened: number; findings: number };
+    flaky: FlakyTest[];
+    /** Average pass rate of the latest runs. */
+    stability: { runs: number; passRate: number | null };
+    changes: { inWindow: number; prs: PrChange[] };
+    workflowCoverage: { total: number; exercised: number } | null;
+    /** Bugs confirmed per finished run and the median hours from first seen to confirmed, in the window. */
+    discovery: { confirmed: number; runs: number; perRun: number | null; medianHoursToConfirm: number | null };
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+function median(xs: number[]): number | null {
+    if (!xs.length) return null;
+    const s = [...xs].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
+/** The eight history series (pure: G7 checks it on a fixture with hand-computed answers). */
+export function qualityHistory(f: QualityFacts, nowMs = Date.now()): QualityHistory {
+    const start = nowMs - HISTORY_WEEKS * WEEK_MS;
+    const inWindow = (iso: string) => {
+        const t = Date.parse(iso);
+        return t >= start && t <= nowMs;
+    };
+    const confirmed = f.confirmations.filter((c) => inWindow(c.at));
+    const defects = Array.from({ length: HISTORY_WEEKS }, (_, i) => ({ weekStart: new Date(start + i * WEEK_MS).toISOString(), confirmed: 0 }));
+    // The last week ends now, inclusive.
+    for (const c of confirmed) defects[Math.min(HISTORY_WEEKS - 1, Math.floor((Date.parse(c.at) - start) / WEEK_MS))]!.confirmed++;
+
+    const runs = f.runs.slice(0, HISTORY_RUNS);
+    const areas = new Map<string, { runs: number; tests: Set<string> }>();
+    for (const r of runs) {
+        const seen = new Set<string>();
+        for (const id of r.notPassing)
+            for (const a of f.areasOf.get(id) ?? []) {
+                const e = areas.get(a) ?? areas.set(a, { runs: 0, tests: new Set() }).get(a)!;
+                e.tests.add(id);
+                if (!seen.has(a)) (seen.add(a), e.runs++);
+            }
+    }
+    const failureAreas = [...areas]
+        .filter(([, e]) => e.runs >= 2)
+        .map(([area, e]) => ({ area, runs: e.runs, testIds: [...e.tests].sort() }))
+        .sort((a, b) => b.runs - a.runs || a.area.localeCompare(b.area));
+
+    const reopens = f.reopens.filter((r) => inWindow(r.at));
+    const rated = runs.filter((r) => r.passRate !== null);
+    const hours = confirmed.map((c) => (Date.parse(c.at) - Date.parse(c.firstSeenAt)) / 3_600_000).filter((h) => h >= 0);
+    const med = median(hours);
+    return {
+        since: new Date(start).toISOString(),
+        defects,
+        failureAreas,
+        regressions: { reopened: reopens.length, findings: new Set(reopens.map((r) => r.findingId)).size },
+        flaky: f.flaky,
+        stability: { runs: rated.length, passRate: rated.length ? round1(rated.reduce((a, r) => a + r.passRate!, 0) / rated.length) : null },
+        changes: { inWindow: f.prs.filter((p) => inWindow(p.createdAt)).length, prs: f.prs },
+        workflowCoverage: f.workflowSteps,
+        discovery: { confirmed: confirmed.length, runs: f.runsInWindow, perRun: f.runsInWindow ? Math.round((confirmed.length / f.runsInWindow) * 100) / 100 : null, medianHoursToConfirm: med === null ? null : round1(med) },
+    };
+}

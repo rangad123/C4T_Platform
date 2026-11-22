@@ -15,7 +15,10 @@ import type { Db, Row } from "./db.js";
 import { notCountedText } from "../engine/quarantine/rules.js";
 import { quarantineGate } from "./quarantine-store.js";
 import { isNothingRan } from "./review-store.js";
-import { flakyCountsByProject, type TestResult } from "./trends.js";
+import type { Platform } from "./bootstrap.js";
+import { EXPLORATION_ARTIFACT, loadExploration } from "./exploration-store.js";
+import { projectCoverage } from "./selection/facts.js";
+import { detectFlaky, flakyCountsByProject, HISTORY_RUNS, HISTORY_WEEKS, prChanges, qualityHistory, type QualityHistory, type TestResult } from "./trends.js";
 
 export type Readiness = "ready" | "needs-attention" | "blocked" | "unknown";
 export const READINESS_STATES: Readiness[] = ["blocked", "needs-attention", "unknown", "ready"];
@@ -424,4 +427,86 @@ export function buildDashboard(db: Db, opts: DashboardFilter & { now?: number } 
         rules: READINESS_RULES,
         staleDays: STALE_DAYS,
     };
+}
+
+// ── one project's quality card (testing-engine Phase 6) ─────────────────────
+
+/** Rows in each of the card's two lists. */
+export const CARD_LIST = 5;
+
+/** Six numbers and two lists with links, nothing else (spec §6 item 5). */
+export interface QualityCard {
+    numbers: {
+        /** Bugs confirmed in the window. */
+        confirmed: number;
+        /** Bugs that came back after a fix, in the window. */
+        reopened: number;
+        /** Average pass rate of the latest runs. */
+        passRate: number | null;
+        workflowSteps: { total: number; exercised: number } | null;
+        /** Median hours from first seen to confirmed. */
+        hoursToConfirm: number | null;
+        /** Pull requests whose tests were chosen, in the window. */
+        pullRequests: number;
+    };
+    /** Pages and endpoints that keep failing, each with a test that failed there. */
+    areas: { total: number; items: Array<{ area: string; runs: number; tests: number; testId: string }> };
+    /** Unreliable tests to fix. */
+    flaky: { total: number; items: Array<{ id: string; testKey: string; title: string; flips: number; executions: number }> };
+    weeks: number;
+    runs: number;
+}
+
+export function qualityCard(h: QualityHistory): QualityCard {
+    return {
+        numbers: {
+            confirmed: h.discovery.confirmed,
+            reopened: h.regressions.reopened,
+            passRate: h.stability.passRate,
+            workflowSteps: h.workflowCoverage,
+            hoursToConfirm: h.discovery.medianHoursToConfirm,
+            pullRequests: h.changes.inWindow,
+        },
+        areas: { total: h.failureAreas.length, items: h.failureAreas.slice(0, CARD_LIST).map((a) => ({ area: a.area, runs: a.runs, tests: a.testIds.length, testId: a.testIds[0]! })) },
+        flaky: { total: h.flaky.length, items: h.flaky.slice(0, CARD_LIST).map((f) => ({ id: f.id, testKey: f.testKey, title: f.title, flips: f.flips, executions: f.executions })) },
+        weeks: HISTORY_WEEKS,
+        runs: HISTORY_RUNS,
+    };
+}
+
+const areaKey = (i: { kind: "page" | "endpoint"; path: string; method?: string }) => (i.kind === "endpoint" && i.method ? `${i.method} ${i.path}` : i.path);
+
+/** Reads what the history needs from stored rows: findings' history, run summaries, test coverage, pull request selections, the latest exploration. Read-only. */
+export async function projectQuality(p: Platform, projectId: string, now = Date.now()): Promise<{ card: QualityCard; history: QualityHistory }> {
+    const since = new Date(now - HISTORY_WEEKS * 7 * DAY_MS).toISOString();
+    const db = p.db;
+    const confirmations = db
+        .all<Row>("SELECT e.finding_id, e.at, f.first_seen_at FROM finding_events e JOIN candidate_findings f ON f.id = e.finding_id WHERE e.project_id = ? AND e.to_state = 'confirmed' AND e.at >= ?", projectId, since)
+        .map((r) => ({ findingId: r.finding_id as string, at: r.at as string, firstSeenAt: r.first_seen_at as string }));
+    const reopens = db
+        .all<Row>("SELECT finding_id, at FROM finding_events WHERE project_id = ? AND from_state = 'fixed' AND to_state = 'verification_pending' AND at >= ?", projectId, since)
+        .map((r) => ({ findingId: r.finding_id as string, at: r.at as string }));
+    const runs = db
+        .all<Row>(`SELECT job_id, finished_at, pass_rate, results_json FROM run_summaries WHERE project_id = ? ORDER BY finished_at DESC, ${db.dialect.insertionOrder()} DESC LIMIT ?`, projectId, HISTORY_RUNS)
+        .map((r) => {
+            let results: TestResult[] = [];
+            try {
+                results = JSON.parse(r.results_json) as TestResult[];
+            } catch {
+                /* an unreadable summary names no failing test */
+            }
+            return { jobId: r.job_id as string, finishedAt: r.finished_at as string, passRate: (r.pass_rate ?? null) as number | null, notPassing: results.filter((t) => t.s !== "p" && !t.q).map((t) => t.id) };
+        });
+    const runsInWindow = Number(db.get<Row>("SELECT COUNT(*) AS c FROM run_summaries WHERE project_id = ? AND finished_at >= ?", projectId, since)?.c ?? 0);
+    const failing = new Set(runs.flatMap((r) => r.notPassing));
+    const areasOf = new Map<string, string[]>();
+    if (failing.size)
+        for (const t of (await projectCoverage(p.repo, p.store, projectId, { only: failing, now })).tests) areasOf.set(t.testId, [...new Set(t.items.filter((i) => !i.external).map(areaKey))]);
+    const ex = db.get<Row>(`SELECT job_id FROM artifacts WHERE project_id = ? AND kind = ? AND job_id IS NOT NULL AND pruned_at IS NULL ORDER BY created_at DESC, ${db.dialect.insertionOrder()} DESC LIMIT 1`, projectId, EXPLORATION_ARTIFACT);
+    const steps = ex ? (await loadExploration(p.repo, p.store, ex.job_id))?.coverage.workflowSteps : undefined;
+    const history = qualityHistory(
+        { confirmations, reopens, runs, runsInWindow, areasOf, flaky: detectFlaky(db, projectId), prs: prChanges(db, projectId), workflowSteps: steps && steps.total > 0 ? { total: steps.total, exercised: steps.exercised } : null },
+        now,
+    );
+    return { card: qualityCard(history), history };
 }

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { actorOf } from "../auth/access.js";
 import { visibleProjectsOf } from "../auth/project-scope.js";
-import { buildDashboard, READINESS_STATES } from "../dashboard.js";
+import { buildDashboard, projectQuality, READINESS_STATES } from "../dashboard.js";
+import { prChanges } from "../trends.js";
 import type { RouteCtx } from "./types.js";
 
 const Query = z.object({
@@ -13,11 +14,25 @@ const Query = z.object({
  * Cross-project dashboard. Read-only: starts no job, calls no model and never contacts a target; it only reads what
  * the platform has already stored. Behind the same API key as every other /api route.
  */
-export function registerDashboardRoutes({ app, p }: RouteCtx): void {
+export function registerDashboardRoutes({ app, p, project }: RouteCtx): void {
     app.get("/api/dashboard", async (req) => {
         const q = Query.parse(req.query);
         // Only the projects the caller may see (a person limited to some projects; auth/project-scope.ts).
         const visible = visibleProjectsOf(req, actorOf(req));
         return buildDashboard(p.db, { state: q.state as never, q: q.q, ...(visible ? { projectIds: visible } : {}) });
+    });
+
+    // One project's quality card and the history behind it (dashboard.ts projectQuality). Read-only.
+    app.get("/api/projects/:id/quality", async (req) => {
+        const { id } = req.params as { id: string };
+        project(id);
+        return projectQuality(p, id);
+    });
+
+    // The latest pull requests' chosen tests, with why and the run of their head commit. Read-only: a run starts only from selection-run.
+    app.get("/api/projects/:id/pull-requests", async (req) => {
+        const { id } = req.params as { id: string };
+        project(id);
+        return { pullRequests: prChanges(p.db, id) };
     });
 }
