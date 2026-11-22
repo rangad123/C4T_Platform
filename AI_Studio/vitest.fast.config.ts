@@ -363,6 +363,7 @@ export default defineConfig({
             "tests/fixed-known-bug-unit.test.ts",
             "tests/known-bug-two-seeds-unit.test.ts",
             "tests/run-data-changes-gate.test.ts",
+            "tests/verify-creation-findings.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

@@ -283,7 +283,10 @@ export async function verifyAfterJob(
     const emit = jobEmitter(p, job.id);
     const store = new CandidateFindingStore(p.sql);
     const testOf = testsOf(p, job.projectId);
-    if (mode === "validate" && !o.harvested) await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed: failedRunsOf(p, job, testOf) });
+    // A run's failed tests are findings; a creation job's are only the ones it left as findings (Needs review: Phase 4 layer checks among
+    // them), not the tests it could not make pass for their own reasons.
+    const failed = o.harvested ? [] : failedRunsOf(p, job, testOf).filter((x) => mode === "validate" || p.repo.getTest(x.test.id)?.validationStatus === "NEEDS_REVIEW");
+    if (failed.length) await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed });
     // This run's new findings first, then older ones still waiting, oldest first. withinBudget caps the whole list; findings it cannot
     // verify (another kind of test) cost no budget, so the older ones are read past them.
     const own = (await store.list(job.projectId, { jobId: job.id })).filter((f) => isVerifiable(f.state) && f.testId);
