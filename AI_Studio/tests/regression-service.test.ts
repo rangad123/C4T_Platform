@@ -244,3 +244,22 @@ describe("one fix check at a time", () => {
         expect(active(s.projectId)).toHaveLength(1);
     });
 });
+
+describe("reopen in a project with many findings", () => {
+    it("a Fixed finding whose test fails again is reopened even when 500 newer findings exist", async () => {
+        const s = await seed("Busy findings shop");
+        const claimed = await claimFix(platform, s.projectId, { findingIds: [s.findingId], by: "person", source: "Ana" });
+        await checkFix(platform, platform.repo.getJob(claimed.jobId!)!, { execute: scripted(["pass", "pass", "pass"]) });
+        platform.repo.setJobStatus(claimed.jobId!, "COMPLETED");
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("fixed");
+        const base = (await store.get(s.projectId, s.findingId))!.finding;
+        await new Promise((r) => setTimeout(r, 5));
+        for (let i = 0; i < 500; i++) await store.upsert({ projectId: s.projectId, finding: { ...base, fingerprint: i.toString(16).padStart(64, "0") } });
+        const appId = platform.repo.getLatestApplicationPublic(s.projectId)!.id as string;
+        const later = await platform.repo.createJob(s.projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [s.bug] });
+        platform.repo.addExecution({ testId: s.bug, scriptId: null, jobId: later.id, attempt: 1, status: "failed", durationMs: 1, startedAt: new Date().toISOString(), steps: [] });
+        platform.repo.setJobStatus(later.id, "COMPLETED");
+        await reopenReturned(platform, platform.repo.getJob(later.id)!);
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("verification_pending");
+    }, 120_000);
+});

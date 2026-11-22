@@ -247,6 +247,13 @@ export class CandidateFindingStore {
         return rows.map(toRecord);
     }
 
+    /** Every finding of the project in one of these states, with no cap (list() keeps the newest 500 only). */
+    async inStates(projectId: string, states: readonly string[]): Promise<CandidateFindingRecord[]> {
+        if (!states.length) return [];
+        const rows = await this.sql.all<FindingRow>(`SELECT * FROM candidate_findings WHERE project_id = ? AND state IN (${states.map(() => "?").join(",")}) ORDER BY last_seen_at DESC, id`, projectId, ...states);
+        return rows.map(toRecord);
+    }
+
     async get(projectId: string, id: string): Promise<CandidateFindingRecord | undefined> {
         const row = await this.sql.get<FindingRow>("SELECT * FROM candidate_findings WHERE id = ? AND project_id = ?", id, projectId);
         return row ? toRecord(row) : undefined;

@@ -14,7 +14,7 @@
  *  - Reopen: a later run in which a Fixed finding's test fails, or that finds it again, moves it back to Verification pending.
  * No AI calls.
  */
-import { STATE_LABEL, type FindingState } from "../../engine/findings/lifecycle.js";
+import { FINDING_STATES, STATE_LABEL, type FindingState } from "../../engine/findings/lifecycle.js";
 import { redactText } from "../../shared/redact-text.js";
 import type { Platform } from "../bootstrap.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
@@ -54,7 +54,7 @@ export async function findingsFixedBy(p: Platform, projectId: string, text: stri
         ...refs,
     );
     const tests = new Set(links.filter((l) => !repo || sameRepo(l.url, repo)).map((l) => l.test_case_id));
-    const all = await new CandidateFindingStore(p.sql).list(projectId);
+    const all = await new CandidateFindingStore(p.sql).inStates(projectId, FINDING_STATES);
     const named = all.filter((f) => f.testId && tests.has(f.testId));
     const groups = new Set(named.map((f) => f.groupId).filter(Boolean));
     return all.filter((f) => (named.includes(f) || (f.groupId && groups.has(f.groupId))) && FIX_STATES.includes(f.state));
@@ -191,7 +191,7 @@ export async function relatedTests(p: Platform, projectId: string, findingId: st
  */
 export async function reopenReturned(p: Platform, job: JobRow): Promise<CandidateFindingRecord[]> {
     const store = new CandidateFindingStore(p.sql);
-    const fixed = (await store.list(job.projectId)).filter((f) => f.state === "fixed");
+    const fixed = await store.inStates(job.projectId, ["fixed"]);
     if (!fixed.length) return [];
     const rows = p.repo.db.all<{ test_case_id: string; status: string }>("SELECT test_case_id, status FROM test_executions WHERE job_id = ? ORDER BY attempt, started_at", job.id);
     const last = new Map(rows.map((r) => [r.test_case_id, r.status]));
