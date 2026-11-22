@@ -76,6 +76,7 @@ import { LEASE_LOST, onHandover } from "./runner-handover.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
 import type { Platform } from "./bootstrap.js";
 import { verifyAfterJob } from "./findings/verify-service.js";
+import { checkFix } from "./findings/regression-service.js";
 import type { ArtifactStore } from "./storage.js";
 
 const LEASE_MS = 60_000;
@@ -118,12 +119,20 @@ export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boole
     };
 }
 
-/** A verification job: the findings of the run it names are verified through `executor`; what became of each is told in this job too. */
+/** A verification job: the findings of the run it names, or a claimed fix, are verified through `executor`; this job tells the outcome. */
 async function runVerifyJob(p: Platform, job: JobRow, executor: ScriptExecutor, signal: AbortSignal, emit: EngineContext["emit"]): Promise<void> {
     const source = job.options.verifyJobId ? p.repo.getJob(job.options.verifyJobId) : undefined;
-    if (!source || source.projectId !== job.projectId) throw new Error("The run whose findings this job verifies no longer exists.");
-    emit({ stage: "validation", kind: "job_started", message: `Verifying the findings of run ${source.id.slice(0, 8)} on the runner.` });
-    const r = await verifyAfterJob(p, source, { execute: (a, b, e, x) => executor.execute(a, b, e, x), signal, ranOn: "the runner", harvested: true });
+    if (!job.options.fixCheck && (!source || source.projectId !== job.projectId)) throw new Error("The run whose findings this job verifies no longer exists.");
+    emit({ stage: "validation", kind: "job_started", message: job.options.fixCheck ? `Checking the fix ${job.options.fixCheck.source} claimed.` : `Verifying the findings of run ${source!.id.slice(0, 8)}.` });
+    const execute: Parameters<typeof checkFix>[2]["execute"] = (a, b, e, x) => executor.execute(a, b, e, x);
+    const ranOn = executor.remote ? "the runner" : "the platform";
+    if (job.options.fixCheck) {
+        const done = await checkFix(p, job, { execute, signal, ranOn });
+        const fixed = done.filter((d) => d.fixed).length;
+        emit({ stage: "validation", kind: "finding_verification", message: `Fix check (${job.options.fixCheck.source}): ${fixed} of ${done.length} finding${done.length === 1 ? "" : "s"} fixed.${done.filter((d) => !d.fixed).map((d) => ` ${d.reason}`).join("")}` });
+        return;
+    }
+    const r = await verifyAfterJob(p, source!, { execute, signal, ranOn, harvested: true });
     const counts = new Map<string, number>();
     for (const v of r?.verified ?? []) counts.set(v.to, (counts.get(v.to) ?? 0) + 1);
     const told = [...counts].map(([to, n]) => `${n} ${to.replace(/_/g, " ")}`);

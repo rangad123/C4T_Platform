@@ -6,7 +6,7 @@
  * side states Duplicate, Flaky, Environment issue, Automation issue and Needs manual review. "Not a bug" is a person's verdict (the
  * card's action), so it is a state too. Classified and Reported follow Confirmed only: an unconfirmed finding stays explicitly
  * unverified, moves to a side state, or waits for a person. Fixed and Accepted risk close a finding as the security module's states do
- * (S2 maps them); a person accepts a confirmed risk with a reason, and only the regression service (X1) will move a finding to Fixed.
+ * (S2 maps them); a person accepts a confirmed risk with a reason, and only the regression service (X1) moves a finding to Fixed.
  *
  * A failed test enters as Detected and never becomes a Candidate while its failure is the test's own step (validation/test-fault.ts):
  * not every failed test is an application defect.
@@ -55,17 +55,17 @@ const MOVES: Record<FindingState, Partial<Record<FindingState, readonly Actor[]>
     candidate: { verification_pending: E, needs_manual_review: EP },
     verification_pending: { reproduced: E, unconfirmed: E, flaky: E, automation_issue: E, environment_issue: E, needs_manual_review: E },
     reproduced: { confirmed: EP, unconfirmed: EP, needs_manual_review: E },
-    confirmed: { classified: EP, needs_manual_review: P, accepted_risk: P },
+    confirmed: { classified: EP, needs_manual_review: P, accepted_risk: P, fixed: E },
     unconfirmed: { verification_pending: EP, flaky: E, automation_issue: E, environment_issue: E, needs_manual_review: EP, confirmed: P },
-    classified: { reported: EP, accepted_risk: P },
-    reported: { accepted_risk: P },
+    classified: { reported: EP, accepted_risk: P, fixed: E },
+    reported: { accepted_risk: P, fixed: E },
     flaky: { verification_pending: EP, needs_manual_review: P, confirmed: P },
     environment_issue: { verification_pending: EP, needs_manual_review: P, confirmed: P },
     automation_issue: { verification_pending: EP, needs_manual_review: P, confirmed: P },
-    needs_manual_review: { verification_pending: EP, confirmed: P, unconfirmed: P },
+    needs_manual_review: { verification_pending: EP, confirmed: P, unconfirmed: P, fixed: E },
     duplicate: { candidate: P },
     not_a_bug: { candidate: P },
-    // Fixed comes back: verify it again. Nothing moves a finding to Fixed yet.
+    // Fixed comes back: verify it again. Only the engine moves a finding to Fixed, after its test passed on the fixed build (regression-service.ts).
     fixed: { verification_pending: EP },
     accepted_risk: { verification_pending: P },
 };

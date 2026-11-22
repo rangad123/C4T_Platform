@@ -55,6 +55,11 @@ const TABLE: Record<string, "E" | "P" | "EP"> = {
     "classified>accepted_risk": "P",
     "reported>accepted_risk": "P",
     "fixed>verification_pending": "EP",
+    // Phase 6 X1: only the engine, after the finding's test passed on the fixed build (regression-service.ts).
+    "confirmed>fixed": "E",
+    "classified>fixed": "E",
+    "reported>fixed": "E",
+    "needs_manual_review>fixed": "E",
     "accepted_risk>verification_pending": "P",
 };
 for (const s of FINDING_STATES) {
@@ -92,8 +97,8 @@ describe("lifecycle table", () => {
         expect(checkTransition({ from: "candidate", to: "confirmed", by: "engine", confidence: "high" })).toMatch(/cannot move from Candidate to Confirmed/);
         expect(checkTransition({ from: "unconfirmed", to: "classified", by: "person" })).toMatch(/cannot move/);
         expect(moversOf("reported", "classified")).toEqual([]);
-        // Only the regression service will move a finding to Fixed; nobody accepts a risk that is not confirmed.
-        for (const from of FINDING_STATES) expect(moversOf(from, "fixed"), from).toEqual([]);
+        // Only the engine (the regression service) moves a finding to Fixed, and only a bug someone stands behind; nobody accepts a risk that is not confirmed.
+        for (const from of FINDING_STATES) expect(moversOf(from, "fixed"), from).toEqual(["confirmed", "classified", "reported", "needs_manual_review"].includes(from) ? ["engine"] : []);
         expect(checkTransition({ from: "unconfirmed", to: "accepted_risk", by: "person", reason: "low impact" })).toMatch(/cannot move from Unconfirmed to Accepted risk/);
     });
 

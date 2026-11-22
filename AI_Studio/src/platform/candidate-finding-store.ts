@@ -284,6 +284,24 @@ export class CandidateFindingStore {
         });
     }
 
+    /**
+     * One history event that moves nothing (a fix claimed, a fix that still reproduces): from and to are the finding's state. False when the
+     * project has no such finding. The reason is redacted before it is stored.
+     */
+    async note(projectId: string, id: string, input: { by: Actor; actor?: { id?: string | null; label: string }; reason: string }): Promise<boolean> {
+        const reason = redactText(input.reason, REASON_MAX);
+        return this.sql.tx(async (t) => {
+            const cur = await t.get<{ state: string }>("SELECT state FROM candidate_findings WHERE id = ? AND project_id = ?", id, projectId);
+            if (!cur) return false;
+            const last = await t.get<{ n: number | string | null }>("SELECT MAX(seq) AS n FROM finding_events WHERE finding_id = ?", id);
+            await t.run(
+                "INSERT INTO finding_events (id, project_id, finding_id, seq, at, actor, actor_id, by_kind, from_state, to_state, reason) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                randomUUID(), projectId, id, Number(last?.n ?? 0) + 1, this.now(), input.actor?.label ?? "Engine", input.actor?.id ?? null, input.by, cur.state, cur.state, reason,
+            );
+            return true;
+        });
+    }
+
     /** The finding's lifecycle events, oldest first; none when the project has no such finding. */
     async history(projectId: string, id: string): Promise<FindingEvent[]> {
         const rows = await this.sql.all<{ seq: number | string; at: string; actor: string; actor_id: string | null; by_kind: string; from_state: string | null; to_state: string; reason: string | null }>(

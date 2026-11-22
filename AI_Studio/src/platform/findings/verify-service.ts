@@ -139,33 +139,42 @@ async function settle(d: VerifyDeps, f: CandidateFindingRecord, to: "unconfirmed
     return { to, reason };
 }
 
-async function verifyOne(d: VerifyDeps, r: { f: CandidateFindingRecord; test: VerifyTest; adapterId: string }, attempts: number, reset: VerifyDeps["reset"], signal: AbortSignal): Promise<{ to: string; reason: string }> {
-    const { f, test, adapterId } = r;
+/**
+ * Runs a finding's test `attempts` times as V1 does (a fresh browser each, a new account where it is safe, no video) and judges them.
+ * Changes no finding. Also the regression service's check of a claimed fix (regression-service.ts). Throws when the attempts cannot run.
+ */
+export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFindingRecord, test: VerifyTest, signal: AbortSignal, attempts = attemptsSetting(d.attempts)) {
     const { spec } = test;
+    const adapterId = getAdapter(test.framework).id;
+    // Who the attempts run as: a new account per attempt where it is safe (explore/clean-account.ts), else the reason it is not.
+    const plan = cleanReplayPlan({ steps: spec.steps, roleAccount: spec.tags.some((t) => t.startsWith("role:")), dataChanges: d.dataChanges, ...(d.signupPath ? { signupPath: d.signupPath } : {}), ...(d.startingIds ? { startingIds: d.startingIds } : {}) });
+    const script = renderWithAdapter(spec, adapterId, d.render);
+    const runs = await d.execute(adapterId, { scratchDir: d.scratchDir, scripts: [{ testId: spec.testId, filename: script.filename, content: script.content }] }, { run: d.env }, {
+        workers: 1,
+        signal,
+        attempts,
+        video: false,
+        ...(plan.register ? { freshAccount: { signupPath: plan.signupPath, ...(d.loginPath ? { loginPath: d.loginPath } : {}) } } : {}),
+    });
+    if (signal.aborted) throw signal.reason ?? new Error("stopped");
+    const notes = runs.map((x) => parseAttemptNote(x.notes?.[0]));
+    const account: AttemptAccount = plan.register
+        ? { clean: notes.every((n) => n?.clean === true), note: notes.find((n) => n?.clean === false)?.note ?? "on a newly registered account each time" }
+        : { clean: plan.clean, note: plan.why };
+    const tried = runs.map((x) => attemptOf(x, spec));
+    const view = fromCandidate(f, test);
+    return { runs, notes, account, tried, view, verdict: verdictOf(view, tried, account) };
+}
+
+async function verifyOne(d: VerifyDeps, r: { f: CandidateFindingRecord; test: VerifyTest; adapterId: string }, attempts: number, reset: VerifyDeps["reset"], signal: AbortSignal): Promise<{ to: string; reason: string }> {
+    const { f, test } = r;
     if (f.state === "candidate") await d.store.transition(d.projectId, f.id, { to: "verification_pending", by: "engine" });
     try {
         if (reset) {
             const sent = await reset.send(signal);
             if (!sent.ok) return await settle(d, f, "unconfirmed", `It could not be verified: the application could not be reset first (${sent.message}).`);
         }
-        // Who the attempts run as: a new account per attempt where it is safe (explore/clean-account.ts), else the reason it is not.
-        const plan = cleanReplayPlan({ steps: spec.steps, roleAccount: spec.tags.some((t) => t.startsWith("role:")), dataChanges: d.dataChanges, ...(d.signupPath ? { signupPath: d.signupPath } : {}), ...(d.startingIds ? { startingIds: d.startingIds } : {}) });
-        const script = renderWithAdapter(spec, adapterId, d.render);
-        const runs = await d.execute(adapterId, { scratchDir: d.scratchDir, scripts: [{ testId: spec.testId, filename: script.filename, content: script.content }] }, { run: d.env }, {
-            workers: 1,
-            signal,
-            attempts,
-            video: false,
-            ...(plan.register ? { freshAccount: { signupPath: plan.signupPath, ...(d.loginPath ? { loginPath: d.loginPath } : {}) } } : {}),
-        });
-        if (signal.aborted) throw signal.reason ?? new Error("stopped");
-        const notes = runs.map((x) => parseAttemptNote(x.notes?.[0]));
-        const account: AttemptAccount = plan.register
-            ? { clean: notes.every((n) => n?.clean === true), note: notes.find((n) => n?.clean === false)?.note ?? "on a newly registered account each time" }
-            : { clean: plan.clean, note: plan.why };
-        const tried = runs.map((x) => attemptOf(x, spec));
-        const view = fromCandidate(f, test);
-        const verdict = verdictOf(view, tried, account);
+        const { runs, notes, account, tried, view, verdict } = await attemptsOn(d, f, test, signal, attempts);
         const appVersion = (await d.appVersion?.().catch(() => null)) ?? null;
         for (const [i, x] of runs.entries()) await keepEvidence(d, f, test, x, tried[i]!, i + 1, runs.length, account, notes[i]?.note, appVersion);
         const confidence = confidenceScore({ ...view, attempts: tried, independence: account.clean ? "independent" : "not_on_clean_state" });
@@ -263,24 +272,9 @@ export async function verifyAfterJob(
     if ((mode !== "validate" && mode !== "generate") || job.options.planOnly || job.error === "Cancelled") return undefined;
     const app = p.repo.getApplication(job.applicationId);
     if (!app || app.projectId !== job.projectId) return undefined;
-    const emit = (message: string, level: "info" | "warn" = "info") => {
-        try {
-            p.repo.addEvent(job.id, { stage: "validation", kind: "finding_verification", level, message: redactText(message, 2000) });
-        } catch {
-            /* an event is a convenience */
-        }
-    };
+    const emit = jobEmitter(p, job.id);
     const store = new CandidateFindingStore(p.sql);
-    const blocks = blocksFor(p.repo.db, job.projectId);
-    const objects = new LocatorStore(p.repo.db).index(job.projectId);
-    const testOf = (id: string): VerifyTest | undefined => {
-        const t = p.repo.getTest(id);
-        if (!t || t.projectId !== job.projectId || t.unreadable) return undefined;
-        // Shared steps and elements are put in place as a run does (job-runner.ts resolveRefs); one that cannot be is not verified.
-        const expanded = tryExpandBlocks(t.spec, blocks);
-        const r = expanded.ok ? tryResolveSpecRefs(expanded.spec, objects) : undefined;
-        return r?.ok ? { id: t.id, title: t.title, spec: r.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework } : undefined;
-    };
+    const testOf = testsOf(p, job.projectId);
     if (mode === "validate" && !o.harvested) await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed: failedRunsOf(p, job, testOf) });
     const findings = (await store.list(job.projectId, { jobId: job.id })).filter((f) => isVerifiable(f.state) && f.testId);
     if (findings.length === 0) return undefined;
@@ -298,6 +292,46 @@ export async function verifyAfterJob(
             return { verified: [], skipped: findings.map((f) => ({ id: f.id, why })) };
         }
     }
+    return verifyFindings({
+        ...verifyDepsOf(p, job, { emit, ...(o.execute ? { execute: o.execute } : {}), ...(o.ranOn ? { ranOn: o.ranOn } : {}) }),
+        findings,
+        ...(o.attempts !== undefined ? { attempts: o.attempts } : {}),
+        ...(o.budget ? { budget: o.budget } : {}),
+        ...(o.signal ? { signal: o.signal } : {}),
+    });
+}
+
+/** The job's events say what verification did; an event is a convenience. */
+const jobEmitter = (p: Platform, jobId: string) => (message: string, level: "info" | "warn" = "info") => {
+    try {
+        p.repo.addEvent(jobId, { stage: "validation", kind: "finding_verification", level, message: redactText(message, 2000) });
+    } catch {
+        /* an event is a convenience */
+    }
+};
+
+/** A project's tests as verification runs them: shared steps and elements put in place as a run does; one that cannot be is undefined. */
+function testsOf(p: Platform, projectId: string): (id: string) => VerifyTest | undefined {
+    const blocks = blocksFor(p.repo.db, projectId);
+    const objects = new LocatorStore(p.repo.db).index(projectId);
+    return (id) => {
+        const t = p.repo.getTest(id);
+        if (!t || t.projectId !== projectId || t.unreadable) return undefined;
+        // As job-runner.ts resolveRefs.
+        const expanded = tryExpandBlocks(t.spec, blocks);
+        const r = expanded.ok ? tryResolveSpecRefs(expanded.spec, objects) : undefined;
+        return r?.ok ? { id: t.id, title: t.title, spec: r.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework } : undefined;
+    };
+}
+
+/**
+ * What verification needs to run a project's tests again for `job` (the run whose findings, or the verification job itself): the
+ * application's address and accounts, its reset request, its sign-up page, and where the evidence is kept. Throws when the job's
+ * application is not the project's.
+ */
+export function verifyDepsOf(p: Platform, job: JobRow, o: { execute?: VerifyDeps["execute"]; ranOn?: string; emit?: VerifyDeps["emit"] } = {}): Omit<VerifyDeps, "findings"> {
+    const app = p.repo.getApplication(job.applicationId);
+    if (!app || app.projectId !== job.projectId) throw new Error("The run's application is not this project's.");
     const origin = new URL(app.url).origin;
     const c = app.credentials;
     const roles = new IdentityStore(p.repo.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).get(job.projectId);
@@ -312,18 +346,16 @@ export async function verifyAfterJob(
     };
     const hook = new ResetHookStore(p.repo.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).secret(job.projectId, "");
     const facts = modelFacts(app.model ?? p.repo.getLatestAppModel(job.projectId));
-    const result = await verifyFindings({
-        store,
+    return {
+        store: new CandidateFindingStore(p.sql),
         projectId: job.projectId,
-        findings,
-        testOf,
+        testOf: testsOf(p, job.projectId),
         appUrl: app.url,
         env,
         render: { baseUrl: origin, apiBaseUrl: env.apiBaseUrl },
         scratchDir: p.config.scratchDir,
         execute: o.execute ?? ((a, b, e, x) => localExecutor.execute(a, b, e, x)),
         ranOn: o.ranOn ?? "the platform",
-        ...(o.attempts !== undefined ? { attempts: o.attempts } : {}),
         dataChanges: job.options.allowMutatingApiTests === true || app.config.allowMutatingApiTests === true,
         ...(facts.signupPath ? { signupPath: facts.signupPath } : {}),
         ...(facts.loginPath ? { loginPath: facts.loginPath } : {}),
@@ -341,11 +373,8 @@ export async function verifyAfterJob(
                 return undefined;
             }
         },
-        emit,
-        ...(o.budget ? { budget: o.budget } : {}),
-        ...(o.signal ? { signal: o.signal } : {}),
-    });
-    return result;
+        emit: o.emit ?? jobEmitter(p, job.id),
+    };
 }
 
 /** The last run of each test in this job that failed, rebuilt from its stored execution (the steps' results, not the files). */

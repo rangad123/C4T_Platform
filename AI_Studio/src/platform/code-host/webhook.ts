@@ -12,6 +12,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { HttpError } from "../http-error.js";
 import type { RouteCtx } from "../routes/types.js";
 import { processPrEvent } from "./pr-impact.js";
+import { checkFixesOfDeployment } from "../findings/regression-service.js";
 import type { CodeHostStore, PrEvent } from "./store.js";
 
 export const WEBHOOK_LIMIT_PER_MINUTE = 30;
@@ -51,7 +52,8 @@ export function decide(event: string, body: Json): Omit<PrEvent, "deliveryId"> {
         const state = str(body.deployment_status?.state);
         const base = { event, action: state, headSha: sha(body.deployment?.sha), environment: str(body.deployment?.environment)?.slice(0, 100) };
         if (state !== "success") return { ...base, ignored: `deployment ${state ?? "status"}: only a successful deployment is re-verified` };
-        // shortcut: no re-verification job until V1; the pr_events row with queued = 'reverify' is the queued work, V1 takes it from there.
+        // The findings its pull request says it fixes ("Fixes #n") are checked on it (findings/regression-service.ts).
+        if (!base.headSha) return { ...base, ignored: "the deployment's commit is missing" };
         return { ...base, queued: "reverify" };
     }
     return { event, action: str(body.action), ignored: event === "ping" ? "ping" : "an event this server does not use" };
@@ -98,6 +100,7 @@ export function registerCodeHostWebhook(ctx: RouteCtx, store: CodeHostStore): vo
             if (!store.recordEvent(repo.projectId, { deliveryId, ...what })) return reply.code(200).send({ duplicate: true });
             // GitHub waits about ten seconds for an answer: the analysis runs after it (pr-impact.ts), and its failure is only logged.
             // shortcut: a restart loses an analysis still running; its pr_events row stays, with no pr_selections row for that head. Upgrade to a job kind if that is seen.
+            if (what.queued === "reverify") void checkFixesOfDeployment(ctx.p, store, repo.projectId, what.headSha!).catch((err) => console.error(`[code-host] the fix check of deployment ${what.headSha!.slice(0, 7)} failed:`, err instanceof Error ? err.message : err));
             if (what.queued === "impact") void processPrEvent(ctx.p, store, repo.projectId, { pr: what.pr!, headSha: what.headSha! }).catch((err) => console.error(`[code-host] impact analysis of pull request #${what.pr} failed:`, err instanceof Error ? err.message : err));
             return what.queued ? reply.code(202).send({ queued: what.queued }) : reply.code(200).send({ ignored: what.ignored });
         });

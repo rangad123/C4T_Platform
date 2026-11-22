@@ -7,6 +7,8 @@
  *                                                              and `severity`: one value or a comma list; `group`: a group id.
  *   GET  /api/projects/:id/findings/:fid                     → { finding: Item, attempts, history }
  *   POST /api/projects/:id/findings/:fid/transition          { action: confirm | not_a_bug | split | reopen, reason? } → { finding: Item }
+ *                                                            { action: check_fix } → { finding, fixCheck: { jobId } }: the fix is checked
+ *                                                            by a verification job (findings/regression-service.ts); Fixed only if it passes.
  *
  * Item = the FindingView plus { severity, findingClass, groupId, readOnly }. A security finding is readOnly: it changes in the
  * Security module (its own states), never here, and is left out when the module is off. A refused move answers 409 with the lifecycle's
@@ -20,6 +22,7 @@ import { securitySettings } from "../../security/settings.js";
 import { securityStoreFor } from "../../security/store.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import { fromCandidate, fromSecurity, type TestOf } from "../findings/adapters.js";
+import { claimFix } from "../findings/regression-service.js";
 import { HttpError } from "../http-error.js";
 import { getScheduleServices } from "../schedule-services.js";
 import type { RouteCtx } from "./types.js";
@@ -43,7 +46,7 @@ const words = <T extends string>(allowed: readonly T[], what: string) =>
         });
 
 const ListQuery = z.object({ state: words(FINDING_STATES, "state"), severity: words(SEVERITY_WORDS, "severity"), group: z.string().max(100).optional() }).passthrough();
-const TransitionBody = z.object({ action: z.enum(["confirm", "not_a_bug", "split", "reopen"]), reason: z.string().max(2000).optional().nullable() }).strict();
+const TransitionBody = z.object({ action: z.enum(["confirm", "not_a_bug", "split", "reopen", "check_fix"]), reason: z.string().max(2000).optional().nullable() }).strict();
 
 /** Where a person's reopen sends a finding: a closed verdict back to Candidate, anything else to verification again. */
 const reopenTo = (from: FindingState): FindingState => (from === "not_a_bug" || from === "duplicate" ? "candidate" : "verification_pending");
@@ -122,6 +125,17 @@ export function registerFindingRoutes(ctx: RouteCtx): void {
             }
         };
         const { action } = b.data;
+        if (action === "check_fix") {
+            // A person says a fix is in: the engine checks it on the application (regression-service.ts); only a passing check makes it Fixed.
+            let claimed: Awaited<ReturnType<typeof claimFix>>;
+            try {
+                claimed = await claimFix(p, id, { findingIds: [fid], by: "person", source: actor.label, actor });
+            } catch (e) {
+                throw e instanceof HttpError ? e : new HttpError(409, (e as Error).message);
+            }
+            if (!claimed.jobId) throw new HttpError(409, claimed.refused[0]?.why ?? "The fix cannot be checked.");
+            return { finding: candidateItem((await store.get(id, fid))!), fixCheck: { jobId: claimed.jobId } };
+        }
         if (action === "split") {
             const mates = r.groupId ? (await store.groups(id)).find((g) => g.id === r.groupId)?.findingIds ?? [] : [];
             if (mates.length < 2) throw new HttpError(409, "This finding is not grouped with others, so there is nothing to split.");

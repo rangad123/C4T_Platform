@@ -152,6 +152,8 @@ export interface JobOptions {
     agentRunId?: string;
     /** verify mode: the finished job whose candidate findings this job verifies on the project's runner (findings/verify-service.ts). */
     verifyJobId?: string;
+    /** verify mode: check a claimed fix of these findings instead (findings/regression-service.ts): by a pull request's "Fixes #n" or a person. */
+    fixCheck?: { findingIds: string[]; by: "issue" | "person"; source: string; headSha?: string };
     /** plain mode: rebuild this existing test (test_cases.id) from the new description instead of adding one. */
     rewriteTestId?: string;
     /** Set when the project's scripts run on a runner agent (stamped by the job gate in agent-services.ts). */
