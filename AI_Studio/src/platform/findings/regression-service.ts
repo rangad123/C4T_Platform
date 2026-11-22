@@ -24,7 +24,8 @@ import { projectCoverage } from "../selection/facts.js";
 import { previewSelection, readChanges, RECOMMENDATION_NOTE } from "../selection/preview.js";
 import { SuiteStore } from "../suite-store.js";
 import { pastFindings } from "./past.js";
-import { attemptsOn, verifyDepsOf, type VerifyDeps } from "./verify-service.js";
+import { attemptsSetting, VERIFY_BUDGET, withinBudget } from "../../engine/findings/reproduce.js";
+import { attemptsOn, verifyDepsOf, type VerifyDeps, type VerifyTest } from "./verify-service.js";
 
 /** States a fix is checked from: a bug a person or the engine stands behind. */
 export const FIX_STATES: readonly FindingState[] = ["confirmed", "classified", "reported", "needs_manual_review"];
@@ -112,39 +113,45 @@ export async function checkFix(p: Platform, job: JobRow, o: { execute: VerifyDep
     const signal = o.signal ?? new AbortController().signal;
     const on = claim.headSha ? `on the build of ${claim.headSha.slice(0, 7)}` : "on the application as it is now";
     const out: FixOutcome[] = [];
+    const note = async (f: CandidateFindingRecord, reason: string) => (await store.note(job.projectId, f.id, { by: "engine", reason }), out.push({ id: f.id, fixed: false, reason }));
+    const ready: Array<{ f: CandidateFindingRecord; test: VerifyTest }> = [];
     for (const id of claim.findingIds) {
         const f = await store.get(job.projectId, id);
         if (!f || !FIX_STATES.includes(f.state)) {
             out.push({ id, fixed: false, reason: "It no longer waits for a fix check." });
             continue;
         }
-        const note = async (reason: string) => (await store.note(job.projectId, f.id, { by: "engine", reason }), out.push({ id, fixed: false, reason }));
         const test = f.testId ? deps.testOf(f.testId) : undefined;
-        if (!test) {
-            await note(`Fix claimed — not checked: its test no longer exists or cannot be run.`);
-            continue;
-        }
+        if (!test) await note(f, `Fix claimed — not checked: its test no longer exists or cannot be run.`);
+        else ready.push({ f, test });
+    }
+    const asked = attemptsSetting(deps.attempts);
+    // The verification budget holds here too: at most so many findings, each for at most so long; the rest keep their state with why.
+    const run = await withinBudget(ready, async ({ f, test }, each): Promise<void> => {
         let r: Awaited<ReturnType<typeof attemptsOn>>;
         try {
-            r = await attemptsOn(deps, f, test, signal);
+            r = await attemptsOn(deps, f, test, each, asked);
         } catch (e) {
-            if (signal.aborted) throw e;
-            await note(`Fix claimed — not checked: ${redactText(e instanceof Error ? e.message.split("\n")[0]! : String(e), 600)}`);
-            continue;
+            if (each.aborted) throw e;
+            return void (await note(f, `Fix claimed — not checked: ${redactText(e instanceof Error ? e.message.split("\n")[0]! : String(e), 600)}`));
         }
         const n = r.tried.length;
         const failed = r.tried.filter((a) => a.outcome !== "passed").length;
         if (n === 0 || failed > 0) {
-            await note(n === 0 ? `Fix claimed — not checked: no attempt ran ${on}.` : `${STILL_REPRODUCES}: it failed in ${failed} of ${n} attempts ${on} (${claim.source}). ${r.verdict.reason}`);
-            continue;
+            return void (await note(f, n === 0 ? `Fix claimed — not checked: no attempt ran ${on}.` : `${STILL_REPRODUCES}: it failed in ${failed} of ${n} attempts ${on} (${claim.source}). ${r.verdict.reason}`));
         }
+        // Never assumed fixed: every asked attempt ran, on clean state (leftovers on the shared account can make a pass as well as a failure).
+        if (n < asked) return void (await note(f, `Fix claimed — not checked: only ${n} of ${asked} attempts ran ${on}.`));
+        if (!r.account.clean) return void (await note(f, `Fix claimed — not checked on clean state: it passed in ${n} of ${n} attempts, but ${r.account.note}.`));
         const reason = `Fixed: it passed in ${n} of ${n} attempts (${r.account.note}) ${on}, after the fix ${claim.source} claimed.`;
         await store.transition(job.projectId, f.id, { to: "fixed", by: "engine", reason });
         await promoteToRegression(p, job.projectId, test.id);
         const related = await relatedTests(p, job.projectId, f.id, test.id);
         await store.note(job.projectId, f.id, { by: "engine", reason: `Its test ${test.testKey} is in the “${REGRESSION_SUITE}” suite now. ${related.note}` });
-        out.push({ id, fixed: true, reason, related: related.testIds });
-    }
+        out.push({ id: f.id, fixed: true, reason, related: related.testIds });
+    }, VERIFY_BUDGET, signal);
+    for (const { item, why } of run.timedOut) await note(item.f, `Fix claimed — not checked: ${why}`);
+    for (const { f } of run.left) await note(f, `Fix claimed — not checked: ${run.stopped ?? "the verification budget was used."}`);
     return out;
 }
 

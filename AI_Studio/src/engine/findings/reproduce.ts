@@ -38,6 +38,7 @@ export function resetHookProblem(hook: { method: string; url: string }, appUrl: 
     } catch {
         return "The reset address is not a valid address, so verification does not reset the application.";
     }
+    if (target.protocol !== "http:" && target.protocol !== "https:") return "The reset address is not an http(s) address, so verification does not reset the application.";
     if (hook.method.toUpperCase() !== "POST") return `Verification resets the application with a POST only; the reset is a ${hook.method.toUpperCase()}, so it is not sent.`;
     if (target.username || target.password) return "The reset address holds sign-in details; put the token in a header. It is not sent.";
     if (target.origin !== own) return `Verification sends the reset only to the application's own site (${own}), not to ${target.origin}. It is not sent.`;
@@ -109,13 +110,16 @@ export async function withinBudget<T, R>(items: readonly T[], one: (item: T, sig
         }
         if (i >= cap) {
             out.left = items.slice(i);
-            out.stopped = `The verification budget of ${cap} finding${cap === 1 ? "" : "s"} per run was used: ${out.left.length} more wait${out.left.length === 1 ? "s" : ""} for the next run.`;
+            out.stopped = `The verification budget of ${cap} finding${cap === 1 ? "" : "s"} per run was used: ${out.left.length} more ${out.left.length === 1 ? "is" : "are"} not verified in this run.`;
             return out;
         }
         const timer = AbortSignal.timeout(ms);
         const each = signal ? AbortSignal.any([signal, timer]) : timer;
+        // The limit holds even when the work does not listen to its signal.
+        const late = new Promise<never>((_, reject) => each.addEventListener("abort", () => reject(each.reason), { once: true }));
+        late.catch(() => undefined);
         try {
-            out.done.push({ item, result: await one(item, each) });
+            out.done.push({ item, result: await Promise.race([one(item, each), late]) });
         } catch (e) {
             if (!timer.aborted) throw e;
             out.timedOut.push({ item, why: `Its attempts took longer than the ${budget.minutesEach} minute${budget.minutesEach === 1 ? "" : "s"} a finding may take, so they were stopped.` });

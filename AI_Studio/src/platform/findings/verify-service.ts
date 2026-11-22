@@ -13,7 +13,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { cleanReplayPlan, signupPathOf } from "../../engine/explore/clean-account.js";
-import { attemptsSetting, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type VerifyBudget } from "../../engine/findings/reproduce.js";
+import { attemptsSetting, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type BudgetRun, type VerifyBudget } from "../../engine/findings/reproduce.js";
 import { confidenceScore } from "../../engine/findings/score.js";
 import type { Attempt } from "../../engine/findings/view.js";
 import { getAdapter, hasAdapter, renderWithAdapter, type ExecutionBatch, type ExecutionEnv, type ExecutionOptions } from "../../engine/frameworks/index.js";
@@ -22,7 +22,9 @@ import { parseEvidence, type Evidence } from "../../engine/evidence/model.js";
 import { parseAttemptNote, type RunEnv, type ScriptRun } from "../../engine/validation/runner.js";
 import { testStepFault } from "../../engine/validation/test-fault.js";
 import { startingIdsOf } from "../../engine/web/leftovers.js";
-import { redactText } from "../../shared/redact-text.js";
+import { clip, HIDDEN, redactText } from "../../shared/redact-text.js";
+import { isSecretSettingName, runSecretValues } from "../../engine/evidence/secret-policy.js";
+import { maskText, maskValue } from "../redact-text.js";
 import { tryExpandBlocks } from "../../engine/blocks/expand.js";
 import { localExecutor } from "../../engine/frameworks/index.js";
 import { tryResolveSpecRefs } from "../../engine/locators/refs.js";
@@ -109,7 +111,8 @@ const isVerifiable = (state: string) => state === "candidate" || state === "veri
 export async function verifyFindings(d: VerifyDeps): Promise<VerifyResult> {
     const out: VerifyResult = { verified: [], skipped: [] };
     const attempts = attemptsSetting(d.attempts);
-    const ready: Array<{ f: CandidateFindingRecord; test: VerifyTest; adapterId: string }> = [];
+    type Ready = { f: CandidateFindingRecord; test: VerifyTest; adapterId: string };
+    const ready: Ready[] = [];
     for (const f of d.findings) {
         if (!isVerifiable(f.state)) continue;
         const test = f.testId ? d.testOf(f.testId) : undefined;
@@ -123,7 +126,14 @@ export async function verifyFindings(d: VerifyDeps): Promise<VerifyResult> {
     }
     const resetWhy = d.reset ? resetHookProblem(d.reset.hook, d.appUrl) : undefined;
     if (resetWhy) d.emit(`Verification does not reset the application: ${resetWhy}`, "warn");
-    const run = await withinBudget(ready, (r, signal) => verifyOne(d, r, attempts, resetWhy ? undefined : d.reset, signal), d.budget ?? VERIFY_BUDGET, d.signal);
+    let run: BudgetRun<Ready, { to: string; reason: string }>;
+    try {
+        run = await withinBudget(ready, (r, signal) => verifyOne(d, r, attempts, resetWhy ? undefined : d.reset, signal), d.budget ?? VERIFY_BUDGET, d.signal);
+    } catch (e) {
+        // Stopped part way (the run was stopped, the platform shuts down): the finding cut short says so instead of waiting silently.
+        for (const { f } of ready) if ((await d.store.get(d.projectId, f.id).catch(() => undefined))?.state === "verification_pending") await settle(d, f, "unconfirmed", "Verification was stopped before its attempts finished (the run was stopped or the platform shut down).");
+        throw e;
+    }
     for (const { item, result } of run.done) out.verified.push({ id: item.f.id, ...result });
     for (const { item, why } of run.timedOut) out.verified.push({ id: item.f.id, ...(await settle(d, item.f, "unconfirmed", why)) });
     if (run.stopped) {
@@ -174,7 +184,8 @@ async function verifyOne(d: VerifyDeps, r: { f: CandidateFindingRecord; test: Ve
             const sent = await reset.send(signal);
             if (!sent.ok) return await settle(d, f, "unconfirmed", `It could not be verified: the application could not be reset first (${sent.message}).`);
         }
-        const { runs, notes, account, tried, view, verdict } = await attemptsOn(d, f, test, signal, attempts);
+        const { runs, notes, account, tried: raw, view, verdict } = await attemptsOn(d, f, test, signal, attempts);
+        const tried = maskValue(raw, runSecretValues(d.env));
         const appVersion = (await d.appVersion?.().catch(() => null)) ?? null;
         for (const [i, x] of runs.entries()) await keepEvidence(d, f, test, x, tried[i]!, i + 1, runs.length, account, notes[i]?.note, appVersion);
         const confidence = confidenceScore({ ...view, attempts: tried, independence: account.clean ? "independent" : "not_on_clean_state" });
@@ -185,20 +196,20 @@ async function verifyOne(d: VerifyDeps, r: { f: CandidateFindingRecord; test: Ve
     } catch (e) {
         if (signal.aborted) throw e;
         // An older runner, a runner that is off, a script that cannot be made: the finding says why it is not verified.
-        const why = redactText(e instanceof Error ? e.message.split("\n")[0] : String(e), 600);
+        const why = clip(maskText(e instanceof Error ? e.message.split("\n")[0]! : String(e), runSecretValues(d.env)), 600);
         return await settle(d, f, "unconfirmed", `It could not be verified: ${why}`);
     }
 }
 
-const line = (s: string, max = 300) => redactText(s, max);
-
 async function keepEvidence(d: VerifyDeps, f: CandidateFindingRecord, test: VerifyTest, run: ScriptRun, attempt: Attempt, i: number, n: number, account: AttemptAccount, note: string | undefined, appVersion: string | null): Promise<void> {
     if (!d.keep) return;
+    const secrets = runSecretValues(d.env);
+    const line = (s: string, max = 300) => clip(maskText(s, secrets), max);
     const shot = run.artifacts.find((a) => a.kind === "screenshot");
     const trace = run.artifacts.find((a) => a.kind === "trace");
     const evidenceFile = run.artifacts.find((a) => a.kind === "evidence");
     let ev: Evidence | undefined;
-    if (evidenceFile) ev = parseEvidence(await fs.readFile(evidenceFile.path, "utf8").catch(() => ""), secretsOf(d.env));
+    if (evidenceFile) ev = parseEvidence(await fs.readFile(evidenceFile.path, "utf8").catch(() => ""), secrets);
     const step = attempt.failedStep;
     const own = ev?.requests.filter((q) => step !== undefined && q.step === step) ?? [];
     const requests = (own.length ? own : (ev?.requests ?? []).slice(-20)).slice(0, 20).map((q) => line(`${q.method} ${q.path} -> ${q.status ?? q.failed ?? "no answer"}`));
@@ -211,7 +222,7 @@ async function keepEvidence(d: VerifyDeps, f: CandidateFindingRecord, test: Veri
         ...(attempt.failedStep ? { failedStep: attempt.failedStep } : {}),
         steps: run.steps.map((s) => ({ index: s.index, title: line(s.title), status: s.status, ...(s.error ? { error: line(s.error, 800) } : {}) })),
         preconditions: test.spec.preconditions.map((p) => line(p)),
-        data: Object.fromEntries(Object.entries(test.spec.testData).map(([k, v]) => [line(k, 100), line(v)])),
+        data: Object.fromEntries(Object.entries(test.spec.testData).map(([k, v]) => [line(k, 100), isSecretSettingName(k) ? HIDDEN : line(v)])),
         appVersion: appVersion ?? "unknown",
         browser: "Chromium (headless)",
         environment: { appUrl: line(d.appUrl), ranOn: d.ranOn },
@@ -225,9 +236,6 @@ async function keepEvidence(d: VerifyDeps, f: CandidateFindingRecord, test: Veri
     if (trace) pkg.trace = await d.keep(f, test, i, { kind: "trace", path: trace.path, name: `trace${path.extname(trace.path)}` });
     await d.keep(f, test, i, { kind: "evidence", json: pkg, name: "package.json" });
 }
-
-const secretsOf = (env: RunEnv): string[] =>
-    [env.credentials?.password, env.credentials?.totpSecret, env.apiToken, ...(env.roles ?? []).flatMap((r) => [r.password, r.totpSecret, r.apiToken])].filter((s): s is string => Boolean(s));
 
 /**
  * A run of saved tests: each failed test whose failure is not its own step becomes an execution (or layer) finding, one row per project

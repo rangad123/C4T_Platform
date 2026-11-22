@@ -76,7 +76,7 @@ describe("the attempts setting and the budget", () => {
         const r = await withinBudget(Array.from({ length: 33 }, (_, i) => i), async (i) => (seen.push(i), i));
         expect(seen).toHaveLength(30);
         expect(r.left).toEqual([30, 31, 32]);
-        expect(r.stopped).toMatch(/budget of 30 findings per run was used: 3 more wait for the next run/);
+        expect(r.stopped).toMatch(/budget of 30 findings per run was used: 3 more are not verified in this run/);
     });
 
     it("an item past its time is stopped with the reason, and the next one still runs", async () => {
@@ -210,7 +210,7 @@ describe("verifyFindings", () => {
         });
         expect(asked[0]!.freshAccount).toBeUndefined();
         expect(r.verified).toEqual([{ id: a!.id, to: "unconfirmed", reason: expect.stringMatching(/only on the shared test account/) }]);
-        expect(r.stopped).toMatch(/budget of 1 finding per run was used: 1 more waits/);
+        expect(r.stopped).toMatch(/budget of 1 finding per run was used: 1 more is not verified in this run/);
         expect(events.join("\n")).toMatch(/budget of 1 finding/);
         expect((await store.get("p1", b.id))!.state).toBe("candidate");
     });

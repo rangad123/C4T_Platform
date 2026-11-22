@@ -64,8 +64,11 @@ const CAUSE_WORDS: Record<Cause, string> = {
 };
 
 const norm = (s: string | undefined) => (s ?? "").normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
-/** The same failure: the same step, check, target and expected value. */
-const failureKey = (a: Attempt) => [a.failedStep ?? "", norm(a.check), norm(a.target), norm(a.value)].join("|");
+/** The same failure: the same step, check, target and expected value; with none of them known, the same first error line. */
+const failureKey = (a: Attempt) => {
+    const key = [a.failedStep ?? "", norm(a.check), norm(a.target), norm(a.value)].join("|");
+    return key === "|||" ? `error:${norm(a.error?.split("\n")[0])}` : key;
+};
 
 const decided = (c: FindingClass, reason: string, reproduced: Classification["reproduced"]): Classification => ({ class: c, candidates: [c], reason, reproduced });
 const open = (candidates: FindingClass[], reason: string, reproduced: Classification["reproduced"]): Classification => ({
@@ -75,10 +78,10 @@ const open = (candidates: FindingClass[], reason: string, reproduced: Classifica
     reproduced,
 });
 
-/** The most attempts that failed the same way, of all attempts. */
+/** The most attempts that failed the same way because of the application's answer, of all attempts. */
 export function reproduction(attempts: readonly Attempt[]): Classification["reproduced"] {
     const counts = new Map<string, number>();
-    for (const a of attempts) if (a.outcome === "failed") counts.set(failureKey(a), (counts.get(failureKey(a)) ?? 0) + 1);
+    for (const a of attempts) if (a.outcome === "failed" && causeOf(a) === "app") counts.set(failureKey(a), (counts.get(failureKey(a)) ?? 0) + 1);
     return { same: Math.max(0, ...counts.values()), of: attempts.length };
 }
 

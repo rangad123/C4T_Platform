@@ -15,6 +15,7 @@
  * sentence.
  */
 import { z } from "zod";
+import { assertHoldsHere } from "../auth/access.js";
 import { actorLabel, currentActor } from "../auth/actor.js";
 import { FINDING_STATES, type FindingState } from "../../engine/findings/lifecycle.js";
 import type { FindingView } from "../../engine/findings/view.js";
@@ -126,6 +127,8 @@ export function registerFindingRoutes(ctx: RouteCtx): void {
         };
         const { action } = b.data;
         if (action === "check_fix") {
+            // It runs the finding's test on the application: the permission a run needs, besides tests.write (roles.ts).
+            assertHoldsHere(app, req, id, "ai_studio.tests.run");
             // A person says a fix is in: the engine checks it on the application (regression-service.ts); only a passing check makes it Fixed.
             let claimed: Awaited<ReturnType<typeof claimFix>>;
             try {
