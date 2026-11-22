@@ -109,6 +109,16 @@ export function workflowsReached(app: Pick<BenchApp, "workflows">, paths: string
 export type Switches = "none" | "all" | string[];
 const switchesEnv = (s: Switches): string => (Array.isArray(s) ? (s.length ? s.join(",") : "none") : s);
 
+/** Whether anything answers HTTP at this address now. */
+async function answers(url: string): Promise<boolean> {
+    try {
+        await fetch(url, { signal: AbortSignal.timeout(1000) });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export class BenchAppHost {
     private child?: ChildProcess;
     private readonly token = crypto.randomBytes(16).toString("hex");
@@ -127,6 +137,8 @@ export class BenchAppHost {
     /** Start (or restart) the app with these behaviours switched on; resolves when it answers. Its data starts fresh. */
     async start(switches: Switches): Promise<void> {
         await this.stop();
+        // Something else answering here (an app left over from an earlier run) would be measured instead of this app.
+        if (await answers(this.url)) throw new Error(`Another process already answers on port ${this.port}: stop it (or choose other ports) before ${this.app.id} starts there.`);
         const child = spawn(process.execPath, [path.join(this.root, this.app.script), String(this.port)], {
             stdio: "ignore",
             env: { ...minimalEnv(), BENCH_DEFECTS: switchesEnv(switches), BENCH_RESET_TOKEN: this.token, BENCH_LOGIN: this.login },

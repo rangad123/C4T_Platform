@@ -5,10 +5,13 @@
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeImpact } from "../src/engine/impact/analyze.js";
+import { BenchAppHost, benchApp } from "../src/eval/bench/apps.js";
 import { gitOf, parseChangeArgs, prFiles, treeOf, type ManifestPr } from "../src/eval/bench/change/run.js";
 import { caught, renderChangeMd, scoreChange, type PrStep, type RunRecord, type SetupRecord } from "../src/eval/bench/change/score.js";
 
@@ -86,6 +89,19 @@ describe("the bench repository", () => {
             const r = await analyse(manifest.prs.find((p) => p.kind === kind)!);
             expect(r.endpoints, kind).toEqual([]);
             expect(r.unmapped, kind).toHaveLength(1);
+        }
+    });
+});
+
+describe("a benchmark app's start", () => {
+    it("refuses when another process already answers on its port", async () => {
+        const other = http.createServer((_q, r) => r.end("someone else"));
+        await new Promise<void>((resolve) => other.listen(0, "127.0.0.1", resolve));
+        const port = (other.address() as AddressInfo).port;
+        try {
+            await expect(new BenchAppHost(benchApp("bench-shop")!, port).start("none")).rejects.toThrow(`Another process already answers on port ${port}`);
+        } finally {
+            await new Promise((resolve) => other.close(resolve));
         }
     });
 });
