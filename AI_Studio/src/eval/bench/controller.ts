@@ -19,6 +19,7 @@
  * made so far are still judged, and the state is saved after every app so `--resume` runs only what did not finish. The model is never
  * switched (the AI layer retries a rate-limited call on the same model).
  */
+import type { Verification } from "./verify-score.js";
 import { FixtureHost } from "../fixtures.js";
 import { ok, type PlatformClient } from "../client.js";
 import type { CorpusEntry } from "../corpus.js";
@@ -78,6 +79,8 @@ export interface BenchOptions {
     continuedValidationMs?: number;
     /** Where the apps' requirements documents are read from (default the repository root). */
     root?: string;
+    /** `--verify-attempts`: verifies the findings of the app's jobs (with its defects in) and returns what it left (cli.ts verifierOf). */
+    verify?: (projectId: string, jobIds: string[]) => Promise<Verification>;
 }
 
 export interface BenchOutcome {
@@ -424,6 +427,14 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         }
     }
 
+    // --verify-attempts: the findings of the app's jobs verified as the platform does after a job, on the app with its defects in.
+    // shortcut: a regression-mode trial's failing replays are not verified (their jobs are not kept); upgrade by keeping the first replay's job id.
+    let verification: Verification | undefined;
+    if (o.verify && !replaySignal.signal.aborted) {
+        await host.start(seeded);
+        verification = await o.verify(projectId, [jobs.planJobId, ...jobs.createJobIds, ...(jobs.validationJobIds ?? [])].filter((x): x is string => Boolean(x)));
+    }
+
     const findings: BenchFinding[] = [];
     for (const t of candidates) {
         const replayed = verdicts.get(t.id)!;
@@ -486,7 +497,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
     const version = o.config.apps.find((a) => a.id === app.id)?.version ?? "unknown";
     return {
         ...(entry ? { entry } : {}),
-        result: { id: app.id, entryId: app.id, projectId, status: "done", appVersion: version, seededDefects: seeded, defects, findings, metrics, jobs, exploration: { sessions: sessions.slice(0, 30) }, ...(caveats.length ? { caveats } : {}) },
+        result: { id: app.id, entryId: app.id, projectId, status: "done", appVersion: version, seededDefects: seeded, defects, findings, metrics, jobs, exploration: { sessions: sessions.slice(0, 30) }, ...(caveats.length ? { caveats } : {}), ...(verification ? { verification } : {}) },
     };
 }
 

@@ -4,6 +4,8 @@
  * Validated with caps on every list and string (a run can be sent by anyone holding the API key). Metric definitions: metrics.ts and
  * docs/ai-testing-engine/BENCHMARK_METHODOLOGY.md.
  */
+import { FINDING_CONFIDENCE } from "../../engine/explore/finding.js";
+import { FINDING_STATES } from "../../engine/findings/lifecycle.js";
 import { z } from "zod";
 
 const Text = (n: number) => z.string().max(n);
@@ -144,6 +146,28 @@ export const ExplorationSessionSchema = z
     .strict();
 export type ExplorationSession = z.infer<typeof ExplorationSessionSchema>;
 
+/** What verification left of an app's findings (verify-score.ts Verification, `--verify-attempts`); absent: not measured. */
+export const BenchVerificationSchema = z
+    .object({
+        findings: z
+            .array(
+                z
+                    .object({
+                        id: Text(100),
+                        testId: Text(100).nullable(),
+                        state: z.enum(FINDING_STATES),
+                        reason: Text(2000).nullable(),
+                        groupId: Text(100).nullable(),
+                        findingClass: Text(40).nullable(),
+                        confidence: z.enum(FINDING_CONFIDENCE).nullable(),
+                    })
+                    .strict(),
+            )
+            .max(500),
+        added: z.object({ cost: z.number().nullable(), durationMs: z.number().nullable() }).strict(),
+    })
+    .strict();
+
 export const BenchAppResultSchema = z
     .object({
         id: Id,
@@ -167,6 +191,8 @@ export const BenchAppResultSchema = z
         exploration: z.object({ sessions: z.array(ExplorationSessionSchema).max(30) }).strict().optional(),
         /** What makes this app's numbers differ from one uninterrupted run (said in the report). */
         caveats: z.array(Text(600)).max(10).optional(),
+        /** Phase 5 (`--verify-attempts`): the app's findings after verification; absent in a trial run without it. */
+        verification: BenchVerificationSchema.optional(),
     })
     .strict();
 export type BenchAppResult = z.infer<typeof BenchAppResultSchema>;
