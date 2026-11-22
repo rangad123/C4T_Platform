@@ -33,6 +33,17 @@ describe("a captured value as a whole part of a request path", () => {
         expect(extractCoverage(api([place, { action: "request", method: "GET", path: "/api/orders/{{order}}" }]), APP).completeness).toBe("declared-complete");
     });
 
+    it("a literal part of the path matches the template's variable there (`/share/u2` is `/share/{userId}`)", () => {
+        const app: AppFacts = { endpoints: [{ method: "DELETE", path: "/api/notes/{id}/share/{userId}" }] };
+        const make = { action: "request", method: "POST", path: "/api/notes", extract: { note: "id" } };
+        expect(extractCoverage(api([make, { action: "request", method: "DELETE", path: "/api/notes/{{note}}/share/u2" }]), app).limits).not.toContain(PATH_LIMIT);
+        // A literal where the template has a literal must be that literal.
+        expect(extractCoverage(api([make, { action: "request", method: "DELETE", path: "/api/notes/{{note}}/unshare/u2" }]), app).limits).toContain(PATH_LIMIT);
+        // The captured value must sit where the template has a variable.
+        expect(extractCoverage(api([make, { action: "request", method: "DELETE", path: "/api/notes/n1/share/{{note}}/x" }]), app).limits).toContain(PATH_LIMIT);
+        expect(extractCoverage(api([make, { action: "request", method: "DELETE", path: "/api/{{note}}/n1/share/u2" }]), app).limits).toContain(PATH_LIMIT);
+    });
+
     it("stays not fully known without a documented or observed template of that method and path", () => {
         const pay = { action: "request", method: "POST", path: "/api/orders/{{order}}/pay" };
         expect(extractCoverage(api([place, pay]), { appHost: "shop.test" }).limits).toContain(PATH_LIMIT);

@@ -409,7 +409,12 @@ export function extractCoverage(t: TestFacts, app: AppFacts = {}): TestCoverage 
     let variablePath = false;
     // Values an earlier request step captured (`extract`); they hold what the application answered, one value each.
     const captured = new Set<string>();
-    const templates = new Set((app.endpoints ?? []).map((e) => `${e.method.toUpperCase()} ${normalisePath(e.path)}`));
+    const templates = (app.endpoints ?? []).map((e) => ({ method: e.method.toUpperCase(), segs: normalisePath(e.path).split("/") }));
+    // The step's path fits a template: each part is the template's, or stands where the template has a variable (`/share/u2`, `/share/{}`).
+    const fits = (method: string, path: string) => {
+        const segs = path.split("/");
+        return templates.some((t) => t.method === method && t.segs.length === segs.length && t.segs.every((x, i) => x === segs[i] || x === "{}"));
+    };
     if (!steps) {
         limits.push(t.specUnreadable ? "The test's stored steps could not be read." : "The test has no readable steps.");
     } else {
@@ -436,7 +441,7 @@ export function extractCoverage(t: TestFacts, app: AppFacts = {}): TestCoverage 
                     // none), so the endpoint read from the step (`/{}`) is not the one called.
                     // A captured value that is a whole part of the path resolves to the application's template of that endpoint, if it has one.
                     const whole = wholeSegmentVariables(s.path);
-                    const resolved = templates.has(`${method} ${a.path}`);
+                    const resolved = fits(method, a.path);
                     const knownCapture = (n: string) => !(n in testData) && captured.has(n) && whole.has(n) && resolved;
                     if (pathVariables(s.path).some((n) => !oneSegment(testData[n]) && !knownCapture(n))) variablePath = true;
                     const q = new Set(a.query);
