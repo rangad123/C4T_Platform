@@ -138,7 +138,9 @@ export function verifyScore(trial: BenchAppResult, v: Verification | undefined, 
     let mixed = 0;
     for (const g of groups.values()) {
         const seeds = new Set(g.flatMap((f) => seedsOf(benchOf(f))));
-        if (seeds.size > 1) mixed++;
+        // Mixed: two of its findings are pinned to different seeds (no seed in common). One finding whose pin names several is not.
+        const pins = g.map((f) => seedsOf(benchOf(f))).filter((p) => p.length);
+        if (pins.some((p, i) => pins.slice(i + 1).some((q) => !q.some((x) => p.includes(x))))) mixed++;
         for (const s of seeds) perSeed[s] = (perSeed[s] ?? 0) + 1;
     }
     const V5 = { measured: true as const, mixed, groupsPerSeed: perSeed, median: median(Object.values(perSeed)) };

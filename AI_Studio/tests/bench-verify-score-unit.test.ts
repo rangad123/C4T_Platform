@@ -57,6 +57,15 @@ describe("verifyScore", () => {
         expect(verifyScore(trial, hypothesis, { seedLocations }).V7).toMatchObject({ value: 0 });
     });
 
+    it("calls a group mixed only when it holds findings pinned to different seeds, not a finding whose pin names several", () => {
+        const pins = { ...trial, findings: [b("p1", "confirmed", ["BS-06", "BS-18"]), b("p2", "confirmed", ["BS-07", "BS-18"]), b("p3", "confirmed", ["BS-01"]), b("p4", "confirmed", ["BS-02"])] } as unknown as BenchAppResult;
+        const v = (groups: Array<string | null>) => ({ ...verification, findings: groups.map((g, i) => f(`q${i + 1}`, `p${i + 1}`, { state: "confirmed", reason: "r", groupId: g })) });
+        // Each finding alone, p1 and p2 each pinned to two seeds: no group mixes seeds.
+        expect(verifyScore(pins, v([null, null, null, null])).V5).toMatchObject({ mixed: 0 });
+        // p1 and p2 share BS-18: one seed they agree on, not mixed. p3 and p4 are pinned to different seeds: mixed.
+        expect(verifyScore(pins, v(["g1", "g1", "g2", "g2"])).V5).toMatchObject({ mixed: 1 });
+    });
+
     it("allows unknown only for the likely cause, and only with a reason", () => {
         const one = (report: Record<string, string>) => verifyScore(trial, { ...verification, findings: [f("f1", "t1", { state: "confirmed", reason: "r", confidence: "high", report })] }).V8;
         expect(one({ ...full, likelyCause: "Unknown — no code source is connected" })).toMatchObject({ value: 1 });
