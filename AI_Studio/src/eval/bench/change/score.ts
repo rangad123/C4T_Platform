@@ -239,7 +239,18 @@ export function scoreChange(setup: SetupRecord, steps: PrStep[], history?: Histo
     for (const app of history ? Object.keys(history).sort() : []) {
         const mine = steps.filter((p) => p.app === app);
         const back = mine.flatMap((p) => (p.kind === "fix" ? (p.fixCheck?.findings ?? []).filter((f) => f.reopened) : []));
-        const want = { confirmed: mine.reduce((n, p) => n + (p.kind === "seed" ? (p.confirmed?.findings.length ?? 0) : 0), 0) + back.length, reopened: back.length, reopenedFindings: new Set(back.map((f) => f.id)).size };
+        // A Fixed finding whose test fails again in a later seed's PR is reopened there too (one test, several seeds): walk the PRs in order.
+        const fixedTests = new Map<string, string>();
+        const later: string[] = [];
+        for (const p of mine) {
+            if (p.kind === "seed")
+                for (const t of p.confirmed?.failingTests ?? []) {
+                    const id = fixedTests.get(t);
+                    if (id) (later.push(id), fixedTests.delete(t));
+                }
+            if (p.kind === "fix") for (const f of p.fixCheck?.findings ?? []) if (f.test && (f.fixedAgain ?? (f.state === "fixed" && !f.reopened))) fixedTests.set(f.test, f.id);
+        }
+        const want = { confirmed: mine.reduce((n, p) => n + (p.kind === "seed" ? (p.confirmed?.findings.length ?? 0) : 0), 0) + back.length, reopened: back.length + later.length, reopenedFindings: new Set([...back.map((f) => f.id), ...later]).size };
         const got = history![app]!;
         g7Values.push(`${app}: confirmed ${got.confirmed} = ${want.confirmed}, reopened ${got.reopened} = ${want.reopened}, reopened findings ${got.reopenedFindings} = ${want.reopenedFindings}`);
         if (got.confirmed !== want.confirmed) g7Notes.push(`${app}: the history says ${got.confirmed} confirmations, the bench counted ${want.confirmed}.`);
