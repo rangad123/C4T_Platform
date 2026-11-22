@@ -292,6 +292,19 @@ describe("two runs of one project finish close together", () => {
         return outcomes.map((o, i) => run(id, o, i + 1, outcomes.length));
     };
 
+    it("a verification job given up after three lost workers settles its findings as Unconfirmed, with why", async () => {
+        const s = await candidate("Lost worker shop");
+        const vj = await platform.repo.createJob(s.projectId, s.jobA.applicationId, { ...DEFAULT_JOB_OPTIONS, mode: "verify", verifyJobId: s.jobA.id, testIds: [platform.repo.getTest((await store.get(s.projectId, s.findingId))!.testId!)!.id] });
+        // Its third worker claimed it and moved the finding to Verification pending, then the process died.
+        platform.db.run("UPDATE generation_jobs SET status = 'VALIDATING', attempts = 3, lease_owner = 'gone', lease_until = ? WHERE id = ?", Date.now() - 1000, vj.id);
+        await store.transition(s.projectId, s.findingId, { to: "verification_pending", by: "engine" });
+        platform.repo.reclaimStaleJobs();
+        expect(platform.repo.getJob(vj.id)!.status).toBe("FAILED");
+        for (let i = 0; i < 100 && (await store.get(s.projectId, s.findingId))!.state === "verification_pending"; i++) await new Promise((r) => setTimeout(r, 20));
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("unconfirmed");
+        expect((await store.history(s.projectId, s.findingId)).at(-1)!.reason).toMatch(/lost track of its verification run/);
+    });
+
     it("their verifications take turns: the finding is verified once and its verdict stands", async () => {
         const s = await candidate("Together shop");
         const gA = gate();

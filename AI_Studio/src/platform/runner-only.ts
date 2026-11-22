@@ -158,6 +158,12 @@ export function removeServerExecutionGuard(): void {
  */
 export function installRunnerOnly(p: Platform, agents: AgentService): void {
     p.repo.beforeRequeue = (jobId, o) => {
+        // A verification job given up leaves no finding in Verification pending (loaded late: verify-service.ts reaches this module through agent-services.ts).
+        if (o.giveUp && p.repo.getJob(jobId)?.options.mode === "verify") {
+            void import("./findings/verify-service.js")
+                .then(({ settleGivenUpVerification }) => settleGivenUpVerification(p, jobId))
+                .catch((err) => console.warn(`[job ${jobId.slice(0, 8)}] could not settle the findings of a verification run given up:`, err));
+        }
         // A graceful restart hands an exploration over: its task keeps running and the next attempt picks it up (explore-dispatch.ts). Not after a
         // crash, not when the job is given up, and not for an agent run (agent-run.ts never resumes one): then its task is stopped first.
         const keepExplore = o.handedOver && !o.giveUp && p.repo.getJob(jobId)?.options.mode !== "agent";

@@ -380,6 +380,24 @@ async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions
     });
 }
 
+/** Why a verification job's findings are Unconfirmed when the job was given up (repo.ts reclaimStaleJobs, after three lost workers). */
+export const VERIFY_LOST =
+    "It could not be verified: the platform lost track of its verification run three times (the process looking after it stopped each time). The next run verifies it again if it fails again.";
+
+/** A verification job given up: the findings it had moved to Verification pending are Unconfirmed with why, never left waiting. */
+export async function settleGivenUpVerification(p: Platform, jobId: string): Promise<number> {
+    const job = p.repo.getJob(jobId);
+    if (!job || job.options.mode !== "verify") return 0;
+    const tests = new Set(job.options.testIds ?? []);
+    const store = new CandidateFindingStore(p.sql);
+    let n = 0;
+    for (const f of await store.inStates(job.projectId, ["verification_pending"])) {
+        if (!f.testId || !tests.has(f.testId)) continue;
+        if (await store.transition(job.projectId, f.id, { to: "unconfirmed", by: "engine", reason: VERIFY_LOST }).catch(() => undefined)) n++;
+    }
+    return n;
+}
+
 /** The job's events say what verification did; an event is a convenience. */
 const jobEmitter = (p: Platform, jobId: string) => (message: string, level: "info" | "warn" = "info") => {
     try {
