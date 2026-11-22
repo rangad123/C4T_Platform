@@ -87,9 +87,18 @@ describe("C3e writes as another identity", () => {
         const all = { ...ACCESS[0]!, status: { anonymous: 401, ana: 200, ben: 200, mia: 200, ada: 200 } };
         const specs = generateIdentityWriteSpecs({ apis: doc(PATHS), lists: [], access: [all] });
         expect(specs.map(cfg)).toEqual(
-            ["ana", "ben", "mia", "ada"].map((as) => ({ identityWrite: "role", as, pool: ["ana", "ben", "mia", "ada"].filter((x) => x !== as), allowedIn: "Not an admin", method: "PATCH", path: "/api/admin/users/{id}", param: "id", whoAmI: "/api/me", documented: "403", sev: "high" })),
+            ["ana", "ben", "mia", "ada"].map((as) => ({ identityWrite: "role", as, pool: ["ana", "ben", "mia", "ada"].filter((x) => x !== as), allowedRoles: ["admin"], method: "PATCH", path: "/api/admin/users/{id}", param: "id", whoAmI: "/api/me", documented: "403", sev: "high" })),
         );
         expect(specs.reduce((t, s) => t + WRITES[String(cfg(s).identityWrite)]!, 0)).toBeLessThanOrEqual(MAX_IDENTITY_WRITES);
+        // The allowed role is only the one the words name as allowed ("admins only", "only admins", "not an admin"); words that name the
+        // refused roles ("users and managers may not change roles") name no allowed role, so no check is made rather than a wrong one.
+        const worded = (summary: string, refusal: string) => {
+            const p = { ...PATHS, "/api/admin/users/{id}": { patch: { summary, responses: { 200: err("Changed"), 403: err(refusal) } } } };
+            return generateIdentityWriteSpecs({ apis: doc(p), lists: [], access: [all] }).map((s) => cfg(s).allowedRoles);
+        };
+        expect(worded("Change someone's role (admins only)", "Forbidden")[0]).toEqual(["admin"]);
+        expect(worded("Change a role", "Only owners may change roles")[0]).toEqual(["owner"]);
+        expect(worded("Change a role", "Users and managers may not change roles")).toEqual([]);
     });
 
     it("the role check from GET /api/me: a lesser account that takes the allowed role is a finding and is changed back; the allowed account sends nothing", async () => {
@@ -99,7 +108,7 @@ describe("C3e writes as another identity", () => {
             const b = fakeBrowser({
                 answer: (c) => (c.url.endsWith("/api/me") ? { status: 200, body: JSON.stringify({ id: `u-${c.who}`, role: ROLES[c.who] }) } : c.method === "PATCH" ? { status: accepted ? 200 : 403, body: "{}" } : { status: 404, body: "{}" }),
             });
-            const run = { identityWrite: "role", as, pool: ["ana", "mia", "ada"].filter((x) => x !== as), allowedIn: "Change someone's role (admins only) Not an admin", method: "PATCH", path: "/api/admin/users/{id}", param: "id", whoAmI: "/api/me", documented: "403", sev: "high" };
+            const run = { identityWrite: "role", as, pool: ["ana", "mia", "ada"].filter((x) => x !== as), allowedRoles: ["admin"], method: "PATCH", path: "/api/admin/users/{id}", param: "id", whoAmI: "/api/me", documented: "403", sev: "high" };
             const err = await accessHelper.accessAssert(b.page, "http://127.0.0.1:9000/", JSON.stringify(run)).then(() => undefined, (e: Error) => e.message);
             return { err, writes: b.calls.filter((c) => c.method === "PATCH") };
         };

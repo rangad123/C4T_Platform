@@ -87,8 +87,8 @@ async function accessWriteAssert(page, base, cfg) {
             let top;
             if (by === undefined) {
                 // No lesser account in the survey: the role the API's own words name as allowed ("admins only") is the top one, read from GET whoAmI.
-                const words = String(cfg.allowedIn || "").toLowerCase().split(/[^a-z0-9_-]+/);
-                const named = (v) => typeof v === "string" && v.length > 0 && (words.includes(v.toLowerCase()) || words.includes(v.toLowerCase() + "s"));
+                const roles = Array.isArray(cfg.allowedRoles) ? cfg.allowedRoles.map(String) : [];
+                const named = (v) => typeof v === "string" && roles.includes(v.toLowerCase().replace(/s$/, ""));
                 const own = roleOf(mine.body);
                 if (!own) throw cannot("GET " + cfg.whoAmI + " as “" + cfg.as + "” shows no role");
                 if (named(mine.body[own])) return; // this account may change roles: nothing is sent
@@ -133,6 +133,15 @@ async function accessWriteAssert(page, base, cfg) {
 `;
 
 const OWNER_WORD = /\bowner\b/i;
+/** The roles words name as allowed: "admins only", "only admins", "not an admin" (singular, lower case). Words naming the refused roles name none. */
+function allowedRolesIn(text: string): string[] {
+    const out = new Set<string>();
+    for (const m of text.matchAll(/\bonly\s+(?:an?\s+|the\s+)?([a-z][a-z_-]{1,30})|\b([a-z][a-z_-]{1,30})\s+only\b|\bnot\s+an?\s+([a-z][a-z_-]{1,30})/gi)) {
+        const w = (m[1] ?? m[2] ?? m[3])!.toLowerCase().replace(/s$/, "");
+        if (!/^(the|a|an|this|that|it|you|one|can|may|be)$/.test(w)) out.add(w);
+    }
+    return [...out];
+}
 const ROLE_WORD = /\badmin|\brole|\bpermission/i;
 const PERSON_PARAM = /user|member|person|people|account|collaborator|grantee/i;
 const WRITES: Record<"owner" | "role" | "revoke", number> = { owner: 1, role: 2, revoke: 1 };
@@ -265,15 +274,16 @@ export function generateIdentityWriteSpecs(input: { apis: ApiEndpointModel[]; li
             if (!allowed.length) continue;
             if (!refused.length && allowed.length > 1) {
                 // Every account read the list (it is open to all): who may change roles is told by the API's own words ("admins only"),
-                // matched in the script against each account's role from GET whoAmI. The allowed account sends nothing.
-                const allowedIn = [w.summary, ...(w.spec?.responses ?? []).filter((x) => x.status === "403" || x.status === "404").map((x) => x.description)].filter(Boolean).join(" ").slice(0, 300);
+                // matched in the script against each account's role from GET whoAmI. The allowed account sends nothing; with no allowed role named, no check.
+                const allowedRoles = allowedRolesIn([w.summary, ...(w.spec?.responses ?? []).filter((x) => x.status === "403" || x.status === "404").map((x) => x.description)].filter(Boolean).join(". "));
+                if (!allowedRoles.length) continue;
                 for (const as of allowed)
                     add(
                         spec(
                             `“${as}” account: cannot change its own role (${w.method} ${w.path})`,
                             `The “${as}” account reads its role from GET ${whoAmI}; unless it is the role the API names as allowed, it sends ${w.method} ${w.path} with its own id and that role, read from an account that has it. Fails if the change is accepted (documented: HTTP ${documented.join(" or ")}); an accepted change is changed back at once.`,
                             [as],
-                            { identityWrite: "role", as, pool: allowed.filter((x) => x !== as), allowedIn, method: w.method, path: w.path, param: m[2], whoAmI, ...at, documented: documented.join(" or "), sev: "high" },
+                            { identityWrite: "role", as, pool: allowed.filter((x) => x !== as), allowedRoles, method: w.method, path: w.path, param: m[2], whoAmI, ...at, documented: documented.join(" or "), sev: "high" },
                             `${w.method} ${w.path} is refused to the “${as}” account`,
                         ),
                         "role",
