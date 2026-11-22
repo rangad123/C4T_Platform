@@ -45,6 +45,7 @@ import { hashObject, keyOfStoredFile, localCopyIn, validKey } from "./object-sto
 import { assertAllowedTarget } from "./net-guard.js";
 import type { JobOptions, JobRow } from "./repo.js";
 import { SecretBox } from "./secrets.js";
+import { VALIDATION_STEPS_VERSION } from "../engine/validation/layers.js";
 
 /** A step of a runbook started by hand, resumed after a restart: its starter is not known here, so no runner may take it. */
 export const RUNBOOK_STARTER_UNKNOWN = "This runbook was started before the platform restarted, and who started it is not known any more. Start it again to run it on your computer.";
@@ -1343,6 +1344,13 @@ class RemoteExecutor implements ScriptExecutor {
     readonly name = "agent";
     /** Tells the engine that scripts run elsewhere: a mobile run is planned against the agent's devices, not this machine's. */
     readonly remote = true;
+
+    /** false when the job starter's runner last said it is older than `validationSteps` 1 (engine/validation/layers.ts); unset when unknown. */
+    get validationSteps(): boolean | undefined {
+        const { projectId, jobId } = this.scope;
+        const agent = projectId && jobId ? this.svc.ownRunner(this.svc.jobStarter(jobId).ownerId, projectId)?.agent : undefined;
+        return agent ? (agent.capabilities.validationSteps ?? 0) >= VALIDATION_STEPS_VERSION : undefined;
+    }
     private seq = 0;
 
     constructor(

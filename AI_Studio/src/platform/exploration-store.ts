@@ -6,6 +6,7 @@
 import { maskExplorationText } from "../agent-protocol/exploration.js";
 import { maskActionLog } from "../engine/explore/action-mask.js";
 import type { ExplorationSummary, GenerationSink } from "../engine/orchestrator.js";
+import { LayerReportSchema, type LayerReport } from "../engine/validation/layers.js";
 import { maskText } from "./redact-text.js";
 import type { Repo } from "./repo.js";
 import type { ArtifactStore } from "./storage.js";
@@ -54,4 +55,16 @@ export async function exploredObjectivesOf(repo: Repo, store: ArtifactStore, pro
     const row = repo.db.get<{ job_id: string }>(`SELECT job_id FROM artifacts WHERE project_id = ? AND kind = ? AND job_id IS NOT NULL AND pruned_at IS NULL ORDER BY created_at DESC, ${repo.db.dialect.insertionOrder()} DESC LIMIT 1`, projectId, EXPLORATION_ARTIFACT);
     const last = row ? await loadExploration(repo, store, row.job_id) : undefined;
     return last && Array.isArray(last.objectives) && Array.isArray(last.outcomes) ? { exploredObjectives: exploredSources(last) } : {};
+}
+
+/** C12: which layers the job checked, or why not (the job's "layer-report" artifact, job-runner.ts); undefined for a job without one. */
+export async function loadLayerReport(repo: Repo, store: ArtifactStore, jobId: string): Promise<LayerReport | undefined> {
+    const row = repo.db.get<{ path: string; pruned_at: string | null }>(`SELECT path, pruned_at FROM artifacts WHERE job_id = ? AND kind = 'layer-report' ORDER BY created_at DESC, ${repo.db.dialect.insertionOrder()} DESC LIMIT 1`, jobId);
+    if (!row || row.pruned_at) return undefined;
+    try {
+        const r = LayerReportSchema.safeParse(JSON.parse((await store.getBytes(row.path)).toString("utf8")));
+        return r.success ? r.data : undefined;
+    } catch {
+        return undefined;
+    }
 }

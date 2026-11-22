@@ -28,6 +28,7 @@ import { ReviewPolicyCard } from "../review/ReviewCards";
 import { ProjectGeneral } from "../workspace/ProjectGeneral";
 import { ProjectAiModelSetting } from "../workspace/ProjectAiModel";
 import { CleanupCard } from "../cleanup/CleanupCard";
+import { DbProbeCard } from "../dbprobe/DbProbeCard";
 import { TestDataPanel } from "../environments/TestDataPanel";
 import { SignInTab } from "../identity/SignInTab";
 import { ResetHookCard } from "../webpages/ResetHookCard";
@@ -148,13 +149,15 @@ export function SetupPage({ id }: { id: string }) {
         {
             key: "data",
             label: "Test data",
-            hint: "Tables of values tests read, files they upload, the reset before a run, and the records tests create",
+            hint: "Tables of values tests read, files they upload, the reset before a run, the records tests create, and database checks",
             render: () => (
                 <div className="stack">
                     <TestDataPanel projectId={id} />
                     <TestFilesCard projectId={id} />
                     <ResetHookCard projectId={id} />
                     <CleanupCard projectId={id} variant="panel" />
+                    {/* Database checks through the customer's own probe (Phase 4 D-c; off by default). */}
+                    <DbProbeCard projectId={id} />
                 </div>
             ),
         },

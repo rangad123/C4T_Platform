@@ -19,6 +19,7 @@ import { CleanupCollector, finishCleanup } from "../cleanup/run.js";
 import type { Framework, RenderContext, RenderedScript } from "../generators/index.js";
 import { groupByRuntime, localExecutor, renderWithAdapter, type ScriptExecutor } from "../frameworks/index.js";
 import type { Scenario, TestSpec } from "../spec/schema.js";
+import { hasValidationSteps, VALIDATION_STEPS_SKIPPED, withoutValidationSteps } from "./layers.js";
 import type { AppModel } from "../understanding/app-model.js";
 import { a11yFinding } from "../a11y/specs.js";
 import { contractFinding } from "../contracts/specs.js";
@@ -190,7 +191,11 @@ export async function validateBatch(
     hooks: ValidationHooks,
 ): Promise<ValidationOutcome[]> {
     const current = tests.map((t) => ({ ...t }));
-    const scripts = current.map((t) => (t.custom ? { framework: t.framework, filename: t.custom.filename, content: t.custom.content, language: "typescript" as const } : renderWithAdapter(t.spec, t.framework, deps.render)));
+    // An older runner: the tests go without the steps it does not understand (the spec is kept as it is), and the run says so once.
+    const older = (deps.executor ?? ctx.executor)?.validationSteps === false;
+    const render = (spec: TestSpec, framework: Framework) => renderWithAdapter(older ? withoutValidationSteps(spec) : spec, framework, deps.render);
+    if (older && current.some((t) => !t.custom && hasValidationSteps(t.spec))) ctx.emit({ stage: "validation", kind: "validation_steps_skipped", level: "warn", message: VALIDATION_STEPS_SKIPPED });
+    const scripts = current.map((t) => (t.custom ? { framework: t.framework, filename: t.custom.filename, content: t.custom.content, language: "typescript" as const } : render(t.spec, t.framework)));
     /** What goes to the runner for a test: a hand-written script is marked so the machine can refuse or check it. */
     const input = (t: TestUnderValidation, s: { filename: string; content: string }) => ({ testId: t.spec.testId, filename: s.filename, content: s.content, baselines: t.baselines, framework: t.framework, ...(t.custom ? { custom: true } : {}) });
     // Records data-changing API tests create are collected from every run (repairs and retries included) and removed at the end.
@@ -313,7 +318,7 @@ export async function validateBatch(
             }
             // Repair without AI first (det-repair.ts): plain-rule fixes for a missing element, each tried with a real run; the model is asked only when none passes.
             if (!deps.repairsAreDrafts && t.spec.kind === "web" && t.scenario && deps.browser && deterministicRepairOn(ctx.config)) {
-                const det = await repairWithoutAi({ ctx, browser: deps.browser, baseUrl: deps.render.baseUrl, spec: t.spec, run, credentials: deps.env.credentials, rerun: (spec) => runAgain(t, renderWithAdapter(spec, t.framework, deps.render)) });
+                const det = await repairWithoutAi({ ctx, browser: deps.browser, baseUrl: deps.render.baseUrl, spec: t.spec, run, credentials: deps.env.credentials, rerun: (spec) => runAgain(t, render(spec, t.framework)) });
                 if (det.status === "stopped") {
                     outcome = cancelledOutcome(t, script, run, attempt);
                     break;
@@ -323,7 +328,7 @@ export async function validateBatch(
                     await hooks.onRepaired?.(t, det.spec, det.reason);
                     attempt++;
                     repairs++;
-                    script = renderWithAdapter(t.spec, t.framework, deps.render);
+                    script = render(t.spec, t.framework);
                     run = det.run;
                     await hooks.onAttempt(t, attempt, script, run);
                     logRun(ctx, t.spec, run, attempt);
@@ -390,7 +395,7 @@ export async function validateBatch(
             ctx.emit({ stage: "validation", kind: "script_regenerated", message: `${t.spec.testId} regenerated (attempt ${attempt + 1}): ${repair.reason}` });
             attempt++;
             repairs++;
-            script = renderWithAdapter(t.spec, t.framework, deps.render);
+            script = render(t.spec, t.framework);
             const repaired = await runAgain(t, script);
             if (!repaired) {
                 outcome = cancelledOutcome(t, script, run, attempt);
@@ -453,7 +458,7 @@ export async function validateBatch(
                 run: outcome.lastRun,
                 target: deps.mobile.target,
                 credentials: deps.mobile.credentials ?? deps.env.credentials,
-                rerun: (spec) => runAgain(t, renderWithAdapter(spec, t.framework, deps.render)),
+                rerun: (spec) => runAgain(t, render(spec, t.framework)),
             });
             await hooks.onHealing(t, heal);
             ctx.emit(

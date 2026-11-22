@@ -85,8 +85,10 @@ export type CoverageAnswer =
           coverage: CoverageRecord;
           actionLog: unknown[];
           actionLogOmitted: number;
+          /** C12: which layers the run checked (a run since Phase 4). */
+          layers?: import("./layers.js").LayerReport;
       }
-    | { available: false; message: string };
+    | { available: false; message: string; layers?: import("./layers.js").LayerReport };
 
 /** The stop reason in a few words; the session's own sentence (stopDetail) says the rest. */
 export const STOP_WORD: Record<StopReason, string> = {

@@ -110,6 +110,11 @@ export const Capabilities = z.object({
     /** Additive, optional: while someone watches, an exploration on this agent sends pictures of its browser (explore-frame.ts). An older agent sends none. */
     explorerFrames: z.boolean().optional(),
     /**
+     * Phase 4 (additive, optional): the version of the checks across layers this agent's scripts run: 1 = relation, kept-response and
+     * database steps (engine/validation/layers.ts). The platform sends an agent without it its tests without those steps, and says so.
+     */
+    validationSteps: z.number().int().min(0).max(100).optional(),
+    /**
      * The runner's own Android phone tools (additive, optional; see docs/features/phone-setup-simple.md): "can-fetch" means this computer has no adb
      * yet and the runner gets Google's platform-tools itself when a phone session arrives; "ready" means it uses the ones it fetched. Reported only
      * when the runner's setting allows it and no other adb is found. Never a path.
