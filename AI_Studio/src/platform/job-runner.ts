@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Config } from "../config.js";
 import type { EngineContext, EngineEvent } from "../engine/context.js";
 import type { JobMeter } from "../engine/llm/metered.js";
-import { executorFor, isBuiltInAdapterId } from "../engine/frameworks/index.js";
+import { executorFor, isBuiltInAdapterId, type ScriptExecutor } from "../engine/frameworks/index.js";
 import { createLlmClientOrUnavailable, type LlmClient } from "../engine/llm/provider.js";
 import { runGeneration, type ExploreCheckpoint, type GenerationRequest, type GenerationSummary } from "../engine/orchestrator.js";
 import type { Scenario } from "../engine/spec/schema.js";
@@ -74,6 +74,8 @@ import { noteRunInMemory, type RunJourneyResult } from "./memory-store.js";
 import { runnersOnly } from "./runner-only.js";
 import { LEASE_LOST, onHandover } from "./runner-handover.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
+import type { Platform } from "./bootstrap.js";
+import { verifyAfterJob } from "./findings/verify-service.js";
 import type { ArtifactStore } from "./storage.js";
 
 const LEASE_MS = 60_000;
@@ -114,6 +116,19 @@ export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boole
             if (++failures >= MAX_BEAT_FAILURES) o.lost();
         }
     };
+}
+
+/** A verification job: the findings of the run it names are verified through `executor`; what became of each is told in this job too. */
+async function runVerifyJob(p: Platform, job: JobRow, executor: ScriptExecutor, signal: AbortSignal, emit: EngineContext["emit"]): Promise<void> {
+    const source = job.options.verifyJobId ? p.repo.getJob(job.options.verifyJobId) : undefined;
+    if (!source || source.projectId !== job.projectId) throw new Error("The run whose findings this job verifies no longer exists.");
+    emit({ stage: "validation", kind: "job_started", message: `Verifying the findings of run ${source.id.slice(0, 8)} on the runner.` });
+    const r = await verifyAfterJob(p, source, { execute: (a, b, e, x) => executor.execute(a, b, e, x), signal, ranOn: "the runner", harvested: true });
+    const counts = new Map<string, number>();
+    for (const v of r?.verified ?? []) counts.set(v.to, (counts.get(v.to) ?? 0) + 1);
+    const told = [...counts].map(([to, n]) => `${n} ${to.replace(/_/g, " ")}`);
+    if (r?.skipped.length) told.push(`${r.skipped.length} not verified`);
+    emit({ stage: "validation", kind: "finding_verification", message: told.length ? `Findings verified: ${told.join(", ")}.${r?.stopped ? ` ${r.stopped}` : ""}` : "No finding was waiting for verification." });
 }
 
 /** Executes one claimed job end to end and records its final state. Never throws. */
@@ -329,6 +344,14 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     // This job's scratch files (each run's folder: page snapshots, reports, traces, recordings) are its own and go when it ends.
     const jobScratch = path.join(config.scratchDir, `job-${job.id}`);
     try {
+        // Phase 5: verifying a finished run's findings on the project's runner (findings/verify-service.ts). No AI; the attempts go through
+        // this job's executor, which is the starter's runner, as a run's tests do.
+        if (o.mode === "verify") {
+            await runVerifyJob({ ...deps, db: repo.db, sql: repo.db.sql }, job, executorFor({ projectId: job.projectId, jobId: job.id, mode: o.mode }), abort.signal, emit);
+            if (abort.signal.aborted) throw abort.signal.reason ?? new Error("Cancelled");
+            await finish("COMPLETED");
+            return;
+        }
         // The starter's key cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
         if (ai.blocked && !validateOnly) throw new Error(ai.blocked);
         const ctx: EngineContext = {

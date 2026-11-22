@@ -150,6 +150,8 @@ export interface JobOptions {
     plainCaseQueue?: string[];
     /** agent mode: the agent run this job carries out (agent-run.ts). */
     agentRunId?: string;
+    /** verify mode: the finished job whose candidate findings this job verifies on the project's runner (findings/verify-service.ts). */
+    verifyJobId?: string;
     /** plain mode: rebuild this existing test (test_cases.id) from the new description instead of adding one. */
     rewriteTestId?: string;
     /** Set when the project's scripts run on a runner agent (stamped by the job gate in agent-services.ts). */
@@ -175,7 +177,7 @@ export interface JobOptions {
 /** Why a job whose worker was lost three times is given up (reclaimStaleJobs). */
 export const WORKER_LOST_GIVE_UP = "This run was given up: the platform lost track of it three times, because the process looking after it stopped each time. No test got a result from it, so tests that had not finished are back to not run yet.";
 
-export type JobMode = "generate" | "validate" | "variants" | "environment" | "plain" | "agent";
+export type JobMode = "generate" | "validate" | "variants" | "environment" | "plain" | "agent" | "verify";
 
 export const DEFAULT_JOB_OPTIONS: JobOptions = {
     maxPages: LEVEL_SETTINGS.thorough.maxPages,

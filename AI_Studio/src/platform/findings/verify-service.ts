@@ -32,7 +32,7 @@ import type { Platform } from "../bootstrap.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import { IdentityStore } from "../identity-store.js";
 import { LocatorStore } from "../locator-store.js";
-import type { JobRow } from "../repo.js";
+import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
 import { SecretBox } from "../secrets.js";
 import { ResetHookStore, sendResetRequest } from "../test-data-reset-store.js";
 import { attemptOf, executionFinding, fromCandidate, type TestOf } from "./adapters.js";
@@ -249,11 +249,16 @@ export function modelFacts(model: unknown): { signupPath?: string; loginPath?: s
 
 /**
  * After a job (schedule-services.ts onJobFinished, when VERIFY_FINDINGS is on): an exploration's new candidate findings, and a run's
- * failed tests (written as findings first), are verified on this machine. A project whose tests run on a runner keeps them waiting: a
- * runner task belongs to a live job, and this one has ended (the runner side of the attempts, hook H1, is ready for a verification job).
+ * failed tests (written as findings first), are verified on this machine. A project whose tests run on a runner gets a verification job
+ * instead (mode "verify", job-runner.ts): a runner task belongs to a live job, and this one has ended. That job calls this again with its
+ * executor (`execute`, the runner's attempts through hook H1) and `harvested`, the failed tests being findings already.
  * Undefined when there is nothing to do.
  */
-export async function verifyAfterJob(p: Platform, job: JobRow, o: { budget?: VerifyBudget; signal?: AbortSignal; attempts?: number; execute?: VerifyDeps["execute"] } = {}): Promise<VerifyResult | undefined> {
+export async function verifyAfterJob(
+    p: Platform,
+    job: JobRow,
+    o: { budget?: VerifyBudget; signal?: AbortSignal; attempts?: number; execute?: VerifyDeps["execute"]; ranOn?: string; harvested?: boolean } = {},
+): Promise<(VerifyResult & { queuedJobId?: string }) | undefined> {
     const mode = job.options.mode ?? "generate";
     if ((mode !== "validate" && mode !== "generate") || job.options.planOnly || job.error === "Cancelled") return undefined;
     const app = p.repo.getApplication(job.applicationId);
@@ -276,12 +281,22 @@ export async function verifyAfterJob(p: Platform, job: JobRow, o: { budget?: Ver
         const r = expanded.ok ? tryResolveSpecRefs(expanded.spec, objects) : undefined;
         return r?.ok ? { id: t.id, title: t.title, spec: r.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework } : undefined;
     };
-    if (mode === "validate") await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed: failedRunsOf(p, job, testOf) });
+    if (mode === "validate" && !o.harvested) await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed: failedRunsOf(p, job, testOf) });
     const findings = (await store.list(job.projectId, { jobId: job.id })).filter((f) => isVerifiable(f.state) && f.testId);
     if (findings.length === 0) return undefined;
     if (!o.execute && getAgentServices(p).routesToAgent(job.projectId)) {
-        emit(`${findings.length} finding${findings.length === 1 ? " waits" : "s wait"} for verification: this project's tests run on a runner, and verifying on a runner needs a verification run of its own, which is not built yet.`, "warn");
-        return { verified: [], skipped: findings.map((f) => ({ id: f.id, why: "the project's tests run on a runner" })) };
+        const n = `${findings.length} finding${findings.length === 1 ? "" : "s"}`;
+        try {
+            // The run's starter's runner does the attempts, as it ran the run (agent-services.ts assertJobAllowed picks it).
+            const testIds = [...new Set(findings.map((f) => f.testId!))];
+            const queued = await p.repo.createJob(job.projectId, job.applicationId, { ...DEFAULT_JOB_OPTIONS, mode: "verify", verifyJobId: job.id, testIds, ...(job.options.startedBy ? { startedBy: job.options.startedBy } : {}) });
+            emit(`${n} will be verified on the runner (verification run ${queued.id.slice(0, 8)}).`);
+            return { verified: [], skipped: [], queuedJobId: queued.id };
+        } catch (e) {
+            const why = redactText(e instanceof Error ? e.message : String(e), 400);
+            emit(`${n} wait${findings.length === 1 ? "s" : ""} for verification: the verification run on the runner could not start. ${why}`, "warn");
+            return { verified: [], skipped: findings.map((f) => ({ id: f.id, why })) };
+        }
     }
     const origin = new URL(app.url).origin;
     const c = app.credentials;
@@ -307,7 +322,7 @@ export async function verifyAfterJob(p: Platform, job: JobRow, o: { budget?: Ver
         render: { baseUrl: origin, apiBaseUrl: env.apiBaseUrl },
         scratchDir: p.config.scratchDir,
         execute: o.execute ?? ((a, b, e, x) => localExecutor.execute(a, b, e, x)),
-        ranOn: "the platform",
+        ranOn: o.ranOn ?? "the platform",
         ...(o.attempts !== undefined ? { attempts: o.attempts } : {}),
         dataChanges: job.options.allowMutatingApiTests === true || app.config.allowMutatingApiTests === true,
         ...(facts.signupPath ? { signupPath: facts.signupPath } : {}),

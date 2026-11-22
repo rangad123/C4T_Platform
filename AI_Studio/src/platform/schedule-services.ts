@@ -115,6 +115,8 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
                 if ((job.options.mode as string | undefined) === "plain") return;
                 // An agent run has its own result (agent-run.ts); it is not a run of the suite.
                 if ((job.options.mode as string | undefined) === "agent") return;
+                // A verification of a run's findings (findings/verify-service.ts) re-runs that run's failures; it is not a run of the suite.
+                if (job.options.mode === "verify") return;
                 // An exploration that stopped at a plan created and ran nothing: there is no run to count.
                 if (job.options.planOnly) return;
                 const summary = summarizeJob(p.repo, job, "low");

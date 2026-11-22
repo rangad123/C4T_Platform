@@ -34,7 +34,7 @@ export interface Job {
     jobId: string;
     projectId: string;
     status: JobStatus;
-    mode?: "generate" | "validate" | "variants" | "environment" | "plain" | "agent";
+    mode?: "generate" | "validate" | "variants" | "environment" | "plain" | "agent" | "verify";
     /** An exploration that stops at a plan: nothing is created or run until the person confirms it (see features/onboarding). */
     planOnly?: boolean;
     /** Creation that starts from the plan an earlier exploration kept (that plan job's id). */
