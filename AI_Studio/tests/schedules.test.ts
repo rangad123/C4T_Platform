@@ -41,7 +41,8 @@ let answer: (n: number) => number = () => 200;
 beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-sched-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", PUBLIC_URL: `${PUBLIC_URL}/`, ALERT_MIN_SEVERITY: "low" }));
+    // Findings verification (on by default) would re-run the seeded failing tests against the app address, which is this receiver.
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", PUBLIC_URL: `${PUBLIC_URL}/`, ALERT_MIN_SEVERITY: "low", VERIFY_FINDINGS: "false" }));
     svc = getScheduleServices(platform, { clock: () => clockNow, delivery: { backoffMs: [5, 5], timeoutMs: 2_000 } });
     server = await buildServer(platform);
     receiver = http.createServer((req, res) => {
