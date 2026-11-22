@@ -30,7 +30,7 @@ const PRODUCTS = [
 ];
 
 /** The shop: one cart per account (a sign-up starts a new one). `defect` switches a bench seed's behaviour on. */
-function shop(defect?: "BS-02" | "BS-11") {
+function shop(defect?: "BS-02" | "BS-11", o: { listNeedsSignIn?: boolean } = {}) {
     let requests = 0;
     const credentials: boolean[] = [];
     const env: ProbeEnv & { requests: () => number; credentials: boolean[] } = {
@@ -41,12 +41,13 @@ function shop(defect?: "BS-02" | "BS-11") {
         async newClient(credential): Promise<ProbeHttp> {
             credentials.push(credential);
             let lines: Array<{ productId: string; quantity: number }> = [];
+            let signedIn = false;
             return {
                 async send(method, path, body) {
                     requests++;
                     const b = (body ?? {}) as Record<string, unknown>;
-                    if (path === "/api/register") return { status: 201, json: {} };
-                    if (path === "/api/products") return { status: 200, json: { products: PRODUCTS } };
+                    if (path === "/api/register") return (signedIn = true), { status: 201, json: {} };
+                    if (path === "/api/products") return o.listNeedsSignIn && !signedIn ? { status: 401, json: { error: "Sign in first." } } : { status: 200, json: { products: PRODUCTS } };
                     if (method === "POST" && path === "/api/cart/items") {
                         const p = PRODUCTS.find((x) => x.id === b.productId);
                         const q = Number(b.quantity ?? 1);
@@ -111,8 +112,8 @@ describe("invariant probe", () => {
         expect(r.writes).toBeLessThanOrEqual(MAX_PROBE_WRITES);
         expect(r.case).toHaveLength(2);
         expect(r.message).toMatch(/Relation check failed/);
-        // The list read, the generation run (sign-up and its writes, two of them checks), and at most 20 more while shrinking.
-        expect(env.requests()).toBeLessThanOrEqual(1 + 1 + r.writes + MAX_SHRINK_REQUESTS);
+        // The list read on its own fresh account (sign-up and read), the generation run (sign-up and its writes, two of them checks), and at most 20 more while shrinking.
+        expect(env.requests()).toBeLessThanOrEqual(2 + 1 + r.writes + MAX_SHRINK_REQUESTS);
         const spec = TestSpecSchema.parse({ ...r.spec, testId: "API-001" });
         expect(spec.testData.probeSeed).toBe(String(seed));
         expect(spec.steps[0]).toMatchObject({ action: "request", path: "/api/register" });
@@ -143,6 +144,14 @@ describe("invariant probe", () => {
         const p = await probeInvariant(SUM, noSignUp, { seed: 1 });
         expect(new Set(noSignUp.credentials)).toEqual(new Set([true]));
         expect(p.spec!.steps.filter((s) => s.action === "request").every((s) => s.action === "request" && s.auth === "default")).toBe(true);
+    });
+
+    it("a reference list that needs sign-in is read with a fresh account's own session, never the run's token", async () => {
+        const env = shop("BS-02", { listNeedsSignIn: true });
+        const r = await probeInvariant(SUM, env, { seed: 1 });
+        expect(r.outcome).toBe("failed");
+        expect(r.case.every((w) => ["p1", "p2", "p3"].includes(String(w.body!.productId)))).toBe(true);
+        expect(env.credentials.every((c) => c === false)).toBe(true);
     });
 
     it("the fetch session sends only the headers it is given, and its own cookies", async () => {

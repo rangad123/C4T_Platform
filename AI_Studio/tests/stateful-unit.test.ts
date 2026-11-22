@@ -120,8 +120,8 @@ describe("stateful sequences", () => {
         const r = await runSequences(stateModels(APIS)[0]!, env, { seed });
         expect(r.outcome).toBe("held");
         expect(r.sequences).toBeLessThanOrEqual(MAX_SEQUENCES);
-        // The product list, then each sequence: its sign-up and at most 8 steps.
-        expect(env.requests()).toBeLessThanOrEqual(1 + MAX_SEQUENCES * (1 + MAX_SEQUENCE_STEPS));
+        // The product list on its own fresh account (sign-up and read), then each sequence: its sign-up and at most 8 steps.
+        expect(env.requests()).toBeLessThanOrEqual(2 + MAX_SEQUENCES * (1 + MAX_SEQUENCE_STEPS));
         const again = await runSequences(stateModels(APIS)[0]!, shop(), { seed });
         expect(again.log).toEqual(r.log);
         expect(again.seen).toEqual(r.seen);
@@ -145,7 +145,7 @@ describe("stateful sequences", () => {
             expect(r.log.slice(0, 2).map((s) => s.request).sort()).toEqual(["POST /api/cart/items", "POST /api/checkout/address"]);
             expect(r.log[2], JSON.stringify(r.log.map((s) => s.request))).toMatchObject({ request: "POST /api/orders", status: 500, expected: "2xx" });
             expect(r.log).toHaveLength(3);
-            expect(env.requests() - before).toBeLessThanOrEqual(1 + MAX_SEQUENCES * (1 + MAX_SEQUENCE_STEPS) + MAX_SEQUENCE_SHRINK_REQUESTS);
+            expect(env.requests() - before).toBeLessThanOrEqual(2 + MAX_SEQUENCES * (1 + MAX_SEQUENCE_STEPS) + MAX_SEQUENCE_SHRINK_REQUESTS);
         }
         expect(found).toBeGreaterThan(0);
     });

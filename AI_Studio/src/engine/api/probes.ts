@@ -297,6 +297,16 @@ async function runCase(plan: Plan, inv: Invariant, writes: readonly ProbeWrite[]
     }
 }
 
+/**
+ * The session the reference lists are read with: a fresh account of its own when the API documents a sign-up (so a list that needs
+ * sign-in still gives ids, and the run's token is never sent), else the run's credential.
+ */
+export async function listSession(env: ProbeEnv, signUp: ApiEndpointModel | undefined): Promise<ProbeHttp> {
+    const client = await env.newClient(!signUp);
+    if (signUp) await client.send("POST", signUp.path, uniqueNow(sample(bodySchema(signUp)), `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`));
+    return client;
+}
+
 /** What the probe needs from the API document for one invariant, or why it cannot run. */
 async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
     const write = endpointOf(inv.write, env.apis);
@@ -320,7 +330,7 @@ async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
         if (l) lists.set(n, l);
     }
     if (lists.size) {
-        const client = await env.newClient(!signUp);
+        const client = await listSession(env, signUp?.ep);
         try {
             for (const [n, l] of lists) {
                 const records = recordsOf((await client.send("GET", l.path)).json);

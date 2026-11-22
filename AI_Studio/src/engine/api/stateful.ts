@@ -15,7 +15,7 @@
 import fc from "fast-check";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
 import type { Step } from "../spec/schema.js";
-import { bodySchema, listFor, recordsOf, uniqueNow, type ProbeEnv, type ProbeHttp } from "./probes.js";
+import { bodySchema, listFor, listSession, recordsOf, uniqueNow, type ProbeEnv, type ProbeHttp } from "./probes.js";
 import { sample, signUpOf, type DraftSpec } from "./test-specs.js";
 
 export const MAX_SEQUENCES = 6;
@@ -271,7 +271,7 @@ export async function runSequences(sm: StateModel, env: ProbeEnv, opts: { seed?:
     const up = signUpOf([...env.apis]);
     // The needed operations' bodies: their documented body, else the fields their answer documents; references take a listed id.
     const ids = new Map<string, unknown>();
-    const probe = await env.newClient(!up);
+    const probe = await listSession(env, up);
     try {
         for (const n of sm.create.needs) {
             const schema = bodySchema(n.ep)?.properties ? bodySchema(n.ep) : okSchema(n.ep);
