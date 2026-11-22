@@ -76,11 +76,24 @@ describe("C3e writes as another identity", () => {
         expect(authorized).not.toContain("revoke");
     });
 
-    it("sends the owner write as PATCH only: with only a PUT documented there is no owner write (a wrongly accepted PUT could wipe fields)", () => {
+    it("prefers PATCH for the owner write; with only a PUT documented it sends PUT with exactly the record as read (reversible)", () => {
         const { patch: _p, ...putOnly } = PATHS["/api/notes/{id}"];
-        const kinds = generateIdentityWriteSpecs({ apis: doc({ ...PATHS, "/api/notes/{id}": putOnly }), lists: LISTS, access: ACCESS }).map((s) => [cfg(s).identityWrite, cfg(s).method]);
-        expect(kinds.filter(([k]) => k === "owner")).toEqual([]);
-        expect(kinds.some(([, m]) => m === "PUT")).toBe(false);
+        const owner = generateIdentityWriteSpecs({ apis: doc({ ...PATHS, "/api/notes/{id}": putOnly }), lists: LISTS, access: ACCESS }).map(cfg).filter((c) => c.identityWrite === "owner");
+        expect(owner.map((c) => c.method)).toEqual(["PUT"]);
+        expect(generateIdentityWriteSpecs({ apis: doc(PATHS), lists: LISTS, access: ACCESS }).map(cfg).filter((c) => c.identityWrite === "owner").map((c) => c.method)).toEqual(["PATCH"]);
+    });
+
+    it("the owner write by PUT sends back exactly the record as read, every field unchanged; PATCH sends its plain fields", async () => {
+        setAccounts(["ana"]);
+        const RECORD = { id: "n3", title: "Team lunch", body: "Ramen", owner: "Ben", sharedWith: [{ id: "u1", name: "Ana" }], pinned: null };
+        const sent = async (method: string) => {
+            const b = fakeBrowser({ answer: (c) => (c.method === "GET" || !c.method ? { status: 200, body: JSON.stringify(RECORD) } : { status: 403, body: "{}" }) });
+            const run = { identityWrite: "owner", as: "ana", method, path: "/api/notes/n3", documented: "403", sev: "high" };
+            await accessHelper.accessAssert(b.page, "http://127.0.0.1:9000/", JSON.stringify(run));
+            return b.calls.filter((c) => c.method === method).map((c) => c.data);
+        };
+        expect(await sent("PUT")).toEqual([RECORD]);
+        expect(await sent("PATCH")).toEqual([{ title: "Team lunch", body: "Ramen" }]);
     });
 
     it("when every account reads the privileged list, the roles come from GET /api/me: the role the API names as allowed is the top one", () => {
@@ -146,7 +159,7 @@ describe("C3e writes as another identity", () => {
             const run = { identityWrite: "owner", as: "ana", method: "PATCH", path: "/api/notes/n3", sev: "high", ...c };
             await expect(accessHelper.accessAssert(page, "http://127.0.0.1:9000/", JSON.stringify(run))).rejects.toThrow(/not the application's own( address)?, so nothing was called/);
         }
-        for (const c of [{ method: "DELETE" }, { method: "POST" }, { method: "PUT" }, { identityWrite: "revoke", method: "PUT" }]) {
+        for (const c of [{ method: "DELETE" }, { method: "POST" }, { identityWrite: "revoke", method: "PUT" }]) {
             const run = { identityWrite: "owner", as: "ana", path: "/api/notes/n3", sev: "high", ...c };
             await expect(accessHelper.accessAssert(page, "http://127.0.0.1:9000/", JSON.stringify(run))).rejects.toThrow(/is not one this check sends, so nothing was called/);
         }

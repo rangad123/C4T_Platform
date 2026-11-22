@@ -2,7 +2,7 @@
  * C3e writes as a second or lesser identity (no LLM). A write endpoint that documents a refusal for "not the owner" or "not an admin" is
  * sent as an account the survey evidence says lacks the right, and the documented refusal is expected:
  *  - owner: an account that reads another account's record through sharing (it lists that record, but not every record of that owner)
- *    sends the record's own plain values back with PATCH (never PUT, which would replace the record), so an accepted write changes nothing;
+ *    sends the record's own plain values back with PATCH, or with PUT exactly the record as read (a PUT replaces it), so an accepted write changes nothing;
  *  - role: an account the vertical survey refused gives itself the role value of the account that was allowed; when the survey refused
  *    nobody, each account's role comes from GET whoAmI and the allowed role is the one the API's refusal words name ("admins only");
  *    an accepted change is changed back at once;
@@ -38,7 +38,7 @@ async function accessWriteAssert(page, base, cfg) {
         return /^\/(?![\/\\])/.test(String(path)) && !/\\/.test(String(path)) && u.origin === origin ? u.toString() : null;
     };
     // The settings can be edited: each kind sends only its own method.
-    if (!(cfg.identityWrite === "revoke" ? cfg.method === "DELETE" : cfg.identityWrite === "owner" ? cfg.method === "PATCH" : cfg.method === "PUT" || cfg.method === "PATCH")) throw new Error("The method " + cfg.method + " is not one this check sends, so nothing was called.");
+    if (!(cfg.identityWrite === "revoke" ? cfg.method === "DELETE" : cfg.identityWrite === "owner" ? cfg.method === "PATCH" || cfg.method === "PUT" : cfg.method === "PUT" || cfg.method === "PATCH")) throw new Error("The method " + cfg.method + " is not one this check sends, so nothing was called.");
     for (const p of [cfg.path, cfg.read, cfg.whoAmI]) if (p !== undefined && !own(String(p).replace("{" + cfg.param + "}", "x"))) throw new Error("The addresses in this check are not the application's own, so nothing was called.");
     const opts = { maxRedirects: 0, failOnStatusCode: false, timeout: 30000 };
     const call = async (ctx, method, path, data) => {
@@ -72,12 +72,13 @@ async function accessWriteAssert(page, base, cfg) {
             const read = await call(ctx, "GET", cfg.path);
             if (!ok(read.status) || !read.body || typeof read.body !== "object" || Array.isArray(read.body)) throw cannot("“" + cfg.as + "” could not read the record first (HTTP " + read.status + ")");
             // The record's own values: an accepted write puts back what was there.
-            const body = Object.fromEntries(Object.entries(read.body).filter(([k, v]) => ["string", "number", "boolean"].includes(typeof v) && !/^(id|uuid|_id)$|^(owner|owner_?id|user_?id|user|created_?by|author|author_?id)$/i.test(k)));
+            // PUT replaces the record, so it sends back exactly the record as read (nothing it leaves out can be lost); PATCH its plain fields.
+            const body = cfg.method === "PUT" ? read.body : Object.fromEntries(Object.entries(read.body).filter(([k, v]) => ["string", "number", "boolean"].includes(typeof v) && !/^(id|uuid|_id)$|^(owner|owner_?id|user_?id|user|created_?by|author|author_?id)$/i.test(k)));
             if (!Object.keys(body).length) throw cannot("The record has no plain fields to send back unchanged");
             const w = await call(ctx, cfg.method, cfg.path, body);
             if (refused(w.status)) return;
             if (!ok(w.status)) throw cannot(what + " answered HTTP " + w.status);
-            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not the owner\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user, who reads this record but does not own it, sent " + what + " and it was accepted (HTTP " + w.status + ")" + doc + ". Only the record's own plain values were sent with " + cfg.method + ", so its content stayed as it was. This is possible broken access control: check that only the owner can change the record");
+            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not the owner\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user, who reads this record but does not own it, sent " + what + " and it was accepted (HTTP " + w.status + ")" + doc + ". " + (cfg.method === "PUT" ? "The record exactly as read was sent back" : "Only the record's own plain values were sent") + " with " + cfg.method + ", so its content stayed as it was. This is possible broken access control: check that only the owner can change the record");
         }
         if (cfg.identityWrite === "role") {
             const roleOf = (body) => Object.keys(body).find((k) => /^(role|roles|user_?role|access_?level)$/i.test(k) && typeof body[k] === "string");
@@ -217,9 +218,10 @@ export function generateIdentityWriteSpecs(input: { apis: ApiEndpointModel[]; li
     for (const row of input.lists) {
         const pair = sharedPairs(row)[0];
         if (!pair) continue;
-        // PATCH only: it sends back the record's own plain fields, so an accepted write changes nothing; a PUT replaces the record and could
-        // wipe the fields it does not send.
-        for (const w of apis.filter((a) => a.method === "PATCH" && a.path === row.detail)) {
+        // PATCH first (it sends back the record's own plain fields); else PUT, which sends back exactly the record as read: either way an
+        // accepted write changes nothing.
+        const writes = apis.filter((a) => (a.method === "PATCH" || a.method === "PUT") && a.path === row.detail && documents(a, OWNER_WORD));
+        for (const w of writes.filter((a) => a.method === "PATCH").concat(writes.filter((a) => a.method === "PUT")).slice(0, 1)) {
             const documented = documents(w, OWNER_WORD);
             if (!documented) continue;
             const path = fill(row.detail, pair.id);
