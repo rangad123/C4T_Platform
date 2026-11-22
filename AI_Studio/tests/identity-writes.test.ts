@@ -7,6 +7,8 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHmac } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium, type Browser } from "playwright";
@@ -16,7 +18,7 @@ import { parseOpenApi } from "../src/engine/api/openapi.js";
 import { ACCESS_HELPER_SOURCE, signedInRequests, surveyApiAccess, surveyApiLists, type SurveyEndpoint } from "../src/engine/identity/access.js";
 import { generateIdentityWriteSpecs, MAX_IDENTITY_WRITES } from "../src/engine/identity/identity-writes.js";
 
-const helper = new Function("totpCode", "createHmac", "IGNORE_HTTPS_ERRORS", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac, false) as { accessAssert: (page: unknown, base: string, spec: string) => Promise<void> };
+const helper = new Function("totpCode", "createHmac", "IGNORE_HTTPS_ERRORS", "riskyFs", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac, false, fs) as { accessAssert: (page: unknown, base: string, spec: string) => Promise<void> };
 const ROOT = path.resolve(__dirname, "..");
 const NAMES = ["ana", "ben", "mia", "ada"];
 for (const n of NAMES) {
@@ -67,6 +69,9 @@ const writesOf = (kind: string) => ({ owner: 1, role: 2, revoke: 1 })[kind] ?? 9
 
 /** The engine's survey and generation as the exploration runs them, then each check through the script-side helper, in order. */
 async function checksOn(defects: string): Promise<{ base: string; before: string; checks: Array<{ title: string; open: boolean; message: string }>; writes: number }> {
+    // What the job gives each run's scripts on a bench app: the gate, and a write counter folder of the run's own.
+    process.env.TEST_RISKY_GATE = "bench";
+    process.env.TEST_RISKY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "identity-writes-"));
     const base = await start(defects);
     const before = await snapshot(base);
     const ctx = { config: loadConfig(), llm: undefined as never, emit: () => undefined };
