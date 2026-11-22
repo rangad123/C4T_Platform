@@ -193,7 +193,8 @@ export function createProbe({ adapter, token, allow, rowCap = DEFAULTS.rowCap, t
     const hashKey = randomBytes(32);
     let schemaOnce;
     const schema = () => (schemaOnce ??= adapter.introspect().then((found) => allowedSchema(found, allow)));
-    let window = { start: now(), n: 0 };
+    // A sliding minute: the times of the requests answered in the last 60 seconds (at most perMinute of them).
+    const recent = [];
     const read = async (statements) => {
         try {
             return await adapter.read(statements, { timeoutMs });
@@ -214,8 +215,10 @@ export function createProbe({ adapter, token, allow, rowCap = DEFAULTS.rowCap, t
         try {
             const got = Buffer.from(req.headers.authorization ?? "");
             if (got.length !== want.length || !timingSafeEqual(got, want)) throw new Refused(401, "not authorised");
-            if (now() - window.start >= 60_000) window = { start: now(), n: 0 };
-            if (++window.n > perMinute) throw new Refused(429, `more than ${perMinute} requests in a minute`);
+            const at = now();
+            while (recent.length && at - recent[0] >= 60_000) recent.shift();
+            if (recent.length >= perMinute) throw new Refused(429, `more than ${perMinute} requests in a minute`);
+            recent.push(at);
             if (req.method === "GET" && req.url === "/schema") {
                 const s = await schema();
                 const counts = await rowsOf(s.map((t) => t.name));

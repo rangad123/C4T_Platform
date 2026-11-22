@@ -196,3 +196,28 @@ describe("serving over HTTPS", () => {
         expect(refused.stderr).toMatch(/loopback address only/);
     }, 30_000);
 });
+
+describe("the probe's rate limit is a sliding minute", () => {
+    it("no more than the limit in any 60 seconds, across a minute boundary too", async () => {
+        const http = await import("node:http");
+        const { createProbe, parseAllow } = await import(pathToFileURL(path.resolve(__dirname, "../examples/db-probe/probe.mjs")).href);
+        const adapter = { introspect: async () => [{ name: "orders", columns: ["id"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [] }], quote: (n: string) => `"${n}"`, fold: (e: string) => `lower(${e})`, same: (e: string) => `${e} = ?`, read: async (st: unknown[]) => st.map(() => [{ n: 1, id: 7 }]), close: async () => {} };
+        let t = 0;
+        const TOKEN = "t".repeat(30);
+        const server = http.createServer(createProbe({ adapter, token: TOKEN, allow: parseAllow({ orders: ["id"] }), perMinute: 10, now: () => t }));
+        await new Promise<void>((r) => server.listen(9879, "127.0.0.1", () => r()));
+        const ask = async () => (await fetch("http://127.0.0.1:9879/check", { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ template: { kind: "count", table: "orders", where: [] } }) })).status;
+        try {
+            const answered = async (n: number) => (await Promise.all(Array.from({ length: n }, ask))).filter((x) => x === 200).length;
+            t = 59_999;
+            expect(await answered(12)).toBe(10);
+            t = 60_000;
+            expect(await answered(12)).toBe(0);
+            t = 59_999 + 60_000;
+            expect(await answered(12)).toBe(10);
+        } finally {
+            await new Promise<void>((r) => server.close(() => r()));
+        }
+    });
+});
+

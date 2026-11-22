@@ -20,6 +20,38 @@ export interface RemoteProbeAccess {
     token: string;
     /** The platform passes its guarded fetch (no redirects, private addresses refused where the server blocks them). */
     fetch?: typeof fetch;
+    /** The time limit for one call, the answer's body included (tests set it lower). */
+    timeoutMs?: number;
+}
+
+/**
+ * The answer's body as text, read as a stream: reading stops at `max` bytes (a compressed answer is unpacked only as far as it is read),
+ * and at the deadline, which covers the body too, not only the headers.
+ */
+async function readCapped(res: Response, max: number, deadline: number, timeoutMs: number): Promise<string> {
+    const reader = res.body?.getReader();
+    if (!reader) return "";
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`the database probe took longer than ${timeoutMs} ms to answer`)), Math.max(0, deadline - Date.now()));
+    });
+    try {
+        for (;;) {
+            const { done, value } = await Promise.race([reader.read(), late]);
+            if (done) break;
+            size += value.byteLength;
+            if (size > max) throw new Error(`the database probe answered more than ${max} bytes`);
+            chunks.push(value);
+        }
+    } catch (e) {
+        await reader.cancel().catch(() => undefined);
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
+    return Buffer.concat(chunks).toString("utf8");
 }
 
 /** Why a probe address is not accepted, or undefined when it is. Also used by the settings route. */
@@ -51,7 +83,9 @@ export function remoteDbProbe(access: RemoteProbeAccess): DatabaseProbe {
     if (!access.token) throw new Error("The database probe needs its token.");
     const base = access.url.replace(/\/+$/, "");
     const token = access.token;
+    const timeoutMs = access.timeoutMs ?? TIMEOUT_MS;
     const call = async (path: "/schema" | "/check", body?: unknown): Promise<{ status: number; json: unknown }> => {
+        const deadline = Date.now() + timeoutMs;
         let res: Response;
         try {
             res = await (access.fetch ?? fetch)(`${base}${path}`, {
@@ -59,13 +93,12 @@ export function remoteDbProbe(access: RemoteProbeAccess): DatabaseProbe {
                 headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
                 ...(body === undefined ? {} : { body: JSON.stringify(body) }),
                 redirect: "error",
-                signal: AbortSignal.timeout(TIMEOUT_MS),
+                signal: AbortSignal.timeout(timeoutMs),
             });
         } catch (e) {
             throw new Error(`the database probe could not be reached (${e instanceof Error ? e.name : "error"})`);
         }
-        const text = await res.text();
-        if (text.length > MAX_BYTES) throw new Error(`the database probe answered more than ${MAX_BYTES} bytes`);
+        const text = await readCapped(res, MAX_BYTES, deadline, timeoutMs);
         let json: unknown;
         try {
             json = JSON.parse(text);

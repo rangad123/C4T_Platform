@@ -112,6 +112,21 @@ describe("generated checks", () => {
 });
 
 describe("the run's database check service", () => {
+    it("counts every call it makes to the probe against one cap, the numeric second try included", async () => {
+        let probeCalls = 0;
+        const counting: DatabaseProbe = { schema: probe.schema, check: async (t, p) => (probeCalls++, probe.check(t, p)) };
+        const s = await startDbCheckService(counting, 4);
+        try {
+            const ask = () => post(s.url, `Bearer ${s.token}`, { name: "exists orders where id = '{{id}}'", vars: { id: "12" } });
+            expect((await ask()).status).toBe(200);
+            expect((await ask()).status).toBe(200);
+            expect((await ask()).status).toBe(429);
+            expect(probeCalls).toBe(4);
+        } finally {
+            await s.close();
+        }
+    });
+
     const post = (url: string, auth: string | undefined, body: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) });
 
     it("loopback only, the token required, counts and fingerprints back (never a row), and refusals name the rule", async () => {

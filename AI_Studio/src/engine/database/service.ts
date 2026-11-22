@@ -24,7 +24,9 @@ export interface DbCheckService {
     close(): Promise<void>;
 }
 
-export async function startDbCheckService(probe: DatabaseProbe): Promise<DbCheckService> {
+class CapReached extends Error {}
+
+export async function startDbCheckService(probe: DatabaseProbe, maxCalls = DB_SERVICE_CALLS_MAX): Promise<DbCheckService> {
     const token = randomBytes(24).toString("base64url");
     const want = Buffer.from(`Bearer ${token}`);
     let calls = 0;
@@ -36,7 +38,13 @@ export async function startDbCheckService(probe: DatabaseProbe): Promise<DbCheck
         const got = Buffer.from(req.headers.authorization ?? "");
         if (got.length !== want.length || !timingSafeEqual(got, want)) return send(401, { error: "not authorised" });
         if (req.method !== "POST" || req.url !== "/check") return send(404, { error: "POST /check only" });
-        if (++calls > DB_SERVICE_CALLS_MAX) return send(429, { error: `more than ${DB_SERVICE_CALLS_MAX} database checks in one run` });
+        const full = () => send(429, { error: `more than ${maxCalls} database checks in one run` });
+        // Every call to the probe counts, the second try with numbers too: the cap is on what reaches the database.
+        const ask = (t: Parameters<DatabaseProbe["check"]>[0], p: Parameters<DatabaseProbe["check"]>[1]) => {
+            if (++calls > maxCalls) throw new CapReached();
+            return probe.check(t, p);
+        };
+        if (calls >= maxCalls) return full();
         const chunks: Buffer[] = [];
         let size = 0;
         req.on("data", (c: Buffer) => {
@@ -51,12 +59,13 @@ export async function startDbCheckService(probe: DatabaseProbe): Promise<DbCheck
                     if (!body.success) return send(400, { error: "a check is { name, vars } with text values" });
                     const { template, params } = parseDbCheck(body.data.name);
                     const values = resolveParams(params, body.data.vars);
-                    let r = await probe.check(template, values);
+                    let r = await ask(template, values);
                     // A test value is text (a captured id); a numeric key column stores a number: try the numbers once.
                     const nums = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, typeof v === "string" && /^-?\d{1,15}$/.test(v) ? Number(v) : v]));
-                    if (template.kind === "exists" && r.count === 0 && JSON.stringify(nums) !== JSON.stringify(values)) r = await probe.check(template, nums);
+                    if (template.kind === "exists" && r.count === 0 && JSON.stringify(nums) !== JSON.stringify(values) && calls < maxCalls) r = await ask(template, nums);
                     send(200, { kind: r.kind, table: r.table, count: r.count, ids: r.ids, examples: r.examples });
                 } catch (e) {
+                    if (e instanceof CapReached) return full();
                     // A refusal names the rule; any other failure (the back end) says so in one line, never with the request's values.
                     send(e instanceof DatabaseCheckRefused ? 400 : 502, { error: e instanceof DatabaseCheckRefused ? e.message : `the database could not be read (${(e instanceof Error ? e.message : String(e)).slice(0, 200)})` });
                 }

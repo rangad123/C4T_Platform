@@ -123,6 +123,36 @@ describe("what the engine accepts from a probe", () => {
     });
 });
 
+describe("an answer that is too big or too slow is cut off", () => {
+    it("stops reading at 2 MB, also when the answer is compressed, and the time limit covers the body", async () => {
+        const zlib = await import("node:zlib");
+        const { guardedFetch } = await import("../src/platform/guarded-fetch.js");
+        const bomb = zlib.gzipSync(Buffer.alloc(200 * 1024 * 1024, 0x20));
+        const server = http.createServer((req, res) => {
+            if (req.url === "/schema") {
+                res.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" });
+                res.end(bomb);
+            } else {
+                res.writeHead(200, { "content-type": "application/json" });
+                res.write("{"); // and then nothing: a body that never ends
+            }
+        });
+        await new Promise<void>((r) => server.listen(9889, "127.0.0.1", () => r()));
+        try {
+            const probe = remoteDbProbe({ url: "http://127.0.0.1:9889", token: TOKEN, fetch: guardedFetch, timeoutMs: 1500 });
+            let started = Date.now();
+            await expect(probe.schema()).rejects.toThrow(/more than 2097152 bytes/);
+            expect(Date.now() - started).toBeLessThan(3000);
+            started = Date.now();
+            await expect(probe.check({ kind: "count", table: "users", where: [] })).rejects.toThrow(/took longer than/);
+            expect(Date.now() - started).toBeLessThan(4000);
+        } finally {
+            server.closeAllConnections();
+            await new Promise<void>((r) => server.close(() => r()));
+        }
+    });
+});
+
 describe("the probe address", () => {
     it.each([
         ["https://probe.example.com", undefined],
