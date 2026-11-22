@@ -334,6 +334,18 @@ export class CandidateFindingStore {
         return { id, projectId, signature: signature ?? null, findingIds: ids, createdAt: at, updatedAt: at };
     }
 
+    /** These findings join an existing duplicate group of the project (each leaves the group it was in). */
+    async addToGroup(projectId: string, groupId: string, findingIds: string[]): Promise<void> {
+        const ids = [...new Set(findingIds)];
+        const at = this.now();
+        await this.sql.tx(async (t) => {
+            if (!(await t.get("SELECT 1 AS ok FROM finding_groups WHERE id = ? AND project_id = ?", groupId, projectId))) throw new Error("That group is not in this project.");
+            for (const f of ids) if (!(await t.get("SELECT 1 AS ok FROM candidate_findings WHERE id = ? AND project_id = ?", f, projectId))) throw new Error("That finding is not in this project.");
+            for (const f of ids) await t.run("UPDATE candidate_findings SET group_id = ?, updated_at = ? WHERE id = ? AND project_id = ?", groupId, at, f, projectId);
+            await t.run("UPDATE finding_groups SET updated_at = ? WHERE id = ?", at, groupId);
+        });
+    }
+
     /** The project's duplicate groups, newest first, each with its members (a group whose members all moved on has none). */
     async groups(projectId: string): Promise<FindingGroup[]> {
         const groups = await this.sql.all<{ id: string; signature_json: string; created_at: string; updated_at: string }>(

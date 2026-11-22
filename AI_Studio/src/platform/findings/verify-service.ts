@@ -146,9 +146,9 @@ export async function verifyFindings(d: VerifyDeps): Promise<VerifyResult> {
 }
 
 /**
- * After the attempts: the engine confirms each finding it reproduced at high confidence (the lifecycle refuses it below), and the project's
- * findings that are in no group yet are grouped as duplicates (findings/dedupe.ts: same source and two strong signals, never on the
- * message alone). Grouping is a convenience: a failure to group leaves each finding on its own.
+ * After the attempts: the engine confirms each finding it reproduced at high confidence (the lifecycle refuses it below), and each
+ * finding in no group yet joins its duplicates (findings/dedupe.ts: same source and two strong signals, never on the message alone): the
+ * group they are in, else a new one. A person's split is kept. Grouping is a convenience: a failure to group leaves each finding alone.
  */
 async function confirmAndGroup(d: VerifyDeps, out: VerifyResult): Promise<void> {
     for (const v of out.verified) {
@@ -158,13 +158,29 @@ async function confirmAndGroup(d: VerifyDeps, out: VerifyResult): Promise<void> 
         await d.store.transition(d.projectId, v.id, { to: "confirmed", by: "engine", reason: `Confirmed at high confidence. ${v.reason}` });
     }
     try {
-        // shortcut: a new sighting that matches an existing group starts its own group; upgrade with a store method that adds members.
-        const loose = (await d.store.list(d.projectId)).filter((r) => !r.groupId);
-        const views = loose.map((r) => {
+        const all = await d.store.list(d.projectId);
+        if (all.every((r) => r.groupId)) return;
+        // A person's split (routes/findings.ts: the finding's new group names the one it left) keeps those findings apart from then on.
+        const stored = await d.store.groups(d.projectId);
+        const members = new Map(stored.map((g) => [g.id, g.findingIds]));
+        const apart: Array<[string, string]> = [];
+        for (const g of stored) {
+            const from = (g.signature as { splitFrom?: unknown } | null)?.splitFrom;
+            if (typeof from === "string") for (const x of g.findingIds) for (const y of members.get(from) ?? []) apart.push([x, y]);
+        }
+        const views = all.map((r) => {
             const t = r.testId ? d.testOf(r.testId) : undefined;
             return fromCandidate(r, t ? { id: t.id, title: t.title, spec: t.spec, meta: t.meta } : undefined);
         });
-        for (const g of dedupe(views)) if (g.memberIds.length > 1) await d.store.group(d.projectId, g.memberIds, { why: g.why });
+        const groupOf = new Map(all.map((r) => [r.id, r.groupId]));
+        for (const g of dedupe(views, apart)) {
+            const loose = g.memberIds.filter((m) => !groupOf.get(m));
+            if (!loose.length) continue;
+            // A new sighting joins the group its first grouped match is in; findings that match only each other form a new group.
+            const home = g.memberIds.map((m) => groupOf.get(m)).find((x): x is string => Boolean(x));
+            if (home) await d.store.addToGroup(d.projectId, home, loose);
+            else if (loose.length > 1) await d.store.group(d.projectId, loose, { why: g.why });
+        }
     } catch (e) {
         d.emit(`The findings were not grouped as duplicates: ${redactText(e instanceof Error ? e.message : String(e), 300)}`, "warn");
     }

@@ -136,4 +136,38 @@ describe("a creation job's findings are verified", () => {
         expect(c!.groupId).not.toBe(a!.groupId);
         expect((await store.history(projectId, a!.id)).at(-1)).toMatchObject({ to: "confirmed", by: "engine" });
     });
+
+    it("a later sighting of a grouped failure joins its group; a finding a person split out does not go back", async () => {
+        const projectId = String(platform.repo.createProject({ name: "Join shop" }).id);
+        const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5595", { ...DEFAULT_JOB_OPTIONS }) as string;
+        const suiteId = platform.repo.getOrCreateSuite(projectId, "API", "api");
+        const store = new CandidateFindingStore(platform.sql);
+        const execute: VerifyDeps["execute"] = async (_a, batch, _e, opts) => Array.from({ length: opts.attempts ?? 1 }, () => failing(batch.scripts[0]!.testId));
+        /** A job whose given tests failed the same rule's check, verified as after any job. */
+        const jobWith = async (mode: "generate" | "validate", keys: string[]) => {
+            const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode, ...(mode === "validate" ? { testIds: [] } : {}) });
+            const ids = keys.map((k) => platform.repo.insertTest({ projectId, suiteId, jobId: job.id, spec: api(k), framework: "playwright-api", validationStatus: "NEEDS_REVIEW", meta: { layer: "api" } }));
+            for (const [i, id] of ids.entries()) {
+                const r = failing(keys[i]!);
+                platform.repo.addExecution({ testId: id, scriptId: null, jobId: job.id, attempt: 1, status: "failed", durationMs: 1, error: r.steps[1]!.error, startedAt: new Date().toISOString(), steps: r.steps });
+            }
+            platform.repo.setJobStatus(job.id, "COMPLETED");
+            await verifyAfterJob(platform, platform.repo.getJob(job.id)!, { execute, attempts: 3 });
+            const rows = await store.list(projectId);
+            return ids.map((id) => rows.find((r) => r.testId === id)!);
+        };
+        const [a, b] = await jobWith("generate", ["API-031", "API-032"]);
+        expect(a!.groupId).toBeTruthy();
+        expect(b!.groupId).toBe(a!.groupId);
+        const [c] = await jobWith("validate", ["API-033"]);
+        expect(c!.groupId).toBe(a!.groupId);
+        // A person splits b out of the group (routes/findings.ts "split").
+        await store.group(projectId, [b!.id], { splitFrom: a!.groupId, by: "Dana" });
+        const splitGroup = (await store.get(projectId, b!.id))!.groupId;
+        const [d4] = await jobWith("validate", ["API-034"]);
+        expect((await store.get(projectId, b!.id))!.groupId).toBe(splitGroup);
+        // It matches the split-out finding as much as the group: the split holds for it too (findings/dedupe.ts), so it joins neither.
+        expect([a!.groupId, splitGroup]).not.toContain(d4!.groupId);
+        expect((await store.get(projectId, a!.id))!.groupId).toBe(a!.groupId);
+    });
 });
