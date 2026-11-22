@@ -155,7 +155,7 @@ async function confirmAndGroup(d: VerifyDeps, out: VerifyResult): Promise<void> 
         if (v.to !== "reproduced") continue;
         const r = await d.store.get(d.projectId, v.id);
         if (r?.state !== "reproduced" || r.confidenceDetail?.confidence !== "high") continue;
-        await d.store.transition(d.projectId, v.id, { to: "confirmed", by: "engine", reason: "Reproduced at high confidence." });
+        await d.store.transition(d.projectId, v.id, { to: "confirmed", by: "engine", reason: `Confirmed at high confidence. ${v.reason}` });
     }
     try {
         // shortcut: a new sighting that matches an existing group starts its own group; upgrade with a store method that adds members.
