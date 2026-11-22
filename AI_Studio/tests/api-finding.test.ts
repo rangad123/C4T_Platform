@@ -83,6 +83,8 @@ describe("apiFinding", () => {
         expect(apiFinding(made(["api", "readback"], rel), failedAt(400, relErr))).toBeUndefined();
         expect(apiFinding(made(["api", "readback"], rel), failedAt(200, "TypeError: x"))).toBeUndefined();
         expect(apiFinding(made(["api", "workflow"], { check: "dbCheck", name: "exists users where name = 'N'" }), failedAt(200, "fetch failed"))).toBeUndefined();
+        // A database check at the end of a test follows its last answer, which may be a documented refusal (the deleted record is gone).
+        expect(apiFinding(made(["api", "workflow"], { check: "dbCheck", name: "orphans a(b) -> c(d)" }), failedAt(404, "Error: Database check failed: orphans a(b) -> c(d): 1 more row(s) break it"))).toMatch(/stored data/);
         expect(apiFinding(made(["api", "readback"], { check: "status", expected: 409 }), failedAt(409, "x"))).toBeUndefined();
         // A status check that expects a success is not a refusal the API skipped.
         expect(apiFinding(made(["api", "readback"], { check: "status", expected: 200 }), failedAt(201, "x"))).toBeUndefined();

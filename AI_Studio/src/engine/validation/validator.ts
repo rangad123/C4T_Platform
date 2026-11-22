@@ -581,7 +581,8 @@ export function apiFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     // Checks judged by code on answers the API accepted are facts, not tests to repair: a database check (C10), and in a C5 probe case
     // (tag "invariant"), a C9 read-back, a C6 backend operation or a C8 concurrency check, its relation or its documented refusal.
     const accepted = last.status >= 200 && last.status < 300;
-    if (accepted && step?.action === "assertResponse" && step.check === "dbCheck" && failed.error?.includes(DB_FAILURE_PREFIX)) {
+    // A database check is judged on the stored rows, not on an answer: the one before it may be a documented refusal (a deleted record).
+    if (step?.action === "assertResponse" && step.check === "dbCheck" && failed.error?.includes(DB_FAILURE_PREFIX)) {
         return `The stored data does not match what the API accepted: ${failed.error.slice(failed.error.indexOf(DB_FAILURE_PREFIX)).split("\n")[0]!.slice(0, 400)}`;
     }
     const codeJudged = ["invariant", "readback", "backend", "concurrency"].some((t) => spec.tags.includes(t));
