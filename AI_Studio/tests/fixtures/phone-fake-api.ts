@@ -308,7 +308,7 @@ export class PhoneFake {
             if (method === "GET" && rest === "storage") return { body: { project: { id: proj.id, name: proj.name }, generatedAt: new Date().toISOString(), truncated: false, usage: { bytes: 0, text: "0 B" }, removed: { files: 0, bytes: 0, text: "" }, retention: { enabled: false, source: "default" }, needsSecrets: [] } };
             // A quiet line on the Tests page; a server that does not answer shows nothing, which is all these tests need.
             // Cards on the Overview and lines on the Tests page that have nothing to say about a phone project: an answer that is not there shows nothing.
-            if (method === "GET" && ["framework-settings", "api-changes", "memory", "performance", "cleanup", "application-model"].includes(rest)) return { status: 404, body: { error: "Not found" } };
+            if (method === "GET" && ["framework-settings", "api-changes", "memory", "performance", "cleanup", "application-model", "quality"].includes(rest)) return { status: 404, body: { error: "Not found" } };
             // Cards of the project's Dashboard (round 34), as a project with nothing to report answers them.
             if (method === "GET" && rest === "setup-check") return { body: { items: [] } };
             // The project's AI model (General settings): none chosen and no models of this person's keys (routes/project-ai-model.ts).
