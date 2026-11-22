@@ -1777,7 +1777,8 @@ class RemoteExecutor implements ScriptExecutor {
             if (d.key) await svc.p.store.delete(d.key).catch(() => false);
         }
 
-        if (opts.projects?.length) return runs;
+        // Variants and verification attempts (H1) have several results per script, in the runner's order.
+        if (opts.projects?.length || opts.attempts !== undefined) return runs;
         return batch.scripts.map((s): ScriptRun => runs.find((r) => r.testId === s.testId) ?? { testId: s.testId, status: "error", durationMs: 0, error: "The runner returned no result for this script.", failedStepIndex: -1, steps: [], artifacts: [], responses: [] });
     }
 
