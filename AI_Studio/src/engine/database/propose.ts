@@ -9,7 +9,7 @@ import type { EngineContext } from "../context.js";
 import { maskSecrets } from "../frameworks/plugin.js";
 import { RELATION_MAX_CHARS } from "../validation/relation.js";
 import { dbCheckName } from "./checks.js";
-import type { DbSchema } from "./probe.js";
+import { DatabaseCheckRefused, type DatabaseProbe, type DbSchema } from "./probe.js";
 import { validateCheck } from "./templates.js";
 
 export const MAX_ROW_RELATIONS = 8;
@@ -58,7 +58,7 @@ export function rowRelationPrompt(input: { requirements: ReadonlyArray<{ id: str
 /** One AI call, then validation. A failed call is reported, never thrown: the run carries on with the declared-key checks. */
 export async function proposeRowRelations(
     ctx: Pick<EngineContext, "llm">,
-    input: { requirements: ReadonlyArray<{ id: string; text: string }>; schema: DbSchema; secrets: readonly string[] },
+    input: { requirements: ReadonlyArray<{ id: string; text: string }>; schema: DbSchema; secrets: readonly string[]; probe?: Pick<DatabaseProbe, "check"> },
 ): Promise<{ checks: Array<{ name: string; source: string }>; report: RowRelationReport }> {
     if (!input.requirements.length || !input.schema.tables.length) return { checks: [], report: { proposed: 0, kept: 0, dropped: [] } };
     let proposed: z.infer<typeof ProposalSchema>["relations"];
@@ -76,7 +76,12 @@ export async function proposeRowRelations(
         else if (!ids.has(p.requirementId)) reason = "it cites no requirement of this run";
         else {
             try {
-                validateCheck({ kind: "relation", table: p.table, where: [], expression: p.expression }, {}, input.schema);
+                const template = { kind: "relation" as const, table: p.table, where: [], expression: p.expression };
+                validateCheck(template, {}, input.schema);
+                // Judged once on the rows there before any test writes: a rule they cannot be judged by is refused (templates.ts).
+                await input.probe?.check(template).catch((e: unknown) => {
+                    if (e instanceof DatabaseCheckRefused) throw e;
+                });
             } catch (e) {
                 reason = e instanceof Error ? e.message : String(e);
             }

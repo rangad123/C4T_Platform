@@ -241,6 +241,46 @@ describe("stored-data rules over rows (C5 over the database)", () => {
         ]);
     });
 
+    // paid-rbac-1 API-034 / API-035: "relation notes: title <= 120" (3.5) compared a text column with a number, so every row broke it
+    // and any test that wrote a note failed on the clean app. Ill-formed rules are dropped at the proposal, judged once on the rows there.
+    it("drops a rule the stored rows cannot be judged by (text compared with a number), and keeps the well-formed ones", async () => {
+        const notesSchema = cleanSchema({
+            tables: [
+                { name: "users", columns: ["id", "email", "name", "role"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [], rowCount: 1 },
+                { name: "notes", columns: ["id", "ownerId", "title", "body"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [fk(["ownerId"], "users", ["id"])], rowCount: 2 },
+            ],
+        });
+        const rows = {
+            users: [{ id: "u1", email: "ana@example.test", name: "Ana", role: "user" }],
+            notes: [
+                { id: "n1", ownerId: "u1", title: "Ana's travel plans", body: "Train to Porto on the 14th." },
+                { id: "n3", ownerId: "u1", title: "Team lunch ideas", body: "Ramen place near the station." },
+            ],
+        };
+        const notesProbe: DatabaseProbe = { schema: async () => notesSchema, check: async (t, p) => runOnRows(validateCheck(t, p, notesSchema), rows, Buffer.alloc(32, 7)) };
+        const reqs = [
+            { id: "3.4", text: "Every note needs a title." },
+            { id: "3.5", text: "A title is at most 120 characters." },
+            { id: "1.2", text: "A role is user, manager or admin." },
+        ];
+        const answer = {
+            relations: [
+                { requirementId: "3.4", table: "notes", expression: 'title != ""' },
+                { requirementId: "3.5", table: "notes", expression: "title <= 120" },
+                { requirementId: "1.2", table: "users", expression: 'role == "user" or role == "manager" or role == "admin"' },
+            ],
+        };
+        const r = await proposeRowRelations(scripted(answer, []), { requirements: reqs, schema: notesSchema, secrets: [], probe: notesProbe });
+        expect(r.checks.map((c) => c.source)).toEqual(["3.4", "1.2"]);
+        expect(r.report).toMatchObject({ proposed: 3, kept: 2 });
+        expect(r.report.dropped).toEqual([{ requirementId: "3.5", table: "notes", reason: expect.stringMatching(/cannot be judged on the stored rows/) }]);
+        // The reason names no stored value.
+        for (const v of ["Ana's travel plans", "Team lunch ideas"]) expect(r.report.dropped[0]!.reason).not.toContain(v);
+        // At run time the same rule is refused, never counted as rows that break it.
+        await expect(notesProbe.check({ kind: "relation", table: "notes", where: [], expression: "title <= 120" })).rejects.toThrow(/cannot be judged on the stored rows/);
+        expect((await notesProbe.check({ kind: "relation", table: "notes", where: [], expression: 'title != ""' })).count).toBe(0);
+    });
+
     it("no requirement, no call", async () => {
         const prompts: string[] = [];
         expect((await proposeRowRelations(scripted({ relations: [] }, prompts), { requirements: [], schema: SCHEMA, secrets: [] })).checks).toEqual([]);

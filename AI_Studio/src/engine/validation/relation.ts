@@ -347,10 +347,10 @@ function relationEval(text, body, vars, source) {
     const shown = () => (seen.length ? " Values: " + seen.slice(0, 8).map((x) => x[0] + " = " + relationShow(x[1])).join(", ") + (seen.length > 8 ? ", ..." : "") + "." : "");
     try {
         const v = relationRun(relationParseTree(text), text, body, vars, seen);
-        if (typeof v !== "boolean") return { held: false, values: seen, message: head + ". It must give true or false, but gave " + relationShow(v) + "." + shown() };
+        if (typeof v !== "boolean") return { held: false, error: true, values: seen, message: head + ". It must give true or false, but gave " + relationShow(v) + "." + shown() };
         return v ? { held: true, values: seen } : { held: false, values: seen, message: head + "." + shown() };
     } catch (e) {
-        return { held: false, values: seen, message: head + ". " + (e && e.message ? e.message : String(e)) + "." + shown() };
+        return { held: false, error: true, values: seen, message: head + ". " + (e && e.message ? e.message : String(e)) + "." + shown() };
     }
 }
 function relationAssert(text, body, vars, source) {
@@ -360,7 +360,8 @@ function relationAssert(text, body, vars, source) {
 `;
 
 export type RelationParse = { ok: true; refs: { paths: string[]; vars: string[] } } | { ok: false; error: string };
-export type RelationResult = { held: true; values: Array<[string, unknown]> } | { held: false; values: Array<[string, unknown]>; message: string };
+/** `error`: the expression could not be judged on these values (a wrong type, a missing value, not true or false), unlike a plain false. */
+export type RelationResult = { held: true; values: Array<[string, unknown]> } | { held: false; error?: true; values: Array<[string, unknown]>; message: string };
 
 interface RelationRuntime {
     relationParse(text: string): RelationParse;

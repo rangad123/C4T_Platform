@@ -1447,7 +1447,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 try {
                     const schema = await dbProbe.schema();
                     // A customer's probe runs the key and persistence checks only: no relation over rows is proposed for it.
-                    const rows = dbProbe.rowRelations === false ? { report: { proposed: 0, kept: 0, dropped: [] } as RowRelationReport, checks: [] } : await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req) });
+                    const rows = dbProbe.rowRelations === false ? { report: { proposed: 0, kept: 0, dropped: [] } as RowRelationReport, checks: [] } : await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req), probe: dbProbe });
                     if (rows.report.proposed || rows.report.error) ctx.emit({ stage: "generation", kind: "db_rules_proposed", ...(rows.report.error ? { level: "warn" as const } : {}), message: rows.report.error ?? `${rows.report.kept} of ${rows.report.proposed} proposed stored-data rules kept (${rows.report.dropped.length} dropped)` });
                     db = { schema, absence: [...integrityChecks(schema).map((name) => ({ name })), ...rows.checks], budget: dbBudget };
                 } catch (e) {
