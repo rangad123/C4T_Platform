@@ -16,6 +16,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { givePersonalKeys } from "./fixtures/ai-key.js";
 import { loadConfig } from "../src/config.js";
 import { afterCaseJob, caseDescription } from "../src/platform/case-scripts.js";
+import { MAX_SCRIPTS_PER_CALL } from "../src/engine/authoring/case-script.js";
+import { expectedOf, startPathOf } from "../src/engine/authoring/describe.js";
+import { buildXlsx } from "../src/shared/xlsx.js";
 import { ANOTHER_RUN, NO_ADDRESS_FOR_SCRIPTS, SCRIPTS_BEING_WRITTEN } from "../src/platform/routes/generate-scripts.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -114,6 +117,41 @@ describe("generate test scripts", () => {
         platform.repo.setJobStatus(job.id, "FAILED", "Cancelled");
     });
 
+    it("gives an Automated case imported from the test case workbook its page, preconditions and expected result, not its steps (SPEC R6.5)", async () => {
+        const pid = platform.repo.createProject({ name: "Imported shop", platforms: ["web"], testingModes: ["code"] }).id as string;
+        platform.repo.createApplication(pid, "http://127.0.0.1:7862", { ...DEFAULT_JOB_OPTIONS });
+        const wb = buildXlsx([
+            {
+                name: "Test cases",
+                header: true,
+                rows: [
+                    ["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement"],
+                    ["TC-004", "Keep the basket after signing in again", "Automated", "High", "/cart", "Two items are in the basket\nAn address is saved", "Click here => ignored", "The basket lists two items\nIts total is unchanged", ""],
+                ],
+            },
+        ]);
+        const imp = await call("POST", `/api/projects/${pid}/manual-cases/import`, { format: "xlsx", content: Buffer.from(wb).toString("base64") });
+        expect(imp.status, JSON.stringify(imp.body)).toBe(201);
+        expect(imp.body).toMatchObject({ created: 1, stepsIgnored: 1 });
+        const r = await gen(pid, {}, { authorization: `Bearer ${editor}` });
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        const job = platform.repo.getJob(r.body.started.jobId)!;
+        expect(job.options.plainDescription).toBe(
+            [
+                "Keep the basket after signing in again",
+                "Start on /cart",
+                "Before it starts: Two items are in the basket",
+                "Before it starts: An address is saved",
+                "Check that The basket lists two items",
+                "Check that Its total is unchanged",
+            ].join("\n"),
+        );
+        // The description reader takes the page as where the test starts and each line of the expected result as a check.
+        expect(startPathOf(job.options.plainDescription!)).toBe("/cart");
+        expect(expectedOf(job.options.plainDescription!)).toEqual(["The basket lists two items", "Its total is unchanged"]);
+        platform.repo.setJobStatus(job.id, "FAILED", "Cancelled");
+    });
+
     it("skips a case whose words would be refused for a described test, with that sentence", async () => {
         const pid = platform.repo.createProject({ name: "Pay shop", platforms: ["web"], testingModes: ["code"] }).id as string;
         platform.repo.createApplication(pid, "http://127.0.0.1:7862", { ...DEFAULT_JOB_OPTIONS });
@@ -206,15 +244,73 @@ describe("after a test case's job", () => {
         platform.repo.setJobStatus(next!.id, "FAILED", "Cancelled");
     });
 
-    it("stops at a cancel, when the job made no test, and while another run is going on", async () => {
+    it("8 cases in one call: each case's job starts the next, and all 8 get their script (sheet #12)", async () => {
+        const pid = platform.repo.createProject({ name: "Eight chain shop", platforms: ["web"], testingModes: ["code"] }).id as string;
+        platform.repo.createApplication(pid, "http://127.0.0.1:7862", { ...DEFAULT_JOB_OPTIONS });
+        const cs: Array<{ id: string }> = [];
+        for (let i = 0; i < 8; i++) cs.push(await addCase(pid, `Verify part ${i + 1}`, "automated"));
+        const r = await gen(pid, {});
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        expect(r.body.started.caseIds).toEqual(cs.map((c) => c.id));
+        let job: any = platform.repo.getJob(r.body.started.jobId)!;
+        for (let i = 0; i < 8; i++) {
+            expect(job.options.plainCaseId).toBe(cs[i]!.id);
+            // The jobs list says which case each job builds (the card follows them).
+            expect((await call("GET", `/api/projects/${pid}/jobs`)).body[0]).toMatchObject({ jobId: job.id, caseId: cs[i]!.id });
+            await madeBy(pid, job.id);
+            platform.repo.setJobStatus(job.id, "COMPLETED");
+            job = await afterCaseJob(platform.repo, job);
+        }
+        expect(job).toBeNull();
+        const list = (await call("GET", `/api/projects/${pid}/manual-cases`)).body.cases;
+        expect(list.filter((c: any) => c.linkedTestIds.length === 1)).toHaveLength(8);
+    });
+
+    it("queues every case of a web project in one call, more than the per-call limit of phone scripts", async () => {
+        const pid = platform.repo.createProject({ name: "Many chain shop", platforms: ["web"], testingModes: ["code"] }).id as string;
+        platform.repo.createApplication(pid, "http://127.0.0.1:7862", { ...DEFAULT_JOB_OPTIONS });
+        for (let i = 0; i < MAX_SCRIPTS_PER_CALL + 3; i++) await addCase(pid, `Verify item ${i + 1}`, "automated");
+        const r = await gen(pid, {});
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        expect(r.body.started.caseIds).toHaveLength(MAX_SCRIPTS_PER_CALL + 3);
+        expect(r.body.skipped.filter((s: any) => s.reason === "later")).toEqual([]);
+        platform.repo.setJobStatus(r.body.started.jobId, "FAILED", "Cancelled");
+    });
+
+    it("goes on past a case whose job made no test; stops when the next one fails for the same reason", async () => {
+        const empty = await chain("Empty shop");
+        platform.repo.setJobStatus(empty.job.id, "FAILED", "The button could not be found");
+        const second = await afterCaseJob(platform.repo, empty.job);
+        expect(second?.options).toMatchObject({ plainCaseId: empty.cs[1]!.id, plainCaseFailed: "The button could not be found" });
+        // A different reason: about that case, so the chain goes on to the third.
+        platform.repo.setJobStatus(second!.id, "FAILED", "The page did not load");
+        const third = await afterCaseJob(platform.repo, second!);
+        expect(third?.options).toMatchObject({ plainCaseId: empty.cs[2]!.id, plainCaseFailed: "The page did not load" });
+        platform.repo.setJobStatus(third!.id, "FAILED", "Cancelled");
+
+        const same = await chain("Same reason shop");
+        platform.repo.setJobStatus(same.job.id, "FAILED", "The AI model isn’t set up yet");
+        const next = await afterCaseJob(platform.repo, same.job);
+        expect(next?.options.plainCaseId).toBe(same.cs[1]!.id);
+        platform.repo.setJobStatus(next!.id, "FAILED", "The AI model isn’t set up yet");
+        expect(await afterCaseJob(platform.repo, next!)).toBeNull();
+        // A case that got its script clears the reason carried on.
+        const ok = await chain("Clears shop");
+        platform.repo.setJobStatus(ok.job.id, "FAILED", "The page did not load");
+        const n2 = (await afterCaseJob(platform.repo, ok.job))!;
+        await madeBy(ok.pid, n2.id);
+        platform.repo.setJobStatus(n2.id, "COMPLETED");
+        const n3 = await afterCaseJob(platform.repo, n2);
+        expect(n3?.options.plainCaseId).toBe(ok.cs[2]!.id);
+        expect(n3?.options.plainCaseFailed).toBeUndefined();
+        platform.repo.setJobStatus(n3!.id, "FAILED", "Cancelled");
+    });
+
+    it("stops at a cancel, and while another run is going on", async () => {
         const cancelled = await chain("Cancel shop");
         await madeBy(cancelled.pid, cancelled.job.id);
         platform.repo.setJobStatus(cancelled.job.id, "FAILED", "Cancelled");
         expect(await afterCaseJob(platform.repo, cancelled.job)).toBeNull();
-
-        const empty = await chain("Empty shop");
-        platform.repo.setJobStatus(empty.job.id, "FAILED", "The AI model isn’t set up yet");
-        expect(await afterCaseJob(platform.repo, empty.job)).toBeNull();
 
         const busy = await chain("Busy chain shop");
         await madeBy(busy.pid, busy.job.id);

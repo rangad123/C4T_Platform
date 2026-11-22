@@ -178,6 +178,10 @@ export async function buildBackup(p: Platform, projectId: string, opts: BackupOp
         linkedTests: c.linkedTestIds.map((id) => keyOfId.get(id) ?? id),
         automation: c.automation,
         number: c.number,
+        preconditions: c.preconditions,
+        expected: c.expected,
+        page: c.page,
+        sourceRef: c.sourceRef,
         ...(c.requirementId && refOfRequirement.has(c.requirementId) ? { requirementRef: refOfRequirement.get(c.requirementId) } : {}),
     }));
     const requirementDocs = backupRequirements(db, projectId, keyOfId);
@@ -670,9 +674,9 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
             const number = typeof c.number === "number" && !takenNumbers.has(c.number) ? c.number : null;
             if (number !== null) takenNumbers.add(number);
             db.run(
-                `INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, automation, number, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT COALESCE(MAX(number), 0) + 1 FROM manual_cases WHERE project_id = ?)),?,?)`,
-                id, pid, c.title, c.area, c.priority, c.requirement, JSON.stringify(c.steps), JSON.stringify(c.linkedTests.map((k) => idOfKey.get(k)).filter(Boolean)), c.automation, number, pid, stamp, stamp,
+                `INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, automation, number, preconditions_json, expected, page, source_ref, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT COALESCE(MAX(number), 0) + 1 FROM manual_cases WHERE project_id = ?)),?,?,?,?,?,?)`,
+                id, pid, c.title, c.area, c.priority, c.requirement, JSON.stringify(c.steps), JSON.stringify(c.linkedTests.map((k) => idOfKey.get(k)).filter(Boolean)), c.automation, number, pid, JSON.stringify(c.preconditions), c.expected, c.page, c.sourceRef, stamp, stamp,
             );
             takenNumbers.add(db.get<{ n: number }>("SELECT number AS n FROM manual_cases WHERE id = ?", id)!.n);
             counts.manualCases!++;

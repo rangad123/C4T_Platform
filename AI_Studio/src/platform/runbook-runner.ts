@@ -25,6 +25,7 @@ import { apiChanges } from "./drift-store.js";
 import { assertEnvironmentTargets } from "./environment-run.js";
 import { findEnvironment } from "./environments-store.js";
 import { HttpError } from "./http-error.js";
+import { caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import { gateJob } from "./quarantine-service.js";
@@ -279,6 +280,7 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
 
     async function runStep(run: RunbookRun, index: number, step: RunStepT, ctx: Ctx, signal: AbortSignal, deadlineAt: number): Promise<Outcome> {
         const build = async () => {
+            await refuseTestsInCaseAgentProject(repo, run.projectId); // a Test Case Generation project runs no tests (case-agent.ts)
             const app = repo.getLatestApplicationPublic(run.projectId);
             if (!app) throw new StepProblem("This project has no application yet. Run an analysis or import tests first.");
             await assertAppTargets({ url: app.url as string, config: app.config as Record<string, any> });
@@ -304,13 +306,16 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
         const build = async () => {
             const app = repo.getLatestApplicationPublic(run.projectId);
             if (!app) throw new StepProblem("This project has no application yet. Run an analysis first.");
+            // No address in a Test Case Generation project: the step writes the cases from the requirements, as the explore route does (FX25).
+            if (!app.url && (await requirementsOnlyRun(repo, run.projectId))) return { applicationId: app.id as string, options: await caseAgentOptions(repo, run.projectId, { ...DEFAULT_JOB_OPTIONS, requirementsOnly: true }) };
             await assertAppTargets({ url: app.url as string, config: app.config as Record<string, any> });
             const config = (app.config ?? {}) as Record<string, any>;
             // Saved settings of the latest analysis, minus anything that belongs to another kind of job. Data-changing tests
             // and the load check are off unless this step switches them on.
             // Never who started an earlier job (an older application kept it): this run's own starter is recorded (labelOptions).
             const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, runbookRunId: _r, retryFailures: _rf, requirementsText: _rt, startedBy: _sb, ...saved } = config;
-            const options = { ...DEFAULT_JOB_OPTIONS, ...saved, mode: "generate", allowMutatingApiTests: step.allowMutatingApiTests === true, loadChecks: step.loadChecks === true } as JobOptions;
+            // A Test Case Generation project explores plan-only (case-agent.ts).
+            const options = await caseAgentOptions(repo, run.projectId, { ...DEFAULT_JOB_OPTIONS, ...saved, mode: "generate", allowMutatingApiTests: step.allowMutatingApiTests === true, loadChecks: step.loadChecks === true } as JobOptions);
             if (options.loadChecks) {
                 const refused = await loadTargetProblem(p.db, run.projectId, [options.apiBaseUrl, app.url as string]);
                 if (refused) throw new StepProblem(refused);

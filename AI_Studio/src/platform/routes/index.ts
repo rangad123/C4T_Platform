@@ -17,6 +17,7 @@ import { registerExplorerRoutes } from "./explorer.js";
 import { registerKnowledgeRoutes } from "./knowledge.js";
 import { registerExploreFindingRoutes } from "./explore-findings.js";
 import { registerFindingRoutes } from "./findings.js";
+import { registerCaseOutcomeRoutes } from "./case-outcome.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerUserRoutes } from "./users.js";
 import { registerProjectAccessRoutes } from "./project-access.js";
@@ -44,7 +45,7 @@ import { registerImportRoutes } from "./imports.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerMemoryRoutes } from "./memory.js";
 import { registerNotesRoutes } from "./notes.js";
-import { registerAppIntelRoutes } from "./app-intel.js";
+import { latestAppModel, registerAppIntelRoutes } from "./app-intel.js";
 import { registerOpsRoutes } from "./ops.js";
 import { registerLocatorRoutes } from "./locators.js";
 import { registerManualCaseRoutes } from "./manual-cases.js";
@@ -157,6 +158,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerPlanRoutes(ctx);
     registerExplorerRoutes(ctx);
     registerKnowledgeRoutes(ctx);
+    // The Test Case Generation outcome: its tree, pages and test cases, and the workbook (routes/case-outcome.ts, founder 2026-11-19).
+    registerCaseOutcomeRoutes(ctx, (id) => latestAppModel(ctx.p, id));
     // People and access: signing in, a person's own account, people, activity, single sign-on (routes/auth.ts, routes/users.ts).
     registerAuthRoutes(ctx);
     registerUserRoutes(ctx);

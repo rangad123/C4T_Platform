@@ -97,6 +97,23 @@ describe("signing in with Crowd4Test", () => {
         expect((await as("t-admin", { url: "/api/projects" })).json().map((p: { name: string }) => p.name)).toContain("From Crowd4Test");
     });
 
+    it("keeps everyone signed in through a restart (a deploy): nothing of a sign-in lives only in the server's memory", async () => {
+        // A local account's session is a database row; a Crowd4Test sign-in is the Crowd4Test cookie, asked about again.
+        const users = accessControlOf(app).users;
+        const local = users.create({ email: "lena@local.example", name: "Lena", role: "editor" });
+        const { token } = users.createSession(local.id, "password");
+        const again = await buildServer(platform);
+        await again.ready();
+        try {
+            const c4t = await again.inject({ url: "/api/auth/state", headers: { cookie: "c4t_access=t-admin" } });
+            expect(c4t.json().me).toMatchObject({ name: "Ada Tester", via: "crowd4test" });
+            const own = await again.inject({ url: "/api/auth/state", headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}` } });
+            expect(own.json().me).toMatchObject({ name: "Lena", via: "session" });
+        } finally {
+            await again.close();
+        }
+    });
+
     it("lets a customer and a tester in as editors of no projects until an owner adds them", async () => {
         accounts.set("t-customer", user("cora", "CUSTOMER"));
         accounts.set("t-tester", user("tim", "TESTER"));

@@ -240,7 +240,8 @@ describe("mandatory inputs", () => {
     });
 
     it("an exploration whose chosen agents miss one is refused with the pop-up's words, until it is saved", async () => {
-        const id = await agentProject("API shop", ["api", "test-generation"]);
+        // The API agent alone: with the Test Case Generation agent it does not run, and nothing is asked (Q6, tests/case-agent-view.test.ts).
+        const id = await agentProject("API shop", ["api"]);
         const got = await as("t-cora", "GET", `/api/projects/${id}/agent-inputs`);
         expect(got.body.missing).toEqual([expect.objectContaining({ agent: "api", input: "openApiUrl", agentName: "API Testing Agent" })]);
         const refused = await as("t-cora", "POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true });

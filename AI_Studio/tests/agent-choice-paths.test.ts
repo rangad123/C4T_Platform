@@ -29,6 +29,7 @@ import type { Schedule } from "../src/platform/schedule-store.js";
 import { startScheduledJob } from "../src/platform/scheduler.js";
 import { buildServer } from "../src/platform/server.js";
 import { narrowToChoice } from "../src/platform/testing-agents.js";
+import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
 
 const KEY = "agent-choice-paths-key-5e1f";
 const SITE = "http://127.0.0.1:7730";
@@ -55,10 +56,10 @@ const PLAN: StoredPlan = {
 const eventsOf = (jobId: string) => platform.db.all<{ kind: string; message: string }>("SELECT kind, message FROM agent_events WHERE job_id = ? ORDER BY id", jobId);
 
 /** A project in agent mode with these agents, and a finished plan-only exploration made while `planned` were on. */
-async function projectWithPlan(name: string, agents: string[], planned: Record<string, unknown>) {
-    const made = await asKey("POST", "/api/projects", { name, platforms: ["web"], testingModes: ["agent"], agents });
-    expect(made.status, JSON.stringify(made.body)).toBe(201);
-    const pid = made.body.id as string;
+async function projectWithPlan(name: string, agents: string[], planned: Record<string, unknown>, mixed = false) {
+    // A mixed project (agent and code, as older projects are) cannot be made through the API any more.
+    const pid = mixed ? (platform.repo.createProject({ name, platforms: ["web"], testingModes: ["agent", "code"] }).id as string) : ((await asKey("POST", "/api/projects", { name, platforms: ["web"], testingModes: ["agent"], agents })).body.id as string);
+    if (mixed) await testingAgentsOf(platform).set(pid, agents as never, "test");
     const appId = platform.repo.createApplication(pid, SITE, { ...DEFAULT_JOB_OPTIONS });
     const job = await platform.repo.createJob(pid, appId, { ...DEFAULT_JOB_OPTIONS, planOnly: true, targets: ["web"], ...planned });
     platform.repo.setJobStatus(job.id, "COMPLETED");
@@ -113,9 +114,21 @@ describe("a scheduled exploration", () => {
     });
 });
 
+describe("a scheduled exploration of a Test Case Generation project", () => {
+    it("leaves out the form input checks its earlier explorations made, and says so", async () => {
+        const pid = (await asKey("POST", "/api/projects", { name: "Cases", platforms: ["web"], testingModes: ["agent"], agents: ["test-generation"] })).body.id as string;
+        platform.repo.createApplication(pid, SITE, { ...DEFAULT_JOB_OPTIONS, targets: ["web"], functionalTests: true, inputChecks: true });
+        const job = await startScheduledJob(platform.repo, { id: "sched-tcg-paths", projectId: pid, kind: "generate", retryFailures: 0 } as unknown as Schedule);
+        const o = platform.repo.getJob(job.id)!.options;
+        expect(o).toMatchObject({ functionalTests: true, inputChecks: false, accessibility: false, securityChecks: false });
+        expect(eventsOf(job.id).find((e) => e.kind === "agent_checks_dropped")?.message).toMatch(/no testing agent runs them: Form input checks/);
+    });
+});
+
 describe("creating tests from a plan", () => {
     it("leaves out a check whose agent was removed since the plan, and says so in the job's events", async () => {
-        const { pid, planJob } = await projectWithPlan("Planned", ["security", "test-generation"], { securityChecks: true, accessChecks: true, functionalTests: true });
+        // A mixed project: a Test Case Generation project (agent mode only) makes no tests from a plan at all (tests/case-agent-plan-only.test.ts).
+        const { pid, planJob } = await projectWithPlan("Planned", ["security", "test-generation"], { securityChecks: true, accessChecks: true, functionalTests: true }, true);
         expect((await asKey("PUT", `/api/projects/${pid}/testing-agents`, { agents: ["accessibility", "test-generation"] })).status).toBe(200);
         const r = await asKey("POST", `/api/projects/${pid}/plans/${planJob}/create`, {});
         expect(r.status, JSON.stringify(r.body)).toBe(202);

@@ -7,7 +7,7 @@ import { Badge, Button, Callout, FilePicker } from "../../components/ui";
 import { plural, toBase64 } from "../../lib/format";
 import { useConfig } from "../../lib/hooks";
 import { useHere } from "../auth/project-access";
-import { IMPORT_ACCEPT, type ImportPreview } from "./requirements";
+import { IMPORT_ACCEPT, PRIORITY_WORDS, type ImportCandidate, type ImportPreview } from "./requirements";
 import { describeApiError } from "../../lib/labels";
 
 
@@ -38,7 +38,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
             const body = mode === "paste" ? { text } : { file: { filename: file!.name, contentBase64: await toBase64(file!) } };
             const r = await api<ImportPreview>(`/projects/${projectId}/requirements/import/${ai ? "refine" : "preview"}`, { method: "POST", body });
             setPreview(r);
-            setPicked(new Set(r.candidates.filter((c) => !c.exists).map((c) => c.ref)));
+            setPicked(new Set(r.candidates.flatMap((c, i) => (c.exists ? [] : [String(i)]))));
         } catch (e) {
             setError(describeApiError(e));
         } finally {
@@ -51,7 +51,10 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
         setError("");
         setBusy("save");
         try {
-            const requirements = preview.candidates.filter((c) => picked.has(c.ref)).map((c) => ({ ref: c.ref, title: c.title, description: c.description }));
+            // A requirement the document did not number is sent without a reference: the platform numbers the chosen ones REQ-n in order.
+            const requirements = preview.candidates
+                .filter((_, i) => picked.has(String(i)))
+                .map((c) => ({ ...(c.numbered ? {} : { ref: c.ref }), title: c.title, description: c.description, acceptanceCriteria: c.acceptanceCriteria, ...(c.priority ? { priority: c.priority } : {}) }));
             const r = await api<{ created: number; duplicates: string[] }>(`/projects/${projectId}/requirements/import`, { method: "POST", body: { requirements, source: preview.usedAi ? "ai" : "imported" } });
             await onImported(`Imported ${plural(r.created, "requirement")}.${r.duplicates.length ? ` ${plural(r.duplicates.length, "reference")} already existed and ${r.duplicates.length === 1 ? "was" : "were"} left out: ${r.duplicates.slice(0, 5).join(", ")}${r.duplicates.length > 5 ? "…" : ""}.` : ""}`);
         } catch (e) {
@@ -60,12 +63,23 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
         }
     }
 
-    const toggle = (ref: string, on: boolean) => setPicked((s) => {
+    const toggle = (key: string, on: boolean) => setPicked((s) => {
         const n = new Set(s);
-        if (on) n.add(ref);
-        else n.delete(ref);
+        if (on) n.add(key);
+        else n.delete(key);
         return n;
     });
+
+    // The references the chosen ones get: the document's own, and REQ-n in order for the others (no gaps for the ones left out).
+    const refs = new Map<number, string>();
+    if (preview) {
+        const free = preview.candidates.filter((c) => c.numbered).map((c) => c.ref);
+        let k = 0;
+        preview.candidates.forEach((c, i) => {
+            if (!c.numbered) refs.set(i, c.ref);
+            else if (picked.has(String(i))) refs.set(i, free[k++]!);
+        });
+    }
 
     return (
         <section className="card card-pad stack-sm" aria-label="Import requirements">
@@ -78,7 +92,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
             </div>
             {!preview ? (
                 <>
-                    <p className="t-secondary">Paste a requirements document or choose its file. You see what was found before anything is saved. Requirement ids in the document (REQ-1, FR-2.3) become the references; the others are numbered.</p>
+                    <p className="t-secondary">Paste a requirements document or choose its file. You see what was found before anything is saved. Requirement ids in the document (REQ-1, FR-2.3) become the references; the others are numbered REQ-1, REQ-2 and on, like requirements added by hand. Acceptance criteria stay with their requirement.</p>
                     <div className="chips" role="group" aria-label="Where the requirements come from">
                         <button type="button" className="chip" aria-pressed={mode === "paste"} onClick={() => setMode("paste")}>
                             Paste text
@@ -126,7 +140,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
                     ) : (
                         <>
                             <div className="row">
-                                <Button size="sm" variant="ghost" onClick={() => setPicked(new Set(preview.candidates.filter((c) => !c.exists).map((c) => c.ref)))}>
+                                <Button size="sm" variant="ghost" onClick={() => setPicked(new Set(preview.candidates.flatMap((c, i) => (c.exists ? [] : [String(i)]))))}>
                                     Choose all
                                 </Button>
                                 <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
@@ -135,24 +149,8 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
                             </div>
                             <fieldset className="req-preview">
                                 <legend className="sr-only">Requirements found</legend>
-                                {preview.candidates.map((c) => (
-                                    <label className="check" key={c.ref}>
-                                        <input type="checkbox" disabled={c.exists} checked={picked.has(c.ref)} onChange={(e) => toggle(c.ref, e.target.checked)} />
-                                        <span>
-                                            <span className="title">
-                                                <span className="req-ref mono">{c.ref}</span> {c.title}
-                                            </span>
-                                            <span className="hint">
-                                                {c.section ? `Under “${c.section}”` : "No heading"}
-                                                {c.exists && (
-                                                    <>
-                                                        {" "}
-                                                        <Badge tone="neutral">Already here</Badge>
-                                                    </>
-                                                )}
-                                            </span>
-                                        </span>
-                                    </label>
+                                {preview.candidates.map((c, i) => (
+                                    <FoundRequirement key={i} c={c} ref_={refs.get(i) ?? null} checked={picked.has(String(i))} onChange={(on) => toggle(String(i), on)} />
                                 ))}
                             </fieldset>
                         </>
@@ -169,5 +167,47 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
                 </>
             )}
         </section>
+    );
+}
+
+/** One requirement found in the document: its reference, title, description and acceptance criteria, as they will be saved. */
+function FoundRequirement({ c, ref_, checked, onChange }: { c: ImportCandidate; ref_: string | null; checked: boolean; onChange: (on: boolean) => void }) {
+    const criteria = c.acceptanceCriteria.split("\n").map((l) => l.trim()).filter(Boolean);
+    return (
+        <div className="req-found" data-testid="import-candidate">
+            <label className="check">
+                <input type="checkbox" disabled={c.exists} checked={checked} onChange={(e) => onChange(e.target.checked)} />
+                <span>
+                    <span className="title">
+                        {ref_ && <span className="req-ref mono">{ref_}</span>} {c.title}
+                    </span>
+                    <span className="hint">
+                        {c.section ? `Under “${c.section}”` : "No heading"}
+                        {c.priority && ` · ${PRIORITY_WORDS[c.priority]} priority`}
+                        {c.exists && (
+                            <>
+                                {" "}
+                                <Badge tone="neutral">Already here</Badge>
+                            </>
+                        )}
+                    </span>
+                </span>
+            </label>
+            {(c.description || criteria.length > 0) && (
+                <div className="req-found-body">
+                    {c.description && <p className="req-text t-secondary">{c.description}</p>}
+                    {criteria.length > 0 && (
+                        <>
+                            <p className="t-meta">Acceptance criteria</p>
+                            <ul className="bullets" aria-label={`Acceptance criteria of ${c.title}`}>
+                                {criteria.map((l, k) => (
+                                    <li key={k}>{l}</li>
+                                ))}
+                            </ul>
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
     );
 }

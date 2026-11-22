@@ -624,6 +624,10 @@ CREATE TABLE manual_cases (
     automation TEXT NOT NULL DEFAULT 'manual',
     number BIGINT,
     requirement_id TEXT REFERENCES requirements(id) ON DELETE SET NULL,
+    preconditions_json TEXT NOT NULL DEFAULT '[]',
+    expected TEXT NOT NULL DEFAULT '',
+    page TEXT NOT NULL DEFAULT '',
+    source_ref TEXT NOT NULL DEFAULT '',
     seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
 CREATE UNIQUE INDEX idx_manual_cases_number ON manual_cases (project_id, number);

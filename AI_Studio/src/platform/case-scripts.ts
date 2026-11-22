@@ -6,9 +6,11 @@
  * guessed ("Dashboard").
  *
  * Each case is one plain job: "Generate test scripts" (routes/generate-scripts.ts) starts the first, and when a job ends the test it made
- * becomes its case's script (linked to the case and the case's requirements) and the next case's job starts (job-runner.ts). The chain
- * stops at a cancel, when a job made no test (no AI, the browser could not start...), or when another run of the project has started:
- * the cases left have no script yet, so generating again picks them up.
+ * becomes its case's script (linked to the case and the case's requirements) and the next case's job starts (job-runner.ts). A case whose
+ * job made no test is passed over (its run says why) and the next one is built, so one click builds them all. The chain stops at a
+ * cancel, when another run of the project has started, or when two cases in a row made no test for the same reason (no AI, the browser
+ * could not start, the AI limit: the cases after them would fail the same way): the cases left have no script yet, the page names them
+ * with why, and generating again picks them up.
  */
 import { detectKind, PLAIN_MAX_LENGTH, refusalFor } from "../engine/authoring/describe.js";
 import { scriptTitleOf } from "../engine/authoring/case-script.js";
@@ -20,17 +22,26 @@ import { RequirementStore } from "./requirement-store.js";
 const TERMINAL = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
 
 /**
- * What a written case says, as the description of a described test: the title first (the test's title is its first line), then each
- * step, and each expected result as a check ("Check that ...", which the description reader takes as an expected result).
+ * What a written case says, as the description of a described test: the title first (the test's title is its first line), the page it
+ * starts on ("Start on /cart", which the description reader takes as the start page) and what must be true before it, then each step,
+ * and each expected result as a check ("Check that ...", which the description reader takes as an expected result): the steps' own and
+ * the case's expected result as a whole, one per line (a case imported from the test case workbook, SPEC R6.5).
  */
-export function caseDescription(c: Pick<ManualCase, "title" | "steps"> & { ref?: string | null }): string {
+export function caseDescription(c: Pick<ManualCase, "title" | "steps"> & Partial<Pick<ManualCase, "preconditions" | "expected" | "page">> & { ref?: string | null }): string {
     const lines = [scriptTitleOf({ ref: c.ref ?? "", title: c.title })];
+    const check = (text: string) => {
+        const t = text.trim().replace(/^expected(?:\s+results?)?\s*:\s*/i, "");
+        if (t) lines.push(`Check that ${t}`);
+    };
+    const page = c.page?.trim();
+    if (page) lines.push(`Start on ${page}`);
+    for (const p of c.preconditions ?? []) if (p.trim()) lines.push(`Before it starts: ${p.trim()}`);
     c.steps.forEach((s, i) => {
         const action = s.action.trim();
-        const expected = s.expected.trim().replace(/^expected(?:\s+results?)?\s*:\s*/i, "");
         if (action) lines.push(`${i + 1}. ${action}`);
-        if (expected) lines.push(`Check that ${expected}`);
+        check(s.expected);
     });
+    for (const e of (c.expected ?? "").split("\n")) check(e);
     return lines.join("\n").slice(0, PLAIN_MAX_LENGTH);
 }
 
@@ -40,11 +51,12 @@ export function caseHasScript(repo: Repo, projectId: string, c: Pick<ManualCase,
 }
 
 /** The options of the plain job that builds this case's script, with the cases still to build after it. */
-export function caseJobOptions(base: JobOptions, c: ManualCase, queue: string[], apis: ReadonlyArray<{ path: string }>): JobOptions {
+export function caseJobOptions(base: JobOptions, c: ManualCase, queue: string[], apis: ReadonlyArray<{ path: string }>, lastFailure?: string): JobOptions {
     const description = caseDescription(c);
-    const { rewriteTestId: _rewrite, ...rest } = base;
+    const { rewriteTestId: _rewrite, plainCaseFailed: _failed, ...rest } = base;
     void _rewrite;
-    return { ...rest, mode: "plain", plainDescription: description, plainKind: detectKind(description, apis as Array<{ path: string }>), plainCaseId: c.id, plainCaseQueue: queue };
+    void _failed;
+    return { ...rest, mode: "plain", plainDescription: description, plainKind: detectKind(description, apis as Array<{ path: string }>), plainCaseId: c.id, plainCaseQueue: queue, ...(lastFailure !== undefined ? { plainCaseFailed: lastFailure } : {}) };
 }
 
 /**
@@ -81,7 +93,10 @@ export async function afterCaseJob(repo: Repo, job: JobRow): Promise<JobRow | nu
     await linkScriptsToCase(repo, pid, caseId, made);
 
     const queue = [...(job.options.plainCaseQueue ?? [])];
-    if (!queue.length || done.error === "Cancelled" || made.length === 0) return null;
+    if (!queue.length || done.error === "Cancelled") return null;
+    // No test made: the next case is built, unless the case before this one failed for the same reason (not a reason about the case).
+    const failure = made.length === 0 ? (done.error ?? "") : undefined;
+    if (failure !== undefined && job.options.plainCaseFailed === failure) return null;
     // A person started another run meanwhile: theirs goes first, and the cases left are generated again later.
     if (repo.listJobs(pid).some((j) => j.id !== job.id && !TERMINAL.includes(j.status))) return null;
     const cases = new ManualCaseStore(repo.db);
@@ -91,7 +106,7 @@ export async function afterCaseJob(repo: Repo, job: JobRow): Promise<JobRow | nu
         if (!c || c.automation !== "automated" || caseHasScript(repo, pid, c)) continue;
         // Changed since it was queued into something that is not built (a payment, an attack...): skipped, as the first call skips it.
         if (refusalFor(caseDescription(c), { allowChanges: job.options.allowMutatingApiTests === true })) continue;
-        return await repo.createJob(pid, job.applicationId, caseJobOptions(job.options, c, queue, apis));
+        return await repo.createJob(pid, job.applicationId, caseJobOptions(job.options, c, queue, apis, failure));
     }
     return null;
 }

@@ -3,6 +3,7 @@ import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError, ROLE_HOME, type Role, type SessionUser } from '@/lib/api/types'
+import { couldNotTell } from '@/lib/auth/session-read'
 
 /**
  * THE authorization boundary.
@@ -57,6 +58,20 @@ const readSession = cache(async (): Promise<SessionRead> => {
 export const getUser = async (): Promise<SessionUser | null> => {
   const read = await readSession()
   return read.ok ? read.user : null
+}
+
+/**
+ * Like `getUser`, but `undefined` when the session could not be read at all
+ * (a dropped connection, a 5xx during a deploy, a 429): for a caller that
+ * must not treat "could not tell" as "signed out". Any other refusal (a 403
+ * for a suspended or deactivated account) is a definite answer and is
+ * rethrown, as `requireUser` does.
+ */
+export const getUserOrUnknown = async (): Promise<SessionUser | null | undefined> => {
+  const read = await readSession()
+  if (read.ok) return read.user
+  if (couldNotTell(read.error)) return undefined
+  throw read.error
 }
 
 /**

@@ -1,8 +1,9 @@
+import { forgetCaseOutcome } from "../case-outcome.js";
 import { forgetMemory, latestMemory } from "../memory-store.js";
 import type { RouteCtx } from "./types.js";
 
 /** Routes for the "memory" feature: what the platform remembers about a project's application, and how to forget it. */
-export function registerMemoryRoutes({ app, repo, project }: RouteCtx): void {
+export function registerMemoryRoutes({ app, repo, project, p }: RouteCtx): void {
     /**
      * A summary of what is remembered plus what changed in the latest analysis. Structural facts only: no content
      * fingerprints and nothing that could be page text or user data (none is ever stored).
@@ -34,6 +35,8 @@ export function registerMemoryRoutes({ app, repo, project }: RouteCtx): void {
     app.delete("/api/projects/:id/memory", async (req) => {
         const id = (req.params as { id: string }).id;
         project(id);
+        // A Test Case Generation project's tree and test cases start again too (case-outcome.ts).
+        await forgetCaseOutcome(p, id);
         return { forgotten: forgetMemory(repo.db, id) > 0 };
     });
 }

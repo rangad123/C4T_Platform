@@ -147,27 +147,62 @@ export const refKey = (ref: string): string => ref.trim().toUpperCase();
 // ── import ─────────────────────────────────────────────────────────────────────
 
 export interface ImportCandidate {
+    /** The document's own id (REQ-12, FR-2.3); for a requirement the document did not number, the REQ-n it would be saved as. */
     ref: string;
+    /** The document gave no id: the reference is the project's next REQ-n, given when it is saved (so saved ones never leave gaps). */
+    numbered: boolean;
     title: string;
     description: string;
+    /** One criterion per line, as a person types them on the form. */
+    acceptanceCriteria: string;
+    /** The document's priority, when it gave one. */
+    priority: RequirementPriority | null;
     /** The heading it was under in the document, when it had one. */
     section: string | null;
     kind: ParsedRequirement["kind"];
 }
 
-/** A requirement's text as a record: the text itself as the title when it is short, else its first words and the whole text below. */
+const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).replace(/\s+\S*$/, "")}…` : s);
+
+/** A requirement as a record: its title, description (with the document's reference) and acceptance criteria, each in its field. */
 export function candidateOf(r: ParsedRequirement): ImportCandidate {
     const text = r.text.replace(/\s+/g, " ").trim();
-    let title = text;
-    let description = "";
-    if (text.length > 160) {
-        const sentence = /^(.{20,160}?[.!?])\s/.exec(text)?.[1];
-        title = sentence ?? `${text.slice(0, 157).replace(/\s+\S*$/, "")}…`;
-        description = text;
+    let title = r.title?.trim() || text;
+    let description = r.title?.trim() ? (r.description ?? "") : "";
+    if (title.length > 160) {
+        const sentence = /^(.{20,160}?[.!?])\s/.exec(title)?.[1];
+        description = [title, description].filter(Boolean).join("\n");
+        title = sentence ?? `${title.slice(0, 157).replace(/\s+\S*$/, "")}…`;
     }
+    // The record has no reference field: the document's "Reference:" line is kept as the description's last line.
+    if (r.reference) description = [description, `Reference: ${r.reference}`].filter(Boolean).join("\n\n");
     // The parser's ids already fit a reference; one the AI copied from the document may not (a space, a slash).
-    const ref = r.id.replace(/[^A-Za-z0-9._#-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, MAX_REF);
-    return { ref, title: title.slice(0, MAX_TITLE), description: description.slice(0, MAX_TEXT), section: r.section ?? null, kind: r.kind };
+    const ref = r.numbered ? "" : r.id.replace(/[^A-Za-z0-9._#-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, MAX_REF);
+    return {
+        ref,
+        numbered: !ref,
+        title: fit(title, MAX_TITLE),
+        description: fit(description, MAX_TEXT),
+        acceptanceCriteria: fit((r.acceptanceCriteria ?? []).join("\n"), MAX_TEXT),
+        priority: r.priority ?? null,
+        section: r.section ?? null,
+        kind: r.kind,
+    };
+}
+
+/**
+ * The references the candidates would be saved with: the document's own ids as they are, and the others the project's next REQ-n in
+ * order (skipping any taken, and any the document itself uses), exactly as importMany numbers them when all are saved.
+ */
+export function numberCandidates(candidates: ImportCandidate[], taken: ReadonlySet<string>, firstFree: number): ImportCandidate[] {
+    const reserved = new Set([...taken, ...candidates.filter((c) => !c.numbered).map((c) => refKey(c.ref))]);
+    let n = firstFree;
+    return candidates.map((c) => {
+        if (!c.numbered) return c;
+        while (reserved.has(`REQ-${n}`)) n++;
+        reserved.add(`REQ-${n}`);
+        return { ...c, ref: `REQ-${n++}` };
+    });
 }
 
 /** The deterministic pass of the requirements parser (engine/requirements/parse.ts) over a document's text: no AI. */
@@ -465,13 +500,15 @@ export class RequirementStore {
         const taken = await this.takenRefs(projectId);
         const fresh: Array<RequirementInput & { ref: string }> = [];
         const duplicates: string[] = [];
+        // The references this import gives itself: a numbered one never takes one of them (it would push that one out as taken).
+        const own = new Set(inputs.map((i) => refKey(i.ref ?? "")).filter(Boolean));
         let next = 0;
         for (const input of inputs) {
             let ref = input.ref?.trim() ?? "";
             if (!ref) {
-                // Numbered after the project's own REQ-n, skipping any taken.
+                // Numbered after the project's own REQ-n, in order, skipping any taken.
                 if (!next) next = Number(/^REQ-(\d+)$/.exec(await this.nextRef(projectId))![1]);
-                while (taken.has(`REQ-${next}`)) next++;
+                while (taken.has(`REQ-${next}`) || own.has(`REQ-${next}`)) next++;
                 ref = `REQ-${next++}`;
             }
             if (taken.has(refKey(ref))) {

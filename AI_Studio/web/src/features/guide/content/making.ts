@@ -35,7 +35,7 @@ export const making: Topic[] = [
             step("Type the address of your application. To steer the plan, fill in Focus (optional).", "Focus (optional)"),
             step("Start it, then read the plan. Choose Create the tests, or Discard the plan.", "Create the tests", "Discard the plan"),
         ],
-        goodToKnow: ["Pages behind a sign-in are planned only if Settings, Sign-in has the sign-in details.", "Stop exploring keeps the tests already created.", "Checks run now. Test cases are written, not run: choose Run."],
+        goodToKnow: ["Pages behind a sign-in are planned only if Settings, Sign-in has the sign-in details.", "Stop exploring keeps the tests already created.", "Checks run now. Test cases are written, not run: choose Run.", "Test Case Generation projects build a tree and write test cases."],
         open: { label: "Start a project", to: { place: "new-project" } },
         words: ["exploration", "plan", "test-account"],
         related: ["describe-a-test", "first-steps", "test-accounts"],
@@ -115,7 +115,7 @@ export const making: Topic[] = [
         what: "You click through your app and the platform writes down each step.",
         why: "You know the journey and want the steps written for you, with no AI.",
         steps: [
-            step("Open Test development and choose Record beside the project (code projects have none).", "Test development", "Record"),
+            step("Open the project, then add /record to the end of its address (code projects have none)."),
             step("Click through your application. Each step appears on the page."),
             step("Choose Add a check to turn a click into a check, such as this text is visible.", "Add a check"),
             step("Choose Save as a test.", "Save as a test"),

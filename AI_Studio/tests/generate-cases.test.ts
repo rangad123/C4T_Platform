@@ -108,8 +108,26 @@ describe("reading the AI's answer", () => {
             batch,
         );
         expect(out.map((c) => c.input)).toEqual([
-            expect.objectContaining({ title: "Verify sign in", priority: "high", automation: "automated", requirementId: "r1", area: "REQ-1 Sign in", steps: [{ action: "Open the page", expected: "The form shows" }] }),
+            // An Automated case is a title only: the steps it was given are dropped (they are written with its script).
+            expect.objectContaining({ title: "Verify sign in", priority: "high", automation: "automated", requirementId: "r1", area: "REQ-1 Sign in", steps: [] }),
             expect.objectContaining({ title: "Check the logo", priority: "medium", automation: "manual", steps: [] }),
+        ]);
+    });
+    it("writes steps only for Manual cases", () => {
+        const out = casesFromAnswer(
+            {
+                cases: [
+                    { requirement: "REQ-1", title: "Verify sign in", priority: "high", type: "automated", steps: [{ action: "Open the page", expected: "The form shows" }] },
+                    { requirement: "REQ-1", title: "Check the email arrives", priority: "high", type: "manual", steps: [{ action: "Open the inbox", expected: "The email is there" }] },
+                    { requirement: "REQ-1", title: "Unknown type is Manual", priority: "low", type: "sometimes", steps: [{ action: "Look", expected: "Seen" }] },
+                ],
+            },
+            batch,
+        );
+        expect(out.map((c) => [c.input.automation, c.input.steps])).toEqual([
+            ["automated", []],
+            ["manual", [{ action: "Open the inbox", expected: "The email is there" }]],
+            ["manual", [{ action: "Look", expected: "Seen" }]],
         ]);
     });
 });
@@ -146,10 +164,10 @@ describe("generating test cases", () => {
             { id: pay.id, ref: pay.ref, created: 2, failed: false },
             { id: basket.id, ref: basket.ref, created: 1, failed: false },
         ]);
-        expect(r.body.cases.map((c: any) => [c.ref, c.title, c.automation, c.priority, c.requirementId])).toEqual([
-            ["TC-001", "Verify paying by card", "automated", "high", pay.id],
-            ["TC-002", "Check the bank statement shows one charge", "manual", "critical", pay.id],
-            ["TC-003", "Verify the basket after signing in", "automated", "medium", basket.id],
+        expect(r.body.cases.map((c: any) => [c.ref, c.title, c.automation, c.priority, c.requirementId, c.steps.length])).toEqual([
+            ["TC-001", "Verify paying by card", "automated", "high", pay.id, 0],
+            ["TC-002", "Check the bank statement shows one charge", "manual", "critical", pay.id, 1],
+            ["TC-003", "Verify the basket after signing in", "automated", "medium", basket.id, 0],
         ]);
         // One call for the two requirements, with what each says and where the application is.
         expect(fake.seen).toHaveLength(1);
@@ -228,6 +246,59 @@ describe("generating test cases", () => {
     });
 });
 
+describe("every chosen requirement in one click (sheet #12)", () => {
+    const one = (r: { ref: string }) => ({ requirement: r.ref, title: `Verify ${r.ref}`, priority: "low", type: "automated", steps: [{ action: "Do it", expected: "It works" }] });
+
+    it("8 requirements: one the AI left out of its answer is asked again on its own, so all 8 get their cases", async () => {
+        const p = seedProject(withAi, "Eight shop", "https://eight.example.test");
+        const eight: Array<{ id: string; ref: string }> = [];
+        for (let i = 0; i < 8; i++) eight.push(await addReq(p, { title: `Rule ${i + 1}` }));
+        fake.reset();
+        // The first batch of five answers for four of them only (a long answer cut short): the fifth is asked on its own, then the second
+        // batch answers for its three.
+        fake.queue("*", answer(eight.slice(0, 4).map(one)), answer([one(eight[4]!)]), answer(eight.slice(5).map(one)));
+        const r = await call("POST", `${reqs(p)}/generate-cases`, { requirementIds: eight.map((x) => x.id) });
+        expect(r.status, JSON.stringify(r.body)).toBe(201);
+        expect(r.body).toMatchObject({ created: 8, failed: [], note: null });
+        expect(r.body.perRequirement.map((q: any) => [q.ref, q.created, q.failed])).toEqual(eight.map((x) => [x.ref, 1, false]));
+        expect(fake.seen).toHaveLength(3);
+        expect(JSON.stringify(fake.seen[1]!.body)).toContain(`Reference: ${eight[4]!.ref}`);
+        expect(JSON.stringify(fake.seen[1]!.body)).toContain("Requirements (1)");
+    });
+
+    it("a batch that fails is asked again one requirement at a time; one that fails again is named with why, the rest are saved", async () => {
+        const p = seedProject(withAi, "Retry shop", "https://retry.example.test");
+        const five: Array<{ id: string; ref: string }> = [];
+        for (let i = 0; i < 5; i++) five.push(await addReq(p, { title: `Step ${i + 1}` }));
+        fake.reset();
+        const refused = { status: 400, body: { error: { message: "Bad request: the prompt was refused", code: 400 } } };
+        fake.queue("*", refused, answer([one(five[0]!)]), answer([one(five[1]!)]), refused, answer([one(five[3]!)]), answer([one(five[4]!)]));
+        const r = await call("POST", `${reqs(p)}/generate-cases`, { requirementIds: five.map((x) => x.id) });
+        expect(r.status, JSON.stringify(r.body)).toBe(201);
+        expect(r.body.created).toBe(4);
+        expect(r.body.failed).toEqual([five[2]!.ref]);
+        const bad = r.body.perRequirement.find((q: any) => q.ref === five[2]!.ref);
+        expect(bad).toMatchObject({ created: 0, failed: true });
+        expect(bad.why).toMatch(/\S/);
+        expect(r.body.note).toContain(`The AI could not write test cases for ${five[2]!.ref}, also when asked again`);
+        expect(fake.seen).toHaveLength(6);
+    });
+
+    it("one the AI answers for with nothing usable, twice, is named so the page can offer it again", async () => {
+        const p = seedProject(withAi, "Empty answer shop", "https://empty.example.test");
+        const two = [await addReq(p, { title: "Has words" }), await addReq(p, { title: "Gets nothing" })];
+        fake.reset();
+        fake.queue("*", answer([one(two[0]!)]), answer([]));
+        const r = await call("POST", `${reqs(p)}/generate-cases`, { requirementIds: two.map((x) => x.id) });
+        expect(r.status, JSON.stringify(r.body)).toBe(201);
+        expect(r.body.perRequirement.map((q: any) => [q.ref, q.created, q.failed])).toEqual([
+            [two[0]!.ref, 1, false],
+            [two[1]!.ref, 0, true],
+        ]);
+        expect(r.body.note).toContain(`The AI wrote nothing usable for ${two[1]!.ref}, also when asked again.`);
+    });
+});
+
 describe("saving what the AI wrote, as the project is when the answer comes", () => {
     /** `n` cases a person added (the project's room is MAX_CASES minus what it has). */
     const fill = (s: Seed, n: number) =>
@@ -295,9 +366,12 @@ describe("saving what the AI wrote, as the project is when the answer comes", ()
         const p = seedProject(withAi, "Unusable shop", "https://unusable.example.test");
         const r0 = await addReq(p, { title: "Export invoices" });
         fake.reset();
-        fake.queue("*", answer([c("REQ-404", "About something not asked for"), { requirement: r0.ref, title: "", priority: "low", type: "manual", steps: [] }]));
+        // Asked once more on its own (sheet #12), with nothing usable again.
+        const unusable = answer([c("REQ-404", "About something not asked for"), { requirement: r0.ref, title: "", priority: "low", type: "manual", steps: [] }]);
+        fake.queue("*", unusable, unusable);
         const r = await call("POST", `${reqs(p)}/generate-cases`, { requirementIds: [r0.id] });
         expect(r.status).toBe(200);
+        expect(fake.seen).toHaveLength(2);
         expect(r.body).toMatchObject({ created: 0, failed: [], total: 0 });
         expect(r.body.note).toBe("The AI answered, but none of what it wrote could be used as a test case, so nothing was saved. Try again, or add a description or acceptance criteria to the requirements.");
     });

@@ -215,6 +215,7 @@ export function htmlToText(html: string): string {
     let markerOnly = false;
     let listDepth = 0;
     let cellIndex = 0;
+    let inCell = false;
     const breakLine = () => {
         if (line.trim() && !markerOnly) lines.push(line.trimEnd());
         if (!markerOnly) line = "";
@@ -245,12 +246,16 @@ export function htmlToText(html: string): string {
             breakLine();
             if (!closing) line = `${"#".repeat(Number(tag[1]))} `;
         } else if (tag === "p" || tag === "br" || tag === "div") {
-            breakLine();
+            // Word puts every table cell's text in paragraphs: inside a cell they are one line, or the row falls apart.
+            if (inCell) {
+                if (line.trim() && !/[\s|]$/.test(line)) line += " ";
+            } else breakLine();
         } else if (tag === "tr") {
             breakLine();
             cellIndex = 0;
-        } else if ((tag === "td" || tag === "th") && !closing) {
-            if (cellIndex++ > 0) line += " | ";
+        } else if (tag === "td" || tag === "th") {
+            inCell = !closing;
+            if (!closing && cellIndex++ > 0) line = `${line.trimEnd()} | `;
         }
     }
     markerOnly = false;

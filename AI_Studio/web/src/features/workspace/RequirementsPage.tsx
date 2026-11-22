@@ -45,7 +45,7 @@ function RequirementList({ id }: { id: string }) {
     const gen = useGenerateCases(id, useRoute().query.get("generate") === "1", async () => {
         announceProjectChanged(id);
         await list.reload();
-    });
+    }, (rid) => list.data?.requirements.find((r) => r.id === rid)?.ref ?? "A requirement");
     const choosing = canGenerate && gen.choosing;
     const [open, setOpen] = useState<"add" | "import" | null>(null);
     const [notice, setNotice] = useState<{ tone: "success" | "warning"; text: string } | null>(null);
@@ -245,7 +245,7 @@ function RequirementList({ id }: { id: string }) {
             {canGenerate && (
                 <GenerateCasesCard
                     projectId={id}
-                    outcome={<GenerateOutcome projectId={id} state={gen.state} onClose={gen.dismiss} />}
+                    outcome={<GenerateOutcome projectId={id} state={gen.state} onClose={gen.dismiss} onRetry={(ids) => void gen.retry(ids)} />}
                     state={gen.state}
                     choosing={gen.choosing}
                     chosenCount={gen.chosen.size}

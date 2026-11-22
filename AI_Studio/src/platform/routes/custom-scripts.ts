@@ -4,6 +4,7 @@ import { MAX_SCRIPT_BYTES } from "../../engine/custom/guard.js";
 import { RateLimiter } from "../agent-routing.js";
 import { CustomScripts, GuardRefusal } from "../custom-scripts.js";
 import { HttpError } from "../http-error.js";
+import { CASE_AGENT_PLAN_REFUSED, refuseTestsInCaseAgentProject } from "../case-agent.js";
 import type { RouteCtx } from "./types.js";
 
 /** Custom (hand-written) scripts, take-over, versions, helpers (Builder AQ). The contract is .scratch/briefs/CODE-API-SHAPES.md. */
@@ -96,6 +97,7 @@ export function registerCustomScriptRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/custom-tests", async (req, reply) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
+        await refuseTestsInCaseAgentProject(repo, id, CASE_AGENT_PLAN_REFUSED); // no test scripts in a Test Case Generation project
         const body = z.object({ title: z.string().trim().min(3).max(160), kind: z.enum(["web", "api"]), content: z.string().max(MAX_SCRIPT_BYTES), category: z.string().trim().min(1).max(80).optional() }).parse(req.body);
         try {
             const r = await svc.createTest({ projectId: id, title: body.title, kind: body.kind, content: body.content, ...(body.category ? { category: body.category } : {}) });

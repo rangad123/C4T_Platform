@@ -82,16 +82,15 @@ const axeClean = async () => {
 };
 
 describe("review and approval in the web app", () => {
-    it("lists the drafts waiting for review on the dashboard and in Test development", async () => {
+    it("lists the drafts waiting for review on the dashboard and in the project's Test scripts → Review (Test development is gone, Q2)", async () => {
         await page.goto(`${BASE}/#/dashboard`);
         const queue = page.getByRole("region", { name: "Drafts waiting for review" });
         await pwExpect(queue.getByRole("link", { name: /WEB-001 Home/ })).toBeVisible();
         await pwExpect(queue.getByRole("link", { name: /WEB-002 Cart/ })).toBeVisible();
         await pwExpect(queue.getByRole("link", { name: /WEB-003 Search/ })).toBeVisible();
         await pwExpect(page.getByTestId("planned-review-queue")).toHaveCount(0);
-        await page.goto(`${BASE}/#/develop`);
-        await pwExpect(page.getByRole("region", { name: "Drafts waiting for review" }).getByRole("link", { name: /WEB-001 Home/ })).toBeVisible();
-        await pwExpect(page.getByTestId("planned-review-queue")).toHaveCount(0);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts?section=review`);
+        await pwExpect(page.getByRole("list", { name: "Test scripts" }).getByRole("link", { name: /Home/ })).toContainText("Waiting for approval");
     });
 
     it("shows every script with its state, sync status and what runs", async () => {

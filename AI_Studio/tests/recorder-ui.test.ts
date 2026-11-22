@@ -356,7 +356,7 @@ async function settle(scheme: "light" | "dark") {
 // ── journeys ────────────────────────────────────────────────────────────────
 
 describe("Record a test: start", () => {
-    it("is reached from Test development's Record, and is not a way of making a test script any more", async () => {
+    it("opens from its address (Test development, which had the Record button, is out of the sidebar for now), and is not a way of making a test script any more", async () => {
         resetFake();
         await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.reload();
@@ -364,8 +364,7 @@ describe("Record a test: start", () => {
         await pwExpect(page.getByRole("menuitem", { name: "Build steps by hand", exact: true })).toBeVisible();
         await pwExpect(page.getByRole("menuitem", { name: "Record it in a browser" })).toHaveCount(0);
         await page.keyboard.press("Escape");
-        await page.goto(`${BASE}/#/develop`);
-        await page.locator("li", { hasText: "Atlas shop" }).getByRole("link", { name: "Record", exact: true }).click();
+        await page.goto(`${BASE}/#/projects/${projectId}/record`);
         await pwExpect(page.getByRole("heading", { name: "Record a test", exact: true })).toBeVisible();
         await pwExpect(page.getByText("We open a browser window on the computer that runs this platform.")).toBeVisible();
         expect(page.url()).toContain(`/#/projects/${projectId}/record`);

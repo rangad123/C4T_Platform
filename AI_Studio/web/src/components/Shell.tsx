@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, FolderKanban, LayoutDashboard, Library, Menu, Plug, Settings, Sparkles, X } from "lucide-react";
+import { Bot, ChevronRight, FolderKanban, LayoutDashboard, Library, Menu, Plug, Settings, X } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import crowd4testMark from "../assets/crowd4test-mark.png";
 import { useEmbedded } from "../lib/embedded";
@@ -71,7 +71,8 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
                     {item(routes.home, "Projects", FolderKanban, "projects", "nav-projects")}
                     {/* Agents: read-level like Projects, so everyone who can see a project sees them. */}
                     {item(routes.agents, "Agents", Bot, "agents", "nav-agents")}
-                    {(can("ai_studio.tests.write") || can("ai_studio.tests.generate")) && item(routes.develop, "Test development", Sparkles, "develop", "nav-develop")}
+                    {/* Founder review 2026-11-19 (Q2): Test development is out of the sidebar for now; it repeated each project's Test
+                        scripts. The page stays in features/workspace/GlobalPages.tsx (TestDevelopmentPage), and `#/develop` opens Projects. */}
                     {item(routes.libraries, "Reusable libraries", Library, "libraries", "nav-libraries")}
                     {(can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && (
                         <>

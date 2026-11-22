@@ -11,6 +11,7 @@ import { isAppUri } from "../engine/desktop/target.js";
 import type { Platform } from "./bootstrap.js";
 import { deliver, type DeliveryOptions } from "./alerts.js";
 import { HttpError } from "./http-error.js";
+import { refuseTestsInCaseAgentProject } from "./case-agent.js";
 import { assertRunTarget } from "./agent-services.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import { assertC4tOwnerMayRun } from "./c4t-service.js";
@@ -164,6 +165,7 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
             if (input.selection === "focused" && !input.pages?.length && !input.endpoints?.length) throw new HttpError(400, "A focused run needs the changed pages or endpoints.");
             // The run is the token maker's, with nobody signed in: a Crowd4Test maker is asked about first (c4t-service.ts).
             await assertC4tOwnerMayRun(p, token.createdBy);
+            await refuseTestsInCaseAgentProject(repo, token.projectId); // a Test Case Generation project runs no tests (case-agent.ts)
 
             const app = repo.getLatestApplicationPublic(token.projectId);
             if (!app) throw new HttpError(409, "This project has no application yet. Run an analysis or import tests first.");

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { EXTRA_VARIANT_IDS, normalizeVariants, publicVariants, variantEligibility, detectBrowsers, variantAvailability, type ExtraVariantId } from "../../engine/validation/variants.js";
 import { HttpError } from "../http-error.js";
+import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { DEFAULT_JOB_OPTIONS, type Repo, type TestRow } from "../repo.js";
 import { refuseUnlessRunsStart } from "../suite-run.js";
 import { compatibilityFor, compatForProject, type CompatBrief } from "../variants-store.js";
@@ -44,6 +45,7 @@ export function registerVariantRoutes(ctx: RouteCtx): void {
 
     /** Queue one compatibility job. `candidates` are the tests the user asked about; ineligible ones are reported, not silently dropped. */
     async function queue(projectId: string, candidates: TestRow[], variants: ExtraVariantId[]) {
+        await refuseTestsInCaseAgentProject(repo, projectId); // a Test Case Generation project runs no tests (case-agent.ts)
         refuseUnlessRunsStart(ctx.p); // tests switched off on this server: nothing is queued
         const eligible: TestRow[] = [];
         const skipped: Array<{ id: string; testId: string; reason: string }> = [];

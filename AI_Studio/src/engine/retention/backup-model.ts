@@ -138,6 +138,11 @@ export const ManualCaseEntrySchema = z.object({
     number: z.number().int().positive().max(1_000_000).optional(),
     /** The reference (REQ-12) of the requirement record the case comes from. */
     requirementRef: z.string().min(1).max(100).optional(),
+    /** Slot 69 (founder 2026-11-19): what a case imported from the test case workbook keeps. Absent in older backups. */
+    preconditions: z.array(z.string().max(500)).max(20).default([]),
+    expected: z.string().max(2000).default(""),
+    page: z.string().max(300).default(""),
+    sourceRef: z.string().max(64).default(""),
 });
 export type ManualCaseEntry = z.infer<typeof ManualCaseEntrySchema>;
 

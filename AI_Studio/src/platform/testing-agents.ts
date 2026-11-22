@@ -164,13 +164,14 @@ export const TESTING_AGENTS: readonly TestingAgent[] = [
     {
         id: "test-generation",
         name: "Test Case Generation Agent",
-        summary: "Explores the application, plans the journeys worth testing, and writes a test case with steps for each.",
-        description: "The AI goes through the application like a visitor, works out its main journeys, plans test cases for them (from a requirements document too, when you give one) and writes each one with plain-English steps and the code that can run them. It does not run the test cases: you run them when you choose. It also tries search forms with harmless unusual input. Each test case is a draft until it is reviewed.",
-        checks: ["The main journeys through the application", "Requirements from a document you give", "Search forms with unusual input", "Android: the app's screens and journeys"],
+        // Founder 2026-11-19: one job, one outcome. It writes test cases (plain English, no code) and stops; nothing is run here.
+        summary: "Explores the application or reads your requirements, builds a tree of its pages and writes test cases for them.",
+        description: "The AI goes through the application like a visitor, or reads a requirements document you give, and builds a tree of the application's pages. It then writes test cases in plain English for the main journeys through them. The outcome is that tree and its test cases: you can download them and import them into a code project to make test scripts there. Each new exploration adds to the same tree.",
+        checks: ["The application's pages, as a tree", "Test cases for the main journeys through the application", "Requirements from a document you give", "Android: the app's screens and journeys"],
         platforms: ["web", "android"],
         needs: [EXPLORE_NEEDS, "The address of the application, or the Android app. Test accounts if the journeys need signing in."],
         available: true,
-        turnsOn: ["functionalTests", "inputChecks"],
+        turnsOn: ["functionalTests"],
         allows: [],
     },
 ];
@@ -188,8 +189,12 @@ export const AGENTS_NEED_AGENT_MODE = "Testing agents are chosen for projects te
 export const unknownAgent = (id: string) => `"${id.slice(0, 40)}" is not a testing agent.`;
 export const agentNotAvailable = (a: TestingAgent) => `The ${a.name} is not available yet, so it cannot be chosen.`;
 export const agentNotForPlatform = (a: TestingAgent, platforms: readonly string[]) => `The ${a.name} does not work on ${platforms.join(" or ")} projects.`;
+const ownersOf = (k: AgentSwitch) => TESTING_AGENTS.filter((a) => a.turnsOn.includes(k) || a.allows.includes(k)).map((a) => a.name);
+/** Form input checks have had no agent since 2026-11-19 (the Test Case Generation Agent writes test cases only). */
+const NO_OWNER = (k: AgentSwitch) => `${SWITCH_WORDS[k]} are not part of any testing agent, so they cannot be turned on.`;
 export const switchNeedsAgent = (k: AgentSwitch) => {
-    const owners = TESTING_AGENTS.filter((a) => a.turnsOn.includes(k) || a.allows.includes(k)).map((a) => a.name);
+    const owners = ownersOf(k);
+    if (!owners.length) return NO_OWNER(k);
     return `${SWITCH_WORDS[k]} come with the ${owners.join(" or the ")}, which this project does not use. Add it in the project's Settings → General.`;
 };
 
@@ -353,8 +358,15 @@ export function narrowToChoice(asked: AskedSwitches, agents: readonly AgentId[],
 }
 
 /** The job event that names what was left out because its agent is no longer chosen. */
-export const droppedChecksNote = (dropped: readonly AgentSwitch[]): string =>
-    `Left out because this project's testing agents do not include the agent that runs them: ${dropped.map((k) => SWITCH_WORDS[k]).join(", ")}. Add the agent again in the project's Settings → General to bring them back.`;
+export const droppedChecksNote = (dropped: readonly AgentSwitch[]): string => {
+    const owned = dropped.filter((k) => ownersOf(k).length);
+    const ownerless = dropped.filter((k) => !ownersOf(k).length);
+    const words = (ks: AgentSwitch[]) => ks.map((k) => SWITCH_WORDS[k]).join(", ");
+    return [
+        owned.length ? `Left out because this project's testing agents do not include the agent that runs them: ${words(owned)}. Add the agent again in the project's Settings → General to bring them back.` : "",
+        ownerless.length ? `Left out because no testing agent runs them: ${words(ownerless)}.` : "",
+    ].filter(Boolean).join(" ");
+};
 
 /** An exploration's options under the project's current choice, narrowed (see narrowToChoice); unchanged when none is saved or the project is not in agent mode. */
 export async function narrowedByChoice(store: TestingAgentStore, row: Row, options: JobOptions, asked: AskedSwitches, opts: { followChoice?: boolean } = {}): Promise<{ options: JobOptions; dropped: AgentSwitch[] }> {

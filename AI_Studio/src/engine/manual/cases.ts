@@ -12,7 +12,8 @@ export type CasePriority = (typeof PRIORITIES)[number];
 export const CASE_AUTOMATION = ["automated", "manual"] as const;
 export type CaseAutomation = (typeof CASE_AUTOMATION)[number];
 
-export const MAX_CASES = 500;
+/** Per project (owner 2026-11-20, FX15). */
+export const MAX_CASES = 5000;
 export const MAX_STEPS = 30;
 export const MAX_TITLE = 160;
 export const MAX_AREA = 80;
@@ -20,6 +21,11 @@ export const MAX_STEP_TEXT = 500;
 export const MAX_REQUIREMENT = 500;
 export const MAX_LINKED = 50;
 export const DEFAULT_AREA = "General";
+/** Slot 69 (founder 2026-11-19, SPEC R6): what a case imported from the test case workbook keeps. */
+export const MAX_PRECONDITIONS = 20;
+export const MAX_EXPECTED = 2000;
+export const MAX_PAGE = 300;
+export const MAX_SOURCE_REF = 64;
 
 /** Control characters other than newline and tab never belong in a title or a step. */
 // eslint-disable-next-line no-control-regex
@@ -56,10 +62,26 @@ export const ManualCaseInputSchema = z.object({
     automation: z.enum(CASE_AUTOMATION, { error: () => "The type is automated or manual" }).optional(),
     /** The requirement record the case comes from (Requirements place). Absent keeps it on a change; null clears it. */
     requirementId: z.string().min(1).max(64).nullable().optional(),
+    /** What must be true before the case starts, one per entry. Absent: a new case has none, a changed case keeps its own. */
+    preconditions: z
+        .array(optionalText(MAX_STEP_TEXT, "A precondition"))
+        .max(MAX_PRECONDITIONS, `A case can have at most ${MAX_PRECONDITIONS} preconditions`)
+        .transform((xs) => xs.filter(Boolean))
+        .optional(),
+    /** The case's expected result as a whole (one or more lines). Absent: empty on a new case, kept on a change. */
+    expected: optionalText(MAX_EXPECTED, "The expected result").optional(),
+    /** The page the case is about (its path, as the workbook's Page column). Absent: empty on a new case, kept on a change. */
+    page: optionalText(MAX_PAGE, "The page").optional(),
+    /** Where the case came from: the workbook's ID (TC-007) for an imported case. Absent: empty on a new case, kept on a change. */
+    sourceRef: optionalText(MAX_SOURCE_REF, "The source ID").optional(),
 });
 export type ManualCaseInput = z.infer<typeof ManualCaseInputSchema>;
 
-export interface ManualCase extends Omit<ManualCaseInput, "automation" | "requirementId"> {
+export interface ManualCase extends Omit<ManualCaseInput, "automation" | "requirementId" | "preconditions" | "expected" | "page" | "sourceRef"> {
+    preconditions: string[];
+    expected: string;
+    page: string;
+    sourceRef: string;
     id: string;
     /** The case's number in its project (1, 2, ...), shown as `ref`. */
     number: number;

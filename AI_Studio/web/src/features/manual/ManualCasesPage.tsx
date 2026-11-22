@@ -10,16 +10,30 @@ import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, routes, type CasesSection } from "../../lib/router";
 import { useHere } from "../auth/project-access";
 import type { RequirementLink, RequirementList } from "../requirements/requirements";
-import { AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
+import { AUTOMATED_NO_STEPS, AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority, importSummary } from "./manual";
 import "./manual.css";
 import { GenerateScriptsCard } from "../authoring/GenerateScriptsCard";
 
 
-const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement: "", steps: [{ action: "", expected: "" }], linkedTestIds: [], automation: "manual", requirementId: null };
+const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement: "", steps: [{ action: "", expected: "" }], linkedTestIds: [], automation: "manual", requirementId: null, preconditions: [], expected: "", page: "" };
+/** Import takes the test case workbook (founder 2026-11-19, Q3); CSV was removed (owner 2026-11-20). */
+const IMPORT_TIP = "The test case workbook (.xlsx) that Export here or a Test Case Generation project downloads: its Test cases sheet is read.";
+
+/** A file's bytes as base64 text, the way the import takes a workbook. */
+const base64Of = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+        reader.onerror = () => reject(new Error("The file could not be read. Choose it again."));
+        reader.readAsDataURL(file);
+    });
+
 const FILTERS: CasesSection[] = ["all", "automated", "manual"];
+/** Rows drawn before "Show more", as on Test scripts: a project can hold 5,000 cases (FX15). */
+const PAGE_SIZE = 50;
 const FILTER_WORDS: Record<CasesSection, string> = { all: "All", automated: "Automated", manual: "Manual" };
 
-const inputOf = (c: ManualCase): CaseInput => ({ title: c.title, area: c.area, priority: c.priority, requirement: c.requirement, steps: c.steps.length ? c.steps : [{ action: "", expected: "" }], linkedTestIds: c.linkedTestIds, automation: c.automation, requirementId: c.requirementId });
+const inputOf = (c: ManualCase): CaseInput => ({ title: c.title, area: c.area, priority: c.priority, requirement: c.requirement, steps: c.steps.length ? c.steps : [{ action: "", expected: "" }], linkedTestIds: c.linkedTestIds, automation: c.automation, requirementId: c.requirementId, preconditions: c.preconditions ?? [], expected: c.expected ?? "", page: c.page ?? "" });
 
 /**
  * The Test cases place: the project's written test cases, one list. A test case is what a tester reads and follows (title, steps
@@ -43,11 +57,12 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     // Having the AI write cases also needs the AI's permission (the server asks for both).
     const canGenerate = canWrite && can("ai_studio.tests.generate");
     const [adding, setAdding] = useState(false);
-    const [notice, setNotice] = useState<{ tone: "success" | "danger" | "warning"; text: string; detail?: string[] } | null>(null);
+    const [notice, setNotice] = useState<{ tone: "success" | "danger" | "warning"; title?: string; text: string; detail?: string[] } | null>(null);
     const [confirming, setConfirming] = useState(false);
     const [q, setQ] = useState("");
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const fileRef = useRef<HTMLInputElement>(null);
+    const [limit, setLimit] = useState(PAGE_SIZE);
 
     const cases = list.data?.cases ?? [];
     const reqById = useMemo(() => new Map((reqs.data?.requirements ?? []).map((r) => [r.id, r])), [reqs.data]);
@@ -62,7 +77,8 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     };
     const shown = cases.filter((c) => (filter === "all" || c.automation === filter) && (!needle || `${c.ref}\n${c.title}\n${c.area}\n${c.requirement}\n${requirementRefs(c).map((r) => r.ref).join(" ")}`.toLowerCase().includes(needle)));
     const opened = open ? cases.find((c) => c.id === open) : undefined;
-    const allShownChosen = shown.length > 0 && shown.every((c) => selected.has(c.id));
+    const rows = shown.slice(0, limit);
+    const allShownChosen = rows.length > 0 && rows.every((c) => selected.has(c.id));
     const scriptOf = (c: ManualCase) => c.linkedTestIds.map((t) => testById.get(t)).find(Boolean);
 
     const close = () => go(routes.cases(id, filter));
@@ -91,26 +107,23 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     async function importFile(file: File) {
         setNotice(null);
         try {
-            const content = await file.text();
-            const format = /\.csv$/i.test(file.name) ? "csv" : /\.json$/i.test(file.name) ? "json" : undefined;
-            const r = await api<ImportResult>(`/projects/${id}/manual-cases/import`, { method: "POST", body: { content, ...(format ? { format } : {}) } });
-            const detail = r.skipped.map((s) => `Row ${s.row}: ${s.reason}`);
-            setNotice({
-                tone: r.skipped.length ? "warning" : "success",
-                text: `Imported ${plural(r.created, "test case")}.${r.duplicates ? ` ${plural(r.duplicates, "test case")} already existed and ${r.duplicates === 1 ? "was" : "were"} left out.` : ""}${r.skipped.length ? ` ${plural(r.skipped.length, "row")} could not be imported.` : ""}`,
-                detail,
-            });
+            // The workbook is the only import here (owner, F3 L2); any file goes as one, and the server refuses what is not. JSON stays in the API.
+            const r = await api<ImportResult>(`/projects/${id}/manual-cases/import`, { method: "POST", body: { format: "xlsx", content: await base64Of(file) } });
+            setNotice(importSummary(r));
             await reloadCounted();
         } catch (e) {
-            setNotice({ tone: "danger", text: `Nothing was imported. ${describeApiError(e)}` });
+            // The server's sentence, as it is.
+            const why = describeApiError(e);
+            setNotice({ tone: "danger", title: /Nothing was imported/.test(why) ? undefined : "Nothing was imported", text: why });
         } finally {
             if (fileRef.current) fileRef.current.value = "";
         }
     }
 
-    async function exportAs(format: "csv" | "json") {
+    // The test case workbook (FX16); JSON export stays in the API, for backups and integrations.
+    async function exportWorkbook() {
         try {
-            await downloadFrom(`/projects/${id}/manual-cases/export?format=${format}`, `test-cases.${format}`);
+            await downloadFrom(`/projects/${id}/manual-cases/export?format=xlsx`, "test-cases.xlsx");
         } catch (e) {
             setNotice({ tone: "danger", text: `Download failed. ${describeApiError(e)}` });
         }
@@ -128,16 +141,16 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             actions={
                 canWrite ? (
                     <>
-                        <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden aria-label="Choose a file to import" onChange={(e) => e.target.files?.[0] && void importFile(e.target.files[0])} />
-                        <Button icon={Upload} onClick={() => fileRef.current?.click()} tip="A CSV file with the columns title, area, priority and steps, or a JSON file this page exported.">
+                        <input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden aria-label="Choose a file to import" onChange={(e) => e.target.files?.[0] && void importFile(e.target.files[0])} />
+                        <Button icon={Upload} onClick={() => fileRef.current?.click()} tip={IMPORT_TIP}>
                             Import
                         </Button>
-                        <Menu label="Add test case (manual)" icon={Plus} variant="primary">
+                        <Menu label="Add test case" icon={Plus} variant="primary">
                             {(closeMenu) => (
                                 <>
                                     <MenuItem
                                         icon={PenLine}
-                                        description="Write its title, steps and what should happen"
+                                        description="Write its title, its type and, for a Manual case, its steps"
                                         onClick={() => {
                                             closeMenu();
                                             setAdding(true);
@@ -161,7 +174,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                             Import
                         </Button>
                         <Button variant="primary" icon={Plus} disabled tip={here.why("ai_studio.tests.write")}>
-                            Add test case (manual)
+                            Add test case
                         </Button>
                     </>
                 ) : undefined
@@ -178,7 +191,9 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             )}
             {notice && (
                 <div className="stack-sm">
-                    <Callout tone={notice.tone}>{notice.text}</Callout>
+                    <Callout tone={notice.tone} title={notice.title}>
+                        {notice.text}
+                    </Callout>
                     {notice.detail && notice.detail.length > 0 && (
                         <ul className="rel-reasons" aria-label="Rows that were not imported">
                             {notice.detail.slice(0, 10).map((d) => (
@@ -307,18 +322,9 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                         <input className="input" type="search" placeholder="Search test cases" aria-label="Search test cases" value={q} onChange={(e) => setQ(e.target.value)} />
                     </div>
                     {cases.length > 0 && can("ai_studio.reports.export") && (
-                        <Menu label="Export" icon={Download}>
-                            {(closeMenu) => (
-                                <>
-                                    <MenuItem hint="Opens in a spreadsheet" onClick={() => (closeMenu(), void exportAs("csv"))}>
-                                        Export as CSV
-                                    </MenuItem>
-                                    <MenuItem hint="Keeps the type and linked scripts" onClick={() => (closeMenu(), void exportAs("json"))}>
-                                        Export as JSON
-                                    </MenuItem>
-                                </>
-                            )}
-                        </Menu>
+                        <Button icon={Download} onClick={() => void exportWorkbook()} tip="Downloads every test case as the test case workbook (.xlsx), to keep, share or import into another project.">
+                            Export
+                        </Button>
                     )}
                 </div>
             </div>
@@ -337,7 +343,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                                 canWrite ? (
                                     <>
                                         <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>
-                                            Add test case (manual)
+                                            Add test case
                                         </Button>
                                         {canGenerate && (
                                             <Button icon={Sparkles} onClick={() => go(`${routes.requirements(id)}?generate=1`)}>
@@ -368,7 +374,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                         <thead>
                             <tr>
                                 <th scope="col" className="tc-check">
-                                    <input type="checkbox" aria-label="Choose every test case shown" checked={allShownChosen} onChange={(e) => setSelected(e.target.checked ? new Set([...selected, ...shown.map((c) => c.id)]) : new Set([...selected].filter((x) => !shown.some((c) => c.id === x))))} />
+                                    <input type="checkbox" aria-label="Choose every test case shown" checked={allShownChosen} onChange={(e) => setSelected(e.target.checked ? new Set([...selected, ...rows.map((c) => c.id)]) : new Set([...selected].filter((x) => !rows.some((c) => c.id === x))))} />
                                 </th>
                                 <th scope="col">ID</th>
                                 <th scope="col">Test case</th>
@@ -381,7 +387,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                             </tr>
                         </thead>
                         <tbody>
-                            {shown.map((c) => {
+                            {rows.map((c) => {
                                 const refs = requirementRefs(c);
                                 const script = scriptOf(c);
                                 return (
@@ -393,7 +399,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                                         <td className="tc-title">
                                             <a href={routes.testCase(id, c.id)}>{c.title}</a>
                                             <span className="t-meta">
-                                                {PRIORITY_LABEL[c.priority]} priority · {plural(c.steps.length, "step")}
+                                                {PRIORITY_LABEL[c.priority]} priority{c.automation === "manual" && ` · ${plural(c.steps.length, "step")}`}
                                             </span>
                                         </td>
                                         <td>
@@ -437,6 +443,16 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                             })}
                         </tbody>
                     </table>
+                    {shown.length > limit && (
+                        <div className="more-row">
+                            <Button size="sm" onClick={() => setLimit((l) => l + PAGE_SIZE)}>
+                                Show {Math.min(PAGE_SIZE, shown.length - limit)} more
+                            </Button>
+                            <span className="t-meta">
+                                Showing {limit} of {shown.length}
+                            </span>
+                        </div>
+                    )}
                 </div>
             )}
             {selected.size > 0 && (
@@ -452,11 +468,14 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     );
 }
 
-/** One case, to read (people who may not change it). */
+/** One case, to read (people who may not change it). Steps belong to Manual cases only; an Automated case's are written with its script. */
 function CaseView({ c }: { c: ManualCase }) {
     return (
         <div className="stack-sm">
-            {c.steps.length === 0 ? (
+            <CaseDetails c={c} />
+            {c.automation === "automated" ? (
+                <p className="t-secondary">{AUTOMATED_NO_STEPS}</p>
+            ) : c.steps.length === 0 ? (
                 <p className="t-secondary">No steps written.</p>
             ) : (
                 <ol className="tc-steps-view">
@@ -470,6 +489,40 @@ function CaseView({ c }: { c: ManualCase }) {
             )}
             {c.requirement && <p className="t-meta">Source: {c.requirement}</p>}
         </div>
+    );
+}
+
+/** The page, preconditions and expected result of a case (the workbook's columns), when it has them. */
+function CaseDetails({ c }: { c: Pick<ManualCase, "page" | "preconditions" | "expected"> }) {
+    const pre = c.preconditions ?? [];
+    if (!c.page && !pre.length && !c.expected) return null;
+    return (
+        <dl className="tc-details" data-testid="case-details">
+            {c.page && (
+                <>
+                    <dt>Page</dt>
+                    <dd className="mono">{c.page}</dd>
+                </>
+            )}
+            {pre.length > 0 && (
+                <>
+                    <dt>Preconditions</dt>
+                    <dd>
+                        <ul>
+                            {pre.map((p, i) => (
+                                <li key={i}>{p}</li>
+                            ))}
+                        </ul>
+                    </dd>
+                </>
+            )}
+            {c.expected && (
+                <>
+                    <dt>Expected result</dt>
+                    <dd className="tc-expected">{c.expected}</dd>
+                </>
+            )}
+        </dl>
     );
 }
 
@@ -498,6 +551,8 @@ function CaseForm({
     onSaved: (c: ManualCase) => void | Promise<void>;
 }) {
     const [f, setF] = useState<CaseInput>(initial);
+    // Preconditions are edited one per line; kept as typed until saved, so a new empty line stays while typing.
+    const [preText, setPreText] = useState(initial.preconditions.join("\n"));
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
@@ -507,12 +562,15 @@ function CaseForm({
     async function submit(e: React.FormEvent) {
         e.preventDefault();
         if (!f.title.trim()) return setError("Give the test case a title, like “Verify sign in with a valid password”.");
-        const steps = f.steps.filter((s) => s.action.trim() || s.expected.trim());
-        if (steps.some((s) => !s.action.trim())) return setError("Every step needs an action. Fill it in or remove the step.");
+        const written = (list: CaseInput["steps"]) => list.filter((s) => s.action.trim() || s.expected.trim());
+        // Steps are written for Manual cases only. A new Automated case has none; one saved with steps before keeps them, unchanged.
+        const steps = f.automation === "manual" ? written(f.steps) : caseId ? written(initial.steps) : [];
+        if (f.automation === "manual" && steps.some((s) => !s.action.trim())) return setError("Every step needs an action. Fill it in or remove the step.");
         setBusy(true);
         setError("");
         try {
-            const body = { ...f, title: f.title.trim(), area: f.area.trim(), requirement: f.requirement.trim(), steps };
+            const preconditions = preText.split("\n").map((l) => l.trim()).filter(Boolean);
+            const body = { ...f, title: f.title.trim(), area: f.area.trim(), requirement: f.requirement.trim(), steps, preconditions, expected: f.expected.trim(), page: f.page.trim() };
             const saved = await api<ManualCase>(caseId ? `/projects/${projectId}/manual-cases/${caseId}` : `/projects/${projectId}/manual-cases`, { method: caseId ? "PUT" : "POST", body });
             await onSaved(saved);
         } catch (err) {
@@ -573,31 +631,45 @@ function CaseForm({
                     </div>
                 </div>
             </div>
-            <fieldset className="mc-steps">
-                <legend className="label">Steps</legend>
-                {f.steps.map((s, i) => (
-                    <div className="mc-step" key={i}>
-                        <div className="field">
-                            <label htmlFor={`mc-action-${i}`}>Step {i + 1}, what to do</label>
-                            <input id={`mc-action-${i}`} className="input" value={s.action} maxLength={500} onChange={(e) => setStep(i, "action", e.target.value)} />
-                        </div>
-                        <div className="field">
-                            <label htmlFor={`mc-expected-${i}`}>Step {i + 1}, what should happen</label>
-                            <input id={`mc-expected-${i}`} className="input" value={s.expected} maxLength={500} onChange={(e) => setStep(i, "expected", e.target.value)} />
-                        </div>
-                        <Button type="button" size="sm" variant="ghost" icon={Trash2} aria-label={`Remove step ${i + 1}`} onClick={() => set("steps", f.steps.filter((_, j) => j !== i))}>
-                            Remove
-                        </Button>
-                    </div>
-                ))}
-                <div>
-                    <Button type="button" size="sm" icon={Plus} disabled={f.steps.length >= MAX_STEPS} onClick={() => set("steps", [...f.steps, { action: "", expected: "" }])}>
-                        Add step
-                    </Button>
-                    {f.steps.length >= MAX_STEPS && <span className="hint"> A test case can have {MAX_STEPS} steps at most.</span>}
+            <div className="grid-2">
+                <div className="field">
+                    <label htmlFor="mc-preconditions">Preconditions (optional)</label>
+                    <textarea id="mc-preconditions" className="input" rows={2} value={preText} placeholder="What must be true first, one per line" onChange={(e) => setPreText(e.target.value)} />
                 </div>
-            </fieldset>
-            <Disclosure label="More: area, source, linked test scripts" defaultOpen={Boolean(initial.requirement) && !initial.requirementId}>
+                <div className="field">
+                    <label htmlFor="mc-expected">Expected result (optional)</label>
+                    <textarea id="mc-expected" className="input" rows={2} value={f.expected} maxLength={2000} placeholder="What should be true at the end" onChange={(e) => set("expected", e.target.value)} />
+                </div>
+            </div>
+            {f.automation === "automated" ? (
+                <p className="hint">{AUTOMATED_NO_STEPS}</p>
+            ) : (
+                <fieldset className="mc-steps">
+                    <legend className="label">Steps</legend>
+                    {f.steps.map((s, i) => (
+                        <div className="mc-step" key={i}>
+                            <div className="field">
+                                <label htmlFor={`mc-action-${i}`}>Step {i + 1}, what to do</label>
+                                <input id={`mc-action-${i}`} className="input" value={s.action} maxLength={500} onChange={(e) => setStep(i, "action", e.target.value)} />
+                            </div>
+                            <div className="field">
+                                <label htmlFor={`mc-expected-${i}`}>Step {i + 1}, what should happen</label>
+                                <input id={`mc-expected-${i}`} className="input" value={s.expected} maxLength={500} onChange={(e) => setStep(i, "expected", e.target.value)} />
+                            </div>
+                            <Button type="button" size="sm" variant="ghost" icon={Trash2} aria-label={`Remove step ${i + 1}`} onClick={() => set("steps", f.steps.filter((_, j) => j !== i))}>
+                                Remove
+                            </Button>
+                        </div>
+                    ))}
+                    <div>
+                        <Button type="button" size="sm" icon={Plus} disabled={f.steps.length >= MAX_STEPS} onClick={() => set("steps", [...f.steps, { action: "", expected: "" }])}>
+                            Add step
+                        </Button>
+                        {f.steps.length >= MAX_STEPS && <span className="hint"> A test case can have {MAX_STEPS} steps at most.</span>}
+                    </div>
+                </fieldset>
+            )}
+            <Disclosure label="More: area, page, source, linked test scripts" defaultOpen={(Boolean(initial.requirement) && !initial.requirementId) || Boolean(initial.page)}>
                 <div className="stack-sm">
                     <div className="grid-2">
                         <div className="field">
@@ -609,6 +681,11 @@ function CaseForm({
                                 ))}
                             </datalist>
                             <span className="hint">A release groups its checks by area.</span>
+                        </div>
+                        <div className="field">
+                            <label htmlFor="mc-page">Page (optional)</label>
+                            <input id="mc-page" className="input mono" value={f.page} maxLength={300} placeholder="/checkout" onChange={(e) => set("page", e.target.value)} />
+                            <span className="hint">Where the test script starts.</span>
                         </div>
                         <div className="field">
                             <label htmlFor="mc-req">Source (optional)</label>

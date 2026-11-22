@@ -1,6 +1,6 @@
 import { KeyRound, LogIn } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ApiError, api, crowd4testSignIn, crowd4testSignInStuck, forgetCrowd4TestTrips, getKey, renewCrowd4Test, setKey } from "../../api";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ApiError, api, crowd4testSignIn, crowd4testSignInHref, crowd4testSignInStuck, forgetCrowd4TestTrips, getKey, onSignInEnded, renewCrowd4Test, sessionHasEnded, setKey, setSessionEnded } from "../../api";
 import { Button, Callout, Disclosure, EmptyState, LinkButton } from "../../components/ui";
 import { useRoute } from "../../lib/router";
 import { AuthContext, getAuthState, type AuthState } from "./auth";
@@ -15,6 +15,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const [state, setState] = useState<AuthState | null>(null);
     const [problem, setProblem] = useState<"unreachable" | null>(null);
     const [keyRefused, setKeyRefused] = useState(false);
+    /** Signed in a moment ago, signed out on Crowd4Test now: said over the page, which stays as it is (an unsaved form included). */
+    const [ended, setEnded] = useState<NonNullable<AuthState["crowd4test"]> | null>(null);
+    const signedIn = useRef(false);
 
     const check = useCallback(async (fromKeyForm = false) => {
         try {
@@ -25,16 +28,51 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 s = await getAuthState();
             }
             setProblem(null);
+            // Already in and now signed out on Crowd4Test: keep the page (and what is typed in it) and say so, rather than replace it.
+            // Until the person is back, requests are not renewed and polls wait (api.ts), so nothing asks crowd4test.com over and over.
+            if (!s.me && signedIn.current && s.crowd4test && (s.crowd4test.status === "none" || s.crowd4test.status === "expired")) {
+                setEnded(s.crowd4test);
+                setSessionEnded(true);
+                return;
+            }
+            // Already in and Crowd4Test cannot be reached for a moment: keep the page as it is, as when this server cannot be reached.
+            // A "refused" answer (the account was suspended or lost AI Studio) does replace the page, deliberately: that is final.
+            if (!s.me && signedIn.current && s.crowd4test?.status === "unreachable") return;
             if (s.me) forgetCrowd4TestTrips();
+            signedIn.current = Boolean(s.me);
+            setEnded(null);
+            setSessionEnded(false);
             setState(s);
             // A key was entered but the server did not take it (a public route ignores a wrong key, so "me" stays empty).
             setKeyRefused(fromKeyForm && !s.me);
         } catch {
+            // Already in: the server restarting (a deploy) is not a reason to replace the page; the next check tells.
+            if (signedIn.current) return;
             // Not reachable, or an answer the page cannot use: either way it cannot go on, and Try again asks once more.
             setProblem("unreachable");
         }
     }, []);
     useEffect(() => void check(), [check]);
+
+    // One refused request is not the end of a session: ask once more (renewing on the way) before saying anything.
+    const confirming = useRef<Promise<void> | null>(null);
+    const confirm = useCallback(() => {
+        confirming.current ??= check().finally(() => (confirming.current = null));
+        return confirming.current;
+    }, [check]);
+    // Once the session is known to have ended, only the person brings the next check: looking at the tab again, or "I have signed in".
+    useEffect(() => onSignInEnded(() => void (sessionHasEnded() || confirm())), [confirm]);
+    // Signed in again in another tab: carry on here as soon as this tab is looked at again.
+    useEffect(() => {
+        if (!ended) return;
+        const back = () => document.visibilityState === "visible" && void confirm();
+        window.addEventListener("focus", back);
+        document.addEventListener("visibilitychange", back);
+        return () => {
+            window.removeEventListener("focus", back);
+            document.removeEventListener("visibilitychange", back);
+        };
+    }, [ended, confirm]);
 
     // An invite or reset link works without being signed in.
     if (parts[0] === "invite" && parts[1]) return <InvitePage token={parts[1]} onDone={() => { location.hash = "#/"; void check(); }} />;
@@ -53,7 +91,43 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (!state) return null;
     if (!state.me && state.crowd4test) return <Crowd4TestGate links={state.crowd4test} onRetry={() => void check()} />;
     if (!state.me) return <SignInPage state={state} keyRefused={keyRefused} ssoError={query.get("ssoError")} onKey={() => void check(true)} onSignedIn={() => void check()} />;
-    return <AuthContext.Provider value={{ state, refresh: () => void check() }}>{children}</AuthContext.Provider>;
+    return (
+        <AuthContext.Provider value={{ state, refresh: () => void check() }}>
+            {ended && <SignInEnded links={ended} onCheck={() => void confirm()} />}
+            {children}
+        </AuthContext.Provider>
+    );
+}
+
+/**
+ * The Crowd4Test session ended while the person was working (signed out there, or past its 30 days). The page stays: signing in
+ * happens in a new tab, which opens this same page once done, and this tab carries on when it is looked at again.
+ */
+function SignInEnded({ links, onCheck }: { links: NonNullable<AuthState["crowd4test"]>; onCheck: () => void }) {
+    return (
+        <div className="sign-in-ended" role="alert" style={{ position: "sticky", top: 0, zIndex: 50, padding: "8px 16px 0" }}>
+            <Callout
+                tone="warning"
+                title="Your Crowd4Test sign-in has ended"
+                actions={
+                    <>
+                        <Button
+                            variant="primary"
+                            icon={LogIn}
+                            onClick={() => {
+                                window.open(crowd4testSignInHref(links.signInUrl), "_blank", "noopener");
+                            }}
+                        >
+                            Sign in again
+                        </Button>
+                        <Button onClick={onCheck}>I have signed in</Button>
+                    </>
+                }
+            >
+                Nothing on this page is lost. Sign in again in a new tab, then come back here and carry on. Save your changes after that.
+            </Callout>
+        </div>
+    );
 }
 
 function KeyForm({ refused, onKey, primary }: { refused: boolean; onKey: () => void; primary: boolean }) {

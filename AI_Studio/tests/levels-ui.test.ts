@@ -73,6 +73,8 @@ describe("how much to explore", () => {
         await pwExpect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
         await page.goto(`${BASE}/#/projects/${shop}/settings`);
         const card = page.getByTestId("explore-level-setting");
+        // Unchanged outside Test Case Generation projects (F3 M2): Deep and Everything still say the AI screen review.
+        await pwExpect(card).toContainText("Uses more AI and takes longer. Includes the AI screen review when your model can read images");
         await pwExpect(card.getByRole("radio", { name: /Thorough/ })).toBeChecked();
         await pwExpect(card).toContainText("Up to 60 pages, 4 clicks deep, about 50 tests from the AI.");
         await pwExpect(card).toContainText("Up to 120 pages, 5 clicks deep, about 100 tests from the AI. Uses more AI and takes longer.");
@@ -146,6 +148,31 @@ describe("how much to explore", () => {
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]).toMatchObject({ fullExploration: true });
         await page.unroute("**/api/projects/*/test-generation");
+    });
+
+    it("lays every level out the same: the radio inline with its name, at desktop and phone widths (F3 L8)", async () => {
+        const shots = process.env.LEVEL_SHOTS;
+        try {
+            for (const width of [1280, 390]) {
+                await page.setViewportSize({ width, height: 900 });
+                await page.goto(`${BASE}/#/new?project=${shop}`);
+                const levels = page.getByTestId("explore-level");
+                await pwExpect(levels.getByRole("radio")).toHaveCount(3);
+                for (const name of ["Thorough", "Deep", "Everything"]) {
+                    const radio = (await levels.getByRole("radio", { name: new RegExp(`^${name} `) }).boundingBox())!;
+                    const title = (await levels.getByText(name, { exact: true }).boundingBox())!;
+                    // Beside its name, on the name's first line: never on a line of its own above it.
+                    expect(radio.x + radio.width, name).toBeLessThanOrEqual(title.x);
+                    expect(radio.y, name).toBeLessThan(title.y + title.height);
+                }
+                if (shots) {
+                    fs.mkdirSync(shots, { recursive: true });
+                    await levels.screenshot({ path: path.join(shots, `explore-levels-${width === 390 ? "phone" : "desktop"}.png`) });
+                }
+            }
+        } finally {
+            await page.setViewportSize({ width: 1280, height: 720 });
+        }
     });
 
     it("AI screen review: Deep shows it checked when the model can read images, and unchecking sends visionChecks:false", async () => {

@@ -132,8 +132,8 @@ export const checks: Topic[] = [
         what: "Tries harmless odd text in search forms and checks a form's own limits.",
         why: "You find forms that break on emoji, quotes or very long text.",
         steps: [
-            step("Keep Test Case Generation chosen under Testing agents, in Settings, then General. New projects start with it.", "Settings", "General", "Testing agents"),
-            step("Open a finding to see which input broke the form, and how."),
+            step("No choice under Testing agents runs form input checks now, so a new exploration does not try odd text.", "Testing agents"),
+            step("Open an earlier finding to see which input broke the form, and how."),
         ],
         goodToKnow: [
             "Only search forms get odd text. Sign-in, sign-up, payment and checkout forms are never touched.",

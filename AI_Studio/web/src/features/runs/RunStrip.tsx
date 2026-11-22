@@ -10,7 +10,7 @@ import { StopRun } from "./StopDialog";
 import { Elapsed } from "./RunTime";
 import { followsRunner, useLiveRun } from "./LiveRun";
 import { currentLine, runPhase, withLive, type LiveRun, type TaskPhase } from "./live-run";
-import { announceRunsChanged, ranSentence, runningLine, STATE_WORD, stoppedLine, useActiveRun, useRunAnswer, whereOf, type RunAnswer, type RunState } from "./runs";
+import { announceRunsChanged, ranSentence, runningLine, STATE_WORD, stoppedLine, useActiveRun, useRunAnswer, useRunStarted, whereOf, type RunAnswer, type RunState } from "./runs";
 import "./runs.css";
 
 const STATE_ICON = { waiting: Clock, running: LoaderCircle, passed: CircleCheck, failed: CircleX, finding: TriangleAlert, not_run: Minus } as const;
@@ -77,6 +77,7 @@ export function RunStrip({ projectId, testId, exceptJobId }: { projectId: string
     useEffect(() => {
         if (active.job) setFollowed(active.job.jobId);
     }, [active.job]);
+    useRunStarted(setFollowed);
     const jobId = active.job?.jobId ?? followed;
     const answer = useRunAnswer(projectId, jobId, Boolean(active.job));
     const [open, setOpen] = useState(false);

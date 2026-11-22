@@ -13,6 +13,8 @@ import { PhoneProgress } from "../features/phone/PhoneProgress";
 import { isPhoneJob, isPhoneOnly, phoneCounts, phonePhase } from "../features/phone/phone";
 import { useExecutionMode, workingOn } from "../features/runs/runs-here";
 import { JobExploreTree } from "../features/explore/ExploreTree";
+import { useCaseAgent } from "../features/runs/case-runs";
+import { CaseStages } from "../features/runs/CaseRunDetail";
 
 /** Live "what is happening" for a running analysis: a checklist, one progress bar, no jargon. */
 export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: () => void }) {
@@ -20,8 +22,11 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
     const stream = useJobStream(polled.jobId, isActive(polled.status), () => onChanged?.());
     // A live snapshot may not carry what the polled one was given (what the job explores), so that is kept.
     const job = stream.live && stream.job && stream.job.jobId === polled.jobId ? { ...stream.job, targets: stream.job.targets ?? polled.targets } : polled;
+    // A run of a Test Case Generation project (always plan-only) has three stages named for what they do, and no list of pages or test
+    // ideas of its own: the project's tree is the one list (founder 2026-11-19, P3, P5.3).
+    const caseAgent = useCaseAgent(polled.planOnly ? polled.projectId : null) === true;
     const pct = progressPercent(job);
-    const label = jobLabel(job);
+    const label = jobLabel({ ...job, caseAgent });
     // Validation-only runs skip every earlier phase; hide them rather than listing five "skipped".
     const quick = job.mode === "plain" || job.mode === "agent" || job.mode === "validate" || job.mode === "variants" || job.mode === "environment" || job.mode === "verify";
     // An exploration that stops at a plan has no generation or run phase: listing them would only suggest it is about to run tests.
@@ -46,8 +51,8 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
         <section className="card card-pad stack">
             <div className="row">
                 <div className="stack-sm" style={{ gap: 2, flex: 1, minWidth: 0 }}>
-                    <h2 className="t-section">{creating ? "Creating your tests" : phoneAlone ? "Exploring your phone app" : job.mode === "agent" ? "The AI agent is working" : job.mode === "plain" ? "Building your test" : job.mode === "environment" ? `Running your tests on ${job.environment ?? "an environment"}` : job.mode === "variants" ? "Checking other browsers and screen sizes" : job.mode === "validate" ? "Running your tests" : job.mode === "verify" ? "Verifying findings" : "Exploring your application"}</h2>
-                    <p className="t-secondary">{creating ? "We’re writing the test cases you chose and running the checks. The test cases are not run: you run them when you choose. You can leave this page." : job.mode === "agent" ? "Follow it, approve what it asks and stop it from Agent runs. You can leave this page." : job.planOnly ? (phoneAlone ? "The AI is using the app on a phone or emulator and planning tests. Nothing is created yet. You can leave this page." : "We’re looking at the application and planning tests. Nothing is created yet. You can leave this page.") : job.mode === "plain" ? "We’re doing what you described in a real browser, then running the finished test. This usually takes a minute or two." : job.mode === "environment" ? "We’re running your tests against that environment’s address. Your tests’ main results won’t change." : job.mode === "variants" ? "We’re repeating your validated web tests on the browsers and screen sizes you chose." : job.mode === "validate" ? "We’re running the tests again." : job.mode === "verify" ? "We’re running each new finding’s test again to see whether it reproduces." : "The AI is exploring the application and building your test suite. This usually takes a few minutes. You can leave this page."}</p>
+                    <h2 className="t-section">{caseAgent ? "Exploring the application" : creating ? "Creating your tests" : phoneAlone ? "Exploring your phone app" : job.mode === "agent" ? "The AI agent is working" : job.mode === "plain" ? "Building your test" : job.mode === "environment" ? `Running your tests on ${job.environment ?? "an environment"}` : job.mode === "variants" ? "Checking other browsers and screen sizes" : job.mode === "validate" ? "Running your tests" : job.mode === "verify" ? "Verifying findings" : "Exploring your application"}</h2>
+                    <p className="t-secondary">{caseAgent ? "We’re exploring the application, adding to its tree and writing test cases. Nothing is run. You can leave this page." : creating ? "We’re writing the test cases you chose and running the checks. The test cases are not run: you run them when you choose. You can leave this page." : job.mode === "agent" ? "Follow it, approve what it asks and stop it from Agent runs. You can leave this page." : job.planOnly ? (phoneAlone ? "The AI is using the app on a phone or emulator and planning tests. Nothing is created yet. You can leave this page." : "We’re looking at the application and planning tests. Nothing is created yet. You can leave this page.") : job.mode === "plain" ? "We’re doing what you described in a real browser, then running the finished test. This usually takes a minute or two." : job.mode === "environment" ? "We’re running your tests against that environment’s address. Your tests’ main results won’t change." : job.mode === "variants" ? "We’re repeating your validated web tests on the browsers and screen sizes you chose." : job.mode === "validate" ? "We’re running the tests again." : job.mode === "verify" ? "We’re running each new finding’s test again to see whether it reproduces." : "The AI is exploring the application and building your test suite. This usually takes a few minutes. You can leave this page."}</p>
                 </div>
                 <span className="t-meta" data-testid="elapsed">
                     <Elapsed since={job.startedAt ?? job.createdAt} />
@@ -68,7 +73,9 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
 
             <LiveLine state={stream.state} latest={stream.latest} />
 
-            {treeFits ? (
+            {caseAgent ? (
+                <CaseStages job={job} />
+            ) : treeFits ? (
                 <JobExploreTree job={job} active={isActive(job.status)} stream={stream} stageText={(p, state) => phaseText(p, state, job.counters)} />
             ) : (
             <ol className="steps">
@@ -100,7 +107,7 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
             {isActive(job.status) && !explorerOpen && (
                 <div>
                     {/* Asks first, says what is kept, and then stops (see features/runs/StopDialog.tsx). */}
-                    <StopRun job={{ jobId: job.jobId, projectId: job.projectId, mode: job.mode, planOnly: job.planOnly }} onRequested={() => onChanged?.()} />
+                    <StopRun job={{ jobId: job.jobId, projectId: job.projectId, mode: job.mode, planOnly: job.planOnly, caseAgent }} onRequested={() => onChanged?.()} />
                 </div>
             )}
         </section>

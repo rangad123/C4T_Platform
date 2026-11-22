@@ -194,3 +194,53 @@ export function runCountsLine(job: Pick<Job, "mode" | "counters" | "environment"
             return `${plural(planned, "test")} created. ${figures}`;
     }
 }
+
+// ── Test Case Generation projects (founder 2026-11-19 P5.3, R10.3, Q4; PLAN.md U5) ──
+// A run of such a project explores the application, adds to its one tree of pages and writes test cases. Nothing is run, so these
+// sentences never speak of tests passing, scripts or plans.
+
+/** What a run of a Test Case Generation project found, as the outcome counts it (src/platform/case-outcome-types.ts CaseOutcomeRun). */
+export interface CaseRunFacts {
+    status: "running" | "completed" | "stopped" | "failed";
+    addedPages: number;
+    addedCases: number;
+}
+
+/** "Run 3": runs are numbered from the first, so "the second run made the tree bigger" can be read off the list. */
+export const caseRunTitle = (n: number | undefined): string => (n ? `Run ${n}` : "Run");
+
+/** "4 pages and 9 test cases"; a run that added no pages (a requirements-only run) names only its test cases. */
+export const addedText = (r: Pick<CaseRunFacts, "addedPages" | "addedCases">): string =>
+    r.addedPages ? `${plural(r.addedPages, "page")} and ${plural(r.addedCases, "test case")}` : plural(r.addedCases, "test case");
+
+/** The one line a run says about what it added to the tree; a stopped or unfinished run says that what it found is kept (Q4). */
+export function caseRunLine(r: CaseRunFacts): string {
+    switch (r.status) {
+        case "running":
+            return `Added ${addedText(r)} so far.`;
+        case "stopped":
+            return `Stopped. What it found is kept: it added ${addedText(r)}.`;
+        case "failed":
+            return `Did not finish. What it found is kept: it added ${addedText(r)}.`;
+        default:
+            return `Added ${addedText(r)}.`;
+    }
+}
+
+/** The three stages of such a run, named for what they do (the engine's discovery, understanding and planning). */
+export const CASE_STAGES = ["discovery", "understanding", "planning"] as const;
+export type CaseStage = (typeof CASE_STAGES)[number];
+
+export function caseStageText(stage: CaseStage, state: "pending" | "running" | "done" | "failed" | "skipped", c: { pagesDiscovered?: number; scenariosPlanned?: number }): { title: string; detail?: string } {
+    switch (stage) {
+        case "discovery":
+            return { title: "Exploring", detail: c.pagesDiscovered ? (state === "done" ? `Found ${plural(c.pagesDiscovered, "page")}` : `${plural(c.pagesDiscovered, "page")} so far`) : undefined };
+        case "understanding":
+            return { title: "Understanding", detail: state === "running" ? "Working out what each page is for" : undefined };
+        default:
+            return { title: "Writing test cases", detail: state === "done" && c.scenariosPlanned ? plural(c.scenariosPlanned, "test case") : undefined };
+    }
+}
+
+/** Asked before such a run is stopped: what it found so far stays in the tree. */
+export const CASE_STOP_QUESTION = { title: "Stop exploring?", body: "Pages found so far are kept. Test cases are kept once they have been written. You can explore again at any time, and the next run adds to it." };

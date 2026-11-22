@@ -87,17 +87,18 @@ function HowChoice({ name, value, onChange, disabled, kinds }: { name: string; v
 }
 
 /**
- * The fields for one platform. `current` (Settings) shows what is saved; `offerLater` (Create) adds "Add it later".
+ * The fields for one platform. `current` (Settings) shows what is saved; `offerLater` (Create) adds "Add it later"; `optionalHint` (Create, a
+ * Test Case Generation project) says the web address may be left empty, and why.
  */
-export function AppDetailsFields({ platform, draft, onChange, current, disabled, offerLater }: { platform: Platform | null; draft: AppDraft; onChange: (d: AppDraft) => void; current?: AppDetails | null; disabled?: boolean; offerLater?: boolean }) {
+export function AppDetailsFields({ platform, draft, onChange, current, disabled, offerLater, optionalHint }: { platform: Platform | null; draft: AppDraft; onChange: (d: AppDraft) => void; current?: AppDetails | null; disabled?: boolean; offerLater?: boolean; optionalHint?: string }) {
     const set = (patch: Partial<AppDraft>) => onChange({ ...draft, ...patch });
     if (!platform) return null;
     if (platform === "web") {
         return (
             <div className="field" data-testid="app-web">
-                <label htmlFor="app-web-url">Application URL</label>
+                <label htmlFor="app-web-url">Application URL{optionalHint && " (optional)"}</label>
                 <p className="hint" id="app-web-url-hint">
-                    The address of the website or web application to test, such as a staging copy.
+                    The address of the website or web application to test, such as a staging copy.{optionalHint && ` ${optionalHint}`}
                 </p>
                 <div className="input-wrap">
                     <Globe size={18} className="lead" aria-hidden />

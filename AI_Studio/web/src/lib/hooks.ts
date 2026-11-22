@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type PlatformConfig } from "../api.js";
+import { api, onSessionEndedChange, sessionHasEnded, type PlatformConfig } from "../api.js";
 import { useEmbedded } from "./embedded.js";
 
 export interface Fetched<T> {
@@ -29,10 +29,22 @@ export function useFetch<T>(path: string | null, pollMs?: (data: T | undefined) 
         let cancelled = false;
         let timer: number | undefined;
 
+        // While the sign-in has ended (features/auth/AuthGate.tsx) a poll waits, and goes on once the person is back.
+        let paused = false;
         const schedule = (d: T | undefined) => {
             const delay = pollRef.current?.(d);
-            if (delay !== null && delay !== undefined) timer = window.setTimeout(() => void run(), delay);
+            if (delay === null || delay === undefined) return;
+            timer = window.setTimeout(() => {
+                if (sessionHasEnded()) paused = true;
+                else void run();
+            }, delay);
         };
+        const resume = onSessionEndedChange((ended) => {
+            if (!ended && paused) {
+                paused = false;
+                void run();
+            }
+        });
         const run = async () => {
             clearTimeout(timer);
             try {
@@ -51,6 +63,7 @@ export function useFetch<T>(path: string | null, pollMs?: (data: T | undefined) 
         return () => {
             cancelled = true;
             clearTimeout(timer);
+            resume();
             runRef.current = undefined;
         };
     }, [path]);
@@ -127,7 +140,7 @@ export function usePolled<T>(path: string | null, everyMs = 5000): Fetched<T> {
     const { reload } = f;
     useEffect(() => {
         const on = () => {
-            if (!document.hidden) void reload();
+            if (!document.hidden && !sessionHasEnded()) void reload();
         };
         document.addEventListener("visibilitychange", on);
         return () => document.removeEventListener("visibilitychange", on);

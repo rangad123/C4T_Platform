@@ -58,6 +58,8 @@ export interface Job {
     deploy?: { commit?: string; environment?: string; label?: string } | null;
     progress: Record<PhaseKey, PhaseState>;
     counters: Counters;
+    /** A job that builds a written test case's script (Generate test scripts): that case's id. */
+    caseId?: string;
     error: string | null;
     /** Only for a run that was cancelled: how many tests reached a result and how many did not run, and a sentence made from those facts. */
     cancelled?: { planned: number; ran: number; notRun: number; note: string } | null;
@@ -298,9 +300,42 @@ export function crowd4testSignIn(signInUrl: string): boolean {
     } catch {
         // storage not available: the trip is not counted
     }
-    const page = location.hash.replace(/^#/, "") || "/";
-    location.assign(`${signInUrl}?to=${encodeURIComponent(page)}`);
+    location.assign(crowd4testSignInHref(signInUrl));
     return true;
+}
+
+/** The same AI Studio page, opened after signing in on crowd4test.com (its hand-off route takes `?to=` back to it). */
+export function crowd4testSignInHref(signInUrl: string): string {
+    const page = location.hash.replace(/^#/, "") || "/";
+    return `${signInUrl}?to=${encodeURIComponent(page)}`;
+}
+
+const signInEndedListeners = new Set<(links: Crowd4TestLinks) => void>();
+/** Told when a request came back "signed out on Crowd4Test" even after renewing. Returns the unsubscribe. */
+export function onSignInEnded(listener: (links: Crowd4TestLinks) => void): () => void {
+    signInEndedListeners.add(listener);
+    return () => void signInEndedListeners.delete(listener);
+}
+function noteSignInEnded(links: Crowd4TestLinks): void {
+    for (const l of signInEndedListeners) l(links);
+}
+
+/**
+ * Set by the sign-in gate once it has found the session ended, cleared when the person is back. While it is set, a refused
+ * request is not renewed (there is nothing to renew, and every poll would ask crowd4test.com again) and polling waits.
+ */
+let sessionEnded = false;
+const sessionEndedListeners = new Set<(ended: boolean) => void>();
+export const sessionHasEnded = (): boolean => sessionEnded;
+export function setSessionEnded(ended: boolean): void {
+    if (ended === sessionEnded) return;
+    sessionEnded = ended;
+    for (const l of sessionEndedListeners) l(ended);
+}
+/** Told when the session is found ended, and when the person is back. Returns the unsubscribe. */
+export function onSessionEndedChange(listener: (ended: boolean) => void): () => void {
+    sessionEndedListeners.add(listener);
+    return () => void sessionEndedListeners.delete(listener);
 }
 
 let renewing: Promise<void> | null = null;
@@ -331,11 +366,13 @@ export class ApiError extends Error {
 async function refused<T>(res: Response, data: unknown, again: (() => Promise<T>) | undefined): Promise<T> {
     const body = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
     const c4t = crowd4testOf(body.details);
-    if (c4t?.crowd4test === "renew" && again) {
+    if (c4t?.crowd4test === "renew" && again && !sessionEnded) {
         await renewCrowd4Test(c4t.refreshUrl);
         return again();
     }
-    if (c4t && (c4t.crowd4test === "sign-in" || c4t.crowd4test === "renew")) crowd4testSignIn(c4t.signInUrl);
+    // Never a page change from here: this may be a background read (a poll, a stream's ticket) while the person is mid-form. The
+    // sign-in gate checks once more and, only when the session really ended, says so over the page (features/auth/AuthGate.tsx).
+    if (c4t && (c4t.crowd4test === "sign-in" || c4t.crowd4test === "renew")) noteSignInEnded(c4t);
     throw new ApiError(res.status, (typeof body.error === "string" && body.error) || res.statusText, body.details, body);
 }
 

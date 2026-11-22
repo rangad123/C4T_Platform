@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defaultAdapterFor } from "../../engine/frameworks/index.js";
 import { assessSeverity } from "../../engine/validation/severity.js";
+import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { HttpError } from "../http-error.js";
 import { blockView } from "../block-store.js";
 import { evidenceSentence } from "../evidence-read.js";
@@ -269,6 +270,8 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/validation", async (req, reply) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
+        // A Test Case Generation project runs nothing: refused before anything (a new application record) is saved.
+        await refuseTestsInCaseAgentProject(repo, id);
         const body = z.object({ baseUrl: z.string().url().optional(), apiBaseUrl: z.string().url().optional(), credentials: CiCredentials, ...EnvironmentChoice.shape }).parse(req.body ?? {});
         assertMaySaveSignIn(ctx.app, req, id, body.credentials); // its sign-in would become the saved one: that needs the project-settings permission
         const tests = repo.listTests(id).filter((t) => t.kind !== "mobile" && t.kind !== "desktop" && defaultAdapterFor(t.spec.kind).executable);

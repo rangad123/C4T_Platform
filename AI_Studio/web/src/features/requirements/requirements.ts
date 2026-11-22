@@ -39,7 +39,7 @@ export interface RequirementRow extends Requirement {
 export interface GenerateCasesResult {
     created: number;
     cases: Array<{ id: string; ref: string; title: string }>;
-    perRequirement: Array<{ id: string; ref: string; created: number; failed: boolean }>;
+    perRequirement: Array<{ id: string; ref: string; created: number; failed: boolean; /** Why it got no test case (newer servers). */ why?: string }>;
     duplicates: number;
     limited: boolean;
     failed: string[];
@@ -84,9 +84,15 @@ export interface RequirementDetailData extends Requirement {
 }
 
 export interface ImportCandidate {
+    /** The document's own id, or (numbered) the REQ-n it would be saved as. */
     ref: string;
+    /** The document gave no id: numbered REQ-n in order when saved, so only the chosen ones take numbers. */
+    numbered: boolean;
     title: string;
     description: string;
+    /** One criterion per line. */
+    acceptanceCriteria: string;
+    priority: RequirementPriority | null;
     section: string | null;
     kind: string;
     exists: boolean;

@@ -74,7 +74,6 @@ export type PlaceId =
     | "guide-words"
     // Round 25: the global places and the project places that are new (docs/product-restructure/INFORMATION_ARCHITECTURE.md).
     | "dashboard"
-    | "develop"
     | "runners-global"
     // Round 37: integrations set up once for an organisation (features/integrations/IntegrationsPage.tsx).
     | "integrations"
@@ -129,7 +128,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Type the address of your application, then choose Explore again.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Explore again"] },
             { text: "Fill in Focus (optional) to tell the AI what matters most. The whole application is still explored.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Focus (optional)"] },
-            { text: "Which checks run is set by the project's Testing agents in Settings, then General.", button: "Read about the checks", to: { search: "checks besides clicks" }, ui: ["Testing agents", "Settings", "General"] },
+            { text: "What the AI does is set by the project's Testing agents in Settings, then General. The Test Case Generation Agent explores the application or reads its requirements, builds a tree and writes test cases.", button: "Read what each agent does", to: { search: "checks besides clicks" }, ui: ["Testing agents", "Settings", "General"] },
             { text: "Keep the sign-in details in Settings, under Sign-in, if your application needs a login.", button: "Read about test accounts", to: { topic: "test-accounts", search: "test accounts login" }, ui: ["Settings", "Sign-in"] },
             { text: "Go back to your list of projects.", button: "Back to projects", to: here("projects") },
         ],
@@ -168,9 +167,9 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         title: "Test cases",
         what: "The written checks of a code project: a title, steps, what should happen and a requirement. Each is Automated (a tool can do it) or Manual (a person does it).",
         canDo: [
-            { text: "Choose Add test case (manual), then Write one by hand, to add one yourself.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["Add test case (manual)", "Write one by hand"] },
+            { text: "Choose Add test case, then Write one by hand, to add one yourself.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["Add test case", "Write one by hand"] },
             { text: "Choose Generate from requirements to let the AI write test cases for the requirements you pick.", button: "Read about requirements", to: { topic: "requirements-coverage" }, ui: ["Generate from requirements"] },
-            { text: "Choose Import to bring in test cases from a CSV or JSON file.", button: "Read about sharing checks", to: { topic: "release-signoff", search: "manual checks" }, ui: ["Import"] },
+            { text: "Choose Import to bring in test cases from the test case workbook (.xlsx) a Test Case Generation project downloads.", button: "Read about sharing checks", to: { topic: "release-signoff", search: "manual checks" }, ui: ["Import"] },
             { text: "Use All, Automated and Manual to see one type at a time.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["All", "Automated", "Manual"] },
             { text: "Use Generate test scripts to have the AI write a runnable test script for each automated test case. It needs both Write tests and Generate tests with AI.", button: "Open Test scripts", to: here("tests"), ui: ["Generate test scripts", "Test scripts", "Write tests", "Generate tests with AI"] },
         ],
@@ -621,18 +620,6 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "Open a project that needs a look and read its dashboard.", button: "Read how a project is laid out", to: { topic: "places" } }],
         topic: "fleet-dashboard",
     },
-    develop: {
-        title: "Test development",
-        what: "Open any project's test scripts to write tests. AI agent projects can also be explored by the AI or recorded.",
-        canDo: [
-            { text: "Choose Open test scripts, then New test script for every way to write one.", button: "Read about describing a test", to: { topic: "describe-a-test" }, ui: ["Open test scripts", "New test script"] },
-            { text: "In an AI agent project, let the AI explore the application and write tests.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
-            { text: "In an AI agent project, record a test by using the application yourself.", button: "Read how recording works", to: { topic: "record-a-test" } },
-        ],
-        words: ["test", "exploration", "plan"],
-        next: [{ text: "Open a project's test scripts to see every way to add a test.", button: "Open projects", to: here("projects") }],
-        topic: "first-steps",
-    },
     "runners-global": {
         title: "Your runner",
         what: "A runner is the program on your computer that runs your tests. It is set up once in Settings, under Your runner.",
@@ -855,7 +842,8 @@ export function placeOf(route: RouteLike): PlaceId {
     if (a === "new") return q.get("project") ? "explore-again" : "new-project";
     if (a === "create") return "new-project";
     if (a === "dashboard") return "dashboard";
-    if (a === "develop") return "develop";
+    // Founder review 2026-11-19 (Q2): Test development is out of the sidebar; its old link opens Projects (main.tsx).
+    if (a === "develop") return "projects";
     if (a === "runners") return "runners-global";
     if (a === "integrations") return "integrations";
     if (a === "project-folders") return "folders";

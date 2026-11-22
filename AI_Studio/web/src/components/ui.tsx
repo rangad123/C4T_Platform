@@ -127,7 +127,7 @@ export function SeverityBadge({ severity, basis, tipFocusable }: { severity: Sev
     );
 }
 
-export function JobBadge({ job, tipFocusable }: { job: Pick<Job, "status" | "error" | "mode"> & { planOnly?: boolean; targets?: Job["targets"] }; tipFocusable?: boolean }) {
+export function JobBadge({ job, tipFocusable }: { job: Pick<Job, "status" | "error" | "mode"> & { planOnly?: boolean; targets?: Job["targets"]; caseAgent?: boolean }; tipFocusable?: boolean }) {
     const j = jobLabel(job);
     return (
         <Badge tone={j.tone} icon={j.tone === "info" ? LoaderCircle : toneIcon(j.tone)} tip={jobHelp(job)} tipFocusable={tipFocusable}>

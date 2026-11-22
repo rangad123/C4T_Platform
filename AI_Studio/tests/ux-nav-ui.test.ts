@@ -281,7 +281,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         const filter = page.getByRole("group", { name: "Filter by type" });
         expect((await filter.getByRole("button").allTextContents()).map((t) => t.replace(/\s*\d+$/, ""))).toEqual(["All", "Automated", "Manual"]);
         await pwExpect(filter.getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true");
-        await pwExpect(page.getByTestId("place-head").getByRole("button", { name: "Add test case (manual)", exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("place-head").getByRole("button", { name: "Add test case", exact: true })).toBeVisible();
         for (const gone of ["New test", "New test script", "Run"]) await pwExpect(page.getByRole("button", { name: gone, exact: true }), gone).toHaveCount(0);
         await visit(routes.cases(P(), "manual"));
         await pwExpect(page.getByRole("group", { name: "Filter by type" }).getByRole("button", { name: /^Manual/ })).toHaveAttribute("aria-pressed", "true");
@@ -407,8 +407,8 @@ describe("sidebar and the Projects page", () => {
         const side = page.getByRole("complementary", { name: "Main navigation" });
         await pwExpect(side.getByRole("link", { name: "Security assessment", exact: true })).toHaveCount(0);
         expect(await side.locator(".nav-label").allTextContents()).toEqual(["Workspace", "Operations", "System"]);
-        expect(await side.locator("a.nav-item").allTextContents()).toEqual(["Dashboard", "Projects", "Agents", "Test development", "Reusable libraries", "Integrations", "Settings"]);
-        expect(await side.locator("a.nav-item").evaluateAll((els) => els.map((e) => e.getAttribute("href")))).toEqual([routes.dashboard, routes.home, routes.agents, routes.develop, routes.libraries, routes.integrations, routes.settings]);
+        expect(await side.locator("a.nav-item").allTextContents()).toEqual(["Dashboard", "Projects", "Agents", "Reusable libraries", "Integrations", "Settings"]);
+        expect(await side.locator("a.nav-item").evaluateAll((els) => els.map((e) => e.getAttribute("href")))).toEqual([routes.dashboard, routes.home, routes.agents, routes.libraries, routes.integrations, routes.settings]);
         await pwExpect(side.getByRole("button", { name: /Help/ })).toBeVisible();
         await pwExpect(side.getByRole("link", { name: /New project/ })).toHaveCount(0);
         const add = page.locator(".page-head").getByRole("link", { name: "New project", exact: true });
@@ -426,7 +426,7 @@ describe("sidebar and the Projects page", () => {
 
     it("each global place opens with its own title, and the open one is marked in the sidebar", async () => {
         const side = page.getByRole("complementary", { name: "Main navigation" });
-        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.agents, "Agents", "Agents"], [routes.develop, "Test development", "Test development"], [routes.libraries, "Reusable libraries", "Reusable libraries"], [routes.projectFolders, "Project folders", "Projects"], [routes.yourRunner, "Settings", "Settings"], [routes.settings, "Settings", "Settings"]] as const) {
+        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.agents, "Agents", "Agents"], [routes.develop, "Projects", "Projects"], [routes.libraries, "Reusable libraries", "Reusable libraries"], [routes.projectFolders, "Project folders", "Projects"], [routes.yourRunner, "Settings", "Settings"], [routes.settings, "Settings", "Settings"]] as const) {
             await visit(h);
             await pwExpect(page.locator("h1"), h).toHaveText(title);
             await pwExpect(side.locator('a.nav-item[aria-current="page"]'), h).toHaveText(nav);

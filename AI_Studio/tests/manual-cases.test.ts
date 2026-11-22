@@ -1,6 +1,6 @@
 /**
  * Manual test cases and release sign-off through a real platform (real server routes via `inject`, a real database, no model, no browser):
- *  cases (create, edit, delete, JSON and CSV import and export, caps, limits), releases (the automated snapshot equals what the dashboard
+ *  cases (create, edit, delete, JSON import and export, CSV gone with a 410 sentence, caps, limits), releases (the automated snapshot equals what the dashboard
  *  says), results, the refused approval with plain reasons, approval after fixing, override with a comment, immutability after sign-off,
  *  reopen and the audit trail, the report page (escaped), API-key protection, per-project isolation, and an issue for a failed check
  *  filed at a local GitHub-shaped receiver. Ports 5710 (receiver).
@@ -134,7 +134,7 @@ describe("manual cases", () => {
 
         expect((await call("GET", `${cases(ready)}/${id}`)).body.title).toBe("Pay with a saved card");
         const list = await call("GET", cases(ready));
-        expect(list.body).toMatchObject({ total: 1, max: 500, areas: ["Checkout"] });
+        expect(list.body).toMatchObject({ total: 1, max: 5000, areas: ["Checkout"] });
 
         const edited = await call("PUT", `${cases(ready)}/${id}`, { title: "Pay with a saved card (new)", area: "Checkout", priority: "high", steps: [] });
         expect(edited.status).toBe(200);
@@ -145,6 +145,22 @@ describe("manual cases", () => {
         expect((await call("PUT", `${cases(ready)}/${id}`, { title: "x" })).status).toBe(404);
         expect((await call("DELETE", `${cases(ready)}/${id}`)).status).toBe(404);
         expect((await call("GET", cases(ready))).body.total).toBe(0);
+    });
+
+    it("keeps the saved steps of an Automated case through an edit that sends them back unchanged (they are hidden, not deleted)", async () => {
+        const steps = [{ action: "Open the cart", expected: "The items are listed" }];
+        const made = await call("POST", cases(ready), { title: "Pay by card", automation: "automated", steps });
+        expect(made.status).toBe(201);
+        const id = made.body.id as string;
+        // The form sends an Automated case's steps as they were saved.
+        const edited = await call("PUT", `${cases(ready)}/${id}`, { title: "Pay by saved card", automation: "automated", steps: made.body.steps });
+        expect(edited.status).toBe(200);
+        expect(edited.body).toMatchObject({ title: "Pay by saved card", automation: "automated", steps });
+        // Switching it to Manual shows them again: they are still there.
+        const manual = await call("PUT", `${cases(ready)}/${id}`, { title: "Pay by saved card", automation: "manual", steps: edited.body.steps });
+        expect((await call("GET", `${cases(ready)}/${id}`)).body).toMatchObject({ automation: "manual", steps });
+        expect(manual.status).toBe(200);
+        expect((await call("DELETE", `${cases(ready)}/${id}`)).status).toBe(204);
     });
 
     it("refuses invalid input with a 400 and says what is wrong", async () => {
@@ -191,13 +207,32 @@ describe("import and export", () => {
         expect(again.body).toMatchObject({ created: 0, duplicates: 2, total: 2 });
     });
 
-    it("imports CSV with quotes, line breaks and the arrow format, reporting the bad rows", async () => {
-        const csv = 'title,area,priority,steps\r\n"Login, then logout",Account,critical,"Sign in => The account page opens\nSign out => The login page opens"\r\nBad priority,Account,urgent,\r\n';
-        const r = await call("POST", `${cases(ready)}/import`, { format: "csv", content: csv });
+    it("no longer imports or exports CSV: the test case workbook replaced it (owner 2026-11-20); the old calls answer 410 with that sentence", async () => {
+        const before = (await call("GET", cases(ready))).body.total;
+        const csv = 'title,area,priority,steps\r\n"Login, then logout",Account,critical,"Sign in => The account page opens"\r\n';
+        // Declared as CSV, or CSV text sent without a format (which used to be read as CSV).
+        for (const body of [{ format: "csv", content: csv }, { content: csv }, { content: '"never closed' }]) {
+            const r = await call("POST", `${cases(ready)}/import`, body);
+            expect(r.status, JSON.stringify(body)).toBe(410);
+            expect(r.body.error).toBe("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them. Import the workbook, or a JSON backup.");
+        }
+        const out = await call("GET", `${cases(ready)}/export?format=csv`);
+        expect(out.status).toBe(410);
+        expect(out.headers["content-type"]).toContain("application/json");
+        expect(out.body.error).toBe("Test cases are no longer imported or exported as CSV files: the test case workbook (.xlsx) replaced them. Export the test cases as JSON instead.");
+        expect((await call("GET", cases(ready))).body.total).toBe(before);
+    });
+
+    it("imports JSON with steps, reporting the bad rows by position", async () => {
+        const content = JSON.stringify([
+            { title: "Login, then logout", area: "Account", priority: "critical", steps: [{ action: "Sign in", expected: "The account page opens" }, { action: "Sign out", expected: "The login page opens" }] },
+            { title: "Bad priority", area: "Account", priority: "urgent" },
+        ]);
+        const r = await call("POST", `${cases(ready)}/import`, { format: "json", content });
         expect(r.status).toBe(201);
         expect(r.body).toMatchObject({ created: 1, total: 1 });
         expect(r.body.skipped).toHaveLength(1);
-        expect(r.body.skipped[0]).toMatchObject({ row: 3 });
+        expect(r.body.skipped[0]).toMatchObject({ row: 2 });
         const c = (await call("GET", cases(ready))).body.cases[0];
         expect(c).toMatchObject({ title: "Login, then logout", area: "Account", priority: "critical" });
         expect(c.steps).toEqual([{ action: "Sign in", expected: "The account page opens" }, { action: "Sign out", expected: "The login page opens" }]);
@@ -205,59 +240,51 @@ describe("import and export", () => {
 
     it("refuses broken files with a plain 400 and imports nothing", async () => {
         const before = (await call("GET", cases(ready))).body.total;
-        for (const content of ["", "name,area\nx,y", '"never closed', "{not json"]) {
+        for (const content of ["", "{not json", "[1, 2", '{"nope": 1}']) {
             const r = await call("POST", `${cases(ready)}/import`, { content });
-            expect(r.status).toBe(400);
+            expect(r.status, content).toBe(400);
         }
         expect((await call("POST", `${cases(ready)}/import`, {})).status).toBe(400);
         expect((await call("GET", cases(ready))).body.total).toBe(before);
     });
 
-    it("exports CSV with formula protection and JSON, and a CSV export imports back into another project", async () => {
+    it("exports JSON, and the export imports back into another project", async () => {
         await newCase(ready, "=HYPERLINK(\"http://evil.test\")", "low", { area: "@area" });
-        const csv = await call("GET", `${cases(ready)}/export?format=csv`);
-        expect(csv.status).toBe(200);
-        expect(csv.headers["content-type"]).toContain("text/csv");
-        expect(csv.headers["content-disposition"]).toContain("manual-cases-atlas-shop.csv");
-        const lines = csv.text.split("\r\n");
-        expect(lines[0]).toBe("title,area,priority,steps");
-        expect(csv.text).toContain("\"'=HYPERLINK(");
-        expect(csv.text).toContain(",'@area,");
-        expect(csv.text).not.toMatch(/(^|\r\n)=/);
-
         const json = await call("GET", `${cases(ready)}/export`);
+        expect(json.status).toBe(200);
         expect(json.headers["content-type"]).toContain("application/json");
+        expect(json.headers["content-disposition"]).toContain("manual-cases-atlas-shop.json");
         expect(json.body.version).toBe(1);
         expect(json.body.cases.map((c: { title: string }) => c.title)).toContain("=HYPERLINK(\"http://evil.test\")");
 
         const third = seedProject(platform, "Round trip", null);
-        const back = await call("POST", `${cases(third)}/import`, { format: "csv", content: csv.text });
+        const back = await call("POST", `${cases(third)}/import`, { format: "json", content: json.text });
         expect(back.body.created).toBe(json.body.cases.length);
         const titles = (await call("GET", cases(third))).body.cases.map((c: { title: string }) => c.title);
         expect(titles).toContain("=HYPERLINK(\"http://evil.test\")");
         expect((await call("GET", `${cases(third)}/export?format=xml`)).status).toBe(400);
     });
 
-    it("holds the limit of 500 cases: all of an import or nothing, and a single add is refused at the limit", async () => {
+    it("holds the limit of 5000 cases (FX15): all of an import or nothing, and a single add is refused at the limit", async () => {
         const s = seedProject(platform, "Many cases", null);
         const make = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ title: `${prefix} ${i}` }));
-        const full = await call("POST", `${cases(s)}/import`, { content: make(500, "A") });
+        const full = await call("POST", `${cases(s)}/import`, { content: make(5000, "A") });
         expect(full.status).toBe(201);
-        expect(full.body.created).toBe(500);
+        expect(full.body.created).toBe(5000);
         const more = await call("POST", `${cases(s)}/import`, { content: make(1, "B") });
         expect(more.status).toBe(409);
-        expect(more.body.error).toMatch(/500/);
+        expect(more.body.error).toMatch(/5000/);
         expect((await call("POST", cases(s), { title: "one more" })).status).toBe(409);
         // a duplicate-only import adds nothing and is not refused
         expect((await call("POST", `${cases(s)}/import`, { content: make(3, "A") })).body).toMatchObject({ created: 0, duplicates: 3 });
-        // 501 in one file is refused before anything is read
-        expect((await call("POST", `${cases(seedProject(platform, "Too many", null))}/import`, { content: make(501, "C") })).status).toBe(400);
+        // 5001 in one file is refused before anything is read
+        expect((await call("POST", `${cases(seedProject(platform, "Too many", null))}/import`, { content: make(5001, "C") })).status).toBe(400);
         // a partial overflow imports nothing at all
         const s2 = seedProject(platform, "Nearly full", null);
-        await call("POST", `${cases(s2)}/import`, { content: make(499, "N") });
+        await call("POST", `${cases(s2)}/import`, { content: make(4999, "N") });
         const over = await call("POST", `${cases(s2)}/import`, { content: make(3, "M") });
         expect(over.status).toBe(409);
-        expect((await call("GET", cases(s2))).body.total).toBe(499);
+        expect((await call("GET", cases(s2))).body.total).toBe(4999);
     });
 });
 

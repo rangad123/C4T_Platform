@@ -19,7 +19,7 @@ import { HEALING_MIGRATION } from "./healing-store.js";
 import { IDENTITY_MIGRATION } from "./identity-store.js";
 import { LIVE_SESSION_MIGRATION } from "./live-session-store.js";
 import { LOCATORS_MIGRATION } from "./locator-store.js";
-import { caseTypesMigration, MANUAL_MIGRATION } from "./manual-case-store.js";
+import { CASE_WORKBOOK_FIELDS_MIGRATION, caseTypesMigration, MANUAL_MIGRATION } from "./manual-case-store.js";
 import { MEMORY_MIGRATION } from "./memory-store.js";
 import { NOTES_MIGRATION } from "./notes-store.js";
 import { PERFORMANCE_MIGRATION } from "./perf-store.js";
@@ -323,7 +323,7 @@ ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
     // LATE_FILLED_SLOTS (told by its table).
     /* 67: candidate findings from exploration, one per project and fingerprint, shaped like security_findings, status candidate only (schema lives in candidate-finding-store.ts; existing projects have none) */ CANDIDATE_FINDINGS_MIGRATION,
     /* 68: the AI response cache: answers of allowed reading calls per project, by a hash of the whole question, and the cached-call counts on AI usage rows (schema lives in llm-response-cache.ts; existing projects start with none, existing usage rows with 0) */ RESPONSE_CACHE_MIGRATION,
-    /* 69: reserved (main's test case workbook fields) */ `-- reserved`,
+    /* 69: what a test case imported from the test case workbook keeps: its preconditions, its expected result, its page and the workbook's ID it came from (schema lives in manual-case-store.ts; only columns with defaults, so existing cases keep every row and have none) */ CASE_WORKBOOK_FIELDS_MIGRATION,
     /* 70: a project's database checks: the address of the customer's database probe, its SecretBox-encrypted token and the on switch (schema lives in db-probe-store.ts; existing projects have none, so off) */ DB_PROBE_MIGRATION,
     /* 71: the finding lifecycle: each candidate finding's state, class, severity, confidence factors, duplicate group, reproduction attempts and app version, its history (finding_events) and duplicate groups (finding_groups) (schema lives in candidate-finding-store.ts; every existing finding keeps its row and starts as a candidate) */ FINDING_LIFECYCLE_MIGRATION,
     /* 72: change-aware testing: the project's code repository (code_repos), the webhook deliveries it received (pr_events, one per delivery id) and the tests chosen per pull request (pr_selections) (schema lives in code-host/store.ts; a repository kept in integrations as kind `code` moves to code_repos with its encrypted secrets) */ codeHostMigration(sqliteDialect),
@@ -357,6 +357,8 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string; column?: s
     { slot: 66, table: "projects", column: "ai_provider" },
     // Main recorded 67 as `-- reserved` before candidate findings joined it, so a database main opened lacks the table.
     { slot: 67, table: "candidate_findings" },
+    // Phase 3-6 branches recorded 69 as `-- reserved` before main's test case workbook fields joined them; it adds only columns.
+    { slot: 69, table: "manual_cases", column: "source_ref" },
     // Phase 5 branches recorded 70 as `-- reserved` before the probe setting joined it.
     { slot: 70, table: "project_db_probes" },
 ];

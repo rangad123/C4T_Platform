@@ -47,6 +47,7 @@ import { loadTargetProblem } from "./load-guard.js";
 import { isLoadSpec, LOAD_MAX_ENDPOINTS, LOAD_MAX_REQUESTS } from "../engine/performance/load.js";
 import { registerFeatureRoutes } from "./routes/index.js";
 import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
+import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
 import { adoptSignIn, assertMaySaveSignIn } from "./routes/project-sign-in.js";
 import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
@@ -233,6 +234,8 @@ const publicJob = (j: JobRow) => ({
     scheduleId: j.options.scheduleId ?? null,
     runbookRunId: j.options.runbookRunId ?? null,
     environment: j.options.environment ?? null,
+    // The written test case this job builds the script of (case-scripts.ts): the Generate test scripts card follows them.
+    ...(j.options.plainCaseId ? { caseId: j.options.plainCaseId } : {}),
     // Only for an exploration that stops at a plan, and for creation that starts from one (see routes/plans.ts).
     ...(j.options.planOnly ? { planOnly: true } : {}),
     ...(j.options.fromPlan ? { fromPlan: j.options.fromPlan } : {}),
@@ -440,7 +443,15 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (wantsPhone) assertPhoneExploration(id, latestMobile(id));
         const phoneOnly = wantsPhone && body0.targets!.every((t) => t === "mobile");
         const phoneUrl = phoneOnly ? `android-app://${latestMobile(id)!.appPackage}` : undefined;
-        if (!body0.url && !phoneUrl) throw new HttpError(400, "Give the address of the website or API to test");
+        if (!body0.url && !phoneUrl) {
+            // A Test Case Generation project without an address writes its test cases from its active requirements (SPEC R16).
+            if (!(await requirementsOnlyRun(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");
+            await assertNoActiveJob(id);
+            // The project's latest application is kept as it is (the form fills its address in next time); a project without one gets an empty one.
+            const appId = (repo.getLatestApplicationPublic(id)?.id as string | undefined) ?? repo.createApplication(id, "", {});
+            const job = await repo.createJob(id, appId, await caseAgentOptions(repo, id, { ...DEFAULT_JOB_OPTIONS, requirementsOnly: true }));
+            return reply.code(202).send({ jobId: job.id, status: job.status, plan: true });
+        }
         // What the request leaves out comes from the inputs saved on the Requirements tab (routes/agent-inputs.ts), on the same site only;
         // saved credentials never go to an API address or OpenAPI document nobody saved them for (409). A sign-in the request brings
         // becomes the project's saved sign-in below (Settings wins); nothing else saved changes.
@@ -465,7 +476,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             ...Object.fromEntries(Object.entries({ scope: body.scope, includePaths: body.includePaths, targets: body.targets, allowMutatingApiTests: body.allowMutatingApiTests, openApiUrl: body.openApiUrl, apiBaseUrl: body.apiBaseUrl, accessibility: body.accessibility, healthChecks: body.healthChecks, securityChecks: body.securityChecks, performanceChecks: body.performanceChecks, loadChecks: body.loadChecks, loadBudgets: body.loadBudgets, inputChecks: body.inputChecks, visionChecks: body.visionChecks,contractChecks: body.contractChecks, accessChecks: body.accessChecks, useMemory: body.useMemory, fullExploration: body.fullExploration, responseCache: body.responseCache, understandingBaseline: body.understandingBaseline, cleanupAfter: body.cleanupAfter, performanceBudgets: body.performanceBudgets, visual: body.visual, variants: body.variants?.length ? body.variants : undefined }).filter(([, v]) => v !== undefined)),
         } as JobOptions;
         // The project's chosen testing agents decide which checks run (routes/testing-agents.ts); a project with none saved runs as asked.
-        const options = await withAgentChoice(p, project(id), asked, body);
+        let options = await withAgentChoice(p, project(id), asked, body);
         // The chosen agents' mandatory inputs (routes/agent-inputs.ts): refused in the words the Explore page's pop-up uses. No saved choice, no refusal.
         const missing = await missingForExploration(p, project(id), { openApiUrl: body.openApiUrl }, options.targets);
         if (missing.length) throw new HttpError(409, missingInputsMessage(missing));
@@ -489,6 +500,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         // The application keeps the generation settings, minus the (possibly large) requirements text.
         // Evaluation only, for this job only: never kept on the application, so no later job inherits it.
         if (body.runTestCases) options.runTestCases = true;
+        // A Test Case Generation project's explorations are plan-only, whatever the request asks (case-agent.ts).
+        options = await caseAgentOptions(repo, id, options);
         const { requirementsText: _text, runTestCases: _run, ...appConfig } = options;
         const keptMobile = latestMobile(id);
         adoptSignIn(p, id, body.url, body0.credentials);
@@ -496,7 +509,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         // The choice made when generating also becomes the project's switch for every later run (see routes/cleanup.ts).
         if (body.cleanupAfter !== undefined) new CleanupStore(repo.db).setEnabled(id, body.cleanupAfter);
         const job = await repo.createJob(id, appId, options);
-        return reply.code(202).send({ jobId: job.id, status: job.status, ...(body.plan ? { plan: true } : {}) });
+        return reply.code(202).send({ jobId: job.id, status: job.status, ...(options.planOnly ? { plan: true } : {}) });
     });
 
     // ── user-supplied specs: import, export, re-validate ─────────────────────
@@ -551,6 +564,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
 
     let routeCtx: RouteCtx;
     const startValidationJob = async (projectId: string, applicationId: string, testIds: string[]) => {
+        await refuseTestsInCaseAgentProject(repo, projectId); // a Test Case Generation project runs no tests (case-agent.ts)
         refuseUnlessRunsStart(p); // a run no worker would pick up is not queued (each caller says the run did not start, or refuses)
         return repo.createJob(projectId, applicationId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds });
     };
@@ -558,6 +572,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     app.post("/api/projects/:id/specs", async (req, reply) => {
         const { id } = req.params as { id: string };
         project(id);
+        await refuseTestsInCaseAgentProject(repo, id, CASE_AGENT_PLAN_REFUSED); // no test scripts in a Test Case Generation project
         const body = ImportSchema.parse(req.body);
         assertMaySaveSignIn(app, req, id, body.credentials); // its sign-in would become the saved one: that needs the project-settings permission
         // Shared elements the specs refer to: those already in the project plus the ones the export brings along.

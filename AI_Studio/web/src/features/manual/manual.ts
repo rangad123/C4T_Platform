@@ -15,9 +15,12 @@ export interface Step {
 export type Automation = "automated" | "manual";
 export const AUTOMATION_WORDS: Record<Automation, string> = { automated: "Automated", manual: "Manual" };
 export const AUTOMATION_HINT: Record<Automation, string> = {
-    automated: "A tool can do its steps and check its results, so a test script can be made from it.",
+    automated: "A tool can check it, so a test script can be made from it. Its steps are written with the script.",
     manual: "A person does it by hand: how something looks, a printout, a device, a judgement call.",
 };
+
+/** Where the Steps would be, for an Automated case: it is a title only (owner, 2026-11-20). */
+export const AUTOMATED_NO_STEPS = "An Automated test case is its title. Its steps are written when its test script is made.";
 
 export interface ManualCase {
     id: string;
@@ -33,6 +36,11 @@ export interface ManualCase {
     requirement: string;
     steps: Step[];
     linkedTestIds: string[];
+    /** From the test case workbook (Q3 columns): what must be true first, the expected result as a whole, the page, the workbook's ID. */
+    preconditions: string[];
+    expected: string;
+    page: string;
+    sourceRef: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -53,13 +61,28 @@ export interface CaseInput {
     linkedTestIds: string[];
     automation: Automation;
     requirementId: string | null;
+    preconditions: string[];
+    expected: string;
+    page: string;
 }
 
 export interface ImportResult {
     created: number;
     duplicates: number;
     skipped: Array<{ row: number; reason: string }>;
+    /** Workbook only: Automated rows whose Steps were not imported (steps belong to Manual test cases). */
+    stepsIgnored?: number;
     total: number;
+}
+
+/** The import's answer in one sentence or two, and the skipped rows with their reason (SPEC R6.4). */
+export function importSummary(r: ImportResult): { tone: "success" | "warning"; text: string; detail: string[] } {
+    const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+    const parts = [`Imported ${n(r.created, "test case", "test cases")}.`];
+    if (r.duplicates) parts.push(`${n(r.duplicates, "test case was", "test cases were")} already here and left out.`);
+    if (r.skipped.length) parts.push(`${n(r.skipped.length, "row", "rows")} could not be imported.`);
+    if (r.stepsIgnored) parts.push(`The steps of ${n(r.stepsIgnored, "Automated row were", "Automated rows were")} not imported: an Automated test case’s steps are written when its test script is made.`);
+    return { tone: r.skipped.length || r.stepsIgnored ? "warning" : "success", text: parts.join(" "), detail: r.skipped.map((s) => `Row ${s.row}: ${s.reason}`) };
 }
 
 export interface ViewItem {

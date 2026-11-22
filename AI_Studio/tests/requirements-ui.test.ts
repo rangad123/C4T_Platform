@@ -2,7 +2,8 @@
  * The Requirements place in a real browser against the real built UI (`web/dist`) and a real platform (no model, no worker): add a
  * requirement, link a test case from the picker and see its latest result, coverage on the list with search and filters, import
  * pasted text with a preview before saving, the coverage panel on the project dashboard, the requirements a test covers on its page,
- * deleting, axe in light mode, phone width and a clean console. Port 7700.
+ * deleting, importing a Word specification (criteria under each requirement, REQ-n without gaps), axe in light mode, phone width
+ * and a clean console. Port 7700.
  *
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/requirements-ui.test.ts
@@ -18,6 +19,7 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
+import { makeWordDocx, SPEC_EXPECTED } from "./fixtures/requirements-spec.js";
 
 const PORT = 7700;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -187,6 +189,43 @@ describe("requirements in the browser", () => {
         await page.getByRole("button", { name: "Delete REQ-1" }).click();
         await pwExpect(page.getByRole("list", { name: "Requirements" }).getByRole("link")).toHaveCount(1);
         expect(platform.repo.getTest(shop.tests.get("pay")!)).toBeTruthy();
+    });
+
+    it("imports a Word specification: clean titles, criteria under each requirement, REQ-n in order for the ones kept", async () => {
+        await open(listUrl());
+        await page.getByRole("button", { name: "Import" }).click();
+        await page.getByRole("button", { name: "Choose a file" }).click();
+        await page.locator("#req-import-file").setInputFiles({ name: "Bookstore SRS.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: makeWordDocx() });
+        await page.getByRole("button", { name: "Read requirements" }).click();
+        await pwExpect(page.getByTestId("import-preview-summary")).toContainText("Found 4 requirements");
+        const found = page.getByTestId("import-candidate");
+        await pwExpect(found).toHaveCount(4);
+        // The acceptance criteria show under their requirement, not as requirements of their own.
+        for (const e of SPEC_EXPECTED) {
+            const criteria = page.getByRole("list", { name: `Acceptance criteria of ${e.title}` });
+            await pwExpect(criteria.getByRole("listitem")).toHaveText(e.acceptanceCriteria);
+        }
+        await pwExpect(found.nth(0)).toContainText("REQ-3 User registration");
+        await pwExpect(found.nth(0)).toContainText("Reference: Business requirements document BRD-04, section 3.1");
+        // Leaving one out renumbers the rest, so the saved ones leave no gap.
+        await page.getByRole("checkbox", { name: /Sign in/ }).uncheck();
+        await pwExpect(found.nth(2)).toContainText("REQ-4 Search books");
+        await pwExpect(found.nth(3)).toContainText("REQ-5 Pay by card");
+        await page.setViewportSize({ width: 375, height: 812 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+        if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/import-preview-phone.png`, fullPage: true });
+        await page.setViewportSize({ width: 1280, height: 900 });
+        if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/import-preview.png`, fullPage: true });
+        await page.getByRole("button", { name: "Save 3 requirements" }).click();
+        await pwExpect(page.getByText("Imported 3 requirements.")).toBeVisible();
+        const list = page.getByRole("list", { name: "Requirements" });
+        await pwExpect(list).toContainText("REQ-5");
+        await list.getByRole("link", { name: /REQ-5/ }).click();
+        await pwExpect(page.getByRole("heading", { name: "REQ-5 Pay by card" })).toBeVisible();
+        const what = page.getByRole("region", { name: "What the requirement says" });
+        await pwExpect(what.getByRole("listitem")).toHaveText(SPEC_EXPECTED[3]!.acceptanceCriteria);
+        await pwExpect(page.getByText(/critical priority/)).toBeVisible();
+        if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/imported-requirement.png`, fullPage: true });
     });
 
     it("kept the browser console clean", () => {

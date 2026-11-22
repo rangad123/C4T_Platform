@@ -148,6 +148,8 @@ export interface JobOptions {
     plainCaseId?: string;
     /** plain mode, with `plainCaseId`: the test cases still to build after this one, each in the next job (case-scripts.ts). */
     plainCaseQueue?: string[];
+    /** plain mode, with `plainCaseId`: why the case before this one made no test (its job's error); the same again ends the chain. */
+    plainCaseFailed?: string;
     /** agent mode: the agent run this job carries out (agent-run.ts). */
     agentRunId?: string;
     /** verify mode: the finished job whose candidate findings this job verifies on the project's runner (findings/verify-service.ts). */
@@ -160,6 +162,8 @@ export interface JobOptions {
     runOn?: "platform" | "agent";
     /** generate mode: explore and plan only. The plan is kept for the person to look at; nothing is created or run (see routes/plans.ts). */
     planOnly?: boolean;
+    /** planOnly in a Test Case Generation project: write the test cases from the project's requirements alone, with no address (case-agent.ts writeCasesFromRequirements). */
+    requirementsOnly?: boolean;
     /** generate mode: start from the plan an earlier plan-only job (this id) kept, instead of exploring again. */
     fromPlan?: string;
     /** With `fromPlan`: test ideas (scenarioIds) the person left out of the plan. */
@@ -463,7 +467,8 @@ export class Repo {
     // ── applications ────────────────────────────────────────────────────────
     createApplication(projectId: string, url: string, config: Record<string, unknown>, credentials?: Credentials): string {
         const id = randomUUID();
-        const origin = new URL(url).origin;
+        // An empty address: a Test Case Generation project that works from its requirements alone (SPEC R16).
+        const origin = url ? new URL(url).origin : "";
         this.db.tx(() => {
             this.db.run(
                 "INSERT INTO applications (id, project_id, url, origin, config_json, credentials_enc, created_at) VALUES (?,?,?,?,?,?,?)",

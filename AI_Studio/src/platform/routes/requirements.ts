@@ -20,6 +20,7 @@ import {
     MAX_REQUIREMENTS,
     MAX_TEXT,
     MAX_TITLE,
+    numberCandidates,
     REF_PATTERN,
     REQUIREMENT_PRIORITIES,
     REQUIREMENT_STATUSES,
@@ -121,8 +122,9 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
     };
     const preview = async (pid: string, candidates: ImportCandidate[], usedAi: boolean, note: string | null = null) => {
         const taken = await store.takenRefs(pid);
-        const list = candidates.slice(0, MAX_REQUIREMENTS).map((c) => ({ ...c, exists: taken.has(c.ref.toUpperCase()) }));
-        return { candidates: list, total: candidates.length, existing: list.filter((c) => c.exists).length, usedAi, note, max: MAX_REQUIREMENTS };
+        const firstFree = Number(/^REQ-(\d+)$/.exec(await store.nextRef(pid))![1]);
+        const list = numberCandidates(candidates.slice(0, MAX_REQUIREMENTS), taken, firstFree).map((c) => ({ ...c, exists: !c.numbered && taken.has(c.ref.toUpperCase()) }));
+        return { candidates: list, total: candidates.length, existing: list.filter((c) => c.exists).length, usedAi, note, max: MAX_REQUIREMENTS, firstFree };
     };
 
     app.get("/api/projects/:id/requirements", async (req) => {
@@ -208,20 +210,45 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
         const metered = meter.wrap(llm);
         const made: GeneratedCase[] = [];
         const failed: string[] = [];
+        /** Why a requirement got no test case: the AI's error, nothing usable in its answer, or the AI token limit. */
+        const why = new Map<string, string>();
         let problem: string | null = null;
+        const ask = async (batch: RequirementForCases[]): Promise<GeneratedCase[] | null> => {
+            try {
+                const got = await generateCasesForBatch(metered, batch, app);
+                made.push(...got);
+                return got;
+            } catch (e) {
+                problem = describeLlmError(classifyLlmError(e));
+                return null;
+            }
+        };
+        const LIMIT = "The AI token limit was reached before the AI got to it.";
         try {
-            // One call per small batch, one after another: a failed batch is named, the others are kept.
+            // One call per small batch, one after another. A requirement left without a case (its batch failed, or the answer left it out:
+            // a long answer the model cut short) is asked once more on its own, so one click writes them all; what still fails is named.
             for (const batch of batchesOf(chosen)) {
-                try {
-                    made.push(...(await generateCasesForBatch(metered, batch, app)));
-                } catch (e) {
-                    failed.push(...batch.map((r) => r.ref));
-                    problem = describeLlmError(classifyLlmError(e));
+                // The AI limits stop the meter (engine/llm/metered.ts): the requirements it did not get to are named, never dropped.
+                if (meter.stop) {
+                    for (const r of batch) why.set(r.ref, LIMIT);
+                    continue;
+                }
+                const got = await ask(batch);
+                const left = batch.filter((r) => !got?.some((c) => c.requirementId === r.id));
+                for (const r of left) {
+                    const again = meter.stop ? null : await ask([r]);
+                    if (meter.stop && !again?.length) why.set(r.ref, LIMIT);
+                    else if (!again) {
+                        failed.push(r.ref);
+                        why.set(r.ref, problem ?? "The AI could not answer.");
+                    } else if (!again.length) why.set(r.ref, "The AI answered, but nothing it wrote could be used as a test case.");
                 }
             }
         } finally {
             meter.finish();
         }
+        const limitHit = chosen.filter((r) => why.get(r.ref) === LIMIT).map((r) => r.ref);
+        const empty = chosen.filter((r) => why.has(r.ref) && !failed.includes(r.ref) && !limitHit.includes(r.ref)).map((r) => r.ref);
         if (made.length === 0 && failed.length > 0) throw new HttpError(502, `The AI could not write test cases now, so nothing was saved. ${problem ?? ""}`.trim(), { failed });
 
         // Saved in one transaction that works out the room itself (a case added while the AI wrote counts), leaves out what is already
@@ -237,11 +264,15 @@ export function registerRequirementRoutes(ctx: RouteCtx): void {
             }
         }
         const gone = chosen.filter((r) => saved.gone.includes(r.id)).map((r) => r.ref);
-        const perRequirement = chosen.map((r) => ({ id: r.id, ref: r.ref, created: saved.created.filter((c) => c.requirementId === r.id).length, failed: failed.includes(r.ref) }));
+        // A requirement that got no case says why (`why`), and counts as failed so the page can offer to try only those again.
+        const perRequirement = chosen.map((r) => ({ id: r.id, ref: r.ref, created: saved.created.filter((c) => c.requirementId === r.id).length, failed: why.has(r.ref), ...(why.has(r.ref) ? { why: why.get(r.ref) } : {}) }));
+        const them = (refs: string[]) => (refs.length === 1 ? "it" : "them");
         const notes = [
-            failed.length ? `The AI could not write test cases for ${failed.join(", ")}. Try ${failed.length === 1 ? "it" : "them"} again.` : "",
+            failed.length ? `The AI could not write test cases for ${failed.join(", ")}, also when asked again: ${problem ?? "it could not answer."} Try ${them(failed)} again.` : "",
             // Every batch answered, but nothing in the answers could be used (no case named a requirement that was sent, or none had a title).
-            made.length === 0 && failed.length === 0 ? "The AI answered, but none of what it wrote could be used as a test case, so nothing was saved. Try again, or add a description or acceptance criteria to the requirements." : "",
+            made.length === 0 && failed.length === 0 && !limitHit.length ? "The AI answered, but none of what it wrote could be used as a test case, so nothing was saved. Try again, or add a description or acceptance criteria to the requirements." : "",
+            made.length > 0 && empty.length ? `The AI wrote nothing usable for ${empty.join(", ")}, also when asked again. Try ${them(empty)} again, or add a description or acceptance criteria.` : "",
+            limitHit.length ? `The AI token limit was reached, so ${limitHit.join(", ")} got no test cases. Raise the limit or wait for it to reset, then try ${them(limitHit)} again.` : "",
             saved.duplicates ? `${saved.duplicates} test case${saved.duplicates === 1 ? " was" : "s were"} already there and left out.` : "",
             gone.length ? `${gone.join(", ")} ${gone.length === 1 ? "was" : "were"} deleted while the AI was writing, so ${gone.length === 1 ? "its" : "their"} test cases were not saved.` : "",
             saved.limited ? `${saved.limited} more did not fit: a project can have at most ${MAX_CASES} test cases.` : "",

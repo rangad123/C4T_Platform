@@ -241,7 +241,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                 out = await api<Started>(`/projects/${projectId}/runs`, { method: "POST", body: { ...(all ? {} : { testIds: ids }), ...(retry ? { retryFailures: 1 } : {}), ...(variantsPicked.length ? { variants: variantsPicked } : {}) } });
             }
             setOpen(false);
-            announceRunsChanged();
+            announceRunsChanged(out.jobId);
             onStarted?.(out.jobId);
         } catch (e) {
             if (direct && onError) onError(describeApiError(e));

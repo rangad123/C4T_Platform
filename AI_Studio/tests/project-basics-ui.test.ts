@@ -16,6 +16,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 
 const PORT = 8788;
+const SHOTS = process.env.CREATE_SHOTS;
 const BASE = `http://127.0.0.1:${PORT}`;
 let browser: Browser;
 let platform: Platform;
@@ -85,6 +86,43 @@ describe("Create a project", () => {
         await page.getByRole("radio", { name: /^Code/ }).check();
         await page.getByRole("button", { name: "Create project" }).click();
         await pwExpect(page.getByText(/already exists in this organisation/)).toBeVisible();
+    });
+
+    it("lets a Test Case Generation project leave the address empty, and only that kind (F3 round 2 M4)", async () => {
+        await visit("#/create");
+        const form = page.getByTestId("create-project");
+        await form.getByLabel("Project name").fill("Requirements first");
+        await form.getByRole("radio", { name: /^Code/ }).check();
+        await form.getByRole("button", { name: "Create project" }).click();
+        await pwExpect(form.getByText("Enter the application’s address.")).toBeVisible();
+        const hint = form.getByText("Leave it empty to write test cases from a requirements document.");
+        await pwExpect(hint).toHaveCount(0);
+        // AI agent with another agent only: still required.
+        await form.getByRole("radio", { name: /^AI agent/ }).check();
+        const picker = form.getByTestId("agent-picker");
+        // The agents arrive after the mode is chosen: wait for the default choice, or the loop below finds no box and stops at once.
+        await pwExpect(picker.getByRole("checkbox", { name: /^Test Case Generation Agent/ })).toBeChecked();
+        const checked = picker.getByRole("checkbox", { checked: true });
+        while ((await checked.count()) > 0) await checked.first().uncheck();
+        await picker.getByRole("checkbox", { name: /^Accessibility Testing Agent/ }).check();
+        await form.getByRole("button", { name: "Create project" }).click();
+        await pwExpect(form.getByText("Enter the application’s address.")).toBeVisible();
+        await pwExpect(hint).toHaveCount(0);
+        // With the Test Case Generation agent among the chosen ones, the address is optional.
+        await picker.getByRole("checkbox", { name: /^Test Case Generation Agent/ }).check();
+        await pwExpect(hint).toBeVisible();
+        if (SHOTS) {
+            fs.mkdirSync(SHOTS, { recursive: true });
+            await page.screenshot({ path: path.join(SHOTS, "create-tcg-no-address-desktop.png"), fullPage: true });
+            await page.setViewportSize({ width: 390, height: 844 });
+            await page.screenshot({ path: path.join(SHOTS, "create-tcg-no-address-phone.png"), fullPage: true });
+            await page.setViewportSize({ width: 1280, height: 900 });
+        }
+        await form.getByRole("button", { name: "Create project" }).click();
+        await page.waitForURL((u) => /^#\/projects\/[^/]+$/.test(u.hash));
+        const id = byName("Requirements first")!.id as string;
+        expect((await api("GET", `/api/projects/${id}/app-details`)).body.webUrl).toBeNull();
+        expect((await api("GET", `/api/projects/${id}/testing-agents`)).body.agents.sort()).toEqual(["accessibility", "test-generation"]);
     });
 
     it("asks for the phone app by platform: a file, a store link, or later; a bad link is refused", async () => {

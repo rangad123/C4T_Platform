@@ -14,6 +14,7 @@ import { EXPLORING_OFF_MESSAGE, refuseUnlessRunsStart } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
 import { droppedChecksNote, narrowedByChoice, type AskedSwitches } from "../testing-agents.js";
 import { testingAgentsOf } from "./testing-agents.js";
+import { CASE_AGENT_PLAN_REFUSED, refuseTestsInCaseAgentProject } from "../case-agent.js";
 
 /**
  * Explore first, create after the person has looked.
@@ -156,6 +157,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
 
     /** Create the tests of a plan (the create route), or continue a stopped creation of it (`carryFrom`: the continue route). */
     const createFromPlan = async (id: string, jobId: string, body: z.infer<typeof CreateBody>, carryFrom?: string[]): Promise<JobRow> => {
+        await refuseTestsInCaseAgentProject(repo, id, CASE_AGENT_PLAN_REFUSED); // a Test Case Generation project's plans make no test scripts
         const job = planJob(id, jobId);
         if (ACTIVE_STATES.includes(job.status) || job.status === "QUEUED") throw new HttpError(409, "This exploration has no plan to create tests from.");
         // A failed exploration has no plan to use, unless it was cancelled after its plan was kept (while the application was being read).
