@@ -237,6 +237,9 @@ describe("on a real API", () => {
         expect(script).toContain("async function latencyAssert");
         expect(script).toContain('latencyAssert(() => call(request, "GET", "/api/slow"');
         expect(script).toContain('"p95:130 runs:4"');
-        expect(script).not.toMatch(/sk-|password/i);
+        // The API script carries the sign-in helper, which names the password field and its environment variables: no AI key and no
+        // password value is written into the script (the helper reads it from process.env only).
+        expect(script).not.toMatch(/sk-/i);
+        expect(script).not.toMatch(/password\s*[:=]\s*["'`]/i);
     });
 });

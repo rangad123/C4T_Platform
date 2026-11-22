@@ -41,7 +41,8 @@ const posted: any[] = [];
 beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-notify-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", PUBLIC_URL: `${PUBLIC_URL}/`, ALERT_MIN_SEVERITY: "low" }));
+    // Findings verification (on by default) would re-run the seeded failing tests against the app address, which is the fake Teams server.
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", PUBLIC_URL: `${PUBLIC_URL}/`, ALERT_MIN_SEVERITY: "low", VERIFY_FINDINGS: "false" }));
     svc = getScheduleServices(platform, { delivery: { backoffMs: [5, 5], timeoutMs: 2_000 } });
     server = await buildServer(platform);
     teams = http.createServer((req, res) => {
@@ -392,7 +393,7 @@ describe("email through the server-wide settings", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-notify-env-"));
         const mailbox = await startFakeSmtp(SERVER_SMTP_PORT);
         mailbox.requireAuth = { user: SERVER_USER, pass: SERVER_PASS };
-        const p2 = bootstrap(loadConfig({ DATA_DIR: dir, SECRET_KEY: "test-secret-key-0123456789", PUBLIC_URL: PUBLIC_URL, SMTP_HOST: "127.0.0.1", SMTP_PORT: String(SERVER_SMTP_PORT), SMTP_USER: SERVER_USER, SMTP_PASSWORD: SERVER_PASS, SMTP_FROM: "tests@platform.test" }));
+        const p2 = bootstrap(loadConfig({ DATA_DIR: dir, SECRET_KEY: "test-secret-key-0123456789", PUBLIC_URL: PUBLIC_URL, SMTP_HOST: "127.0.0.1", SMTP_PORT: String(SERVER_SMTP_PORT), SMTP_USER: SERVER_USER, SMTP_PASSWORD: SERVER_PASS, SMTP_FROM: "tests@platform.test", VERIFY_FINDINGS: "false" }));
         getScheduleServices(p2, { delivery: { backoffMs: [], timeoutMs: 2_000 } });
         const srv = await buildServer(p2);
         try {
