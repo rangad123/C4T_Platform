@@ -46,6 +46,8 @@ export interface RunEnv {
      * signed in with it. Written to the run folder for the run only. A secret: never logged, never stored with a result.
      */
     storageState?: string;
+    /** The run's database check service (../database/service.ts): loopback, for this run only. Unset: database check steps are skipped with a note. */
+    dbCheck?: { url: string; token: string };
 }
 
 export interface ScriptInput {
@@ -529,6 +531,7 @@ export async function runScripts(
         ...(/^[1-9]\d{2,5}$/.test(process.env.AITP_TEST_HEAP_MB ?? "") ? { NODE_OPTIONS: `--max-old-space-size=${process.env.AITP_TEST_HEAP_MB}` } : {}),
         API_TOKEN: env.apiToken ?? "",
         API_AUTH_HEADER: env.apiAuthHeader ?? "",
+        ...(env.dbCheck ? { DB_CHECK_URL: env.dbCheck.url, DB_CHECK_TOKEN: env.dbCheck.token } : {}),
         ...(env.cleanup ? { AITP_CLEANUP: env.cleanup, AITP_CREATED_DIR: path.join(runDir, "created") } : {}),
         // {{env.NAME}} in a spec: the variables of the environment this run targets (TEST_ENV_<NAME>).
         ...Object.fromEntries(Object.entries(env.vars ?? {}).map(([k, val]) => [`TEST_ENV_${k.toUpperCase()}`, val])),

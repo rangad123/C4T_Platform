@@ -85,6 +85,11 @@ import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 import { createThumbnailer } from "./discovery/thumbnails.js";
 import { layerOfSpec, layerReport, type Layer, type LayerReport } from "./validation/layers.js";
 import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
+import { benchProbeFor } from "./database/bench-data.js";
+import { DB_CHECKS_MAX, integrityChecks, withDatabaseChecks } from "./database/checks.js";
+import type { DbSchema } from "./database/probe.js";
+import { proposeRowRelations } from "./database/propose.js";
+import { dbServiceFor, type DbCheckService } from "./database/service.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
 export const TEST_CASES_NOT_RUN = "test_cases_not_run";
@@ -461,6 +466,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
     const creds: Credentials | undefined = req.credentials?.username && req.credentials.password ? { username: req.credentials.username, password: req.credentials.password, ...(req.credentials.totpSecret ? { totpSecret: req.credentials.totpSecret } : {}) } : undefined;
 
     const browser = await launchChromium(ctx.config.HEADLESS);
+    /** C10: the run's database check service, while its tests validate. */
+    let dbService: DbCheckService | undefined;
     try {
         let authState: AppModel["authentication"] = { required: false, mechanisms: [], loggedIn: false };
         let pages: AppModel["pages"] = [];
@@ -874,6 +881,14 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         /** C5: the invariants kept for the probe, and the proposal's report for summary.layers. */
         let invariants: Invariant[] = [];
         let invariantReport: InvariantReport | undefined;
+        /**
+         * C10: the database layer, on when a person set up read-only access for this application (the benchmark's --db, or the project's
+         * probe): its schema, the absence checks every data-changing test ends with, the run's remaining checks, and what was made.
+         */
+        const dbProbe = benchProbeFor(origin);
+        let db: { schema: DbSchema; absence: Array<{ name: string; source?: string }>; budget: { left: number } } | undefined;
+        let dbLayer: { checks: number } | { unavailable: string } | undefined = dbProbe ? { checks: 0 } : undefined;
+        let dbTests = 0;
         /** New tests per layer, for summary.layers (C12). */
         const layerTests: Partial<Record<Layer, number>> = {};
         const persistNew = async (spec: TestSpec, framework: Framework, validation: "PENDING" | "NEEDS_REVIEW", reason?: string, meta?: Record<string, unknown>) => {
@@ -1368,6 +1383,21 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 }
             }
 
+            // 4b0c. C10 database checks: from the schema's declared keys, plus one AI proposal of rules over rows (names only). Data changes only:
+            // every check follows a write.
+            if (dbProbe && dataChanges) {
+                try {
+                    const schema = await dbProbe.schema();
+                    const rows = await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req) });
+                    if (rows.report.proposed || rows.report.error) ctx.emit({ stage: "generation", kind: "db_rules_proposed", ...(rows.report.error ? { level: "warn" as const } : {}), message: rows.report.error ?? `${rows.report.kept} of ${rows.report.proposed} proposed stored-data rules kept (${rows.report.dropped.length} dropped)` });
+                    db = { schema, absence: [...integrityChecks(schema).map((name) => ({ name })), ...rows.checks], budget: { left: DB_CHECKS_MAX } };
+                } catch (e) {
+                    const why = `the database could not be read (${(e instanceof Error ? e.message : String(e)).slice(0, 200)})`;
+                    dbLayer = { unavailable: why };
+                    ctx.emit({ stage: "generation", kind: "db_checks_skipped", level: "warn", message: `Database checks skipped: ${why}` });
+                }
+            }
+
             // 4b1. Access control for API endpoints (deterministic): a visitor or a lesser account must be refused.
             if (req.accessChecks !== false && (apiAccess.length || apiLists.length)) {
                 // A check made signed in without a token runs in a browser script (kind web); one with a token is an API script.
@@ -1420,7 +1450,13 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const wf = generateApiWorkflowSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxWorkflows: levelSettings(req).apiEndpoints });
             for (const d of wf.specs) {
                 if (await carried(d)) continue;
-                const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
+                const steps = db ? withDatabaseChecks(d.steps, db.schema, db.absence, db.budget) : d.steps;
+                const checks = steps.length - d.steps.length;
+                if (checks && dbLayer && "checks" in dbLayer) {
+                    dbLayer.checks += checks;
+                    dbTests++;
+                }
+                const spec = TestSpecSchema.parse({ ...d, steps, testId: await sink.nextTestKey("API") });
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { workflow: true });
                 pending.push({ spec, framework: "playwright-api" });
             }
@@ -1576,12 +1612,13 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const validationStartedAt = new Date().toISOString();
             for (const t of pending) await sink.updateTest(handles.get(t.spec.testId)!, { validation: "VALIDATING" });
 
+            dbService = await dbServiceFor(dbProbe, pending.map((t) => t.spec), ctx.executor?.remote === true);
             const outcomes: ValidationOutcome[] = await validateBatch(
                 ctx,
                 {
                     browser,
                     scratchDir: ctx.config.scratchDir,
-                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken: await resolveApiToken(ctx, req.credentials), apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS },
+                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken: await resolveApiToken(ctx, req.credentials), apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS, ...(dbService ? { dbCheck: { url: dbService.url, token: dbService.token } } : {}) },
                     render: renderCtx,
                     model,
                     // The level decides; a setting below the default (tests, the local CLI) lowers it.
@@ -1696,7 +1733,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         // Site memory: save what this analysis learned (and what changed since the last one). A cancelled run saved nothing
         // (its validation was partial); never fails the job.
         await memory.remember(scenarios.map((s) => ({ title: s.title, journey: s.journey, startPath: s.startPath, validated: validatedScenarioIds.has(s.scenarioId), ran: ranScenarioIds.has(s.scenarioId) })));
-        summary.layers = { ...layerReport(layerTests, { web: wantWeb, api: wantApi, apiEndpoints: apis.length, dataChanges }), ...(invariantReport ? { invariants: invariantReport } : {}) };
+        summary.layers = { ...layerReport({ ...layerTests, database: dbTests }, { web: wantWeb, api: wantApi, apiEndpoints: apis.length, dataChanges, ...(dbLayer ? { database: dbLayer } : {}) }), ...(invariantReport ? { invariants: invariantReport } : {}) };
         ctx.emit({
             stage: "orchestration",
             kind: "job_summary",
@@ -1704,6 +1741,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         });
         return summary;
     } finally {
+        await dbService?.close();
         await closeBrowser(browser);
     }
 }

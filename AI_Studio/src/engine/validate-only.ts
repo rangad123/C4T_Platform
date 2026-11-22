@@ -28,6 +28,8 @@ import type { Scenario, TestSpec } from "./spec/schema.js";
 import { dataSetNameOf, resolveRows, truncationNote } from "./testdata/dataset.js";
 import type { AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
+import { benchProbeFor } from "./database/bench-data.js";
+import { dbServiceFor } from "./database/service.js";
 import { runVariantChecks, type VariantTest } from "./validation/variants.js";
 
 export interface ValidationOnlyRequest {
@@ -205,6 +207,8 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
         const noServerBrowser = ctx.config.EXECUTION_MODE === "runners";
         if (noServerBrowser && wantsRepairBrowser) ctx.emit({ stage: "validation", kind: "repair_browser_skipped", message: "Repair suggestions that need a browser are not made for this run: tests run only on runners here, and the platform opens no browser of its own." });
         const browser = !agentOnlyTarget && !noServerBrowser && wantsRepairBrowser ? await launchChromium(ctx.config.HEADLESS) : undefined;
+        // C10: database check steps reach the read-only access set up for this application through a service for this run.
+        const dbService = await dbServiceFor(benchProbeFor(origin), pending.map((t) => t.spec), ctx.executor?.remote === true);
         try {
             const apiToken = await resolveApiToken(ctx, req.credentials);
             const batch = (items: TestUnderValidation[]): Promise<ValidationOutcome[]> => validateBatch(
@@ -212,7 +216,7 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
                 {
                     browser,
                     scratchDir: ctx.config.scratchDir,
-                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken, apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS },
+                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken, apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS, ...(dbService ? { dbCheck: { url: dbService.url, token: dbService.token } } : {}) },
                     render: renderCtx,
                     model,
                     // These are existing tests, run as approved: a repair waits for review and is not run in this job.
@@ -275,6 +279,7 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
                 else summary.testsFailedValidation++;
             }
         } finally {
+            await dbService?.close();
             await browser?.close().catch(() => undefined);
         }
     }

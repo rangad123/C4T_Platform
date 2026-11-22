@@ -37,11 +37,12 @@ export interface RunSecretsEnv {
     apiAuthHeader?: string | undefined;
     storageState?: string | undefined;
     vars?: Record<string, string> | undefined;
+    dbCheck?: { token: string } | undefined;
 }
 
 /** Every secret of a run's environment, as exact strings (see the header). Reads the environment, never changes it. */
 export function runSecretValues(env: RunSecretsEnv): string[] {
-    const out: Array<string | undefined> = [env.credentials?.password, env.credentials?.totpSecret, env.apiToken, env.apiAuthHeader];
+    const out: Array<string | undefined> = [env.credentials?.password, env.credentials?.totpSecret, env.apiToken, env.apiAuthHeader, env.dbCheck?.token];
     for (const r of env.roles ?? []) out.push(r.password, r.totpSecret, r.apiToken);
     // An auth header ("Authorization: Bearer abc"): its value, and the credential alone without the scheme word, can each show up on their own.
     const header = /^[A-Za-z][\w-]*:\s*(.+)$/.exec(env.apiAuthHeader?.trim() ?? "");

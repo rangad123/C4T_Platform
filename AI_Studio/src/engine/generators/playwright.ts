@@ -43,7 +43,8 @@ import { EMAIL_HELPER_SOURCE, renderEmailStep, usesEmail } from "../auth/email-s
 import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, overlayHelperSource, overlayRules } from "../web/interruptions.js";
 import { renderClock, renderCondition, renderPinnedTime } from "../web/conditions.js";
 import { RELATION_HELPER_SOURCE } from "../validation/relation.js";
-import { classPattern, DB_CHECK_NOT_YET, KEPT_CALL_HELPER_SOURCE, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
+import { DB_CHECK_HELPER_SOURCE, dbCheckVars, isAbsenceCheck, parseDbCheck } from "../database/checks.js";
+import { classPattern, KEPT_CALL_HELPER_SOURCE, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
 import { ignoresHttpsErrors, jsonExpr, recordExpr } from "./api.js";
 import { LABEL_FIELD_HELPER_SOURCE, nearbyTargets, type FieldClue } from "../web/label-fallback.js";
 
@@ -59,6 +60,21 @@ const captures = (extract?: Record<string, string>) => Object.entries(extract ??
 export const relationCall = (step: Extract<Step, { action: "assertResponse" }>) => {
     if (!step.expression) throw new Error("A relation check needs its expression");
     return `relationAssert(${lit(step.expression)}, last?.json, data, ${step.source === undefined ? "undefined" : lit(step.source)});`;
+};
+const isDbCheck = (s: Step): s is Extract<Step, { action: "assertResponse" }> => s.action === "assertResponse" && s.check === "dbCheck";
+/** A database check in a script (web or API): its name and the test values it uses go to the run's database check service (database/checks.ts). */
+export const dbCheckCall = (step: Extract<Step, { action: "assertResponse" }>) => {
+    const name = step.name ?? "";
+    parseDbCheck(name); // a name outside the forms is refused here, with the forms
+    const vars = dbCheckVars(name).map((v) => `${lit(v)}: ${expr(`{{${v}}}`)}`);
+    return `await dbAssert(${lit(name)}, { ${vars.join(", ")} }, dbBefore, ${lit(step.source ?? "")});`;
+};
+/** The helper and the first line of a test with database checks: the absence checks are read before its first step. */
+export const dbCheckSetup = (steps: readonly Step[]): { helper: string; start: string } => {
+    const db = steps.filter(isDbCheck);
+    if (!db.length) return { helper: "", start: "" };
+    const before = [...new Set(db.map((s) => s.name ?? "").filter(isAbsenceCheck))];
+    return { helper: `\n${DB_CHECK_HELPER_SOURCE}`, start: `    const dbBefore = await dbBaseline(${JSON.stringify(before)});\n` };
 };
 /** The final outcome checks of a test (the asserts after its last other step) that run as soft assertions: every one is tried, the first failure is reported. */
 function softOutcomeChecks(steps: readonly Step[]): Set<number> {
@@ -146,7 +162,7 @@ function renderStep(step: Step, snapshotName: string, index = 0, softMessage?: s
                 case "relation":
                     return relationCall(step);
                 case "dbCheck":
-                    throw new Error(DB_CHECK_NOT_YET(step.name ?? ""));
+                    return dbCheckCall(step);
                 default:
                     throw new Error(`The response check "${step.check}" runs in API tests only`);
             }
@@ -421,9 +437,9 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }, testInfo) => {
     await evidenceAttach(page, testInfo);
 });
-${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\nconst IGNORE_HTTPS_ERRORS = ${ignoresHttpsErrors(spec)};\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
+${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\nconst IGNORE_HTTPS_ERRORS = ${ignoresHttpsErrors(spec)};\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${dbCheckSetup(spec.steps).helper}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ page }) => {
-${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
+${knownBugLine(spec, ctx)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${dbCheckSetup(spec.steps).start}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
 });
 ${dataRows ? "}\n" : ""}`;
         return { framework: "playwright", filename: scriptFilename(spec), content, language: "typescript" };

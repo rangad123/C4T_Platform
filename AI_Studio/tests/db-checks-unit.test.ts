@@ -1,0 +1,246 @@
+/**
+ * C10 database checks as test steps (Phase 4 T23), browser-free: the check names (names only, values apart), the checks generated from a
+ * schema's declared keys and after 2xx writes, the bound of 40, the run's check service (loopback, token, counts only, refusals), the
+ * rendering into API and web scripts, the stored-data rule proposal (a prompt of names only, an assert) and the layer report's count.
+ * Expected values come from PHASE_4_SPEC 4.4, section 5 (C10 at most 40 checks) and the bench apps' declared keys.
+ */
+import { describe, expect, it } from "vitest";
+import { dbCheckName, DB_CHECKS_MAX, integrityChecks, parseDbCheck, persistenceCheck, resolveParams, withDatabaseChecks } from "../src/engine/database/checks.js";
+import { cleanSchema, type DatabaseProbe, type DbSchema } from "../src/engine/database/probe.js";
+import { proposeRowRelations, rowRelationPrompt } from "../src/engine/database/propose.js";
+import { startDbCheckService } from "../src/engine/database/service.js";
+import { runOnRows, validateCheck, type DbTemplate } from "../src/engine/database/templates.js";
+import { renderScript } from "../src/engine/generators/index.js";
+import type { LlmClient } from "../src/engine/llm/provider.js";
+import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
+import { webRequestProblems } from "../src/engine/web/checks.js";
+import { layerReport, LayerReportSchema } from "../src/engine/validation/layers.js";
+
+const fk = (columns: string[], table: string, refs: string[]) => ({ columns, references: { table, columns: refs } });
+const SCHEMA: DbSchema = cleanSchema({
+    tables: [
+        { name: "users", columns: ["id", "email", "name", "address"], primaryKey: ["id"], uniqueKeys: [{ columns: ["email"], ignoreCase: true }], foreignKeys: [], rowCount: 2 },
+        { name: "carts", columns: ["id", "userId"], primaryKey: ["id"], uniqueKeys: [{ columns: ["userId"] }], foreignKeys: [fk(["userId"], "users", ["id"])], rowCount: 1 },
+        { name: "cart_items", columns: ["cartId", "productId", "quantity"], primaryKey: ["cartId", "productId"], uniqueKeys: [], foreignKeys: [fk(["cartId"], "carts", ["id"])], rowCount: 1 },
+        { name: "orders", columns: ["id", "userId", "subtotal", "discount", "shipping", "total"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [fk(["userId"], "users", ["id"])], rowCount: 1 },
+    ],
+});
+const ROWS = {
+    users: [
+        { id: "u1", email: "alice@example.test", name: "Alice", address: "12 Harbour Street" },
+        { id: "u2", email: "ALICE@example.test", name: "Alice Again", address: "" },
+    ],
+    carts: [{ id: "c1", userId: "u1" }],
+    cart_items: [{ cartId: "c1", productId: "p1", quantity: 1 }, { cartId: "c9", productId: "p2", quantity: 2 }],
+    orders: [{ id: "ord-1", userId: "u1", subtotal: 100, discount: 10, shipping: 5, total: 95 }],
+};
+const TOKEN_OF_DATA = "bench-data-token-0123456789";
+/** A probe over ROWS, as the D-a back end runs it (the in-memory templates). */
+const probe: DatabaseProbe = {
+    schema: async () => SCHEMA,
+    check: async (t, p) => runOnRows(validateCheck(t, p, SCHEMA), ROWS, Buffer.alloc(32, 7)),
+};
+
+describe("check names: the template in words, names only", () => {
+    it("each form reads back as its template; values travel as params", () => {
+        const forms: DbTemplate[] = [
+            { kind: "exists", table: "users", where: ["email", "address"] },
+            { kind: "orphans", table: "cart_items", columns: ["cartId"], references: { table: "carts", columns: ["id"] } },
+            { kind: "duplicates", table: "users", columns: ["email"], fold: true },
+            { kind: "duplicates", table: "carts", columns: ["userId"] },
+            { kind: "relation", table: "orders", where: [], expression: "total == subtotal - discount + shipping" },
+        ];
+        for (const t of forms) {
+            const params: Record<string, string> = t.kind === "exists" ? { email: "qa+{{unique}}@example.com", address: "1 Road" } : {};
+            const name = dbCheckName(t, params);
+            expect(parseDbCheck(name)).toEqual({ template: t, params });
+        }
+        expect(dbCheckName({ kind: "orphans", table: "cart_items", columns: ["cartId"], references: { table: "carts", columns: ["id"] } })).toBe("orphans cart_items(cartId) -> carts(id)");
+        expect(parseDbCheck("exists orders where id = 12, note = null").params).toEqual({ id: 12, note: null });
+    });
+
+    it("anything else is refused: SQL text, a quote inside a value, an unknown form", () => {
+        for (const bad of ["SELECT * FROM users", "exists users where email = 'a' OR 1=1 --'", "exists users where email = 'it's'", "count users", "orphans users(id) -> ", "relation : total > 0", "exists users; DROP TABLE users"]) {
+            expect(() => parseDbCheck(bad), bad).toThrow(/Database check refused/);
+        }
+    });
+
+    it("placeholders take the test's values; a missing one refuses the check", () => {
+        const { params } = parseDbCheck("exists orders where id = '{{orderId}}'");
+        expect(resolveParams(params, { orderId: "ord-7" })).toEqual({ id: "ord-7" });
+        expect(() => resolveParams(params, {})).toThrow(/no value for \{\{orderId\}\}/);
+    });
+});
+
+describe("generated checks", () => {
+    it("the declared keys give one orphan check per foreign key and one duplicate check per unique key (case-folded where stated)", () => {
+        expect(integrityChecks(SCHEMA)).toEqual(["duplicates users(email) any case", "orphans carts(userId) -> users(id)", "duplicates carts(userId)", "orphans cart_items(cartId) -> carts(id)", "orphans orders(userId) -> users(id)"]);
+    });
+
+    const req = (method: string, path: string, extra: Record<string, unknown> = {}) => ({ action: "request", method, path, auth: "default", description: "", ...extra }) as Extract<Step, { action: "request" }>;
+    it("persistence: a create that returned an id, an update of its fields; never a sign-in detail, never a guess", () => {
+        expect(persistenceCheck(req("POST", "/api/orders", { extract: { orderId: "id" } }), SCHEMA)).toBe("exists orders where id = '{{orderId}}'");
+        expect(persistenceCheck(req("PUT", "/api/profile", { body: { name: "Test {{unique}}", address: "1 Road {{unique}}" } }), SCHEMA)).toBe("exists users where name = 'Test {{unique}}', address = '1 Road {{unique}}'");
+        expect(persistenceCheck(req("PUT", "/api/users/{{userId}}", { body: { name: "N", password: "Secret1!" } }), SCHEMA)).toBe("exists users where id = '{{userId}}', name = 'N'");
+        // A stored password column is never compared, even when the write sends one.
+        const withPassword = cleanSchema({ tables: [{ name: "accounts", columns: ["id", "name", "password"], primaryKey: ["id"] }] });
+        expect(persistenceCheck(req("PUT", "/api/accounts/{{accountId}}", { body: { name: "N", password: "Secret1!" } }), withPassword)).toBe("exists accounts where id = '{{accountId}}', name = 'N'");
+        // No id returned; a field no table has; a GET.
+        expect(persistenceCheck(req("POST", "/api/orders"), SCHEMA)).toBeUndefined();
+        expect(persistenceCheck(req("PUT", "/api/profile", { body: { nickname: "x" } }), SCHEMA)).toBeUndefined();
+        expect(persistenceCheck(req("GET", "/api/orders", { extract: { orderId: "id" } }), SCHEMA)).toBeUndefined();
+    });
+
+    const ok = { action: "assertResponse", check: "statusClass", expected: "2xx", description: "" } as Step;
+    it("a data-changing test gets its persistence check after the 2xx write and the absence checks at its end; a read-only one none", () => {
+        const steps = [req("POST", "/api/orders", { extract: { orderId: "id" } }), ok, req("GET", "/api/orders"), ok];
+        const out = withDatabaseChecks(steps, SCHEMA, [{ name: "orphans cart_items(cartId) -> carts(id)" }, { name: "relation orders: total >= 0", source: "6.1" }], { left: 40 });
+        expect(out.map((s) => (s.action === "assertResponse" && s.check === "dbCheck" ? s.name : s.action))).toEqual(["request", "assertResponse", "exists orders where id = '{{orderId}}'", "request", "assertResponse", "orphans cart_items(cartId) -> carts(id)", "relation orders: total >= 0"]);
+        expect(out.at(-1)).toMatchObject({ source: "6.1" });
+        expect(withDatabaseChecks([req("GET", "/api/orders"), ok], SCHEMA, [{ name: "orphans cart_items(cartId) -> carts(id)" }], { left: 40 })).toHaveLength(2);
+        // A write as the test's last step (nothing after it) still gets the absence checks; so does a delete.
+        for (const last of [req("POST", "/api/register", { body: { email: "A@x.test" } }), req("DELETE", "/api/notes/n3")]) expect(withDatabaseChecks([last], SCHEMA, [{ name: "duplicates users(email) any case" }], { left: 40 })).toHaveLength(2);
+    });
+
+    it(`at most ${DB_CHECKS_MAX} checks in a run`, () => {
+        const budget = { left: DB_CHECKS_MAX };
+        const absence = integrityChecks(SCHEMA).map((name) => ({ name }));
+        let made = 0;
+        for (let i = 0; i < 30; i++) made += withDatabaseChecks([req("POST", "/api/orders", { extract: { orderId: "id" } }), ok], SCHEMA, absence, budget).length - 2;
+        expect(made).toBe(DB_CHECKS_MAX);
+    });
+});
+
+describe("the run's database check service", () => {
+    const post = (url: string, auth: string | undefined, body: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) });
+
+    it("loopback only, the token required, counts and fingerprints back (never a row), and refusals name the rule", async () => {
+        const s = await startDbCheckService(probe);
+        try {
+            expect(new URL(s.url).hostname).toBe("127.0.0.1");
+            expect((await post(s.url, undefined, { name: "duplicates users(email) any case" })).status).toBe(401);
+            expect((await post(s.url, "Bearer wrong", { name: "duplicates users(email) any case" })).status).toBe(401);
+            const res = await post(s.url, `Bearer ${s.token}`, { name: "duplicates users(email) any case" });
+            const body = (await res.json()) as Record<string, unknown>;
+            expect(res.status).toBe(200);
+            expect(body).toMatchObject({ kind: "duplicates", count: 1 });
+            expect(JSON.stringify(body)).not.toMatch(/alice|Harbour/i);
+            const orphan = (await (await post(s.url, `Bearer ${s.token}`, { name: "orphans cart_items(cartId) -> carts(id)" })).json()) as { count: number };
+            expect(orphan.count).toBe(1);
+            const stored = (await (await post(s.url, `Bearer ${s.token}`, { name: "exists orders where id = '{{orderId}}'", vars: { orderId: "ord-1" } })).json()) as { count: number };
+            expect(stored.count).toBe(1);
+            for (const [name, why] of [["SELECT * FROM users", /not one of/], ["duplicates sessions(token)", /no table "sessions"/], ["exists users where password = 'x'", /no column "password"/]] as const) {
+                const r = await post(s.url, `Bearer ${s.token}`, { name });
+                expect(r.status).toBe(400);
+                expect(((await r.json()) as { error: string }).error).toMatch(why);
+            }
+            expect((await post(s.url, `Bearer ${s.token}`, { name: "duplicates users(email)", sql: "DROP TABLE users" })).status).toBe(400);
+        } finally {
+            await s.close();
+        }
+    });
+});
+
+describe("rendering", () => {
+    const spec = (kind: "api" | "web") =>
+        TestSpecSchema.parse({
+            testId: kind === "api" ? "API-001" : "WEB-001",
+            title: "Order",
+            kind,
+            type: "functional",
+            priority: "high",
+            steps: [
+                ...(kind === "api" ? [{ action: "request", method: "POST", path: "/api/orders", auth: "none", extract: { orderId: "id" }, description: "" }] : [{ action: "navigate", url: "/", description: "" }]),
+                { action: "assertResponse", check: "dbCheck", name: kind === "api" ? "exists orders where id = '{{orderId}}'" : "exists users where email = 'qa+{{unique}}@example.com'", description: "" },
+                { action: "assertResponse", check: "dbCheck", name: "orphans cart_items(cartId) -> carts(id)", source: "5.2", description: "" },
+            ],
+        });
+    it("API and web scripts send the name and its test values to the service, read the absence checks first, and hold no database access", () => {
+        for (const kind of ["api", "web"] as const) {
+            const s = spec(kind);
+            expect(webRequestProblems(s, { baseUrl: "http://127.0.0.1:9" })).toEqual([]);
+            const { content } = renderScript(s, kind === "api" ? "playwright-api" : "playwright", { baseUrl: "http://127.0.0.1:9" });
+            expect(content).toContain('const dbBefore = await dbBaseline(["orphans cart_items(cartId) -> carts(id)"]);');
+            expect(content).toContain(kind === "api" ? `await dbAssert("exists orders where id = '{{orderId}}'", { "orderId": \`\${data["orderId"] ?? ""}\` }, dbBefore, "");` : `await dbAssert("exists users where email = 'qa+{{unique}}@example.com'", { "unique": \`\${unique}\` }, dbBefore, "");`);
+            expect(content).toContain('await dbAssert("orphans cart_items(cartId) -> carts(id)", {  }, dbBefore, "5.2");');
+            expect(content).toContain("process.env.DB_CHECK_URL");
+            expect(content).not.toMatch(/x-bench-data|BENCH_DATA_TOKEN|sqlite/i);
+        }
+    });
+
+    it("a name outside the forms, or one using sign-in details, is refused at rendering", () => {
+        const bad = (name: string) => () => renderScript({ ...spec("api"), steps: [{ action: "assertResponse", check: "dbCheck", name, description: "" }] as never }, "playwright-api", { baseUrl: "http://127.0.0.1:9" });
+        expect(bad("SELECT 1")).toThrow(/not one of/);
+        expect(bad("exists users where email = '{{credentials.username}}'")).toThrow(/plain test values only/);
+    });
+});
+
+describe("stored-data rules over rows (C5 over the database)", () => {
+    const requirements = [
+        { id: "6.1", text: "An order's total is its subtotal less the discount plus shipping." },
+        { id: "3.8", text: "A line total is the unit price times the quantity." },
+    ];
+    const scripted = (answer: unknown, prompts: string[]): { llm: LlmClient } => ({
+        llm: {
+            object: (async ({ prompt }: { prompt: string }) => {
+                prompts.push(prompt);
+                return answer;
+            }) as LlmClient["object"],
+        } as LlmClient,
+    });
+
+    it("the prompt carries table and column names only: no row value, no count, no token", async () => {
+        const prompts: string[] = [];
+        await proposeRowRelations(scripted({ relations: [] }, prompts), { requirements, schema: SCHEMA, secrets: [TOKEN_OF_DATA] });
+        expect(prompts).toHaveLength(1);
+        const prompt = prompts[0]!;
+        expect(prompt).toBe(rowRelationPrompt({ requirements, schema: SCHEMA, secrets: [] }));
+        const tables = prompt.slice(prompt.indexOf("<<<TABLES"));
+        const names = new Set(SCHEMA.tables.flatMap((t) => [t.name, ...t.columns]));
+        // Every word of the tables part is a schema name or a fixed word of the layout.
+        for (const word of tables.match(/[A-Za-z_][A-Za-z0-9_]*/g)!) expect(names.has(word) || ["TABLES", "key", "unique"].includes(word), word).toBe(true);
+        for (const v of [...Object.values(ROWS).flatMap((rows) => rows.flatMap((r) => Object.values(r).map(String))), TOKEN_OF_DATA]) if (v.length > 2) expect(prompt).not.toContain(v);
+        expect(tables).not.toMatch(/\d/);
+    });
+
+    it("keeps only rules citing a requirement and inside the grammar over the table's own columns", async () => {
+        const answer = {
+            relations: [
+                { requirementId: "6.1", table: "orders", expression: "total == subtotal - discount + shipping" },
+                { requirementId: "9.9", table: "orders", expression: "total >= 0" },
+                { requirementId: "6.1", table: "orders", expression: "total == price" },
+                { requirementId: "6.1", table: "sessions", expression: "id != 0" },
+                { requirementId: "6.1", table: "orders", expression: "total == $paid" },
+                { requirementId: "6.1", table: "orders", expression: "1; DROP TABLE orders" },
+            ],
+        };
+        const r = await proposeRowRelations(scripted(answer, []), { requirements, schema: SCHEMA, secrets: [] });
+        expect(r.checks).toEqual([{ name: "relation orders: total == subtotal - discount + shipping", source: "6.1" }]);
+        expect(r.report).toMatchObject({ proposed: 6, kept: 1 });
+        expect(r.report.dropped.map((d) => d.reason)).toEqual([
+            "it cites no requirement of this run",
+            expect.stringMatching(/no column "price"/),
+            expect.stringMatching(/no table "sessions"/),
+            expect.stringMatching(/columns only, not test values/),
+            expect.stringMatching(/outside the relation grammar/),
+        ]);
+    });
+
+    it("no requirement, no call", async () => {
+        const prompts: string[] = [];
+        expect((await proposeRowRelations(scripted({ relations: [] }, prompts), { requirements: [], schema: SCHEMA, secrets: [] })).checks).toEqual([]);
+        expect(prompts).toEqual([]);
+    });
+});
+
+describe("the layer report counts the database checks", () => {
+    const run = { web: false, api: true, apiEndpoints: 4, dataChanges: true };
+    it("ran, with the tests and their checks; not set up, or nothing to check after, says why", () => {
+        const r = layerReport({ api: 3, database: 2 }, { ...run, database: { checks: 9 } });
+        expect(r.database).toEqual({ status: "ran", tests: 2, checks: 9 });
+        expect(LayerReportSchema.parse(r)).toEqual(r);
+        expect(layerReport({ api: 3 }, run).database).toEqual({ status: "unavailable", reason: "Not checked: no read-only database access is set up." });
+        expect(layerReport({ api: 3 }, { ...run, dataChanges: false, database: { checks: 0 } }).database).toEqual({ status: "unavailable", reason: "Not checked: data changes are off, so no write is followed by a database check." });
+        expect(layerReport({ api: 3 }, { ...run, database: { unavailable: "the database could not be read (HTTP 403)" } }).database).toEqual({ status: "unavailable", reason: "Not checked: the database could not be read (HTTP 403)." });
+    });
+});

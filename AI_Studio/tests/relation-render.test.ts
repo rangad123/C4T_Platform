@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { RELATION_HELPER_SOURCE } from "../src/engine/validation/relation.js";
-import { DB_CHECK_NOT_YET, KEPT_CALL_HELPER_SOURCE, webRequestProblems } from "../src/engine/web/checks.js";
+import { KEPT_CALL_HELPER_SOURCE, webRequestProblems } from "../src/engine/web/checks.js";
 
 const ctx = { baseUrl: "http://127.0.0.1:5999" };
 const count = (hay: string, needle: string) => hay.split(needle).length - 1;
@@ -72,10 +72,12 @@ describe("API scripts", () => {
     });
 });
 
-describe("database checks wait for the database layer", () => {
-    const db = { action: "assertResponse", check: "dbCheck", name: "orders-have-lines" };
-    it("both renderers refuse them with the same sentence", () => {
-        expect(() => renderScript(spec("api", [{ action: "request", method: "GET", path: "/api/orders" }, db]), "playwright-api", ctx)).toThrow(DB_CHECK_NOT_YET("orders-have-lines"));
-        expect(() => renderScript(spec("web", [{ action: "navigate", url: "/" }, db]), "playwright", ctx)).toThrow(DB_CHECK_NOT_YET("orders-have-lines"));
+describe("database checks in scripts (Phase 4 T23)", () => {
+    const db = (name: string) => ({ action: "assertResponse", check: "dbCheck", name });
+    it("both renderers run a check named in its words through the run's check service, and refuse any other name", () => {
+        for (const [kind, first, framework] of [["api", { action: "request", method: "GET", path: "/api/orders" }, "playwright-api"], ["web", { action: "navigate", url: "/" }, "playwright"]] as const) {
+            expect(renderScript(spec(kind, [first, db("orphans cart_items(cartId) -> carts(id)")]), framework, ctx).content).toContain('await dbAssert("orphans cart_items(cartId) -> carts(id)"');
+            expect(() => renderScript(spec(kind, [first, db("orders-have-lines")]), framework, ctx)).toThrow(/Database check refused: the check is not one of/);
+        }
     });
 });
