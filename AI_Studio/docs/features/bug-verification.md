@@ -3,6 +3,9 @@
 What exploration finds is shown inside the run's existing results, in the **Findings to check** card. There is no separate page or
 tab for findings.
 
+After each run the platform verifies the run's new candidate findings in the background: it runs the test again, 3 attempts in fresh
+browsers. This is on by default; set `VERIFY_FINDINGS=false` on the server to switch it off.
+
 ## Order
 
 1. **Confirmed**: findings whose status reads "Confirmed …", worst severity first (critical, high, medium, low).

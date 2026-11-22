@@ -172,3 +172,12 @@ describe("reset hook: checked origin equals sent origin", () => {
         expect(resetHookProblem({ method: "POST", url: "blob:http://127.0.0.1:5591/x" }, app)).toMatch(/not an http\(s\) address/);
     });
 });
+
+describe("VERIFY_FINDINGS (owner decision 2026-11-22: on by default)", () => {
+    it("is on when unset, and off only when exactly false", () => {
+        expect(loadConfig({}).VERIFY_FINDINGS).toBe(true);
+        expect(loadConfig({ VERIFY_FINDINGS: "true" }).VERIFY_FINDINGS).toBe(true);
+        expect(loadConfig({ VERIFY_FINDINGS: "1" }).VERIFY_FINDINGS).toBe(true);
+        expect(loadConfig({ VERIFY_FINDINGS: "false" }).VERIFY_FINDINGS).toBe(false);
+    });
+});
