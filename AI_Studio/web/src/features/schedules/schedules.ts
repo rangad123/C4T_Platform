@@ -75,7 +75,7 @@ export interface FlakyTest {
     lastRunAt: string;
 }
 
-export type AlertEvent = "run_failed" | "regression" | "recovered" | "flaky" | "api_breaking_change";
+export type AlertEvent = "run_failed" | "regression" | "recovered" | "flaky" | "api_breaking_change" | "finding_confirmed" | "finding_reopened" | "pr_selection_ready";
 export type ChannelKind = "webhook" | "slack" | "teams" | "email";
 
 export interface AlertChannel {
@@ -116,8 +116,11 @@ export const EVENT_LABEL: Record<AlertEvent, { label: string; help: string }> = 
     recovered: { label: "A failing test is fixed", help: "A test that failed before now passes." },
     flaky: { label: "A test is unreliable", help: "A test failed, then passed when run again." },
     api_breaking_change: { label: "The API changed in a breaking way", help: "A field, type or endpoint that clients rely on changed since the previous run." },
+    finding_confirmed: { label: "A finding is confirmed", help: "A person confirmed a finding as a real defect." },
+    finding_reopened: { label: "A finding is reopened", help: "A finding that was closed or judged is open again." },
+    pr_selection_ready: { label: "Tests are chosen for a pull request", help: "The tests a pull request's change reaches, with why, and whether a full run is recommended." },
 };
-export const EVENT_ORDER: AlertEvent[] = ["regression", "run_failed", "flaky", "recovered", "api_breaking_change"];
+export const EVENT_ORDER: AlertEvent[] = ["regression", "run_failed", "flaky", "recovered", "api_breaking_change", "finding_confirmed", "finding_reopened", "pr_selection_ready"];
 
 export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 

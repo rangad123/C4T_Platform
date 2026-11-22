@@ -299,6 +299,8 @@ export class CapabilityProbe {
         caps.validationSteps = VALIDATION_STEPS_VERSION;
         // Row 208: and carries on from a stopped one (the request's `resume` and `carry`, explore-child.ts), so a Continue makes nothing twice.
         caps.exploreResume = true;
+        // Phase 5 H1: and a finding's verification attempts (a task's attempts, freshAccount and video; validation/runner.ts runs them).
+        caps.verifyAttempts = 1;
 
         const parsed = Capabilities.safeParse(caps);
         // A value the protocol cannot carry is a bug here, not a reason to stop: fall back to the part that is certainly valid.

@@ -79,9 +79,11 @@ export function registerTriggerRoutes(ctx: RouteCtx): void {
             // A token linked to a runbook starts a run of it; every other token starts the plain re-run below.
             const viaRunbook = await startRunbookForToken(p, token, req.body);
             if (viaRunbook) return reply.code(202).send(viaRunbook);
-            const { job, testCount, ignored } = await svc.run(token, req.body);
+            const { job, testCount, ignored, selection, fullRunReasons } = await svc.run(token, req.body);
             const run = svc.store.getRun(job.id);
-            return reply.code(202).send({ jobId: job.id, state: "queued", testCount, commit: run?.commit ?? null, environment: run?.environment ?? null, ...(ignored.length ? { ignored } : {}) });
+            return reply
+                .code(202)
+                .send({ jobId: job.id, state: "queued", testCount, commit: run?.commit ?? null, environment: run?.environment ?? null, ...(ignored.length ? { ignored } : {}), ...(selection === "focused" ? { selection, ...(fullRunReasons ? { fullRunReasons } : {}) } : {}) });
         } catch (e) {
             if (e instanceof RateLimited) return reply.header("retry-after", String(e.retryAfterSec)).code(429).send({ error: e.message, retryAfterSeconds: e.retryAfterSec });
             throw e;

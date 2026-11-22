@@ -31,6 +31,7 @@ import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { ScheduleStore } from "../src/platform/schedule-store.js";
 import { gatherReport, renderReportHtml } from "../src/platform/reports/project-report.js";
 import { buildServer } from "../src/platform/server.js";
+import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import { SecurityStore } from "../src/security/store.js";
 import { forgetUsage } from "../src/platform/storage-usage.js";
 import { addBaseline, addRun, addTest, DAY, exists, pastGrace, type Seed, type SeedFile, seedProject } from "./fixtures/retention-seed.js";
@@ -604,6 +605,38 @@ describe("confirmed findings survive the expiry of their run's files (2026-11-14
         expect(f.hasScreenshot).toBeUndefined(); // integration: the report no longer embeds images (report-shots); nothing claims a screenshot is kept
         expect(f.expired).toMatch(/^The evidence for this finding expired and was removed on .+ The finding itself is kept\.$/);
         expect(renderReportHtml(report)).toContain("The evidence for this finding expired");
+    });
+});
+
+describe("an open finding holds its evidence until it is closed plus the failed-run period (Phase 5 E2)", () => {
+    it("keeps the files and failure text of an open finding and of one closed 3 days ago; releases one closed 8 days ago", async () => {
+        const seed = project("Finding hold");
+        const iso = (daysAgo: number) => new Date(Date.now() - daysAgo * DAY).toISOString();
+        const finding = (fp: string) => ({ objective: null, actions: { stepCount: 2 }, expected: { text: "The total is 30.00.", source: "R-1" }, observed: "The total is 40.00.", evidence: { screenshots: [], requests: [], console: [] }, capture: "captured", independence: "independent", confidence: "high", fingerprint: fp.repeat(64), modelVersion: null, replays: [] });
+        const runOf = async (name: string, fp: string, closedDaysAgo: number | null) => {
+            const t = addTest(platform, seed, name, "web");
+            const run = addRun(platform, seed, t, { daysAgo: 30, status: "failed", files: [{ kind: "screenshot", size: 500 }, { kind: "trace", size: 900 }] });
+            // Found with the run, 30 days ago; closed later: the hold counts from the close, not from when the finding was made.
+            const { finding: f } = await new CandidateFindingStore(platform.db.sql, () => iso(30)).upsert({ projectId: seed.projectId, testId: t.id, finding: finding(fp) });
+            if (closedDaysAgo !== null) await new CandidateFindingStore(platform.db.sql, () => iso(closedDaysAgo)).transition(seed.projectId, f.id, { to: "not_a_bug", by: "person", actor: { label: "One" }, reason: "Works as designed" });
+            return run;
+        };
+        const open = await runOf("Open finding", "a", null);
+        const lately = await runOf("Closed 3 days ago", "b", 3);
+        const long = await runOf("Closed 8 days ago", "c", 8);
+        const error = (r: { executionId: string }) => platform.db.get<{ error: string | null }>("SELECT error FROM test_executions WHERE id = ?", r.executionId)!.error;
+
+        const preview = ok(await call("POST", `/api/projects/${seed.projectId}/retention/preview`), 200).body;
+        expect(preview).toMatchObject({ files: 2, findingHeld: 4, runs: 1 });
+        expect(preview.findingHeldNote).toBe("4 files are kept as the evidence of a finding that is still open, or was closed less than 7 days ago.");
+
+        expect((await runScheduledRetention(platform, Date.now())).find((r) => r.projectId === seed.projectId)).toMatchObject({ result: "pruned", files: 2 });
+        // held
+        expect([...open.files, ...lately.files].every(exists)).toBe(true);
+        expect([error(open), error(lately)]).toEqual(["boom", "boom"]);
+        // pruned
+        expect(long.files.some(exists)).toBe(false);
+        expect(error(long)).toBeNull();
     });
 });
 

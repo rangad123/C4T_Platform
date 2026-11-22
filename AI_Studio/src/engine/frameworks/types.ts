@@ -87,6 +87,18 @@ export interface ExecutionOptions {
      * ../browsers/choice.ts). It goes into the run's Playwright config, never into the test file. Unset: Playwright's own Chromium, as before.
      */
     browser?: BrowserLaunch;
+    /**
+     * Playwright frameworks only: false records no video. Verification attempts set it (spec Q6: a recording shows every value on screen and
+     * cannot be masked). Unset: every test is recorded, as before.
+     */
+    video?: false;
+    /**
+     * Playwright frameworks only (Phase 5 hook H1, verification): run the batch this many times (1 to 5), each attempt a run of its own in
+     * a fresh browser. Results come attempt by attempt, each run's first note saying which (validation/runner.ts attemptNote). Unset: once.
+     */
+    attempts?: number;
+    /** With `attempts`: each attempt signs in as an account registered just before it through this sign-up page (explore/clean-account.ts). */
+    freshAccount?: { signupPath: string; loginPath?: string };
 }
 
 /**

@@ -1,4 +1,5 @@
 /** The benchmark result as a short Markdown report (written beside the JSON). Numbers only from the result itself. */
+import { verifyScore, type Measure } from "./verify-score.js";
 import type { EvalRun } from "../run.js";
 import type { Catalogue } from "./catalogue.js";
 import { observedOf, seriesOf, type Observed, type ObservedKind } from "./observed.js";
@@ -175,5 +176,31 @@ export function layersMarkdown(name: string, b: Benchmark, catalogue: Pick<Catal
         const isExt = (id: string) => ext.has(id) || a.defects.some((d) => d.id === id && d.set === "extension");
         out.push("", `Original seeds detected: ${score(a.seededDefects.filter((id) => !isExt(id)))}. Extension seeds detected: ${score(a.seededDefects.filter(isExt))}.`, "");
     }
+    return out.join("\n");
+}
+
+const rateCell = (m: { value: number | null; n: number; note?: string }) => (m.value === null ? `none (${m.note ?? "nothing to count"})` : `${pct(m.value)} of ${m.n}`);
+
+/** One row per app of each trial: V1–V8 and V11 of its verification (verify-score.ts); "not measured" where the trial has no data for one. */
+export function verificationMarkdown(trials: Array<{ name: string; benchmark: Benchmark }>): string {
+    const cell = <T>(m: Measure<T>, f: (x: T) => string) => (m.measured ? f(m as T) : "not measured");
+    const out = ["| Trial | App | V1 confirmed are real | V2 real are confirmed | V3 says why | V4 false positives not app defects | V5 groups | V6 Confirmed rules | V7 root cause | V8 complete reports | V11 added cost, time |", "|---|---|---|---|---|---|---|---|---|---|---|"];
+    for (const t of trials)
+        for (const a of t.benchmark.apps) {
+            const s = verifyScore(a, a.verification);
+            out.push(
+                `| ${t.name} | ${a.id} | ${[
+                    cell(s.V1, rateCell),
+                    cell(s.V2, rateCell),
+                    cell(s.V3, rateCell),
+                    cell(s.V4, (x) => rateCell(x.fp)),
+                    cell(s.V5, (x) => `${x.mixed} mixed, median ${x.median ?? "none"} per seed`),
+                    cell(s.V6, (x) => `${x.confirmedBelowHigh} below high, ${x.securityWithoutH5} security without H5`),
+                    cell(s.V7, (x) => `${rateCell(x)}, ${x.invented} invented`),
+                    cell(s.V8, rateCell),
+                    cell(s.V11, (x) => `cost ${pct(x.cost)}, time ${pct(x.time)}`),
+                ].join(" | ")} |`,
+            );
+        }
     return out.join("\n");
 }

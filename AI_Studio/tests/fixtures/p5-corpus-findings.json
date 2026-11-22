@@ -1,0 +1,2984 @@
+[
+ {
+  "truth": {
+   "trial": "p3-m4-cand-1",
+   "category": "confirmed",
+   "seed": "BS-04"
+  },
+  "view": {
+   "id": "p3-m4-cand-1/7453ed6b-85fe-42cc-8252-41e04da590d2",
+   "projectId": "0a037f74-509d-483d-b98a-13eb87c329c1",
+   "source": {
+    "kind": "exploration",
+    "id": "7453ed6b-85fe-42cc-8252-41e04da590d2"
+   },
+   "state": "detected",
+   "title": "Registration refuses an invalid email address",
+   "testId": "7453ed6b-85fe-42cc-8252-41e04da590d2",
+   "detectedAt": "2026-11-06T00:01:06.000Z",
+   "expected": {
+    "text": "Anything else is refused with \"Enter a valid email address.\"",
+    "source": "R-cb1ada2e7986",
+    "stated": "explicit"
+   },
+   "observed": "Submitting the registration form with the malformed email \"qa9ae8-invalid-address\" (name \"qa9ae8 Tester\", valid password) was accepted instead of refused. The app did not show \"Enter a valid email address.\", it navigated away from /register to the Products page (/), signed the visitor in, and the Account page reads \"Signed in as qa9ae8-invalid-address\". This violates rule R-cb1ada2e7986 (the email",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "assert",
+     "target": "Enter a valid email address."
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "Error: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "stopped at step 6 (Verify visible of text \"Enter a valid email address.\"), the check of R-cb1ada2e7986: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "stopped at step 6 (Verify visible of text \"Enter a valid email address.\"), the check of R-cb1ada2e7986: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-001.b"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-cand-4",
+   "category": "confirmed",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "p3-m4-cand-4/3a9307f9-6f54-481d-8e6b-8a7e4313da34",
+   "projectId": "fb24b08e-9662-4707-a5c9-643cefb3afcc",
+   "source": {
+    "kind": "exploration",
+    "id": "3a9307f9-6f54-481d-8e6b-8a7e4313da34"
+   },
+   "state": "detected",
+   "title": "Change default delivery address, then place an order that uses it",
+   "testId": "3a9307f9-6f54-481d-8e6b-8a7e4313da34",
+   "detectedAt": "2026-11-09T00:02:11.000Z",
+   "expected": {
+    "text": "Saving shows 'Saved.'; saved name and address become the account's details everywhere, including the next checkout's starting address.",
+    "source": "R-455d3d12fa7f",
+    "stated": "explicit"
+   },
+   "observed": "Registered a new account (qa+{{unique}}@example.com), entered \"7 Generated Road qa7ydb, Bristol\" as the default delivery address and clicked Save. The page showed \"Saved.\" (expected 1 passed). However, the saved address did not persist: after navigating to Products, adding Trail Mug to the cart and opening Checkout, the Delivery address field was empty instead of the saved address. Returning to th",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "wait",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "wait",
+     "target": "Saved."
+    },
+    {
+     "action": "assert",
+     "target": "Saved."
+    },
+    {
+     "action": "click",
+     "target": "Products"
+    },
+    {
+     "action": "click",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "wait",
+     "target": "Cart"
+    },
+    {
+     "action": "click",
+     "target": "Check out"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "wait",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 21,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "Error: expect(locator).toHaveValue(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 21,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 21 (Verify value of textbox \"Default delivery address\" = 7 Generated Road qa7ydb, Bristol), the check of R-455d3d12fa7f: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 21,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 21 (Verify value of textbox \"Default delivery address\" = 7 Generated Road qa7ydb, Bristol), the check of R-455d3d12fa7f: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-073",
+    "R-075",
+    "R-076",
+    "R-077"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m6-cand-1",
+   "category": "confirmed",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "p3-m6-cand-1/c8a45533-1b24-44b3-969f-05dc8bef3700",
+   "projectId": "83ac21f1-4246-4a8c-a653-879e9d6a1b62",
+   "source": {
+    "kind": "exploration",
+    "id": "c8a45533-1b24-44b3-969f-05dc8bef3700"
+   },
+   "state": "detected",
+   "title": "Saved delivery address is used at the next checkout",
+   "testId": "c8a45533-1b24-44b3-969f-05dc8bef3700",
+   "detectedAt": "2026-11-11T00:02:51.000Z",
+   "expected": {
+    "text": "The default address is pre-filled and may be changed for this checkout only.",
+    "source": "R-d347038b46ab",
+    "stated": "explicit"
+   },
+   "observed": "Expected result 1 passed: [hidden] registering, the Account page showed \"Saved.\" and kept the default delivery address 796 Oak Avenue. Expected result 2 passed: the cart review (\"Review your order\") showed \"Deliver to: 796 Oak Avenue\" before placing the order. However, rule R-d347038b46ab (the default address is pre-filled at checkout Step 1) was not met. On opening /checkout with a saved default ",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "wait",
+     "target": "Saved."
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Products"
+    },
+    {
+     "action": "click",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "click",
+     "target": "Check out"
+    },
+    {
+     "action": "click",
+     "target": "Continue"
+    },
+    {
+     "action": "navigate",
+     "url": "/checkout"
+    },
+    {
+     "action": "assert",
+     "target": "Delivery address"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 19,
+     "check": "value",
+     "target": "Delivery address",
+     "error": "Error: expect(locator).toHaveValue(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 19,
+     "check": "value",
+     "target": "Delivery address",
+     "error": "stopped at step 19 (Verify value of label \"Delivery address\" = 796 Oak Avenue), the check of R-d347038b46ab: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 19,
+     "check": "value",
+     "target": "Delivery address",
+     "error": "stopped at step 19 (Verify value of label \"Delivery address\" = 796 Oak Avenue), the check of R-d347038b46ab: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "7.3",
+    "5.6"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m9-cand-1",
+   "category": "confirmed",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "p3-m9-cand-1/afeb953f-b2dc-4828-bee7-2a8dced5e506",
+   "projectId": "ef36bde4-cd60-44eb-95dc-6ca903df384e",
+   "source": {
+    "kind": "exploration",
+    "id": "afeb953f-b2dc-4828-bee7-2a8dced5e506"
+   },
+   "state": "detected",
+   "title": "Changed name and delivery address persist after reload and sign in again",
+   "testId": "afeb953f-b2dc-4828-bee7-2a8dced5e506",
+   "detectedAt": "2026-11-18T00:04:42.000Z",
+   "expected": {
+    "text": "After reloading /account the Default delivery address textarea shows 1 Test Road, York (requirement R-054)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": "Expected result 1 failed. I registered a new account, changed Name to \"Qapg8a Updated\" and Default delivery address to \"1 Test Road, York\", and the page showed \"Saved.\" after Save. After reloading /account, the Name field showed the original \"qapg8a Shopper 1795239943097\" and the Default delivery address textarea was empty, not \"1 Test Road, York\" (requirement R-054). The saved changes were not pe",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "wait",
+     "target": "Account"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "Error: expect(locator).toHaveValue(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 12 (Verify value of label \"Default delivery address\" = 1 Test Road, York), the check of expected:1: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 12 (Verify value of label \"Default delivery address\" = 1 Test Road, York), the check of expected:1: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-054",
+    "R-057"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m9-cand-1",
+   "category": "confirmed",
+   "seed": "BS-04"
+  },
+  "view": {
+   "id": "p3-m9-cand-1/4307de27-0dd5-4d20-aa2b-a1217ba3fc2d",
+   "projectId": "ef36bde4-cd60-44eb-95dc-6ca903df384e",
+   "source": {
+    "kind": "exploration",
+    "id": "4307de27-0dd5-4d20-aa2b-a1217ba3fc2d"
+   },
+   "state": "detected",
+   "title": "Registration refuses an invalid email address",
+   "testId": "4307de27-0dd5-4d20-aa2b-a1217ba3fc2d",
+   "detectedAt": "2026-11-18T00:04:45.000Z",
+   "expected": {
+    "text": "The message Enter a valid email address. is shown next to the Email field (requirement 1.6)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": " after clicking \"Create account\" the browser navigated to / (Products page) showing \"Sign out\", \"Orders\" and \"Account\" links, i.e. an account was created and signed in with a malformed email. The message \"Enter a valid email address.\" was not shown. Both expected-result assertions failed.",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "assert",
+     "target": "Enter a valid email address."
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "Error: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "stopped at step 6 (Verify visible of text \"Enter a valid email address.\"), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "stopped at step 6 (Verify visible of text \"Enter a valid email address.\"), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "1.6"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m9-cand-1",
+   "category": "confirmed",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "p3-m9-cand-1/31fc2fb2-f514-4ccf-a263-bf5575e96650",
+   "projectId": "ef36bde4-cd60-44eb-95dc-6ca903df384e",
+   "source": {
+    "kind": "exploration",
+    "id": "31fc2fb2-f514-4ccf-a263-bf5575e96650"
+   },
+   "state": "detected",
+   "title": "Account page shows the signed-in email and current details",
+   "testId": "31fc2fb2-f514-4ccf-a263-bf5575e96650",
+   "detectedAt": "2026-11-18T00:04:46.000Z",
+   "expected": {
+    "text": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, including the starting address of the next checkout.",
+    "source": "R-d1bd15a4421e",
+    "stated": "explicit"
+   },
+   "observed": "Expected result 1 passed: the Account page shows \"Signed in as [email hidden]\", the test account email. Expected result 2 failed. I signed in, saved a unique name and Default delivery address, and the app showed \"Saved.\". After navigating away to Orders and back, and again after a full reload of /account, the Name field showed the old value \"QA Replay mwpzkjx9517d0e\" and the Default delivery addre",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "wait",
+     "target": "Account"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "click",
+     "target": "Orders"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 13,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "Error: expect(locator).toHaveValue(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 13,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 13 (Verify value of textbox \"Default delivery address\" = {{unique}} Harbour Street, Leeds), the check of R-d1bd15a4421e: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 13,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 13 (Verify value of textbox \"Default delivery address\" = {{unique}} Harbour Street, Leeds), the check of R-d1bd15a4421e: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-052"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m9-cand-2",
+   "category": "confirmed",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "p3-m9-cand-2/5a895c3b-74cd-4992-8257-3c32857dccd0",
+   "projectId": "39869d78-406e-4353-995f-953607e59ba9",
+   "source": {
+    "kind": "exploration",
+    "id": "5a895c3b-74cd-4992-8257-3c32857dccd0"
+   },
+   "state": "detected",
+   "title": "Saved name and delivery address persist after reload",
+   "testId": "5a895c3b-74cd-4992-8257-3c32857dccd0",
+   "detectedAt": "2026-11-19T00:05:08.000Z",
+   "expected": {
+    "text": "After reload the delivery address textarea shows qamulx 9 Harbour Test Road, Leeds, and the account-linked checkout form shows the same address (requirement R-031)",
+    "source": "expected:2",
+    "stated": "explicit"
+   },
+   "observed": "Registered a new account (qamulx Tester {{unique}}), changed Name to \"qamulx Updated {{unique}}\" and Default delivery address to \"qamulx 9 Harbour Test Road, Leeds\", clicked Save and saw \"Saved.\". After navigating to /account again, the Name field shows the old value \"qamulx Tester 1795240183894\" and the Default delivery address textarea is empty. Expected result 1 (Name shows the updated name aft",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "Error: expect(locator).toHaveValue(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 11 (Verify value of label \"Default delivery address\" = qamulx 9 Harbour Test Road, Leeds), the check of expected:2: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "value",
+     "target": "Default delivery address",
+     "error": "stopped at step 11 (Verify value of label \"Default delivery address\" = qamulx 9 Harbour Test Road, Leeds), the check of expected:2: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ().",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-028",
+    "R-031"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m9-cand-2",
+   "category": "confirmed",
+   "seed": "BS-04"
+  },
+  "view": {
+   "id": "p3-m9-cand-2/c2822b48-a144-47c9-b2f5-f0ab4eae0d98",
+   "projectId": "39869d78-406e-4353-995f-953607e59ba9",
+   "source": {
+    "kind": "exploration",
+    "id": "c2822b48-a144-47c9-b2f5-f0ab4eae0d98"
+   },
+   "state": "detected",
+   "title": "Registration refuses an invalid email address",
+   "testId": "c2822b48-a144-47c9-b2f5-f0ab4eae0d98",
+   "detectedAt": "2026-11-19T00:05:11.000Z",
+   "expected": {
+    "text": "The message Enter a valid email address. is shown under the Email field (requirement R-001.b)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": " the form accepted the invalid email, created the account and signed the user in. The browser landed on / (Products) with navigation showing Orders, Account and Sign out, no \"Enter a valid email address.\" message appeared, and \"Sign in\" was gone. Failing checks: expected:1 (message not visible), expected:2 (URL is / not /register; Sign in not shown).",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "assert",
+     "target": "Enter a valid email address."
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "Error: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "validation message is shown under Email), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "validation message is shown under Email), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-001.b"
+   ],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-base-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-base-1/a6328065-5207-48e9-b5df-991c5e0ee907",
+   "projectId": "7778d286-dc56-40eb-ae18-491e7f442669",
+   "source": {
+    "kind": "execution",
+    "id": "a6328065-5207-48e9-b5df-991c5e0ee907"
+   },
+   "state": "detected",
+   "title": "Cart line quantity above the 10-unit limit is refused",
+   "testId": "a6328065-5207-48e9-b5df-991c5e0ee907",
+   "detectedAt": "2026-11-01T00:00:08.000Z",
+   "expected": {
+    "text": "An error message mentioning the limit of 10 is shown next to the quantity field The line quantity still shows 2 after the refused change The subtotal is unchanged from before the change",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Scenario S-034 failed: the 10-unit limit is not enforced in the cart. Precondition mismatch: the cart held one Trail Mug line with quantity 4 (not 2), so the test ran from that baseline (subtotal $50.00). After setting the quantity to 11 and clicking Update, no error message about a limit of 10 appeared anywhere on the page. The change was accepted: the line shows quantity 11, line total $137.50, ",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "remember",
+     "target": "Quantity"
+    },
+    {
+     "action": "remember",
+     "target": "dd >> nth=0"
+    },
+    {
+     "action": "fill",
+     "target": "Quantity"
+    },
+    {
+     "action": "click",
+     "target": "Update"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 5,
+     "target": "Quantity",
+     "error": "TimeoutError: locator.inputValue: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 5 (5. Remember the line quantity before the change) could not use its element. TimeoutError: locator.inputValue: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "3.7"
+   ]
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-base-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-base-1/2763b1f4-7d70-4779-ab0d-a13975fb86e6",
+   "projectId": "7778d286-dc56-40eb-ae18-491e7f442669",
+   "source": {
+    "kind": "execution",
+    "id": "2763b1f4-7d70-4779-ab0d-a13975fb86e6"
+   },
+   "state": "detected",
+   "title": "Shipping is still charged when the subtotal is just below 50.00",
+   "testId": "2763b1f4-7d70-4779-ab0d-a13975fb86e6",
+   "detectedAt": "2026-11-01T00:00:09.000Z",
+   "expected": {
+    "text": "The shipping line shows $5.00 while the subtotal is below 50.00 The total equals the subtotal plus $5.00",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Cart subtotal is wrong. After reaching line totals Pocket Notebook 3 x $4.25 = $12.75 and Water Bottle 2 x $18.00 = $36.00 (sum $48.75, below $50.00), the Subtotal still reads $30.75 (it appears to count the water bottle line only once at $18.00). This persisted after a page reload. Shipping shows $5.00 and Total shows $35.75, which are consistent with the displayed $30.75 subtotal, but the true s",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "wait",
+     "target": "Cart"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Products"
+    },
+    {
+     "action": "click",
+     "target": "Pocket Notebook"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "fill",
+     "target": "Quantity"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "click",
+     "target": "Desk Lamp"
+    },
+    {
+     "action": "click",
+     "target": "Remove"
+    },
+    {
+     "action": "click",
+     "target": "Remove"
+    },
+    {
+     "action": "fill",
+     "target": "Quantity"
+    },
+    {
+     "action": "click",
+     "target": "Update"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Products"
+    },
+    {
+     "action": "click",
+     "target": "Water Bottle"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "fill",
+     "target": "Quantity"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "assert",
+     "target": "main"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 13,
+     "target": "Desk Lamp",
+     "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 13 (13. Click row \"Desk Lamp\") could not use its element. TimeoutError: locator.click: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "4.5"
+   ]
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-base-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-base-1/d0902160-85e0-4128-af3a-f80e80217ff0",
+   "projectId": "7778d286-dc56-40eb-ae18-491e7f442669",
+   "source": {
+    "kind": "execution",
+    "id": "d0902160-85e0-4128-af3a-f80e80217ff0"
+   },
+   "state": "detected",
+   "title": "Checkout step 1 starts with the default delivery address",
+   "testId": "d0902160-85e0-4128-af3a-f80e80217ff0",
+   "detectedAt": "2026-11-01T00:00:11.000Z",
+   "expected": {
+    "text": "The checkout shows step 1 Delivery address as the active step The delivery address field is prefilled with the account default delivery address",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Signed in as the test account, opened /cart and pressed Check out. The checkout page shows the Delivery address step first (with its Continue button and the step list Delivery address / Review and pay), and the Delivery address textbox is prefilled with the account default \"12 Harbour Street, Leeds\", matching the Account page. Caveats: (1) the cart actually held two lines (Pocket Notebook and Wate",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "click",
+     "target": "Cart"
+    },
+    {
+     "action": "click",
+     "target": "Products"
+    },
+    {
+     "action": "click",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "wait",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "wait",
+     "target": "Check out"
+    },
+    {
+     "action": "click",
+     "target": "Check out"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Cart"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Check out"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "assert",
+     "target": "Delivery address"
+    },
+    {
+     "action": "assert",
+     "target": "Continue"
+    },
+    {
+     "action": "assert",
+     "target": "Checkout"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 8,
+     "target": "Products",
+     "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 8 (8. Start checkout) could not use its element. TimeoutError: locator.click: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "5.1",
+    "5.2"
+   ]
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "d1-haiku-p1b/ebc1a469-f26b-4800-b846-b45c7a82a780",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "ebc1a469-f26b-4800-b846-b45c7a82a780"
+   },
+   "state": "detected",
+   "title": "Home page looks right to an AI reviewer (/)",
+   "testId": "ebc1a469-f26b-4800-b846-b45c7a82a780",
+   "detectedAt": "2026-11-20T00:05:39.000Z",
+   "expected": {
+    "text": "The screen looks right: no overlapping or cut-off elements, no missing images, readable text",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "AI judgement — please look: a screen may not look right\n- [medium] Step 2 (high confidence): A grey annotation box at the top left overlaps the navigation bar and covers the Home link text.\n- [medium] Step 2 (high confidence): The text 'WEB-047.spec.ts' overlaps the 'Home' link in the top navigation bar.\nHow to check: A vision model judged the attached screenshot, so it can be wrong: open the scre",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/"
+    },
+    {
+     "action": "assert"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 2,
+     "check": "looksRight",
+     "error": "AI judgement — please look: the screen may not look right (high confidence)",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "d1-haiku-p1b/4195618f-cef2-455d-8329-11875f9d2855",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "4195618f-cef2-455d-8329-11875f9d2855"
+   },
+   "state": "detected",
+   "title": "Cart page looks right to an AI reviewer (/cart)",
+   "testId": "4195618f-cef2-455d-8329-11875f9d2855",
+   "detectedAt": "2026-11-20T00:05:40.000Z",
+   "expected": {
+    "text": "The screen looks right: no overlapping or cut-off elements, no missing images, readable text",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "AI judgement — please look: a screen may not look right\n- [medium] Step 2 (high confidence): A grey test-annotation box at the top left overlaps the navigation bar and covers the 'Home' link.\n- [medium] Step 2 (high confidence): The annotation text 'WEB-048.spec.ts' overlaps the 'Home' link text in the top navigation bar.\nHow to check: A vision model judged the attached screenshot, so it can be wr",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "assert"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 2,
+     "check": "looksRight",
+     "error": "AI judgement — please look: the screen may not look right (high confidence)",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-cand-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-cand-1/18783a60-86c7-45e9-9063-b16af5033746",
+   "projectId": "0a037f74-509d-483d-b98a-13eb87c329c1",
+   "source": {
+    "kind": "exploration",
+    "id": "18783a60-86c7-45e9-9063-b16af5033746"
+   },
+   "state": "detected",
+   "title": "As stated: rule \"R-d414e3565eb5\"",
+   "testId": "18783a60-86c7-45e9-9063-b16af5033746",
+   "detectedAt": "2026-11-06T00:01:15.000Z",
+   "expected": {
+    "text": "\"Discount is 10% of subtotal rounded to nearest cent.\" (source: R-d414e3565eb5)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": "Rule R-d414e3565eb5 says SAVE10 takes 10% off the order subtotal, rounded to the nearest cent. On the cart page (signed in as the test account, with the Headphones and Trail Mug lines already present plus one added Headphones), the Subtotal shows $132.48 and the Discount (SAVE10) shows −$12.00, not −$13.25 (10% of 132.48 = 13.248, rounded to 13.25). The shown −$12.00 equals 10% of the Headphones l",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/"
+    },
+    {
+     "action": "click",
+     "target": "Headphones"
+    },
+    {
+     "action": "condition"
+    },
+    {
+     "action": "condition"
+    },
+    {
+     "action": "navigate",
+     "url": "/login?next=/products/p4"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "click",
+     "target": "Apply"
+    },
+    {
+     "action": "assert",
+     "target": "−$12.00"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "exactText",
+     "target": "−$12.00",
+     "error": "Error: expect(locator).toHaveText(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "exactText",
+     "target": "−$12.00",
+     "error": "$13.25), the check of expected:1: expect(locator).toHaveText(expected) failed. It failed at the captured check, but not the way it failed when captured, so it does not reproduce the defect.",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "exactText",
+     "target": "−$12.00",
+     "error": "$13.25), the check of expected:1: expect(locator).toHaveText(expected) failed. It failed at the captured check, but not the way it failed when captured, so it does not reproduce the defect.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [],
+   "capture": "captured",
+   "independence": "state_dependent",
+   "confidence": "medium"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-cand-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-cand-1/fde1f184-7f1f-4431-93ff-e22ad44506df",
+   "projectId": "0a037f74-509d-483d-b98a-13eb87c329c1",
+   "source": {
+    "kind": "exploration",
+    "id": "fde1f184-7f1f-4431-93ff-e22ad44506df"
+   },
+   "state": "detected",
+   "title": "As stated: rule \"R-33cf2d4e6e43\"",
+   "testId": "fde1f184-7f1f-4431-93ff-e22ad44506df",
+   "detectedAt": "2026-11-06T00:01:16.000Z",
+   "expected": {
+    "text": "\"The Orders page lists all of the customer's orders, newest first, each with number, date, status and total.\" (source: R-33cf2d4e6e43)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": "Signed in with the test account, the Orders page (/orders) lists 13 orders newest first, each with number, date, status and total. However, order ord-1001 is missing from the list (it is skipped between ord-1002 and ord-1000), although its detail page /orders/ord-1001 opens for the same account (status Placed, total $39.50). The expected result requires all of the customer's orders to be listed, s",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "condition"
+    },
+    {
+     "action": "condition"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "wait",
+     "target": "Orders"
+    },
+    {
+     "action": "click",
+     "target": "Orders"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders/ord-1001"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders"
+    },
+    {
+     "action": "assert",
+     "target": "ord-1001"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "count",
+     "target": "ord-1001",
+     "error": "Error: expect(locator).toHaveCount(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "count",
+     "target": "ord-1001",
+     "error": "stopped at step 12 (The Orders list should include every customer order, including ord-1001 which the account can open), the check of expected:1: expect(locator).toHaveCount(expected) failed. It saw the same value as when captured (0).",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "count",
+     "target": "ord-1001",
+     "error": "stopped at step 12 (The Orders list should include every customer order, including ord-1001 which the account can open), the check of expected:1: expect(locator).toHaveCount(expected) failed. It saw the same value as when captured (0).",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-cand-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-cand-1/01cd4c89-0149-4f9c-8616-3c74cfaa04f0",
+   "projectId": "0a037f74-509d-483d-b98a-13eb87c329c1",
+   "source": {
+    "kind": "exploration",
+    "id": "01cd4c89-0149-4f9c-8616-3c74cfaa04f0"
+   },
+   "state": "detected",
+   "title": "As stated: rule \"R-db0ed00b195a\"",
+   "testId": "01cd4c89-0149-4f9c-8616-3c74cfaa04f0",
+   "detectedAt": "2026-11-06T00:01:17.000Z",
+   "expected": {
+    "text": "\"Shipping charge is $5.00 per order.\" (source: R-db0ed00b195a)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": "Rule R-db0ed00b195a states shipping costs $5.00 per order, expecting \"Shipping charge is $5.00 per order.\" The application does not show that statement. After signing in as the test account and adding Trail Mug, the cart (subtotal $312.45 including leftover items, SAVE10 applied) shows Shipping \"Free\", and the cart note says free shipping applies on orders of $50.00 or more after discount, otherwi",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/"
+    },
+    {
+     "action": "click",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "click",
+     "target": "Main"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "click",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "assert"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "text",
+     "error": "Error: expect(locator).toContainText(expected) failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "text",
+     "error": "stopped at step 10 (Verify text of main \"\" = Shipping charge is $5.00 per order.), the check of expected:1: expect(locator).toContainText(expected) failed. It failed at the captured check, but not the way it failed when captured, so it does not reproduce the defect.",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "text",
+     "error": "stopped at step 10 (Verify text of main \"\" = Shipping charge is $5.00 per order.), the check of expected:1: expect(locator).toContainText(expected) failed. It failed at the captured check, but not the way it failed when captured, so it does not reproduce the defect.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [],
+   "capture": "captured",
+   "independence": "state_dependent",
+   "confidence": "medium"
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "d1-haiku-p1b/f0827749-8397-44f0-8968-d29043570b67",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "f0827749-8397-44f0-8968-d29043570b67"
+   },
+   "state": "detected",
+   "title": "Two different products are listed with a correct combined total",
+   "testId": "f0827749-8397-44f0-8968-d29043570b67",
+   "detectedAt": "2026-11-20T00:05:32.000Z",
+   "expected": {
+    "text": "The cart page lists two lines, Trail Mug and Water Bottle The cart total equals the sum of the two line prices shown The Products link in the header still returns to the catalogue",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Signed in, cleared a leftover Desk Lamp line so the cart held no other items, then added Trail Mug ($12.50) and Water Bottle ($18.00). The cart lists exactly these two lines and the subtotal $30.50 equals the sum of the line prices. The total shows $35.50 because the app adds $5.00 shipping on orders under $50 (stated on the cart page), so the total is the lines' sum plus shipping, not the bare su",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/products/p1"
+    },
+    {
+     "action": "click",
+     "target": "Main"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "assert",
+     "target": "Products"
+    },
+    {
+     "action": "click",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "wait",
+     "target": "Add to cart"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "click",
+     "target": "Products"
+    },
+    {
+     "action": "assert",
+     "target": "Water Bottle"
+    },
+    {
+     "action": "click",
+     "target": "Water Bottle"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "assert",
+     "target": "Items in your cart"
+    },
+    {
+     "action": "click",
+     "target": "Pocket Notebook"
+    },
+    {
+     "action": "click",
+     "target": "Remove"
+    },
+    {
+     "action": "click",
+     "target": "Remove"
+    },
+    {
+     "action": "wait",
+     "target": "Headphones"
+    },
+    {
+     "action": "assert",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "assert",
+     "target": "Water Bottle"
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "click",
+     "target": "Products"
+    },
+    {
+     "action": "click",
+     "target": "Cart"
+    },
+    {
+     "action": "assert",
+     "target": "Trail Mug"
+    },
+    {
+     "action": "assert",
+     "target": "Water Bottle $18.00"
+    },
+    {
+     "action": "assert",
+     "target": "Items in your cart"
+    },
+    {
+     "action": "assert",
+     "target": "Items in your cart"
+    },
+    {
+     "action": "assert",
+     "target": "Items in your cart"
+    },
+    {
+     "action": "assert",
+     "target": "$35.50"
+    },
+    {
+     "action": "assert",
+     "target": "$30.50"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Products",
+     "error": "TimeoutError: locator.fill: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 6 (6. Re-enter the email, which did not register) could not use its element. TimeoutError: locator.fill: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "d1-haiku-p1b/d16779c8-7c1c-4952-b5db-aca6643c65d4",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "d16779c8-7c1c-4952-b5db-aca6643c65d4"
+   },
+   "state": "detected",
+   "title": "Free shipping message changes as the cart total crosses the threshold",
+   "testId": "d16779c8-7c1c-4952-b5db-aca6643c65d4",
+   "detectedAt": "2026-11-20T00:05:33.000Z",
+   "expected": {
+    "text": "While the subtotal is below the threshold the cart shows a message stating how much more is needed for free shipping Once the subtotal reaches the threshold the message changes to confirm free shipping The message text on the cart page matches the subtotal shown",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "The cart page never shows a dynamic free-shipping message. Signed in as the test account, I emptied the cart and added Trail Mug ($12.50, below the $50.00 threshold). The cart showed no message about how much more was needed for free shipping (expected result 1 failed). After adding Headphones ($59.99, subtotal $72.49), the summary changed shipping to \"Free\", but no message confirming free shippin",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/products/p4"
+    },
+    {
+     "action": "click",
+     "target": "Main"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "click",
+     "target": "Main"
+    },
+    {
+     "action": "click",
+     "target": "Cart"
+    },
+    {
+     "action": "click",
+     "target": "Remove"
+    },
+    {
+     "action": "click",
+     "target": "Remove"
+    },
+    {
+     "action": "navigate",
+     "url": "/products/p1"
+    },
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "navigate",
+     "url": "/products/p1"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "navigate",
+     "url": "/products/p4"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 7,
+     "target": "Email",
+     "error": "TimeoutError: locator.fill: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 7 (7. Enter \"{{credentials.username}}\" into textbox \"Email\") could not use its element. TimeoutError: locator.fill: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-base-1",
+   "category": "unreproduced",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-base-1/699de84f-b160-4e16-b146-8ca53c362383",
+   "projectId": "7778d286-dc56-40eb-ae18-491e7f442669",
+   "source": {
+    "kind": "execution",
+    "id": "699de84f-b160-4e16-b146-8ca53c362383"
+   },
+   "state": "detected",
+   "title": "Registration refuses an invalid email address",
+   "testId": "699de84f-b160-4e16-b146-8ca53c362383",
+   "detectedAt": "2026-11-01T00:00:01.000Z",
+   "expected": {
+    "text": "The message Enter a valid email address. is shown next to the email field The URL is still /register",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": " the Create account click navigated to / (Products) with the user signed in. The message never appeared. The Account page reads \"Signed in as qa79pl1795088862086example.com\", so the account was created with the invalid address. Note: during setup, the first fill calls put the email text into the Password field; I corrected it by refilling Email and Password before submitting, so the final submitte",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "fill",
+     "target": "input[type=password]"
+    },
+    {
+     "action": "fill",
+     "target": "input[name=email]"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "passed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-001.b"
+   ]
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-base-1",
+   "category": "unreproduced",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-base-1/90237d76-2002-4bbc-8f7f-686ee5d9421b",
+   "projectId": "7778d286-dc56-40eb-ae18-491e7f442669",
+   "source": {
+    "kind": "execution",
+    "id": "90237d76-2002-4bbc-8f7f-686ee5d9421b"
+   },
+   "state": "detected",
+   "title": "Registration refuses a password shorter than 8 characters",
+   "testId": "90237d76-2002-4bbc-8f7f-686ee5d9421b",
+   "detectedAt": "2026-11-01T00:00:02.000Z",
+   "expected": {
+    "text": "A message stating the password must be at least 8 characters is shown next to the password field The URL is still /register and the navigation still shows Create account",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Submitting the form with a 6-character password (qa79p1) returned HTTP 400 and showed the alert \"Use at least 8 characters for the password.\", so the message text is correct. The URL is still /register and \"Create account\" is still in the navigation. However, the message is not shown next to the password field: it is a page-level alert placed at the top of the form, above the Name field, and the P",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "input[name='name'], input[autocomplete='name']"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "press",
+     "target": "Name"
+    },
+    {
+     "action": "press",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill"
+    },
+    {
+     "action": "fill"
+    },
+    {
+     "action": "fill"
+    },
+    {
+     "action": "fill"
+    },
+    {
+     "action": "fill"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "assert",
+     "target": "Create account"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "passed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [
+    "R-001.c"
+   ]
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "unreproduced",
+   "seed": "BS-12"
+  },
+  "view": {
+   "id": "d1-haiku-p1b/858df117-2245-4e50-9f33-a37b779badb3",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "858df117-2245-4e50-9f33-a37b779badb3"
+   },
+   "state": "detected",
+   "title": "Checkout from cart to payment step stops before paying",
+   "testId": "858df117-2245-4e50-9f33-a37b779badb3",
+   "detectedAt": "2026-11-20T00:05:34.000Z",
+   "expected": {
+    "text": "The cart shows Pocket Notebook with the delivery address 12 Harbour Street, Leeds After placing the order the payment step for the new order is shown and the payment is not submitted The Orders list shows a new order row in addition to ord-1000 with the same total as the cart",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Checks 1 and 2 passed. The cart/checkout showed Pocket Notebook (cart total $27.25) and the delivery address 12 Harbour Street, Leeds. Placing the order created ord-1002 (total $27.25, status Placed) and showed the payment step with a \"Pay now\" button, which was not pressed. Check 3 failed: after reloading, the Orders list still shows only ord-1000 and does not show ord-1002. Note also that the pr",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/products/p3"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "click",
+     "target": "Pocket Notebook"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "click",
+     "target": "Check out"
+    },
+    {
+     "action": "assert",
+     "target": "Delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Continue"
+    },
+    {
+     "action": "click",
+     "target": "Place order"
+    },
+    {
+     "action": "click",
+     "target": "Orders"
+    },
+    {
+     "action": "navigate",
+     "url": "http://127.0.0.1:5291/orders"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "passed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "false_positive",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "d1-haiku-p1b/88599eb8-b145-4185-aebe-aa5599c43b70",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "88599eb8-b145-4185-aebe-aa5599c43b70"
+   },
+   "state": "detected",
+   "title": "Edited name saves and persists after reload, then is restored",
+   "testId": "88599eb8-b145-4185-aebe-aa5599c43b70",
+   "detectedAt": "2026-11-20T00:05:37.000Z",
+   "expected": {
+    "text": "After Save a success message is shown and the Name field shows the new generated name After reload the Name field still shows the new generated name After restoring the original name the Name field shows the original value again",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Signed in as {{credentials.username}}. The original name was \"Alice Moreau\". Changed Name to \"Ravi Larsen qabe4t\" and clicked Save: the \"Saved.\" status appeared and the field showed the new name (expected results 1 passed). After reloading /account, the Name field showed \"Alice Moreau\" again, not the saved \"Ravi Larsen qabe4t\" (expected result 2 failed). The restore step was not reached. The accou",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "wait",
+     "target": "saved"
+    },
+    {
+     "action": "assert",
+     "target": "Saved."
+    },
+    {
+     "action": "remember",
+     "target": "Name"
+    },
+    {
+     "action": "assert",
+     "target": "Name"
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "wait",
+     "target": "Name"
+    },
+    {
+     "action": "assert",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "assert",
+     "target": "Name"
+    },
+    {
+     "action": "assert",
+     "target": "Saved."
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 5,
+     "target": "Default delivery address",
+     "error": "Error: expect(locator).toHaveValue(expected) failed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "unreproduced",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "d1-haiku-p1b/a3c744db-3338-472c-b9de-726f95cfeeab",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "a3c744db-3338-472c-b9de-726f95cfeeab"
+   },
+   "state": "detected",
+   "title": "Updated delivery address persists across sign out and sign in",
+   "testId": "a3c744db-3338-472c-b9de-726f95cfeeab",
+   "detectedAt": "2026-11-20T00:05:38.000Z",
+   "expected": {
+    "text": "After Save the delivery address textarea shows the new generated address After sign out and sign in again the textarea still shows the new address After restoring the original address the textarea shows 12 Harbour Street, Leeds",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Expected result 1 passed: [hidden] Save the delivery address textarea showed the generated address \"190 Maple Avenue\" and a \"Saved.\" status appeared. Expected result 2 failed: after Sign out and Sign in again, the Account page's \"Default delivery address\" textarea showed the original \"12 Harbour Street, Leeds\" instead of the saved \"190 Maple Avenue\" (the assertion did not pass on retry). The saved",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "click",
+     "target": "Sign out"
+    },
+    {
+     "action": "fill",
+     "target": "input[type=email]"
+    },
+    {
+     "action": "fill",
+     "target": "input[type=password]"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "click",
+     "target": "Account"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "passed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p1b",
+   "category": "false_positive",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "d1-haiku-p1b/bdef9487-6707-48e6-be73-983d52541dfb",
+   "projectId": "db59eccd-4a02-4b34-aab8-8f97a9cb9ffe",
+   "source": {
+    "kind": "execution",
+    "id": "bdef9487-6707-48e6-be73-983d52541dfb"
+   },
+   "state": "detected",
+   "title": "Very long delivery address is limited or saved with a message",
+   "testId": "bdef9487-6707-48e6-be73-983d52541dfb",
+   "detectedAt": "2026-11-20T00:05:50.000Z",
+   "expected": {
+    "text": "Either a length message is shown beside the textarea and Save is refused, or Save shows a success message If saved the textarea shows the stored text after reload The Name field is unchanged",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Signed in as [email hidden] and entered a long delivery address (~1,500 characters, tagged qagvdq; the full 2000-character target was not reached because the input was typed by hand) in \"Default delivery address\". Save showed \"Saved.\" and no length limit or length message appeared. After reloading /account the textarea again showed the old value \"12 Harbour Street, Leeds\", so the long address was ",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "wait"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "fill",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "remember",
+     "target": "Name"
+    },
+    {
+     "action": "wait",
+     "target": "Save"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    },
+    {
+     "action": "assert",
+     "target": "Name"
+    },
+    {
+     "action": "assert",
+     "target": "Default delivery address"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "target": "Name",
+     "error": "TimeoutError: page.waitForResponse: Timeout 10000ms exceeded while waiting for event \"response\"",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p2",
+   "category": "unreproduced",
+   "seed": "BS-04"
+  },
+  "view": {
+   "id": "d1-haiku-p2/2cd78381-2432-4fba-adcd-977b86a5aebf",
+   "projectId": "7fcb2440-f45f-4c28-b6cb-c5222230d6ac",
+   "source": {
+    "kind": "execution",
+    "id": "2cd78381-2432-4fba-adcd-977b86a5aebf"
+   },
+   "state": "detected",
+   "title": "Registration rejects an invalid email format",
+   "testId": "2cd78381-2432-4fba-adcd-977b86a5aebf",
+   "detectedAt": "2026-11-21T00:06:03.000Z",
+   "expected": {
+    "text": "The Email field shows a format error message No account is created and the page still shows Create an account",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "With Name \"Sofia Patel qawxzl\", Email \"qawxzl-invalid-email\" and a valid password, clicking \"Create account\" did not show an Email format error. The app navigated to / (Products) and showed a signed-in header (Orders, Account, Sign out), so the invalid email was accepted and an account/session was created. Expected: the Email field shows a format error and the page stays on \"Create an account\". No",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/register"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "assert",
+     "target": "Name"
+    },
+    {
+     "action": "assert",
+     "target": "Email"
+    },
+    {
+     "action": "click",
+     "target": "Create account"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "passed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p2",
+   "category": "unreproduced",
+   "seed": "BS-02"
+  },
+  "view": {
+   "id": "d1-haiku-p2/2d97dcb8-93ea-4cec-8e53-4e8be1e438cd",
+   "projectId": "7fcb2440-f45f-4c28-b6cb-c5222230d6ac",
+   "source": {
+    "kind": "execution",
+    "id": "2d97dcb8-93ea-4cec-8e53-4e8be1e438cd"
+   },
+   "state": "detected",
+   "title": "Change item quantity updates the line and total",
+   "testId": "2d97dcb8-93ea-4cec-8e53-4e8be1e438cd",
+   "detectedAt": "2026-11-21T00:06:05.000Z",
+   "expected": {
+    "text": "The Pocket Notebook line quantity changes from 1 to 4 The line subtotal becomes four times the unit price and the cart total updates to match",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Quantity change on the Pocket Notebook line works: quantity went 1 -> 4 and the line subtotal shows $17.00 (4 x $4.25). But the cart total does not update to match. After the update, Subtotal and Total stayed at $180.24 (no change), and after a page reload they show $283.74, which equals the line totals with Pocket Notebook still counted at $4.25 (207.00 + 59.99 + 12.50 + 4.25). The expected total",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/products/p3"
+    },
+    {
+     "action": "navigate",
+     "url": "/login"
+    },
+    {
+     "action": "click",
+     "target": "Main"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "navigate",
+     "url": "/products/p3"
+    },
+    {
+     "action": "click",
+     "target": "Cart"
+    },
+    {
+     "action": "navigate",
+     "url": "/products/p3"
+    },
+    {
+     "action": "click",
+     "target": "Add to cart"
+    },
+    {
+     "action": "fill",
+     "target": "Quantity"
+    },
+    {
+     "action": "click",
+     "target": "Update"
+    },
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "assert",
+     "target": "Quantity"
+    },
+    {
+     "action": "assert",
+     "target": "Pocket Notebook"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "passed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "p3-m4-cand-1",
+   "category": "false_positive",
+   "seed": null
+  },
+  "view": {
+   "id": "p3-m4-cand-1/d24222c6-fb75-44be-ab48-6831bd2e6329",
+   "projectId": "0a037f74-509d-483d-b98a-13eb87c329c1",
+   "source": {
+    "kind": "exploration",
+    "id": "d24222c6-fb75-44be-ab48-6831bd2e6329"
+   },
+   "state": "detected",
+   "title": "As stated: workflow \"journey-12-pay-for-an-order\"",
+   "testId": "d24222c6-fb75-44be-ab48-6831bd2e6329",
+   "detectedAt": "2026-11-06T00:01:21.000Z",
+   "expected": {
+    "text": "\"Every step completes: Submit payment for the order\" (source: journey-12-pay-for-an-order)",
+    "source": "expected:1",
+    "stated": "explicit"
+   },
+   "observed": "Signed in with the test account and opened /orders/ord-1000 (after the sign-in redirect). The step \"Submit payment for the order\" cannot be performed: the page shows Status \"Shipped\", the line item Pocket Notebook × 2 ($8.50), Total $13.50, delivery address, the note \"You can cancel an order until it ships\", and only a \"Cancel order\" button. There is no payment control, form or Pay button, so the ",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/orders/ord-1000"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "wait",
+     "target": "Sign out"
+    },
+    {
+     "action": "assert",
+     "target": "Pay"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Pay",
+     "error": "Error: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Pay",
+     "error": "a payment for the order can be submitted from /orders/ord-1000), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Pay",
+     "error": "a payment for the order can be submitted from /orders/ord-1000), the check of expected:1: expect(locator).toBeVisible() failed",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": [],
+   "capture": "captured",
+   "independence": "independent",
+   "confidence": "high"
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p2",
+   "category": "false_positive",
+   "seed": "BS-06"
+  },
+  "view": {
+   "id": "d1-haiku-p2/5491b0e3-9568-4962-b6dd-dc256230aa65",
+   "projectId": "7fcb2440-f45f-4c28-b6cb-c5222230d6ac",
+   "source": {
+    "kind": "execution",
+    "id": "5491b0e3-9568-4962-b6dd-dc256230aa65"
+   },
+   "state": "detected",
+   "title": "Edit profile name and confirm it persists",
+   "testId": "5491b0e3-9568-4962-b6dd-dc256230aa65",
+   "detectedAt": "2026-11-21T00:06:09.000Z",
+   "expected": {
+    "text": "The Name field shows the new name containing qawxzl after saving The name shown in the account view matches the saved name after reload",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Signed in as {{credentials.username}}; original Name was \"Alice Moreau\". I changed Name to \"Ada Silva qawxzl\" and clicked Save; the page showed \"Saved.\". After reloading /account (checked twice), the Name field shows \"Alice Moreau\" again, so the change did not persist. Expected result 1 (Name shows the saved name containing qawxzl after saving/reload) failed. Expected result 2 could not be verifie",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "remember",
+     "target": "Name"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "wait",
+     "target": "Save"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "navigate",
+     "url": "/account"
+    },
+    {
+     "action": "assert",
+     "target": "Name"
+    },
+    {
+     "action": "assert"
+    },
+    {
+     "action": "fill",
+     "target": "Name"
+    },
+    {
+     "action": "click",
+     "target": "Save"
+    },
+    {
+     "action": "assert"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 5,
+     "target": "Name",
+     "error": "TimeoutError: locator.fill: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 5 (5. Enter account email in the Email field) could not use its element. TimeoutError: locator.fill: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ },
+ {
+  "truth": {
+   "trial": "d1-haiku-p2",
+   "category": "false_positive",
+   "seed": "BS-12"
+  },
+  "view": {
+   "id": "d1-haiku-p2/6ef7a5bf-d39a-469a-a96d-94f043b0a5b3",
+   "projectId": "7fcb2440-f45f-4c28-b6cb-c5222230d6ac",
+   "source": {
+    "kind": "execution",
+    "id": "6ef7a5bf-d39a-469a-a96d-94f043b0a5b3"
+   },
+   "state": "detected",
+   "title": "Place an order from the cart with a delivery address",
+   "testId": "6ef7a5bf-d39a-469a-a96d-94f043b0a5b3",
+   "detectedAt": "2026-11-21T00:06:11.000Z",
+   "expected": {
+    "text": "An order confirmation shows a new order reference and the order total The Orders list shows the new order with a status such as placed or unpaid",
+    "source": null,
+    "stated": "inferred"
+   },
+   "observed": "Order placement works: the order ord-1002 was created with status Placed, total $21.20, and delivery address \"39 Birch Avenue qawxzl\", and its order page shows the reference and total. However, the Orders list (/orders) shows only ord-1000 (Shipped, $13.50) and does not list the new order ord-1002, although it was re-loaded after placement. Expected result 2 (Orders list shows the new order) fails",
+   "steps": [
+    {
+     "action": "navigate",
+     "url": "/products/p1"
+    },
+    {
+     "action": "click",
+     "target": "Main"
+    },
+    {
+     "action": "fill",
+     "target": "Email"
+    },
+    {
+     "action": "fill",
+     "target": "Password"
+    },
+    {
+     "action": "click",
+     "target": "Sign in"
+    },
+    {
+     "action": "navigate",
+     "url": "/cart"
+    },
+    {
+     "action": "click",
+     "target": "Check out"
+    },
+    {
+     "action": "fill",
+     "target": "Delivery address"
+    },
+    {
+     "action": "click",
+     "target": "Continue"
+    },
+    {
+     "action": "click",
+     "target": "Place order"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders"
+    },
+    {
+     "action": "navigate",
+     "url": "/orders/ord-1002"
+    },
+    {
+     "action": "assert",
+     "target": "Order ord-1002"
+    },
+    {
+     "action": "wait",
+     "target": "Order ord-1002"
+    },
+    {
+     "action": "assert",
+     "target": "Total: $22.00"
+    },
+    {
+     "action": "assert",
+     "target": "Order ord-1002"
+    },
+    {
+     "action": "click",
+     "target": "Orders"
+    },
+    {
+     "action": "assert",
+     "target": "ord-1002 2026-11-01 Placed $22.00"
+    },
+    {
+     "action": "assert",
+     "target": "Newest first"
+    }
+   ],
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 7,
+     "target": "Check out",
+     "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(…)",
+     "stepFault": "The test needs fixing, not your application: Step 7 (7. Start checkout from the cart) could not use its element. TimeoutError: locator.click: Timeout 10000ms exceeded. Check that the element is on the page at that point and point the step at it as the page shows it now.",
+     "requests": [],
+     "stack": []
+    }
+   ],
+   "requirements": []
+  }
+ }
+]

@@ -107,6 +107,12 @@ export const Capabilities = z.object({
      * continues a stopped exploration only on an agent that reports this; an older one would start from the beginning and make checks twice.
      */
     exploreResume: z.boolean().optional(),
+    /**
+     * Phase 5 hook H1 (additive, optional): this agent runs a task's `attempts`, `freshAccount` and `video` (a finding's verification
+     * attempts). The number is the version of that support. The platform sends verification attempts only to an agent that reports 1 or more;
+     * an older one would run the test once, recorded, and is told to update instead.
+     */
+    verifyAttempts: z.number().int().min(1).max(100).optional(),
     /** Additive, optional: while someone watches, an exploration on this agent sends pictures of its browser (explore-frame.ts). An older agent sends none. */
     explorerFrames: z.boolean().optional(),
     /**
@@ -764,6 +770,16 @@ export const TaskOffer = z.object({
     testTimeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
     /** Windows desktop tests only: how long an application may take to show its window, in ms (project framework settings). Absent: 15 s. */
     startTimeoutMs: z.number().int().min(1000).max(600_000).optional(),
+    /**
+     * Phase 5 hook H1 (additive, optional; only to an agent that reports `verifyAttempts`): a finding's verification. Run the scripts this
+     * many times, each attempt in a fresh browser; the results come attempt by attempt (scripts × attempts runs), each run's first note naming
+     * its attempt. Not the hand-out counter `attempt` below. Absent: once, as always.
+     */
+    attempts: z.number().int().min(1).max(5).optional(),
+    /** With `attempts`: each attempt signs in as an account the agent registers just before it through this sign-up page of the application. */
+    freshAccount: z.object({ signupPath: z.string().min(1).max(500), loginPath: z.string().min(1).max(500).optional() }).optional(),
+    /** false: no video is recorded (a verification attempt: a recording cannot be masked, spec Q6). Absent: recorded as before. */
+    video: z.literal(false).optional(),
     /** Playwright projects for a cross-browser run (same as RunnerProject). */
     projects: z.array(z.object({ name: z.string(), device: z.string(), viewport: z.object({ width: z.number(), height: z.number() }).optional() })).optional(),
     /** Absent or "run": execute the scripts. "record": host a recording session (the agent must have reported `record: true`). */

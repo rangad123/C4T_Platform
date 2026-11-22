@@ -28,9 +28,9 @@ export const runnersOnly = (config: Pick<Config, "EXECUTION_MODE">): boolean => 
 /**
  * Jobs a runner can do: the ones that only run existing tests (their scripts go to a runner), and from round 51 an exploration ("generate"),
  * which goes to the starter's runner as a whole (explore-task.ts); from round 52 a test described in words ("plain") and an agent run ("agent"),
- * the same way. Nothing in them needs this server's browser.
+ * the same way; from Phase 5 a verification of a finished run's findings ("verify"). Nothing in them needs this server's browser.
  */
-export const RUNNER_JOB_MODES: readonly JobMode[] = ["validate", "variants", "environment", "generate", "plain", "agent"];
+export const RUNNER_JOB_MODES: readonly JobMode[] = ["validate", "variants", "environment", "generate", "plain", "agent", "verify"];
 
 /** Databases a dispatch worker in this process is looking after right now (worker.ts adds and removes them; runsCanStartHere asks). */
 export const dispatching = new Set<object>();

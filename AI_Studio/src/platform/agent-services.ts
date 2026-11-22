@@ -110,6 +110,14 @@ export function cannotRunSentence(adapter: { id: string; kinds: readonly string[
 /** The failure of the run itself, not of a test: the agent could not run the tests, or was lost. Never a test verdict. */
 export class RunnerAgentError extends Error {}
 
+/** Phase 5 H1: the one sentence a verification gets when the runner program is older than verification attempts (`verifyAttempts`). */
+export const verifyNeedsUpdate = (runner: string): string => `Your runner “${runner}” is too old to verify findings: it would run the test once, with a recording. Update your runner in Settings, Your runner; the finding is verified at the next run.`;
+/** Why this agent cannot take a task with verification attempts, or undefined (any task without them: undefined). */
+export function verifyProblem(agent: { name: string; capabilities: { verifyAttempts?: number } }, offer: Pick<TaskOffer, "attempts" | "freshAccount" | "video">): string | undefined {
+    if (offer.attempts === undefined && !offer.freshAccount && offer.video === undefined) return undefined;
+    return (agent.capabilities.verifyAttempts ?? 0) >= 1 ? undefined : verifyNeedsUpdate(agent.name);
+}
+
 export { jobOwnerId, OPEN_OWNER_ID };
 
 /** Whose a job about to be made is: its recorded starter, else the person acting now (createJob records them only after its gates). */
@@ -355,6 +363,8 @@ export class AgentService {
             if (!adapter || capabilityProblem(adapter, agent.capabilities)) continue;
             // A task with hand-written scripts goes only where its owner agreed to run them (mayRunCodeScripts).
             if (this.hasCustomScripts(t) && !this.mayRunCodeScripts(agent, token)) continue;
+            // Verification attempts only to a runner that runs them (H1; the executor told the run's starter already).
+            if (this.verifyTaskProblem(agent, t)) continue;
             // A private or local address only to a runner that allows them.
             if (!this.targetAllowed(token, t)) continue;
             const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, this.deviceOf(t));
@@ -973,6 +983,14 @@ export class AgentService {
     }
 
     /** Does the queued task carry hand-written scripts? An unreadable task counts as yes: it is not offered to an agent that has not agreed. */
+    private verifyTaskProblem(agent: AgentRecord, t: { payloadEnc: string }): string | undefined {
+        try {
+            return verifyProblem(agent, this.secrets.decrypt<TaskOffer>(t.payloadEnc));
+        } catch {
+            return undefined;
+        }
+    }
+
     private hasCustomScripts(t: { payloadEnc: string }): boolean {
         try {
             return this.secrets.decrypt<TaskOffer>(t.payloadEnc).scripts.some((s) => s.custom === true);
@@ -1298,7 +1316,7 @@ type EmitFn = (message: string, level?: "info" | "warn", kind?: string) => void;
  * the environment without its secret values (envKey); the phone or iOS part (the app file by its sha256); each browser variant with its
  * device and screen size. Made from the offer on both sides, so a task an earlier version of the platform sent is compared the same way.
  */
-function batchKey(offer: Pick<TaskOffer, "adapterId" | "scripts" | "helpers" | "projects" | "mobile" | "ios"> & { env?: WireRunEnv }): string {
+function batchKey(offer: Pick<TaskOffer, "adapterId" | "scripts" | "helpers" | "projects" | "mobile" | "ios" | "attempts" | "freshAccount" | "video"> & { env?: WireRunEnv }): string {
     return JSON.stringify([
         offer.adapterId,
         (offer.scripts ?? []).map((s) => [s.testId, s.filename, sha256Of(s.content), s.custom === true, s.session === true, (s.baselines ?? []).map((b) => [b.name, b.file.sha256])]),
@@ -1307,6 +1325,8 @@ function batchKey(offer: Pick<TaskOffer, "adapterId" | "scripts" | "helpers" | "
         stableJson(offer.mobile ?? null),
         stableJson(offer.ios ?? null),
         stableJson(offer.projects ?? []),
+        // Verification attempts (H1) are other work than one run of the same scripts; a key without them stays as it was.
+        ...(offer.attempts !== undefined || offer.freshAccount || offer.video !== undefined ? [stableJson([offer.attempts ?? null, offer.freshAccount ?? null, offer.video ?? null])] : []),
     ]);
 }
 
@@ -1443,6 +1463,10 @@ class RemoteExecutor implements ScriptExecutor {
                 ...(opts.timeoutMs !== undefined ? { timeoutMs: Math.round(opts.timeoutMs) } : {}),
                 ...(opts.testTimeoutMs !== undefined ? { testTimeoutMs: Math.round(opts.testTimeoutMs) } : {}),
                 ...(opts.startTimeoutMs !== undefined ? { startTimeoutMs: Math.round(opts.startTimeoutMs) } : {}),
+                // A finding's verification (H1): attempts, a fresh account per attempt, no video.
+                ...(opts.attempts !== undefined ? { attempts: opts.attempts } : {}),
+                ...(opts.freshAccount ? { freshAccount: opts.freshAccount } : {}),
+                ...(opts.video === false ? { video: false } : {}),
                 ...(opts.projects?.length ? { projects: opts.projects.map((p) => ({ name: p.name, device: p.device, ...(p.viewport ? { viewport: p.viewport } : {}) })) } : {}),
                 scripts,
                 // Shared helper modules of hand-written scripts; the agent writes them next to the scripts (and only if it was started with --allow-custom-scripts).
@@ -1460,6 +1484,10 @@ class RemoteExecutor implements ScriptExecutor {
         // attempt left for exactly this work (still waiting, still going, or finished with its result stored) is followed, not sent a second
         // time. Exactly: the same scripts with the same content, flags, baselines and helpers (batchKey), so a result is never attached to a
         // script that did not run.
+        // Verification attempts (H1) on a runner program that cannot run them: the sentence now, not a run once with a recording.
+        const own = offer.attempts !== undefined ? svc.ownRunner(svc.jobStarter(jobId).ownerId, projectId) : undefined;
+        const tooOld = own?.agent ? verifyProblem(own.agent, offer) : undefined;
+        if (tooOld) throw new RunnerAgentError(tooOld);
         const earlier = this.earlierTask(batchKey(offer));
         if (earlier) {
             this.taken.add(earlier.id);
@@ -1757,7 +1785,8 @@ class RemoteExecutor implements ScriptExecutor {
             if (d.key) await svc.p.store.delete(d.key).catch(() => false);
         }
 
-        if (opts.projects?.length) return runs;
+        // Variants and verification attempts (H1) have several results per script, in the runner's order.
+        if (opts.projects?.length || opts.attempts !== undefined) return runs;
         return batch.scripts.map((s): ScriptRun => runs.find((r) => r.testId === s.testId) ?? { testId: s.testId, status: "error", durationMs: 0, error: "The runner returned no result for this script.", failedStepIndex: -1, steps: [], artifacts: [], responses: [] });
     }
 

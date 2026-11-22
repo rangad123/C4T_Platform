@@ -401,8 +401,9 @@ describe("secrets never leave the encrypted store", () => {
         // Videos are pictures and cannot be searched (a password field is drawn as dots: tests/runner-trace-secrets.test.ts). A zip, the
         // failure trace of a test that typed the password, is unpacked and every part is searched (round 40: traces are cleaned).
         const files = fs.existsSync(scratch) ? filesUnder(scratch, startedAt).filter((f) => !/\.(mp4|webm)$/i.test(f)) : [];
-        expect(files.length).toBeGreaterThan(0); // the scripts really ran from here
-        expect(files.some((f) => /[\\/]trace\.zip$/.test(f))).toBe(true); // and a failing test left its trace
+        // A job's run folders go when the job ends (P5 L-8): nothing the scripts wrote there is left (tests/evidence-canary.test.ts checks
+        // what each run stored on the way).
+        expect(files.map((f) => path.relative(scratch, f))).toEqual([]);
         const leaked = files.flatMap((f) => partsOf(f).flatMap(([name, b]) => leaksIn(b).map((s) => `${s} in ${path.relative(scratch, name)}`)));
         expect(leaked).toEqual([]);
     });

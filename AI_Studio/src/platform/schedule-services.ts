@@ -17,6 +17,9 @@ import { ScheduleStore, type Schedule } from "./schedule-store.js";
 import { SecretBox } from "./secrets.js";
 import { saveRunSummary, summarizeJob, type RunSummary } from "./trends.js";
 import { getAgentServices } from "./agent-services.js";
+import { verifyAfterJob } from "./findings/verify-service.js";
+import { reopenReturned } from "./findings/regression-service.js";
+import type { CandidateFindingRecord } from "./candidate-finding-store.js";
 import { getTriggerServices } from "./trigger-services.js";
 import { assertC4tOwnerMayRun } from "./c4t-service.js";
 import { refuseUnlessRunsStart, startSuiteForSchedule } from "./suite-run.js";
@@ -98,6 +101,14 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
         track(alerts.notifyRun(alerts.subject({ id: project.id, name: project.name, url: (app?.url as string | undefined) ?? null }), summary));
     };
 
+    // The channels that chose the notice hear that a fixed bug came back (alerts.ts notifyEvent masks the texts).
+    const notifyReopened = (f: CandidateFindingRecord) => {
+        const project = p.repo.getProject(f.projectId);
+        if (!project) return;
+        const title = (f.testId ? p.repo.getTest(f.testId)?.title : undefined) ?? f.finding.expected.text;
+        track(alerts.notifyEvent(alerts.subject({ id: project.id, name: project.name, url: null }), { event: "finding_reopened", summary: `The fixed finding “${title}” came back: its test failed again.`, items: [{ title, reason: f.finding.observed }] }));
+    };
+
     const services: ScheduleServices = {
         store,
         alertStore,
@@ -108,6 +119,14 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
         async onJobFinished(job) {
             // A deploy trigger may have asked to be told how its run ended (cancelled runs included); runs in the background like alerts.
             track(getTriggerServices(p, { clock: opts.clock, delivery: opts.delivery }).onJobFinished(job));
+            // Phase 5 V1: the run's new findings are verified in the background (the next job is not held up); never throws into the worker.
+            // Phase 6 X1: a Fixed finding whose test fails again is reopened first, so the verification that follows checks it again.
+            track(
+                (async () => {
+                    for (const f of await reopenReturned(p, job)) notifyReopened(f);
+                    if (p.config.VERIFY_FINDINGS) await verifyAfterJob(p, job);
+                })(),
+            );
             try {
                 // A cancelled job says nothing about the application.
                 if (job.error === "Cancelled") return;
@@ -121,6 +140,8 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
                 if ((job.options.mode as string | undefined) === "plain") return;
                 // An agent run has its own result (agent-run.ts); it is not a run of the suite.
                 if ((job.options.mode as string | undefined) === "agent") return;
+                // A verification of a run's findings (findings/verify-service.ts) re-runs that run's failures; it is not a run of the suite.
+                if (job.options.mode === "verify") return;
                 // An exploration that stopped at a plan created and ran nothing: there is no run to count.
                 if (job.options.planOnly) return;
                 const summary = summarizeJob(p.repo, job, "low");

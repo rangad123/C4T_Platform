@@ -54,6 +54,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/health": "own",
     "POST /api/triggers/:token/run": "own",
     "GET /api/triggers/:token/status/:jobId": "own",
+    "POST /api/code-host/github/:token": "own",
     "POST /api/agent/hello": "own",
     "POST /api/agent/poll": "own",
     "POST /api/agent/tasks/:id/heartbeat": "own",
@@ -181,6 +182,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/test-coverage": "read",
     "POST /api/projects/:id/selection-preview": "read",
     "GET /api/projects/:id/selection-preview/detected-changes": "read",
+    // Starts a validation run of the focused or the full set: the same permission as "run these tests".
+    "POST /api/projects/:id/selection-run": "ai_studio.tests.run",
     "PUT /api/projects/:id/mobile-app": "ai_studio.project.settings",
     "PUT /api/projects/:id/explore-level": "ai_studio.project.settings",
     // A project's AI model (routes/project-ai-model.ts): the choices are the asking person's own; changing it is a project setting.
@@ -329,6 +332,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "PUT /api/projects/:id/sentry": "ai_studio.ai_keys.manage",
     "DELETE /api/projects/:id/sentry": "ai_studio.ai_keys.manage",
     "POST /api/projects/:id/sentry/test": "ai_studio.ai_keys.manage",
+    "GET /api/projects/:id/code-host": "read",
+    "PUT /api/projects/:id/code-host": "ai_studio.ai_keys.manage",
+    "DELETE /api/projects/:id/code-host": "ai_studio.ai_keys.manage",
+    "POST /api/projects/:id/code-host/test": "ai_studio.ai_keys.manage",
     // Integrations set up once for an organisation (routes/shared-integrations.ts): setting one up is managing connections to other systems,
     // the code that guards the same connections inside a project (the handler keeps a customer to their organisation); which projects use
     // it is a project setting. Reading is narrowed by the handler.
@@ -365,6 +372,12 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/candidate-findings": "read",
     "GET /api/projects/:id/objectives": "read",
     "GET /api/projects/:id/jobs/:jobId/coverage": "read",
+    // One findings list (routes/findings.ts, Phase 5): reading is access, a person's verdict (confirm, not a bug, split, reopen) is tests.write.
+    "GET /api/projects/:id/findings": "read",
+    "GET /api/projects/:id/findings/:fid": "read",
+    "POST /api/projects/:id/findings/:fid/transition": "ai_studio.tests.write",
+    // An issue filed from a finding group (routes/integrations.ts, Phase 5 C3): the same as filing one from a test.
+    "POST /api/projects/:id/findings/:fid/issue": "ai_studio.tests.write",
     "GET /api/projects/:id/requirements": "read",
     "POST /api/projects/:id/requirements": "ai_studio.tests.write",
     "GET /api/projects/:id/requirements/coverage": "read",

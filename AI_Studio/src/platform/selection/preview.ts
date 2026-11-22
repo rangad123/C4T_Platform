@@ -18,6 +18,7 @@
  * in a request step and `/api/items` seen in a page's traffic are the same endpoint.
  */
 import type { TriggerParity } from "./parity.js";
+import { fullRunRecommendation, riskOf, type ImpactSummary, type Risk, type RiskFacts } from "./risk.js";
 import { UNKNOWN_SITE_LIMIT, isOwnHost, pageKey, parseEndpoint, splitAddress, type AppFacts, type CoverageItem, type CoverageSource, type HTTP_METHODS, type TestCoverage } from "./coverage.js";
 
 export const RECOMMENDATION_NOTE = "This is a recommendation only. No test was skipped or run, and deploy triggers still run every runnable test.";
@@ -56,6 +57,8 @@ export interface PreviewTest {
     why?: string;
     /** What a deploy trigger does differently with this test (its maker's runner can or cannot run it). */
     notes?: string[];
+    /** Proposed tests only: the risk score (risk.ts) they are ordered by, highest first. */
+    risk?: Risk;
 }
 
 export interface Preview {
@@ -166,6 +169,10 @@ export interface PreviewOptions {
     cannotRun?: ReadonlyMap<string, { why: string; unreadable?: boolean; nowhere?: boolean; held?: boolean }>;
     /** Each active deploy trigger compared with the viewer's runnable set (parity.ts). */
     parity?: TriggerParity[];
+    /** The risk facts of each test, by id (risk.ts); a test without any scores on change impact alone. */
+    risk?: ReadonlyMap<string, RiskFacts>;
+    /** From impact analysis of a PR: too much unmapped, or a shared part changed, makes a full run required (risk.ts). */
+    impact?: ImpactSummary;
 }
 
 const lowerFirst = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
@@ -219,8 +226,13 @@ export function previewSelection(coverage: TestCoverage[], changes: ChangeItem[]
         } else if (c.stale) unknown.push({ ...base, reasons, why: `Proposed because its recorded coverage is out of date: ${lowerFirst(c.stale)}` });
         else unknown.push({ ...base, reasons, why: `Proposed because what it touches is not fully known: ${c.limits[0] ?? "no page or endpoint of it is known."}` });
     }
+    // The score orders the proposed tests and never removes one.
+    for (const t of [...matched, ...unknown]) t.risk = riskOf(new Set(t.reasons.map((r) => r.change)).size, opts.risk?.get(t.testId));
+    const byRisk = (a: PreviewTest, b: PreviewTest) => b.risk!.score - a.risk!.score || a.testKey.localeCompare(b.testKey);
+    matched.sort(byRisk);
+    unknown.sort(byRisk);
     const uncoveredChanges = changes.filter((c) => !reached.has(c)).map(changeText);
-    const fullRunReasons: string[] = [];
+    const fullRunReasons: string[] = opts.impact ? fullRunRecommendation(opts.impact) : [];
     if (notProcessed.length) {
         fullRunReasons.push(`The change names ${changes.length + notProcessed.length} pages and endpoints; the preview compares at most ${MAX_CHANGES}, so ${notProcessed.length} ${notProcessed.length === 1 ? "was" : "were"} not compared with any test.`);
     }
@@ -270,4 +282,14 @@ export function previewSelection(coverage: TestCoverage[], changes: ChangeItem[]
         triggers,
         counts: { tests: coverage.length, matched: matched.length, unknown: unknown.length, proposed: matched.length + unknown.length, notMatched: notMatched.length, cannotRun: cannotRun.length },
     };
+}
+
+/**
+ * The tests a focused run runs: every test the preview proposes (matched and unknown) among those that can run. Chosen only by a person
+ * or an explicit API field, never automatically; `fullRunReasons` says when only a full run is safe.
+ */
+export function focusedSelection(coverage: TestCoverage[], runnable: ReadonlySet<string>, input: { pages?: string[]; endpoints?: string[] }, app: AppFacts, apiPrefix?: string): { testIds: string[]; fullRunReasons: string[] } {
+    const { changes, ignored, notProcessed } = readChanges(input, app);
+    const p = previewSelection(coverage.filter((c) => runnable.has(c.testId)), changes, ignored, { apiPrefix, notProcessed });
+    return { testIds: [...p.matched, ...p.unknown].map((t) => t.testId), fullRunReasons: p.fullRunReasons };
 }

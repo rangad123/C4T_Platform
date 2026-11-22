@@ -49,6 +49,15 @@ const EnvSchema = z.object({
         .string()
         .default("false")
         .transform((v) => v === "true"),
+    /**
+     * Phase 5 V1: after a run, verify its new candidate findings (platform/findings/verify-service.ts: the test again, 3 attempts in fresh
+     * browsers, on new accounts where the project allows data changes). Off unless exactly "true" (owner's switch: it runs real tests
+     * against the application after each run).
+     */
+    VERIFY_FINDINGS: z
+        .string()
+        .default("false")
+        .transform((v) => v === "true"),
     /** Run the queue worker inside the API process. Set false to run `npm run worker` separately. */
     WORKER_EMBEDDED: z
         .string()

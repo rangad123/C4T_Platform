@@ -75,6 +75,7 @@ async function runTask(m: ChildRun): Promise<void> {
             { scratchDir: m.scratchDir, scripts: m.scripts, ...(m.helpers?.length ? { helpers: m.helpers } : {}) },
             { run: m.run, ...(mobile ? { mobile } : {}), ...(ios ? { ios } : {}), ...(m.desktop ? { desktop: m.desktop } : {}) },
             { workers: m.opts.workers, signal: abort.signal, ...(m.allowCustom ? { allowCustom: true } : {}), ...(m.browser ? { browser: m.browser } : {}), ...(m.opts.timeoutMs !== undefined ? { timeoutMs: m.opts.timeoutMs } : {}), ...(m.opts.projects ? { projects: m.opts.projects } : {}), ...(m.opts.testTimeoutMs !== undefined ? { testTimeoutMs: m.opts.testTimeoutMs } : {}), ...(m.opts.startTimeoutMs !== undefined ? { startTimeoutMs: m.opts.startTimeoutMs } : {}),
+                ...(m.opts.attempts !== undefined ? { attempts: m.opts.attempts } : {}), ...(m.opts.freshAccount ? { freshAccount: m.opts.freshAccount } : {}), ...(m.opts.video === false ? { video: false as const } : {}),
                 // "Finished 3 of 12 tests" travels to the platform with the next heartbeat (frameworks that cannot report progress ignore this).
                 onProgress: (p) => void send({ type: "log", line: `Finished ${p.done} of ${p.total} tests: ${p.title} (${p.status})`.slice(0, 300) }),
                 // Protocol 2: each test and step as it starts and ends, and each failure screenshot (Playwright web and API runs; others ignore it).

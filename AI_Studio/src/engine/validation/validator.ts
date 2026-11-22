@@ -113,6 +113,8 @@ export const REPAIR_WAITS_FOR_REVIEW = "A repair was saved as a new version for 
 export interface ValidationDeps {
     /** Needed only to repair web tests; a mobile-only batch runs without a browser. */
     browser?: Browser;
+    /** false: the runs record no video (verification attempts, spec Q6; ExecutionOptions.video). Unset: recorded as before. */
+    video?: false;
     scratchDir: string;
     env: RunEnv;
     render: RenderContext;
@@ -174,7 +176,7 @@ async function execute(ctx: EngineContext, deps: ValidationDeps, items: Array<Sc
         const env = { run: deps.cleanup && adapter.traits.cleanupLedger ? { ...deps.env, cleanup: deps.cleanup.enabled ? ("platform" as const) : ("off" as const) } : deps.env, mobile: deps.mobile, ...(deps.ios ? { ios: deps.ios } : {}) };
         let runs: ScriptRun[];
         try {
-            runs = await executor.execute(adapter.id, { scratchDir: deps.scratchDir, scripts: group.map(({ item }) => item), ...(deps.helpers?.length && group.some(({ item }) => item.custom) ? { helpers: deps.helpers } : {}) }, env, { workers, signal: ctx.signal });
+            runs = await executor.execute(adapter.id, { scratchDir: deps.scratchDir, scripts: group.map(({ item }) => item), ...(deps.helpers?.length && group.some(({ item }) => item.custom) ? { helpers: deps.helpers } : {}) }, env, { workers, signal: ctx.signal, ...(deps.video === false ? { video: false as const } : {}) });
         } catch (err) {
             // A cancelled job: whatever was on its way has no result. That is "not run", not a failure of any test.
             if (!ctx.signal?.aborted) throw err;

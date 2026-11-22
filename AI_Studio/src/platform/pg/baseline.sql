@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-70 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 70;
+-- Equal to SQLite migration slots 1-72 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 72;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -1875,6 +1875,15 @@ CREATE TABLE app_workflow_decisions (
     PRIMARY KEY (project_id, fingerprint)
 );
 
+CREATE TABLE finding_groups (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    signature_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_finding_groups_project ON finding_groups (project_id);
+
 CREATE TABLE candidate_findings (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1890,12 +1899,21 @@ CREATE TABLE candidate_findings (
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'candidate',
+    class TEXT,
+    severity TEXT,
+    confidence_json TEXT,
+    group_id TEXT REFERENCES finding_groups(id) ON DELETE SET NULL,
+    attempts_json TEXT NOT NULL DEFAULT '[]',
+    app_version TEXT
 );
 CREATE INDEX idx_cand_find_first_job ON candidate_findings (first_job_id);
 CREATE UNIQUE INDEX idx_cand_find_fp ON candidate_findings (project_id, fingerprint);
+CREATE INDEX idx_cand_find_group ON candidate_findings (group_id);
 CREATE INDEX idx_cand_find_last ON candidate_findings (project_id, last_seen_at);
 CREATE INDEX idx_cand_find_last_job ON candidate_findings (last_job_id);
+CREATE INDEX idx_cand_find_state ON candidate_findings (project_id, state);
 
 CREATE TABLE llm_response_cache (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1919,3 +1937,63 @@ CREATE TABLE project_db_probes (
     token_enc TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE finding_events (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    finding_id TEXT NOT NULL REFERENCES candidate_findings(id) ON DELETE CASCADE,
+    seq BIGINT NOT NULL,
+    at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    actor_id TEXT,
+    by_kind TEXT NOT NULL,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    reason TEXT
+);
+CREATE INDEX idx_finding_events_project ON finding_events (project_id);
+CREATE UNIQUE INDEX idx_finding_events_seq ON finding_events (finding_id, seq);
+
+CREATE TABLE code_repos (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    host TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    api_url TEXT,
+    secret_enc TEXT NOT NULL,
+    hook_token_hash TEXT,
+    feedback BIGINT NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (hook_token_hash),
+    UNIQUE (project_id)
+);
+
+CREATE TABLE pr_events (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    delivery_id TEXT NOT NULL,
+    event TEXT NOT NULL,
+    action TEXT,
+    pr BIGINT,
+    head_sha TEXT,
+    environment TEXT,
+    queued TEXT,
+    ignored TEXT,
+    received_at TEXT NOT NULL,
+    UNIQUE (project_id, delivery_id)
+);
+CREATE INDEX idx_pr_events_pr ON pr_events (project_id, pr);
+
+CREATE TABLE pr_selections (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    pr BIGINT NOT NULL,
+    head_sha TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    selected_json TEXT NOT NULL,
+    reasons_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_pr_selections_pr ON pr_selections (project_id, pr, head_sha);

@@ -6,7 +6,7 @@ import path from "node:path";
 import type { Config } from "../config.js";
 import type { EngineContext, EngineEvent } from "../engine/context.js";
 import type { JobMeter } from "../engine/llm/metered.js";
-import { executorFor, isBuiltInAdapterId } from "../engine/frameworks/index.js";
+import { executorFor, isBuiltInAdapterId, type ScriptExecutor } from "../engine/frameworks/index.js";
 import { createLlmClientOrUnavailable, type LlmClient } from "../engine/llm/provider.js";
 import { runGeneration, type ExploreCheckpoint, type GenerationRequest, type GenerationSummary } from "../engine/orchestrator.js";
 import type { Scenario } from "../engine/spec/schema.js";
@@ -77,6 +77,9 @@ import { noteRunInMemory, type RunJourneyResult } from "./memory-store.js";
 import { runnersOnly } from "./runner-only.js";
 import { LEASE_LOST, onHandover } from "./runner-handover.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
+import type { Platform } from "./bootstrap.js";
+import { verifyAfterJob } from "./findings/verify-service.js";
+import { checkFix } from "./findings/regression-service.js";
 import type { ArtifactStore } from "./storage.js";
 
 const LEASE_MS = 60_000;
@@ -130,6 +133,27 @@ export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boole
             if (++failures >= MAX_BEAT_FAILURES) o.lost();
         }
     };
+}
+
+/** A verification job: the findings of the run it names, or a claimed fix, are verified through `executor`; this job tells the outcome. */
+async function runVerifyJob(p: Platform, job: JobRow, executor: ScriptExecutor, signal: AbortSignal, emit: EngineContext["emit"]): Promise<void> {
+    const source = job.options.verifyJobId ? p.repo.getJob(job.options.verifyJobId) : undefined;
+    if (!job.options.fixCheck && (!source || source.projectId !== job.projectId)) throw new Error("The run whose findings this job verifies no longer exists.");
+    emit({ stage: "validation", kind: "job_started", message: job.options.fixCheck ? `Checking the fix ${job.options.fixCheck.source} claimed.` : `Verifying the findings of run ${source!.id.slice(0, 8)}.` });
+    const execute: Parameters<typeof checkFix>[2]["execute"] = (a, b, e, x) => executor.execute(a, b, e, x);
+    const ranOn = executor.remote ? "the runner" : "the platform";
+    if (job.options.fixCheck) {
+        const done = await checkFix(p, job, { execute, signal, ranOn });
+        const fixed = done.filter((d) => d.fixed).length;
+        emit({ stage: "validation", kind: "finding_verification", message: `Fix check (${job.options.fixCheck.source}): ${fixed} of ${done.length} finding${done.length === 1 ? "" : "s"} fixed.${done.filter((d) => !d.fixed).map((d) => ` ${d.reason}`).join("")}` });
+        return;
+    }
+    const r = await verifyAfterJob(p, source!, { execute, signal, ranOn, harvested: true });
+    const counts = new Map<string, number>();
+    for (const v of r?.verified ?? []) counts.set(v.to, (counts.get(v.to) ?? 0) + 1);
+    const told = [...counts].map(([to, n]) => `${n} ${to.replace(/_/g, " ")}`);
+    if (r?.skipped.length) told.push(`${r.skipped.length} not verified`);
+    emit({ stage: "validation", kind: "finding_verification", message: told.length ? `Findings verified: ${told.join(", ")}.${r?.stopped ? ` ${r.stopped}` : ""}` : "No finding was waiting for verification." });
 }
 
 /** Executes one claimed job end to end and records its final state. Never throws. */
@@ -338,14 +362,25 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         sink.writes.close();
         if (!repo.handOverJob(job.id, owner)) console.warn(`[job ${job.id.slice(0, 8)}] could not be handed over: its lease had moved on`);
         frameHub.drop(job.id);
-        meter?.finish();
+        // Usage written, but no call summary: the job has not ended, it goes on in the next process.
+        meter?.handOver();
     });
 
+    // This job's scratch files (each run's folder: page snapshots, reports, traces, recordings) are its own and go when it ends.
+    const jobScratch = path.join(config.scratchDir, `job-${job.id}`);
     try {
+        // Phase 5: verifying a finished run's findings on the project's runner (findings/verify-service.ts). No AI; the attempts go through
+        // this job's executor, which is the starter's runner, as a run's tests do.
+        if (o.mode === "verify") {
+            await runVerifyJob({ ...deps, db: repo.db, sql: repo.db.sql }, job, executorFor({ projectId: job.projectId, jobId: job.id, mode: o.mode }), abort.signal, emit);
+            if (abort.signal.aborted) throw abort.signal.reason ?? new Error("Cancelled");
+            await finish("COMPLETED");
+            return;
+        }
         // The starter's key cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
         if (ai.blocked && !validateOnly) throw new Error(ai.blocked);
         const ctx: EngineContext = {
-            config,
+            config: { ...config, scratchDir: jobScratch },
             llm,
             signal: abort.signal,
             // Where this job's scripts run: this machine today (see engine/frameworks/executor.ts).
@@ -741,7 +776,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 console.warn(`[job ${job.id.slice(0, 8)}] could not link the test script to its test case or start the next one: ${e instanceof Error ? e.message : String(e)}`);
             }
         }
-        await cleanScratch(config.scratchDir).catch(() => undefined);
+        await fs.rm(jobScratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
+        await cleanScratch(config.scratchDir, repo).catch(() => undefined);
         await notifyFinished(deps, job.id);
     }
 }
@@ -794,11 +830,17 @@ async function notifyFinished(deps: RunnerDeps, jobId: string): Promise<void> {
     }
 }
 
-/** Remove validation scratch directories older than an hour (concurrent jobs keep theirs). */
-async function cleanScratch(dir: string): Promise<void> {
+/**
+ * Remove scratch folders older than an hour: a job's own (`job-<id>`, left by a job that never reached its end, such as a crash) and run
+ * folders made outside a job (`run-<time>-<id>`). Concurrent jobs keep theirs: a run folder is written to as it goes, and a job folder
+ * of a job `repo` knows is still going is kept however old it is. Run when a job ends and when a worker starts.
+ */
+export async function cleanScratch(dir: string, repo: Pick<Repo, "getJob">): Promise<void> {
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const e of entries) {
-        if (!e.isDirectory() || !e.name.startsWith("run-")) continue;
+        if (!e.isDirectory() || !/^(?:run|job)-/.test(e.name)) continue;
+        const job = e.name.startsWith("job-") ? repo.getJob(e.name.slice(4)) : undefined;
+        if (job && !TERMINAL_STATES.includes(job.status)) continue;
         const full = path.join(dir, e.name);
         const st = await fs.stat(full).catch(() => null);
         if (st && Date.now() - st.mtimeMs > 60 * 60_000) await fs.rm(full, { recursive: true, force: true });

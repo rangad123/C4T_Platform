@@ -91,6 +91,7 @@ import { DB_CHECKS_MAX, integrityChecks, webPersistenceChecks, withDatabaseCheck
 import type { DbSchema } from "./database/probe.js";
 import { proposeRowRelations, type RowRelationReport } from "./database/propose.js";
 import { dbServiceFor, type DbCheckService } from "./database/service.js";
+import { maskValue } from "../platform/redact-text.js";
 
 /** The event a job emits when the test cases it wrote were not run (runTestCases false), and its sentence. */
 /** C11 stored-markup tests a run makes at most (each is a written workflow run again). */
@@ -701,7 +702,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 }
 
                 const external = session.network.getExternalHosts();
-                const base: Omit<AppModel, "siteType" | "purpose" | "features" | "journeys"> = {
+                // The model is stored and sent to the AI: what it took from the app (page text, link and request addresses, request samples,
+                // console lines) has the run's secrets and the shared redaction's kinds masked (e-mails, phone numbers, cards, credentials,
+                // secret query values). The API tests below are made from the endpoints as observed (`apis`), so they still call real paths.
+                const base: Omit<AppModel, "siteType" | "purpose" | "features" | "journeys"> = maskValue({
                     url: req.url,
                     origin,
                     pages,
@@ -714,7 +718,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     documentedTestCases,
                     stats: { pagesVisited: pages.length, pagesSkipped: skipped, apisFound: apis.length, durationMs: Date.now() - started },
                     ...(wantWeb && pages.length ? { screenMap: buildScreenMap({ pages, transitions: crawlTransitions }, roleCrawls) } : {}),
-                };
+                }, authoringSecretsOf(req));
                 await sink.counters({ pagesDiscovered: pages.length, apisDiscovered: apis.length });
                 await sink.saveModel({ ...base, siteType: "unknown", purpose: "", features: [], journeys: [] });
                 summary.model = { ...base, siteType: "unknown", purpose: "", features: [], journeys: [] };

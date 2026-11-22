@@ -140,6 +140,16 @@ describe("sanitizeEvidence: an attachment is never trusted", () => {
         expect(out.requests[1]!.path).toBe("/api/cart?note=[hidden]&password=[hidden]&code=[hidden]");
         expect(out.console[0]!.text).toBe("typed [hidden] then Bearer [hidden]");
     });
+    it("masks the run's credentials in their other forms too: hex, upper case, quoted-printable, split across a line (T-9)", () => {
+        const pw = "Hunt3r!pw22";
+        const forms = [Buffer.from(pw).toString("hex"), pw.toUpperCase(), "Hunt3r=21pw22", "Hunt3r\n!pw22"];
+        const e = good();
+        e.console[0]!.text = `echo ${forms.join(" | ")}`;
+        // Upper case in the path: the pattern rules would hide the long hex part of a path on their own, so only the run's secrets catch this.
+        e.requests[1]!.path = `/api/echo/${forms[1]}`;
+        const out = JSON.stringify(sanitizeEvidence(e, [pw]));
+        for (const f of forms) expect(out).not.toContain(JSON.stringify(f).slice(1, -1));
+    });
     it("rejects things that are not evidence, and bad entries inside real evidence", () => {
         for (const junk of [null, 1, "x", [], {}, { v: 2 }, { ...good(), counts: "many" }]) expect(sanitizeEvidence(junk)).toBeUndefined();
         const mixed = good() as unknown as { requests: unknown[] };

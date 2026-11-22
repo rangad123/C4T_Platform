@@ -14,6 +14,7 @@ import { createdFileName } from "../cleanup/helper.js";
 import { EVIDENCE_ATTACHMENT } from "../evidence/capture.js";
 import { parseEvidence, secretsOfRun } from "../evidence/model.js";
 import { scrubRunTraces, traceSecretsOfRun } from "../evidence/trace-scrub.js";
+import { maskSnapshot } from "../evidence/observed-text.js";
 import { PROOF_SHOT_STYLE } from "../evidence/proof-style.js";
 import { parseCreatedLog, type CreatedLine } from "../cleanup/ledger.js";
 import { parseMetrics } from "../performance/specs.js";
@@ -196,6 +197,10 @@ export function configFor(projects: RunnerProject[], testTimeoutMs?: number, bro
         .join("\n");
     return base.replace("import { defineConfig }", () => "import { defineConfig, devices }").replace("    use: {", () => `    projects: [\n${list}\n    ],\n    use: {`);
 }
+
+/** The run config before the proxy and the overall limit: no recording when the caller says `video: false` (verification attempts, spec Q6). */
+export const runConfigOf = (projects: RunnerProject[], opts: { testTimeoutMs?: number; browser?: BrowserLaunch; video?: false }): string =>
+    configFor(projects, opts.testTimeoutMs, opts.video === false ? { ...opts.browser, video: false } : opts.browser);
 
 /** One test finished (Playwright's list reporter, read from the runner's output). Only produced when a caller asks for progress. */
 export interface RunProgress {
@@ -467,14 +472,63 @@ export function customRefusals(scripts: ScriptInput[], helpers: ReadonlyArray<{ 
     return out;
 }
 
+/** Where a verification attempt registers its new account (ExecutionOptions.freshAccount). */
+export interface FreshAccount {
+    signupPath: string;
+    loginPath?: string;
+}
+
+/** The first note of each run of a verification attempt (H1): "Attempt 2 of 3 (clean state): as a newly registered account". */
+export const attemptNote = (i: number, n: number, account?: { clean: boolean; note: string }): string =>
+    account ? `Attempt ${i} of ${n} (${account.clean ? "clean state" : "shared account"}): ${account.note}` : `Attempt ${i} of ${n}: in a fresh browser`;
+const ATTEMPT_NOTE = /^Attempt (\d+) of (\d+)(?: \((clean state|shared account)\))?: ([^]*)$/;
+/** attemptNote read back: which attempt, and (with a fresh-account attempt) whether it ran on clean state and why. */
+export function parseAttemptNote(note: string | undefined): { attempt: number; of: number; clean?: boolean; note: string } | undefined {
+    const m = ATTEMPT_NOTE.exec(note ?? "");
+    return m ? { attempt: Number(m[1]), of: Number(m[2]), ...(m[3] ? { clean: m[3] === "clean state" } : {}), note: m[4]! } : undefined;
+}
+
+/**
+ * Verification attempts (Phase 5 hook H1): the batch runs `attempts` times (1 to 5), each a run of its own (a fresh browser), and, with
+ * `freshAccount`, each signed in as an account registered just before it through the application's sign-up page (explore/clean-account.ts;
+ * when none can be made the attempt runs on the shared account and its note says why). Results come attempt by attempt, in input order
+ * within each, every run's first note being attemptNote. No AI calls.
+ */
+async function runAttempts(scratchDir: string, scripts: ScriptInput[], env: RunEnv, opts: NonNullable<Parameters<typeof runScripts>[3]>): Promise<ScriptRun[]> {
+    const { attempts, freshAccount, ...once } = opts;
+    const n = Math.min(5, Math.max(1, Math.floor(attempts ?? 1)));
+    const out: ScriptRun[] = [];
+    for (let i = 1; i <= n; i++) {
+        if (opts.signal?.aborted) throw new Error("Job cancelled");
+        const account = freshAccount ? await freshAccountFor(env.baseUrl, freshAccount, opts.browser) : undefined;
+        const runs = await runScripts(scratchDir, scripts, account?.credentials ? { ...env, credentials: account.credentials } : env, once);
+        out.push(...runs.map((r) => ({ ...r, notes: [attemptNote(i, n, account), ...(r.notes ?? [])] })));
+    }
+    return out;
+}
+
+/** One newly registered account in a browser of its own (closed again), or the shared account with the reason. */
+async function freshAccountFor(baseUrl: string, fresh: FreshAccount, browser: BrowserLaunch | undefined) {
+    const [{ registerFreshAccount, replayAccountPreparer }, { chromium }] = await Promise.all([import("../explore/clean-account.js"), import("playwright")]);
+    return replayAccountPreparer({ register: true, signupPath: fresh.signupPath }, async () => {
+        const b = await chromium.launch({ headless: true, ...(browser?.channel ? { channel: browser.channel } : {}), ...(browser?.executablePath ? { executablePath: browser.executablePath } : {}) });
+        try {
+            return await registerFreshAccount(b, baseUrl, fresh.signupPath, fresh.loginPath ? { loginPath: fresh.loginPath } : {});
+        } finally {
+            await b.close().catch(() => undefined);
+        }
+    })();
+}
+
 export async function runScripts(
     scratchDir: string,
     scripts: ScriptInput[],
     env: RunEnv,
-    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** Called as each test and top-level step starts and ends, and when a failure screenshot is written (a runner agent's live view). Leaves the run itself untouched. */ onLive?: (e: LiveRunEvent) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch } = { workers: 2 },
+    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** Called as each test and top-level step starts and ends, and when a failure screenshot is written (a runner agent's live view). Leaves the run itself untouched. */ onLive?: (e: LiveRunEvent) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch; /** false: no recording (verification attempts, ExecutionOptions.video). */ video?: false; /** Verification (H1): run the whole batch this many times, each in a fresh browser. */ attempts?: number; /** With `attempts`: each attempt signs in as an account newly registered through this sign-up page. */ freshAccount?: FreshAccount } = { workers: 2 },
 ): Promise<ScriptRun[]> {
     if (scripts.length === 0) return [];
     if (opts.signal?.aborted) throw new Error("Job cancelled");
+    if (opts.attempts !== undefined) return runAttempts(scratchDir, scripts, env, opts);
     // Code tests are arbitrary code. Whatever called this, they are not started unless the caller said this machine allows it, and
     // each one (and every helper) passes the guard again right before it is written. The others in the batch run as usual.
     if (scripts.some((s) => s.custom)) {
@@ -493,7 +547,7 @@ export async function runScripts(
     // --proxy-tests on a runner (AITP_PROXY_TESTS=1): the browser gets the proxy; otherwise the config is unchanged (engine/net/test-proxy.ts).
     const limit = opts.timeoutMs ?? Math.max(120_000, scripts.length * Math.max(1, projects.length) * (opts.testTimeoutMs ?? 60_000));
     // Just under the kill timer below: Playwright stops the run itself first and still writes report.json for every test.
-    const config = withGlobalTimeout(withTestProxy(configFor(projects, opts.testTimeoutMs, opts.browser), process.env), limit);
+    const config = withGlobalTimeout(withTestProxy(runConfigOf(projects, opts), process.env), limit);
     await fs.writeFile(path.join(runDir, "playwright.config.ts"), withReporters(config, [...(opts.onProgress ? ['["list"]'] : []), ...(opts.signal ? ['["./partial-reporter.mjs"]'] : []), ...(opts.onLive ? [`["./${LIVE_REPORTER_FILE}"]`] : [])]));
     if (opts.signal) await fs.writeFile(path.join(runDir, "partial-reporter.mjs"), PARTIAL_REPORTER);
     if (opts.onLive) await fs.writeFile(path.join(runDir, LIVE_REPORTER_FILE), LIVE_REPORTER);
@@ -596,7 +650,8 @@ export async function runScripts(
     const evidenceTexts = new Map<string, string>();
     const runs = await parseReport(runDir, scripts, stderr, timedOut, "Playwright", projects.map((p) => p.name), evidenceTexts);
     await storeEvidence(runDir, runs, evidenceTexts, [...secretsOfRun(env), ...extras.secrets]);
-    for (const run of runs) if (run.errorContext) run.errorContext = maskSecrets(run.errorContext, [...traceSecretsOfRun(env), ...extras.secrets]);
+    // The page snapshot at the failure is read by repair (an AI prompt): field values and the shared redaction's kinds go as well.
+    for (const run of runs) if (run.errorContext) run.errorContext = maskSnapshot(maskSecrets(run.errorContext, [...traceSecretsOfRun(env), ...extras.secrets]));
     // Failure traces keep what the test typed and what the browser sent: masked with the run's secrets, or not kept (../evidence/trace-scrub.ts).
     await scrubRunTraces(runs, [...traceSecretsOfRun(env), ...extras.secrets]);
     // Records data-changing API tests created: written as they happened, so a run that was killed still reports them.

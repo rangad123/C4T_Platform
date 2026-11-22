@@ -110,6 +110,9 @@ export interface Preview {
     grace?: number;
     graceRecords?: number;
     graceUntil?: string | null;
+    /** Files kept as an open (or lately closed) finding's evidence, and the sentence saying so. */
+    findingHeld?: number;
+    findingHeldNote?: string | null;
     /** Files kept because the time of their run could not be read. */
     undated?: number;
     undatedNote?: string | null;
@@ -135,6 +138,7 @@ export function previewNotes(p: Preview): string[] {
         const until = p.graceUntil ? ` until ${formatDate(p.graceUntil)}` : " for now";
         out.push(`Kept${until}: ${what} from before retention was first switched on. Nothing from before then is removed in the first 14 days.`);
     }
+    if (p.findingHeldNote) out.push(p.findingHeldNote);
     if (p.sizeLimitNote) out.push(p.sizeLimitNote);
     if ((p.undated ?? 0) > 0) out.push(p.undatedNote ?? `${count(p.undated!, "file")} kept: the time of the run could not be read.`);
     return out;

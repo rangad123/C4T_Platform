@@ -4,7 +4,11 @@ import { assessSeverity } from "../../engine/validation/severity.js";
 import { HttpError } from "../http-error.js";
 import { blockView } from "../block-store.js";
 import { evidenceSentence } from "../evidence-read.js";
-import { buildIssueDraft } from "../issues/content.js";
+import { rootCause } from "../../engine/findings/root-cause.js";
+import type { FindingState } from "../../engine/findings/lifecycle.js";
+import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
+import { fromCandidate } from "../findings/adapters.js";
+import { buildFindingReport, buildIssueDraft, findingIssueDraft } from "../issues/content.js";
 import { TrackerError } from "../issues/http.js";
 import { IntegrationStore, providerFor, splitSettings } from "../issues/store.js";
 import { IntegrationSettings, NotionDatabaseId } from "../issues/types.js";
@@ -174,6 +178,70 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
                 evidenceSummary: await evidenceSentence(repo, ctx.p.store, t.id),
                 relatedSentry: cachedTopIssue(repo, t.id),
             });
+            try {
+                const issue = await store.provider(integrationId)!.createIssue(draft);
+                return store.addLink({ testId: t.id, integrationId, provider: conn.kind, externalId: issue.externalId, url: issue.url, title: draft.title });
+            } catch (e) {
+                return upstream(e);
+            }
+        })();
+        inFlight.set(key, work);
+        try {
+            return reply.code(201).send({ link: await work, existing: false });
+        } finally {
+            inFlight.delete(key);
+        }
+    });
+
+    // ── issues from a finding group (testing-engine Phase 5 C3) ───────────────────
+    const findings = new CandidateFindingStore(p.sql);
+    /** A person files only what was confirmed, or what the engine handed to a person; an issue links to the group, once per tracker. */
+    const FILABLE: readonly FindingState[] = ["confirmed", "classified", "needs_manual_review"];
+
+    app.post("/api/projects/:id/findings/:fid/issue", async (req, reply) => {
+        const { id, fid } = req.params as { id: string; fid: string };
+        ctx.project(id);
+        const { integrationId } = z.object({ integrationId: z.string().min(1).max(100) }).strict().parse(req.body ?? {});
+        const conn = store.get(integrationId);
+        if (!conn || conn.projectId !== id) throw new HttpError(404, "Issue tracker connection not found for this project");
+        const r = await findings.get(id, fid);
+        if (!r) throw new HttpError(404, "Finding not found");
+        const groupIds = r.groupId ? ((await findings.groups(id)).find((g) => g.id === r.groupId)?.findingIds ?? [fid]) : [fid];
+        const members = [r, ...(await Promise.all(groupIds.filter((x) => x !== fid).map((x) => findings.get(id, x)))).filter((m): m is CandidateFindingRecord => !!m)];
+        const testIds = [...new Set(members.map((m) => m.testId).filter((t): t is string => !!t))];
+        const linked = () => testIds.map((t) => store.linkFor(t, integrationId)).find(Boolean);
+        const existing = linked();
+        if (existing) return reply.code(200).send({ link: existing, existing: true });
+        if (!FILABLE.includes(r.state)) throw new HttpError(422, "Only a Confirmed finding, or one that needs manual review, can be filed as an issue.");
+        const t = r.testId ? repo.getTest(r.testId) : undefined;
+        if (!t || t.projectId !== id || t.unreadable) throw new HttpError(422, "This finding has no saved test to link the issue to.");
+
+        // A double click waits for the first request and gets its link.
+        const key = `finding:${r.groupId ?? fid}:${integrationId}`;
+        const pending = inFlight.get(key);
+        if (pending) {
+            await pending.catch(() => undefined);
+            const made = linked();
+            if (made) return reply.code(200).send({ link: made, existing: true });
+        }
+        const work = (async () => {
+            const testOf = (m: CandidateFindingRecord) => {
+                const mt = m.testId ? repo.getTest(m.testId) : undefined;
+                return mt && mt.projectId === id && !mt.unreadable ? { id: mt.id, title: mt.title, spec: mt.spec, meta: mt.generationMeta } : undefined;
+            };
+            const views = members.map((m) => fromCandidate(m, testOf(m)));
+            const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.headers.host}`).replace(/\/+$/, "");
+            const evidenceUrl = `${base}/#/tests/${t.id}`;
+            const report = buildFindingReport({
+                members: views,
+                spec: blockView(repo.db, id)(t.spec),
+                area: t.suite,
+                environment: { appUrl: repo.getLatestApplicationPublic(id)?.url as string | undefined, appVersion: r.appVersion },
+                evidenceUrl,
+                // No code source is connected to projects yet (Phase 6), so this says Unknown and why; no AI call is made here.
+                rootCause: await rootCause({ members: views }),
+            });
+            const draft = findingIssueDraft(report, evidenceUrl);
             try {
                 const issue = await store.provider(integrationId)!.createIssue(draft);
                 return store.addLink({ testId: t.id, integrationId, provider: conn.kind, externalId: issue.externalId, url: issue.url, title: draft.title });

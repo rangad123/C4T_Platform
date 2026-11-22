@@ -26,9 +26,10 @@ import { engineVersion, promptFingerprints, writeBaseline } from "./record.js";
 import { bindLabels, migrateLabels, parseLabels } from "./labels.js";
 import { observedOf, trialProblem, withLabels } from "./observed.js";
 import { rescored, SCORING_VERSION } from "./metrics.js";
-import { benchMarkdown, layersMarkdown, observedMarkdown } from "./report.js";
+import { benchMarkdown, layersMarkdown, observedMarkdown, verificationMarkdown } from "./report.js";
 import { LAYERS_ONLY_EXPLORATION, layersOnlyLlm } from "./layers-only.js";
 import { BenchmarkSchema, type Benchmark, type BenchAppResult, type BenchConfig, type PriceRow } from "./schema.js";
+import { verificationOf, type Verification } from "./verify-score.js";
 
 export interface BenchDeps {
     /** Tests only: a scripted model for the in-process platform. Then no money is spent and no budget is asked for. */
@@ -68,6 +69,8 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --repeat <n>               reruns of every created test, 1 to 10 (default 1)
   --job-timeout-min <n>      longest the exploration, a creation and each replay job may take, in minutes (default 45)
   --isolated-replays         replay each finding alone, in a job of its own, on a freshly started app (every replay stage; slower, no AI)
+  --verify-attempts <n>      verify each app's findings as the platform does after a job, n attempts each (1 to 5; no AI), and keep what
+                             it left in the result (bench-report --verification scores it)
   --port-base <n>            first port for the apps (default 5291)
   --prices <file>            price table: [{ "model", "inputPerMTok", "outputPerMTok", "cachedInputPerMTok"?, "cacheWritePerMTok"?, "note"? }] in US dollars
   --approved-budget-usd <n>  the most this run may spend (required with a real AI model; 0 for a free model); AI work stops at it
@@ -99,6 +102,7 @@ interface Args {
     repeat: number;
     jobTimeoutMin?: number;
     isolatedReplays: boolean;
+    verifyAttempts?: number;
     portBase: number;
     prices?: string;
     budget?: number;
@@ -158,6 +162,7 @@ export function parseBenchArgs(argv: string[]): Args {
         } else if (k === "--repeat") a.repeat = whole(1, 10);
         else if (k === "--job-timeout-min") a.jobTimeoutMin = whole(1, 24 * 60);
         else if (k === "--isolated-replays") a.isolatedReplays = true;
+        else if (k === "--verify-attempts") a.verifyAttempts = whole(1, 5);
         else if (k === "--port-base") a.portBase = whole(1024, 65000);
         else if (k === "--prices") a.prices = path.resolve(value());
         else if (k === "--approved-budget-usd") {
@@ -269,12 +274,12 @@ export function resumedArgs(firstArgv: string[], argv: string[]): Args {
 }
 
 /**
- * The job time limit and isolated replays: what the run's config records (only when set, so a default run's config is what it was) and
+ * The job time limit, isolated replays and verification attempts: what the run's config records (only when set, so a default run's config is what it was) and
  * what the controller is given.
  */
-export function configLimits(a: Pick<Args, "jobTimeoutMin" | "isolatedReplays">): { options: Record<string, number | boolean>; run: { jobTimeoutMs?: number; isolatedReplays?: true } } {
+export function configLimits(a: Pick<Args, "jobTimeoutMin" | "isolatedReplays" | "verifyAttempts">): { options: Record<string, number | boolean>; run: { jobTimeoutMs?: number; isolatedReplays?: true } } {
     return {
-        options: { ...(a.jobTimeoutMin !== undefined ? { jobTimeoutMin: a.jobTimeoutMin } : {}), ...(a.isolatedReplays ? { isolatedReplays: true } : {}) },
+        options: { ...(a.jobTimeoutMin !== undefined ? { jobTimeoutMin: a.jobTimeoutMin } : {}), ...(a.isolatedReplays ? { isolatedReplays: true } : {}), ...(a.verifyAttempts !== undefined ? { verifyAttempts: a.verifyAttempts } : {}) },
         run: { ...(a.jobTimeoutMin !== undefined ? { jobTimeoutMs: a.jobTimeoutMin * 60_000 } : {}), ...(a.isolatedReplays ? { isolatedReplays: true as const } : {}) },
     };
 }
@@ -363,6 +368,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
     process.once("SIGINT", onSigint);
     try {
         let client: PlatformClient;
+        let platform: Platform;
         let config: BenchConfig;
         let model: string;
         try {
@@ -373,6 +379,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             const started = await startPlatform(dataDir, { ...env, EXPLORE_DATA_OPERATORS: "true", BENCH_RISKY_CHECKS: "true" }, deps);
             stop = started.stop;
             client = started.client;
+            platform = started.platform;
             const cfg = ok(await client.call("GET", "/api/config"), "Reading the platform's settings");
             // A scripted model (tests) is set on the platform directly, so the platform's settings do not name it.
             if (!scripted && !cfg?.llm?.configured) throw new Error("The benchmark needs an AI model. Set one up first (LLM_PROVIDER and its key in .env), then run this again.");
@@ -500,6 +507,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             ...(args.roles ? { roles: (appId: string) => catalogueRoles(catalogue.accounts?.[appId] ?? []) } : {}),
             ...(args.db ? { database: args.db === "bench-data" ? { kind: "bench-data" as const } : { kind: "bench-sqlite" as const, dir: path.join(dataDir, "bench-db") } } : {}),
             ...configLimits(args).run,
+            ...(args.verifyAttempts !== undefined ? { verify: verifierOf(platform, args.verifyAttempts) } : {}),
         });
 
         const kept = await client.call("POST", "/api/eval/runs", run);
@@ -574,6 +582,18 @@ export function previousCalibration(dir: string): ReturnType<typeof calibrationO
     return undefined;
 }
 
+/** `--verify-attempts`: the jobs' findings verified as onJobFinished does (verify-service.ts; no AI), then what the platform recorded. */
+export const verifierOf = (platform: Platform, attempts: number) => async (projectId: string, jobIds: string[]): Promise<Verification> => {
+    const { verifyAfterJob } = await import("../../platform/findings/verify-service.js");
+    const { CandidateFindingStore } = await import("../../platform/candidate-finding-store.js");
+    const t0 = Date.now();
+    for (const id of jobIds) {
+        const job = platform.repo.getJob(id);
+        if (job) await verifyAfterJob(platform, job, { attempts });
+    }
+    return verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
+};
+
 export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, deps: BenchDeps): Promise<{ client: PlatformClient; platform: Platform; stop: () => Promise<void> }> {
     const { loadConfig } = await import("../../config.js");
     const { bootstrap } = await import("../../platform/bootstrap.js");
@@ -603,7 +623,10 @@ export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --o
        node scripts/eval.mjs bench-report --rescore <results folder or file> [<more>...]
        node scripts/eval.mjs bench-report --layers <results folder or file> [<more>...]
        node scripts/eval.mjs bench-report --migrate-labels <old labels file> --result <results file> --to <new file>
+       node scripts/eval.mjs bench-report --verification <results folder or file> [<more>...]
   Prints the "Observed vs fails on the seeded app" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
+  --verification    scores the verification of each app of each trial (V1–V8, V11, eval/bench/verify-score.ts); an app run without
+                    --verify-attempts reads "not measured"
   --rescore         scores each trial again by the current rules (metrics.ts SCORING_VERSION, the catalogue's unreachable defects) and prints
                     a before → after table; detection must not change (the replays' categories are kept); extension seeds
                     (catalogue 2026-11-21.1) are scored apart, as in the run
@@ -652,11 +675,13 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
     let observed = false;
     let rescore = false;
     let layers = false;
+    let verification = false;
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         if (k === "--observed") observed = true;
         else if (k === "--rescore") rescore = true;
         else if (k === "--layers") layers = true;
+        else if (k === "--verification") verification = true;
         else if (k === "--labels") labelsFile = argv[++i];
         else if (k === "--migrate-labels") migrate = argv[++i];
         else if (k === "--result") result = argv[++i];
@@ -717,6 +742,21 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
             }
             if (extensionRows.length) out.push("", "Extension seeds (scored apart from the original ones):", "", "| Trial | Detected | Effective maximum |", "|---|---|---|", ...extensionRows);
             log(out.join("\n"));
+            return 0;
+        } catch (e) {
+            log(e instanceof Error ? e.message : String(e));
+            return 2;
+        }
+    }
+    if (verification && targets.length) {
+        try {
+            const trials = targets.map((t) => {
+                const file = trialFile(t);
+                const parsed = BenchmarkSchema.safeParse((JSON.parse(fs.readFileSync(file, "utf8")) as { benchmark?: unknown }).benchmark);
+                if (!parsed.success) throw new Error(`${file} is not a benchmark result: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
+                return { name: path.relative(process.cwd(), file) || file, benchmark: parsed.data };
+            });
+            log(verificationMarkdown(trials));
             return 0;
         } catch (e) {
             log(e instanceof Error ? e.message : String(e));

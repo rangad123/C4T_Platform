@@ -174,13 +174,21 @@ export function anchoredPath(base: string, name: string): string {
 
 // ── secrets ─────────────────────────────────────────────────────────────────
 
+/** The forms of a run's secrets, longest first. The last list is kept: masking a whole model calls this once per string with the same secrets. */
+let lastForms: { key: string; list: string[] } | undefined;
+function formsOf(secrets: readonly string[]): string[] {
+    const key = secrets.join("\u0000");
+    if (lastForms?.key !== key) lastForms = { key, list: [...new Set(secrets.filter((s) => s.length >= 4).flatMap((s) => secretVariants(s)))].sort((a, b) => b.length - a.length) };
+    return lastForms.list;
+}
+
 /**
  * Replace every secret of the run, wherever it appears in text, with a marker. Works on any JSON-like value; strings shorter than 4 characters
  * are not secrets. Each secret is also masked in the forms text usually carries it in (URL-encoded, with `+` for spaces, lower-case hex,
  * JSON-escaped; secret-variants.ts), so an error that quotes a sign-in address or a JSON body does not keep it.
  */
 export function scrubSecrets<T>(value: T, secrets: string[]): T {
-    const list = [...new Set(secrets.filter((s) => s.length >= 4).flatMap((s) => secretVariants(s)))].sort((a, b) => b.length - a.length);
+    const list = formsOf(secrets);
     if (list.length === 0) return value;
     const walk = (v: unknown): unknown => {
         if (typeof v === "string") {
