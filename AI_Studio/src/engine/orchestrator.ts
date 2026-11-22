@@ -85,6 +85,7 @@ import { usableRules, type AppKnowledge } from "./planning/planner.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 import { createThumbnailer } from "./discovery/thumbnails.js";
 import { layerOfSpec, layerReport, type Layer, type LayerReport } from "./validation/layers.js";
+import { withStatedSources } from "./api/stated-source.js";
 import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
 import { benchProbeFor } from "./database/bench-data.js";
 import { DB_CHECKS_MAX, integrityChecks, webPersistenceChecks, withDatabaseChecks } from "./database/checks.js";
@@ -913,6 +914,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             throwIfAborted(ctx.signal);
             // Stored sign-in details only go to the application's own site: refused before anything is created.
             assertCredentialsStayHome(spec, renderCtx);
+            // Each check names what states its expectation (the API document, the test's requirement), so verification can tell stated from inferred.
+            withStatedSources(spec, model.apis);
             // Which model version of the application the test was made from, when the exploration had one.
             if (req.appKnowledge) meta = { ...meta, modelVersion: req.appKnowledge.modelVersionId };
             const layer = layerOfSpec(spec);
