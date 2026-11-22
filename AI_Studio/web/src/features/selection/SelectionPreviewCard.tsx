@@ -1,9 +1,12 @@
-import { GitBranch, ScanSearch } from "lucide-react";
+import { GitBranch, GitPullRequest, Play, ScanSearch } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../api";
 import { Badge, Button, Callout, Metric } from "../../components/ui";
+import { plural } from "../../lib/format";
+import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
-import { linesOf, SOURCE_WORDS, type DetectedChanges, type SelectionPreview, type SelectionTest } from "./selection";
+import { routes } from "../../lib/router";
+import { linesOf, SOURCE_WORDS, type DetectedChanges, type PullRequestSelection, type SelectionPreview, type SelectionTest } from "./selection";
 
 /**
  * "Which tests would a change call for?" beside the deploy tokens. A person names changed pages and endpoints (or takes the ones the
@@ -53,6 +56,7 @@ export function SelectionPreviewCard({ projectId }: { projectId: string }) {
                 <ScanSearch size={18} aria-hidden />
                 <h2 className="t-section" id="selection-title">Which tests a change calls for</h2>
             </div>
+            <PullRequests projectId={projectId} />
             <div className="card-pad stack-sm">
                 <p className="t-secondary">Name the pages and endpoints a release changes. The preview shows which tests open or call them, and why. It never runs or skips a test: a deploy still runs every runnable test.</p>
                 <div className="field">
@@ -185,5 +189,81 @@ function Group({ title, tests, testId, collapsed }: { title: string; tests: Sele
                 </>
             )}
         </div>
+    );
+}
+
+/** The latest pull requests whose tests were chosen from the change (code-host/pr-impact.ts), each with why and both runs. Nothing runs until a person picks one; a full run is the default. */
+function PullRequests({ projectId }: { projectId: string }) {
+    const prs = useFetch<{ pullRequests: PullRequestSelection[] }>(`/projects/${projectId}/pull-requests`);
+    const [busy, setBusy] = useState<string | null>(null);
+    const [started, setStarted] = useState<{ key: string; jobId: string; testCount: number } | null>(null);
+    const [error, setError] = useState<{ key: string; text: string } | null>(null);
+    const list = prs.data?.pullRequests.slice(0, 3) ?? [];
+    if (!list.length) return null;
+
+    const start = async (p: PullRequestSelection, selection: "full" | "focused") => {
+        const key = `${p.pr}-${selection}`;
+        setBusy(key);
+        setError(null);
+        setStarted(null);
+        try {
+            const r = await api<{ jobId: string; testCount: number }>(`/projects/${projectId}/selection-run`, { method: "POST", body: selection === "full" ? { selection } : { selection, ...p.change } });
+            setStarted({ key: String(p.pr), jobId: r.jobId, testCount: r.testCount });
+        } catch (e) {
+            setError({ key: String(p.pr), text: describeApiError(e) });
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    return (
+        <ul className="list divided" aria-label="Pull requests" data-testid="selection-prs">
+            {list.map((p) => {
+                const canFocus = p.proposed > 0 && (p.change.pages.length > 0 || p.change.endpoints.length > 0);
+                return (
+                    <li key={`${p.pr}-${p.headSha}`} className="card-pad stack-sm" data-pr={p.pr}>
+                        <div className="row wrap">
+                            <GitPullRequest size={16} aria-hidden />
+                            <span className="t-card">Pull request #{p.pr}</span>
+                            <code className="t-meta">{p.headSha.slice(0, 7)}</code>
+                            <span className="t-meta">{plural(p.proposed, "test")} proposed</span>
+                        </div>
+                        {p.fullRunRecommended && <p className="t-secondary">Full run recommended: {p.fullRunReasons.join(" ")}</p>}
+                        {p.tests.length > 0 && (
+                            <ul className="t-secondary" aria-label={`Why tests were proposed for pull request #${p.pr}`}>
+                                {p.tests.map((t) => (
+                                    <li key={t.testKey}>
+                                        <code>{t.testKey}</code> {t.title}: {t.why}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        <p className="t-meta">
+                            {p.outcome ? (
+                                <>
+                                    Run of this commit: {p.outcome.failed ? `${p.outcome.failed} of ${p.outcome.total} failed` : `all ${p.outcome.total} passed`}. <a href={routes.run(projectId, p.outcome.jobId)}>Open the run</a>
+                                </>
+                            ) : (
+                                "This commit has not been run yet."
+                            )}
+                        </p>
+                        <div className="row wrap">
+                            <Button variant="primary" icon={Play} loading={busy === `${p.pr}-full`} disabled={busy !== null} onClick={() => void start(p, "full")}>
+                                Run all tests
+                            </Button>
+                            <Button icon={Play} loading={busy === `${p.pr}-focused`} disabled={busy !== null || !canFocus} tip={canFocus ? undefined : "No test reaches this change: run all tests."} onClick={() => void start(p, "focused")}>
+                                Run only the proposed tests
+                            </Button>
+                        </div>
+                        {started?.key === String(p.pr) && (
+                            <p className="t-meta" role="status">
+                                Started a run of {plural(started.testCount, "test")}. <a href={routes.run(projectId, started.jobId)}>Open the run</a>
+                            </p>
+                        )}
+                        {error?.key === String(p.pr) && <Callout tone="danger">{error.text}</Callout>}
+                    </li>
+                );
+            })}
+        </ul>
     );
 }

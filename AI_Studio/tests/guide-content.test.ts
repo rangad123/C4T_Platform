@@ -18,6 +18,7 @@ const FEATURE_DOCS = join(ROOT, "docs", "features");
 /** Feature documents that are not the "more detail" of any topic, each with the reason. */
 const NOT_A_TOPIC: Record<string, string> = {
     "bug-verification.md": "the Findings to check card on a run's results says what a tester needs in its own words (each finding's status, severity, confidence, \"Failed the same way 2 of 3 times\", likely cause, and the Not a bug dialog's question); the document is the order and the rules behind them",
+    "change-aware-testing.md": "the pull request lines on the selection preview card and the Quality card on the project dashboard say on screen what a tester needs (why tests were proposed, Run all tests first, each number's own tip); the document is the technical detail and the integrations evaluation",
     "selection-preview.md": "the selection preview card on Runs, After a deploy, says what a tester needs in its own sentences (what each list means, \"This is a recommendation only. No test was skipped or run\"); the document is the technical detail of the mapping",
     "crowd4test-sign-in.md": "how aistudio.crowd4test.com shares the crowd4test.com sign-in, and the settings an administrator sets for it; a tester never sees a sign-in here at all, only the portal's AI Studio entry and the Portal button",
     "phone-test-ideas.md": "how a phone plan's ideas, screen names and locators are made: each idea's own sentence (\"Covers the Jobs tab.\") and the plan say what a tester needs; the document is the technical detail",

@@ -64,3 +64,16 @@ export const SOURCE_WORDS: Record<CoverageSource, { label: string; tip: string }
     declared: { label: "Declared", tip: "The test's own steps open this page or call this endpoint." },
     observed: { label: "Observed", tip: "A recorded run of the test's current version opened this page or called this endpoint." },
 };
+
+/** GET /api/projects/:id/pull-requests (src/platform/trends.ts PrChange): a pull request's proposed tests and the run of its head commit. */
+export interface PullRequestSelection {
+    pr: number;
+    headSha: string;
+    createdAt: string;
+    proposed: number;
+    fullRunRecommended: boolean;
+    fullRunReasons: string[];
+    tests: Array<{ testKey: string; title: string; why: string }>;
+    change: { pages: string[]; endpoints: string[] };
+    outcome: { jobId: string; passRate: number | null; total: number; failed: number } | null;
+}
