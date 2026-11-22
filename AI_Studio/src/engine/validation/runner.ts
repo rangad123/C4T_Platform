@@ -460,14 +460,63 @@ export function customRefusals(scripts: ScriptInput[], helpers: ReadonlyArray<{ 
     return out;
 }
 
+/** Where a verification attempt registers its new account (ExecutionOptions.freshAccount). */
+export interface FreshAccount {
+    signupPath: string;
+    loginPath?: string;
+}
+
+/** The first note of each run of a verification attempt (H1): "Attempt 2 of 3 (clean state): as a newly registered account". */
+export const attemptNote = (i: number, n: number, account?: { clean: boolean; note: string }): string =>
+    account ? `Attempt ${i} of ${n} (${account.clean ? "clean state" : "shared account"}): ${account.note}` : `Attempt ${i} of ${n}: in a fresh browser`;
+const ATTEMPT_NOTE = /^Attempt (\d+) of (\d+)(?: \((clean state|shared account)\))?: ([^]*)$/;
+/** attemptNote read back: which attempt, and (with a fresh-account attempt) whether it ran on clean state and why. */
+export function parseAttemptNote(note: string | undefined): { attempt: number; of: number; clean?: boolean; note: string } | undefined {
+    const m = ATTEMPT_NOTE.exec(note ?? "");
+    return m ? { attempt: Number(m[1]), of: Number(m[2]), ...(m[3] ? { clean: m[3] === "clean state" } : {}), note: m[4]! } : undefined;
+}
+
+/**
+ * Verification attempts (Phase 5 hook H1): the batch runs `attempts` times (1 to 5), each a run of its own (a fresh browser), and, with
+ * `freshAccount`, each signed in as an account registered just before it through the application's sign-up page (explore/clean-account.ts;
+ * when none can be made the attempt runs on the shared account and its note says why). Results come attempt by attempt, in input order
+ * within each, every run's first note being attemptNote. No AI calls.
+ */
+async function runAttempts(scratchDir: string, scripts: ScriptInput[], env: RunEnv, opts: NonNullable<Parameters<typeof runScripts>[3]>): Promise<ScriptRun[]> {
+    const { attempts, freshAccount, ...once } = opts;
+    const n = Math.min(5, Math.max(1, Math.floor(attempts ?? 1)));
+    const out: ScriptRun[] = [];
+    for (let i = 1; i <= n; i++) {
+        if (opts.signal?.aborted) throw new Error("Job cancelled");
+        const account = freshAccount ? await freshAccountFor(env.baseUrl, freshAccount, opts.browser) : undefined;
+        const runs = await runScripts(scratchDir, scripts, account?.credentials ? { ...env, credentials: account.credentials } : env, once);
+        out.push(...runs.map((r) => ({ ...r, notes: [attemptNote(i, n, account), ...(r.notes ?? [])] })));
+    }
+    return out;
+}
+
+/** One newly registered account in a browser of its own (closed again), or the shared account with the reason. */
+async function freshAccountFor(baseUrl: string, fresh: FreshAccount, browser: BrowserLaunch | undefined) {
+    const [{ registerFreshAccount, replayAccountPreparer }, { chromium }] = await Promise.all([import("../explore/clean-account.js"), import("playwright")]);
+    return replayAccountPreparer({ register: true, signupPath: fresh.signupPath }, async () => {
+        const b = await chromium.launch({ headless: true, ...(browser?.channel ? { channel: browser.channel } : {}), ...(browser?.executablePath ? { executablePath: browser.executablePath } : {}) });
+        try {
+            return await registerFreshAccount(b, baseUrl, fresh.signupPath, fresh.loginPath ? { loginPath: fresh.loginPath } : {});
+        } finally {
+            await b.close().catch(() => undefined);
+        }
+    })();
+}
+
 export async function runScripts(
     scratchDir: string,
     scripts: ScriptInput[],
     env: RunEnv,
-    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** Called as each test and top-level step starts and ends, and when a failure screenshot is written (a runner agent's live view). Leaves the run itself untouched. */ onLive?: (e: LiveRunEvent) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch; /** false: no recording (verification attempts, ExecutionOptions.video). */ video?: false } = { workers: 2 },
+    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** Called as each test and top-level step starts and ends, and when a failure screenshot is written (a runner agent's live view). Leaves the run itself untouched. */ onLive?: (e: LiveRunEvent) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch; /** false: no recording (verification attempts, ExecutionOptions.video). */ video?: false; /** Verification (H1): run the whole batch this many times, each in a fresh browser. */ attempts?: number; /** With `attempts`: each attempt signs in as an account newly registered through this sign-up page. */ freshAccount?: FreshAccount } = { workers: 2 },
 ): Promise<ScriptRun[]> {
     if (scripts.length === 0) return [];
     if (opts.signal?.aborted) throw new Error("Job cancelled");
+    if (opts.attempts !== undefined) return runAttempts(scratchDir, scripts, env, opts);
     // Code tests are arbitrary code. Whatever called this, they are not started unless the caller said this machine allows it, and
     // each one (and every helper) passes the guard again right before it is written. The others in the batch run as usual.
     if (scripts.some((s) => s.custom)) {

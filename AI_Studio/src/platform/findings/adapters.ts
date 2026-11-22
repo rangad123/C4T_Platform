@@ -4,7 +4,9 @@
  * (security_findings, which keeps its own states: they are mapped here and never written back). Each adapter ends in
  * FindingViewSchema.parse, the boundary that redacts and cuts free text.
  */
+import { confidenceOf, findingFingerprint, type CandidateFindingInput } from "../../engine/explore/finding.js";
 import { AttemptSchema, FindingViewSchema, type Attempt, type FindingView, type FindingViewInput } from "../../engine/findings/view.js";
+import { redactText } from "../../shared/redact-text.js";
 import type { FindingState } from "../../engine/findings/lifecycle.js";
 import type { TestSpec } from "../../engine/spec/schema.js";
 import { testStepFault } from "../../engine/validation/test-fault.js";
@@ -42,9 +44,51 @@ const stepsOf = (spec: TestSpec | undefined): FindingViewInput["steps"] =>
     (spec?.steps ?? []).slice(0, 500).map((s) => ({ action: s.action, ...(targetOf(s) ? { target: targetOf(s) } : {}), ...(typeof field(s, "url") === "string" ? { url: field(s, "url") as string } : {}) }));
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 
-/** A stored candidate finding (exploration). Recorded attempts (slot 71) win; else the detection and the engine's own replays. */
+/**
+ * The fingerprint of a failed run of an ordinary test or layer check (V1): one finding per project, test and expectation. The scenario
+ * `execution:<test key>` keeps it apart from an exploration finding of the same check; fromCandidate reads the source kind back from it.
+ */
+export const executionFingerprint = (testKey: string, expected: { text: string; source: string | null }): string =>
+    findingFingerprint({ source: expected.source, expected: expected.text, scenario: `execution:${testKey}` });
+
+/** What the failed run says the test expected: the failing check's own source when it names one, else the test's written results. */
+function expectationOf(spec: TestSpec, run: Pick<ScriptRun, "failedStepIndex">): { text: string; source: string | null } {
+    const failing = run.failedStepIndex >= 0 ? spec.steps[run.failedStepIndex] : undefined;
+    const source = failing ? (str(field(failing, "source")) ?? null) : null;
+    const value = failing ? field(failing, "expected") : undefined;
+    const text = typeof value === "string" || typeof value === "number" ? `${spec.expectedResults.join(" ")} (${String(value)})`.trim() : spec.expectedResults.join(" ");
+    // Stored text is redacted and cut (CandidateFindingSchema): the fingerprint is made from the stored form, so it can be checked again.
+    return { text: redactText(text || spec.title, 2000), source };
+}
+
+/** A failed run of an ordinary test (or Phase 4 layer check) as a candidate finding to store (V1; S2 noted none were written). */
+export function executionFinding(test: TestOf, run: ScriptRun): CandidateFindingInput {
+    const expected = expectationOf(test.spec, run);
+    const capture = expected.source ? "captured" : "observed_only";
+    const observed = ((run.steps.find((st) => st.status === "failed")?.error ?? run.error ?? "").split("\n")[0] ?? "").trim() || `${test.spec.testId} failed.`;
+    return {
+        objective: null,
+        actions: { stepCount: test.spec.steps.length },
+        expected,
+        observed,
+        evidence: { screenshots: [], requests: run.responses.slice(-20).map((x) => `${x.method} ${x.path} -> ${x.status}`), console: [] },
+        capture,
+        independence: "not_run",
+        confidence: confidenceOf({ sourced: expected.source !== null, capture, independence: "not_run" }),
+        fingerprint: executionFingerprint(test.spec.testId, expected),
+        modelVersion: null,
+        replays: [],
+    };
+}
+
+/**
+ * A stored candidate finding: an exploration finding, or (its fingerprint says so, executionFingerprint) a failed run of an ordinary test
+ * or layer check. Recorded attempts (slot 71) win; else the detection and the engine's own replays.
+ */
 export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): FindingView {
     const f = r.finding;
+    const execution = test !== undefined && r.fingerprint === executionFingerprint(test.spec.testId, f.expected);
+    const layer = execution ? str(test.meta?.layer) : undefined;
     const recorded = r.attempts.map((a) => AttemptSchema.safeParse(a)).flatMap((p) => (p.success ? [p.data] : []));
     const attempts: FindingViewInput["attempts"] = recorded.length
         ? recorded
@@ -56,12 +100,12 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
     return FindingViewSchema.parse({
         id: r.id,
         projectId: r.projectId,
-        source: { kind: "exploration", id: r.id },
+        source: { kind: execution ? (layer ? "layer" : "execution") : "exploration", id: r.id },
         state: r.state,
         title: test?.title ?? f.expected.text,
         testId: r.testId,
         detectedAt: r.firstSeenAt,
-        expected: { text: f.expected.text, source: f.expected.source, stated: f.expected.source ? "explicit" : "none" },
+        expected: { text: f.expected.text, source: f.expected.source, stated: f.expected.source ? "explicit" : execution && f.expected.text ? "inferred" : "none" },
         observed: f.observed,
         steps: stepsOf(test?.spec),
         attempts: attempts.slice(0, 6),
@@ -70,6 +114,8 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
         capture: f.capture,
         independence: f.independence,
         confidence: f.confidence,
+        ...(layer ? { layer } : {}),
+        ...(execution && test ? { origin: test.spec.source.origin } : {}),
     } satisfies FindingViewInput);
 }
 

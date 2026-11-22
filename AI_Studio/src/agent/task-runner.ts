@@ -593,7 +593,7 @@ export class TaskRunner {
             ...(runtime === "windows" ? { desktop: { allowApps: [...(this.deps.allowApps ?? [])] } } : {}),
             ...(hand.length > 0 ? { allowCustom: true, ...(task.helpers?.length ? { helpers: task.helpers } : {}) } : {}),
             ...(web && (web.launch.channel || web.launch.executablePath) ? { browser: web.launch } : {}),
-            opts: { workers: task.workers, ...(task.timeoutMs !== undefined ? { timeoutMs: task.timeoutMs } : {}), ...(task.projects ? { projects: task.projects } : {}), ...(task.testTimeoutMs !== undefined ? { testTimeoutMs: task.testTimeoutMs } : {}), ...(task.startTimeoutMs !== undefined ? { startTimeoutMs: task.startTimeoutMs } : {}) },
+            opts: { workers: task.workers, ...(task.timeoutMs !== undefined ? { timeoutMs: task.timeoutMs } : {}), ...(task.projects ? { projects: task.projects } : {}), ...(task.testTimeoutMs !== undefined ? { testTimeoutMs: task.testTimeoutMs } : {}), ...(task.startTimeoutMs !== undefined ? { startTimeoutMs: task.startTimeoutMs } : {}), ...(task.attempts !== undefined ? { attempts: task.attempts } : {}), ...(task.freshAccount ? { freshAccount: task.freshAccount } : {}), ...(task.video === false ? { video: false as const } : {}) },
         };
         // Protocol 2: the child reports each test and step as it happens; a failure screenshot is uploaded at once and then named in an event.
         const liveShots = new Map<string, string>();
@@ -624,7 +624,8 @@ export class TaskRunner {
             proc.start(message);
             // A project's own per-test limit (task.testTimeoutMs) stretches the overall limit with it, so the watchdog never ends a test early.
             const perTest = task.testTimeoutMs ?? (runtime === "windows" && task.startTimeoutMs !== undefined ? Math.max(120, Math.ceil(task.startTimeoutMs / 1000) + 90) * 1000 : undefined);
-            const limit = (task.timeoutMs ?? (runtime === "taqwright" || runtime === "ios" ? Math.max(10 * 60_000, scripts.length * (perTest !== undefined ? Math.max(4 * 60_000, perTest + 60_000) : 4 * 60_000)) : Math.max(120_000, scripts.length * Math.max(1, task.projects?.length ?? 1) * (perTest ?? 60_000)))) + WATCHDOG_GRACE_MS;
+            // Verification attempts (H1) run the whole batch once per attempt.
+            const limit = (task.timeoutMs ?? (runtime === "taqwright" || runtime === "ios" ? Math.max(10 * 60_000, scripts.length * (perTest !== undefined ? Math.max(4 * 60_000, perTest + 60_000) : 4 * 60_000)) : Math.max(120_000, scripts.length * Math.max(1, task.projects?.length ?? 1) * (task.attempts ?? 1) * (perTest ?? 60_000)))) + WATCHDOG_GRACE_MS;
             let watchdogFired = false;
             const timer = setTimeout(() => {
                 watchdogFired = true;
@@ -657,8 +658,9 @@ export class TaskRunner {
         if (ran.outcome.kind !== "result") return fail("The test runner returned no results.");
         const runs = ran.outcome.runs;
         // A run on other browsers has one result per script and variant.
-        const expected = scripts.length * Math.max(1, task.projects?.length ?? 0);
-        if (runs.length !== expected) return fail(`The test runner returned ${runs.length} results for ${scripts.length} scripts${task.projects?.length ? ` on ${task.projects.length} variants` : ""}.`);
+        // Verification attempts (H1): one result per script and attempt.
+        const expected = scripts.length * Math.max(1, task.projects?.length ?? 0) * (task.attempts ?? 1);
+        if (runs.length !== expected) return fail(`The test runner returned ${runs.length} results for ${scripts.length} scripts${task.projects?.length ? ` on ${task.projects.length} variants` : ""}${task.attempts ? ` in ${task.attempts} attempts` : ""}.`);
 
         // A problem with this machine must not look like failing tests.
         const infra = this.infrastructureProblem(runs);

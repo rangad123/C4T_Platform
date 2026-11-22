@@ -53,7 +53,7 @@ export interface ChildRun {
     helpers?: Array<{ name: string; content: string }>;
     /** The installed Chrome or Edge this runner uses for web tests (from its own browser setting). Absent: Playwright's own Chromium. */
     browser?: BrowserLaunch;
-    opts: { workers: number; timeoutMs?: number; projects?: RunnerProject[]; testTimeoutMs?: number; startTimeoutMs?: number };
+    opts: { workers: number; timeoutMs?: number; projects?: RunnerProject[]; testTimeoutMs?: number; startTimeoutMs?: number; /** Verification (H1): TaskOffer.attempts, freshAccount and video. */ attempts?: number; freshAccount?: { signupPath: string; loginPath?: string }; video?: false };
     /** Protocol 2: report each test, step and failure screenshot as it happens (`live` messages). Absent: the run is exactly as before. */
     live?: boolean;
 }

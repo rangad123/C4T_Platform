@@ -321,6 +321,8 @@ export default defineConfig({
             "tests/planner-salvage-unit.test.ts",
             "tests/analyzer-split.test.ts",
             "tests/usage-latency-unit.test.ts",
+            "tests/findings-reproduce-unit.test.ts",
+            "tests/verify-attempts-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

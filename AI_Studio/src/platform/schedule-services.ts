@@ -14,6 +14,7 @@ import { ScheduleStore, type Schedule } from "./schedule-store.js";
 import { SecretBox } from "./secrets.js";
 import { saveRunSummary, summarizeJob, type RunSummary } from "./trends.js";
 import { getAgentServices } from "./agent-services.js";
+import { verifyAfterJob } from "./findings/verify-service.js";
 import { getTriggerServices } from "./trigger-services.js";
 import { assertC4tOwnerMayRun } from "./c4t-service.js";
 import { refuseUnlessRunsStart, startSuiteForSchedule } from "./suite-run.js";
@@ -99,6 +100,8 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
         async onJobFinished(job) {
             // A deploy trigger may have asked to be told how its run ended (cancelled runs included); runs in the background like alerts.
             track(getTriggerServices(p, { clock: opts.clock, delivery: opts.delivery }).onJobFinished(job));
+            // Phase 5 V1: the run's new findings are verified in the background (the next job is not held up); never throws into the worker.
+            if (p.config.VERIFY_FINDINGS) track(verifyAfterJob(p, job));
             try {
                 // A cancelled job says nothing about the application.
                 if (job.error === "Cancelled") return;
