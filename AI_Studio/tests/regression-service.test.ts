@@ -16,7 +16,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import type { CodeHostStore } from "../src/platform/code-host/store.js";
 import { checkFix, checkFixesOfDeployment, claimFix, findingsFixedBy, fixReferences, reopenReturned, REGRESSION_SUITE, STILL_REPRODUCES } from "../src/platform/findings/regression-service.js";
-import { harvestExecutionFindings, type VerifyDeps } from "../src/platform/findings/verify-service.js";
+import { harvestExecutionFindings, verifyAfterJob, type VerifyDeps } from "../src/platform/findings/verify-service.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { RECOMMENDATION_NOTE } from "../src/platform/selection/preview.js";
@@ -262,4 +262,51 @@ describe("reopen in a project with many findings", () => {
         await reopenReturned(platform, platform.repo.getJob(later.id)!);
         expect((await store.get(s.projectId, s.findingId))!.state).toBe("verification_pending");
     }, 120_000);
+});
+
+describe("two runs of one project finish close together", () => {
+    /** A candidate finding of WEB-001 found by run A, and a later run B; both finished, so each one's verification may start. */
+    async function candidate(name: string) {
+        const projectId = String(platform.repo.createProject({ name }).id);
+        const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5591", { ...DEFAULT_JOB_OPTIONS });
+        const suiteId = platform.repo.getOrCreateSuite(projectId, "Cart", "cart");
+        const bug = platform.repo.insertTest({ projectId, suiteId, jobId: null, spec: web("WEB-001", "Cart total of two lines", "/cart"), framework: "playwright", validationStatus: "VALIDATED" });
+        const jobA = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [bug] });
+        const t = platform.repo.getTest(bug)!;
+        const [f] = await harvestExecutionFindings(store, { projectId, jobId: jobA.id, failed: [{ test: { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework }, run: run("WEB-001", "fail", 1, 1) }] });
+        platform.repo.setJobStatus(jobA.id, "COMPLETED");
+        const jobB = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [bug] });
+        platform.repo.setJobStatus(jobB.id, "COMPLETED");
+        return { projectId, findingId: f!.id, jobA: platform.repo.getJob(jobA.id)!, jobB: platform.repo.getJob(jobB.id)! };
+    }
+    const gate = () => {
+        let open!: () => void;
+        const p = new Promise<void>((r) => (open = r));
+        return { p, open };
+    };
+    /** Attempts that wait for the gate, and are counted. */
+    const gated = (g: Promise<void>, outcomes: Array<"pass" | "fail">, calls: { n: number }): VerifyDeps["execute"] => async (_a, batch) => {
+        calls.n++;
+        await g;
+        const id = batch.scripts[0]!.testId;
+        return outcomes.map((o, i) => run(id, o, i + 1, outcomes.length));
+    };
+
+    it("their verifications take turns: the finding is verified once and its verdict stands", async () => {
+        const s = await candidate("Together shop");
+        const gA = gate();
+        const gB = gate();
+        const calls = { n: 0 };
+        const pA = verifyAfterJob(platform, s.jobA, { execute: gated(gA.p, ["fail", "fail", "fail"], calls) });
+        const pB = verifyAfterJob(platform, s.jobB, { execute: gated(gB.p, ["fail", "fail", "fail"], calls) });
+        await new Promise((r) => setTimeout(r, 100));
+        gA.open();
+        gB.open();
+        const [rA] = await Promise.all([pA, pB]);
+        expect(rA?.verified.map((v) => v.to)).toEqual(["reproduced"]);
+        expect(calls.n).toBe(1);
+        const h = await store.history(s.projectId, s.findingId);
+        expect(h.map((e) => e.to)).not.toContain("unconfirmed");
+        expect((await store.get(s.projectId, s.findingId))!.state).toBe("confirmed");
+    });
 });

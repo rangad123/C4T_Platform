@@ -314,20 +314,30 @@ export function modelFacts(model: unknown): { signupPath?: string; loginPath?: s
  * executor (`execute`, the runner's attempts through hook H1) and `harvested`, the failed tests being findings already.
  * Undefined when there is nothing to do.
  */
-export async function verifyAfterJob(
-    p: Platform,
-    job: JobRow,
-    o: {
-        budget?: VerifyBudget;
-        signal?: AbortSignal;
-        attempts?: number;
-        execute?: VerifyDeps["execute"];
-        ranOn?: string;
-        harvested?: boolean;
-        /** The tests a creation job left as findings, when their statuses have changed since (the benchmark reruns and replays first). */
-        findingTests?: ReadonlySet<string>;
-    } = {},
-): Promise<(VerifyResult & { queuedJobId?: string }) | undefined> {
+export async function verifyAfterJob(p: Platform, job: JobRow, o: VerifyAfterOptions = {}): Promise<(VerifyResult & { queuedJobId?: string }) | undefined> {
+    // One verification of a project at a time: two runs that finish close together would each pick up the same waiting finding, and the
+    // second's refused move settled it Unconfirmed while the first's attempts were still going. The next one reads the states afresh.
+    // shortcut: in this process only; a second worker process could still overlap, upgrade with a claim on the finding row.
+    const mine = (verifying.get(job.projectId) ?? Promise.resolve()).then(() => verifyAfterJobNow(p, job, o));
+    // The turn's end, never its result or error: one settled promise per project is all that stays.
+    verifying.set(job.projectId, mine.then(() => undefined, () => undefined));
+    return mine;
+}
+
+const verifying = new Map<string, Promise<void>>();
+
+type VerifyAfterOptions = {
+    budget?: VerifyBudget;
+    signal?: AbortSignal;
+    attempts?: number;
+    execute?: VerifyDeps["execute"];
+    ranOn?: string;
+    harvested?: boolean;
+    /** The tests a creation job left as findings, when their statuses have changed since (the benchmark reruns and replays first). */
+    findingTests?: ReadonlySet<string>;
+};
+
+async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions): Promise<(VerifyResult & { queuedJobId?: string }) | undefined> {
     const mode = job.options.mode ?? "generate";
     if ((mode !== "validate" && mode !== "generate") || job.options.planOnly || job.error === "Cancelled") return undefined;
     const app = p.repo.getApplication(job.applicationId);
