@@ -4,6 +4,7 @@
  * (links resolved) must sit at least one folder below that root. Templates become parameterised SQL here: names come from the validated
  * schema (plain identifiers, quoted), every value is a bound parameter, and nothing the caller writes is ever SQL text.
  */
+import { sameStoredValue } from "./same-value.js";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -51,6 +52,7 @@ export async function openBenchDatabase(file: string, root = BENCH_DATA_ROOT): P
     const d = new DatabaseSync(`${pathToFileURL(real).href}?mode=ro`, { readOnly: true, timeout: 2000 });
     // Case folding the way the D-a back end folds (JavaScript's toLowerCase), not SQLite's ASCII-only lower().
     d.function("bench_fold", { deterministic: true }, (v) => (typeof v === "string" ? v.toLowerCase() : v));
+    d.function("bench_same", { deterministic: true }, (a, b) => (sameStoredValue(a, b) ? 1 : 0));
     return d;
 }
 
@@ -102,7 +104,7 @@ function run(d: DatabaseSync, v: ValidCheck, evidenceKey: Buffer) {
     for (const [c, want] of Object.entries(v.params)) {
         if (want === null) where.push(`x.${q(c)} IS NULL`);
         else {
-            where.push(`x.${q(c)} = ?`);
+            where.push(`bench_same(x.${q(c)}, ?) = 1`);
             bound.push(want);
         }
     }

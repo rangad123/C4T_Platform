@@ -167,6 +167,23 @@ describe("what each template counts (from the spec's definitions)", () => {
         { id: "u4", email: null, name: "No mail either" },
     ];
 
+    it("a stored value matches what was sent when they are the same after the usual normalising: trimmed; e-mail addresses case-folded; dates the same instant or day", () => {
+        const people = [{ id: "u9", email: "jane.doe@example.com", name: "Jane", born: "1990-05-01", seen: "2030-01-01T00:00:00.000Z" }];
+        const t: DbTemplate = { kind: "exists", table: "users", where: ["email"] };
+        // The API lowercased the address it was sent.
+        expect(run(t, { users: people }, { email: "Jane.Doe@Example.com" })).toBe(1);
+        expect(run(t, { users: people }, { email: " jane.doe@example.com " })).toBe(1);
+        expect(run({ kind: "exists", table: "users", where: ["name"] }, { users: people }, { name: " Jane " })).toBe(1);
+        // Not an e-mail address: letter case still counts.
+        expect(run({ kind: "exists", table: "users", where: ["name"] }, { users: people }, { name: "jane" })).toBe(0);
+        const dates = { users: [{ id: "u9", email: "2030-01-01T00:00:00.000Z", name: "1990-05-01" }] };
+        expect(run(t, dates, { email: "2030-01-01T00:00:00Z" })).toBe(1);
+        expect(run(t, dates, { email: "2030-01-01T01:00:00+01:00" })).toBe(1);
+        expect(run(t, dates, { email: "2030-01-01T00:00:01Z" })).toBe(0);
+        expect(run({ kind: "exists", table: "users", where: ["name"] }, dates, { name: "1990-05-01T00:00:00Z" })).toBe(1);
+        expect(run({ kind: "exists", table: "users", where: ["name"] }, dates, { name: "1990-05-02" })).toBe(0);
+    });
+
     it("exists and count match bound values strictly (a number is not its text)", () => {
         expect(run({ kind: "exists", table: "users", where: ["id", "name"] }, { users }, { id: "u1", name: "Alice" })).toBe(1);
         expect(run({ kind: "exists", table: "users", where: ["id", "name"] }, { users }, { id: "u1", name: "Bob" })).toBe(0);

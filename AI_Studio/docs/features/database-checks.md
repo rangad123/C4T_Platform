@@ -107,6 +107,8 @@ An adapter is an object with five functions (`examples/db-probe/probe.mjs` docum
 - `introspect()`: the tables with their columns, primary key, unique keys and foreign keys;
 - `quote(name)`: an identifier quoted for the dialect (`"name"` in PostgreSQL, `` `name` `` in MySQL);
 - `fold(expression)`: the case-folding expression, such as `lower(...)`;
+- `same(expression)`: a condition with one `?` that holds when the stored value is the one the test sent, after the usual normalising
+  (text trimmed, an e-mail address compared in lower case, two dates equal at the same instant or day), as `sameValue` in `probe.mjs` says;
 - `read(statements, { timeoutMs })`: runs `[{ sql, params }]` with `?` placeholders in one read-only transaction and returns each
   statement's rows. PostgreSQL: `BEGIN READ ONLY`, `SET LOCAL statement_timeout`, the statements with `?` numbered as `$1, $2, ...` in
   order, then `ROLLBACK`. MySQL: `START TRANSACTION READ ONLY` and `MAX_EXECUTION_TIME`. Past the timeout it stops the query and rejects

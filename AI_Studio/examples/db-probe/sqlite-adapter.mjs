@@ -1,14 +1,14 @@
 /**
  * The probe's node:sqlite adapter (see probe.mjs for the interface). The database file is opened read-only in a worker thread:
  *   - `readOnly: true` and `?mode=ro`, so the connection cannot write;
- *   - an authorizer that allows only SELECT, reads of allow-listed tables and columns, the functions count and probe_fold, and BEGIN and
+ *   - an authorizer that allows only SELECT, reads of allow-listed tables and columns, the functions count, probe_fold and probe_same, and BEGIN and
  *     ROLLBACK: anything else (a write, a pragma, an attached database, a table off the list) is denied by SQLite itself;
  *   - every check runs in BEGIN ... ROLLBACK;
  *   - the statement timeout: SQLite has none of its own, so a check that runs too long ends the worker, and a new one is started.
  */
 import { pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
-import { ProbeTimeout } from "./probe.mjs";
+import { ProbeTimeout, sameValue } from "./probe.mjs";
 
 if (!isMainThread && workerData?.dbProbe) serve(workerData);
 
@@ -42,6 +42,7 @@ export function sqliteAdapter(file, allow) {
         introspect: () => ready,
         quote: (n) => `"${n}"`,
         fold: (e) => `probe_fold(${e})`,
+        same: (e) => `probe_same(${e}, ?) = 1`,
         async read(statements, { timeoutMs }) {
             await ready;
             const id = ++seq;
@@ -70,6 +71,7 @@ async function serve({ href, allowed }) {
     try {
         db = new DatabaseSync(href, { readOnly: true, timeout: 1000 });
         db.function("probe_fold", { deterministic: true }, (v) => (typeof v === "string" ? v.toLowerCase() : v));
+        db.function("probe_same", { deterministic: true }, (a, b) => (sameValue(a, b) ? 1 : 0));
         const tables = db
             .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
             .all()
@@ -99,7 +101,7 @@ async function serve({ href, allowed }) {
         db.setAuthorizer((action, a, b) => {
             if (action === K.SQLITE_SELECT) return K.SQLITE_OK;
             if (action === K.SQLITE_READ) return ok.has(a) && (b === "" || b === null || ok.get(a).has(b)) ? K.SQLITE_OK : K.SQLITE_DENY;
-            if (action === K.SQLITE_FUNCTION) return b === "count" || b === "probe_fold" ? K.SQLITE_OK : K.SQLITE_DENY;
+            if (action === K.SQLITE_FUNCTION) return b === "count" || b === "probe_fold" || b === "probe_same" ? K.SQLITE_OK : K.SQLITE_DENY;
             if (action === K.SQLITE_TRANSACTION) return a === "BEGIN" || a === "ROLLBACK" ? K.SQLITE_OK : K.SQLITE_DENY;
             return K.SQLITE_DENY;
         });

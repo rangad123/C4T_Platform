@@ -22,6 +22,8 @@
  *   introspect(): Promise<Array<{ name, columns: string[], primaryKey: string[], uniqueKeys: [{ columns }], foreignKeys: [{ columns, references: { table, columns } }] }>>
  *   quote(name): string                    an identifier quoted for the dialect ("x" in SQLite and Postgres, `x` in MySQL)
  *   fold(sqlExpression): string            the case-folding expression (lower(...) in Postgres and MySQL)
+ *   same(sqlExpression): string            a condition with one `?` that holds when the stored value is the sent one as sameValue below
+ *                                          says (SQLite: a function; Postgres and MySQL: trim, lower for e-mail addresses, a timestamp cast)
  *   read(statements, { timeoutMs }): Promise<rows[][]>   [{ sql, params }] with `?` placeholders, run in ONE read-only transaction
  *                                          (Postgres: BEGIN READ ONLY; SET LOCAL statement_timeout; ...; ROLLBACK. MySQL: START TRANSACTION
  *                                          READ ONLY with MAX_EXECUTION_TIME). Rejects with ProbeTimeout past the timeout.
@@ -119,6 +121,30 @@ export function validate(body, schema) {
     return { kind: "orphans", table: x, columns: t.columns, parent, parentColumns: t.references.columns };
 }
 
+/**
+ * Whether a stored value is the value a test sent: text trimmed, an e-mail address on either side case-folded, two dates equal at the same
+ * instant (or the same day when either is a date alone). Nothing else: other text keeps its case, a number is not its text. The engine's
+ * own back ends use the same rule (src/engine/database/same-value.ts).
+ */
+export function sameValue(stored, sent) {
+    if (typeof stored !== "string" || typeof sent !== "string") return stored === sent;
+    const a = stored.trim();
+    const b = sent.trim();
+    if (a === b) return true;
+    const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (email.test(a) || email.test(b)) return a.toLowerCase() === b.toLowerCase();
+    const dateOf = (s) => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return Number.isNaN(Date.parse(`${s}T00:00:00Z`)) ? undefined : { day: s };
+        if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/.test(s)) return undefined;
+        const ms = Date.parse(s.replace(" ", "T"));
+        return Number.isNaN(ms) ? undefined : { day: new Date(ms).toISOString().slice(0, 10), ms };
+    };
+    const da = dateOf(a);
+    const db = dateOf(b);
+    if (!da || !db) return false;
+    return da.ms !== undefined && db.ms !== undefined ? da.ms === db.ms : da.day === db.day;
+}
+
 /** The statements of a validated check: [the count, the keys of at most 20 matching rows]. Names are quoted from the schema, values bound. */
 export function plan(c, adapter) {
     const q = (n) => {
@@ -141,7 +167,7 @@ export function plan(c, adapter) {
         for (const n of c.where) {
             if (c.params[n] === null) where.push(`x.${q(n)} IS NULL`);
             else {
-                where.push(`x.${q(n)} = ?`);
+                where.push(adapter.same(`x.${q(n)}`));
                 params.push(c.params[n]);
             }
         }

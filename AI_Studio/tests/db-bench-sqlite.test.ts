@@ -94,6 +94,7 @@ describe("the file answers as the data routes do", () => {
                 [{ kind: "count", table: "orders", where: [] }, {}],
                 [{ kind: "count", table: "orders", where: ["userId"] }, { userId: "u1" }],
                 [{ kind: "exists", table: "users", where: ["email"] }, { email: "alice@example.test" }],
+                [{ kind: "exists", table: "users", where: ["email"] }, { email: "Alice@Example.TEST" }],
                 [{ kind: "exists", table: "orders", where: ["total"] }, { total: "1350" }],
                 [{ kind: "count", table: "carts", where: ["code"] }, { code: null }],
                 [{ kind: "orphans", table: "cart_items", columns: ["cartId"], references: { table: "carts", columns: ["id"] } }, {}],

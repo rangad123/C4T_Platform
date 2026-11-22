@@ -141,6 +141,8 @@ describe("what the probe answers", () => {
         expect(orphans.examples).toEqual(["• (1 characters)"]);
         const user = await call(main, "POST", "/check", check({ kind: "exists", table: "users", where: ["email"] }, { email: "user@practice.test" }));
         expect(JSON.parse(user.text)).toMatchObject({ kind: "exists", count: 1 });
+        // The application stored the address in lower case: the address as typed still matches (same-value rule, probe_same).
+        expect(JSON.parse((await call(main, "POST", "/check", check({ kind: "exists", table: "users", where: ["email"] }, { email: " User@Practice.TEST" }))).text)).toMatchObject({ count: 1 });
         expect((await call(main, "POST", "/check", check({ kind: "duplicates", table: "users", columns: ["email"], fold: true }))).text).toMatch(/"count":0/);
         for (const v of PRIVATE_VALUES) expect(user.text).not.toContain(v);
         // The audit log names the check and its result, never a value it was given.

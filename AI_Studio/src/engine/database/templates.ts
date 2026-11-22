@@ -8,6 +8,7 @@
  *   relation   rows of `table` (narrowed by `where`) on which the C5 expression (validation/relation.ts) does not hold
  * Every name must be in the probe's schema, and every object is strict: an extra field (a "sql" text, say) is refused like a wrong name.
  */
+import { sameStoredValue } from "./same-value.js";
 import { z } from "zod";
 import { parseRelation, checkRelation } from "../validation/relation.js";
 import { checkResult, DatabaseCheckRefused, type DbCheckResult, type DbSchema, type DbTable } from "./probe.js";
@@ -108,15 +109,15 @@ const fold = (v: unknown) => (typeof v === "string" ? v.toLowerCase() : v);
 export const relationHolds = (expression: string, row: Row): boolean => checkRelation(expression, { body: row }).held;
 
 /**
- * Runs a validated check over rows held in memory (the D-a back end's tables). Comparison is strict (`1` is not `"1"`), as a bound
- * parameter compares in SQLite without a declared column type.
+ * Runs a validated check over rows held in memory (the D-a back end's tables). A value matches as same-value.ts says (trimmed, e-mail
+ * addresses case-folded, dates by instant or day); otherwise strictly (`1` is not `"1"`).
  */
 export function runOnRows(v: ValidCheck, tables: Record<string, Row[] | undefined>, evidenceKey: Buffer): DbCheckResult {
     const rows = tables[v.table.name] ?? [];
     const key = keyColumns(v);
     const keyOf = (r: Row) => key.map((c) => own(r, c));
     const t = v.template;
-    const matches = (r: Row) => Object.entries(v.params).every(([c, want]) => (want === null ? isNull(own(r, c)) : own(r, c) === want));
+    const matches = (r: Row) => Object.entries(v.params).every(([c, want]) => (want === null ? isNull(own(r, c)) : sameStoredValue(own(r, c), want)));
     let hit: Row[];
     if (t.kind === "exists" || t.kind === "count") hit = rows.filter(matches);
     else if (t.kind === "relation") hit = rows.filter((r) => matches(r) && !relationHolds(t.expression, r));
