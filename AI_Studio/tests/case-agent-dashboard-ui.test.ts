@@ -495,8 +495,8 @@ describe("other projects keep their Dashboards", () => {
     it("an agent project of other agents: the same Dashboard (tests, Passing, Not passing), and no requirements coverage (P6)", async () => {
         await dashboard(access);
         await pwExpect(page.getByTestId("case-outcome")).toHaveCount(0);
-        await pwExpect(page.locator(".metrics")).toContainText("Passing");
-        await pwExpect(page.locator(".metrics")).toContainText("Not passing");
+        await pwExpect(page.locator(".metrics:not(.quality-metrics)")).toContainText("Passing");
+        await pwExpect(page.locator(".metrics:not(.quality-metrics)")).toContainText("Not passing");
         await pwExpect(page.getByTestId("project-head").getByRole("link", { name: "View tests" })).toBeVisible();
         await pwExpect(page.getByRole("heading", { name: "Needs your attention" })).toBeVisible();
         await pwExpect(page.getByTestId("requirements-coverage")).toHaveCount(0);
@@ -506,7 +506,7 @@ describe("other projects keep their Dashboards", () => {
     it("a mixed project and a code project: the same Dashboard, with requirements coverage", async () => {
         for (const id of [mixed, code]) {
             await dashboard(id);
-            await pwExpect(page.locator(".metrics")).toContainText("Passing");
+            await pwExpect(page.locator(".metrics:not(.quality-metrics)")).toContainText("Passing");
             await pwExpect(page.getByTestId("requirements-coverage")).toBeVisible();
             await pwExpect(page.getByTestId("case-outcome")).toHaveCount(0);
         }
