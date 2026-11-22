@@ -94,8 +94,8 @@ export function defaultAgents(all: readonly TestingAgent[], platforms: readonly 
 }
 
 /**
- * The agent picker: one checkbox per agent, with its avatar and summary. An agent that is not available, or that does not work on
- * the project's platform, is shown and disabled with the reason.
+ * The agent picker: one checkbox per available agent, with its avatar and summary. An agent that does not work on the project's platform
+ * is shown and disabled with the reason; one AI Studio does not have yet is left out.
  */
 export function AgentPicker({ agents, platforms, value, onChange, disabled, legend = "Testing agents" }: { agents: readonly TestingAgent[]; platforms: readonly Platform[]; value: readonly AgentId[]; onChange: (v: AgentId[]) => void; disabled?: boolean; legend?: string }) {
     const toggle = (id: AgentId) => onChange(agents.filter((a) => (a.id === id ? !value.includes(id) : value.includes(a.id))).map((a) => a.id));
@@ -104,9 +104,9 @@ export function AgentPicker({ agents, platforms, value, onChange, disabled, lege
             <legend className="t-card">{legend}</legend>
             <p className="t-meta">Choose at least one. Each agent decides which checks run when the AI explores the application.</p>
             <div className="ta-pick">
-                {agents.map((a) => {
+                {agents.filter((a) => a.available).map((a) => {
                     const fits = fitsPlatforms(a, platforms);
-                    const why = !a.available ? (a.unavailableReason ?? "Not available yet.") : !fits ? `Works on ${a.platforms.map((p) => PLATFORM_WORDS[p]).join(" and ")} only.` : null;
+                    const why = !fits ? `Works on ${a.platforms.map((p) => PLATFORM_WORDS[p]).join(" and ")} only.` : null;
                     return (
                         <label key={a.id} className={`check ta-check${why ? " is-off" : ""}`}>
                             <input type="checkbox" checked={fits && value.includes(a.id)} disabled={disabled || !fits} onChange={() => toggle(a.id)} aria-describedby={`agent-pick-${a.id}`} />

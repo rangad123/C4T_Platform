@@ -1,6 +1,6 @@
 /**
- * Testing agents in a real browser against a real platform (port 7621): the Agents place in the left panel, the eight agent cards
- * with Chatbot shown as not available, an agent's detail with the projects that use it, choosing agents in Create project (at least
+ * Testing agents in a real browser against a real platform (port 7621): the Agents place in the left panel, the seven agent cards
+ * (Chatbot, not built yet, is left out), an agent's detail with the projects that use it, choosing agents in Create project (at least
  * one, only those that work on the platform), changing them in project Settings, and the Explore page naming the agents that
  * decide the checks. Light-mode accessibility of the pages. Requires `web/dist` (vite build).
  */
@@ -54,7 +54,7 @@ const axeClean = async (page: Page) => {
 describe("testing agents in the web app", () => {
     let page: Page;
 
-    it("shows Agents in the left panel, with eight agents and Chatbot not available", async () => {
+    it("shows Agents in the left panel, with the seven agents AI Studio has (Chatbot, not built yet, is left out)", async () => {
         page = await (await browser.newContext()).newPage();
         await page.goto(BASE);
         await page.getByLabel("Email").fill("olga@example.com");
@@ -69,8 +69,9 @@ describe("testing agents in the web app", () => {
         const labels = await nav.getByRole("link").allTextContents();
         expect(labels.indexOf("Agents")).toBe(labels.indexOf("Projects") + 1);
         const cards = page.getByRole("list", { name: "Testing agents" }).getByRole("listitem");
-        await pwExpect(cards).toHaveCount(8);
-        await pwExpect(page.getByTestId("agent-card-chatbot")).toContainText("Not available yet");
+        await pwExpect(cards).toHaveCount(7);
+        await pwExpect(page.getByTestId("agent-card-chatbot")).toHaveCount(0);
+        await pwExpect(page.getByText("Not available yet")).toHaveCount(0);
         await pwExpect(page.getByTestId("agent-card-accessibility")).toContainText("1 project uses it");
         // No AI key and no worker here: said plainly.
         await pwExpect(page.getByText("AI is not set up on this server")).toBeVisible();
@@ -103,7 +104,7 @@ describe("testing agents in the web app", () => {
         await pwExpect(picker).toBeVisible();
         await pwExpect(picker.getByRole("checkbox", { name: "Security Testing Agent" })).toBeDisabled();
         await pwExpect(picker.getByText("Works on Web only.").first()).toBeVisible();
-        await pwExpect(picker.getByRole("checkbox", { name: "Chatbot Testing Agent" })).toBeDisabled();
+        await pwExpect(picker.getByRole("checkbox", { name: "Chatbot Testing Agent" })).toHaveCount(0);
         // The defaults for Android: accessibility and test case generation.
         await pwExpect(picker.getByRole("checkbox", { name: "Accessibility Testing Agent" })).toBeChecked();
         await pwExpect(picker.getByRole("checkbox", { name: "Test Case Generation Agent" })).toBeChecked();

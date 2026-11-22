@@ -165,13 +165,14 @@ describe("the projects list shows each project's kind", () => {
         await pwExpect(page.locator(".tt.is-open").filter({ hasText: "Choose one in Settings → General" })).toBeVisible();
     });
 
-    it("the legend under the list names the project types, the platforms and every agent", async () => {
+    it("the legend under the list names the project types, the platforms and every agent AI Studio has (not Chatbot, which it does not have yet)", async () => {
         const legend = page.getByRole("region", { name: "What the icons mean" });
         await pwExpect(legend.getByRole("heading")).toHaveText(["Project type", "Platforms", "Agents"]);
         await pwExpect(legend).toContainText("Agent");
         await pwExpect(legend).toContainText("Code");
-        for (const w of ["Web", "Android", "iOS", "API", "Accessibility", "Security", "Chatbot", "Responsive UI", "UX", "Performance", "Test Case Generation"]) await pwExpect(legend).toContainText(w);
-        await pwExpect(legend.locator(".ta-avatar")).toHaveCount(8);
+        for (const w of ["Web", "Android", "iOS", "API", "Accessibility", "Security", "Responsive UI", "UX", "Performance", "Test Case Generation"]) await pwExpect(legend).toContainText(w);
+        await pwExpect(legend).not.toContainText("Chatbot");
+        await pwExpect(legend.locator(".ta-avatar")).toHaveCount(7);
         // On a laptop no project's name is cut short, even on the widest row (agents, a ribbon and a status).
         await pwExpect(row("Osprey agents").getByTestId("row-agents-more")).toContainText("+2");
         await pwExpect(row("Osprey agents")).toContainText("2 of 3 tests passing");
@@ -340,12 +341,12 @@ describe("the project header sits above the tabs on every place", () => {
 });
 
 describe("the dashboard follows the project's kind", () => {
-    it("an agent project offers exploring: Explore again in the header, Not explored yet with Start exploring", async () => {
+    it("an agent project offers exploring: Not explored yet with Start exploring, and no second button in the header", async () => {
         await visit(routes.project(agent));
         const head = page.getByTestId("project-head");
         await pwExpect(head.locator("h1")).toHaveText("Kestrel agents");
-        await pwExpect(head.getByRole("link", { name: "Explore again" })).toBeVisible();
         await pwExpect(page.getByRole("heading", { name: "Not explored yet" })).toBeVisible();
+        await pwExpect(head.getByRole("link", { name: /Explore again|Start exploring/ })).toHaveCount(0);
         await pwExpect(page.getByRole("link", { name: "Start exploring" })).toBeVisible();
         await shot("dashboard-agent-1280");
     });
@@ -394,8 +395,8 @@ describe("the dashboard follows the project's kind", () => {
 
     it("a mixed project keeps exploring as before", async () => {
         await visit(routes.project(mixed));
-        await pwExpect(page.getByTestId("project-head").getByRole("link", { name: "Explore again" })).toBeVisible();
         await pwExpect(page.getByRole("heading", { name: "Not explored yet" })).toBeVisible();
+        await pwExpect(page.getByRole("link", { name: "Start exploring" })).toBeVisible();
     });
 
     it("logged no errors in the browser console", () => {

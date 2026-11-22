@@ -44,7 +44,7 @@ export function AgentsPage() {
                     <>
                         <ServerNotes where={list.data} />
                         <ul className="ta-grid" aria-label="Testing agents">
-                            {list.data.agents.map((a) => (
+                            {list.data.agents.filter((a) => a.available).map((a) => (
                                 <li key={a.id}>
                                     <a className={`card ta-card${a.available ? "" : " is-off"}`} href={routes.agent(a.id)} data-testid={`agent-card-${a.id}`}>
                                         <span className="ta-card-head">
