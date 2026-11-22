@@ -15,6 +15,8 @@ export interface FakeCall {
     who: string;
     url: string;
     headers: Record<string, string>;
+    method?: string;
+    data?: unknown;
 }
 export type FakeAnswer = { status: number; body: string } | null;
 
@@ -72,6 +74,13 @@ export function fakeBrowser(opts: {
                 post: async () => ({ status: () => 200 }),
                 get: async (url: string, o: { headers: Record<string, string> }) => {
                     const call = { who: state.who, url, headers: o.headers };
+                    calls.push(call);
+                    const a = opts.answer(call);
+                    if (!a) throw new Error("unreachable");
+                    return { status: () => a.status, text: async () => a.body };
+                },
+                fetch: async (url: string, o: { method: string; data?: unknown }) => {
+                    const call = { who: state.who, url, headers: {}, method: o.method, data: o.data };
                     calls.push(call);
                     const a = opts.answer(call);
                     if (!a) throw new Error("unreachable");

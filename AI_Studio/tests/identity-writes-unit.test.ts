@@ -8,7 +8,7 @@ import { ACCESS_HELPER_SOURCE, type ApiAccessRow, type ApiListRow } from "../src
 import { generateIdentityWriteSpecs as generate, MAX_IDENTITY_WRITES } from "../src/engine/identity/identity-writes.js";
 import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
-import { accessHelper } from "./identity-fake-browser.js";
+import { accessHelper, fakeBrowser, setAccounts } from "./identity-fake-browser.js";
 
 const err = (d: string) => ({ description: d, content: { "application/json": { schema: { type: "object" } } } });
 const doc = (paths: Record<string, unknown>) => parseOpenApi({ openapi: "3.0.0", info: { title: "t", version: "1" }, paths }, "http://127.0.0.1:1/openapi.json").operations;
@@ -81,6 +81,33 @@ describe("C3e writes as another identity", () => {
         const kinds = generateIdentityWriteSpecs({ apis: doc({ ...PATHS, "/api/notes/{id}": putOnly }), lists: LISTS, access: ACCESS }).map((s) => [cfg(s).identityWrite, cfg(s).method]);
         expect(kinds.filter(([k]) => k === "owner")).toEqual([]);
         expect(kinds.some(([, m]) => m === "PUT")).toBe(false);
+    });
+
+    it("when every account reads the privileged list, the roles come from GET /api/me: the role the API names as allowed is the top one", () => {
+        const all = { ...ACCESS[0]!, status: { anonymous: 401, ana: 200, ben: 200, mia: 200, ada: 200 } };
+        const specs = generateIdentityWriteSpecs({ apis: doc(PATHS), lists: [], access: [all] });
+        expect(specs.map(cfg)).toEqual(
+            ["ana", "ben", "mia", "ada"].map((as) => ({ identityWrite: "role", as, pool: ["ana", "ben", "mia", "ada"].filter((x) => x !== as), allowedIn: "Not an admin", method: "PATCH", path: "/api/admin/users/{id}", param: "id", whoAmI: "/api/me", documented: "403", sev: "high" })),
+        );
+        expect(specs.reduce((t, s) => t + WRITES[String(cfg(s).identityWrite)]!, 0)).toBeLessThanOrEqual(MAX_IDENTITY_WRITES);
+    });
+
+    it("the role check from GET /api/me: a lesser account that takes the allowed role is a finding and is changed back; the allowed account sends nothing", async () => {
+        setAccounts(["ana", "mia", "ada"]);
+        const ROLES: Record<string, string> = { ana: "user", mia: "manager", ada: "admin" };
+        const runAs = async (as: string, accepted: boolean) => {
+            const b = fakeBrowser({
+                answer: (c) => (c.url.endsWith("/api/me") ? { status: 200, body: JSON.stringify({ id: `u-${c.who}`, role: ROLES[c.who] }) } : c.method === "PATCH" ? { status: accepted ? 200 : 403, body: "{}" } : { status: 404, body: "{}" }),
+            });
+            const run = { identityWrite: "role", as, pool: ["ana", "mia", "ada"].filter((x) => x !== as), allowedIn: "Change someone's role (admins only) Not an admin", method: "PATCH", path: "/api/admin/users/{id}", param: "id", whoAmI: "/api/me", documented: "403", sev: "high" };
+            const err = await accessHelper.accessAssert(b.page, "http://127.0.0.1:9000/", JSON.stringify(run)).then(() => undefined, (e: Error) => e.message);
+            return { err, writes: b.calls.filter((c) => c.method === "PATCH") };
+        };
+        const seeded = await runAs("mia", true);
+        expect(seeded.err).toMatch(/^Access control check failed: 1 write may be open.*“mia” user gave its own account the role “admin” of “ada”.*it was changed back/s);
+        expect(seeded.writes.map((w) => [w.url, w.data])).toEqual([["http://127.0.0.1:9000/api/admin/users/u-mia", { role: "admin" }], ["http://127.0.0.1:9000/api/admin/users/u-mia", { role: "manager" }]]);
+        expect(await runAs("mia", false)).toEqual({ err: undefined, writes: [expect.objectContaining({ method: "PATCH" })] });
+        expect(await runAs("ada", true)).toEqual({ err: undefined, writes: [] });
     });
 
     it("keeps to the write budget however many accounts were refused", () => {

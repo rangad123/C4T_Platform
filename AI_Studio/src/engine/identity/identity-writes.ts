@@ -3,8 +3,9 @@
  * sent as an account the survey evidence says lacks the right, and the documented refusal is expected:
  *  - owner: an account that reads another account's record through sharing (it lists that record, but not every record of that owner)
  *    sends the record's own plain values back with PATCH (never PUT, which would replace the record), so an accepted write changes nothing;
- *  - role: an account the vertical survey refused gives itself the role value of the account that was allowed; an accepted change is
- *    changed back at once;
+ *  - role: an account the vertical survey refused gives itself the role value of the account that was allowed; when the survey refused
+ *    nobody, each account's role comes from GET whoAmI and the allowed role is the one the API's refusal words name ("admins only");
+ *    an accepted change is changed back at once;
  *  - revoke: the record's owner stops sharing it with the reader, then the reader reads it again and expects the documented 404 (bench
  *    and fixture apps only: the share is not given back).
  * Writes, so only behind the Q4 gate (concurrencyAllowed, lane A2's T24) and at most MAX_IDENTITY_WRITES writes a run. Each check runs in the access
@@ -79,18 +80,37 @@ async function accessWriteAssert(page, base, cfg) {
             throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not the owner\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user, who reads this record but does not own it, sent " + what + " and it was accepted (HTTP " + w.status + ")" + doc + ". Only the record's own plain values were sent with " + cfg.method + ", so its content stayed as it was. This is possible broken access control: check that only the owner can change the record");
         }
         if (cfg.identityWrite === "role") {
-            const top = await me(await as(cfg.by), cfg.by);
+            const roleOf = (body) => Object.keys(body).find((k) => /^(role|roles|user_?role|access_?level)$/i.test(k) && typeof body[k] === "string");
             const ctx = await as(cfg.as);
             const mine = await me(ctx, cfg.as);
-            const field = Object.keys(top.body).find((k) => /^(role|roles|user_?role|access_?level)$/i.test(k) && typeof top.body[k] === "string");
-            if (!field || typeof mine.body[field] !== "string" || mine.body[field] === top.body[field]) throw cannot("GET " + cfg.whoAmI + " shows no role that differs between “" + cfg.by + "” and “" + cfg.as + "”");
+            let by = cfg.by;
+            let top;
+            if (by === undefined) {
+                // No lesser account in the survey: the role the API's own words name as allowed ("admins only") is the top one, read from GET whoAmI.
+                const words = String(cfg.allowedIn || "").toLowerCase().split(/[^a-z0-9_-]+/);
+                const named = (v) => typeof v === "string" && v.length > 0 && (words.includes(v.toLowerCase()) || words.includes(v.toLowerCase() + "s"));
+                const own = roleOf(mine.body);
+                if (!own) throw cannot("GET " + cfg.whoAmI + " as “" + cfg.as + "” shows no role");
+                if (named(mine.body[own])) return; // this account may change roles: nothing is sent
+                for (const who of cfg.pool || []) {
+                    const t = await me(await as(who), who);
+                    if (named(t.body[own])) {
+                        by = who;
+                        top = t;
+                        break;
+                    }
+                }
+                if (!top) throw cannot("No account's role in GET " + cfg.whoAmI + " is the one the API names as allowed");
+            } else top = await me(await as(by), by);
+            const field = roleOf(top.body);
+            if (!field || typeof mine.body[field] !== "string" || mine.body[field] === top.body[field]) throw cannot("GET " + cfg.whoAmI + " shows no role that differs between “" + by + "” and “" + cfg.as + "”");
             const path = cfg.path.replace("{" + cfg.param + "}", encodeURIComponent(mine.id));
             const w = await call(ctx, cfg.method, path, { [field]: top.body[field] });
             if (refused(w.status)) return;
             if (!ok(w.status)) throw cannot(what + " answered HTTP " + w.status);
             // An accepted change is a privilege the account must not keep: it is changed back before the finding is told.
             const back = await call(ctx, cfg.method, path, { [field]: mine.body[field] });
-            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not allowed to make it\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user gave its own account the " + field + " “" + top.body[field] + "” of “" + cfg.by + "” with " + cfg.method + " " + path + " and it was accepted (HTTP " + w.status + ")" + doc + "; it was " + (ok(back.status) ? "changed back" : "NOT changed back (HTTP " + back.status + "): change it back by hand") + ". This is possible broken access control: check that only the accounts allowed to change roles can do so");
+            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not allowed to make it\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user gave its own account the " + field + " “" + top.body[field] + "” of “" + by + "” with " + cfg.method + " " + path + " and it was accepted (HTTP " + w.status + ")" + doc + "; it was " + (ok(back.status) ? "changed back" : "NOT changed back (HTTP " + back.status + "): change it back by hand") + ". This is possible broken access control: check that only the accounts allowed to change roles can do so");
         }
         if (cfg.identityWrite === "revoke") {
             const reader = await as(cfg.as);
@@ -243,6 +263,23 @@ export function generateIdentityWriteSpecs(input: { apis: ApiEndpointModel[]; li
             const allowed = named.filter((who) => row.status[who]! >= 200 && row.status[who]! < 300);
             const refused = named.filter((who) => !allowed.includes(who));
             if (!allowed.length) continue;
+            if (!refused.length && allowed.length > 1) {
+                // Every account read the list (it is open to all): who may change roles is told by the API's own words ("admins only"),
+                // matched in the script against each account's role from GET whoAmI. The allowed account sends nothing.
+                const allowedIn = [w.summary, ...(w.spec?.responses ?? []).filter((x) => x.status === "403" || x.status === "404").map((x) => x.description)].filter(Boolean).join(" ").slice(0, 300);
+                for (const as of allowed)
+                    add(
+                        spec(
+                            `“${as}” account: cannot change its own role (${w.method} ${w.path})`,
+                            `The “${as}” account reads its role from GET ${whoAmI}; unless it is the role the API names as allowed, it sends ${w.method} ${w.path} with its own id and that role, read from an account that has it. Fails if the change is accepted (documented: HTTP ${documented.join(" or ")}); an accepted change is changed back at once.`,
+                            [as],
+                            { identityWrite: "role", as, pool: allowed.filter((x) => x !== as), allowedIn, method: w.method, path: w.path, param: m[2], whoAmI, ...at, documented: documented.join(" or "), sev: "high" },
+                            `${w.method} ${w.path} is refused to the “${as}” account`,
+                        ),
+                        "role",
+                    );
+                continue;
+            }
             const lesser = { by: allowed[0]!, viewers: refused };
             for (const as of lesser.viewers)
                 add(
