@@ -77,6 +77,16 @@ describe("names outside the schema are refused", () => {
     });
 });
 
+describe("a credential column is never compared (no oracle over it)", () => {
+    const withSecrets = cleanSchema({ tables: [{ name: "accounts", columns: ["id", "email", "passwordHash", "apiToken"], primaryKey: ["id"] }] });
+    it("exists, count and relation refuse a credential column; the other columns still work", () => {
+        expect(() => validateCheck({ kind: "exists", table: "accounts", where: ["passwordHash"] }, { passwordHash: "$2b$" }, withSecrets)).toThrow(/sign-in details/);
+        expect(() => validateCheck({ kind: "count", table: "accounts", where: ["apiToken"] }, { apiToken: "x" }, withSecrets)).toThrow(/sign-in details/);
+        expect(() => validateCheck({ kind: "relation", table: "accounts", where: [], expression: "passwordHash != \"x\"" }, {}, withSecrets)).toThrow(/sign-in details/);
+        expect(validateCheck({ kind: "exists", table: "accounts", where: ["email"] }, { email: "a@b.c" }, withSecrets).columnsRead).toEqual(["email"]);
+    });
+});
+
 describe("there is no way to pass SQL text", () => {
     it("property: any extra field on a template (sql, query, raw, or anything else) is refused", () => {
         const extra = fc.string({ minLength: 1, maxLength: 20 }).filter((k) => !["kind", "table", "where", "columns", "references", "fold", "expression"].includes(k));

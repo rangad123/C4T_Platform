@@ -33,6 +33,8 @@ export type DbValue = DbParams[string];
 /** A template that passed validateCheck: every name is in the schema and the params bind exactly its `where` columns. */
 export type ValidCheck = { template: DbTemplate; params: DbParams; table: DbTable; parent?: DbTable; columnsRead: string[] };
 
+/** Column names that hold sign-in details (as database/checks.ts leaves them out of generated checks). */
+const CREDENTIAL_COLUMN = /pass(word)?|secret|token|otp|pin$|key$/i;
 /** The names of a template as text for a message (the caller's own names, shortened; never a param value). */
 const named = (v: unknown) => JSON.stringify(String(v).slice(0, 60));
 
@@ -53,11 +55,16 @@ export function validateCheck(template: unknown, params: unknown, schema: DbSche
         for (const c of cols) if (!x.columns.includes(c)) throw new DatabaseCheckRefused(`table ${named(x.name)} has no column ${named(c)}`);
         if (new Set(cols).size !== cols.length) throw new DatabaseCheckRefused("a column is named twice");
     };
+    // A credential column is never compared with a value or in a relation: a check would be an oracle over it (counts and fingerprints).
+    const noCredential = (cols: string[]) => {
+        for (const c of cols) if (CREDENTIAL_COLUMN.test(c)) throw new DatabaseCheckRefused(`column ${named(c)} holds sign-in details, which a check never compares`);
+    };
     const table = tableOf(tpl.table);
     let parent: DbTable | undefined;
     const read: string[] = [];
     if (tpl.kind === "exists" || tpl.kind === "count" || tpl.kind === "relation") {
         columnsOf(table, tpl.where);
+        noCredential(tpl.where);
         const keys = Object.keys(p.data);
         if (keys.length !== tpl.where.length || !tpl.where.every((c) => Object.prototype.hasOwnProperty.call(p.data, c))) throw new DatabaseCheckRefused("the params must be exactly the where columns");
         read.push(...tpl.where);
@@ -80,6 +87,7 @@ export function validateCheck(template: unknown, params: unknown, schema: DbSche
         const top = [...new Set(r.refs.paths.map((x) => x.split(/[.[]/)[0]!))];
         if (top.some((c) => c === "")) throw new DatabaseCheckRefused("a database relation names columns, not list positions");
         columnsOf(table, top);
+        noCredential(top);
         read.push(...top);
     }
     return { template: tpl, params: p.data, table, ...(parent ? { parent } : {}), columnsRead: [...new Set(read)] };
