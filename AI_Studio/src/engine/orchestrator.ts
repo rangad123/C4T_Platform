@@ -40,7 +40,7 @@ import { generateApiWorkflowSpecs } from "./api/workflows.js";
 import { fetchClient, probeInvariant, requesterClient, type ProbeEnv, type ProbeHttp } from "./api/probes.js";
 import { MAX_SEQUENCES, runSequences, stateCheckSpecs, stateModels } from "./api/stateful.js";
 import { maskSecrets } from "./frameworks/plugin.js";
-import { concurrencyAllowed, generateConcurrencySpecs, type ConcurrencyGate } from "./api/concurrency.js";
+import { concurrencyAllowed, generateConcurrencySpecs, riskyGateFor, type ConcurrencyGate } from "./api/concurrency.js";
 import { handOverLine, rateLimitSpec, sensitiveFields, sensitiveFieldSpecs, storedInjectionSpec } from "./security/functional.js";
 import { planScenarios, requirementsCoverage, rulesForScenario } from "./planning/planner.js";
 import type { StoredPlan } from "./planning/preview.js";
@@ -1461,7 +1461,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     ...generateApiAccessSpecs(apiAccess, { maxSpecs: 8, reach: accessReach, ...offHost }),
                     ...lists,
                     // C3e: writes as another or a lesser identity, only behind the Q4 gate (identity/identity-writes.ts).
-                    ...generateIdentityWriteSpecs({ apis, lists: apiLists, access: apiAccess, ...offHost, dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate }),
+                    ...generateIdentityWriteSpecs({ apis, lists: apiLists, access: apiAccess, ...offHost, dataChanges, appUrl: renderCtx.apiBaseUrl, gate: riskyGateFor(req.riskyChecksGate, origin, renderCtx.apiBaseUrl) }),
                 ];
                 for (const d of access) {
                     if (await carried(d)) continue;
@@ -1523,7 +1523,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
 
             // 4c1. C8 controlled concurrency (lane D slot, T24): k identical writes at once, only behind the Q4 gate (api/concurrency.ts).
-            const cc = generateConcurrencySpecs(apis, { dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate });
+            const cc = generateConcurrencySpecs(apis, { dataChanges, appUrl: renderCtx.apiBaseUrl, gate: riskyGateFor(req.riskyChecksGate, origin, renderCtx.apiBaseUrl) });
             for (const d of cc.specs) {
                 if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
@@ -1534,7 +1534,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             else if (cc.refused) ctx.emit({ stage: "generation", kind: "concurrency_tests_skipped", message: `Concurrency checks ${cc.refused}` });
 
             // 4c2. C11 sign-in limit (T25): once a run, only from a stated limit and behind the same gate as the concurrency checks.
-            const limit = rateLimitSpec({ apis, requirements: requirementList, gate: concurrencyAllowed({ dataChanges, appUrl: renderCtx.apiBaseUrl, gate: req.riskyChecksGate }).allowed });
+            const limit = rateLimitSpec({ apis, requirements: requirementList, gate: concurrencyAllowed({ dataChanges, appUrl: renderCtx.apiBaseUrl, gate: riskyGateFor(req.riskyChecksGate, origin, renderCtx.apiBaseUrl) }).allowed });
             if (limit.spec && !(await carried(limit.spec))) {
                 const spec = TestSpecSchema.parse({ ...limit.spec, testId: await sink.nextTestKey("API") });
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { security: "functional" });

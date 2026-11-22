@@ -16,6 +16,7 @@ import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import type { ApiEndpointModel } from "../src/engine/understanding/app-model.js";
 import { executeStep } from "../src/engine/web/interpreter.js";
 import { riskyChecksGateOf } from "../src/platform/job-runner.js";
+import { riskyGateFor } from "../src/engine/api/concurrency.js";
 import { benchOpenApi } from "./fixtures/bench-openapi.js";
 
 const SHOP = parseOpenApi(await benchOpenApi("bench-shop"), "http://127.0.0.1:9604/openapi.json").operations;
@@ -156,3 +157,14 @@ describe("risky write checks run once per validation (the write caps hold per ru
         expect(asked).toBe(0);
     });
 });
+
+describe("a client authorization covers the application's own address only", () => {
+    it("the authorization gate holds only when the checks' API host is the authorized application's origin", () => {
+        expect(riskyGateFor("authorization", "https://shop.example", "https://shop.example/api")).toBe("authorization");
+        expect(riskyGateFor("authorization", "https://shop.example", "https://someone-else.example")).toBeUndefined();
+        // The bench and fixture gates are judged on loopback by concurrencyAllowed, as before.
+        expect(riskyGateFor("bench", "http://127.0.0.1:9000", "http://127.0.0.1:9001")).toBe("bench");
+        expect(riskyGateFor(undefined, "https://shop.example", "https://shop.example")).toBeUndefined();
+    });
+});
+

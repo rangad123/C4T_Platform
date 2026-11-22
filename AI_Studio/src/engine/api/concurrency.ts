@@ -48,6 +48,19 @@ async function parallelCall(k, send) {
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
+/**
+ * The gate for a run's risky checks: a client authorization covers the authorized application's own address, so it holds only when the
+ * checks' API host is that origin (an API on another host, from the job's options or the API description, is not covered).
+ */
+export function riskyGateFor(gate: ConcurrencyGate | undefined, appOrigin: string, apiBaseUrl: string): ConcurrencyGate | undefined {
+    if (gate !== "authorization") return gate;
+    try {
+        return new URL(apiBaseUrl).origin === new URL(appOrigin).origin ? gate : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 /** Whether C8 may run here, and the reason when it may not (for the layer report). */
 export function concurrencyAllowed(o: { dataChanges: boolean; appUrl: string; gate?: ConcurrencyGate }): { allowed: true } | { allowed: false; reason: string } {
     if (!o.dataChanges) return { allowed: false, reason: "not checked: data changes are off" };
