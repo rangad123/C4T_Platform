@@ -46,6 +46,8 @@ export interface PrStep {
 }
 export interface SetupRecord {
     main: string;
+    /** Per app, what its app model holds after the setup's analysis of its OpenAPI description. */
+    appModel?: Record<string, string>;
     suite: Record<string, number>;
     repeat: number;
     aiCalls: number;

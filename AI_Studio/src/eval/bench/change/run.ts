@@ -330,7 +330,7 @@ export async function changeMain(argv: string[], deps: { log?: (s: string) => vo
         if (!state) {
             const setup = await doSetup(s, args, git, manifest, gh.url, hostFor, port, counter);
             fs.writeFileSync(stateFile, JSON.stringify(setup, null, 2));
-            log(`Set up: ${Object.entries(setup.projects).map(([app, p]) => `${app} ${Object.keys(p.tests).length} tests`).join(", ")}; G5 ${setup.setup.g5.pass ? "passed" : "failed"}.`);
+            log(`Set up: ${Object.entries(setup.projects).map(([app, p]) => `${app} ${Object.keys(p.tests).length} tests`).join(", ")}; G5 ${setup.setup.g5.pass ? "passed" : "failed"}; app models: ${JSON.stringify(setup.setup.appModel)}.`);
             return 0;
         }
         // The connection follows the fake GitHub to its port of this step (a new token is sent with it, as a person would).
@@ -359,6 +359,7 @@ async function doSetup(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>,
     const root = checkout(git, args.out, manifest.main);
     const projects: State["projects"] = {};
     const g5: SetupRecord["g5"] = { pass: true, notes: [] };
+    const appModel: Record<string, string> = {};
     for (const app of ["bench-shop", "bench-rbac"] as const) {
         const host = await hostFor(app, root);
         await host.start("none");
@@ -368,6 +369,7 @@ async function doSetup(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>,
         const tests = s.platform.repo.listTests(id);
         const bad = tests.filter((t) => t.validationStatus !== "VALIDATED");
         if (bad.length) throw new Error(`${bad.length} test(s) of the frozen suite do not pass on main in ${app}: ${bad.map((t) => `${t.testKey} ${t.title} (${t.validationStatus})`).join("; ")}`);
+        appModel[app] = await describeApp(s, id, `http://127.0.0.1:${port(app)}/openapi.json`);
         const conn = ok(await s.client.call("PUT", `/api/projects/${id}/code-host`, { owner: OWNER, repo: REPO, token: TOKEN, webhookSecret: SECRET, apiUrl: ghUrl, feedback: true }), "Connecting the repository");
         projects[app] = { id, tests: Object.fromEntries(tests.map((t) => [t.testKey, t.id])), hookPath: new URL(conn.webhookUrl, "http://x").pathname };
         // G5: the full suite starts from the selection route a PR view uses, with every runnable test.
@@ -386,7 +388,25 @@ async function doSetup(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>,
         await settled(s, id, false);
         await host.stop();
     }
-    return { setup: { main: manifest.main, suite: Object.fromEntries(Object.entries(projects).map(([a, p]) => [a, Object.keys(p.tests).length])), repeat: args.repeat, aiCalls: counter.calls, g5 }, projects, done: [] };
+    return { setup: { main: manifest.main, appModel, suite: Object.fromEntries(Object.entries(projects).map(([a, p]) => [a, Object.keys(p.tests).length])), repeat: args.repeat, aiCalls: counter.calls, g5 }, projects, done: [] };
+}
+
+/**
+ * The app's API description as a person gives it (the project's OpenAPI address, then an analysis; reading OpenAPI needs no AI): the
+ * documented endpoint templates the selection matches captured path parts against. Returns what the model holds, or why there is none.
+ */
+async function describeApp(s: Side, projectId: string, openApiUrl: string): Promise<string> {
+    const put = await s.client.call("PUT", `/api/projects/${projectId}/agent-inputs`, { openApiUrl });
+    if (put.status >= 300) return `no OpenAPI address: ${JSON.stringify(put.body).slice(0, 200)}`;
+    const started = await s.client.call("POST", `/api/projects/${projectId}/intel/analyse`);
+    if (started.status !== 202) return `no analysis: ${JSON.stringify(started.body).slice(0, 200)}`;
+    for (let i = 0; i < 240; i++) {
+        const st = ok(await s.client.call("GET", `/api/projects/${projectId}/intel/sources`), "Reading the analysis");
+        if (!st.running && st.last) break;
+        await sleep(250);
+    }
+    const model = await s.client.call("GET", `/api/projects/${projectId}/intel/models/latest`);
+    return model.status === 200 ? `${(model.body?.model?.endpoints ?? []).length} endpoints in app model version ${model.body?.version ?? "?"}` : `no app model (${model.status})`;
 }
 
 async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, manifest: Manifest, state: State, pr: ManifestPr, hostFor: (app: string, root: string) => Promise<BenchAppHost>, counter: { calls: number }): Promise<PrStep> {
