@@ -47,7 +47,8 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-runbook-"));
     dataDir2 = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-runbook2-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", API_KEY, CONCURRENCY: "2", PUBLIC_URL: "https://qa.example.test" }));
+    // Findings verification (on by default) re-runs a failed test after its run, which would call the flaky endpoint between the runs here.
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", API_KEY, CONCURRENCY: "2", PUBLIC_URL: "https://qa.example.test", VERIFY_FINDINGS: "false" }));
     // Injected before the server is built, like the other features' tests: quick polls, short "seconds", fast alert retries.
     svc = getScheduleServices(platform, { clock: () => clockNow, delivery: { backoffMs: [20, 20], timeoutMs: 2_000 } });
     getTriggerServices(platform, { minGapMs: 50 });
@@ -714,7 +715,7 @@ describe("analyze steps", () => {
 describe("restarts", () => {
     it("a run found going after a restart is marked interrupted, never resumed; a graceful shutdown does the same at once", async () => {
         // A second platform on its own database: "the process that was running a runbook" and "the process that starts afterwards".
-        const configFor = () => loadConfig({ DATA_DIR: dataDir2, SECRET_KEY: "test-secret-key-0123456789", API_KEY, CONCURRENCY: "2" });
+        const configFor = () => loadConfig({ DATA_DIR: dataDir2, SECRET_KEY: "test-secret-key-0123456789", API_KEY, CONCURRENCY: "2", VERIFY_FINDINGS: "false" });
         const before = bootstrap(configFor());
         const beforeRb = getRunbookServices(before, { waitUnitMs: 100 });
         const beforeServer = await buildServer(before);
