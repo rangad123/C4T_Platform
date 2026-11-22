@@ -35,7 +35,7 @@ export interface StatedRequirement {
 // ── sensitive fields ─────────────────────────────────────────────────────────
 
 /** Field names (lower case, without _ - .) that hold a sign-in secret. Not tokens or session ids: a sign-in answer may return those. */
-const CREDENTIAL_NAMES = new Set(["password", "passwd", "pwd", "passwordhash", "hashedpassword", "passworddigest", "encryptedpassword", "passwordsalt", "salt", "secret", "clientsecret", "apisecret", "secretkey", "privatekey", "otpsecret", "totpsecret", "mfasecret"]);
+const CREDENTIAL_NAMES = new Set(["password", "passwd", "pwd", "passwordhash", "hashedpassword", "passworddigest", "encryptedpassword", "passwordsalt", "secret", "clientsecret", "apisecret", "secretkey", "privatekey", "otpsecret", "totpsecret", "mfasecret"]);
 /** Values that are a credential whatever the field is called: bcrypt, argon2, scrypt and crypt hashes, PEM private keys. */
 const CREDENTIAL_VALUE = /^\$(?:2[aby]\$\d\d\$[./A-Za-z0-9]{53}|argon2(?:id|i|d)\$|scrypt\$|[156]\$[^$]{1,16}\$[./A-Za-z0-9]{20,})|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/;
 
@@ -152,7 +152,8 @@ export function rateLimitSpec(input: { apis: readonly Pick<ApiEndpointModel, "me
     const attempts = stated.fails + 1;
     if (attempts > RATE_LIMIT_MAX_ATTEMPTS) return { skipped: `Requirement ${stated.req.id} allows ${stated.fails} failed sign-ins; checking it would take ${attempts} attempts, more than the ${RATE_LIMIT_MAX_ATTEMPTS} allowed.` };
     if (!input.gate) return { skipped: "The rate-limit check needs a benchmark or fixture app, or the client's current authorization, with data changes on." };
-    const posts = input.apis.filter((a) => a.method.toUpperCase() === "POST" && !a.path.includes("{"));
+    // The application's own paths only: a documented path written //host would send the attempts to another site.
+    const posts = input.apis.filter((a) => a.method.toUpperCase() === "POST" && !a.path.includes("{") && a.path.startsWith("/") && !a.path.startsWith("//"));
     const signIn = posts.find((a) => SIGN_IN_PATH.test(a.path) && a.statuses.includes(401)) ?? posts.find((a) => SIGN_IN_PATH.test(a.path));
     const withPassword = posts.filter((a) => !/\/admin\//i.test(a.path) && Object.keys(props(bodyOf(a))).some((k) => /pass/i.test(k)));
     const signUp = withPassword.find((a) => SIGN_UP.test(a.path)) ?? withPassword.find((a) => NEW_ACCOUNT.test(a.path));

@@ -29,6 +29,9 @@ describe("sensitive fields in captured answers", () => {
         expect(sensitiveFields([call({ passwordPolicy: { minLength: 8 }, hasPassword: true, password: null, pin: "", token: "abc", sessionId: "s1" })])).toEqual([]);
         expect(sensitiveFields([call({ password: "x" }, { status: 401 })])).toEqual([]);
         expect(sensitiveFields([call("<html>password: x</html>")])).toEqual([]);
+        // A field that only shares a name with a credential word, holding a number, is not a secret: a food label's salt.
+        expect(sensitiveFields([call([{ name: "Sea salt crisps", salt: 1.3 }])])).toEqual([]);
+        expect(sensitiveFields([call({ passwordSalt: "k3P9x0aZ" })])).toEqual([{ method: "GET", path: "/api/profile", fields: ["passwordSalt"], status: 200 }]);
     });
     it("hash and secret names anywhere in the answer, and hash values under any name, one hit per method and path", () => {
         const bcrypt = `$2b$12$${"a".repeat(53)}`;
@@ -84,6 +87,12 @@ describe("rate limit: only from a stated limit, bounded, on a throwaway account"
         expect(signIns.slice(0, 5).every((s) => s.body!.password !== steps[0]!.body!.password)).toBe(true);
         expect(steps.at(-1)).toEqual(expect.objectContaining({ action: "assertResponse", check: "status", expected: 429, source: "2.14" }));
         expect(JSON.stringify(spec)).not.toMatch(/credentials\.|"auth":"default"/);
+    });
+    it("sends sign-in attempts only to the application's own paths: a documented path written //host is never used", () => {
+        const offHost = signInApis.map((a) => (a.path === "/api/login" ? { ...a, path: "//other-host.example/login" } : a.path === "/api/register" ? { ...a, path: "//other-host.example/register" } : a));
+        const r = rateLimitSpec({ apis: offHost, requirements: [R_214], gate: true });
+        expect(r.spec).toBeUndefined();
+        expect(JSON.stringify(r)).not.toContain("other-host");
     });
 });
 
