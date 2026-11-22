@@ -23,6 +23,15 @@ export const SECRET_SETTING_NAME =
 /** Is this a setting name that holds a secret? */
 export const isSecretSettingName = (name: string): boolean => SECRET_SETTING_NAME.test(name.trim());
 
+/**
+ * Does any leading part of this name name a secret (`password_confirmation`, `passwordConfirm`, `x-api-key-value`)? Broader than
+ * isSecretSettingName, for values copied into evidence, where hiding one too many costs nothing.
+ */
+export const namesASecret = (name: string): boolean => {
+    const parts = name.trim().split(/(?<=[a-z0-9])(?=[A-Z])|(?=[_\-. ])/);
+    return parts.some((_, i) => isSecretSettingName(parts.slice(0, i + 1).join("")));
+};
+
 /** Ordinary setting values that are never secrets, whatever the setting is called. */
 const NOT_A_SECRET = /^(?:true|false|null|none|nil|undefined|yes|no|on|off|enabled|disabled|default|empty|unset|required|optional)$/i;
 

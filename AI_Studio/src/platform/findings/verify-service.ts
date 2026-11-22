@@ -24,7 +24,7 @@ import { parseAttemptNote, type RunEnv, type ScriptRun } from "../../engine/vali
 import { testStepFault } from "../../engine/validation/test-fault.js";
 import { startingIdsOf } from "../../engine/web/leftovers.js";
 import { clip, HIDDEN, redactText } from "../../shared/redact-text.js";
-import { isSecretSettingName, runSecretValues } from "../../engine/evidence/secret-policy.js";
+import { namesASecret, runSecretValues } from "../../engine/evidence/secret-policy.js";
 import { maskText, maskValue } from "../redact-text.js";
 import { tryExpandBlocks } from "../../engine/blocks/expand.js";
 import { localExecutor } from "../../engine/frameworks/index.js";
@@ -265,7 +265,7 @@ async function keepEvidence(d: VerifyDeps, f: CandidateFindingRecord, test: Veri
         ...(attempt.failedStep ? { failedStep: attempt.failedStep } : {}),
         steps: run.steps.map((s) => ({ index: s.index, title: line(s.title), status: s.status, ...(s.error ? { error: line(s.error, 800) } : {}) })),
         preconditions: test.spec.preconditions.map((p) => line(p)),
-        data: Object.fromEntries(Object.entries(test.spec.testData).map(([k, v]) => [line(k, 100), isSecretSettingName(k) ? HIDDEN : line(v)])),
+        data: Object.fromEntries(Object.entries(test.spec.testData).map(([k, v]) => [line(k, 100), namesASecret(k) ? HIDDEN : line(v)])),
         appVersion: appVersion ?? "unknown",
         browser: "Chromium (headless)",
         environment: { appUrl: line(d.appUrl), ranOn: d.ranOn },
