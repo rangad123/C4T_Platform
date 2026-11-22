@@ -676,9 +676,12 @@ export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --o
        node scripts/eval.mjs bench-report --layers <results folder or file> [<more>...]
        node scripts/eval.mjs bench-report --migrate-labels <old labels file> --result <results file> --to <new file>
        node scripts/eval.mjs bench-report --verification <results folder or file> [<more>...]
+       node scripts/eval.mjs bench-report --ladder <ladder folder>
   Prints the "Observed vs fails on the seeded app" section (E1, E2 and every finding) of finished benchmark results; one folder or file per trial.
   --verification    scores the verification of each app of each trial (V1–V8, V11, eval/bench/verify-score.ts); an app run without
                     --verify-attempts reads "not measured"
+  --ladder          per app and rung of a ladder (eval/bench/ladder.ts), the median and range of the brief's metrics, every trial
+                    with its status and tree fingerprint, and the detection verdict of the last rung against the first
   --rescore         scores each trial again by the current rules (metrics.ts SCORING_VERSION, the catalogue's unreachable defects) and prints
                     a before → after table; detection must not change (the replays' categories are kept); extension seeds
                     (catalogue 2026-11-21.1) are scored apart, as in the run
@@ -691,7 +694,7 @@ export const BENCH_REPORT_USAGE = `Usage: node scripts/eval.mjs bench-report --o
                     (never over an existing one); every label and note is kept as it was, the old file is left untouched`;
 
 /** The one finished result a trial stands for: the file itself, or the single non-partial `*-benchmark-*.json` in the folder. */
-function trialFile(target: string): string {
+export function trialFile(target: string): string {
     if (!fs.existsSync(target)) throw new Error(`${target} does not exist: this trial is missing.`);
     if (fs.statSync(target).isFile()) return target;
     const finished = fs.readdirSync(target).filter((n) => /-benchmark-[a-z]+(-[a-z0-9-]+)?\.json$/.test(n) && !n.endsWith("-partial.json"));
@@ -700,7 +703,7 @@ function trialFile(target: string): string {
     return path.join(target, finished[0]!);
 }
 
-function readResult(file: string): Benchmark {
+export function readResult(file: string): Benchmark {
     const parsed = BenchmarkSchema.safeParse((JSON.parse(fs.readFileSync(file, "utf8")) as { benchmark?: unknown }).benchmark);
     if (!parsed.success) throw new Error(`${file} is not a benchmark result: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
     return parsed.data;
@@ -728,12 +731,14 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
     let rescore = false;
     let layers = false;
     let verification = false;
+    let ladder: string | undefined;
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i]!;
         if (k === "--observed") observed = true;
         else if (k === "--rescore") rescore = true;
         else if (k === "--layers") layers = true;
         else if (k === "--verification") verification = true;
+        else if (k === "--ladder") ladder = argv[++i];
         else if (k === "--labels") labelsFile = argv[++i];
         else if (k === "--migrate-labels") migrate = argv[++i];
         else if (k === "--result") result = argv[++i];
@@ -755,6 +760,16 @@ export async function benchReportMain(argv: string[], deps: { log?: (line: strin
             const set = migrateLabels(JSON.parse(fs.readFileSync(migrate, "utf8")), JSON.parse(fs.readFileSync(result, "utf8")), result, path.basename(migrate));
             fs.writeFileSync(to, `${JSON.stringify(set, null, 2)}\n`, { flag: "wx" });
             log(`Wrote ${to}: ${Object.keys(set.trials[0]!.labels).length} labels bound to ${JSON.stringify(set.trials[0]!.projects)} (${result}).`);
+            return 0;
+        } catch (e) {
+            log(e instanceof Error ? e.message : String(e));
+            return 2;
+        }
+    }
+    if (ladder) {
+        try {
+            const { ladderReport } = await import("./ladder.js");
+            log(ladderReport(path.resolve(ladder)));
             return 0;
         } catch (e) {
             log(e instanceof Error ? e.message : String(e));
