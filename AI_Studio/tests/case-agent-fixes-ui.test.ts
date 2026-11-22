@@ -123,12 +123,14 @@ describe("the explore form (FX12, FX13)", () => {
     it("R16.2: no address and no requirements: the form says what to add and posts nothing; no OpenAPI mention (L5)", async () => {
         await page.goto(`${BASE}/#/new?project=${ids.noInput}`);
         await pwExpect(page.getByTestId("inputs-note")).toBeVisible();
+        // The note is drawn before the project's agents load (then it is the general one), so wait for the Test Case Generation wording.
+        await pwExpect(page.getByTestId("inputs-note")).toContainText("The sign-in the agent uses");
         expect(await page.getByTestId("inputs-note").innerText()).not.toMatch(/OpenAPI/);
         const posts: string[] = [];
         page.on("request", (r) => {
             if (r.method() === "POST" && r.url().includes("/test-generation")) posts.push(r.url());
         });
-        await page.getByRole("button", { name: "Explore again" }).click();
+        await page.getByRole("button", { name: "Start exploring" }).click();
         await pwExpect(page.getByText("Add the application's address or a requirements document first.")).toBeVisible();
         await page.waitForTimeout(300);
         expect(posts).toEqual([]);
