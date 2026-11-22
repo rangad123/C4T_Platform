@@ -120,6 +120,8 @@ describe("run control: start, read and stop a run of chosen tests", () => {
         expect((await call("POST", `/api/projects/${projectId}/runs`, { testIds: [] })).status).toBe(400);
         expect((await call("POST", `/api/projects/${projectId}/runs`, { testIds: [idOf["Fast one"]], variants: ["netscape"] })).status).toBe(400);
         expect((await call("POST", `/api/projects/${projectId}/runs`, { surprise: true })).status).toBe(400);
+        // Data changes for a run are on or off, nothing else.
+        expect((await call("POST", `/api/projects/${projectId}/runs`, { testIds: [idOf["Fast one"]], allowMutatingApiTests: "yes" })).status).toBe(400);
         // A test of another project is not a test of this one.
         const foreign = await call("POST", `/api/projects/${otherProject}/runs`, { testIds: [idOf["Fast one"]] });
         expect(foreign.status).toBe(400);

@@ -611,7 +611,8 @@ async function replayStage(client: PlatformClient, host: BenchAppHost, switches:
 async function replay(client: PlatformClient, projectId: string, testIds: string[], o: BenchOptions, signal: AbortSignal): Promise<Map<string, ReplayVerdict>> {
     const out = new Map<string, ReplayVerdict>();
     if (!testIds.length) return out;
-    const r = await client.call("POST", `/api/projects/${projectId}/runs`, { testIds });
+    // Data changes are allowed in every trial: the replays of risky checks need it (engine/validation/risky.ts).
+    const r = await client.call("POST", `/api/projects/${projectId}/runs`, { testIds, allowMutatingApiTests: true });
     if (r.status === 422) {
         for (const id of testIds) out.set(id, "not_run");
         return out;
