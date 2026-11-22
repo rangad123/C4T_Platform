@@ -173,6 +173,7 @@ describe("the PR bench's scores", () => {
         expect(crit(edit(3, { inRegressionSuite: false }), "G6").verdict).toBe("misses");
         expect(crit(edit(3, { reopened: false }), "G6").verdict).toBe("misses");
         expect(crit(STEPS.filter((p) => p.kind !== "fix"), "G6").verdict).toBe("not measured");
+        expect(crit(edit(3, { fixedAgain: false }), "G6").notes).toContain("Fixed again when the fix was deployed again after the return: 0 of 1.");
     });
 
     it("G7 is not measured on this base; G9 allows one AI call per PR, not two", () => {

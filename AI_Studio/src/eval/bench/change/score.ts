@@ -26,7 +26,7 @@ export interface FixCheckRecord {
     linked: number;
     delivery?: number;
     jobId?: string;
-    findings: Array<{ id: string; test: string | null; state: string; stillReproduces: boolean; inRegressionSuite: boolean; reopened?: boolean; stateAfterReturn?: string }>;
+    findings: Array<{ id: string; test: string | null; state: string; stillReproduces: boolean; inRegressionSuite: boolean; reopened?: boolean; stateAfterReturn?: string; fixedAgain?: boolean }>;
     returned?: { jobId: string | null; failed: string[] };
 }
 export interface PrStep {
@@ -222,6 +222,7 @@ export function scoreChange(setup: SetupRecord, steps: PrStep[]): ChangeReport {
             ...(noFinding.length ? [`No confirmed finding to fix (nothing failed, or verification did not reproduce it): ${noFinding.join(", ")}.`] : []),
             ...fixF.filter((f) => f.state !== "fixed").map((f) => `${f.test}: ${f.state} after its fix PR.`),
             ...fixed.filter((f) => !f.reopened).map((f) => `${f.test}: not reopened when the bug came back (${f.stateAfterReturn ?? "not checked"}).`),
+            ...(fixed.some((f) => f.fixedAgain !== undefined) ? [`Fixed again when the fix was deployed again after the return: ${fixed.filter((f) => f.fixedAgain).length} of ${fixed.length}.`] : []),
         ],
     });
 

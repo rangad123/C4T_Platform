@@ -508,6 +508,19 @@ async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, ma
                     f.reopened = r.reopened.includes(f.id);
                     f.stateAfterReturn = r.states[f.id];
                 }
+                // The return was a branch: a person confirms the returned bug and the fix is deployed again, so the next PRs start from
+                // Fixed findings (else their resolved issue links would count again and mark the tests as expected failures).
+                await settled(s, proj.id, false);
+                for (const f of fixed) {
+                    const st = ok(await s.client.call("GET", `/api/projects/${proj.id}/findings/${f.id}`), "Reading a finding").finding.state as string;
+                    if (st === "reproduced" || st === "unconfirmed") ok(await s.client.call("POST", `/api/projects/${proj.id}/findings/${f.id}/transition`, { action: "confirm", reason: "The bug came back on a branch; checked by the bench's person." }), "Confirming a finding");
+                }
+                const host = await hostFor(pr.app, checkout(git, args.out, pr.head));
+                await host.start("none");
+                const after = new Date().toISOString();
+                await deliver(s, proj.hookPath, "deployment_status", `dep2-${pr.number}-${pr.head.slice(0, 12)}`, deploymentPayload(pr.head));
+                await fixCheckJob(s, proj.id, after);
+                for (const f of fixed) f.fixedAgain = ok(await s.client.call("GET", `/api/projects/${proj.id}/findings/${f.id}`), "Reading a finding").finding.state === "fixed";
             }
         }
         step.fixCheck = check;
