@@ -48,6 +48,11 @@ export interface RunEnv {
     storageState?: string;
     /** The run's database check service (../database/service.ts): loopback, for this run only. Unset: database check steps are skipped with a note. */
     dbCheck?: { url: string; token: string };
+    /**
+     * The Q4 gate this run holds for risky saved checks (validation/risky.ts): set only by a job that checked it (data changes on, and an
+     * authorization for the app's own origin or a bench/fixture app). Unset: risky tests skip themselves.
+     */
+    riskyChecks?: "bench" | "fixture" | "authorization";
 }
 
 export interface ScriptInput {
@@ -375,6 +380,11 @@ function withProgressReporter(config: string): string {
  * put them into a report of the same shape, so the one parser reads them. Tests that had not finished are simply absent. Returns
  * whether anything was written.
  */
+/** The risky-check gate for a run's scripts: on, its kind, and the folder that counts the run's identity writes (at most 8). */
+export function riskyEnv(env: Pick<RunEnv, "riskyChecks">, runDir: string): Record<string, string> {
+    return env.riskyChecks ? { AITP_RISKY_CHECKS: "1", AITP_RISKY_GATE: env.riskyChecks, AITP_RISKY_DIR: path.join(runDir, "risky") } : {};
+}
+
 export async function reportFromPartialResults(runDir: string): Promise<boolean> {
     const text = await fs.readFile(path.join(runDir, PARTIAL_FILE), "utf8").catch(() => "");
     const byFile = new Map<string, Array<{ title: string; file: string; tests: unknown[] }>>();
@@ -532,6 +542,7 @@ export async function runScripts(
         API_TOKEN: env.apiToken ?? "",
         API_AUTH_HEADER: env.apiAuthHeader ?? "",
         ...(env.dbCheck ? { DB_CHECK_URL: env.dbCheck.url, DB_CHECK_TOKEN: env.dbCheck.token } : {}),
+        ...riskyEnv(env, runDir),
         ...(env.cleanup ? { AITP_CLEANUP: env.cleanup, AITP_CREATED_DIR: path.join(runDir, "created") } : {}),
         // {{env.NAME}} in a spec: the variables of the environment this run targets (TEST_ENV_<NAME>).
         ...Object.fromEntries(Object.entries(env.vars ?? {}).map(([k, val]) => [`TEST_ENV_${k.toUpperCase()}`, val])),

@@ -61,6 +61,8 @@ export interface ValidationOnlyRequest {
     knownBugs?: Record<string, string>;
     /** The project's notes for the AI: the overlays they name are closed in the rendered web scripts (see generators/types.ts). */
     siteNotes?: import("./memory/notes.js").SiteNote[];
+    /** The Q4 gate the job checked for this run (validation/risky.ts). Unset: risky saved tests skip themselves. */
+    riskyChecks?: "bench" | "fixture" | "authorization";
 }
 
 export interface TestToValidate {
@@ -216,7 +218,7 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
                 {
                     browser,
                     scratchDir: ctx.config.scratchDir,
-                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken, apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS, ...(dbService ? { dbCheck: { url: dbService.url, token: dbService.token } } : {}) },
+                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken, apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS, ...(dbService ? { dbCheck: { url: dbService.url, token: dbService.token } } : {}), ...(req.riskyChecks ? { riskyChecks: req.riskyChecks } : {}) },
                     render: renderCtx,
                     model,
                     // These are existing tests, run as approved: a repair waits for review and is not run in this job.

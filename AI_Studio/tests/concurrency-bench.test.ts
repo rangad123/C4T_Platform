@@ -40,7 +40,7 @@ async function runOn(defects: string): Promise<Record<string, string>> {
     try {
         await dirty(app.base);
         const scripts = specs.map((spec) => ({ testId: spec.testId, ...renderScript(spec, "playwright-api", { baseUrl: app.base }) }));
-        const runs = await runScripts(loadConfig({}).scratchDir, scripts, { baseUrl: app.base, credentials: alice, headless: true }, { workers: 1 });
+        const runs = await runScripts(loadConfig({}).scratchDir, scripts, { baseUrl: app.base, credentials: alice, headless: true, riskyChecks: "bench" }, { workers: 1 });
         return Object.fromEntries(
             specs.map((spec, i) => {
                 const r = runs[i]!;

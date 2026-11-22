@@ -40,6 +40,32 @@ async function accessWriteAssert(page, base, cfg) {
     // The settings can be edited: each kind sends only its own method.
     if (!(cfg.identityWrite === "revoke" ? cfg.method === "DELETE" : cfg.identityWrite === "owner" ? cfg.method === "PATCH" || cfg.method === "PUT" : cfg.method === "PUT" || cfg.method === "PATCH")) throw new Error("The method " + cfg.method + " is not one this check sends, so nothing was called.");
     for (const p of [cfg.path, cfg.read, cfg.whoAmI]) if (p !== undefined && !own(String(p).replace("{" + cfg.param + "}", "x"))) throw new Error("The addresses in this check are not the application's own, so nothing was called.");
+    // An edited test keeps the rules too: stopping a share is not undone, so it runs only on a benchmark or fixture app.
+    if (cfg.identityWrite === "revoke" && !["bench", "fixture"].includes(String(process.env.AITP_RISKY_GATE || ""))) throw new Error("Not run: stopping a share is not undone, so this check runs only on a benchmark or fixture app.");
+    // At most 8 writes as another account in one run, counted across the run's scripts (one file per write in the run's folder).
+    const claim = async (n) => {
+        // riskyFs: the script's own "node:fs" import (generators/playwright.ts adds it to scripts with these checks).
+        const fs = typeof riskyFs !== "undefined" ? riskyFs : undefined;
+        const dir = fs ? process.env.AITP_RISKY_DIR : undefined;
+        if (dir) fs.mkdirSync(dir, { recursive: true });
+        const taken = (globalThis.__identityWrites ??= new Set());
+        for (let k = 0; k < n; k++) {
+            let got = false;
+            for (let i = 1; i <= 8 && !got; i++) {
+                if (!dir) {
+                    if (!taken.has(i)) (taken.add(i), (got = true));
+                    continue;
+                }
+                try {
+                    fs.writeFileSync(dir + "/write-" + i, "", { flag: "wx" });
+                    got = true;
+                } catch (e) {
+                    if (e && e.code !== "EEXIST") throw e;
+                }
+            }
+            if (!got) throw new Error("Not run: more than 8 writes as another account are never sent in one run.");
+        }
+    };
     const opts = { maxRedirects: 0, failOnStatusCode: false, timeout: 30000 };
     const call = async (ctx, method, path, data) => {
         const r = await ctx.request.fetch(own(path), { ...opts, method, ...(data !== undefined ? { data } : {}) }).catch(() => null);
@@ -75,6 +101,7 @@ async function accessWriteAssert(page, base, cfg) {
             // PUT replaces the record, so it sends back exactly the record as read (nothing it leaves out can be lost); PATCH its plain fields.
             const body = cfg.method === "PUT" ? read.body : Object.fromEntries(Object.entries(read.body).filter(([k, v]) => ["string", "number", "boolean"].includes(typeof v) && !/^(id|uuid|_id)$|^(owner|owner_?id|user_?id|user|created_?by|author|author_?id)$/i.test(k)));
             if (!Object.keys(body).length) throw cannot("The record has no plain fields to send back unchanged");
+            await claim(1);
             const w = await call(ctx, cfg.method, cfg.path, body);
             if (refused(w.status)) return;
             if (!ok(w.status)) throw cannot(what + " answered HTTP " + w.status);
@@ -106,6 +133,7 @@ async function accessWriteAssert(page, base, cfg) {
             const field = roleOf(top.body);
             if (!field || typeof mine.body[field] !== "string" || mine.body[field] === top.body[field]) throw cannot("GET " + cfg.whoAmI + " shows no role that differs between “" + by + "” and “" + cfg.as + "”");
             const path = cfg.path.replace("{" + cfg.param + "}", encodeURIComponent(mine.id));
+            await claim(2); // the change and, if it is accepted, the change back
             const w = await call(ctx, cfg.method, path, { [field]: top.body[field] });
             if (refused(w.status)) return;
             if (!ok(w.status)) throw cannot(what + " answered HTTP " + w.status);
@@ -119,6 +147,7 @@ async function accessWriteAssert(page, base, cfg) {
             if (!ok(before.status)) throw cannot("“" + cfg.as + "” could not read GET " + cfg.read + " before the share was stopped (HTTP " + before.status + ")");
             const mine = await me(reader, cfg.as);
             const path = cfg.path.replace("{" + cfg.param + "}", encodeURIComponent(mine.id));
+            await claim(1);
             const w = await call(await as(cfg.by), cfg.method, path);
             if (!ok(w.status)) throw cannot("The owner “" + cfg.by + "” could not stop sharing (" + cfg.method + " " + path + " answered HTTP " + w.status + ")");
             const after = await call(reader, "GET", cfg.read);

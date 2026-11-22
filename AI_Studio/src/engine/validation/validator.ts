@@ -7,6 +7,7 @@
  *   NEEDS_REVIEW       failure is (or may be) a real application defect — a human should look
  *   FAILED_VALIDATION  could not be made to pass (environment problem, unfixable, attempts exhausted)
  */
+import { RISKY_SKIPPED, riskyKindOf } from "./risky.js";
 import { RELATION_FAILURE_PREFIX } from "./relation.js";
 
 import { captchaFinding } from "../auth/captcha-run.js";
@@ -271,7 +272,12 @@ export async function validateBatch(
         // Scheduled re-runs: a failure gets another go straight away with the very same script. A pass after
         // a fail is a flaky pass (both results are recorded as executions), not a regression.
         // A load check is never run again straight away: a second round of up to 300 requests is exactly what it must not send (it confirms itself).
-        for (let retries = isLoadSpec(t.spec) ? 0 : (deps.retryFailures ?? 0); run.status !== "passed" && !outcome && retries > 0 && !ctx.signal?.aborted && !isVisionFailure(run); retries--) {
+        // A risky check the run was not given the gate for skipped itself: no result, nothing changes, and one sentence says why.
+        if (!outcome && run.status === "skipped" && riskyKindOf(t.spec)) {
+            ctx.emit({ stage: "validation", kind: "risky_check_skipped", level: "warn", message: `${t.spec.testId}: ${RISKY_SKIPPED}` });
+            return await notRun(t, script, run);
+        }
+        for (let retries = isLoadSpec(t.spec) || riskyKindOf(t.spec) ? 0 : (deps.retryFailures ?? 0); run.status !== "passed" && !outcome && retries > 0 && !ctx.signal?.aborted && !isVisionFailure(run); retries--) {
             ctx.emit({ stage: "validation", kind: "validation_retry", level: "warn", message: `${t.spec.testId} failed; running it again to tell a flaky test from a real failure` });
             attempt++;
             const again = await runAgain(t, script);

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { concurrencyAllowed, riskyGateFor } from "../engine/api/concurrency.js";
 import type { ApiListRow } from "../engine/identity/access.js";
 import { effectiveLimits, levelOf } from "../engine/levels.js";
 import path from "node:path";
@@ -549,7 +550,13 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                     ...(custom.byTest.has(t.id) ? { custom: custom.byTest.get(t.id)! } : {}),
                 });
             }
-            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}), ...knownBugsOf(repo.db, tests), ...(await siteNotesOf(repo, job.projectId)) }, tests, engineSink);
+            // Risky saved tests (validation/risky.ts) run only with the gate, checked now: data changes on, and the project's current
+            // authorization for the application's own address, or this server's bench setting on loopback.
+            const apiBase = app.config.apiBaseUrl ?? o.apiBaseUrl ?? app.url;
+            const gate = riskyGateFor(riskyChecksGateOf(config, deps.hasCurrentAuthorization?.(job.projectId, app.url) ?? false), app.url, apiBase);
+            const dataChanges = (o.allowMutatingApiTests ?? (app.config as { allowMutatingApiTests?: boolean }).allowMutatingApiTests) === true;
+            const riskyChecks = gate && concurrencyAllowed({ dataChanges, appUrl: apiBase, gate }).allowed ? gate : undefined;
+            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, ...(riskyChecks ? { riskyChecks } : {}), credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}), ...knownBugsOf(repo.db, tests), ...(await siteNotesOf(repo, job.projectId)) }, tests, engineSink);
             // A person's Run of journey tests tells the site memory which journeys have tests that pass (an exploration writes them only).
             if (!abort.signal.aborted && o.useMemory !== false) await noteRunForMemory(repo, sink, { job, url: app.url, tests, secrets: secretValues({ credentials: app.credentials, roles }), emit });
         } else {

@@ -4,10 +4,11 @@
  * signed-in account (with its own token, when the account has one), and API answers come from `answer`.
  */
 import { createHmac } from "node:crypto";
+import * as riskyFs from "node:fs";
 import { ACCESS_HELPER_SOURCE } from "../src/engine/identity/access.js";
 
 // A normal project's script: HTTPS errors are not ignored (IGNORE_HTTPS_ERRORS, as the generators declare it).
-export const accessHelper = new Function("totpCode", "createHmac", "IGNORE_HTTPS_ERRORS", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac, false) as {
+export const accessHelper = new Function("totpCode", "createHmac", "IGNORE_HTTPS_ERRORS", "riskyFs", `${ACCESS_HELPER_SOURCE}\nreturn { accessAssert };`)(() => "000000", createHmac, false, riskyFs) as {
     accessAssert: (page: unknown, base: string, spec: string) => Promise<void>;
 };
 

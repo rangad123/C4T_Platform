@@ -320,6 +320,7 @@ export default defineConfig({
             "tests/db-probe-migration-70.test.ts",
             "tests/runner-capability-validation.test.ts",
             "tests/authorization-gate-unit.test.ts",
+            "tests/risky-gate-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

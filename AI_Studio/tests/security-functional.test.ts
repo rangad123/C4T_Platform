@@ -58,7 +58,7 @@ function requirement(appName: string, id: string): StatedRequirement {
 async function runSpec(draft: DraftSpec, base: string, credentials: { username: string; password: string }): Promise<{ status: string; error?: string }> {
     const spec = TestSpecSchema.parse({ ...draft, testId: draft.kind === "api" ? "API-901" : "WEB-901" });
     const r = renderScript(spec, draft.kind === "api" ? "playwright-api" : "playwright", { baseUrl: base });
-    const [res] = await runScripts(loadConfig({}).scratchDir, [{ testId: spec.testId, filename: r.filename, content: r.content }], { baseUrl: base, apiBaseUrl: base, headless: true, credentials, cleanup: "off" }, { workers: 1 });
+    const [res] = await runScripts(loadConfig({}).scratchDir, [{ testId: spec.testId, filename: r.filename, content: r.content }], { baseUrl: base, apiBaseUrl: base, headless: true, credentials, cleanup: "off", riskyChecks: "bench" }, { workers: 1 });
     return res!;
 }
 

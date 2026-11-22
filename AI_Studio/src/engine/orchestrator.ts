@@ -1676,12 +1676,15 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             for (const t of pending) await sink.updateTest(handles.get(t.spec.testId)!, { validation: "VALIDATING" });
 
             dbService = await dbServiceFor(dbProbe, pending.map((t) => t.spec), ctx.executor?.remote === true);
+            // The run's gate for risky checks (validation/risky.ts): the scripts skip themselves without it.
+            const riskyGate = riskyGateFor(req.riskyChecksGate, origin, renderCtx.apiBaseUrl);
+            const runRiskyGate = concurrencyAllowed({ dataChanges, appUrl: renderCtx.apiBaseUrl, gate: riskyGate }).allowed ? riskyGate : undefined;
             const outcomes: ValidationOutcome[] = await validateBatch(
                 ctx,
                 {
                     browser,
                     scratchDir: ctx.config.scratchDir,
-                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken: await resolveApiToken(ctx, req.credentials), apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS, ...(dbService ? { dbCheck: { url: dbService.url, token: dbService.token } } : {}) },
+                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken: await resolveApiToken(ctx, req.credentials), apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS, ...(dbService ? { dbCheck: { url: dbService.url, token: dbService.token } } : {}), ...(runRiskyGate ? { riskyChecks: runRiskyGate } : {}) },
                     render: renderCtx,
                     model,
                     // The level decides; a setting below the default (tests, the local CLI) lowers it.
