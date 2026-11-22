@@ -91,8 +91,11 @@ export interface BenchOptions {
      * count as reachable. None: as Phase 3.
      */
     database?: BenchDatabase;
-    /** `--verify-attempts`: verifies the findings of the app's jobs (with its defects in) and returns what it left (cli.ts verifierOf). */
-    verify?: (projectId: string, jobIds: string[], findingTests?: ReadonlySet<string>) => Promise<Verification>;
+    /**
+     * `--verify-attempts`: verifies the findings of the app's jobs (with its defects in) and returns what it left (cli.ts verifierOf).
+     * `source` is the app's source folder (its server script's folder, relative to the repository root): the code source of root cause.
+     */
+    verify?: (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string) => Promise<Verification>;
 }
 
 export interface BenchOutcome {
@@ -468,7 +471,7 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         await host.start(seeded);
         // The creation's findings as collected: the harness's rerun and the replays have moved their statuses on since the job ended.
         const findingTests = o.mode === "discovery" ? new Set(candidates.map((t) => t.id)) : undefined;
-        verification = await o.verify(projectId, [jobs.planJobId, ...jobs.createJobIds, ...(jobs.validationJobIds ?? [])].filter((x): x is string => Boolean(x)), findingTests);
+        verification = await o.verify(projectId, [jobs.planJobId, ...jobs.createJobIds, ...(jobs.validationJobIds ?? [])].filter((x): x is string => Boolean(x)), findingTests, app.script.replace(/\/[^/]*$/, ""));
     }
 
     const findings: BenchFinding[] = [];

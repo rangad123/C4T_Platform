@@ -515,7 +515,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             ...(args.roles ? { roles: (appId: string) => catalogueRoles(catalogue.accounts?.[appId] ?? []) } : {}),
             ...(args.db ? { database: args.db === "bench-data" ? { kind: "bench-data" as const } : { kind: "bench-sqlite" as const, dir: path.join(dataDir, "bench-db") } } : {}),
             ...configLimits(args).run,
-            ...(args.verifyAttempts !== undefined ? { verify: verifierOf(platform, args.verifyAttempts) } : {}),
+            ...(args.verifyAttempts !== undefined ? { verify: verifierOf(platform, args.verifyAttempts, deps.root) } : {}),
         });
 
         const kept = await client.call("POST", "/api/eval/runs", run);
@@ -591,7 +591,7 @@ export function previousCalibration(dir: string): ReturnType<typeof calibrationO
 }
 
 /** `--verify-attempts`: the jobs' findings verified as onJobFinished does (verify-service.ts; no AI), then what the platform recorded. */
-export const verifierOf = (platform: Platform, attempts: number) => async (projectId: string, jobIds: string[], findingTests?: ReadonlySet<string>): Promise<Verification> => {
+export const verifierOf = (platform: Platform, attempts: number, root = REPO_ROOT) => async (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string): Promise<Verification> => {
     const { verifyAfterJob } = await import("../../platform/findings/verify-service.js");
     const { CandidateFindingStore } = await import("../../platform/candidate-finding-store.js");
     const t0 = Date.now();
@@ -599,8 +599,50 @@ export const verifierOf = (platform: Platform, attempts: number) => async (proje
         const job = platform.repo.getJob(id);
         if (job) await verifyAfterJob(platform, job, { attempts, ...(findingTests ? { findingTests } : {}) });
     }
-    return verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
+    const verified = await verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
+    return withRootCauses(platform, projectId, verified, source, root);
 };
+
+/**
+ * Root cause (C2) of each finding group, with the bench app's own source folder as the code source (the platforms of a trial have no
+ * code connection), on the trial's model, metered under the project like its jobs. Locations are repository paths. A group whose root
+ * cause fails keeps no root cause; nothing else changes.
+ */
+export async function withRootCauses(platform: Platform, projectId: string, v: Verification, source: string, root = REPO_ROOT): Promise<Verification> {
+    const { rootCause } = await import("../../engine/findings/root-cause.js");
+    const { localCodeSource } = await import("../../engine/findings/code-source.js");
+    const { fromCandidate } = await import("../../platform/findings/adapters.js");
+    const { CandidateFindingStore } = await import("../../platform/candidate-finding-store.js");
+    const { JobMeter } = await import("../../engine/llm/metered.js");
+    const { usageStoreFor } = await import("../../platform/usage-store.js");
+    const { randomUUID } = await import("node:crypto");
+    const code = localCodeSource(path.join(root, source), "the bench source");
+    const meter = platform.llm.modelName !== "unavailable" ? new JobMeter({ backend: usageStoreFor(platform.db, platform.config), jobId: `root-cause-${randomUUID()}`, projectId }) : undefined;
+    const llm = meter?.wrap(platform.llm);
+    const store = new CandidateFindingStore(platform.sql);
+    const groupOf = (f: Verification["findings"][number]) => f.groupId ?? `solo:${f.id}`;
+    const causes = new Map<string, NonNullable<Verification["findings"][number]["rootCause"]>>();
+    try {
+        for (const key of new Set(v.findings.map(groupOf))) {
+            const views = [];
+            for (const f of v.findings.filter((x) => groupOf(x) === key)) {
+                const r = await store.get(projectId, f.id);
+                const t = r?.testId ? platform.repo.getTest(r.testId) : undefined;
+                if (r) views.push(fromCandidate(r, t ? { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta } : undefined));
+            }
+            if (!views.length) continue;
+            const rc = await rootCause({ members: views, code, ...(llm ? { llm } : {}) }).catch(() => undefined);
+            if (!rc) continue;
+            const locations = await Promise.all(
+                (rc.location ? [rc.location] : []).map(async (l) => ({ path: path.posix.join(source, l.file), line: l.line, ...(l.function ? { fn: l.function } : {}), ...(l.route ? { route: l.route } : {}), exists: await code.has(l.file) })),
+            );
+            causes.set(key, { label: rc.label, locations });
+        }
+    } finally {
+        meter?.finish();
+    }
+    return { ...v, findings: v.findings.map((f) => (causes.has(groupOf(f)) ? { ...f, rootCause: causes.get(groupOf(f))! } : f)) };
+}
 
 export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, deps: BenchDeps): Promise<{ client: PlatformClient; platform: Platform; server: FastifyInstance; stop: () => Promise<void> }> {
     const { loadConfig } = await import("../../config.js");

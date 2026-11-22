@@ -6,6 +6,7 @@
  */
 import { FINDING_CONFIDENCE } from "../../engine/explore/finding.js";
 import { FINDING_STATES } from "../../engine/findings/lifecycle.js";
+import { ROOT_CAUSE_LABELS } from "../../engine/findings/root-cause.js";
 import { z } from "zod";
 
 const Text = (n: number) => z.string().max(n);
@@ -173,6 +174,14 @@ export const BenchVerificationSchema = z
                         groupId: Text(100).nullable(),
                         findingClass: Text(40).nullable(),
                         confidence: z.enum(FINDING_CONFIDENCE).nullable(),
+                        /** C2's root cause with the app's source as the code source (cli.ts withRootCauses); `exists` is the location check. */
+                        rootCause: z
+                            .object({
+                                label: z.enum(ROOT_CAUSE_LABELS),
+                                locations: z.array(z.object({ path: Text(300), line: z.number().int().optional(), fn: Text(200).optional(), route: Text(200).optional(), exists: z.boolean() }).strict()).max(5),
+                            })
+                            .strict()
+                            .optional(),
                     })
                     .strict(),
             )
