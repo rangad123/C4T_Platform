@@ -133,8 +133,16 @@ async function apiSignedIn(): Promise<APIRequestContext | undefined> {
     }
     apiSession = { test: testId };
     const use = test.info().project.use as { headless?: boolean; channel?: string; launchOptions?: Record<string, unknown>; proxy?: { server: string } };
-    apiBrowser ??= await chromium.launch({ headless: use.headless !== false, ...(use.channel ? { channel: use.channel } : {}), ...(use.launchOptions ?? {}) });
-    const context = await apiBrowser.newContext({ ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS, serviceWorkers: "block", ...(use.proxy ? { proxy: use.proxy } : {}) });
+    let context: BrowserContext;
+    try {
+        apiBrowser ??= await chromium.launch({ headless: use.headless !== false, ...(use.channel ? { channel: use.channel } : {}), ...(use.launchOptions ?? {}) });
+        context = await apiBrowser.newContext({ ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS, serviceWorkers: "block", ...(use.proxy ? { proxy: use.proxy } : {}) });
+    } catch (e) {
+        // No browser to sign in with (a runner that has not fetched one): a named account says so; the project's own account goes unsigned, as before C1.
+        if (API_SIGN_IN_AS) throw e;
+        console.log("AITP: the API calls are not signed in: no browser could be started (" + String((e as Error)?.message ?? e).split("\\n")[0] + ")");
+        return undefined;
+    }
     const page = await context.newPage();
     try {
         await accessSignIn(page, process.env.BASE_URL ?? API_BASE_URL, as);
@@ -346,7 +354,7 @@ export const apiGenerator: ScriptGenerator = {
         const cleanupScript = cleanup ? cleanupScriptSource({ testId: spec.testId, ops: mergeOperations(ctx.deleteOps, deleteOperationsOfSpec(spec)) }) : "";
         const cleanupSource = signs && cleanup ? withSignedInCleanup(cleanupScript) : cleanupScript;
         const content = `${fileHeader(spec, "Playwright API")}
-import { test, expect, ${signs ? "chromium, type Browser, " : ""}type APIRequestContext } from "@playwright/test";
+import { test, expect, ${signs ? "chromium, type Browser, type BrowserContext, " : ""}type APIRequestContext } from "@playwright/test";
 ${RUN_ADDRESS_IMPORT}${security ? 'import * as tls from "node:tls";\n' : ""}${cleanup ? 'import * as cleanupFs from "node:fs";\nimport * as cleanupPath from "node:path";\n' : ""}
 const API_BASE_URL = ${passive ? `process.env.BASE_URL ?? ${lit(ctx.baseUrl)}` : `process.env.API_BASE_URL ?? ${lit(ctx.apiBaseUrl ?? ctx.baseUrl)}`};
 const IGNORE_HTTPS_ERRORS = ${passive};
