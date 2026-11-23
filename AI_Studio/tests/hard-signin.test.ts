@@ -182,7 +182,10 @@ describe("hard sign-ins on a real app", () => {
         const [popup] = await Promise.all([main.waitForEvent("popup"), main.click("#sso")]);
         await popup.waitForLoadState("domcontentloaded");
         expect((await call("GET", `/api/projects/${projectId}/sessions/capture`)).body).toMatchObject({ popupOpen: true, popups: 1 });
-        await popup.click("#allow");
+        // Allow closes the popup itself (window.close()), so the click can end on a page that is already closed: that is the expected outcome.
+        await Promise.all([popup.waitForEvent("close"), popup.click("#allow").catch((e) => {
+            if (!popup.isClosed()) throw e;
+        })]);
         await main.waitForURL(`${APP}/dashboard`);
         const view = await until(async () => {
             const c = (await call("GET", `/api/projects/${projectId}/sessions/capture`)).body;
