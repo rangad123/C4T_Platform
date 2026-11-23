@@ -974,11 +974,27 @@ export async function runSmoke(opts, deps = {}) {
                 if (refusedHere) throw new Error("The platform tried to open a browser itself (its log has a [runners-only] refusal): the exploration should have run on the runner only.");
                 if (!model.calls.includes("analysis") || !model.calls.includes("plan")) throw new Error(`The AI's calls did not reach the platform's model as expected (calls: ${model.calls.join("; ") || "none"}).`);
                 if (tests.length === 0) throw new Error(`The exploration ended ${job.status} but created no test (AI calls: ${model.calls.join("; ")}).`);
-                // The test the scripted AI wrote was run on the runner while exploring, and passed there.
+                // An exploration writes its test cases and runs none (Not run yet, since 2026-11-18); the person's Run then runs it on the runner.
                 const written = tests.find((t) => t.title === EXPLORE_IDEA.title);
                 if (!written) throw new Error(`The exploration did not create the test the AI wrote ("${EXPLORE_IDEA.title}"); it created: ${tests.map((t) => t.title).join(", ")}.`);
-                if ((written.status ?? written.validationStatus) !== "VALIDATED") throw new Error(`The test the AI wrote ended ${written.status ?? written.validationStatus ?? "with no status"}, not VALIDATED.`);
-                return `${tests.length === 1 ? "1 test" : `${tests.length} tests`} created ${where} in ${fmtMs(Date.now() - t0)}, ${model.calls.length} AI calls answered by the platform, no browser opened on the platform`;
+                if ((written.status ?? written.validationStatus) !== "PENDING") throw new Error(`The test the AI wrote ended ${written.status ?? written.validationStatus ?? "with no status"}, not PENDING (Not run yet): an exploration writes its tests and runs none.`);
+                // A job the exploration left behind (verifying its findings on the runner, VERIFY_FINDINGS) holds the project's one job slot until it ends.
+                const followUps = await until("the exploration's follow-up jobs (verifying its findings on the runner) to finish", async () => {
+                    const jobs = (await api("GET", `/api/projects/${exploreProject}/jobs`)).json ?? [];
+                    return jobs.every((j) => ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"].includes(j.status)) ? jobs.filter((j) => j.id !== start.json.jobId) : undefined;
+                }, opts.testTimeout * 1000, 1000);
+                report.explore.followUps = followUps.map((j) => ({ mode: j.options?.mode ?? j.mode ?? null, status: j.status, ranOn: j.ranOn?.name ?? null }));
+                const run = await startWhenBrowserReady(api, written.id);
+                if (run.status !== 202) throw new Error(`Run of the test the AI wrote did not start (${run.status}): ${run.message}`);
+                const runJob = await until("the run of the test the AI wrote to finish", async () => {
+                    const j = (await api("GET", `/api/test-generation/${run.json.jobId}`)).json;
+                    return j && ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"].includes(j.status) ? j : undefined;
+                }, opts.testTimeout * 1000, 1000);
+                const exec = (await api("GET", `/api/tests/${written.id}/executions`)).json?.[0];
+                report.explore.run = { jobStatus: runJob.status, status: exec?.status ?? null, ranOn: runJob.ranOn?.name ?? null };
+                if (runJob.ranOn?.kind !== "agent" || runJob.ranOn.name !== runnerName) throw new Error(`The test the AI wrote ran ${runJob.ranOn?.kind === "platform" ? "on the platform" : "where is not known"}, not on the runner "${runnerName}".`);
+                if (exec?.status !== "passed") throw new Error(`The test the AI wrote ended ${exec?.status ?? `with no result (job ${runJob.status})`} when run${exec?.error ? `: ${redact(String(exec.error).slice(0, 300), secrets)}` : ""}.`);
+                return `${tests.length === 1 ? "1 test" : `${tests.length} tests`} created ${where} in ${fmtMs(Date.now() - t0)}, ${model.calls.length} AI calls answered by the platform, no browser opened on the platform; the written test passed when run on the runner`;
             });
         }
 
