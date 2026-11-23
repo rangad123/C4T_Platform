@@ -509,6 +509,20 @@ export function withExactRoleNames(step: Step): Step {
     return out;
 }
 
+/** Controls whose content is the value typed into them: their text is always empty, so a text check on one can never pass. */
+const VALUE_ROLES = new Set(["textbox", "searchbox", "spinbutton", "slider"]);
+
+/**
+ * A text check on a form field (by its role or its placeholder) checks the field's value instead: Playwright's toHaveText reads an
+ * input's text, which is always "" (paid trial shop-2 WEB-045, `exactText` 10 on the Quantity spinbutton, failed the same on every app).
+ */
+export function withFormControlChecks(step: Step): Step {
+    if (step.action !== "assert" || (step.check !== "text" && step.check !== "exactText") || !step.locator) return step;
+    const l = step.locator;
+    const field = (l.by === "role" && VALUE_ROLES.has(l.role ?? "")) || l.by === "placeholder";
+    return field && !l.filter ? { ...step, check: "value" } : step;
+}
+
 const target = LocatorSchema.describe("How to find the element");
 /** The longest fixed pause the agent may record (a wait for something is the better step; the review flags fixed ones). */
 const MAX_FIXED_WAIT_MS = 3_000;
@@ -939,7 +953,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         const refuse = refusedBy(input.notes);
         let notesShownFor = pathOf(page.url());
         const record = async (step: Step, toolName: string, args: unknown) => {
-            step = withExactRoleNames(step);
+            step = withFormControlChecks(withExactRoleNames(step));
             // The browser crashed or went away: nothing more can be done in it, so the scenario ends here with that reason.
             const lost = session.lostReason({ pageClosedCounts: false });
             if (lost) {
