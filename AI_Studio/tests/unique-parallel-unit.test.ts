@@ -11,7 +11,7 @@ const spec = TestSpecSchema.parse({ testId: "API-001", title: "Health check", ki
 const NOW = 1795392931538;
 // The line that declares `unique` (the rest of the declaration is TypeScript).
 const uniqueIn = (env: Record<string, string>) =>
-    new Function("process", "Date", `${dataDeclaration(spec).split("\n")[0]}\nreturn unique;`)({ env }, { now: () => NOW }) as string;
+    new Function("process", "Date", `${dataDeclaration(spec, true).split("\n")[0]}\nreturn unique;`)({ env }, { now: () => NOW }) as string;
 
 describe("{{unique}} across parallel workers", () => {
     it("differs between two workers in the same millisecond", () => {
@@ -20,5 +20,8 @@ describe("{{unique}} across parallel workers", () => {
     it("is the timestamp followed by the worker's index, and the timestamp alone outside Playwright", () => {
         expect(uniqueIn({ TEST_PARALLEL_INDEX: "1" })).toBe(`${NOW}1`);
         expect(uniqueIn({})).toBe(String(NOW));
+    });
+    it("leaves phone and desktop scripts (one at a time) exactly as they were", () => {
+        expect(dataDeclaration(spec).split("\n")[0]).toBe("const unique = String(Date.now());");
     });
 });

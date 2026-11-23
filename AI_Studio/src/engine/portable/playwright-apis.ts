@@ -41,7 +41,7 @@ export function availableIn(since: string, version: string): boolean {
  */
 export const PLAYWRIGHT_METHODS: Readonly<Record<string, string>> = {
     // @playwright/test
-    test: "1.10", step: "1.10", info: "1.10", setTimeout: "1.10", beforeEach: "1.10", afterEach: "1.10", beforeAll: "1.10", afterAll: "1.10", skip: "1.10", fail: "1.10", slow: "1.10", describe: "1.10", attach: "1.10", defineConfig: "1.28",
+    test: "1.10", step: "1.10", info: "1.10", setTimeout: "1.10", beforeEach: "1.10", afterEach: "1.10", beforeAll: "1.10", afterAll: "1.10", skip: "1.10", fail: "1.10", slow: "1.10", describe: "1.10", use: "1.10", attach: "1.10", defineConfig: "1.28",
     expect: "1.10", toBe: "1.10", toEqual: "1.10", toBeTruthy: "1.10", toBeFalsy: "1.10", toContain: "1.10", toMatch: "1.10", toBeGreaterThan: "1.10", toBeLessThan: "1.10", toBeLessThanOrEqual: "1.10", toBeGreaterThanOrEqual: "1.10",
     toBeVisible: "1.20", toBeHidden: "1.20", toBeEnabled: "1.20", toBeDisabled: "1.20", toContainText: "1.20", toHaveValue: "1.20", toHaveCount: "1.20", toHaveURL: "1.20", toHaveTitle: "1.20", toHaveScreenshot: "1.23",
     toBeChecked: "1.20", toBeFocused: "1.20", toBeEditable: "1.20", toHaveAttribute: "1.20", toHaveClass: "1.20", toHaveCSS: "1.20", toHaveText: "1.20", soft: "1.20", poll: "1.21", toBeInViewport: "1.31",

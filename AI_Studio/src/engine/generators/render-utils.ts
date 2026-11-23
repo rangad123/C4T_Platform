@@ -67,13 +67,15 @@ function escapeTemplate(s: string): string {
  * start in the same millisecond on two workers never register the same fresh account. Outside Playwright it is the time alone.
  */
 const UNIQUE_LINE = 'const unique = String(Date.now()) + (process.env.TEST_PARALLEL_INDEX ?? "");';
+/** Phone and desktop scripts run one at a time: their output stays exactly as it was. */
+const UNIQUE_LINE_ALONE = "const unique = String(Date.now());";
 
-/** `data` object literal: spec.testData with {{unique}} always available. */
-export function dataDeclaration(spec: TestSpec): string {
+/** `data` object literal: spec.testData with {{unique}} always available (`perWorker`: Playwright scripts, see UNIQUE_LINE). */
+export function dataDeclaration(spec: TestSpec, perWorker = false): string {
     const entries = Object.entries(spec.testData)
         .map(([k, v]) => `    ${lit(k)}: ${expr(v, true)},`)
         .join("\n");
-    return `${UNIQUE_LINE}\nconst data: Record<string, string> = {\n    unique,\n${entries}\n};`;
+    return `${perWorker ? UNIQUE_LINE : UNIQUE_LINE_ALONE}\nconst data: Record<string, string> = {\n    unique,\n${entries}\n};`;
 }
 
 /** The rows a data-driven spec is rendered for (`testData.dataSet`), or undefined for an ordinary spec. */

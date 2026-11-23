@@ -433,7 +433,7 @@ export const playwrightGenerator: ScriptGenerator = {
 import { test, expect } from "@playwright/test";
 ${RUN_ADDRESS_IMPORT}${a11yImports}${needsTotp(spec) ? 'import { createHmac } from "node:crypto";\n' : ""}${uploads ? UPLOAD_IMPORTS : ""}${runTag ? 'import * as cleanupFs from "node:fs";\nimport * as cleanupPath from "node:path";\n' : ""}${riskyKindOf(spec) === "identity-write" ? 'import * as riskyFs from "node:fs";\n' : ""}
 const BASE_URL = process.env.BASE_URL ?? ${lit(ctx.baseUrl)};
-${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec)}
+${dataRows ? dataSetDeclaration(spec, dataRows) : dataDeclaration(spec, true)}
 ${RUN_ADDRESS_HELPER_SOURCE}
 ${EVIDENCE_HELPER_SOURCE}
 // Failure evidence: the page's network calls and console lines are kept in memory and attached to the result only when the test fails.
