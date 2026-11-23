@@ -81,8 +81,19 @@ export class ResultOutbox {
         }
     }
 
+    /** Deliveries under way, per task: a second try while one runs (the reconnect's flush beside the background loop's) joins it. */
+    private readonly delivering = new Map<string, Promise<Delivery>>();
+
     /** One try at delivering a kept result. */
-    async deliver(taskId: string): Promise<Delivery> {
+    deliver(taskId: string): Promise<Delivery> {
+        const running = this.delivering.get(taskId);
+        if (running) return running;
+        const p = this.deliverNow(taskId).finally(() => this.delivering.delete(taskId));
+        this.delivering.set(taskId, p);
+        return p;
+    }
+
+    private async deliverNow(taskId: string): Promise<Delivery> {
         const file = this.file(taskId);
         const entry = await this.read(file).catch(() => undefined);
         if (!entry) return "refused";

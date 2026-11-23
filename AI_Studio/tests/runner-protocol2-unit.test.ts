@@ -275,6 +275,21 @@ describe("the result outbox", () => {
         }
     });
 
+    it("two flushes at once (the reconnect's and the background loop's) post a kept result once", async () => {
+        const work = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-outbox-"));
+        try {
+            const c = fakeClient(["ok", "ok"]);
+            const { log } = memoryLogger();
+            const box = new ResultOutbox(work, { client: c.client, log });
+            await box.put("task-4", body);
+            expect(await Promise.all([box.flush(), box.flush(), box.deliver("task-4")])).toEqual([0, 0, "sent"]);
+            expect(c.calls).toEqual(["task-4"]);
+            expect(await box.pending()).toEqual([]);
+        } finally {
+            fs.rmSync(work, { recursive: true, force: true });
+        }
+    });
+
     it("the background loop keeps trying until the platform is back", async () => {
         const work = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-outbox-"));
         try {
