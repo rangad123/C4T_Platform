@@ -9,6 +9,7 @@ export default defineConfig({
     test: {
         include: [
             "tests/levels-unit.test.ts",
+            "tests/unique-parallel-unit.test.ts",
             "tests/bench-root-cause-unit.test.ts",
             "tests/bench-usage-unit.test.ts",
             "tests/impact-routes-linear-unit.test.ts",

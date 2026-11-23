@@ -62,12 +62,18 @@ function escapeTemplate(s: string): string {
     return s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
 }
 
+/**
+ * `{{unique}}`: the time, then the Playwright worker's index (TEST_PARALLEL_INDEX, distinct for workers running at once), so two tests that
+ * start in the same millisecond on two workers never register the same fresh account. Outside Playwright it is the time alone.
+ */
+const UNIQUE_LINE = 'const unique = String(Date.now()) + (process.env.TEST_PARALLEL_INDEX ?? "");';
+
 /** `data` object literal: spec.testData with {{unique}} always available. */
 export function dataDeclaration(spec: TestSpec): string {
     const entries = Object.entries(spec.testData)
         .map(([k, v]) => `    ${lit(k)}: ${expr(v, true)},`)
         .join("\n");
-    return `const unique = String(Date.now());\nconst data: Record<string, string> = {\n    unique,\n${entries}\n};`;
+    return `${UNIQUE_LINE}\nconst data: Record<string, string> = {\n    unique,\n${entries}\n};`;
 }
 
 /** The rows a data-driven spec is rendered for (`testData.dataSet`), or undefined for an ordinary spec. */
@@ -88,7 +94,7 @@ export function dataSetDeclaration(spec: TestSpec, set: NonNullable<ReturnType<t
     const note = set.truncated ? ` Only the first ${set.rows.length} of ${set.total} rows are rendered.` : "";
     const rows = set.rows.map((r) => `    { ${set.columns.map((c) => `${lit(c)}: ${lit(r[c] ?? "")}`).join(", ")} },`).join("\n");
     return [
-        `const unique = String(Date.now());`,
+        UNIQUE_LINE,
         `const baseData: Record<string, string> = {\n${entries}\n};`,
         `// Test data set ${commentSafe(JSON.stringify(dataSetNameOf(spec.testData) ?? ""))}: one test per row.${commentSafe(note)} Plain values only; secrets never belong here.`,
         `const ROWS: Array<Record<string, string>> = [\n${rows}\n];`,
