@@ -65,7 +65,7 @@ export function registerRunRoutes(ctx: RouteCtx): void {
         if (willRun.length === 0) throw new HttpError(422, chosen.length ? `None of these tests can run here. ${skipped[0]!.reason}` : "There are no tests to run yet.", { skipped });
         const application = await ctx.applicationFor(id);
         // Right before creating the job, with no await in between (one active job per project).
-        await ctx.assertNoActiveJob(id);
+        await ctx.assertNoActiveJob(id, { verifyYields: true });
         const variants = body.variants?.length ? normalizeVariants(body.variants) : undefined;
         const job = await repo.createJob(id, application.id, {
             ...DEFAULT_JOB_OPTIONS,

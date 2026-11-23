@@ -100,7 +100,7 @@ export function registerSelectionRoutes({ app, repo, p, project, applicationFor,
         }
         if (!testIds.length) throw new HttpError(409, body.selection === "focused" ? "No runnable test is proposed for this change. Run the full suite instead." : "This project has no tests that can be run yet.");
         const application = await applicationFor(id);
-        await assertNoActiveJob(id);
+        await assertNoActiveJob(id, { verifyYields: true });
         const job = await startValidationJob(id, application.id, testIds);
         return reply.code(202).send({ jobId: job.id, selection: body.selection, testCount: testIds.length, ...(fullRunReasons.length ? { fullRunReasons } : {}) });
     });

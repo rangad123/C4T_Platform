@@ -32,9 +32,12 @@ export class OverlapError extends Error {
 export class AiLimitSkip extends Error {}
 
 /** The project's job that has not finished yet, if any (QUEUED counts: it is about to run). */
-export async function activeJobOf(repo: Repo, projectId: string): Promise<{ id: string; status: string } | undefined> {
+export async function activeJobOf(repo: Repo, projectId: string, o: { verifyYields?: boolean } = {}): Promise<{ id: string; status: string } | undefined> {
     const terminal = TERMINAL_STATES.map((s) => `'${s}'`).join(",");
-    return repo.db.get<{ id: string; status: string }>(`SELECT id, status FROM generation_jobs WHERE project_id = ? AND status NOT IN (${terminal}) LIMIT 1`, projectId);
+    // verifyYields (a run: a person's, a schedule's, a trigger's): a findings verification does not hold the project; the run queues and
+    // the two never run at once (repo.ts claimNextJob).
+    const notVerify = o.verifyYields ? ` AND COALESCE(${repo.db.dialect.jsonText("options_json", "mode")}, '') <> 'verify'` : "";
+    return repo.db.get<{ id: string; status: string }>(`SELECT id, status FROM generation_jobs WHERE project_id = ? AND status NOT IN (${terminal})${notVerify} LIMIT 1`, projectId);
 }
 
 /**
@@ -124,7 +127,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     options.startedBy = scheduleStarter(s);
 
     // Synchronous from here to the insert: no other job can slip in between the check and the create.
-    const busy = await activeJobOf(repo, s.projectId);
+    const busy = await activeJobOf(repo, s.projectId, { verifyYields: true });
     if (busy) throw new OverlapError(busy.id, busy.status);
     const job = await repo.createJob(s.projectId, app.id as string, options);
     await noteCustomSkipped(repo, job.id, s.projectId);
@@ -220,7 +223,7 @@ export class Scheduler {
         }
         for (const s of store.due(now)) {
             const at = new Date(now).toISOString();
-            const busy = await activeJobOf(repo, s.projectId);
+            const busy = await activeJobOf(repo, s.projectId, { verifyYields: true });
             if (busy) {
                 const note = new OverlapError(busy.id, busy.status).message;
                 store.recordRun(s.id, { outcome: "skipped", note, at });

@@ -426,8 +426,9 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     };
 
     /** One active job per project. Await it right before creating the job: nothing but this check and the job's gates may run in between. */
-    const assertNoActiveJob = async (projectId: string) => {
-        const active = repo.listJobs(projectId).find((j) => !["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status));
+    const assertNoActiveJob = async (projectId: string, o: { verifyYields?: boolean } = {}) => {
+        // verifyYields (a person's Run): a findings verification does not hold the project; the run queues (repo.ts claimNextJob).
+        const active = repo.listJobs(projectId).find((j) => !["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status) && !(o.verifyYields && j.options.mode === "verify"));
         if (active) throw new HttpError(409, `Job ${active.id} is still ${active.status}; wait for it to finish or cancel it`);
     };
 
@@ -753,7 +754,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (choice.environment) {
             return reply.code(202).send(await startEnvironmentRun({ repo, p, applicationFor: (pid) => applicationFor(pid), assertNoActiveJob }, t.projectId, [t], choice.environment, choice.confirmProduction));
         }
-        await assertNoActiveJob(t.projectId);
+        await assertNoActiveJob(t.projectId, { verifyYields: true });
         const application = await applicationFor(t.projectId);
         const job = await startValidationJob(t.projectId, application.id, [t.id]);
         return reply.code(202).send({ jobId: job.id, status: job.status });

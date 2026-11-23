@@ -175,7 +175,7 @@ export async function startSuiteForSchedule(p: Platform, s: Schedule): Promise<J
     options.trigger = "schedule";
     options.scheduleId = s.id;
     options.startedBy = scheduleStarter(s);
-    const busy = await activeJobOf(repo, s.projectId);
+    const busy = await activeJobOf(repo, s.projectId, { verifyYields: true });
     if (busy) throw new OverlapError(busy.id, busy.status);
     const job = await repo.createJob(s.projectId, app.id as string, options);
     await noteCustomSkipped(repo, job.id, s.projectId);

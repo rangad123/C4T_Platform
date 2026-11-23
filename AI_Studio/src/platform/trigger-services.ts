@@ -201,7 +201,7 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
                 ({ testIds, fullRunReasons } = focusedSelection(coverage.tests, new Set(testIds), input, coverage.app, coverage.apiPrefix));
                 if (testIds.length === 0) throw new HttpError(409, "No runnable test is proposed for this change. Run the full suite instead.");
             }
-            const busy = await activeJobOf(repo, token.projectId);
+            const busy = await activeJobOf(repo, token.projectId, { verifyYields: true });
             if (busy) throw new HttpError(409, `Tests are already running for this project (${busy.status.toLowerCase().replace(/_/g, " ")}). Try again when that run has finished.`);
             if (!store.claimSlot(token.id, minGap)) throw new RateLimited(Math.max(1, Math.ceil(store.waitMs(store.find(presented) ?? token, minGap) / 1000)));
 

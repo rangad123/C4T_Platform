@@ -620,11 +620,17 @@ export class Repo {
         const only = modes ? ` AND (${col} IN (${modes.map((m) => `'${m.replace(/[^a-z]/g, "")}'`).join(",")})${modes.includes("generate") ? ` OR ${col} IS NULL` : ""})` : "";
         // Jobs left in the queue for now (the dispatch worker: schedule and trigger runs whose owner's runner is offline, jobsWaitingForRunner).
         const not = skip.length ? ` AND id NOT IN (${skip.map(() => "?").join(",")})` : "";
+        // A findings verification (mode "verify") and any other job of one project never run at the same time: a run made while a verification
+        // held the project (it yields, scheduler.ts activeJobOf) waits behind one already running, and a verification still queued waits
+        // behind a run. Two other jobs of one project are kept apart when they are made (one active job per project).
+        const isVerify = (t: string) => `COALESCE(${this.db.dialect.jsonText(`${t}.options_json`, "mode")}, '') = 'verify'`;
+        const apart = ` AND NOT EXISTS (SELECT 1 FROM generation_jobs o WHERE o.project_id = q.project_id AND o.id <> q.id AND o.status NOT IN (${TERMINAL_STATES.map((x) => `'${x}'`).join(",")})
+              AND (${isVerify("q")}) <> (${isVerify("o")}) AND (o.status <> 'QUEUED' OR ${isVerify("q")}))`;
         const r = this.db.get(
             `UPDATE generation_jobs
                 SET status = CASE ${this.db.dialect.jsonText("options_json", "mode")} WHEN 'validate' THEN 'VALIDATING' ELSE 'DISCOVERING' END,
                     lease_until = ?, lease_owner = ?, attempts = attempts + 1, started_at = COALESCE(started_at, ?), updated_at = ?
-              WHERE id = (SELECT id FROM generation_jobs WHERE status = 'QUEUED'${only}${not} ORDER BY created_at LIMIT 1${this.db.dialect.skipLocked()}) AND status = 'QUEUED'
+              WHERE id = (SELECT q.id FROM generation_jobs q WHERE q.status = 'QUEUED'${only}${not}${apart} ORDER BY q.created_at LIMIT 1${this.db.dialect.skipLocked()}) AND status = 'QUEUED'
           RETURNING *`,
             Date.now() + leaseMs,
             owner,

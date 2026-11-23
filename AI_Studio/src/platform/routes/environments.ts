@@ -107,7 +107,7 @@ export interface EnvironmentRunDeps {
     repo: Repo;
     p: Pick<Platform, "config">;
     applicationFor(projectId: string): Promise<{ id: string; url: string }>;
-    assertNoActiveJob(projectId: string): Promise<void>;
+    assertNoActiveJob(projectId: string, o?: { verifyYields?: boolean }): Promise<void>;
 }
 
 /**
@@ -125,7 +125,7 @@ export async function startEnvironmentRun(deps: EnvironmentRunDeps, projectId: s
     }
     const application = await deps.applicationFor(projectId);
     // Right before creating the job, with no await in between (one active job per project).
-    await deps.assertNoActiveJob(projectId);
+    await deps.assertNoActiveJob(projectId, { verifyYields: true });
     // Tests that will be skipped are handed to the job too, so it records *why* next to each of them.
     const job = await repo.createJob(projectId, application.id, {
         ...DEFAULT_JOB_OPTIONS,

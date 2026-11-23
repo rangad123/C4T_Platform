@@ -11,7 +11,7 @@ export interface RouteCtx {
     /** The project row, or an HTTP 404. */
     project(id: string): Row;
     /** Throws an HTTP 409 if the project already has a job running. Call right before creating a job. */
-    assertNoActiveJob(projectId: string): Promise<void>;
+    assertNoActiveJob(projectId: string, o?: { verifyYields?: boolean }): Promise<void>;
     /** The application a validation job runs against (creates one when a URL/credentials/mobile target is given). */
     applicationFor(projectId: string, baseUrl?: string): Promise<{ id: string; url: string }>;
     /** Queue a validation-only job for existing tests. */

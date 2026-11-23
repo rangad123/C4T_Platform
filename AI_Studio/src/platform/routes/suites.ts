@@ -278,7 +278,7 @@ export function registerSuiteRoutes(ctx: RouteCtx): void {
         if (run.length === 0) throw new HttpError(422, `None of this suite's tests can run here. ${skipped[0]!.reason}`, { skipped });
         const application = await ctx.applicationFor(id);
         // Right before creating the job, with no await in between (one active job per project).
-        await ctx.assertNoActiveJob(id);
+        await ctx.assertNoActiveJob(id, { verifyYields: true });
         const job = await repo.createJob(id, application.id, suiteJobOptions(s.settings, run.map((t) => t.id)));
         await store.recordRun({ suiteId: sid, jobId: job.id, trigger: "manual", testCount: run.length });
         return reply.code(202).send({ jobId: job.id, status: job.status, testCount: run.length, tests: run.map((t) => ({ id: t.id, testId: t.testKey })), skipped: [...chosen.held, ...skipped] });

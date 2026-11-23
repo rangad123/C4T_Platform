@@ -281,7 +281,7 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
             const started = await startEnvironmentRun({ repo, p: ctx.p, applicationFor: (pid) => ctx.applicationFor(pid), assertNoActiveJob: ctx.assertNoActiveJob }, id, tests, body.environment, body.confirmProduction);
             return reply.code(202).send({ ...started, testCount: started.testCount });
         }
-        await ctx.assertNoActiveJob(id);
+        await ctx.assertNoActiveJob(id, { verifyYields: true });
         let application: { id: string; url: string };
         const hasCredentials = Boolean(body.credentials && Object.keys(body.credentials).length);
         if (hasCredentials || body.apiBaseUrl) {
