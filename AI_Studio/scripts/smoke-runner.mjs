@@ -978,12 +978,10 @@ export async function runSmoke(opts, deps = {}) {
                 const written = tests.find((t) => t.title === EXPLORE_IDEA.title);
                 if (!written) throw new Error(`The exploration did not create the test the AI wrote ("${EXPLORE_IDEA.title}"); it created: ${tests.map((t) => t.title).join(", ")}.`);
                 if ((written.status ?? written.validationStatus) !== "PENDING") throw new Error(`The test the AI wrote ended ${written.status ?? written.validationStatus ?? "with no status"}, not PENDING (Not run yet): an exploration writes its tests and runs none.`);
-                // A job the exploration left behind (verifying its findings on the runner, VERIFY_FINDINGS) holds the project's one job slot until it ends.
-                const followUps = await until("the exploration's follow-up jobs (verifying its findings on the runner) to finish", async () => {
-                    const jobs = (await api("GET", `/api/projects/${exploreProject}/jobs`)).json ?? [];
-                    return jobs.every((j) => ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"].includes(j.status)) ? jobs.filter((j) => j.id !== start.json.jobId) : undefined;
-                }, opts.testTimeout * 1000, 1000);
-                report.explore.followUps = followUps.map((j) => ({ mode: j.options?.mode ?? j.mode ?? null, status: j.status, ranOn: j.ranOn?.name ?? null }));
+                // Run at once, as a person does: a verification of the exploration's findings (VERIFY_FINDINGS) may still be queued or running, and
+                // yields; the run is accepted and queued, never refused because of it.
+                const others = (await api("GET", `/api/projects/${exploreProject}/jobs`)).json ?? [];
+                report.explore.otherJobsAtRun = others.filter((j) => j.jobId !== start.json.jobId).map((j) => ({ mode: j.mode ?? null, status: j.status }));
                 const run = await startWhenBrowserReady(api, written.id);
                 if (run.status !== 202) throw new Error(`Run of the test the AI wrote did not start (${run.status}): ${run.message}`);
                 const runJob = await until("the run of the test the AI wrote to finish", async () => {
