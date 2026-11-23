@@ -145,6 +145,24 @@ describe("refusals", () => {
     });
 });
 
+describe("lists of numbers element by element (paid shop-2 API-057)", () => {
+    // The trial's own relation for requirement 3.8, on the cart answer of the clean app (cents), then with a wrong line total.
+    const rel = "lines[*].lineTotal == lines[*].unitPrice * lines[*].quantity";
+    const answer = (lineTotal: number) => ({ lines: [{ productId: "p1", unitPrice: 1250, quantity: 2, lineTotal }], subtotal: lineTotal });
+    it("holds on the clean app's answer and fails on a wrong line total", () => {
+        expect(checkRelation(rel, { body: answer(2500) }, "3.8")).toMatchObject({ held: true });
+        expect(checkRelation(rel, { body: answer(2400) }, "3.8")).toMatchObject({ held: false, message: expect.stringContaining("lines[*].unitPrice * lines[*].quantity = [2500]") });
+    });
+    it("a number with each element, < <= > >= over every element, and lists of different lengths refused", () => {
+        const body = { lines: [{ q: 2, p: 100, t: 20 }, { q: 3, p: 50, t: 30 }], one: [{ x: 1 }] };
+        expect(checkRelation("lines[*].q * 10 == lines[*].t and sum(lines[*].q * lines[*].p) == 350", { body })).toMatchObject({ held: true });
+        expect(checkRelation("lines[*].q <= 3 and 1 < lines[*].q", { body })).toMatchObject({ held: true });
+        expect(checkRelation("lines[*].q <= 2", { body })).toMatchObject({ held: false });
+        expect(checkRelation("lines[*].q == lines[*].p * one[*].x", { body })).toMatchObject({ held: false, message: expect.stringContaining("lines[*].p has 2 values and one[*].x has 1") });
+        expect(checkRelation("lines[*].q + 1 == lines[*].q", { body: { lines: [{ q: 2 }, { q: "x" }] } })).toMatchObject({ held: false, message: expect.stringContaining("is not a number") });
+    });
+});
+
 describe("failure messages name the expression, its values and the source", () => {
     it("a relation that does not hold", () => {
         const r = checkRelation(REQ_4_1, { body: cart([line(2000, 2), line(1500, 3)], "SAVE10", { discount: 400 }) }, "requirement 4.1");

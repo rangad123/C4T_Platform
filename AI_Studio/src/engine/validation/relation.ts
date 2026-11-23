@@ -19,6 +19,8 @@
  *   suffix  := "." name | "[" digits "]" | "[*]"     ([*] maps the rest of the path over every element; nested ones flatten)
  *
  * Arithmetic and < > need numbers, == and != compare JSON values exactly, and / or / implies need true or false (and short-circuit).
+ * Arithmetic and < > also take lists of numbers ([*] paths) element by element, or a list with one number: `lines[*].lineTotal ==
+ * lines[*].unitPrice * lines[*].quantity` compares two lists, and `lines[*].quantity <= 10` holds when every element keeps it.
  * Caps: 300 characters, 120 tokens, nesting 20, 12 path parts, 1000 list elements. Only own properties of the data are read.
  *
  * Like ../contracts/check.ts, the checker is plain JavaScript text: scripts carry it verbatim (so a downloaded script runs on its
@@ -308,15 +310,24 @@ function relationRun(tree, text, body, vars, seen) {
                 const r = ev(n.r);
                 if (op === "==") return relationSame(l, r);
                 if (op === "!=") return !relationSame(l, r);
-                const x = num(n.l, l);
-                const y = num(n.r, r);
-                if (op === "<") return x < y;
-                if (op === "<=") return x <= y;
-                if (op === ">") return x > y;
-                if (op === ">=") return x >= y;
-                if (op === "/" && y === 0) throw new Error(src(n.r) + " is 0, so " + src(n) + " has no value");
-                const v = op === "+" ? x + y : op === "-" ? x - y : op === "*" ? x * y : x / y;
-                return note(n, num(n, v));
+                const one = (x, y) => {
+                    num(n.l, x);
+                    num(n.r, y);
+                    if (op === "<") return x < y;
+                    if (op === "<=") return x <= y;
+                    if (op === ">") return x > y;
+                    if (op === ">=") return x >= y;
+                    if (op === "/" && y === 0) throw new Error(src(n.r) + " is 0, so " + src(n) + " has no value");
+                    return num(n, op === "+" ? x + y : op === "-" ? x - y : op === "*" ? x * y : x / y);
+                };
+                if (!Array.isArray(l) && !Array.isArray(r)) return op === "<" || op === "<=" || op === ">" || op === ">=" ? one(l, r) : note(n, one(l, r));
+                // Lists ([*] paths) element by element, a number with each element: arithmetic gives the list of results, < <= > >= hold
+                // when they hold for every element.
+                if (Array.isArray(l) && Array.isArray(r) && l.length !== r.length) throw new Error(src(n.l) + " has " + l.length + " values and " + src(n.r) + " has " + r.length);
+                const k = Array.isArray(l) ? l.length : r.length;
+                const out = [];
+                for (let i = 0; i < k; i++) out.push(one(Array.isArray(l) ? l[i] : l, Array.isArray(r) ? r[i] : r));
+                return op === "<" || op === "<=" || op === ">" || op === ">=" ? out.every((b) => b) : note(n, out);
             }
         }
         throw new Error("unknown part of the expression");
