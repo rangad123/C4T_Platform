@@ -121,6 +121,26 @@ describe("authoring guards against false positives (row 228)", () => {
         expect(withFormControlChecks(visible)).toEqual(visible);
     }, 120_000);
 
+    it("refuses a role locator without its role, with one sentence, and records nothing of it (paid rbac-2 WEB-038)", async () => {
+        const { ROLE_MISSING } = await import("../src/engine/spec/schema.js");
+        const actions: Array<{ tool: string; ok: boolean; observation: string }> = [];
+        const out = await authorWebSpec({
+            ctx: ctxFor(
+                scripted([
+                    { tool: "assert", input: { check: "visible", target: { by: "role", role: "link", value: "Products", within: { by: "role", value: "Main" } }, source: "expected:1" } },
+                    { tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: "Cart" }, source: "expected:1" } },
+                    // A writer that reads the refusal as the defect: the refused check must not become the captured one.
+                    { tool: "finish", input: { result: "defect", explanation: "The menu link is missing" } },
+                ]),
+            ),
+            browser, baseUrl: BASE, model: emptyModel, scenario: { ...scenario, scenarioId: "S-ROLE", expectedResults: ["The cart page opens"] }, onAction: (a) => actions.push(a),
+        });
+        const refused = actions.find((a) => a.tool === "assert" && !a.ok);
+        expect(refused?.observation).toContain(ROLE_MISSING);
+        expect(out.steps.filter((s) => s.action === "assert")).toEqual([expect.objectContaining({ locator: expect.objectContaining({ role: "heading" }) })]);
+        expect(out.status === "defect" && out.capture).not.toBe("captured");
+    }, 120_000);
+
     it("keeps the substring match for containers and for a name the writer set exact=false on", async () => {
         const { withExactRoleNames } = await import("../src/engine/web/author.js");
         const row: Step = { action: "click", locator: { by: "role", role: "button", value: "Remove", within: { by: "role", role: "row", value: "Trail Mug" } }, description: "" };

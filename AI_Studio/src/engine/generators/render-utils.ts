@@ -1,4 +1,4 @@
-import { isLocatorRef, repeatOf, type Locator, type PlainLocator, type TestSpec } from "../spec/schema.js";
+import { isLocatorRef, repeatOf, ROLE_MISSING, type Locator, type PlainLocator, type TestSpec } from "../spec/schema.js";
 import { DATA_SET_KEY, dataSetNameOf, resolveRows, type DataSet } from "../testdata/dataset.js";
 import { frameSelector } from "../web/pages.js";
 import type { FieldClue } from "../web/label-fallback.js";
@@ -187,9 +187,9 @@ function plainCall(root: string, l: PlainLocator, withNth = false): string {
     let out: string;
     switch (l.by) {
         case "role":
-            out = l.value
-                ? `${root}.getByRole(${lit(l.role ?? "button")}, { name: ${expr(l.value)}${exact} })`
-                : `${root}.getByRole(${lit(l.role ?? "button")})`;
+            // No role: the step stops with the sentence that says what to fix, so a repair can name it (never a guessed button).
+            if (!l.role) return `(() => { throw new Error(${lit(ROLE_MISSING)}); })()`;
+            out = l.value ? `${root}.getByRole(${lit(l.role)}, { name: ${expr(l.value)}${exact} })` : `${root}.getByRole(${lit(l.role)})`;
             break;
         case "label":
             out = `${root}.getByLabel(${expr(l.value ?? "")}${l.exact ? ", { exact: true }" : ""})`;

@@ -18,7 +18,7 @@ import { gotoOnceMore } from "../discovery/crawler.js";
 import { dialogProblem, downloadProblem, generatedSample } from "./interruptions.js";
 import { labelledField, LABEL_WAIT_MS, type FieldClue } from "./label-fallback.js";
 import { applyClock, applyCondition } from "./conditions.js";
-import { interpolate, type Locator, type PlainLocator, type Step } from "../spec/schema.js";
+import { interpolate, ROLE_MISSING, type Locator, type PlainLocator, type Step } from "../spec/schema.js";
 import { ARIA_TEMPLATE_MAX, classPattern, ariaTemplate, DB_CHECK_NOT_YET, numberIn, urlPatternRegex, WEB_REQUEST_RULE, WEB_RESPONSE_CHECKS } from "./checks.js";
 import { checkRelation } from "../validation/relation.js";
 
@@ -73,6 +73,7 @@ function locatePlain(page: Page | FrameLocator | PwLocator, l: PlainLocator, dat
     let loc: PwLocator;
     switch (l.by) {
         case "role":
+            if (!l.role) throw new Error(ROLE_MISSING);
             loc = page.getByRole(l.role as Parameters<Page["getByRole"]>[0], {
                 ...(value ? { name: value } : {}),
                 ...(l.exact ? { exact: true } : {}),
