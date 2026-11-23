@@ -130,7 +130,8 @@ beforeAll(async () => {
     });
     await new Promise<void>((r) => site.listen(PORT, "127.0.0.1", () => r()));
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-explore-resume-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dir, LLM_PROVIDER: "anthropic", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0", SECRET_KEY: "test-secret-key-0123456789" }));
+    // Findings verification (on by default) would re-run an earlier job's tests in the background and load the fixture's pages while another test counts them.
+    platform = bootstrap(loadConfig({ DATA_DIR: dir, LLM_PROVIDER: "anthropic", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0", SECRET_KEY: "test-secret-key-0123456789", VERIFY_FINDINGS: "false" }));
     svc = getScheduleServices(platform);
     server = await buildServer(platform);
     worker = new Worker({ ...platform, makeLlm: () => scripted, onJobFinished: svc.onJobFinished }, 100);
