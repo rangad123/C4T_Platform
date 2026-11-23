@@ -130,6 +130,8 @@ describe("how much to explore", () => {
         await levels.getByRole("radio", { name: /Everything/ }).check();
         await page.getByRole("button", { name: "Start exploring" }).click();
         await pwExpect.poll(() => platform.repo.listJobs(shop).length).toBe(1);
+        // The start ends on the project's page; waited for, so its late navigation never lands on the next test's page.
+        await pwExpect(page).toHaveURL(new RegExp(`#/projects/${shop}$`));
         expect(platform.repo.listJobs(shop)[0]!.options).toMatchObject({ level: "everything", maxPages: 250, maxDepth: 6, maxScenarios: 150 });
         expect(platform.repo.listJobs(shop)[0]!.options.fullExploration).toBeFalsy();
     });
