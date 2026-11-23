@@ -7,7 +7,7 @@
 import { z } from "zod";
 import type { EngineContext } from "../context.js";
 import { maskSecrets } from "../frameworks/plugin.js";
-import { RELATION_MAX_CHARS } from "../validation/relation.js";
+import { numberComparisons, RELATION_MAX_CHARS } from "../validation/relation.js";
 import { dbCheckName } from "./checks.js";
 import { DatabaseCheckRefused, type DatabaseProbe, type DbSchema } from "./probe.js";
 import { validateCheck } from "./templates.js";
@@ -55,6 +55,29 @@ export function rowRelationPrompt(input: { requirements: ReadonlyArray<{ id: str
     return `${maskSecrets(["<<<REQUIREMENTS", ...reqs, "REQUIREMENTS>>>"].join("\n"), input.secrets)}\n\n${tablesSection(input.schema)}`;
 }
 
+/** An amount as a requirement writes it: after a currency sign, or with two decimals ($50.00, 50.00, €5). */
+const AMOUNT = /[$€£¥₹]\s?(\d[\d,]*(?:\.\d+)?)|\b(\d[\d,]*\.\d{2})\b/g;
+
+/**
+ * Whether the rule copies an amount of its requirement onto stored numbers that are 100 times larger (the requirement's $50.00 against
+ * rows that hold cents, paid trial shop-2 rule 4.5): the rule compares a column with that amount, every stored row is above it, and 100
+ * times the amount falls among the rows. The reason, or undefined. Judged with counts only; a probe that cannot answer judges nothing.
+ */
+async function otherScale(probe: Pick<DatabaseProbe, "check">, table: string, expression: string, stated: string, rows: number): Promise<string | undefined> {
+    const amounts = new Set([...stated.matchAll(AMOUNT)].map((m) => Number((m[1] ?? m[2])!.replace(/,/g, ""))));
+    const breaking = async (e: string) => (await probe.check({ kind: "relation", table, where: [], expression: e }).catch(() => undefined))?.count;
+    for (const c of numberComparisons(expression)) {
+        if (!(c.limit > 0) || !amounts.has(c.limit) || (c.op !== ">" && c.op !== ">=")) continue;
+        if ((await breaking(`${c.side} > ${c.limit}`)) !== 0) continue;
+        const other = Number((c.limit * 100).toPrecision(12));
+        const below = await breaking(`${c.side} >= ${other}`);
+        const above = await breaking(`${c.side} < ${other}`);
+        if (below !== undefined && above !== undefined && below > 0 && above > 0 && below + above <= rows)
+            return `it compares ${c.side.slice(0, 60)} with the requirement's amount ${c.limit}, but every stored row of ${JSON.stringify(table.slice(0, 63))} is above it while ${other} falls among them, so the stored numbers are 100 times the requirement's (cents, not whole units)`;
+    }
+    return undefined;
+}
+
 /** One AI call, then validation. A failed call is reported, never thrown: the run carries on with the declared-key checks. */
 export async function proposeRowRelations(
     ctx: Pick<EngineContext, "llm">,
@@ -87,6 +110,9 @@ export async function proposeRowRelations(
                     if (e instanceof DatabaseCheckRefused) throw e;
                 });
                 if (r && rows > 0 && r.count >= rows) throw new Error(`every stored row of ${JSON.stringify(p.table.slice(0, 63))} already breaks it, so it does not read the data as it is stored`);
+                const stated = input.requirements.find((q) => q.id === p.requirementId)?.text ?? "";
+                const scale = r && rows >= 2 && input.probe ? await otherScale(input.probe, p.table, p.expression, stated, rows) : undefined;
+                if (scale) throw new Error(scale);
             } catch (e) {
                 reason = e instanceof Error ? e.message : String(e);
             }

@@ -373,15 +373,17 @@ function relationAssert(text, body, vars, source) {
 export type RelationParse = { ok: true; refs: { paths: string[]; vars: string[] } } | { ok: false; error: string };
 export type RelationResult = { held: true; values: Array<[string, unknown]> } | { held: false; values: Array<[string, unknown]>; message: string };
 
+type RelationNode = { t: string; op?: string; v?: unknown; s: number; e: number; l?: RelationNode; r?: RelationNode; x?: RelationNode; args?: RelationNode[] };
 interface RelationRuntime {
     relationParse(text: string): RelationParse;
     relationEval(text: string, body: unknown, vars: Record<string, unknown>, source?: string): RelationResult;
+    relationParseTree(text: string): RelationNode;
 }
 
 let runtime: RelationRuntime | undefined;
 /** The exact helper the scripts carry, compiled once from its constant text (never from an expression). */
 function relationRuntime(): RelationRuntime {
-    runtime ??= new Function(`${RELATION_HELPER_SOURCE}\nreturn { relationParse, relationEval };`)() as RelationRuntime;
+    runtime ??= new Function(`${RELATION_HELPER_SOURCE}\nreturn { relationParse, relationEval, relationParseTree };`)() as RelationRuntime;
     return runtime;
 }
 
@@ -396,4 +398,30 @@ export function parseRelation(text: string): RelationParse {
  */
 export function checkRelation(text: string, input: { body: unknown; vars?: Record<string, unknown> }, source?: string): RelationResult {
     return relationRuntime().relationEval(text, input.body, input.vars ?? {}, source);
+}
+
+/**
+ * The comparisons of an expression with a number (`(subtotal - discount) >= 50`): the other side's text, the operator as if the number
+ * were on the right, and the number. Empty for an expression outside the grammar.
+ */
+export function numberComparisons(text: string): Array<{ side: string; op: "<" | "<=" | ">" | ">="; limit: number }> {
+    let tree: RelationNode;
+    try {
+        tree = relationRuntime().relationParseTree(text);
+    } catch {
+        return [];
+    }
+    const flip = { "<": ">", "<=": ">=", ">": "<", ">=": "<=" } as const;
+    const out: Array<{ side: string; op: "<" | "<=" | ">" | ">="; limit: number }> = [];
+    const isNum = (n?: RelationNode) => n?.t === "lit" && typeof n.v === "number";
+    const walk = (n?: RelationNode): void => {
+        if (!n) return;
+        if (n.t === "bin" && n.op && n.op in flip && isNum(n.l) !== isNum(n.r)) {
+            const [side, limit, op] = isNum(n.r) ? [n.l!, n.r!.v as number, n.op as keyof typeof flip] : [n.r!, n.l!.v as number, flip[n.op as keyof typeof flip]];
+            out.push({ side: text.slice(side.s, side.e).trim(), op, limit });
+        }
+        for (const c of [n.l, n.r, n.x, ...(n.args ?? [])]) walk(c);
+    };
+    walk(tree);
+    return out;
 }
