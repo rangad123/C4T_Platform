@@ -364,6 +364,7 @@ export default defineConfig({
             "tests/findings-reproduce-unit.test.ts",
             "tests/verify-attempts-unit.test.ts",
             "tests/verify-budget-reset.test.ts",
+            "tests/verify-yields.test.ts",
             "tests/fix-check-verdict.test.ts",
             "tests/verify-evidence-secrets.test.ts",
             "tests/findings-check-fix-permission.test.ts",
