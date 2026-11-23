@@ -131,13 +131,14 @@ function normalValue(v: string): string {
 }
 /**
  * Whether a replay's failure of the captured check is the captured failure itself, judged as the independence check judges it: the same
- * kind (never "other"), and for an assertion that saw a value, the same value. Without the captured text, never.
+ * kind (never "other"), and for an assertion that saw a value, the same value. Without the captured text, never. An element that is not
+ * there never counts: it is missing the same way whether or not the dropped steps ran (paid rbac-2 WEB-054 lost its Save this way).
  */
 export function failsAsCaptured(capturedObserved: string | undefined, replayed: string | undefined): boolean {
     if (capturedObserved === undefined || replayed === undefined) return false;
     const want = failureKind(capturedObserved, { plainIsValue: true });
     const got = failureKind(asKept(replayed, []));
-    if (got.kind !== want.kind || got.kind === "other") return false;
+    if (got.kind !== want.kind || got.kind === "other" || got.kind === "missing") return false;
     return got.kind !== "value" || normalValue(got.value) === normalValue((want as { value: string }).value);
 }
 
