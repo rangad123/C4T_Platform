@@ -880,6 +880,9 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
                 const at = here().url();
                 const done = acting(read);
                 const r = await run(step);
+                // As after the model's own steps: the requests a replayed step started finish before the next step, or a slow answer's
+                // navigation (an Add to cart that then opens the cart) lands on top of the next step's page.
+                await session.quiet(10_000);
                 done();
                 input.gate?.after({ tool: step.action, args, ok: r.ok, url: here().url(), read, ...(target ? { target } : {}) });
                 if (r.ok) noteSignIn(input.gate, step, anchor, at);
