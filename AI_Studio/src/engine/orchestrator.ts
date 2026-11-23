@@ -1146,7 +1146,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (scenarios.length) {
             // One lane per account: scenarios that sign in as the same account share its state on the server (cart, discount,
             // profile), so they are written one at a time; signed-out ones and other accounts' run beside them, up to CONCURRENCY.
-            const laneOf = (scenario: Scenario): string | undefined => scenarioAccountLane(scenario, roleCredentials(scenario, req.roles)?.name, Boolean(creds && authState.loggedIn));
+            const laneOf = (scenario: Scenario): string | undefined => scenarioAccountLane(scenario, roleCredentials(scenario, req.roles, creds?.username)?.name, Boolean(creds && authState.loggedIn));
             const sharing = scenarios.filter((s, _, all) => laneOf(s) !== undefined && all.filter((o) => laneOf(o) === laneOf(s)).length > 1).length;
             if (sharing) ctx.emit({ stage: "generation", kind: "account_lanes", message: `${sharing} scenarios that sign in as the same account are written one at a time` });
             const results = await mapLanes(scenarios, ctx.config.CONCURRENCY, laneOf, async (scenario) => {
@@ -1155,7 +1155,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const runId = await sink.startAgentRun("web-authoring", `${scenario.scenarioId} ${scenario.title}`);
                 try {
                     // A role scenario is written signed in as its own test account, and its script runs as that account.
-                    const asAccount = roleCredentials(scenario, req.roles);
+                    const asAccount = roleCredentials(scenario, req.roles, creds?.username);
                     const scenarioRules = rulesForScenario(scenario, req.appKnowledge);
                     const as = await authoringAccount(scenario, { objective: false, roleAccount: Boolean(asAccount), signsInAsMain: laneOf(scenario) === "main" });
                     const outcome = await authorWebSpec({
