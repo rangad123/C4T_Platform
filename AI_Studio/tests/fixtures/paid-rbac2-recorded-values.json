@@ -1,0 +1,528 @@
+{
+ "WEB-012": {
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/notes/new",
+    "description": "Open /notes/new"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Enter \"{{credentials.username}}\" into label \"Email\""
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in",
+     "exact": true
+    },
+    "description": "Click button \"Sign in\""
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Notes",
+     "exact": true
+    },
+    "description": "Click link \"Notes\""
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "navigation",
+     "value": "Main"
+    },
+    "description": "Click navigation \"Main\""
+   },
+   {
+    "action": "navigate",
+    "url": "/notes/new",
+    "description": "Open /notes/new"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Title"
+    },
+    "value": "qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "description": "Enter \"qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" into label \"Title\""
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Text"
+    },
+    "value": "Boundary test note qapbhy",
+    "description": "Enter \"Boundary test note qapbhy\" into label \"Text\""
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Save note",
+     "exact": true
+    },
+    "description": "Click button \"Save note\""
+   },
+   {
+    "action": "navigate",
+    "url": "/notes",
+    "description": "Open /notes"
+   },
+   {
+    "action": "navigate",
+    "url": "/notes/n6",
+    "description": "Open /notes/n6"
+   },
+   {
+    "action": "assert",
+    "check": "exactText",
+    "locator": {
+     "by": "role",
+     "role": "heading",
+     "value": "qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "exact": true
+    },
+    "expected": "qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "source": "expected:1",
+    "description": "Verify exactText of heading \"qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" = qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   {
+    "action": "navigate",
+    "url": "/notes/new",
+    "description": "Open /notes/new"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Title"
+    },
+    "value": "qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "description": "Enter \"qapbhy-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" into label \"Title\""
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Text"
+    },
+    "value": "Boundary test note qapbhy 121",
+    "description": "Enter \"Boundary test note qapbhy 121\" into label \"Text\""
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Save note",
+     "exact": true
+    },
+    "description": "Click button \"Save note\""
+   },
+   {
+    "action": "wait",
+    "ms": 0,
+    "until": "visible",
+    "locator": {
+     "by": "text",
+     "value": "120"
+    },
+    "description": "Wait until text \"120\" is visible"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "alert"
+    },
+    "source": "expected:2",
+    "description": "Verify visible of alert \"\""
+   },
+   {
+    "action": "navigate",
+    "url": "/notes",
+    "description": "Open /notes"
+   },
+   {
+    "action": "assert",
+    "check": "count",
+    "locator": {
+     "by": "role",
+     "role": "listitem"
+    },
+    "expected": 5,
+    "source": "expected:2",
+    "description": "Verify count of listitem \"\" = 5"
+   }
+  ],
+  "scenario": {
+   "description": "Create a note with a 120-character title and confirm it is saved. Then try a 121-character title and confirm it is refused and no note is added.",
+   "preconditions": [
+    "Signed in as the test account"
+   ],
+   "requiredData": [
+    "120-character and 121-character titles tagged qamosn with generated data"
+   ],
+   "expectedResults": [
+    "The 120-character title is saved and its note page heading shows the full 120-character title (requirement 3.5)",
+    "With a 121-character title the form shows an error message and no note is created, so the notes list count is unchanged (requirement 3.5)"
+   ]
+  }
+ },
+ "WEB-046": {
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/notes",
+    "description": "Open /notes"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "{{credentials.username}}",
+    "description": "Sign in as test user"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Sign in",
+     "exact": true
+    },
+    "description": "Submit sign-in form"
+   },
+   {
+    "action": "wait",
+    "ms": 0,
+    "until": "url",
+    "value": "/notes",
+    "locator": {
+     "by": "text",
+     "value": "Notes"
+    },
+    "description": "Wait until the address matches \"/notes\""
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "navigation",
+     "value": "Main"
+    },
+    "description": "Scope to main navigation"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Notes",
+     "exact": true
+    },
+    "description": "Return to Notes list"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "navigation",
+     "value": "Main"
+    },
+    "description": "placeholder"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Notes",
+     "exact": true
+    },
+    "description": "Return to Notes list"
+   },
+   {
+    "action": "assert",
+    "check": "count",
+    "locator": {
+     "by": "css",
+     "value": "main li"
+    },
+    "expected": 34,
+    "source": "expected:2",
+    "description": "Record the notes count before the attempt (3 shown + 31 more)"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "css",
+     "value": "main p a[href='/notes/new']"
+    },
+    "description": "Open new note form"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Title"
+    },
+    "value": "   ",
+    "description": "Whitespace-only title"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Text"
+    },
+    "value": "qamosn check",
+    "description": "Required body text"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Save note",
+     "exact": true
+    },
+    "description": "Submit the note with a whitespace title"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Notes",
+     "exact": true
+    },
+    "description": "Open Notes list from main navigation"
+   },
+   {
+    "action": "assert",
+    "check": "count",
+    "locator": {
+     "by": "css",
+     "value": "main li"
+    },
+    "expected": 34,
+    "source": "expected:2",
+    "description": "Notes list count must be unchanged (34)"
+   }
+  ],
+  "scenario": {
+   "description": "Enters spaces as the title, submits the form, and checks that the title error appears and the notes list count is unchanged.",
+   "preconditions": [
+    "Signed in as the test user ana",
+    "Note list count noted before the attempt"
+   ],
+   "requiredData": [
+    "title of spaces only",
+    "text qamosn check"
+   ],
+   "expectedResults": [
+    "Clicking Save note with a title of spaces keeps the browser on /notes/new and shows the message Give the note a title. (requirement 3.4)",
+    "After clicking Notes in the main navigation, the list shows the same number of notes as before the attempt, with no new entry (requirement 3.4)"
+   ]
+  }
+ },
+ "WEB-059": {
+  "steps": [
+   {
+    "action": "navigate",
+    "url": "/",
+    "description": "Open /"
+   },
+   {
+    "action": "remember",
+    "locator": {
+     "by": "text",
+     "value": "Private notes you can share with colleagues."
+    },
+    "name": "homeIntro",
+    "from": "text",
+    "description": "Remember home page description"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Create account",
+     "exact": true
+    },
+    "description": "Open registration page"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Name"
+    },
+    "value": "Sofia Okafor {{unique}}",
+    "description": "Enter name for new account"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Email"
+    },
+    "value": "sofia.{{unique}}@example.com",
+    "description": "Enter unique email"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Password"
+    },
+    "value": "{{credentials.password}}",
+    "description": "Enter password"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Create account",
+     "exact": true
+    },
+    "description": "Submit registration"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "navigation",
+     "value": "Main"
+    },
+    "description": "Open new note page via main navigation"
+   },
+   {
+    "action": "navigate",
+    "url": "/notes/new",
+    "description": "Open /notes/new"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Title"
+    },
+    "value": "Bench note {{unique}}",
+    "description": "Enter note title"
+   },
+   {
+    "action": "fill",
+    "locator": {
+     "by": "label",
+     "value": "Text"
+    },
+    "value": "Owner-only test note {{unique}}",
+    "description": "Enter note text"
+   },
+   {
+    "action": "click",
+    "locator": {
+     "by": "role",
+     "role": "button",
+     "value": "Save note",
+     "exact": true
+    },
+    "description": "Save the note as its owner"
+   },
+   {
+    "action": "navigate",
+    "url": "/notes",
+    "description": "Open /notes"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "link",
+     "value": "Bench note 1795433813701",
+     "exact": true
+    },
+    "source": "expected:1",
+    "description": "Owner sees own note in their notes list"
+   },
+   {
+    "action": "navigate",
+    "url": "/notes/n52",
+    "description": "Open /notes/n52"
+   },
+   {
+    "action": "assert",
+    "check": "visible",
+    "locator": {
+     "by": "role",
+     "role": "heading",
+     "value": "Bench note 1795433813701",
+     "exact": true
+    },
+    "source": "expected:1",
+    "description": "Owner can open and read the note page"
+   },
+   {
+    "action": "assert",
+    "check": "text",
+    "locator": {
+     "by": "text",
+     "value": "Owner: Sofia Okafor"
+    },
+    "expected": "Owner: Sofia Okafor",
+    "source": "expected:1",
+    "description": "Note page shows the owner reading it"
+   }
+  ],
+  "scenario": {
+   "description": "Operator: As stated. Objective OBJ-61eb7378766325b5 (rule, source \"R-af988d26d4cb\").\n\nSteps you must take:\n1. Do the preconditions, then follow the stated steps in order.\n2. Check each expected result with an assert that cites it.\n\nUse {{unique}} in every value that must be new (names, emails, references), so a second run does not collide with the first.\n\nCite the expected result an assert proves as its source (expected:1).\n\nThe question, as data from the application's sources: \"Does the application keep rule R-af988d26d4cb: \\\"Who may read a note.\\\"?\"",
+   "preconditions": [
+    "Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps"
+   ],
+   "requiredData": [],
+   "expectedResults": [
+    "\"A note can be read by its owner, the people it is shared with, managers and admins.\" (source: R-af988d26d4cb)"
+   ]
+  }
+ }
+}

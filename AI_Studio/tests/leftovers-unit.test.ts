@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Step } from "../src/engine/spec/schema.js";
-import { findLeftoverUse, leftoverReason, startingIdsOf } from "../src/engine/web/leftovers.js";
+import { findLeftoverUse, leftoverReason, scenarioWords, startingIdsOf, withOwnUnique } from "../src/engine/web/leftovers.js";
 
 const saved = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "c1c-leftover-specs.json"), "utf8")) as Record<string, { steps: Step[] }>;
 const stepsOf = (key: string) => saved[key]!.steps;
@@ -179,6 +179,51 @@ describe("the leftover check", () => {
     it("reads the starting record ids from the discovery model, wherever they are", () => {
         const model = { pages: [{ path: "/orders/ord-1000", components: [{ role: "link", name: "ord-1001" }] }], purpose: "A shop\nord-12 is too short" };
         expect([...startingIdsOf(model)].sort()).toEqual(["ord-1000", "ord-1001"]);
+    });
+});
+
+// Paid trial rbac-2 (fixtures/paid-rbac2-recorded-values.json: the saved steps and the scenario of each, from the trial's database).
+const paid = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "paid-rbac2-recorded-values.json"), "utf8")) as Record<string, { steps: Step[]; scenario: Parameters<typeof scenarioWords>[0] }>;
+// What the trial's discovery saw of bench-rbac as its account: the two notes ana can open.
+const rbacStart = startingIdsOf({ pages: [{ path: "/notes/n1" }, { url: "http://127.0.0.1:8100/notes/n3" }, { path: "/notes/new" }] });
+
+describe("values recorded from the authoring run (paid rbac-2)", () => {
+    it("reads the record numbers of addresses in the discovery model", () => {
+        expect([...rbacStart].sort()).toEqual(["/n1", "/n3"]);
+    });
+
+    it("WEB-059: its own {{unique}} title becomes {{unique}} again, and the note address it was given is found", () => {
+        const { steps, scenario } = paid["WEB-059"]!;
+        const own = withOwnUnique(steps);
+        expect(own[13]).toMatchObject({ locator: { value: "Bench note {{unique}}" } });
+        expect(own[15]).toMatchObject({ locator: { value: "Bench note {{unique}}" } });
+        expect(own.filter((s, i) => JSON.stringify(s) !== JSON.stringify(steps[i])).length).toBe(2);
+        expect(findLeftoverUse(own, rbacStart, scenarioWords(scenario))).toEqual([{ step: 15, what: "opens /notes/n52, a record number the test never made" }]);
+        // As saved, the title is a generated value of another run.
+        expect(findLeftoverUse(steps, rbacStart, scenarioWords(scenario)).map((u) => u.what)).toContain("uses 1795433813701, a generated value of an earlier run");
+    });
+
+    it("WEB-012 and WEB-046: counts of the shared list (5, 34) that no stated result gives, and WEB-012's note address", () => {
+        const w012 = paid["WEB-012"]!;
+        expect(findLeftoverUse(w012.steps, rbacStart, scenarioWords(w012.scenario))).toEqual([
+            { step: 12, what: "opens /notes/n6, a record number the test never made" },
+            { step: 21, what: "expects 5 items on the shared account, a count its stated results do not give" },
+        ]);
+        const w046 = paid["WEB-046"]!;
+        expect(findLeftoverUse(w046.steps, rbacStart, scenarioWords(w046.scenario)).map((u) => u.step)).toEqual([10, 16]);
+        expect(findLeftoverUse(w046.steps, rbacStart, scenarioWords(w046.scenario))[0]!.what).toBe("expects 34 items on the shared account, a count its stated results do not give");
+    });
+
+    it("leaves alone a stated count, a count signed out or in a fresh account, a starting record's address, and {{unique}} itself", () => {
+        const count = (n: number): Step => ({ action: "assert", check: "count", locator: { by: "role", role: "listitem" }, expected: n, description: "" });
+        expect(findLeftoverUse([...signIn, count(3)], rbacStart, "The list shows 3 notes")).toEqual([]);
+        expect(findLeftoverUse([...signIn, count(1)], rbacStart, "")).toEqual([]);
+        expect(findLeftoverUse([{ action: "navigate", url: "/products", description: "" }, count(6)], rbacStart, "")).toEqual([]);
+        expect(findLeftoverUse([...signIn, { action: "navigate", url: "/notes/n3", description: "" }], rbacStart)).toEqual([]);
+        expect(findLeftoverUse([...signIn, { action: "navigate", url: "/notes/n9", description: "" }])).toEqual([]);
+        const fresh: Step[] = [{ action: "fill", locator: { by: "label", value: "Title" }, value: "Note {{unique}}", description: "" }, { action: "assert", check: "visible", locator: { by: "role", role: "link", value: "Note {{unique}}" }, description: "" }];
+        expect(withOwnUnique(fresh)).toEqual(fresh);
+        expect(findLeftoverUse(fresh, rbacStart)).toEqual([]);
     });
 });
 

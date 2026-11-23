@@ -63,7 +63,7 @@ import { validateBatch, type TestUnderValidation, type ValidationOutcome } from 
 import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
 import { authorWebSpec, statedSource, toSpec, WRITER_STOPPED, type ActionGate, type AuthorOutcome } from "./web/author.js";
-import { findLeftoverUse, leftoverReason, startingIdsOf } from "./web/leftovers.js";
+import { findLeftoverUse, leftoverReason, scenarioWords, startingIdsOf } from "./web/leftovers.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
 import { checkIndependence, replayOwnSteps, type IndependenceCheck, type IndependenceReplay } from "./explore/independence.js";
@@ -1035,7 +1035,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
             // The leftover check (web/leftovers.ts, no AI): a test that still acts on or checks an item its own steps never added or opened,
             // after its second try, leans on what the account held. Saved for review, never validated, and never a finding.
-            const leftovers = findLeftoverUse(written.steps, startingIdsOf(model));
+            const leftovers = findLeftoverUse(written.steps, startingIdsOf(model), scenarioWords(scenario));
             if (leftovers.length) {
                 const why = leftoverReason(leftovers);
                 const h = await persistNew(spec, "playwright", "NEEDS_REVIEW", `${outcome.status === "defect" ? "Not reported as a finding" : "Not validated"}: ${why.replace(/\.$/, "")}. The test writer's account: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.`, { ...meta, leftovers });

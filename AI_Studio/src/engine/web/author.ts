@@ -44,7 +44,7 @@ import { knowledgeBlock, usableRules, type KnowledgeRule } from "../planning/pla
 import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
 import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
-import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, startingIdsOf } from "./leftovers.js";
+import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, scenarioWords, startingIdsOf, withOwnUnique } from "./leftovers.js";
 import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 import { engineWordingIn } from "../explore/perturb.js";
 import { failsAsCaptured } from "../explore/independence.js";
@@ -622,15 +622,17 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
         if (out.status === "complete" && input.review && !input.resume) out = await reviewAndFix(input, out);
         if (input.leftoverCheck && !input.resume && out.status !== "blocked") {
             const starting = startingIdsOf(input.model);
-            const uses = findLeftoverUse(out.steps, starting);
+            const stated = scenarioWords(input.scenario);
+            out = { ...out, steps: withOwnUnique(out.steps) };
+            const uses = findLeftoverUse(out.steps, starting, stated);
             if (uses.length) {
                 const redo = `${leftoverReason(uses)} ${LEFTOVER_REDO}`;
                 input.ctx.emit({ stage: "generation", kind: "leftover_redo", level: "warn", message: `${input.scenario.scenarioId}: written again from the start: ${leftoverReason(uses)}`, data: { steps: uses.map((u) => u.step) } });
                 let again = await authorScenario({ ...input, redo });
                 if (again.status === "complete" && input.review) again = await reviewAndFix({ ...input, redo }, again);
                 // A second try that could not finish keeps the first test (still flagged: the caller saves it for review).
-                if (again.status !== "blocked") out = again;
-                if (findLeftoverUse(out.steps, starting).length) return out;
+                if (again.status !== "blocked") out = { ...again, steps: withOwnUnique(again.steps) };
+                if (findLeftoverUse(out.steps, starting, stated).length) return out;
             }
         }
         // A disagreement between layers (C4) is judged by code on the real answers, like a documented case the API accepted: no AI verdict.
@@ -1589,7 +1591,7 @@ export function toSpec(scenario: Scenario, outcome: AuthorOutcome, testId: strin
         type: scenario.type,
         priority: scenario.priority,
         preconditions: scenario.preconditions,
-        steps: outcome.steps,
+        steps: withOwnUnique(outcome.steps),
         expectedResults: scenario.expectedResults,
         testData: outcome.testData,
         tags: [scenario.type, scenario.priority],

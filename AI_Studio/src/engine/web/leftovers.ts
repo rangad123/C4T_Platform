@@ -23,6 +23,13 @@
  *     discount or coupon field, and a check of an amount on the cart (its page, or a subtotal or discount) other than zero. Those show
  *     only what the shared account already held. Signed out (or in a freshly registered account) the browser is fresh, so what such a
  *     page shows is the application's starting data.
+ *
+ * Values recorded from the authoring run (paid trials rbac-2 and shop-2: counts 5 and 34, a title and an address from an earlier run):
+ *   - an address that opens a record by its number (/notes/n52, /orders/1034) that is not in the application's starting data: the
+ *     application numbered it while the test was written, so a fresh run gets another number;
+ *   - a run's {{unique}} value (a millisecond time, 1795433813701) in what the test opens or checks: `withOwnUnique` first turns the test's
+ *     own back into {{unique}}, so one that is left came from another run;
+ *   - on the shared account, a count of 2 or more that the scenario's stated words do not give: it counts what earlier tests left there.
  */
 import type { Locator, Step } from "../spec/schema.js";
 
@@ -64,6 +71,10 @@ const CART_WORDS = /\b(subtotal|discount|cart|basket)\b/i;
 /** A value typed from the provided test account: the test works in the shared account, which earlier tests may have filled. */
 const SHARED_ACCOUNT = /\{\{\s*credentials\./;
 const NOT_FOUND = /\b(not found|404|no such|does not exist|doesn't exist|no longer exists)\b/i;
+/** A record number in an address: a path part of up to 4 letters and digits (n52, ord1034) or 2+ digits (1034). */
+const PATH_ID = /\/([a-z]{1,4}\d+|\d{2,})(?=$|[/?#\s"'])/gi;
+/** A {{unique}} value as a run writes it: the time in milliseconds (2020 to 2033), with the Playwright worker's index after it. */
+const RUN_VALUE = /\b1[6-9]\d{11}\d{0,2}\b/g;
 /** Checks that something is absent: on a fresh account that holds, so they are not leaning on leftovers. */
 const ABSENCE_CHECKS = new Set(["hidden", "notText", "count"]);
 
@@ -114,12 +125,18 @@ function whereRecordsShow(s: Step): string[] {
     return names.filter((x): x is string => typeof x === "string");
 }
 
-/** The record ids in a model of the application (its discovery crawl, every string in it): the starting data every fresh session sees. */
+/**
+ * The record ids in a model of the application (its discovery crawl, every string in it): the starting data every fresh session sees.
+ * Record numbers of addresses are kept with their slash ("/n1", "/1034").
+ */
 export function startingIdsOf(model: unknown): Set<string> {
     const ids = new Set<string>();
     const walk = (v: unknown, depth: number): void => {
         if (depth > 40) return;
-        if (typeof v === "string") for (const m of v.matchAll(RECORD_ID)) ids.add(m[0]);
+        if (typeof v === "string") {
+            for (const m of v.matchAll(RECORD_ID)) ids.add(m[0]);
+            for (const m of v.matchAll(PATH_ID)) ids.add(`/${m[1]!.toLowerCase()}`);
+        }
         else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
         else if (v && typeof v === "object") for (const x of Object.values(v)) walk(x, depth + 1);
     };
@@ -132,9 +149,9 @@ const locatorOf = (s: Step): Locator | undefined => ("locator" in s && s.locator
 /**
  * The steps of a saved test that act on or check an item its own earlier steps never added or opened; empty when there are none.
  * `startingIds`: the record ids of the application's starting data (`startingIdsOf` the discovery model); without them record ids are
- * not checked.
+ * not checked. `stated`: the scenario's own words (its expected results); a count they give is the scenario's, not a recorded one.
  */
-export function findLeftoverUse(steps: readonly Step[], startingIds?: ReadonlySet<string>): LeftoverUse[] {
+export function findLeftoverUse(steps: readonly Step[], startingIds?: ReadonlySet<string>, stated?: string): LeftoverUse[] {
     const found: LeftoverUse[] = [];
     const seen: string[] = [];
     let added = false;
@@ -170,6 +187,27 @@ export function findLeftoverUse(steps: readonly Step[], startingIds?: ReadonlySe
                 usedIds.add(id);
                 found.push({ step: i + 1, what: `uses the record ${id}, which the test never created` });
             }
+        }
+        // An address's record number the application handed out while the test was written (/notes/n52).
+        if (startingIds && !checksNotFound && s.action === "navigate") {
+            for (const m of s.url.matchAll(PATH_ID)) {
+                const id = `/${m[1]!.toLowerCase()}`;
+                if (startingIds.has(id) || usedIds.has(id)) continue;
+                usedIds.add(id);
+                found.push({ step: i + 1, what: `opens ${s.url.slice(0, 80)}, a record number the test never made` });
+            }
+        }
+        // A {{unique}} value of another run: this run writes a new one.
+        for (const v of whereRecordsShow(s).flatMap((t) => [...t.matchAll(RUN_VALUE)].map((m) => m[0]))) {
+            if (usedIds.has(v)) continue;
+            usedIds.add(v);
+            found.push({ step: i + 1, what: `uses ${v}, a generated value of an earlier run` });
+        }
+        // A count of what the shared account holds, which earlier tests change, that the scenario does not state.
+        if (s.action === "assert" && s.check === "count" && signedIn) {
+            const n = Number(s.expected);
+            if (Number.isInteger(n) && n >= 2 && !new RegExp(`(^|[^\\d.])${n}($|[^\\d]|\\.(?!\\d))`).test(stated ?? ""))
+                found.push({ step: i + 1, what: `expects ${n} items on the shared account, a count its stated results do not give` });
         }
         if (signedIn && !grew && !flaggedControl && l && (l.by === "role" || l.by === "text")) {
             const shows = s.action === "click" || (s.action === "wait" && s.until === "visible") || (s.action === "assert" && (s.check === "visible" || s.check === "enabled"));
@@ -211,6 +249,31 @@ export function findLeftoverUse(steps: readonly Step[], startingIds?: ReadonlySe
     return found;
 }
 
+/**
+ * The test's own {{unique}} values written back as {{unique}}: a check or address holding the value a step typed with {{unique}} in it
+ * ("Bench note {{unique}}" typed, the link "Bench note 1795433813701" checked) reads the value the run makes, not the authoring run's.
+ */
+/** The words of a scenario a count may be stated in (findLeftoverUse's `stated`). */
+export function scenarioWords(scenario: { description?: string; preconditions?: string[]; requiredData?: string[]; expectedResults?: string[] }): string {
+    return [scenario.description ?? "", ...(scenario.preconditions ?? []), ...(scenario.requiredData ?? []), ...(scenario.expectedResults ?? [])].join("\n");
+}
+
+export function withOwnUnique(steps: readonly Step[]): Step[] {
+    const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const typed = steps.flatMap((s) => (s.action === "fill" && /\{\{\s*unique\s*\}\}/.test(s.value) ? [s.value] : []));
+    const patterns = typed.map((v) => new RegExp(v.split(/\{\{\s*unique\s*\}\}/).map(esc).join(`(${RUN_VALUE.source})`), "g"));
+    const seen = new Set<string>();
+    for (const s of steps) for (const t of whereRecordsShow(s)) for (const re of patterns) for (const m of t.matchAll(re)) for (const d of m.slice(1)) if (d) seen.add(d);
+    if (!seen.size) return [...steps];
+    const swap = (v: unknown): unknown => {
+        if (typeof v === "string") return [...seen].reduce((t, d) => t.split(d).join("{{unique}}"), v);
+        if (Array.isArray(v)) return v.map(swap);
+        if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, VOCABULARY.has(k) ? x : swap(x)]));
+        return v;
+    };
+    return steps.map((s) => (s.action === "fill" ? s : (swap(s) as Step)));
+}
+
 /** What the test writer is told when its test leaned on leftovers, and what a test saved for review says. */
 export function leftoverReason(uses: readonly LeftoverUse[]): string {
     const listed = uses.slice(0, 4).map((u) => `step ${u.step} ${u.what}`).join("; ");
@@ -219,4 +282,4 @@ export function leftoverReason(uses: readonly LeftoverUse[]): string {
 
 /** The instruction for a second try. */
 export const LEFTOVER_REDO =
-    "The test account can hold items an earlier test left (cart lines, applied codes). They are not this test's: never remove, change or check them by name, and never clear them first. Add what the test needs with its own steps, then act and assert only on those items.";
+    "The test account can hold items an earlier test left (cart lines, applied codes). They are not this test's: never remove, change or check them by name, and never clear them first. Add what the test needs with its own steps, then act and assert only on those items. Never write down a number the application handed out while you worked (a record's address such as /notes/n52, a generated name, how many items a shared list holds): open what the test made by its own links, and use {{unique}} for generated values.";
