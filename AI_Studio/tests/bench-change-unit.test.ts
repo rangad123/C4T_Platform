@@ -108,6 +108,24 @@ describe("a benchmark app's start", () => {
 });
 
 describe("the command's options", () => {
+    it("the frozen suite checks no field of a seeded note that another test writes: a seed letting that write through cannot fail it by order", async () => {
+        // BR-02 lets API-015's refused rename of n3 through; API-014 then read the new title when it ran after API-015 (G6, B2).
+        const { SUITE } = (await import(path.join(import.meta.dirname, "..", "examples", "bench-repo", "suite.mjs"))) as { SUITE: Record<string, Array<{ title: string; steps: Array<Record<string, any>> }>> };
+        const rbac = SUITE["bench-rbac"]!;
+        const conflicts: string[] = [];
+        rbac.forEach((t, i) => {
+            let read: string | undefined;
+            for (const s of t.steps) {
+                if (s.action === "request") read = s.method === "GET" && /^\/api\/notes\/n\d+$/.test(s.path) ? s.path : undefined;
+                else if (read && s.check === "jsonPath") {
+                    const field = String(s.path).split(".")[0]!;
+                    rbac.forEach((o, j) => o.steps.forEach((w) => j !== i && w.action === "request" && ["PUT", "PATCH"].includes(w.method) && w.path === read && w.body && field in w.body && conflicts.push(`${t.title} reads ${field} of ${read}; ${o.title} writes it`)));
+                }
+            }
+        });
+        expect(conflicts).toEqual([]);
+    });
+
     it("deploys the same commit twice as two deliveries, so the second is not dropped as a replay of the first's body", () => {
         // webhook.ts acts once per body: the fix deployed again after the bug's return must be a new deployment of that commit.
         const sha = "a".repeat(40);
