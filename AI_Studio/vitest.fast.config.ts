@@ -41,6 +41,7 @@ export default defineConfig({
             "tests/agent-platform-unit.test.ts",
             "tests/runner-risky-gate-unit.test.ts",
             "tests/finding-report-v10-unit.test.ts",
+            "tests/eng-fix3-verify-unit.test.ts",
             "tests/runner-handover.test.ts",
             "tests/runner-owner-unit.test.ts",
             "tests/runner-reset-migration.test.ts",
