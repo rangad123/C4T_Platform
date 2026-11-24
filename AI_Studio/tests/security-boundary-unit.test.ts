@@ -12,8 +12,9 @@ const SRC = path.join(ROOT, "src");
  * The only places that may name src/security: the migration list, the route registration, the standalone worker, project backups (and the
  * storage route that offers leaving security data out of one), (round 52) the runner's explore child, which runs an assessment's steps,
  * and (Phase 5, spec Q3) the one findings view, which reads security findings through an adapter without changing them.
+ * Verification re-runs risky checks and must apply the same authorization gate as the run (eng-fix3-report): findings/verify-service.ts.
  */
-const WIRING = ["src/platform/db.ts", "src/platform/routes/index.ts", "src/worker-main.ts", "src/platform/backup.ts", "src/platform/routes/retention.ts", "src/agent/explore-child.ts", "src/platform/schedule-services.ts", "src/platform/findings/adapters.ts", "src/platform/routes/findings.ts"];
+const WIRING = ["src/platform/db.ts", "src/platform/routes/index.ts", "src/worker-main.ts", "src/platform/backup.ts", "src/platform/routes/retention.ts", "src/agent/explore-child.ts", "src/platform/schedule-services.ts", "src/platform/findings/adapters.ts", "src/platform/routes/findings.ts", "src/platform/findings/verify-service.ts"];
 
 function files(dir: string): string[] {
     return fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? files(path.join(dir, d.name)) : d.name.endsWith(".ts") ? [path.join(dir, d.name)] : []));
