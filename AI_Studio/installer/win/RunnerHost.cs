@@ -124,6 +124,8 @@ namespace AITestingRunner
                 psi.StandardErrorEncoding = Util.Utf8;
                 string path = Environment.GetEnvironmentVariable("PATH") ?? "";
                 psi.EnvironmentVariables["PATH"] = Path.GetDirectoryName(nodePath) + ";" + path;
+                // The runner keeps its credential with DPAPI through this program (Program.cs --dpapi-protect), so a locked-down PowerShell does not matter.
+                psi.EnvironmentVariables["AITP_DPAPI_HELPER"] = File.Exists(lay.SelfCopy) ? lay.SelfCopy : System.Reflection.Assembly.GetExecutingAssembly().Location;
                 p = Process.Start(psi);
             }
             catch (Exception e)

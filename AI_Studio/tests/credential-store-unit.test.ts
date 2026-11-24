@@ -64,6 +64,36 @@ describe("the credential store", () => {
         expect(dpapiCommands().unprotect("QUJD").stdin).toBe("QUJD");
     });
 
+    // A company's Constrained Language Mode refuses PowerShell's Add-Type (2026-11-24): Setup's own program does DPAPI natively instead.
+    it("Windows with Setup's helper (AITP_DPAPI_HELPER): DPAPI without PowerShell, the same blob; PowerShell only when the helper fails", async () => {
+        const dir = tmp();
+        const helper = "C:\\Users\\Tess\\AppData\\Local\\AITestingRunner\\AITestingRunner.exe";
+        const calls: Array<{ cmd: string; args: string[]; stdin: string }> = [];
+        let helperWorks = true;
+        const run: CommandRunner = async (cmd, args, stdin) => {
+            calls.push({ cmd, args, stdin });
+            if (cmd === "powershell.exe") return { code: 1, stdout: "", stderr: "Cannot add type. Definition of new types is not supported in this language mode." };
+            if (!helperWorks) return { code: 1, stdout: "", stderr: "" };
+            if (args[0] === "--dpapi-protect") return { code: 0, stdout: Buffer.from(`sealed:${stdin}`).toString("base64"), stderr: "" };
+            return { code: 0, stdout: Buffer.from(stdin, "base64").toString("utf8").replace(/^sealed:/, ""), stderr: "" };
+        };
+        await saveCredential(dir, TOKEN, { platform: "win32", run, dpapiHelper: helper });
+        const text = fs.readFileSync(path.join(dir, CREDENTIAL_FILE), "utf8");
+        expect(text.startsWith("dpapi:")).toBe(true);
+        expect(text).not.toContain(TOKEN);
+        expect(await loadCredential(dir, { platform: "win32", run, dpapiHelper: helper })).toBe(TOKEN);
+        expect(calls.map((c) => [c.cmd, c.args])).toEqual([
+            [helper, ["--dpapi-protect"]],
+            [helper, ["--dpapi-unprotect"]],
+        ]);
+        expect(calls[0]!.stdin).toBe(TOKEN);
+        // A helper that fails (deleted, blocked): PowerShell is tried next, and both failing is the plain sentence.
+        helperWorks = false;
+        calls.length = 0;
+        await expect(saveCredential(dir, TOKEN, { platform: "win32", run, dpapiHelper: helper })).rejects.toThrow("Windows data protection did not work");
+        expect(calls.map((c) => c.cmd)).toEqual([helper, "powershell.exe"]);
+    });
+
     it("macOS: the login Keychain through security; adding sends the token on stdin (security -i), never as an argument", async () => {
         const dir = tmp();
         const calls: Array<{ cmd: string; args: string[]; stdin: string }> = [];

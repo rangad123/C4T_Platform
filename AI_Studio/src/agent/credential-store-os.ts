@@ -47,6 +47,17 @@ export function dpapiCommands(): { protect(token: string): Command; unprotect(bl
     };
 }
 
+/**
+ * Windows: the same DPAPI (CurrentUser, no entropy, so the blobs are interchangeable) done natively by Setup's own program
+ * (installer/win/Program.cs --dpapi-protect / --dpapi-unprotect). It works where a company locks PowerShell down (Constrained Language Mode).
+ */
+export function dpapiHelperCommands(exe: string): { protect(token: string): Command; unprotect(blob: string): Command } {
+    return {
+        protect: (token) => ({ cmd: exe, args: ["--dpapi-protect"], stdin: token }),
+        unprotect: (blob) => ({ cmd: exe, args: ["--dpapi-unprotect"], stdin: blob }),
+    };
+}
+
 /** Run a program, give it `stdin`, collect what it prints (at most 64 KB each), and give up after 20 seconds. */
 export const runCommand: CommandRunner = (cmd, args, stdin) =>
     new Promise((resolve) => {
