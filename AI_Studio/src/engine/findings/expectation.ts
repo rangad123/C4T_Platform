@@ -65,6 +65,16 @@ export function judgePageCheck(x: { spec: TestSpec; failedStep?: number; cited: 
 }
 
 /**
+ * The written expectation a test's failing check cites: its expected result (expected:N), else all of them. An execution finding's
+ * stored expectation carries the check's own value ("… ($21.00)"), so judged against that every check would read as stated.
+ */
+export function writtenExpectation(spec: TestSpec, failedStep: number | undefined): string {
+    const source = failedStep === undefined ? undefined : (spec.steps[failedStep - 1] as { source?: unknown } | undefined)?.source;
+    const n = typeof source === "string" ? /^expected:(\d+)$/.exec(source) : null;
+    return (n ? spec.expectedResults[Number(n[1]) - 1] : undefined) ?? spec.expectedResults.join(" ");
+}
+
+/**
  * Whether the API answers a test captured while it was written hold the amount its failing check expects (in units or in cents):
  * "holds" means the page and the API disagree on it, "lacks" that the API does not support it. Undefined: not an amount check, or no
  * answer with numbers to compare.

@@ -29,7 +29,8 @@ afterAll(() => {
 });
 
 const check = { action: "assert", check: "exactText", locator: { by: "testId", value: "total" }, expected: "$21.00", source: "R-2" };
-const web = (testId: string) => TestSpecSchema.parse({ testId, title: `T ${testId}`, kind: "web", category: "Cart", source: { origin: "browser-agent", requirements: ["R-2"] }, steps: [{ action: "navigate", url: "/cart" }, check] });
+// The written expected result states the amount the check expects (the expectation check before the vote reads it, expectation.ts).
+const web = (testId: string) => TestSpecSchema.parse({ testId, title: `T ${testId}`, kind: "web", category: "Cart", source: { origin: "browser-agent", requirements: ["R-2"] }, expectedResults: ["The total is $21.00 (rule R-2)"], steps: [{ action: "navigate", url: "/cart" }, check] });
 const run = (testId: string, outcome: "pass" | "fail", i = 1, n = 1): ScriptRun => ({
     testId,
     status: outcome === "pass" ? "passed" : "failed",
@@ -231,5 +232,22 @@ describe("eng-fix3: the budget's leftovers, the expectation check before the vot
         expect(r.findingClass).toBe("incorrect_expectation");
         expect(r.state).not.toBe("confirmed");
         expect(r.confidenceDetail?.confidence).toBe("low");
+    });
+
+    it("an execution finding is judged against its written expected result, not the text that carries the check's own value (eng-fix3-verify)", async () => {
+        const spec = TestSpecSchema.parse({ testId: "WEB-300", title: "Short password refused", kind: "web", category: "Cart", source: { origin: "browser-agent", requirements: ["2.7"] }, expectedResults: ["A message stating the minimum of 8 characters is shown (requirement 2.7)"], steps: [{ action: "navigate", url: "/register" }, { action: "click", locator: { by: "role", role: "button", value: "Create account" } }, { action: "assert", check: "text", locator: { by: "testId", value: "msg" }, expected: "at least 8 characters", source: "expected:1" }] });
+        const projectId = String(platform.repo.createProject({ name: "Execution unstated" }).id);
+        const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5591", { ...DEFAULT_JOB_OPTIONS }) as string;
+        const suiteId = platform.repo.getOrCreateSuite(projectId, "Cart", "cart");
+        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
+        const id = platform.repo.insertTest({ projectId, suiteId, jobId: null, spec, framework: "playwright", validationStatus: "VALIDATED" });
+        const t = platform.repo.getTest(id)!;
+        const [f] = await harvestExecutionFindings(store, { projectId, jobId: job.id, failed: [{ test: { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework }, run: failingAt3(t.testKey)[0]! }] });
+        platform.repo.setJobStatus(job.id, "COMPLETED");
+        const execute: VerifyDeps["execute"] = async (_a, b) => failingAt3(b.scripts[0]!.testId);
+        await verifyAfterJob(platform, platform.repo.getJob(job.id)!, { execute, harvested: true });
+        const r = (await store.get(projectId, f!.id))!;
+        expect(r.findingClass).toBe("incorrect_expectation");
+        expect(r.state).not.toBe("confirmed");
     });
 });

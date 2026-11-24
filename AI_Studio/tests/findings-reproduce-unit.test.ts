@@ -130,7 +130,8 @@ const spec = TestSpecSchema.parse({
     kind: "web",
     category: "Cart",
     source: { origin: "browser-agent" },
-    expectedResults: ["The subtotal is the sum of the lines"],
+    // States the amount the check expects: an unstated one would wait for a person (expectation.ts, eng-fix3).
+    expectedResults: ["The subtotal is the sum of the lines: $21.00"],
     steps: [
         { action: "navigate", url: "/login" },
         { action: "fill", locator: { by: "label", value: "Email" }, value: "{{credentials.username}}" },
