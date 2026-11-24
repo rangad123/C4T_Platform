@@ -87,6 +87,7 @@ import { createThumbnailer } from "./discovery/thumbnails.js";
 import { layerOfSpec, layerReport, type Layer, type LayerReport } from "./validation/layers.js";
 import { withStatedSources } from "./api/stated-source.js";
 import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
+import { apiOnAmount } from "./findings/expectation.js";
 import { benchProbeFor } from "./database/bench-data.js";
 import { DB_CHECKS_MAX, integrityChecks, webPersistenceChecks, withDatabaseChecks } from "./database/checks.js";
 import type { DbSchema } from "./database/probe.js";
@@ -1109,7 +1110,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ? await checkIndependence(browser, origin, replayed, { prepare, ...(shoot ? { shoot } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
                 const found = defectFinding({ scenario, rules: scenarioRules, requirementIds, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
-                const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}) };
+                // What the API's own answers say about an amount the failing check expects (findings/expectation.ts, read at verification).
+                const apiAmount = apiOnAmount(written.steps, outcome.capturedCheck?.source, outcome.calls);
+                const defectMeta = { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}), ...(found.finding ? { finding: found.finding } : {}), ...(apiAmount ? { apiAmount } : {}) };
                 const saved = (await persistNew(spec, "playwright", "NEEDS_REVIEW", `The application did not behave as expected: ${outcome.explanation.trim().replace(/\.+$/, "")}. ${found.basis}`, defectMeta)).testId;
                 if (!found.finding) ctx.emit({ stage: "generation", kind: "finding_invalid", level: "warn", message: `${saved} ${spec.title}: its candidate finding could not be built (${found.problem}); the test is saved for review without it.` });
                 summary.testsNeedingReview++;

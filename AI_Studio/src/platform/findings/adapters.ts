@@ -13,6 +13,7 @@ import { testStepFault } from "../../engine/validation/test-fault.js";
 import type { ScriptRun } from "../../engine/validation/runner.js";
 import type { SecurityFinding, ValidationState } from "../../security/contract.js";
 import type { CandidateFindingRecord } from "../candidate-finding-store.js";
+import type { Evidence } from "../../engine/evidence/model.js";
 
 /** The security module's states in lifecycle words (plan S2). */
 export const SECURITY_STATE: Record<ValidationState, FindingState> = {
@@ -138,6 +139,26 @@ export function attemptOf(run: ScriptRun, spec: TestSpec): Attempt {
         // An API test's responses are its application's own answers.
         requests: run.responses.slice(-20).map((x) => ({ method: x.method, path: x.path, status: x.status, own: true })),
     });
+}
+
+/** Requests of these kinds are the application's work (a page, a form sent, a call), not files the page loads. */
+const WORK_TYPES = new Set(["document", "fetch", "xhr"]);
+
+/**
+ * A web attempt with the requests its failing step made, from the run's evidence (V7: a page finding's root cause maps them to their
+ * handlers): the failing step's own requests, else those of the nearest earlier step that made any (a check after the click it checks).
+ * An attempt that already has requests (an API test's answers), or a run without evidence, is left as it is.
+ */
+export function withStepRequests(a: Attempt, ev: Pick<Evidence, "requests"> | undefined): Attempt {
+    if (a.requests.length || !ev || a.failedStep === undefined) return a;
+    const work = ev.requests.filter((r) => WORK_TYPES.has(r.type) && r.step <= a.failedStep!);
+    const step = work.reduce((m, r) => Math.max(m, r.step), -1);
+    if (step < 0) return a;
+    const requests = work
+        .filter((r) => r.step === step)
+        .slice(-20)
+        .map((r) => ({ method: r.method, path: r.path, status: r.status !== undefined && r.status <= 599 ? r.status : null, own: !r.host }));
+    return AttemptSchema.parse({ ...a, requests });
 }
 
 /**

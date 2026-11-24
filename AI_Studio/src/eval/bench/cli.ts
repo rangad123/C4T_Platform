@@ -31,6 +31,7 @@ import { benchMarkdown, layersMarkdown, observedMarkdown, verificationMarkdown }
 import { LAYERS_ONLY_EXPLORATION, layersOnlyLlm } from "./layers-only.js";
 import { BenchmarkSchema, type Benchmark, type BenchAppResult, type BenchConfig, type PriceRow } from "./schema.js";
 import { verificationOf, type Verification } from "./verify-score.js";
+import { VERIFY_BUDGET } from "../../engine/findings/reproduce.js";
 
 export interface BenchDeps {
     /** Tests only: a scripted model for the in-process platform. Then no money is spent and no budget is asked for. */
@@ -590,6 +591,9 @@ export function previousCalibration(dir: string): ReturnType<typeof calibrationO
     return undefined;
 }
 
+/** No cap on the findings a bench trial verifies; each still gets the product's minutes. */
+export const BENCH_VERIFY_BUDGET = { ...VERIFY_BUDGET, findingsPerRun: Number.MAX_SAFE_INTEGER };
+
 /** `--verify-attempts`: the jobs' findings verified as onJobFinished does (verify-service.ts; no AI), then what the platform recorded. */
 export const verifierOf = (platform: Platform, attempts: number, root = REPO_ROOT) => async (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string): Promise<Verification> => {
     const { verifyAfterJob } = await import("../../platform/findings/verify-service.js");
@@ -597,7 +601,8 @@ export const verifierOf = (platform: Platform, attempts: number, root = REPO_ROO
     const t0 = Date.now();
     for (const id of jobIds) {
         const job = platform.repo.getJob(id);
-        if (job) await verifyAfterJob(platform, job, { attempts, ...(findingTests ? { findingTests } : {}) });
+        // A bench trial verifies every candidate (V2, V3): the product's per-run budget would leave some waiting, unscored.
+        if (job) await verifyAfterJob(platform, job, { attempts, budget: BENCH_VERIFY_BUDGET, ...(findingTests ? { findingTests } : {}) });
     }
     const verified = await verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
     return withRootCauses(platform, projectId, verified, source, root);

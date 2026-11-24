@@ -82,8 +82,9 @@ describe("--roles catalogue", () => {
         expect(rbac).toEqual([
             { name: "ana", username: "ana@example.test", password: "Password1!" },
             { name: "ben", username: "ben@example.test", password: "Password1!" },
-            { name: "mia", username: "mia@example.test", password: "Password1!" },
-            { name: "ada", username: "ada@example.test", password: "Password1!" },
+            // The only manager and the only admin are named after their role; the two users after their email.
+            { name: "manager", username: "mia@example.test", password: "Password1!" },
+            { name: "admin", username: "ada@example.test", password: "Password1!" },
         ]);
         for (const r of [...shop, ...rbac]) {
             expect(Object.keys(r).sort()).toEqual(["name", "password", "username"]);

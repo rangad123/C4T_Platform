@@ -53,8 +53,8 @@ export interface Catalogue {
     /** sha256 of the file, so a result names exactly the catalogue it was judged against. */
     sha256: string;
     defects: CatalogueDefect[];
-    /** Each app's fixture accounts (email and password only). */
-    accounts?: Record<string, Array<{ email: string; password: string }>>;
+    /** Each app's fixture accounts (email, password and the app role it holds, where the catalogue gives one). */
+    accounts?: Record<string, Array<{ email: string; password: string; role?: string }>>;
 }
 
 export function parseCatalogue(text: string): Catalogue {
@@ -66,7 +66,7 @@ export function parseCatalogue(text: string): Catalogue {
     }
     const parsed = CatalogueSchema.safeParse(raw);
     if (!parsed.success) throw new Error(`The defect catalogue has problems: ${parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    const accounts = Object.fromEntries(Object.entries(parsed.data.apps ?? {}).map(([app, a]) => [app, a.accounts.map(({ email, password }) => ({ email, password }))]));
+    const accounts = Object.fromEntries(Object.entries(parsed.data.apps ?? {}).map(([app, a]) => [app, a.accounts.map(({ email, password, role }) => ({ email, password, ...(typeof role === "string" ? { role } : {}) }))]));
     return { version: parsed.data.version, sha256: crypto.createHash("sha256").update(text).digest("hex"), defects: parsed.data.defects, accounts };
 }
 

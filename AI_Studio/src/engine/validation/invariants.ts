@@ -143,6 +143,43 @@ export function invariantProblem(inv: Invariant, input: InvariantInput, requirem
     return undefined;
 }
 
+/** "SAVE10 takes 10% off the order subtotal": the code and the percentage. */
+const PERCENT_OFF = /\b([A-Z]{2,}\d+[A-Z0-9]*)\b[^.]*?\b(\d{1,2}(?:\.\d+)?)\s?%\s+off\s+(?:the\s+|your\s+)?(?:order\s+)?subtotal\b/;
+/** "Shipping is free when the subtotal after the discount is $50.00 or more": the threshold, and whether the discount comes off first. */
+const FREE_SHIPPING = /\bshipping is free (?:when|if|for orders where) the (?:order )?subtotal( after (?:the )?discount)? is [$€£]?\s?(\d+(?:\.\d{1,2})?) or more\b/i;
+
+/**
+ * Invariants code can read from the requirement text itself, for the two money rules shops state (paid series: the model proposed none
+ * for bench-shop's 4.1 and 4.5, so BS-01 and BS-11 were never probed): a code's percentage off the subtotal, and free shipping from a
+ * threshold. Each names a documented code operation and a write whose answer holds the fields, in cents when those are whole numbers.
+ * They go through the same checks as the model's (invariantProblem); none when the text or the API does not fit.
+ */
+export function statedInvariants(input: InvariantInput): Invariant[] {
+    const writes = input.apis.filter((a) => a.method.toUpperCase() === "POST" && !/discount|coupon|promo|voucher/i.test(a.path) && [...sentNames(a)].some((n) => n !== "code"));
+    const answering = (fields: string[]) => writes.find((a) => fields.every((f) => fieldPaths(answerSchema(a)).has(f)));
+    const out: Invariant[] = [];
+    for (const r of input.requirements) {
+        const off = PERCENT_OFF.exec(r.text);
+        const free = FREE_SHIPPING.exec(r.text);
+        if (off) {
+            const codeOp = input.apis.find((a) => a.method.toUpperCase() === "POST" && sentNames(a).has("code"));
+            const w = answering(["subtotal", "discount"]);
+            if (!codeOp || !w) continue;
+            const cents = fieldPaths(answerSchema(w)).get("subtotal") === "integer";
+            const rate = Number(off[2]) / 100;
+            out.push({ requirementId: r.id, endpoint: `POST ${codeOp.path}`, setup: [`POST ${codeOp.path}`], setupBodies: [{ code: off[1]! }], write: `POST ${w.path}`, expression: cents ? `discount == round(subtotal * ${rate})` : `discount == round(subtotal * ${rate}, 2)` });
+        } else if (free) {
+            const after = Boolean(free[1]);
+            const w = answering(["subtotal", "shipping", ...(after ? ["discount"] : [])]);
+            if (!w) continue;
+            const cents = fieldPaths(answerSchema(w)).get("subtotal") === "integer";
+            const at = cents ? Math.round(Number(free[2]) * 100) : Number(free[2]);
+            out.push({ requirementId: r.id, endpoint: `POST ${w.path}`, setup: [], write: `POST ${w.path}`, expression: `(${after ? "subtotal - discount" : "subtotal"} >= ${at}) implies shipping == 0` });
+        }
+    }
+    return out;
+}
+
 const MARKER = /<<<\s*(?:REQUIREMENTS|ENDPOINTS)|(?:REQUIREMENTS|ENDPOINTS)\s*>>>/gi;
 const line = (s: string, max = 300) => s.replace(MARKER, " ").replace(/\s+/g, " ").trim().slice(0, max);
 
@@ -167,15 +204,24 @@ export function invariantPrompt(input: InvariantInput): string {
     return maskSecrets(text, input.secrets);
 }
 
-/** One AI call, then validation. A failed call is reported (error), never thrown: the run carries on without invariants. */
+/**
+ * One AI call, then validation, with the invariants the requirement text states (statedInvariants) added for each requirement the model
+ * proposed nothing for. A failed call is reported (error), never thrown: the run carries on with the stated ones.
+ */
 export async function proposeInvariants(ctx: Pick<EngineContext, "llm">, input: InvariantInput): Promise<{ invariants: Invariant[]; report: InvariantReport }> {
     let proposed: Invariant[];
+    let error: string | undefined;
     try {
         // Parsed again here: an answer that is not the schema's shape is a failed proposal, never a failed run.
         proposed = ProposalSchema.parse(await ctx.llm.object({ system: SYSTEM, prompt: invariantPrompt(input), schema: ProposalSchema, purpose: "planning", maxOutputTokens: 4096 })).invariants;
     } catch (e) {
-        return { invariants: [], report: { proposed: 0, kept: 0, dropped: [], error: `The invariant proposal failed: ${maskSecrets(e instanceof Error ? e.message : String(e), input.secrets)}`.slice(0, 300) } };
+        proposed = [];
+        error = `The invariant proposal failed: ${maskSecrets(e instanceof Error ? e.message : String(e), input.secrets)}`.slice(0, 300);
     }
+    const covered = new Set(proposed.map((p) => p.requirementId));
+    // The stated ones first: they cost nothing and are never the ones the cap drops.
+    proposed = [...statedInvariants(input).filter((p) => !covered.has(p.requirementId)), ...proposed];
+    if (error && !proposed.length) return { invariants: [], report: { proposed: 0, kept: 0, dropped: [], error } };
     const ids = new Set(input.requirements.map((r) => r.id));
     const invariants: Invariant[] = [];
     const dropped: InvariantReport["dropped"] = [];
@@ -184,5 +230,5 @@ export async function proposeInvariants(ctx: Pick<EngineContext, "llm">, input: 
         if (reason) dropped.push({ requirementId: inv.requirementId.slice(0, 80), endpoint: inv.endpoint.slice(0, 300), reason: reason.slice(0, 300) });
         else invariants.push(inv);
     }
-    return { invariants, report: { proposed: proposed.length, kept: invariants.length, dropped } };
+    return { invariants, report: { proposed: proposed.length, kept: invariants.length, dropped, ...(error ? { error } : {}) } };
 }
