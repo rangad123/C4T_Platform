@@ -57,12 +57,45 @@ export interface Verdict {
     classification: Classification;
 }
 
+/** The start of the `environment` note carriedOver puts on an attempt that began from an earlier attempt's changes. */
+export const CARRIED_OVER = "It started from the data an earlier attempt changed";
+const READS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Without a reset between attempts, a test that changes data leaves the next attempt a different start (V10 R3: attempt 1 cancelled the
+ * order, so attempts 2 and 3 stopped at the "still shipped" precondition). An attempt that stopped at an earlier step than an earlier
+ * attempt that wrote to the application (an accepted POST, PUT, PATCH or DELETE of its own) is that earlier attempt's side effect, not a
+ * reproduction: it gets an `environment` note saying so, which keeps it out of the count.
+ * shortcut: judged by the requests an attempt records (all of an API test's; only the failing step's of a page test), so a page test's
+ * earlier writes go unseen; upgrade with the run's whole request list.
+ */
+export function carriedOver(attempts: readonly Attempt[]): Attempt[] {
+    const wrote = (b: Attempt) => b.requests.find((r) => r.own && !READS.has(r.method.toUpperCase()) && (r.status ?? 0) >= 200 && (r.status ?? 0) < 300);
+    return attempts.map((a, i) => {
+        const by = attempts.slice(0, i).findIndex((b) => b.outcome === "failed" && b.failedStep !== undefined && wrote(b));
+        const w = attempts[by];
+        if (!w || a.outcome !== "failed" || a.failedStep === undefined || a.failedStep >= w.failedStep! || a.environment) return a;
+        const write = wrote(w)!;
+        return { ...a, environment: `${CARRIED_OVER} (attempt ${by + 1} sent ${write.method} ${write.path}, answered ${write.status}), so it stopped at step ${a.failedStep}, before the check attempt ${by + 1} failed at (step ${w.failedStep}). It does not count as a reproduction.` };
+    });
+}
+
 /** The move out of Verification pending that these attempts make. */
-export function verdictOf(f: Pick<FindingView, "expected" | "layer">, attempts: readonly Attempt[], account: AttemptAccount): Verdict {
+export function verdictOf(f: Pick<FindingView, "expected" | "layer"> & Partial<Pick<FindingView, "independence">>, attempts: readonly Attempt[], account: AttemptAccount): Verdict {
     const classification = classify({ attempts: [...attempts], expected: f.expected, layer: f.layer, independence: account.clean ? "independent" : "not_on_clean_state" });
     const n = attempts.length;
     const v = (to: Verdict["to"], reason: string): Verdict => ({ to, reason, classification });
     if (n === 0) return v("unconfirmed", "No verification attempt ran, so nothing shows the failure comes back.");
+    // Only the attempts that started from the same data are evidence: a person checks the rest, or sets a reset request (V10 R3).
+    const carried = attempts.filter((a) => a.environment?.startsWith(CARRIED_OVER)).length;
+    if (carried) {
+        const own = attempts.filter((a) => !a.environment?.startsWith(CARRIED_OVER));
+        const failed = own.filter((a) => a.outcome === "failed").length;
+        return v(
+            "needs_manual_review",
+            `The test changes data and the application was not reset between attempts: ${carried} of ${n} attempts started from what an earlier attempt changed, so only ${own.length} count (${failed} of them failed). Set the project's reset request so each attempt starts from the same data, or check it by hand.`,
+        );
+    }
     if (attempts.every((a) => a.outcome === "passed")) {
         return v(
             "unconfirmed",
@@ -81,6 +114,9 @@ export function verdictOf(f: Pick<FindingView, "expected" | "layer">, attempts: 
     if (!isReproduced(c.reproduced)) return v("unconfirmed", c.reason);
     const same = `The same check failed the same way in ${c.reproduced.same} of ${n} attempts`;
     if (!account.clean) return v("unconfirmed", `${same}, but only ${account.note}. It stays unconfirmed until clean state reproduces it.`);
+    // The engine's own replays when it was found said it does not reproduce (V10 R10): the two disagree, so it is never Confirmed alone.
+    if (f.independence === "state_dependent")
+        return v("needs_manual_review", `${same}, ${account.note}, but the replays when it was found did not reproduce it. A person checks which is right.`);
     return v("reproduced", `${same}, ${account.note}.`);
 }
 

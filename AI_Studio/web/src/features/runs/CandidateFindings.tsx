@@ -133,12 +133,15 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
     const rv = rec.review;
     const h = `run-finding-${n}`;
     // The source's own reference (a rule or requirement id), for someone tracing the finding back; a plan's "expected:N" says nothing more.
-    const ref = f.expected.source && !f.expected.source.startsWith("expected:") ? f.expected.source : (f.objective?.source ?? null);
+    const expected = rv.expected ?? f.expected;
+    const ref = expected.source && !expected.source.startsWith("expected:") ? expected.source : (f.objective?.source ?? null);
+    const shots = [...ev.screenshots, ...(rv.screenshots ?? [])];
+    const requests = rv.requests?.length ? rv.requests : ev.requests;
     return (
         <li className={`fnd-item is-${f.capture}`} data-testid="finding" data-capture={f.capture} data-state={rec.state} aria-labelledby={h}>
             <div className="fnd-head">
                 <h3 className="t-card fnd-title" id={h} data-testid="finding-observed">
-                    {f.observed}
+                    {rv.headline ?? f.observed}
                 </h3>
                 <div className="fnd-badges">
                     <Badge tone={STATUS_TONE[bucketOf(rec)]}>
@@ -176,13 +179,19 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                         <span data-testid="finding-actions">{plural(f.actions.stepCount, "action")}</span>
                     )}
                 </dd>
+                {rv.account && (
+                    <>
+                        <dt>Signed in as</dt>
+                        <dd data-testid="finding-account">{rv.account}</dd>
+                    </>
+                )}
                 <dt>Expected</dt>
                 <dd>
                     <span className="fnd-block" data-testid="finding-expected">
-                        {f.expected.text}
+                        {expected.text}
                     </span>
                     <span className="t-meta fnd-block fnd-source" data-testid="finding-source">
-                        {sourceText(f.expected.source)}
+                        {sourceText(expected.source)}
                     </span>
                 </dd>
                 <dt>Confidence</dt>
@@ -206,12 +215,12 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                     {possibleWhy(rv)}
                 </p>
             )}
-            {ev.screenshots.length > 0 && (
+            {shots.length > 0 && (
                 <ul className="fnd-shots" data-testid="finding-screenshots">
-                    {ev.screenshots.map((id, i) => (
+                    {shots.map((id, i) => (
                         <li key={id}>
                             <a href={artifactUrl(id)} target="_blank" rel="noreferrer">
-                                <img className="fnd-thumb" src={artifactUrl(id)} alt={shotAlt(i, ev.screenshots.length)} loading="lazy" />
+                                <img className="fnd-thumb" src={artifactUrl(id)} alt={shotAlt(i, shots.length)} loading="lazy" />
                                 <span className="t-meta">Open larger</span>
                             </a>
                         </li>
@@ -221,7 +230,7 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
             <details className="disclosure">
                 <summary>
                     <ChevronRight size={16} className="chev" aria-hidden />
-                    Evidence ({plural(ev.screenshots.length, "screenshot")}, {plural(ev.requests.length, "request")}, {plural(ev.console.length, "console line")})
+                    Evidence ({plural(shots.length, "screenshot")}, {plural(requests.length, "request")}, {plural(ev.console.length, "console line")})
                 </summary>
                 <div className="stack-sm fnd-evidence" data-testid="finding-evidence">
                     {ref && (
@@ -237,18 +246,18 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                             {CONFIDENCE_WORD[rv.confidence]}: {rv.confidenceBasis}
                         </li>
                     </ul>
-                    {ev.screenshots.length ? (
+                    {shots.length ? (
                         <p className="t-meta">Password fields and stored secrets are covered in the pictures above.</p>
                     ) : (
                         <p className="t-secondary" data-testid="finding-screenshots">
                             No screenshot was saved for this finding.
                         </p>
                     )}
-                    {ev.requests.length > 0 && (
+                    {requests.length > 0 && (
                         <>
                             <h4 className="t-meta fnd-sub">Requests</h4>
                             <ul className="fnd-lines" data-testid="finding-requests">
-                                {ev.requests.map((l, i) => (
+                                {requests.map((l, i) => (
                                     <li key={i}>{l}</li>
                                 ))}
                             </ul>

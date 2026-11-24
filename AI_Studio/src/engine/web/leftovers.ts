@@ -76,7 +76,7 @@ const PATH_ID = /\/([a-z]{1,4}\d+|\d{2,})(?=$|[/?#\s"'])/gi;
 /** A record number in a heading: "Note n17", "Order #1034" (letters then digits, or # then digits). */
 const HEADING_ID = /(?<![\w-])#?([a-z]{1,4}\d+)\b|#(\d{2,})\b/gi;
 /** A {{unique}} value as a run writes it: the time in milliseconds (2020 to 2033), with the Playwright worker's index after it. */
-const RUN_VALUE = /\b1[6-9]\d{11}\d{0,2}\b/g;
+export const RUN_VALUE = /\b1[6-9]\d{11}\d{0,2}\b/g;
 /** Checks that something is absent: on a fresh account that holds, so they are not leaning on leftovers. */
 const ABSENCE_CHECKS = new Set(["hidden", "notText", "count"]);
 

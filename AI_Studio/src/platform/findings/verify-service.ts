@@ -14,13 +14,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { cleanReplayPlan, signupPathOf } from "../../engine/explore/clean-account.js";
 import { dedupe } from "../../engine/findings/dedupe.js";
-import { attemptsSetting, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type BudgetRun, type VerifyBudget } from "../../engine/findings/reproduce.js";
-import { confidenceScore } from "../../engine/findings/score.js";
+import { attemptsSetting, carriedOver, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type BudgetRun, type VerifyBudget } from "../../engine/findings/reproduce.js";
+import { confidenceScore, severityOf } from "../../engine/findings/score.js";
+import { concurrencyAllowed, riskyGateFor } from "../../engine/api/concurrency.js";
+import { hasCurrentAuthorization } from "../../security/authorization-gate.js";
 import type { Attempt } from "../../engine/findings/view.js";
 import { getAdapter, hasAdapter, renderWithAdapter, type ExecutionBatch, type ExecutionEnv, type ExecutionOptions } from "../../engine/frameworks/index.js";
 import type { RenderContext } from "../../engine/generators/types.js";
 import { parseEvidence, type Evidence } from "../../engine/evidence/model.js";
-import { parseAttemptNote, type RunEnv, type ScriptRun } from "../../engine/validation/runner.js";
+import { attemptNote, parseAttemptNote, type RunEnv, type ScriptRun } from "../../engine/validation/runner.js";
 import { testStepFault } from "../../engine/validation/test-fault.js";
 import { startingIdsOf } from "../../engine/web/leftovers.js";
 import { clip, HIDDEN, redactText } from "../../shared/redact-text.js";
@@ -157,7 +159,10 @@ async function confirmAndGroup(d: VerifyDeps, out: VerifyResult): Promise<void> 
         if (v.to !== "reproduced") continue;
         const r = await d.store.get(d.projectId, v.id);
         if (r?.state !== "reproduced" || r.confidenceDetail?.confidence !== "high") continue;
-        await d.store.transition(d.projectId, v.id, { to: "confirmed", by: "engine", reason: `Confirmed at high confidence. ${v.reason}` });
+        const t = r.testId ? d.testOf(r.testId) : undefined;
+        // A confirmed finding carries its severity (V10: it was null on every one), from the same rules the card shows.
+        const severity = r.severity ?? severityOf(fromCandidate(r, t ? { id: t.id, title: t.title, spec: t.spec, meta: t.meta } : undefined)).severity;
+        await d.store.transition(d.projectId, v.id, { to: "confirmed", by: "engine", reason: `Confirmed at high confidence. ${v.reason}`, set: { severity } });
     }
     try {
         const all = await d.store.list(d.projectId);
@@ -203,19 +208,31 @@ async function settle(d: VerifyDeps, f: CandidateFindingRecord, to: "unconfirmed
  * Runs a finding's test `attempts` times as V1 does (a fresh browser each, a new account where it is safe, no video) and judges them.
  * Changes no finding. Also the regression service's check of a claimed fix (regression-service.ts). Throws when the attempts cannot run.
  */
-export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFindingRecord, test: VerifyTest, signal: AbortSignal, attempts = attemptsSetting(d.attempts)) {
+export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFindingRecord, test: VerifyTest, signal: AbortSignal, attempts = attemptsSetting(d.attempts), reset?: VerifyDeps["reset"]) {
     const { spec } = test;
     const adapterId = getAdapter(test.framework).id;
     // Who the attempts run as: a new account per attempt where it is safe (explore/clean-account.ts), else the reason it is not.
     const plan = cleanReplayPlan({ steps: spec.steps, roleAccount: spec.tags.some((t) => t.startsWith("role:")), dataChanges: d.dataChanges, ...(d.signupPath ? { signupPath: d.signupPath } : {}), ...(d.startingIds ? { startingIds: d.startingIds } : {}) });
     const script = renderWithAdapter(spec, adapterId, d.render);
-    const runs = await d.execute(adapterId, { scratchDir: d.scratchDir, scripts: [{ testId: spec.testId, filename: script.filename, content: script.content }] }, { run: d.env }, {
-        workers: 1,
-        signal,
-        attempts,
-        video: false,
-        ...(plan.register ? { freshAccount: { signupPath: plan.signupPath, ...(d.loginPath ? { loginPath: d.loginPath } : {}) } } : {}),
-    });
+    const run = (n: number) =>
+        d.execute(adapterId, { scratchDir: d.scratchDir, scripts: [{ testId: spec.testId, filename: script.filename, content: script.content }] }, { run: d.env }, {
+            workers: 1,
+            signal,
+            attempts: n,
+            video: false,
+            ...(plan.register ? { freshAccount: { signupPath: plan.signupPath, ...(d.loginPath ? { loginPath: d.loginPath } : {}) } } : {}),
+        });
+    let runs: ScriptRun[] = [];
+    if (reset) {
+        // Q5: the application is reset before each attempt, so a test that changes data starts every attempt from the same data (V10 R3).
+        for (let i = 1; i <= attempts; i++) {
+            const sent = await reset.send(signal);
+            if (!sent.ok) throw new Error(`the application could not be reset before attempt ${i} (${sent.message})`);
+            const one = await run(1);
+            const note = parseAttemptNote(one[0]?.notes?.[0]);
+            runs.push(...one.map((x) => ({ ...x, notes: [attemptNote(i, attempts, note?.clean !== undefined ? { clean: note.clean, note: note.note } : undefined), ...(x.notes ?? []).slice(1)] })));
+        }
+    } else runs = await run(attempts);
     if (signal.aborted) throw signal.reason ?? new Error("stopped");
     const notes = runs.map((x) => parseAttemptNote(x.notes?.[0]));
     const account: AttemptAccount = plan.register
@@ -226,9 +243,13 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
         runs.map(async (x) => {
             const file = x.artifacts.find((a) => a.kind === "evidence");
             const ev = file ? parseEvidence(await fs.readFile(file.path, "utf8").catch(() => ""), secrets) : undefined;
-            return withStepRequests(attemptOf(x, spec), ev);
+            const a = withStepRequests(attemptOf(x, spec), ev);
+            const who = parseAttemptNote(x.notes?.[0])?.note;
+            return who ? { ...a, account: who } : a;
         }),
     );
+    // Without a reset, an attempt that began from an earlier attempt's changes is not a reproduction (findings/reproduce.ts).
+    if (!reset) tried.splice(0, tried.length, ...carriedOver(tried));
     const view = judgedView(fromCandidate(f, test), f, test, tried);
     let verdict = verdictOf(view.view, tried, account);
     // An amount no API answer was compared with is never confirmed by the vote alone: a person checks it.
@@ -251,11 +272,7 @@ async function verifyOne(d: VerifyDeps, r: { f: CandidateFindingRecord; test: Ve
     const { f, test } = r;
     if (f.state === "candidate") await d.store.transition(d.projectId, f.id, { to: "verification_pending", by: "engine" });
     try {
-        if (reset) {
-            const sent = await reset.send(signal);
-            if (!sent.ok) return await settle(d, f, "unconfirmed", `It could not be verified: the application could not be reset first (${sent.message}).`);
-        }
-        const { runs, notes, account, tried: raw, view, verdict } = await attemptsOn(d, f, test, signal, attempts);
+        const { runs, notes, account, tried: raw, view, verdict } = await attemptsOn(d, f, test, signal, attempts, reset);
         const tried = maskValue(raw, runSecretValues(d.env));
         const appVersion = (await d.appVersion?.().catch(() => null)) ?? null;
         for (const [i, x] of runs.entries()) await keepEvidence(d, f, test, x, tried[i]!, i + 1, runs.length, account, notes[i]?.note, appVersion);
@@ -363,6 +380,8 @@ type VerifyAfterOptions = {
     harvested?: boolean;
     /** The tests a creation job left as findings, when their statuses have changed since (the benchmark reruns and replays first). */
     findingTests?: ReadonlySet<string>;
+    /** A reset of the application in place of the project's saved one (the benchmark's own app reset). */
+    reset?: VerifyDeps["reset"];
 };
 
 async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions): Promise<(VerifyResult & { queuedJobId?: string }) | undefined> {
@@ -403,6 +422,7 @@ async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions
     }
     return verifyFindings({
         ...verifyDepsOf(p, job, { emit, ...(o.execute ? { execute: o.execute } : {}), ...(o.ranOn ? { ranOn: o.ranOn } : {}) }),
+        ...(o.reset ? { reset: o.reset } : {}),
         findings,
         ...(o.attempts !== undefined ? { attempts: o.attempts } : {}),
         ...(o.budget ? { budget: o.budget } : {}),
@@ -462,14 +482,21 @@ export function verifyDepsOf(p: Platform, job: JobRow, o: { execute?: VerifyDeps
     const origin = new URL(app.url).origin;
     const c = app.credentials;
     const roles = new IdentityStore(p.repo.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).get(job.projectId);
+    const apiBaseUrl = (app.config.apiBaseUrl as string | undefined) ?? origin;
+    const dataChanges = job.options.allowMutatingApiTests === true || app.config.allowMutatingApiTests === true;
+    // The risky-checks gate a run of these tests had (job-runner.ts riskyChecksGateOf): without it an access write skips itself, and its
+    // attempts verify nothing (V10 R7, R9).
+    const gate = riskyGateFor(p.config.BENCH_RISKY_CHECKS ? "bench" : hasCurrentAuthorization(p.db, job.projectId, app.url) ? "authorization" : undefined, app.url, apiBaseUrl);
+    const riskyChecks = gate && concurrencyAllowed({ dataChanges, appUrl: apiBaseUrl, gate }).allowed ? gate : undefined;
     const env: RunEnv = {
         baseUrl: origin,
-        apiBaseUrl: (app.config.apiBaseUrl as string | undefined) ?? origin,
+        apiBaseUrl,
         ...(c?.username && c.password ? { credentials: { username: c.username, password: c.password, ...(c.totpSecret ? { totpSecret: c.totpSecret } : {}) } } : {}),
         ...(roles.length ? { roles } : {}),
         ...(c?.apiToken ? { apiToken: c.apiToken } : {}),
         ...(c?.apiAuthHeader ? { apiAuthHeader: c.apiAuthHeader } : {}),
         headless: true,
+        ...(riskyChecks ? { riskyChecks } : {}),
     };
     const hook = new ResetHookStore(p.repo.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).secret(job.projectId, "");
     const facts = modelFacts(app.model ?? p.repo.getLatestAppModel(job.projectId));
@@ -483,7 +510,7 @@ export function verifyDepsOf(p: Platform, job: JobRow, o: { execute?: VerifyDeps
         scratchDir: p.config.scratchDir,
         execute: o.execute ?? ((a, b, e, x) => localExecutor.execute(a, b, e, x)),
         ranOn: o.ranOn ?? "the platform",
-        dataChanges: job.options.allowMutatingApiTests === true || app.config.allowMutatingApiTests === true,
+        dataChanges,
         ...(facts.signupPath ? { signupPath: facts.signupPath } : {}),
         ...(facts.loginPath ? { loginPath: facts.loginPath } : {}),
         startingIds: facts.startingIds,

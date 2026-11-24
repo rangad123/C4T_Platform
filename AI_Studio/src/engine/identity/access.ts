@@ -36,6 +36,12 @@ export const ACCESS_FAILURE_PREFIX = "Access control check failed:";
 export const ACCESS_HELPER_SOURCE = String.raw`const ACCESS_PREFIX = ${JSON.stringify(ACCESS_FAILURE_PREFIX)};
 const ACCESS_OTP = 'input[autocomplete="one-time-code"]:visible, input[name*="otp" i]:visible, input[name*="totp" i]:visible, input[name*="2fa" i]:visible, input[name*="mfa" i]:visible, input[name*="verif" i]:visible, input[name="code" i]:visible, input[id*="otp" i]:visible, input[id*="code" i]:visible, input[placeholder*="code" i]:visible';
 
+/** A request this check sent itself, on a line of its own that the finding's report reads (platform/findings/adapters.ts): secret-named values hidden. */
+function accessSent(method, path, status, body) {
+    const shown = body === undefined ? "" : " " + JSON.stringify(body, (k, v) => (k && /pass|secret|token|api_?key|auth|cookie|session|otp|cvv/i.test(k) && v !== null && typeof v !== "object" ? "[hidden]" : v)).slice(0, 300);
+    return "\nRequest: " + method + " " + path + shown + " -> HTTP " + status;
+}
+
 function accessEnv(role) {
     const k = "TEST_" + role.toUpperCase().replace(/-/g, "_");
     return { username: process.env[k + "_USERNAME"] || "", password: process.env[k + "_PASSWORD"] || "", totp: process.env[k + "_TOTP_SECRET"] || "" };
@@ -155,8 +161,8 @@ async function accessApiAssert(page, base, cfg) {
         if (!read || read.status < 200 || read.status >= 300 || (cfg.of && read.body === undefined)) return;
         const who = cfg.as === "anonymous" ? "Anyone who is not signed in" : "A signed-in “" + cfg.as + "” user";
         const doc = cfg.documented ? " (documented: HTTP " + cfg.documented + ")" : "";
-        if (cfg.of) throw new Error(ACCESS_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] " + who + " can call GET " + where + " (HTTP " + read.status + "), a record listed for the “" + cfg.of + "” account and not for “" + cfg.as + "”" + doc + ", so this is possible broken access control between accounts: check that the API refuses one account's records to another account");
-        throw new Error(ACCESS_PREFIX + " 1 endpoint may be open to someone who should not call it\n- [" + cfg.sev + "] " + who + " can call GET " + where + " (HTTP " + read.status + "). It is normally reached only by “" + cfg.by + "”" + doc + ", so this is possible broken access control: check that this endpoint is meant to be open to them");
+        if (cfg.of) throw new Error(ACCESS_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] " + who + " can call GET " + where + " (HTTP " + read.status + "), a record listed for the “" + cfg.of + "” account and not for “" + cfg.as + "”" + doc + ", so this is possible broken access control between accounts: check that the API refuses one account's records to another account" + accessSent("GET", where, read.status));
+        throw new Error(ACCESS_PREFIX + " 1 endpoint may be open to someone who should not call it\n- [" + cfg.sev + "] " + who + " can call GET " + where + " (HTTP " + read.status + "). It is normally reached only by “" + cfg.by + "”" + doc + ", so this is possible broken access control: check that this endpoint is meant to be open to them" + accessSent("GET", where, read.status));
     }
     if (!cfg.of) throw new Error("The check does not name the account the record belongs to, so it could not be judged whether GET " + where + " is open to “" + cfg.as + "”.");
     const evidence = (cfg.evidence || []).map((e) => {
@@ -177,7 +183,7 @@ async function accessApiAssert(page, base, cfg) {
     accessWalk(read.body, "", (v) => { if (ownerValues.has(v)) hits.set(v, ownerValues.get(v)); });
     if (!hits.size) return;
     const shown = [...new Set([...hits.values()])].map((e) => e.key + ": " + "•".repeat(Math.min(6, Math.max(1, e.length))) + " (" + e.length + " characters)").join("; ");
-    throw new Error(ACCESS_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user can call GET " + where + " (HTTP " + read.status + ") and the answer holds content of a record that belongs to the “" + cfg.of + "” account (" + shown + "; values masked, compared with the “" + cfg.of + "” account's own answer in this run only). Each account reaches its own records through addresses like " + cfg.pattern + ", so this is possible broken access control between accounts: check that the API refuses one account's records to another account");
+    throw new Error(ACCESS_PREFIX + " 1 record may be open to another account\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user can call GET " + where + " (HTTP " + read.status + ") and the answer holds content of a record that belongs to the “" + cfg.of + "” account (" + shown + "; values masked, compared with the “" + cfg.of + "” account's own answer in this run only). Each account reaches its own records through addresses like " + cfg.pattern + ", so this is possible broken access control between accounts: check that the API refuses one account's records to another account" + accessSent("GET", where, read.status));
 }
 
 /**

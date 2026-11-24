@@ -30,6 +30,7 @@ import { redactText } from "../../shared/redact-text.js";
 import { describeStep, type Step } from "../spec/schema.js";
 import { executeStep, runtimeData } from "../web/interpreter.js";
 import { nearbyTargets } from "../web/label-fallback.js";
+import { RUN_VALUE } from "../web/leftovers.js";
 import { usesTestAccount, type ReplayAccount } from "./clean-account.js";
 import type { IndependenceResult } from "./finding.js";
 
@@ -117,7 +118,7 @@ export function failureKind(message: string, opts: { plainIsValue?: boolean } = 
     return { kind: "other" };
 }
 
-/** A seen value as compared (CP3d U-1): a quoted one unquoted, spacing folded. */
+/** A seen value as compared (CP3d U-1): a quoted one unquoted, spacing folded, and a {{unique}} value of the run as {{unique}} (V10 R10: each replay types a new one). */
 function normalValue(v: string): string {
     let s = v.trim();
     if (/^"(?:[^"\\]|\\.)*"$/.test(s)) {
@@ -127,7 +128,7 @@ function normalValue(v: string): string {
             s = s.slice(1, -1);
         }
     }
-    return s.replace(/\s+/g, " ").trim();
+    return s.replace(RUN_VALUE, "{{unique}}").replace(/\s+/g, " ").trim();
 }
 /**
  * Whether a replay's failure of the captured check is the captured failure itself, judged as the independence check judges it: the same

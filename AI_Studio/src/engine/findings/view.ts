@@ -32,6 +32,8 @@ const RequestSchema = z
         own: z.boolean(),
         /** A transport error instead of an answer ("net::ERR_NAME_NOT_RESOLVED"). */
         error: text(L.lineMax).optional(),
+        /** The body sent, as JSON with secret-named values hidden (an access check's own write). */
+        body: text(L.lineMax).optional(),
     })
     .strict();
 
@@ -57,6 +59,8 @@ export const AttemptSchema = z
         /** The address the attempt stopped on. */
         page: text(L.lineMax).optional(),
         requests: z.array(RequestSchema).max(L.requestsMax).default([]),
+        /** Who the attempt ran as (validation/runner.ts attemptNote: "on a newly registered account each time"). */
+        account: text(L.lineMax).optional(),
         /** Top stack frames of an application error, `file:function` (line numbers dropped by the adapter or here). */
         stack: z.array(text(L.refMax)).max(L.framesMax).default([]),
     })
@@ -88,10 +92,16 @@ export const FindingViewSchema = z
             })
             .strict(),
         observed: text(L.textMax),
-        /** The saved test's steps (the action sequence). */
+        /** The saved test's steps (the action sequence), with a request's method and body and a step's typed or expected value. */
         steps: z
-            .array(z.object({ action: z.string().min(1).max(40), target: text(L.refMax).optional(), url: text(L.lineMax).optional() }).strict())
+            .array(
+                z
+                    .object({ action: z.string().min(1).max(40), target: text(L.refMax).optional(), url: text(L.lineMax).optional(), method: z.string().min(1).max(10).optional(), body: text(L.lineMax).optional(), value: text(L.refMax).optional() })
+                    .strict(),
+            )
             .max(L.stepsMax),
+        /** Who the test signs in as: the project's test account, a named one ("the “ana” test account"), or no one. */
+        account: text(L.refMax).optional(),
         attempts: z.array(AttemptSchema).max(L.attemptsMax),
         requirements: z.array(ref).max(L.listMax).default([]),
         /** An issue the finding is linked to (GitHub/Jira/Notion key). */

@@ -256,7 +256,7 @@ export function buildFindingReport(src: FindingReportInput): FindingReport {
         src.environment.appUrl || src.environment.browser ? `App version: ${line(src.environment.appVersion ?? "not recorded", 100)}` : "",
         src.environment.browser ? `Browser: ${line(src.environment.browser, 100)}` : "",
     ].filter(Boolean);
-    const requests = (failed?.requests ?? []).slice(0, 10).map((r) => `${line(r.method, 10)} ${line(r.path, 200)} → ${r.error ? line(r.error, 120) : (r.status ?? "no answer")}`);
+    const requests = (failed?.requests ?? []).slice(0, 10).map((r) => `${line(r.method, 10)} ${line(r.path, 200)}${r.body ? ` ${line(r.body, 300)}` : ""} → ${r.error ? line(r.error, 120) : (r.status ?? "no answer")}`);
     const rc = src.rootCause;
     const cause = rc?.location
         ? [`${ROOT_CAUSE_LABEL_TEXT[rc.label]}: ${line(where(rc.location), 300)}`, line(rc.location.explanation ?? rc.reason, 600)]
@@ -269,7 +269,10 @@ export function buildFindingReport(src: FindingReportInput): FindingReport {
         confidence: [`${conf.confidence[0]!.toUpperCase()}${conf.confidence.slice(1)}: ${line(conf.basis, 300)}`],
         area: area ? [line(area, 200)] : [],
         environment: env,
-        preconditions: src.spec?.preconditions.length ? src.spec.preconditions.map((p) => line(p, 300)) : ["None stated: the steps start in a new browser session."],
+        preconditions: [
+            ...(src.spec?.preconditions.length ? src.spec.preconditions.map((p) => line(p, 300)) : ["None stated: the steps start in a new browser session."]),
+            ...(f.account ? [`Signed in as ${line(f.account, 200)}.`] : []),
+        ],
         steps,
         expected: [`${line(f.expected.text, 600)}${f.expected.source ? ` (source: ${line(f.expected.source, 100)})` : ""}`],
         actual: [line(f.observed, 1000), ...(failed?.error ? [line(failed.error, 600)] : [])].filter(Boolean),
