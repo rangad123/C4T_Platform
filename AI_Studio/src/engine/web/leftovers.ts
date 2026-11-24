@@ -73,6 +73,8 @@ const SHARED_ACCOUNT = /\{\{\s*credentials\./;
 const NOT_FOUND = /\b(not found|404|no such|does not exist|doesn't exist|no longer exists)\b/i;
 /** A record number in an address: a path part of up to 4 letters and digits (n52, ord1034) or 2+ digits (1034). */
 const PATH_ID = /\/([a-z]{1,4}\d+|\d{2,})(?=$|[/?#\s"'])/gi;
+/** A record number in a heading: "Note n17", "Order #1034" (letters then digits, or # then digits). */
+const HEADING_ID = /(?<![\w-])#?([a-z]{1,4}\d+)\b|#(\d{2,})\b/gi;
 /** A {{unique}} value as a run writes it: the time in milliseconds (2020 to 2033), with the Playwright worker's index after it. */
 const RUN_VALUE = /\b1[6-9]\d{11}\d{0,2}\b/g;
 /** Checks that something is absent: on a fresh account that holds, so they are not leaning on leftovers. */
@@ -195,6 +197,19 @@ export function findLeftoverUse(steps: readonly Step[], startingIds?: ReadonlySe
                 if (startingIds.has(id) || usedIds.has(id)) continue;
                 usedIds.add(id);
                 found.push({ step: i + 1, what: `opens ${s.url.slice(0, 80)}, a record number the test never made` });
+            }
+        }
+        // The same in a check of the address or of a heading (paid trial rbac-5 WEB-027 `url /notes/n17`, rbac-4 WEB-038 `/notes/n25`).
+        if (startingIds && !checksNotFound && s.action === "assert") {
+            const address = (s.check === "url" || s.check === "urlPattern") && typeof s.expected === "string" ? s.expected : undefined;
+            const heading = l?.by === "role" && l.role === "heading" ? `${l.value ?? ""} ${typeof s.expected === "string" ? s.expected : ""}` : undefined;
+            const ids = address !== undefined ? [...address.matchAll(PATH_ID)].map((m) => m[1]!) : heading ? [...heading.matchAll(HEADING_ID)].map((m) => m[1] ?? m[2]!) : [];
+            for (const raw of ids) {
+                const id = `/${raw.toLowerCase()}`;
+                // A number the test typed itself (a title) is its own.
+                if (startingIds.has(id) || usedIds.has(id) || (heading !== undefined && seen.some((x) => x.includes(raw.toLowerCase())))) continue;
+                usedIds.add(id);
+                found.push({ step: i + 1, what: `checks ${(address ?? heading!).trim().slice(0, 80)}, a record number the test never made` });
             }
         }
         // A {{unique}} value of another run: this run writes a new one.
