@@ -84,7 +84,7 @@ import { senderName } from "./explore/request-target.js";
 import { usableRules, type AppKnowledge } from "./planning/planner.js";
 import { runMobileGeneration } from "./mobile/explore/pipeline.js";
 import { createThumbnailer } from "./discovery/thumbnails.js";
-import { layerOfSpec, layerReport, type Layer, type LayerReport } from "./validation/layers.js";
+import { layerOfSpec, layerReport, layersOfSpec, type Layer, type LayerReport } from "./validation/layers.js";
 import { withStatedSources } from "./api/stated-source.js";
 import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
 import { apiOnAmount } from "./findings/expectation.js";
@@ -919,9 +919,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             withStatedSources(spec, model.apis);
             // Which model version of the application the test was made from, when the exploration had one.
             if (req.appKnowledge) meta = { ...meta, modelVersion: req.appKnowledge.modelVersionId };
-            const layer = layerOfSpec(spec);
-            meta = { ...meta, layer };
-            layerTests[layer] = (layerTests[layer] ?? 0) + 1;
+            meta = { ...meta, layer: layerOfSpec(spec) };
+            // A test counts in every layer it checks: a read-back is an API test that also reads stored data back.
+            for (const l of layersOfSpec(spec)) layerTests[l] = (layerTests[l] ?? 0) + 1;
             const h = await sink.createTest({ spec, framework, validation, reason, meta });
             // The host takes the key at save (another scenario may have saved under the one asked for): the spec, its script and
             // everything after go by the key the test was saved under.

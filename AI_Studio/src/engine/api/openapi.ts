@@ -54,19 +54,23 @@ export function deref(spec: Json, schema: any, depth = 0): Json {
     const out: Json = { ...s };
     delete out.$ref;
     if (s.allOf) {
-        const merged: Json = { type: "object", properties: {}, required: [] };
-        for (const part of s.allOf) {
-            const d = deref(spec, part, depth + 1);
-            Object.assign(merged.properties, d.properties ?? {});
-            merged.required.push(...(d.required ?? []));
-        }
-        return { ...out, ...merged, allOf: undefined };
+        // Every part at once: their fields and required names joined, and their other keywords kept (an allOf around one reference
+        // keeps its type, enum or format, rather than becoming an object; a part's "no extra fields" then means none beyond all parts').
+        // shortcut: a part that is a oneOf / anyOf makes the whole node judged by its forms alone; split them if such documents turn up.
+        const { allOf, ...own } = s;
+        const parts = [...allOf, own].map((p: Json) => deref(spec, p, depth + 1));
+        const merged: Json = Object.assign({}, ...parts);
+        const properties = Object.assign({}, ...parts.map((p) => p.properties ?? {}));
+        const required = [...new Set(parts.flatMap((p) => p.required ?? []))];
+        if (Object.keys(properties).length || required.length) Object.assign(merged, { type: merged.type ?? "object", properties, required });
+        return merged;
     }
     if (s.oneOf || s.anyOf) {
-        const first = (s.oneOf ?? s.anyOf)[0];
-        // Only the first alternative is kept, so a response may legitimately match another one: flag it so contract
-        // checks skip this node instead of raising a false alarm.
-        return { ...deref(spec, first, depth + 1), ...(s.description ? { description: s.description } : {}), "x-aitp-lossy": true };
+        const key = s.oneOf ? "oneOf" : "anyOf";
+        const forms = (s[key] as Json[]).map((f) => deref(spec, f, depth + 1));
+        // The first form stands for the node wherever one shape is read (request bodies, ids, diffs), marked "x-aitp-lossy"; the
+        // contract check judges the response against every form.
+        return { ...forms[0], ...(s.description ? { description: s.description } : {}), "x-aitp-lossy": true, [key]: forms };
     }
     if (s.properties) {
         out.properties = Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, deref(spec, v, depth + 1)]));

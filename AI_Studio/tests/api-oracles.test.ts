@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { parseOpenApi } from "../src/engine/api/openapi.js";
 import { generateApiSpecs, type DraftSpec } from "../src/engine/api/test-specs.js";
+import { loadContractRuntime } from "../src/engine/contracts/check.js";
 import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import { benchOpenApi } from "./fixtures/bench-openapi.js";
@@ -123,5 +124,94 @@ describe("documented cases (C2)", () => {
             const spec = TestSpecSchema.parse({ ...d, testId: `API-${String(i + 1).padStart(3, "0")}` });
             expect(renderScript(spec, "playwright-api", { baseUrl: "http://127.0.0.1:9" }).content).toContain("await call(request");
         }
+    });
+});
+
+// ── Q6: the response-schema check judges every form the API document gives (JSON Schema oneOf / anyOf / allOf), in its own plain
+// words, instead of skipping the node. Expected verdicts follow JSON Schema's meaning of the keywords.
+const rt = loadContractRuntime();
+/** The failure lines for a value, or [] when it conforms. */
+function lines(value: unknown, schema: unknown): string[] {
+    try {
+        rt.contractAssert(value, schema);
+        return [];
+    } catch (e) {
+        return String((e as Error).message).split("\n").slice(1);
+    }
+}
+const either = { oneOf: [{ type: "object", required: ["a"], properties: { a: { type: "string" } } }, { type: "object", required: ["b"], properties: { b: { type: "integer" } } }] };
+const maybeDate = { anyOf: [{ type: "string", format: "date" }, { type: "null" }] };
+
+describe("the contract check with documented forms", () => {
+    it("passes a response that matches one of the documented forms (oneOf / anyOf)", () => {
+        expect(lines({ a: "x" }, either)).toEqual([]);
+        expect(lines({ b: 3 }, either)).toEqual([]);
+        expect(lines(null, maybeDate)).toEqual([]);
+        expect(lines("2024-01-01", maybeDate)).toEqual([]);
+        expect(lines([{ b: 1 }, { a: "y" }], { type: "array", items: either })).toEqual([]);
+    });
+
+    it("reports a response that matches none of the forms, with the nearest form's difference and its severity", () => {
+        expect(lines({ b: "3" }, either)).toEqual(["- [high] response: matches none of the 2 documented forms; nearest: response.b: expected integer, got string"]);
+        expect(lines({ c: 1 }, either)).toEqual(["- [high] response: matches none of the 2 documented forms; nearest: response.a: is missing, but the documentation marks it required"]);
+        expect(lines({ a: 1 }, { anyOf: either.oneOf })).toHaveLength(1);
+        expect(lines(5, maybeDate)).toEqual(["- [high] response: matches none of the 2 documented forms; nearest: response: expected string, got integer"]);
+        expect(lines("soon", maybeDate)).toEqual(['- [low] response: matches none of the 2 documented forms; nearest: response: "soon" is not a valid date']);
+        // a "null" form is a real constraint, not an empty one
+        expect(lines(5, { type: "null" })).toEqual(["- [high] response: expected null, got integer"]);
+    });
+
+    it("a part of allOf that allows no extra fields refuses only fields no part documents, once the document is read", () => {
+        const doc = { openapi: "3.0.0", info: { title: "t", version: "1" }, paths: { "/x": { get: { responses: { "200": { description: "ok", content: { "application/json": { schema: { allOf: [{ type: "object", additionalProperties: false, properties: { id: { type: "integer" } } }, { properties: { name: { type: "string" } } }] } } } } } } } } };
+        const schema = parseOpenApi(doc, "http://x/openapi.json").operations[0]!.spec!.responses[0]!.schema;
+        expect(lines({ id: 1, name: "n" }, schema)).toEqual([]);
+        expect(lines({ id: 1, name: "n", secret: "s" }, schema)).toEqual(["- [low] response.secret: is not documented (the documentation allows no extra fields)"]);
+    });
+
+    it("judges allOf as every part at once", () => {
+        const named = { allOf: [{ type: "object", required: ["id"], properties: { id: { type: "integer" } } }, { required: ["name"], properties: { name: { type: "string", maxLength: 3 } } }] };
+        expect(lines({ id: 1, name: "abc" }, named)).toEqual([]);
+        expect(lines({ id: "1", name: "abcd" }, named)).toEqual(["- [high] response.id: expected integer, got string", "- [medium] response.name: is longer than the documented maximum of 3 characters"]);
+    });
+
+    it("still skips a node an older parser kept only partly (marked, with no forms)", () => {
+        expect(lines({ b: 3 }, { type: "object", required: ["a"], "x-aitp-lossy": true })).toEqual([]);
+    });
+});
+
+describe("the API document's forms reach the check", () => {
+    const doc = {
+        openapi: "3.0.0",
+        info: { title: "t", version: "1" },
+        components: { schemas: { Status: { type: "string", enum: ["active", "disabled"] }, Base: { type: "object", required: ["id"], properties: { id: { type: "integer" } } } } },
+        paths: {
+            "/either": { get: { responses: { "200": { description: "ok", content: { "application/json": { schema: either } } } } } },
+            "/thing": {
+                get: {
+                    responses: {
+                        "200": {
+                            description: "ok",
+                            content: { "application/json": { schema: { allOf: [{ $ref: "#/components/schemas/Base" }, { type: "object", properties: { status: { allOf: [{ $ref: "#/components/schemas/Status" }], description: "state" } } }] } } },
+                        },
+                    },
+                },
+            },
+        },
+    };
+    const endpoints = parseOpenApi(doc, "http://x/openapi.json").operations;
+
+    it("the attached schema keeps every oneOf form, and the check judges the response against each", () => {
+        const spec = generateApiSpecs(endpoints, { allowMutating: false, maxPerEndpoint: 6 }).specs.find((s) => s.title.startsWith("GET /either") && s.title.endsWith("succeeds with a valid request"))!;
+        const step = spec.steps.find((x) => x.action === "assertResponse" && x.check === "matchesSchema");
+        if (step?.action !== "assertResponse") throw new Error("no schema check on GET /either");
+        expect((step.schema as { oneOf?: unknown[] }).oneOf).toHaveLength(2);
+        expect(lines({ b: 3 }, step.schema)).toEqual([]);
+        expect(lines({ a: 3 }, step.schema)).toHaveLength(1);
+    });
+
+    it("an allOf around a reference keeps the referenced type (no object forced on a string)", () => {
+        const schema = endpoints.find((e) => e.path === "/thing")!.spec!.responses[0]!.schema;
+        expect(lines({ id: 1, status: "active" }, schema)).toEqual([]);
+        expect(lines({ status: "gone" }, schema)).toEqual(["- [high] response.id: is missing, but the documentation marks it required", '- [medium] response.status: "gone" is not one of the documented values (active, disabled)']);
     });
 });

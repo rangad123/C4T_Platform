@@ -108,7 +108,7 @@ describe("generation", () => {
         expect(contractSteps(happy({ contractChecks: false })).every((n) => n === 0)).toBe(true);
     });
 
-    it("marks collapsed oneOf nodes so they are not judged", () => {
+    it("marks collapsed oneOf nodes, whose forms are judged instead", () => {
         const either = happy({}).find((s) => s.title.startsWith("GET /either"));
         const step = either?.steps.find((x) => x.action === "assertResponse" && x.check === "matchesSchema");
         // the response is described by oneOf: the schema (if attached at all) must be flagged lossy
@@ -183,7 +183,7 @@ describe("on a real API", () => {
     it("passes conforming and oneOf responses, and flags the rest with the right severity", async () => {
         const by = await runJob({});
         expect(by["GET /api/ok"]!.validationStatus).toBe("VALIDATED");
-        expect(by["GET /api/either"]!.validationStatus).toBe("VALIDATED"); // oneOf is not judged: no false alarm
+        expect(by["GET /api/either"]!.validationStatus).toBe("VALIDATED"); // the body matches the second oneOf form
 
         const bad = by["GET /api/bad"]!;
         expect(bad.validationStatus).toBe("NEEDS_REVIEW");
