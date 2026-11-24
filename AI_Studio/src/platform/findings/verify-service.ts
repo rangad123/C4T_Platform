@@ -8,7 +8,7 @@
  *
  * A run of saved tests (mode validate) also writes its failed tests into candidate_findings first: a failure that is not the test's own
  * step is an execution (or, with test meta `layer`, a layer) finding. Budget: at most 30 findings per run, 10 minutes each; the rest wait.
- * No AI calls: nothing here is given a model.
+ * AI: only with a model given (`llm`), one explanation (findings/explain.ts) per verified finding whose class the rules left open.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -16,6 +16,9 @@ import { cleanReplayPlan, signupPathOf } from "../../engine/explore/clean-accoun
 import { dedupe } from "../../engine/findings/dedupe.js";
 import { attemptsSetting, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type BudgetRun, type VerifyBudget } from "../../engine/findings/reproduce.js";
 import { confidenceScore } from "../../engine/findings/score.js";
+import { explainGroup } from "../../engine/findings/explain.js";
+import type { LlmClient } from "../../engine/llm/provider.js";
+import { responseBodiesInTrace, secretsInTrace } from "../../engine/evidence/trace-scrub.js";
 import type { Attempt } from "../../engine/findings/view.js";
 import { getAdapter, hasAdapter, renderWithAdapter, type ExecutionBatch, type ExecutionEnv, type ExecutionOptions } from "../../engine/frameworks/index.js";
 import type { RenderContext } from "../../engine/generators/types.js";
@@ -63,8 +66,8 @@ export interface EvidencePackage {
     environment: { appUrl: string; ranOn: string };
     /** "GET /api/cart -> 200" lines of the failing step (else the attempt's last ones). */
     requests: string[];
-    /** Masked response bodies (<= 8 KB) of those requests: Phase 4's step capture; until then not available. */
-    responseBodies: "not available";
+    /** Masked response bodies (each at most 8 KB, `cut` when longer) of the failing step's requests, from the attempt's scrubbed trace. */
+    responseBodies: Array<{ request: string; body: string; cut?: true }>;
     console: string[];
     screenshot?: string;
     trace?: string;
@@ -99,6 +102,8 @@ export interface VerifyDeps {
     emit: (message: string, level?: "info" | "warn") => void;
     budget?: VerifyBudget;
     signal?: AbortSignal;
+    /** The project's model: explains a verified finding whose class the rules left open. Without one, no AI call. */
+    llm?: LlmClient;
 }
 
 export interface VerifyResult {
@@ -259,9 +264,18 @@ async function verifyOne(d: VerifyDeps, r: { f: CandidateFindingRecord; test: Ve
         const tried = maskValue(raw, runSecretValues(d.env));
         const appVersion = (await d.appVersion?.().catch(() => null)) ?? null;
         for (const [i, x] of runs.entries()) await keepEvidence(d, f, test, x, tried[i]!, i + 1, runs.length, account, notes[i]?.note, appVersion);
-        const confidence = confidenceScore({ ...view, attempts: tried, independence: account.clean ? "independent" : "not_on_clean_state" });
+        const seen = { ...view, attempts: tried, independence: account.clean ? ("independent" as const) : ("not_on_clean_state" as const) };
         const c = verdict.classification;
-        await d.store.transition(d.projectId, f.id, { to: verdict.to, by: "engine", reason: verdict.reason, set: { attempts: tried, findingClass: c.class === "open" ? null : c.class, confidence, appVersion } });
+        // Spec §5.1 item 3: the AI explains a class the rules left open and may pick only among its candidates; it never moves the state.
+        // shortcut: one call per verified finding (the budget's 30 per run at most), not per duplicate group; group first if that costs too much.
+        const ex = c.class === "open" && d.llm ? await explainGroup(d.llm, [seen], c).catch(() => undefined) : undefined;
+        const confidence = ex?.aiClass ? ex.confidence : confidenceScore(seen);
+        const findingClass = ex?.aiClass ? ex.class : c.class === "open" ? null : c.class;
+        await d.store.transition(d.projectId, f.id, { to: verdict.to, by: "engine", reason: verdict.reason, set: { attempts: tried, findingClass, confidence, appVersion } });
+        if (ex?.explanation) {
+            const picked = ex.aiClass ? ` It reads this as ${ex.class.replace(/_/g, " ")} (the rules left ${c.candidates.join(", ")} open).` : "";
+            await d.store.note(d.projectId, f.id, { by: "engine", reason: `AI explanation: ${ex.explanation}${picked} Next: ${ex.next ?? ""}` }).catch(() => undefined);
+        }
         d.emit(`${test.testKey}: ${verdict.to === "reproduced" ? "reproduced" : verdict.to.replace(/_/g, " ")}. ${verdict.reason}`, verdict.to === "reproduced" ? "warn" : "info");
         return { to: verdict.to, reason: verdict.reason };
     } catch (e) {
@@ -284,6 +298,7 @@ async function keepEvidence(d: VerifyDeps, f: CandidateFindingRecord, test: Veri
     const step = attempt.failedStep;
     const own = ev?.requests.filter((q) => step !== undefined && q.step === step) ?? [];
     const requests = (own.length ? own : (ev?.requests ?? []).slice(-20)).slice(0, 20).map((q) => line(`${q.method} ${q.path} -> ${q.status ?? q.failed ?? "no answer"}`));
+    const responseBodies = trace ? await bodiesOf(trace.path, attempt.requests, secrets) : [];
     const pkg: EvidencePackage = {
         attempt: i,
         of: n,
@@ -298,7 +313,7 @@ async function keepEvidence(d: VerifyDeps, f: CandidateFindingRecord, test: Veri
         browser: "Chromium (headless)",
         environment: { appUrl: line(d.appUrl), ranOn: d.ranOn },
         requests: requests.length ? requests : run.responses.slice(-20).map((x) => line(`${x.method} ${x.path} -> ${x.status}`)),
-        responseBodies: "not available",
+        responseBodies,
         console: (ev?.console ?? []).slice(-20).map((c) => line(`${c.type}: ${c.text}`, 600)),
         video: "off",
         notes: (run.notes ?? []).slice(0, 10).map((x) => line(x, 500)),
@@ -306,6 +321,38 @@ async function keepEvidence(d: VerifyDeps, f: CandidateFindingRecord, test: Veri
     if (shot) pkg.screenshot = await d.keep(f, test, i, { kind: "screenshot", path: shot.path, name: `screenshot${path.extname(shot.path)}` });
     if (trace) pkg.trace = await d.keep(f, test, i, { kind: "trace", path: trace.path, name: `trace${path.extname(trace.path)}` });
     await d.keep(f, test, i, { kind: "evidence", json: pkg, name: "package.json" });
+}
+
+/** Response bodies kept per attempt, and the most of one body. */
+const BODIES_MAX = 5;
+const BODY_MAX_BYTES = 8 * 1024;
+
+/**
+ * The response bodies of the failing step's requests (the attempt's own requests, adapters.ts withStepRequests), read from its trace,
+ * which is scrubbed of the run's secrets before it reaches here (trace-scrub.ts). Each body is masked again with the run's secrets, the
+ * values the trace itself marks secret (cookies, secret-named JSON keys and headers: secretsInTrace) and the shared redaction (e-mails,
+ * phones, cards, credentials after a key word), then cut to 8 KB; masked first, so a cut never halves a secret.
+ */
+async function bodiesOf(tracePath: string, wanted: Attempt["requests"], secrets: readonly string[]): Promise<EvidencePackage["responseBodies"]> {
+    const own = wanted.filter((r) => r.own);
+    if (!own.length) return [];
+    const data = await fs.readFile(tracePath).catch(() => undefined);
+    if (!data) return [];
+    const masks = [...secrets, ...(await secretsInTrace(data).catch(() => []))];
+    const pathOf = (p: string) => p.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+/i, "").split(/[?#]/)[0] || "/";
+    const out: EvidencePackage["responseBodies"] = [];
+    for (const r of (await responseBodiesInTrace(data, 64 * BODY_MAX_BYTES).catch(() => [])).reverse()) {
+        const q = own.find((w) => w.method.toUpperCase() === r.method.toUpperCase() && pathOf(w.path) === pathOf(r.url));
+        const request = q && clip(maskText(`${q.method} ${pathOf(q.path)} -> ${r.status}`, masks), 300);
+        if (!request || out.some((x) => x.request === request)) continue;
+        const masked = maskText(r.body, masks);
+        const whole = Buffer.from(masked);
+        // A cut at a byte inside a character drops that character.
+        const body = whole.length > BODY_MAX_BYTES ? whole.subarray(0, BODY_MAX_BYTES).toString("utf8").replace(/\uFFFD$/, "") : masked;
+        out.unshift({ request, body, ...(whole.length > BODY_MAX_BYTES ? { cut: true as const } : {}) });
+        if (out.length >= BODIES_MAX) break;
+    }
+    return out;
 }
 
 /**
@@ -363,6 +410,8 @@ type VerifyAfterOptions = {
     harvested?: boolean;
     /** The tests a creation job left as findings, when their statuses have changed since (the benchmark reruns and replays first). */
     findingTests?: ReadonlySet<string>;
+    /** The job's model (a verification job's, the benchmark's), for the explanation of open classes; without it, no AI call. */
+    llm?: LlmClient;
 };
 
 async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions): Promise<(VerifyResult & { queuedJobId?: string }) | undefined> {
@@ -407,6 +456,7 @@ async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions
         ...(o.attempts !== undefined ? { attempts: o.attempts } : {}),
         ...(o.budget ? { budget: o.budget } : {}),
         ...(o.signal ? { signal: o.signal } : {}),
+        ...(o.llm ? { llm: o.llm } : {}),
     });
 }
 

@@ -572,6 +572,46 @@ export async function secretsInTrace(data: Uint8Array): Promise<string[]> {
     return [...out].filter((v) => v.length >= 4 && !ORDINARY.test(v.trim()));
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the network log is parsed JSON, checked field by field below
+type Json = any;
+/**
+ * The text response bodies a Playwright trace holds, in the order its network log lists them (resource snapshots and the parts they
+ * name), each cut at `max` characters. Read-only: the caller masks them (the trace was scrubbed before it was kept). A body that is not
+ * text (a picture, base64, a part that does not unpack as it says) is left out, and an archive this reader does not take gives none.
+ */
+export async function responseBodiesInTrace(data: Uint8Array, max: number): Promise<Array<{ method: string; url: string; status: number; body: string }>> {
+    if (!isZip(data)) return [];
+    const b = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+    const entries = readZip(b);
+    if (!entries || entries.length > TRACE_LIMITS.maxEntries || entries.some((e) => e.originalSize > TRACE_LIMITS.maxEntryBytes)) return [];
+    const byName = new Map(entries.map((e) => [e.name, e]));
+    const textOf = async (e: ZipEntry | undefined) => {
+        const c = e ? await contentOf(b, e) : undefined;
+        return c && !isMedia(c) ? asText(c) : undefined;
+    };
+    const out: Array<{ method: string; url: string; status: number; body: string }> = [];
+    for (const e of entries.filter((x) => x.name.endsWith(".network"))) {
+        for (const line of ((await textOf(e)) ?? "").split("\n")) {
+            let snap: Json;
+            try {
+                const v = JSON.parse(line) as Json;
+                if (v?.type !== "resource-snapshot") continue;
+                snap = v.snapshot;
+            } catch {
+                continue;
+            }
+            const method = snap?.request?.method;
+            const url = snap?.request?.url;
+            const content = snap?.response?.content;
+            if (typeof method !== "string" || typeof url !== "string" || !content || content.encoding === "base64") continue;
+            const file = typeof content._file === "string" ? content._file : typeof content._sha1 === "string" ? `resources/${content._sha1}` : undefined;
+            const body = typeof content.text === "string" ? content.text : await textOf(file ? byName.get(file) : undefined);
+            if (body !== undefined) out.push({ method, url, status: Number(snap.response.status) || 0, body: body.slice(0, max) });
+        }
+    }
+    return out;
+}
+
 /** One trace at a time per process: a few traces at once would hold several archives in memory and fill the thread pool. */
 let cleaning: Promise<unknown> = Promise.resolve();
 function oneAtATime<T>(work: () => Promise<T>): Promise<T> {

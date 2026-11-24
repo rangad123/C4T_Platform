@@ -25,11 +25,12 @@ import { levelSettings } from "../../engine/levels.js";
 import { objectivesFrom } from "../../engine/explore/objectives.js";
 import { isReproduced, reproduction } from "../../engine/findings/classify.js";
 import { FINDING_STATES, moversOf, STATE_LABEL } from "../../engine/findings/lifecycle.js";
-import { ROOT_CAUSE_LABEL_TEXT, rootCause } from "../../engine/findings/root-cause.js";
+import { ROOT_CAUSE_LABEL_TEXT } from "../../engine/findings/root-cause.js";
 import { confidenceScore, label, severityOf } from "../../engine/findings/score.js";
 import { SEVERITIES, type Severity } from "../../engine/validation/severity.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import { fromCandidate } from "../findings/adapters.js";
+import { projectRootCause } from "../code-host/source.js";
 import { loadExploration, loadLayerReport } from "../exploration-store.js";
 import { HttpError } from "../http-error.js";
 import { appKnowledgeOf } from "../job-runner.js";
@@ -50,8 +51,8 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
         const severity = stored ?? scored.severity;
         const conf = r.confidenceDetail ?? confidenceScore(view);
         const rep = reproduction(view.attempts);
-        // No code source is connected to projects yet (Phase 6): Unknown with its reason, and no AI call.
-        const rc = await rootCause({ members: [view] });
+        // The project's connected repository is the code source (code-host/source.ts); without one, Unknown with its reason. No AI call.
+        const rc = await projectRootCause(p, r.projectId, [view]);
         const at = rc.location ? `${rc.location.file}:${rc.location.line}${rc.location.function ? ` in ${rc.location.function}()` : ""}. ` : "";
         return {
             label: label({ state: r.state, severity, confidence: conf.confidence, security: false, reproduced: isReproduced(rep) }),

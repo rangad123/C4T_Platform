@@ -151,7 +151,7 @@ describe("without a code source", () => {
         const seen: Seen = { prompts: [] };
         const llm = scripted(cites(["server.mjs", seedLine(s.seed)]), seen);
         const withStack = view({ ...seedView(s), attempts: [{ outcome: "failed", stack: ["server.mjs:register"], requests: [{ method: "POST", path: "/register", status: 500, own: true }] }] });
-        for (const code of [undefined, repositoryCodeSource({ owner: "acme", repo: "shop" })]) {
+        for (const code of [undefined, repositoryCodeSource({ owner: "acme", repo: "shop" }, "0".repeat(40), {})]) {
             const r = await rootCause({ members: [withStack], code, llm });
             expect(r.label).toBe("unknown");
             expect(r.location).toBeUndefined();

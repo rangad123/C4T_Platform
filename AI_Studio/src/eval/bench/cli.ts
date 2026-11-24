@@ -73,7 +73,7 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --repeat <n>               reruns of every created test, 1 to 10 (default 1)
   --job-timeout-min <n>      longest the exploration, a creation and each replay job may take, in minutes (default 45)
   --isolated-replays         replay each finding alone, in a job of its own, on a freshly started app (every replay stage; slower, no AI)
-  --verify-attempts <n>      verify each app's findings as the platform does after a job, n attempts each (1 to 5; no AI), and keep what
+  --verify-attempts <n>      verify each app's findings as the platform does after a job, n attempts each (1 to 5; AI explains open classes), and keep what
                              it left in the result (bench-report --verification scores it)
   --port-base <n>            first port for the apps (default 5291)
   --prices <file>            price table: [{ "model", "inputPerMTok", "outputPerMTok", "cachedInputPerMTok"?, "cacheWritePerMTok"?, "note"? }] in US dollars
@@ -594,15 +594,27 @@ export function previousCalibration(dir: string): ReturnType<typeof calibrationO
 /** No cap on the findings a bench trial verifies; each still gets the product's minutes. */
 export const BENCH_VERIFY_BUDGET = { ...VERIFY_BUDGET, findingsPerRun: Number.MAX_SAFE_INTEGER };
 
-/** `--verify-attempts`: the jobs' findings verified as onJobFinished does (verify-service.ts; no AI), then what the platform recorded. */
+/**
+ * `--verify-attempts`: the jobs' findings verified as a verification job does (verify-service.ts; the trial's model, metered under the
+ * project, explains the open classes), then what the platform recorded.
+ */
 export const verifierOf = (platform: Platform, attempts: number, root = REPO_ROOT) => async (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string): Promise<Verification> => {
     const { verifyAfterJob } = await import("../../platform/findings/verify-service.js");
     const { CandidateFindingStore } = await import("../../platform/candidate-finding-store.js");
+    const { JobMeter } = await import("../../engine/llm/metered.js");
+    const { usageStoreFor } = await import("../../platform/usage-store.js");
+    const { randomUUID } = await import("node:crypto");
+    const meter = platform.llm.modelName !== "unavailable" ? new JobMeter({ backend: usageStoreFor(platform.db, platform.config), jobId: `verify-${randomUUID()}`, projectId }) : undefined;
+    const llm = meter?.wrap(platform.llm);
     const t0 = Date.now();
-    for (const id of jobIds) {
-        const job = platform.repo.getJob(id);
-        // A bench trial verifies every candidate (V2, V3): the product's per-run budget would leave some waiting, unscored.
-        if (job) await verifyAfterJob(platform, job, { attempts, budget: BENCH_VERIFY_BUDGET, ...(findingTests ? { findingTests } : {}) });
+    try {
+        for (const id of jobIds) {
+            const job = platform.repo.getJob(id);
+            // A bench trial verifies every candidate (V2, V3): the product's per-run budget would leave some waiting, unscored.
+            if (job) await verifyAfterJob(platform, job, { attempts, budget: BENCH_VERIFY_BUDGET, ...(findingTests ? { findingTests } : {}), ...(llm ? { llm } : {}) });
+        }
+    } finally {
+        meter?.finish();
     }
     const verified = await verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
     return withRootCauses(platform, projectId, verified, source, root);

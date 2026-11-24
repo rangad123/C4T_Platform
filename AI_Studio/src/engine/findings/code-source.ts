@@ -1,7 +1,7 @@
 /**
  * Read-only access to an application's source code for root cause (testing-engine Phase 5, spec §5.1 item 6). One interface, three
  * backings: a local folder (the bench apps' source), the git-import checkout (platform/git-checkout.ts: files read from git's object
- * store, nothing checked out), and the Phase 6 repository connection (a stub until G2 reads files through it).
+ * store, nothing checked out), and the Phase 6 repository connection (its files read at one commit, platform/code-host/source.ts).
  *
  * Nothing here runs code. Paths are repository paths (forward slashes, relative, no `..`); a local folder resolves each one and refuses
  * anything whose real path leaves the folder (a symlink out of it included). Files over MAX_SOURCE_BYTES read as missing.
@@ -118,20 +118,25 @@ export function checkoutCodeSource(c: CheckoutLike): CodeSource {
 }
 
 /**
- * The project's repository connection (Phase 6, code-host/github.ts).
- * shortcut: a stub that has no files, until G2 reads file contents and commits through the connection; root cause then says Unknown.
+ * The project's repository connection (Phase 6, code-host/github.ts): its code files at `commit`, already read (`sources`, by path).
+ * shortcut: no commit history (the connection reads no per-file commits yet); add it through the commits API when root cause needs it.
  */
-export function repositoryCodeSource(repo: { owner: string; repo: string }): CodeSource {
+export function repositoryCodeSource(repo: { owner: string; repo: string }, commit: string, sources: Readonly<Record<string, string>>): CodeSource {
+    const files = Object.keys(sources)
+        .filter((f) => isSafeRepoPath(f) && !f.split("/").slice(0, -1).some(SKIP_DIR))
+        .sort()
+        .slice(0, MAX_SOURCE_FILES);
+    const known = new Set(files);
     return {
-        label: `the connected repository ${repo.owner}/${repo.repo} (file reading is not built yet)`,
+        label: `the connected repository ${repo.owner}/${repo.repo} at ${commit.slice(0, 7)}`,
         async files() {
-            return [];
+            return files;
         },
-        async has() {
-            return false;
+        async has(file) {
+            return known.has(file);
         },
-        async read() {
-            return undefined;
+        async read(file, from, to) {
+            return known.has(file) ? slice(sources[file]!, from, to) : undefined;
         },
         async log() {
             return [];

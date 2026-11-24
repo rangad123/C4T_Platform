@@ -302,6 +302,7 @@ export function CandidateFindings({ projectId, jobId, explores }: { projectId: s
     const here = useHere(projectId);
     const write = !here.why("ai_studio.tests.write");
     const trackers = useFetch<Integration[]>(write ? `/projects/${projectId}/integrations` : null);
+    const codeHost = useFetch<{ connected: boolean }>(`/projects/${projectId}/code-host`);
     const list = got.data?.findings ?? [];
     const sections = useMemo(() => findingSections(got.data?.findings ?? []), [got.data]);
     if (got.loading || (!got.data && !got.error)) return null;
@@ -329,6 +330,11 @@ export function CandidateFindings({ projectId, jobId, explores }: { projectId: s
             ) : (
                 <>
                     <p className="t-secondary">Found by the AI. Confirmed bugs come first, then findings a person needs to check. Open a finding’s saved test to see what it does.</p>
+                    {codeHost.data?.connected === false && (
+                        <p className="t-meta" data-testid="run-findings-no-repo">
+                            No likely cause in the code: no code repository is connected. Connect GitHub in <a href={routes.integrations}>Integrations</a>.
+                        </p>
+                    )}
                     {write && trackers.data?.length === 0 && (
                         <p className="t-meta" data-testid="run-findings-no-tracker">
                             To file a finding as an issue, connect an issue tracker in <a href={routes.projectSettings(projectId, "connections")}>Settings → Connections</a>.

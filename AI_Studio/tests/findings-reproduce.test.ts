@@ -124,7 +124,10 @@ describe("verification on bench-shop from a dirty start", () => {
         expect(arts.some((a) => a.kind === "video")).toBe(false);
         expect(arts.filter((a) => a.kind === "screenshot" && a.test_case_id === s.testId).length).toBeGreaterThanOrEqual(3);
         const pkg = JSON.parse(fs.readFileSync(path.join(platform.config.artifactsDir, packages[0]!.path), "utf8").toString()) as Record<string, unknown>;
-        expect(pkg).toMatchObject({ of: 3, cleanState: true, video: "off", appVersion: "unknown", responseBodies: "not available", environment: { appUrl: SHOP } });
+        expect(pkg).toMatchObject({ of: 3, cleanState: true, video: "off", appVersion: "unknown", environment: { appUrl: SHOP } });
+        // The failing step's response bodies from the attempt's trace (masked, at most 8 KB each; eng-fix3-verify).
+        expect(Array.isArray(pkg.responseBodies)).toBe(true);
+        for (const x of pkg.responseBodies as Array<{ body: string }>) expect(Buffer.byteLength(x.body)).toBeLessThanOrEqual(8 * 1024);
         expect(JSON.stringify(pkg)).not.toContain(ALICE.password);
     }, 600_000);
 });
