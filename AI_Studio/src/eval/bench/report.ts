@@ -33,7 +33,7 @@ export function benchMarkdown(b: Benchmark, run: EvalRun): string {
     out.push(`| Detection time | ${dur(m.detectionTimeMs)} |`, `| Execution time | ${dur(m.durationMs)} |`, `| AI calls | ${m.aiCalls} |`, `| Tokens in / out | ${m.inputTokens} / ${m.outputTokens} |`, `| Estimated AI cost | ${money(m.cost)} |`, `| Cost per confirmed defect | ${money(m.costPerConfirmedDefect)} |`);
     out.push(`| Tests generated | ${m.testsGenerated} |`, `| Workflows reached | ${m.workflowsCovered} of ${m.workflows} |`, `| Execution failures | ${m.executionFailures} |`, `| Flaky tests | ${m.flaky} |`, "");
     out.push("## Configuration", "");
-    out.push(`- Engine commit ${c.engineCommit}${c.engineDirty ? " (with uncommitted engine changes)" : ""}`);
+    out.push(`- Engine commit ${c.engineCommit}${c.engineDirty ? " (with uncommitted engine changes)" : ""}${c.engineFingerprint ? `, tree fingerprint ${c.engineFingerprint}` : ""}`);
     out.push(`- Model ${c.model.provider} / ${c.model.model}; fast model ${c.model.fastModel ?? "none"}; planning model ${c.model.planningModel ?? "none"}; temperature ${c.model.temperature}`);
     out.push(`- Catalogue ${c.catalogueVersion}; apps ${c.apps.map((a) => `${a.id} ${a.version}`).join(", ")}`);
     out.push(`- Options ${Object.entries(c.options).map(([k, v]) => `${k}=${String(v)}`).join(", ")}`);

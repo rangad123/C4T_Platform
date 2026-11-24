@@ -10,7 +10,8 @@ import { BENCH_APPS, workflowsReached } from "../src/eval/bench/apps.js";
 import { parseCatalogue } from "../src/eval/bench/catalogue.js";
 import { estimate, tokenLimits } from "../src/eval/bench/cost.js";
 import { benchMetrics, categorize, combineMetrics, costOfTokens } from "../src/eval/bench/metrics.js";
-import { promptFingerprints, verifyBaseline, writeBaseline } from "../src/eval/bench/record.js";
+import { execFileSync } from "node:child_process";
+import { engineVersion, promptFingerprints, verifyBaseline, writeBaseline, writeEngineStamp } from "../src/eval/bench/record.js";
 import { BenchmarkSchema, type BenchFinding } from "../src/eval/bench/schema.js";
 import { BENCH_COMPARED, compareMetrics } from "../src/eval/metrics.js";
 
@@ -147,6 +148,42 @@ describe("recording", () => {
         const f = promptFingerprints();
         expect(f.map((x) => x.file)).toContain("src/engine/web/author.ts");
         expect(f.every((x) => /^[0-9a-f]{64}$/.test(x.sha256))).toBe(true);
+    });
+    it("the engine's commit and dirty state: from git, or from the stamp of a copy without git (the VM), checked by the tree fingerprint", () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "bench-engine-"));
+        try {
+            const repo = path.join(root, "repo");
+            const write = (dir: string, f: string, text: string) => (fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }), fs.writeFileSync(path.join(dir, f), text));
+            write(repo, "src/engine/a.ts", "a");
+            write(repo, "src/platform/findings/v.ts", "v");
+            const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: repo, encoding: "utf8" }).trim();
+            git("init", "-q");
+            git("add", ".");
+            git("commit", "-qm", "c");
+            const sha = git("rev-parse", "HEAD");
+            expect(engineVersion(repo)).toMatchObject({ commit: sha, dirty: false });
+            // Phase 5 lives outside src/engine (platform/findings): a change there makes the tree dirty too.
+            write(repo, "src/platform/findings/v.ts", "changed");
+            expect(engineVersion(repo)).toMatchObject({ commit: sha, dirty: true });
+            write(repo, "src/platform/findings/v.ts", "v");
+
+            // A copy without .git (rsync --exclude .git): unknown, unless stamped.
+            const copy = path.join(root, "copy");
+            fs.cpSync(path.join(repo, "src"), path.join(copy, "src"), { recursive: true });
+            expect(engineVersion(copy)).toMatchObject({ commit: "unknown", dirty: true });
+            writeEngineStamp(repo, copy);
+            expect(engineVersion(copy)).toMatchObject({ commit: sha, dirty: false });
+            // The copy changed after it was stamped: dirty.
+            write(copy, "src/engine/a.ts", "edited on the VM");
+            expect(engineVersion(copy)).toMatchObject({ commit: sha, dirty: true });
+            // Stamped from a dirty checkout: dirty, though the copy equals it.
+            write(repo, "src/engine/a.ts", "edited on the VM");
+            writeEngineStamp(repo, copy);
+            expect(engineVersion(copy)).toMatchObject({ commit: sha, dirty: true });
+            expect(engineVersion(copy).fingerprint).toMatch(/^[0-9a-f]{16}$/);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
     it("the baseline is written once, read-only, with its hash; a second write is refused", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-baseline-"));

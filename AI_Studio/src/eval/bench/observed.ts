@@ -22,8 +22,8 @@
  *
  *   per objective       candidate findings (authoring findings) by their objective's kind and operator ("none" without an objective)
  *   E6 bounded          objective sessions with a recorded stop reason / sessions, and sessions that used more than a budget they were
- *                       given (objectives pursued, actions, AI calls: the counts `exploration_stopped` records; tokens and minutes are
- *                       not in the event, so not checked here)
+ *                       given (objectives pursued, actions, AI calls: the counts `exploration_stopped` records; tokens and minutes: the
+ *                       job's exploration record, for its last session; a session without them is not checked on them)
  *   E7 evidence         candidate findings that carry every field of EVIDENCE_FIELDS / candidate findings
  *   E8 cost             the trial's AI calls and estimated cost (always), the objective sessions' own calls (null without the record);
  *                       across trials, the candidate median against the baseline median (report.ts)
@@ -139,8 +139,9 @@ const count = (v: unknown): number | null => (typeof v === "number" && Number.is
  * A job's objective sessions from its events, in order: `objectives_planned` opens a session (its `data.budgets`), `exploration_stopped`
  * closes the open one (`data.stopReason`, `pursued`, `actions`, `aiCalls`), or stands alone when nothing was opened. A session opened and
  * never closed has no stop reason. Event data is read defensively: a field that is not a count is left out (budgets / used null).
+ * `record`: the tokens and minutes the job's exploration record says its last session used (the event does not carry them).
  */
-export function sessionsFromEvents(jobId: string, events: readonly unknown[]): ExplorationSession[] {
+export function sessionsFromEvents(jobId: string, events: readonly unknown[], record?: { tokens?: unknown; minutes?: unknown }): ExplorationSession[] {
     const out: ExplorationSession[] = [];
     let open: ExplorationSession | undefined;
     for (const e of events) {
@@ -149,7 +150,7 @@ export function sessionsFromEvents(jobId: string, events: readonly unknown[]): E
         if (e.kind === "objectives_planned") {
             const b = isObj(d.budgets) ? d.budgets : {};
             const [objectives, actions, aiCalls] = [count(b.objectives), count(b.actions), count(b.aiCalls)];
-            open = { jobId: jobId.slice(0, 100), stopReason: null, detail: "", budgets: objectives !== null && actions !== null && aiCalls !== null ? { objectives, actions, aiCalls } : null, used: null };
+            open = { jobId: jobId.slice(0, 100), stopReason: null, detail: "", budgets: objectives !== null && actions !== null && aiCalls !== null ? { objectives, actions, aiCalls, ...tokensMinutes(b) } : null, used: null };
             out.push(open);
         } else if (e.kind === "exploration_stopped") {
             const s = open ?? { jobId: jobId.slice(0, 100), stopReason: null, detail: "", budgets: null, used: null };
@@ -161,15 +162,24 @@ export function sessionsFromEvents(jobId: string, events: readonly unknown[]): E
             s.used = objectives !== null && actions !== null && aiCalls !== null ? { objectives, actions, aiCalls } : null;
         }
     }
+    const last = out.findLast((x) => x.used);
+    if (last?.used && record) last.used = { ...last.used, ...tokensMinutes(record) };
     return out.slice(0, 30);
 }
 
-/** The budgets this session used more of than it was given (objectives, actions, aiCalls); empty when within them or not known. */
+const amount = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+/** Tokens (a count) and minutes (any amount), each only when readable. */
+function tokensMinutes(x: { tokens?: unknown; minutes?: unknown }): { tokens?: number; minutes?: number } {
+    const [tokens, minutes] = [count(x.tokens), amount(x.minutes)];
+    return { ...(tokens !== null ? { tokens } : {}), ...(minutes !== null ? { minutes } : {}) };
+}
+
+/** The budgets this session used more of than it was given (objectives, actions, aiCalls, tokens, minutes); empty when within them or not known. */
 export function overBudget(s: ExplorationSession): string[] {
     if (!s.budgets || !s.used) return [];
     const b = s.budgets;
     const u = s.used;
-    return (["objectives", "actions", "aiCalls"] as const).filter((k) => u[k] > b[k]);
+    return (["objectives", "actions", "aiCalls", "tokens", "minutes"] as const).filter((k) => u[k] !== undefined && b[k] !== undefined && u[k] > b[k]);
 }
 
 const failing = (v: ReplayVerdict | null | undefined): boolean => v === "failed" || v === "finding";

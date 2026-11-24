@@ -423,6 +423,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             config = {
                 engineCommit: eng.commit,
                 engineDirty: eng.dirty,
+                engineFingerprint: eng.fingerprint,
                 prompts: promptFingerprints(deps.root),
                 model: { provider: scripted ? "scripted" : String(cfg.llm.provider ?? "unknown").slice(0, 80), model: model.slice(0, 200), fastModel, planningModel, temperature: "not set by the engine (provider default)" },
                 catalogueVersion: `${catalogue.version} (${catalogue.sha256.slice(0, 12)})`,
@@ -604,14 +605,16 @@ export const verifierOf = (platform: Platform, attempts: number, root = REPO_ROO
         // A bench trial verifies every candidate (V2, V3): the product's per-run budget would leave some waiting, unscored.
         if (job) await verifyAfterJob(platform, job, { attempts, budget: BENCH_VERIFY_BUDGET, ...(findingTests ? { findingTests } : {}) });
     }
-    const verified = await verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
-    return withRootCauses(platform, projectId, verified, source, root);
+    // Verification makes no AI call: its added cost is root cause's (withRootCauses); its added time includes root cause.
+    const verified = await withRootCauses(platform, projectId, await verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: null }), source, root);
+    return { ...verified, added: { ...verified.added, durationMs: Date.now() - t0 } };
 };
 
 /**
  * Root cause (C2) of each finding group, with the bench app's own source folder as the code source (the platforms of a trial have no
  * code connection), on the trial's model, metered under the project like its jobs. Locations are repository paths. A group whose root
- * cause fails keeps no root cause; nothing else changes.
+ * cause fails keeps no root cause. The calls' cost (their usage rows at the platform's prices; null when a model has no price) is added
+ * to `added.cost` (V11).
  */
 export async function withRootCauses(platform: Platform, projectId: string, v: Verification, source: string, root = REPO_ROOT): Promise<Verification> {
     const { rootCause } = await import("../../engine/findings/root-cause.js");
@@ -620,9 +623,12 @@ export async function withRootCauses(platform: Platform, projectId: string, v: V
     const { CandidateFindingStore } = await import("../../platform/candidate-finding-store.js");
     const { JobMeter } = await import("../../engine/llm/metered.js");
     const { usageStoreFor } = await import("../../platform/usage-store.js");
+    const { totalsOf } = await import("../../engine/llm/usage.js");
     const { randomUUID } = await import("node:crypto");
     const code = localCodeSource(path.join(root, source), "the bench source");
-    const meter = platform.llm.modelName !== "unavailable" ? new JobMeter({ backend: usageStoreFor(platform.db, platform.config), jobId: `root-cause-${randomUUID()}`, projectId }) : undefined;
+    const usage = usageStoreFor(platform.db, platform.config);
+    const jobId = `root-cause-${randomUUID()}`;
+    const meter = platform.llm.modelName !== "unavailable" ? new JobMeter({ backend: usage, jobId, projectId }) : undefined;
     const llm = meter?.wrap(platform.llm);
     const store = new CandidateFindingStore(platform.sql);
     const groupOf = (f: Verification["findings"][number]) => f.groupId ?? `solo:${f.id}`;
@@ -646,7 +652,12 @@ export async function withRootCauses(platform: Platform, projectId: string, v: V
     } finally {
         meter?.finish();
     }
-    return { ...v, findings: v.findings.map((f) => (causes.has(groupOf(f)) ? { ...f, rootCause: causes.get(groupOf(f))! } : f)) };
+    const t = totalsOf(usage.jobRows(jobId), usage.prices());
+    const cost = t.calls === 0 ? 0 : t.unpricedTokens > 0 ? null : (t.cost ?? 0);
+    return {
+        findings: v.findings.map((f) => (causes.has(groupOf(f)) ? { ...f, rootCause: causes.get(groupOf(f))! } : f)),
+        added: { ...v.added, cost: v.added.cost === null || cost === null ? null : v.added.cost + cost },
+    };
 }
 
 export async function startPlatform(dataDir: string, env: NodeJS.ProcessEnv, deps: BenchDeps): Promise<{ client: PlatformClient; platform: Platform; server: FastifyInstance; stop: () => Promise<void> }> {

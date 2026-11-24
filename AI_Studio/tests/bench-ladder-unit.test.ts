@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ladderMain, ladderReport, ladderRuns, treeFingerprint, verdict } from "../src/eval/bench/ladder.js";
+import { ladderMain, ladderReport, ladderRuns, rungFlags, treeFingerprint, verdict } from "../src/eval/bench/ladder.js";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "ladder-"));
 
@@ -90,6 +90,29 @@ describe("ladderMain", () => {
         fs.rmSync(root, { recursive: true, force: true });
     });
 
+    it("gives each rung the flag plan's flags (LADDER-FLAGS.md): --db from L3, --verify-attempts on L4 only, everything else to all", async () => {
+        const root = tmp();
+        const ids = ["L0", "L1", "L2", "L3", "L4"];
+        const trees = ids.map((id) => (fs.mkdirSync(path.join(root, id, "src"), { recursive: true }), path.join(root, id)));
+        const calls: Array<{ cwd: string; args: string[] }> = [];
+        const full = ["--level", "thorough", "--db", "bench-data", "--roles", "catalogue", "--verify-attempts", "3", "--isolated-replays"];
+        const argv = ["--rungs", ids.map((id, i) => `${id}=${trees[i]}`).join(","), "--apps", "shop", "--trials", "1", "--out", path.join(root, "out"), "--", ...full];
+        expect(await ladderMain(argv, { spawn: (cwd, args) => (calls.push({ cwd, args }), 0), log: () => {} })).toBe(0);
+        const given = (id: string) => {
+            const a = calls.find((c) => c.cwd === trees[ids.indexOf(id)])!.args;
+            return a.slice(2, a.indexOf("--apps"));
+        };
+        const common = ["--level", "thorough", "--roles", "catalogue", "--isolated-replays"];
+        for (const id of ["L0", "L1", "L2"]) expect(given(id), id).toEqual(common);
+        expect(given("L3")).toEqual(["--level", "thorough", "--db", "bench-data", "--roles", "catalogue", "--isolated-replays"]);
+        expect(given("L4")).toEqual(full);
+        // What each trial got is what its record says.
+        expect(JSON.parse(fs.readFileSync(path.join(root, "out/L0/shop-1/ladder-run.json"), "utf8")).flags).toEqual(common);
+        // A rung outside the plan's ids gets the common flags only.
+        expect(rungFlags("X", full)).toEqual(common);
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
     it("refuses a rung without a tree, a repeated rung, and a missing --out", async () => {
         const log = () => {};
         expect(await ladderMain(["--rungs", "L0=/nope", "--apps", "shop", "--out", "/tmp/x"], { spawn: () => 0, log })).toBe(2);
@@ -136,6 +159,50 @@ describe("ladderReport", () => {
         expect(md).toContain("| Mutation score | not measured | not measured |");
         expect(md).toContain("| L4 | 2 | shop | fpL4 | not finished (exit 4) |");
         expect(md).toContain("Detection, L4 against L0 (shop): better");
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it("reads trials that follow the flag plan as one harness, and gives V12 and V1's baseline precision from L3 against L4", () => {
+        const root = tmp();
+        const common = ["--level", "thorough"];
+        const run = (rung: string, wave: number, flags: string[], detected: number, precision: number | null = null) => {
+            const out = path.join(root, rung, `shop-${wave}`);
+            fs.mkdirSync(out, { recursive: true });
+            fs.writeFileSync(path.join(out, "ladder-run.json"), JSON.stringify({ format: 1, rung, tree: `/t/${rung}`, fingerprint: `fp${rung}`, app: "shop", wave, flags, exitCode: 0 }));
+            writeTrial(out, "shop", { detected, falsePositives: 0, cost: 0, durationMs: 0, reproductionRate: null });
+            if (precision !== null) {
+                const file = path.join(out, "2026-11-22-1000-benchmark-discovery.json");
+                const j = JSON.parse(fs.readFileSync(file, "utf8"));
+                j.benchmark.apps[0].metrics.precision = precision;
+                fs.writeFileSync(file, JSON.stringify(j));
+            }
+        };
+        run("L0", 1, common, 1);
+        run("L3", 1, [...common, "--db", "bench-data"], 5, 0.5);
+        run("L3", 2, [...common, "--db", "bench-data"], 7, 0.7);
+        run("L4", 1, [...common, "--db", "bench-data", "--verify-attempts", "3"], 6);
+        run("L4", 2, [...common, "--db", "bench-data", "--verify-attempts", "3"], 8);
+        // L4's trials: $3 and 10 minutes in all, of which verification (with root cause) added $0.50 and 1 minute.
+        for (const w of [1, 2]) {
+            const file = path.join(root, "L4", `shop-${w}`, "2026-11-22-1000-benchmark-discovery.json");
+            const j = JSON.parse(fs.readFileSync(file, "utf8"));
+            Object.assign(j.benchmark.apps[0].metrics, { cost: 3, durationMs: 10 * 60_000 });
+            j.benchmark.apps[0].verification = { findings: [], added: { cost: 0.5, durationMs: 60_000 } };
+            fs.writeFileSync(file, JSON.stringify(j));
+        }
+        const md = ladderReport(root);
+        // Phase 4's L10 compares L2 and L4 without what verification added (LADDER-FLAGS.md); L3 has none to take off.
+        expect(md).toContain("| Cost without verification (USD) | $0.00 ($0.00–$0.00) [1/1] | $0.00 ($0.00–$0.00) [2/2] | $2.50 ($2.50–$2.50) [2/2] |");
+        expect(md).toContain("| Time without verification (min) | 0 (0–0) [1/1] | 0 (0–0) [2/2] | 9 (9–9) [2/2] |");
+        expect(md).not.toContain("did not all use the same harness flags");
+        expect(md).toContain("Harness flags: --level thorough");
+        expect(md).toContain("L4: + --db bench-data --verify-attempts 3");
+        // V12: L4's detection median 7 against L3's 6. V1's baseline: L3's list precision, median 60%.
+        expect(md).toContain("V12 (shop): L4 detection median 7 against L3's 6: met");
+        expect(md).toContain("V1 baseline list precision (shop, L3): 60% (50%–70%) [2/2]");
+        // A trial whose common flags differ is still called out.
+        run("L1", 1, ["--level", "quick"], 1);
+        expect(ladderReport(root)).toContain("did not all use the same harness flags");
         fs.rmSync(root, { recursive: true, force: true });
     });
 
