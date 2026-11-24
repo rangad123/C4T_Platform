@@ -23,7 +23,7 @@ interface Issue {
 }
 interface Page {
     path: string;
-    state: "issues" | "clean" | "not-checked";
+    state: "issues" | "clean" | "not-checked" | "dismissed";
     issues: Issue[];
     moreRules: number;
     note: string | null;
@@ -34,7 +34,7 @@ interface Outcome {
     runs: number;
     pages: Page[];
     rules: Array<{ rule: string; severity: Severity; help: string; pages: number; elements: number }>;
-    counts: { issues: number; clean: number; notChecked: number };
+    counts: { issues: number; clean: number; notChecked: number; dismissed: number };
 }
 
 export const LIST: CSSProperties = { listStyle: "none", margin: 0, padding: 0 };
@@ -108,6 +108,9 @@ export function RunLink({ projectId, agentId, page, inRun }: { projectId: string
     );
 }
 
+/** The pages a person marked not a bug, in one sentence (both outcomes); nothing when there are none. */
+export const dismissedLine = (n: number) => (n ? ` ${n === 1 ? "1 page" : `${n} pages`} a person marked not a bug ${n === 1 ? "is" : "are"} listed below and left out of these counts.` : "");
+
 /** A titled card holding a list (the sections of both outcomes). */
 export function ListCard({ title, testId, children }: { title: string; testId: string; children: ReactNode }) {
     return (
@@ -145,6 +148,7 @@ const STATE: Record<Page["state"], { label: string; tone: Tone }> = {
     issues: { label: "Issues", tone: "warning" },
     clean: { label: "Clean", tone: "success" },
     "not-checked": { label: "Not checked", tone: "neutral" },
+    dismissed: { label: "Not a bug", tone: "neutral" },
 };
 
 /** The issues on each page, by rule and severity, and the pages clean and with issues (SPEC §3): nothing else. */
@@ -158,8 +162,9 @@ function Report({ o, projectId, inRun }: { o: Outcome; projectId: string; inRun:
                     <Metric value={o.counts.notChecked} label="Not checked" />
                     <Metric value={o.rules.length} label="Rules broken" />
                 </div>
-                <p className="section t-meta" style={{ margin: 0 }}>
-                    Each key page is checked signed out against the WCAG 2.1 A and AA rules (axe-core). Issues of serious or critical impact are reported. The rules are facts, not AI judgement.
+                <p className="section t-meta" style={{ margin: 0 }} data-testid="a11y-scope">
+                    Each key page is checked signed out against the WCAG 2.1 A and AA rules (axe-core). A page fails at serious or critical impact, and every issue found is listed with its severity. The rules are facts, not AI judgement, so a finding needs no replay to verify it.
+                    {dismissedLine(o.counts.dismissed)}
                 </p>
             </div>
             {o.rules.length > 0 && (

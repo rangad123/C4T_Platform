@@ -7,7 +7,9 @@ import type { DraftSpec } from "../api/test-specs.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { AppModel, PageModel, PageType } from "../understanding/app-model.js";
 import type { ScriptRun } from "../validation/runner.js";
-import { A11Y_FAILURE_PREFIX, type A11yImpact } from "./audit.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_ALL_RULES_TAG, A11Y_FAILURE_PREFIX, type A11yImpact } from "./audit.js";
+
+export { A11Y_ALL_RULES_TAG } from "./audit.js";
 
 export interface A11yGenOptions {
     maxPages: number;
@@ -15,6 +17,8 @@ export interface A11yGenOptions {
     perTypeScale?: number;
     /** Minimum failing impact; defaults to "serious". */
     threshold?: A11yImpact;
+    /** Keep every rule found, at every impact (an Accessibility agent's run): audit.ts A11Y_ALL_RULES_TAG. */
+    allRules?: boolean;
 }
 
 /** Lower = audited first. Types not listed here are skipped. */
@@ -124,7 +128,7 @@ export function selectKeyPages(model: AppModel, maxPages: number, perTypeScale =
 
 export function generateA11ySpecs(model: AppModel, opts: A11yGenOptions): DraftSpec[] {
     const threshold = opts.threshold ?? "serious";
-    return pickPages(model, opts.maxPages, opts.perTypeScale ?? 1).map(({ page, type }) => a11ySpec(page, type, threshold));
+    return pickPages(model, opts.maxPages, opts.perTypeScale ?? 1).map(({ page, type }) => a11ySpec(page, type, threshold, opts.allRules === true));
 }
 
 function pickPages(model: AppModel, maxPages: number, perTypeScale: number): Array<{ page: PageModel; type: PageType }> {
@@ -154,7 +158,7 @@ function pickPages(model: AppModel, maxPages: number, perTypeScale: number): Arr
     return picked;
 }
 
-function a11ySpec(page: PageModel, type: PageType, threshold: string): DraftSpec {
+function a11ySpec(page: PageModel, type: PageType, threshold: string, allRules: boolean): DraftSpec {
     const name = page.title?.trim() || LABEL[type] || page.path;
     const label = LABEL[type] ? `${LABEL[type]} page` : "Page";
     const steps: Step[] = [
@@ -177,7 +181,7 @@ function a11ySpec(page: PageModel, type: PageType, threshold: string): DraftSpec
         steps,
         expectedResults: [`No WCAG 2.0/2.1 A or AA violations with "${threshold}" impact or above`],
         testData: {},
-        tags: ["a11y", "wcag"],
+        tags: ["a11y", "wcag", ...(allRules ? [A11Y_ALL_RULES_TAG] : [])],
         source: { origin: "a11y-audit" },
     };
 }
@@ -199,9 +203,12 @@ export function a11yFinding(spec: TestSpec, run: ScriptRun): string | undefined 
     // Keep the rule lines, drop Playwright's trailing call log / stack if any.
     const lines = text.slice(at).split("\n");
     const end = lines.findIndex((l, i) => i > 0 && !l.startsWith("- "));
-    return lines
+    const message = lines
         .slice(0, end < 0 ? lines.length : end)
         .join("\n")
         .trim()
         .slice(0, 1000);
+    // An audit that keeps every rule (A11Y_ALL_RULES_TAG) noted them all: they follow the message, whatever their impact.
+    const all = run.notes?.indexOf(A11Y_ALL_RULES_PREFIX) ?? -1;
+    return all < 0 ? message : [message, A11Y_ALL_RULES_PREFIX, ...run.notes!.slice(all + 1).filter((l) => l.startsWith("- "))].join("\n");
 }

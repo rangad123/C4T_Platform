@@ -675,6 +675,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 // Only a job that asked for it (evaluation) runs its new test cases; every other one only writes them.
                 ...(o.runTestCases === true ? { runTestCases: true } : {}),
                 accessibility: o.accessibility,
+                // The Accessibility agent's outcome groups every issue by severity, so its audits keep every rule (Agent Workspace W2b).
+                ...(o.agentId === "accessibility" ? { a11yAllRules: true } : {}),
                 healthChecks: o.healthChecks,
                 securityChecks: o.securityChecks,
                 performanceChecks: o.performanceChecks,

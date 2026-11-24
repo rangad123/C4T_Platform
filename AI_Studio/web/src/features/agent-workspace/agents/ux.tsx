@@ -3,7 +3,7 @@ import { Badge, Metric } from "../../../components/ui";
 import type { Tone } from "../../../lib/labels";
 import { routes } from "../../../lib/router";
 import type { AgentView } from "../registry";
-import { InputsFrame, LIST, ListCard, OutcomeFrame, RunLink, WRAP } from "./accessibility";
+import { dismissedLine, InputsFrame, LIST, ListCard, OutcomeFrame, RunLink, WRAP } from "./accessibility";
 
 const ID = "ux";
 
@@ -14,7 +14,7 @@ interface Problem {
     text: string;
 }
 interface Visual {
-    state: "looks-right" | "please-look" | "could-not-run" | "not-checked";
+    state: "looks-right" | "please-look" | "could-not-run" | "not-checked" | "dismissed";
     notes: Problem[];
     note: string | null;
     screenshot: string | null;
@@ -23,7 +23,7 @@ interface Visual {
 }
 interface Page {
     path: string;
-    state: "problems" | "healthy" | "not-checked";
+    state: "problems" | "healthy" | "not-checked" | "dismissed";
     checks: Array<{ check: Check; summary: string; problems: Problem[]; advice: string }>;
     note: string | null;
     run: number;
@@ -33,7 +33,7 @@ interface Page {
 interface Outcome {
     runs: number;
     pages: Page[];
-    counts: { problems: number; healthy: number; notChecked: number };
+    counts: { problems: number; healthy: number; notChecked: number; dismissed: number };
     visualReview: boolean;
 }
 
@@ -54,12 +54,14 @@ const STATE: Record<Page["state"], { label: string; tone: Tone }> = {
     problems: { label: "Problems", tone: "warning" },
     healthy: { label: "Healthy", tone: "success" },
     "not-checked": { label: "Not checked", tone: "neutral" },
+    dismissed: { label: "Not a bug", tone: "neutral" },
 };
 const LOOK: Record<Visual["state"], { label: string; tone: Tone }> = {
     "looks-right": { label: "Looks right", tone: "success" },
     "please-look": { label: "Please look", tone: "warning" },
     "could-not-run": { label: "Could not run", tone: "neutral" },
     "not-checked": { label: "Not checked", tone: "neutral" },
+    dismissed: { label: "Not a bug", tone: "neutral" },
 };
 
 function Problems({ list }: { list: Problem[] }) {
@@ -115,10 +117,11 @@ function Report({ o, projectId, inRun }: { o: Outcome; projectId: string; inRun:
                     <Metric value={o.visualReview ? looks : "Off"} label="Visual notes to look at" />
                 </div>
                 <p className="section t-meta" style={{ margin: 0 }} data-testid="ux-scope">
-                    Each key page is opened like a visitor would: broken links, script errors, failed requests to the site, insecure content and page basics are facts.{" "}
+                    Each key page is opened like a visitor would: broken links, script errors, failed requests to the site, insecure content and page basics are facts, so a finding needs no replay to verify it.{" "}
                     {o.visualReview
                         ? "Visual notes come from AI screen review: a model's judgement of a screenshot, so open it and decide."
                         : "AI screen review was not part of these runs, so there are no visual notes: it runs at Deep and Everything when your model can read images, or when you turn it on for a run."}
+                    {dismissedLine(o.counts.dismissed)}
                 </p>
             </div>
             <ListCard title="Pages" testId="ux-pages">

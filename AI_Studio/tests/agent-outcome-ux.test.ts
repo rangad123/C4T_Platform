@@ -20,6 +20,9 @@ import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions, type JobStatus, type ValidationState } from "../src/platform/repo.js";
 import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
 import { buildServer } from "../src/platform/server.js";
+import type { ScriptRun } from "../src/engine/validation/runner.js";
+import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
+import { executionFinding } from "../src/platform/findings/adapters.js";
 
 const KEY = "agent-outcome-ux-key-3f9a";
 const SITE = "http://127.0.0.1:7742";
@@ -124,7 +127,7 @@ describe("the UX Testing Agent's outcome", () => {
         const { status, body } = await call(`/api/projects/${pid}/workspace/ux/outcome`);
         expect(status).toBe(200);
         expect(body.runs).toBe(3);
-        expect(body.counts).toEqual({ problems: 2, healthy: 2, notChecked: 1 });
+        expect(body.counts).toEqual({ problems: 2, healthy: 2, notChecked: 1, dismissed: 0 });
         expect(page(body, "/")).toMatchObject({
             state: "problems",
             run: 2,
@@ -162,7 +165,7 @@ describe("the UX Testing Agent's outcome", () => {
         const { status, body } = await call(`/api/projects/${pid}/workspace/ux/outcome?run=${ids.stopped}`);
         expect(status).toBe(200);
         expect(body.pages.map((x: any) => [x.path, x.state, x.run])).toEqual([["/products", "problems", 3], ["/about", "not-checked", 3]]);
-        expect(body).toMatchObject({ runs: 1, counts: { problems: 1, healthy: 0, notChecked: 1 }, visualReview: false });
+        expect(body).toMatchObject({ runs: 1, counts: { problems: 1, healthy: 0, notChecked: 1, dismissed: 0 }, visualReview: false });
         expect((await call(`/api/projects/${pid}/workspace/ux/outcome?run=${ids.security}`)).status).toBe(404);
     });
 
@@ -172,7 +175,41 @@ describe("the UX Testing Agent's outcome", () => {
         const ws = await call(`/api/projects/${pid}/workspace`);
         expect(ws.body.agents.find((a: any) => a.id === "ux").headline).toBe("2 pages with problems, 2 healthy, 1 not checked");
         const none = await call(`/api/projects/${empty}/workspace/ux/outcome`);
-        expect(none.body).toEqual({ runs: 0, pages: [], counts: { problems: 0, healthy: 0, notChecked: 0 }, visualReview: false });
+        expect(none.body).toEqual({ runs: 0, pages: [], counts: { problems: 0, healthy: 0, notChecked: 0, dismissed: 0 }, visualReview: false });
         expect(ux!.headline(none.body)).toBeNull();
+    });
+});
+
+/** A person's "not a bug" on a health check or a screen review (candidate_findings, state not_a_bug), and a low-confidence screen note. */
+describe("a person's not a bug, and the screen review's unsure notes", () => {
+    let other = "";
+    const dismiss = async (of: string, jobId: string, testId: string, reason: string) => {
+        const t = platform.repo.getTest(testId)!;
+        const store = new CandidateFindingStore(platform.sql);
+        const fake = { status: "failed", failedStepIndex: 1, steps: [{ index: 1, title: "2", status: "failed", error: "failed" }], responses: [], error: "failed" } as unknown as ScriptRun;
+        const { finding } = await store.upsert({ projectId: of, jobId, testId, finding: executionFinding({ id: t.id, title: t.title, spec: t.spec }, fake) });
+        await store.transition(of, finding.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason });
+    };
+
+    beforeAll(async () => {
+        other = await project("Dismiss Store", ["ux"]);
+        const job = await run(other, "ux", "COMPLETED", undefined, { visionChecks: true });
+        await dismiss(other, job, check(other, job, "health", "/old", "NEEDS_REVIEW", PRODUCTS_HEALTH), "The stock service is switched off on this test site.");
+        await dismiss(other, job, check(other, job, "vision", "/old", "NEEDS_REVIEW", HOME_LOOK), "The footer is meant to overlap there.");
+        check(other, job, "health", "/", "NEEDS_REVIEW", HOME_HEALTH);
+        check(other, job, "vision", "/", "VALIDATED", "AI judgement note (not sure): step 2 — the model thought this might look wrong (a cut-off logo) but was not confident, so the test still passes.");
+    });
+
+    it("shows a dismissed page with the reason, out of the problem counts", async () => {
+        const { body } = await call(`/api/projects/${other}/workspace/ux/outcome`);
+        expect(page(body, "/old")).toMatchObject({ state: "dismissed", note: "A person marked this not a bug: The stock service is switched off on this test site.", checks: [{ check: "noFailedRequests" }] });
+        expect(page(body, "/old").visual).toMatchObject({ state: "dismissed", note: "A person marked this not a bug: The footer is meant to overlap there.", notes: [{ severity: "medium" }] });
+        expect(body.counts).toEqual({ problems: 1, healthy: 0, notChecked: 0, dismissed: 1 });
+        expect(ux!.headline(body)).toBe("1 page with problems, 1 dismissed");
+    });
+
+    it("keeps the screen review's unsure note on a page that looks right", async () => {
+        const { body } = await call(`/api/projects/${other}/workspace/ux/outcome`);
+        expect(page(body, "/").visual).toMatchObject({ state: "looks-right", note: expect.stringContaining("a cut-off logo") });
     });
 });

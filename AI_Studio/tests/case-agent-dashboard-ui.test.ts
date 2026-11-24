@@ -539,15 +539,16 @@ describe("the Agent Workspace (W1)", () => {
         }
     });
 
-    it("Open shows the agent's own page; an agent not built yet says so, and its Runs are its runs only", async () => {
+    it("Open shows the agent's own page: its own outcome (W2b), and its Runs are its runs only", async () => {
         await visit(routes.project(team));
         await card("accessibility").getByRole("link", { name: "Open" }).click();
         await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Accessibility Testing Agent");
-        await pwExpect(page.getByText("Not shown here yet")).toBeVisible();
+        await pwExpect(page.getByTestId("accessibility-outcome")).toBeVisible();
+        await pwExpect(page.getByText("Not shown here yet")).toHaveCount(0);
         await page.getByRole("navigation", { name: "Accessibility Testing Agent sections" }).getByRole("link", { name: "Runs" }).click();
         await pwExpect(page.getByTestId("agent-runs").locator("li")).toHaveCount(1);
         await page.getByRole("navigation", { name: "Accessibility Testing Agent sections" }).getByRole("link", { name: "Setup" }).click();
-        await pwExpect(page.getByTestId("agent-setup")).toContainText("What it needs");
+        await pwExpect(page.getByTestId("agent-setup")).toContainText("Application address");
         await axe("agent page, setup");
     });
 

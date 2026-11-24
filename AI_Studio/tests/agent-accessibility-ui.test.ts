@@ -20,7 +20,10 @@ import { expect as pwExpect } from "@playwright/test";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
-import { formatA11yViolations } from "../src/engine/a11y/audit.js";
+import { formatA11yAllRules, formatA11yViolations } from "../src/engine/a11y/audit.js";
+import type { ScriptRun } from "../src/engine/validation/runner.js";
+import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
+import { executionFinding } from "../src/platform/findings/adapters.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions, type JobStatus, type ValidationState } from "../src/platform/repo.js";
@@ -79,6 +82,16 @@ beforeAll(async () => {
     check(ids.a1, "accessibility", "/", "NEEDS_REVIEW", audit(["image-alt", "critical", "Images must have alternate text", 3], ["color-contrast", "serious", "Elements must meet minimum color contrast ratio thresholds", 5]));
     check(ids.a1, "accessibility", "/about", "VALIDATED");
     check(ids.a1, "accessibility", "/cart", "FAILED_VALIDATION", "Could not open /cart: net::ERR_CONNECTION_REFUSED");
+    // Passed the "serious" threshold, with every rule kept: a moderate and a minor issue.
+    const lvl = (id: string, impact: string) => ({ id, impact, help: `Help for ${id}`, nodes: [{ target: ["html"] }] });
+    check(ids.a1, "accessibility", "/levels", "VALIDATED", formatA11yAllRules([lvl("html-xml-lang-mismatch", "moderate"), lvl("server-side-image-map", "minor")])!.join("\n"));
+    // A person said not a bug.
+    const promo = check(ids.a1, "accessibility", "/promo", "NEEDS_REVIEW", audit(["color-contrast", "serious", "Elements must meet minimum color contrast ratio thresholds", 2]));
+    const t = platform.repo.getTest(promo)!;
+    const store = new CandidateFindingStore(platform.sql);
+    const fake = { status: "failed", failedStepIndex: 1, steps: [{ index: 1, title: "2", status: "failed", error: "failed" }], responses: [], error: "failed" } as unknown as ScriptRun;
+    const { finding } = await store.upsert({ projectId: pid, jobId: ids.a1, testId: promo, finding: executionFinding({ id: t.id, title: t.title, spec: t.spec }, fake) });
+    await store.transition(pid, finding.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason: "The banner is decorative." });
     ids.a2 = await run("accessibility", "FAILED", "Cancelled");
     check(ids.a2, "accessibility", "/products/travel-mug-with-a-very-long-name-that-wraps", "NEEDS_REVIEW", audit(["label", "serious", "Form elements must have labels", 1]));
     // Another agent's run, with an audit and a health check in it: on neither page.
@@ -138,10 +151,16 @@ describe("the Accessibility Testing Agent's page", () => {
     it("Outcome: the issues on each page by rule and severity, and the pages clean and with issues; nothing of another agent", async () => {
         await visit(routes.projectAgent(pid, "accessibility"));
         const out = page.getByTestId("accessibility-outcome");
-        await pwExpect(out.locator(".metric")).toHaveText(["2Pages with issues", "1Clean pages", "1Not checked", "3Rules broken"]);
-        await pwExpect(page.getByTestId("a11y-rules").locator("li")).toHaveText([/Critical\s*image-alt\s*Images must have alternate text\s*1 page · 3 elements/, /Serious\s*color-contrast/, /Serious\s*label/]);
+        await pwExpect(out.locator(".metric")).toHaveText(["3Pages with issues", "1Clean pages", "1Not checked", "5Rules broken"]);
+        await pwExpect(page.getByTestId("a11y-rules").locator("li")).toHaveText([/Critical\s*image-alt\s*Images must have alternate text\s*1 page · 3 elements/, /Serious\s*color-contrast\s*.*1 page · 5 elements/, /Serious\s*label/, /Moderate\s*html-xml-lang-mismatch/, /Minor\s*server-side-image-map/]);
         const pages = page.getByTestId("a11y-page");
-        await pwExpect(pages).toHaveCount(4);
+        await pwExpect(pages).toHaveCount(6);
+        await pwExpect(pages.filter({ hasText: "/levels" })).toContainText("html-xml-lang-mismatch: Help for html-xml-lang-mismatch. 1 element: html");
+        const promo = pages.filter({ hasText: "/promo" });
+        await pwExpect(promo.locator(".badge").first()).toHaveText("Not a bug");
+        await pwExpect(promo).toContainText("A person marked this not a bug: The banner is decorative.");
+        await pwExpect(page.getByTestId("a11y-scope")).toContainText("a finding needs no replay to verify it");
+        await pwExpect(page.getByTestId("a11y-scope")).toContainText("1 page a person marked not a bug is listed below and left out of these counts.");
         await pwExpect(pages.nth(0)).toContainText("/");
         await pwExpect(pages.nth(0)).toContainText("image-alt: Images must have alternate text. 3 elements: main > img:nth-child(1)");
         await pwExpect(pages.nth(0).getByRole("link", { name: "Run 1" })).toHaveAttribute("href", routes.projectAgentRun(pid, "accessibility", ids.a1));
@@ -186,7 +205,7 @@ describe("before a run", () => {
         await pwExpect(page.getByTestId("accessibility-outcome").getByRole("link", { name: "Run the agent" })).toHaveAttribute("href", routes.newProject({ project: fresh, agent: "accessibility" }));
         await shot("accessibility", "not-run.png");
         await visit(routes.project(pid));
-        await pwExpect(page.locator('.ws-card[data-agent="accessibility"]').getByTestId("agent-headline")).toHaveText("2 pages with issues, 1 clean, 1 not checked");
+        await pwExpect(page.locator('.ws-card[data-agent="accessibility"]').getByTestId("agent-headline")).toHaveText("3 pages with issues, 1 clean, 1 not checked, 1 dismissed");
         await shot("accessibility", "workspace.png");
         expect(consoleErrors).toEqual([]);
     });
