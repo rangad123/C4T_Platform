@@ -5,7 +5,7 @@
  */
 import type { Job } from "../../api";
 import type { Tone } from "../../lib/labels";
-import { progressPercent } from "../../lib/labels";
+import { isActive, progressPercent } from "../../lib/labels";
 import { relativeTime } from "../../lib/format";
 import type { AgentId } from "../testing-agents/testing-agents";
 
@@ -30,6 +30,21 @@ export interface WorkspaceAnswer {
 
 /** True when a project of these modes and this agent choice (GET /testing-agents) has the Workspace. */
 export const hasWorkspace = (modes: readonly string[], agents: { applies: boolean; source: string } | undefined): boolean => modes.includes("agent") && !modes.includes("code") && agents?.applies === true && agents.source === "chosen";
+
+/** One of an agent's runs as its Runs list answers it: a check agent's run with its own one line (what that run found). */
+export type AgentRun = Job & { headline?: string | null };
+
+/** What the status of one run is, by the CONTRACT's status rules (the card's words; agent-workspace.ts agentStatusOf). */
+export const runStatusOf = (job: Pick<Job, "status" | "error" | "cancelled">): AgentStatus =>
+    isActive(job.status) ? "running" : job.status !== "FAILED" ? "done" : job.error === "Cancelled" || job.cancelled ? "stopped" : "failed";
+
+/** Each run status word, explained (the Runs list's key). */
+export const RUN_STATUS_HELP: Partial<Record<AgentStatus, string>> = {
+    running: "The run is going now.",
+    done: "The run finished; what it found is part of the agent's outcome.",
+    stopped: "Someone stopped the run; what it found before then is kept.",
+    failed: "The run stopped with a problem; the reason is on its page. What it found before then is kept.",
+};
 
 /** The status as the card says it (SPEC §1): Not run yet, Running n%, Done (when), Stopped (what it found is kept), Failed, Needs input. */
 export function statusWords(a: Pick<WorkspaceAgent, "status" | "lastRun">): { label: string; tone: Tone } {

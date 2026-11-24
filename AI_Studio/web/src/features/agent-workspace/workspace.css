@@ -16,6 +16,7 @@
 
 .ws-runs { list-style: none; margin: 0; padding: 0; }
 .ws-runs li { gap: 10px; flex-wrap: wrap; }
+.ws-run-headline { flex-basis: 100%; margin: 0; color: var(--text-secondary); font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); font-variant-numeric: tabular-nums; }
 .ws-inputs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
 .ws-inputs dt { color: var(--text-muted); }
 .ws-inputs dd { margin: 0; overflow-wrap: anywhere; }

@@ -233,15 +233,17 @@ describe("the tabs follow the project's kind", () => {
         }
     });
 
-    it("an agent project with its agents chosen has Workspace, Requirements, Settings, on every place; its old Runs address has no tab", async () => {
+    it("an agent project with its agents chosen has Workspace, Requirements, Settings, on every place; its old Runs address opens the Workspace", async () => {
         for (const h of [routes.project(agent), routes.requirements(agent), routes.projectSettings(agent)]) {
             await visit(h);
             expect(await tabNames(), h).toEqual(WORKSPACE_TABS);
             await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(1);
         }
+        // W3 review M4: each agent's runs are on its own page, so the old Runs address opens the Workspace.
         await visit(routes.runs(agent));
+        await page.waitForURL((u) => u.hash === routes.project(agent));
         expect(await tabNames()).toEqual(WORKSPACE_TABS);
-        await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(0);
+        await pwExpect(tabs().locator('[aria-current="page"]')).toHaveText("Workspace");
     });
 
     it("a code project and a mixed project have Dashboard, Requirements, Test cases, Test scripts (count), Test suites, Runs, Settings", async () => {
@@ -308,14 +310,16 @@ describe("the tabs follow the project's kind", () => {
             await pwExpect.poll(() => runsHint(id)).toBe(explores ? "Every exploration and every run of tests" : "Every run of tests");
         }
         await pwExpect.poll(() => runsHint(ran)).toBe("Every run of tests");
-        await pwExpect.poll(() => runsHint(agent)).toBe("Every exploration and every run of tests");
+        // An agent project with its agents chosen has no Runs place (W3 review M4); one with no choice saved keeps it.
+        await pwExpect.poll(() => runsHint(legacy)).toBe("Every exploration and every run of tests");
     });
 });
 
 describe("the project header sits above the tabs on every place", () => {
     it("the kind's tile beside the name as the one h1, the project's tags without a second type chip; the place's title is an h2 under the tab bar", async () => {
         for (const [id, kind, label, platform] of [[agent, "agent", "Agent project", "Web"], [code, "code", "Code project", "Android"], [mixed, "mixed", "Agent and code project", "iOS"]] as const) {
-            for (const [h, title] of [[routes.requirements(id), "Requirements"], [routes.runs(id), "Runs"], [routes.projectSettings(id), "Settings"]] as const) {
+            // An agent project with the Workspace has no Runs place (its old address opens the Workspace).
+            for (const [h, title] of [[routes.requirements(id), "Requirements"], ...(kind === "agent" ? [] : ([[routes.runs(id), "Runs"]] as const)), [routes.projectSettings(id), "Settings"]] as const) {
                 await visit(h);
                 const head = page.getByTestId("project-head");
                 await pwExpect(head).toHaveAttribute("data-kind", kind);

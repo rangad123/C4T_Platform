@@ -160,6 +160,24 @@ describe("Schedule tab", () => {
         await pwExpect(row.locator(".badge", { hasText: "UX Testing Agent" })).toBeVisible();
         const saved = getScheduleServices(platform).store.list(pid);
         expect(saved.map((x) => [x.kind, x.agentId])).toEqual([["generate", "ux"]]);
+        // No code-project tooling here (W3 review M4): no run sequences and no release gate.
+        await pwExpect(page.getByText("Run sequences")).toHaveCount(0);
+        await pwExpect(page.getByText("Release gate")).toHaveCount(0);
+
+        // An agent's Runs tab opens Schedules showing that agent's only, with a new schedule already that agent's.
+        await page.goto(`${BASE}/#/projects/${pid}/agents/accessibility?tab=runs`);
+        await page.getByTestId("agent-schedules-link").getByRole("link", { name: "Schedules" }).click();
+        await page.waitForURL((u) => u.hash === `#/projects/${pid}/runs?section=schedules&agent=accessibility`);
+        await pwExpect(page.getByRole("heading", { name: "Scheduled runs of the Accessibility Testing Agent" })).toBeVisible();
+        await pwExpect(page.locator("[data-schedule]")).toHaveCount(0);
+        await pwExpect(page.getByTestId("schedules-agent-only")).toBeVisible();
+        await page.getByRole("button", { name: "New schedule" }).click();
+        await pwExpect(page.getByRole("form", { name: "New schedule" }).getByLabel("What should run")).toHaveValue("agent:accessibility");
+
+        // The old Runs address opens the Workspace.
+        await page.goto(`${BASE}/#/projects/${pid}/runs`);
+        await page.waitForURL((u) => u.hash === `#/projects/${pid}`);
+        await pwExpect(page.getByTestId("workspace")).toBeVisible();
     });
 
     it("adds a webhook channel and sends a test message that really arrives", async () => {

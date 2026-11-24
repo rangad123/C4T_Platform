@@ -2,13 +2,14 @@ import type { CSSProperties, ReactNode } from "react";
 import { Accessibility, Play, type LucideIcon } from "lucide-react";
 import type { Job } from "../../../api";
 import { JobProgress } from "../../../components/JobProgress";
-import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton, Metric } from "../../../components/ui";
+import { Badge, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, Metric } from "../../../components/ui";
 import { friendlyError, isActive, type Tone } from "../../../lib/labels";
 import { useFetch, useOnFinish } from "../../../lib/hooks";
 import { routes } from "../../../lib/router";
 import type { AgentInputs } from "../../requirements/AgentInputs";
 import { RelTime } from "../../runs/RunTime";
 import type { AgentView } from "../registry";
+import { RunStatus } from "../RunStatus";
 
 const ID = "accessibility";
 
@@ -63,7 +64,7 @@ export function OutcomeFrame<T extends { runs: number }>(props: { projectId: str
                     <h3 className="t-card" style={{ margin: 0 }}>
                         Run {runs.data!.length - at}
                     </h3>
-                    <JobBadge job={job} tipFocusable />
+                    <RunStatus job={job} />
                     <span className="t-meta">
                         Started <RelTime iso={job.createdAt} />
                     </span>
@@ -166,7 +167,7 @@ function Report({ o, projectId, inRun }: { o: Outcome; projectId: string; inRun:
                     <Metric value={o.counts.needsCheck} label="Needs a person’s check" />
                 </div>
                 <p className="section t-meta" style={{ margin: 0 }} data-testid="a11y-scope">
-                    Each key page is checked signed out against the WCAG 2.1 A and AA rules (axe-core). A page fails at serious or critical impact, and every issue found is listed with its severity. The rules are facts, not AI judgement, so a finding needs no replay to verify it. What axe cannot decide by itself is listed as “Needs a person’s check”: it is never counted as an issue and never fails a page.
+                    Each key page is opened in a new browser that is not signed in and checked against the WCAG 2.1 A and AA rules (axe-core), so a page that needs signing in is checked as a visitor sees it, often its sign-in page. A page fails at serious or critical impact, and every issue found is listed with its severity. The rules are facts, not AI judgement, so a finding needs no replay to verify it. What axe cannot decide by itself is listed as “Needs a person’s check”: it is never counted as an issue and never fails a page.
                     {dismissedLine(o.counts.dismissed)}
                 </p>
             </div>
@@ -284,7 +285,7 @@ function Setup({ projectId }: { projectId: string }) {
                             To explore and find the pages; the checks themselves are rules · <a href={routes.aiKeys}>Settings → AI keys</a>
                         </dd>
                         <dt>Pages checked</dt>
-                        <dd>The key pages a visitor can open without signing in</dd>
+                        <dd>The key pages the exploration found, each opened without signing in: a page behind a sign-in is checked as a visitor sees it</dd>
                     </dl>
                 </>
             )}

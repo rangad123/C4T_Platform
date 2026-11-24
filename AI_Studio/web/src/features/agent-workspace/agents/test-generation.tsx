@@ -71,10 +71,10 @@ function Outcome({ projectId }: { projectId: string }) {
 function Runs({ projectId }: { projectId: string }) {
     return (
         <div className="stack">
-            <CaseRuns id={projectId} />
+            <CaseRuns id={projectId} jobsPath={`/projects/${projectId}/workspace/${ID}/runs`} />
             <p className="t-meta" data-testid="case-runs-schedules">
                 <CalendarClock size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 6 }} />
-                To explore again on a timetable, so the tree keeps growing, open <a href={routes.runs(projectId, "schedules")}>Schedules</a>.
+                To explore again on a timetable, so the tree keeps growing, open <a href={routes.agentSchedules(projectId, ID)}>Schedules</a>.
             </p>
         </div>
     );

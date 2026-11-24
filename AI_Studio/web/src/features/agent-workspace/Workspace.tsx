@@ -122,7 +122,7 @@ function Flow({ projectId, agents }: { projectId: string; agents: WorkspaceAgent
                 <li>
                     <Network size={18} aria-hidden />
                     <span>
-                        <strong>One tree of the application.</strong> Every agent’s run explores the application and adds to the same tree of its pages, and every agent starts from it.
+                        <strong>One memory of the site.</strong> Every agent’s run adds to the site memory that later runs reuse. The tree you see is built by the Test Case Generation agent.
                     </span>
                 </li>
                 {has("test-generation") && (

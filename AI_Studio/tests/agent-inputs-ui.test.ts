@@ -142,12 +142,20 @@ describe("what the agents need", () => {
 
         // A project of several agents runs one of them (Agent Workspace D1): the API agent's Run opens the form with it, and lands on its page.
         await page.goto(`${BASE}/#/new?project=${shop}&agent=api`);
-        await page.getByLabel(/^Focus/).fill("search and checkout only");
+        // A check agent's Run page (W3 review H1): what its run does (the catalogue's sentence), the address and Start; no plan, no
+        // test count, no focus or level, and the breadcrumb ends at the agent.
+        await pwExpect(page.getByRole("heading", { level: 1 })).toHaveText("Run the API Testing Agent");
+        await pwExpect(page.getByTestId("agent-run-does")).toHaveText("Tests the API calls the application makes, and checks the answers against the API's own description.");
+        const runPage = (await page.locator("main").innerText()).toLowerCase();
+        for (const gone of ["plan", "tests from the ai", "existing tests", "explore again", "focus", "explore every page"]) expect(runPage).not.toContain(gone);
+        await pwExpect(page.getByRole("navigation", { name: "Breadcrumb" }).locator(".here")).toHaveText("API Testing Agent");
+        await pwExpect(page.getByTestId("agent-run-form").getByRole("button")).toHaveText(["Start"]);
+        expect(await axeClean(page)).toEqual([]);
         await pwExpect(dialog()).toHaveCount(0);
-        await page.getByRole("button", { name: "Start exploring" }).click();
+        await page.getByRole("button", { name: "Start", exact: true }).click();
         await page.waitForURL((u) => u.hash === `#/projects/${shop}/agents/api`);
         const job = platform.repo.listJobs(shop)[0]!;
-        expect(job.options).toMatchObject({ scope: "search and checkout only", openApiUrl: "https://shop.example/openapi.json", agentId: "api", contractChecks: true });
+        expect(job.options).toMatchObject({ openApiUrl: "https://shop.example/openapi.json", agentId: "api", contractChecks: true });
         // A check agent's run has no plan step: it makes and runs its checks.
         expect(job.options.planOnly).toBeUndefined();
         expect(platform.repo.getApplication(job.applicationId)!.credentials).toMatchObject({ username: "old@shop.example", password: "an earlier password", apiToken: TOKEN });

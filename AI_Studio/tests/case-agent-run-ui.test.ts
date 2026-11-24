@@ -133,13 +133,16 @@ const OLD_RUN_WORDS = ["Create the tests", "Discard the plan", "Edit the plan", 
 
 describe("the Runs place of a Test Case Generation project", () => {
     it("has only All runs and Schedules, no Run button, and rows that say what each run added (P7.2, O6, R10.3, Q4, FX8)", async () => {
+        // The old Runs address of an Agent Workspace project opens the Workspace (W3 review M4); the runs are on the agent's page.
         await visit(`#/projects/${tcg}/runs`);
-        await page.waitForURL(`**#/projects/${tcg}/agents/test-generation?tab=runs`);
+        await page.waitForURL((u) => u.hash === `#/projects/${tcg}`);
+        await page.getByTestId("workspace").waitFor();
+        await visit(`#/projects/${tcg}/agents/test-generation?tab=runs`);
         const list = page.getByTestId("case-runs");
         await list.locator("[data-run]").first().waitFor();
         const sections = page.getByRole("navigation", { name: "Test Case Generation Agent sections" }).getByRole("link");
         expect(await sections.allTextContents()).toEqual(["Outcome", "Runs", "Setup"]);
-        expect(await page.getByTestId("case-runs-schedules").getByRole("link", { name: "Schedules" }).getAttribute("href")).toBe(`#/projects/${tcg}/runs?section=schedules`);
+        expect(await page.getByTestId("case-runs-schedules").getByRole("link", { name: "Schedules" }).getAttribute("href")).toBe(`#/projects/${tcg}/runs?section=schedules&agent=test-generation`);
         const text = await mainText();
         for (const gone of ["After a deploy", "Trends", "Releases", "Compliance", "signing off a release"]) expect(text).not.toContain(gone);
         expect(await main().getByRole("button", { name: /^Run\b/ }).count()).toBe(0);
@@ -155,7 +158,8 @@ describe("the Runs place of a Test Case Generation project", () => {
         expect(await row(runs.partial).textContent()).toContain("Test cases written, with a problem");
         expect(await row(runs.first).textContent()).toContain("Test cases written");
         expect(await row(runs.running).textContent()).toContain("Exploring");
-        expect(await page.getByTestId("case-runs-others").textContent()).toBe("1 earlier run is not part of the tree, so it is not listed.");
+        // Only Test Case Generation's own runs are counted (W3 review M2): the old run of tests is not one of them.
+        expect(await page.getByTestId("case-runs-others").count()).toBe(0);
         expect(await row(runs.first).getByRole("link", { name: "See what it found" }).getAttribute("href")).toBe(`#/projects/${tcg}/agents/test-generation/runs/${runs.first}`);
         await shot("runs.png");
         await axe("runs");

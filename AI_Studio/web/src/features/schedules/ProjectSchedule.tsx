@@ -17,7 +17,7 @@ export type ScheduleSection = "schedules" | "deploys" | "trends";
  * The automatic side of the Runs place. Shown inside it, so it has no title or tab bar of its own: the place owns them.
  * While a run is going it keeps an eye on it, and when it ends everything that depends on its results is refreshed.
  */
-export function ProjectSchedule({ id, section }: { id: string; section: ScheduleSection }) {
+export function ProjectSchedule({ id, section, agentId, workspace }: { id: string; section: ScheduleSection; /** Show one testing agent's schedules only. */ agentId?: string | null; /** An Agent Workspace project: no run sequences or release gate (W3 review M4). */ workspace?: boolean }) {
     // A link from a run-sequence message names one run to show.
     const focusRunId = useRoute().query.get("run") ?? undefined;
     const jobs = useFetch<Job[]>(`/projects/${id}/jobs`, (d) => (d?.some((j) => isActive(j.status)) ? 2500 : null));
@@ -32,13 +32,14 @@ export function ProjectSchedule({ id, section }: { id: string; section: Schedule
                 <>
                     <SchedulesPanel
                         projectId={id}
+                        agentId={agentId ?? undefined}
                         reloadKey={reloadKey}
                         onRunStarted={() => {
                             // A started run shows up in the job list; polling then follows it to the end.
                             void jobs.reload();
                         }}
                     />
-                    <RunbooksPanel projectId={id} reloadKey={reloadKey} focusRunId={focusRunId} onLinked={bump} />
+                    {!workspace && <RunbooksPanel projectId={id} reloadKey={reloadKey} focusRunId={focusRunId} onLinked={bump} />}
                 </>
             )}
             {section === "trends" && (

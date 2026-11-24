@@ -22,9 +22,9 @@ import "./runs.css";
  * no Run button, no run strip of tests and no "See each test": nothing is run in such a project. Older runs that are not part of the tree
  * (runs of tests made before the project only wrote test cases, or forgotten with "Forget what we learned") are counted in one line.
  */
-export function CaseRuns({ id }: { id: string }) {
+export function CaseRuns({ id, jobsPath }: { id: string; /** Whose runs to count: the agent's own in the Agent Workspace (W3 review M2); default every run of the project. */ jobsPath?: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
-    const jobs = useFetch<Job[]>(`/projects/${id}/jobs`, (d) => (d?.some((j) => isActive(j.status)) ? 3000 : null));
+    const jobs = useFetch<Job[]>(jobsPath ?? `/projects/${id}/jobs`, (d) => (d?.some((j) => isActive(j.status)) ? 3000 : null));
     const anyActive = Boolean(jobs.data?.some((j) => isActive(j.status)));
     const outcome = useCaseOutcome(id, null, (o) => anyActive || Boolean(o?.runs.some((r) => r.status === "running")));
     const live = useProjectStream(id, anyActive, () => {

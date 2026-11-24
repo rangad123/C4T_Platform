@@ -134,17 +134,17 @@ async function narrow(name: string) {
 const rows = async () => (await pwExpect(page.getByTestId("performance-pages")).toBeVisible(), Promise.all((await page.getByTestId("performance-pages").locator("tbody tr").all()).map(async (r) => (await r.locator("td").allTextContents()).map((t) => t.trim()))));
 
 describe("the Performance Testing Agent's page", () => {
-    it("Outcome: each page's timings and budget, the slowest pages and the load result, and nothing of another agent's", async () => {
+    it("Outcome: each page's timings and budget, slowest first with no second list of them, and the load result, and nothing of another agent's", async () => {
         await visit(routes.projectAgent(pid, "performance"));
         await pwExpect(page.getByTestId("performance-outcome")).toBeVisible();
         expect(await page.getByTestId("performance-pages").locator("thead th").allTextContents()).toEqual(["Page", "Server starts responding", "First content appears", "Main content appears", "Page finished loading", "Budget"]);
         expect(await rows()).toEqual([
-            ["/", "180 ms", "700 ms", "1.2 s", "1.5 s", "Within budget"],
             ["/cartSigned in", "400 ms", "1.6 s", "3.4 s", "3.6 s", "Over budgetMain content appears after 3.4 s (aim for under 2.5 s)"],
             ["/products/a-very-long-product-page-address-for-narrow-screens", "300 ms", "900 ms", "1.9 s", "2.1 s", "Within budget"],
+            ["/", "180 ms", "700 ms", "1.2 s", "1.5 s", "Within budget"],
         ]);
-        expect((await page.getByTestId("performance-slowest").locator("li").allTextContents()).map((t) => t.split(/\d/)[0])).toEqual(["/cart", "/products/a-very-long-product-page-address-for-narrow-screens", "/"]);
-        await pwExpect(page.getByTestId("performance-slowest").locator("li").first()).toContainText("over the 2.5 s budget");
+        await pwExpect(page.getByTestId("performance-slowest")).toHaveCount(0);
+        await pwExpect(page.getByText("Slowest pages")).toHaveCount(0);
         const load = page.getByTestId("performance-load").locator("li");
         await pwExpect(load).toHaveCount(1);
         await pwExpect(load.first()).toContainText("GET /api/products");
@@ -165,8 +165,16 @@ describe("the Performance Testing Agent's page", () => {
         await visit(routes.projectAgent(pid, "performance", "runs"));
         const list = page.getByTestId("agent-runs").locator("li");
         await pwExpect(list).toHaveCount(2);
+        // Each row says what that run found, in the Workspace's status words, never a test suite's (W3 review M3, L5).
+        await pwExpect(list.nth(0).getByTestId("run-headline")).toHaveText("0 pages timed");
+        await pwExpect(list.nth(1).getByTestId("run-headline")).toHaveText("3 pages timed, 1 over budget");
+        await pwExpect(list.nth(0).locator(".badge")).toHaveText("Stopped, what it found is kept");
+        await pwExpect(list.nth(1).locator(".badge")).toContainText("Done");
+        await pwExpect(page.getByTestId("agent-runs")).not.toContainText("Test suite ready");
+        await pwExpect(page.getByTestId("agent-schedules-link").getByRole("link", { name: "Schedules" })).toHaveAttribute("href", routes.agentSchedules(pid, "performance"));
         await list.first().getByRole("link", { name: "Run 2" }).click();
         await pwExpect(page.getByTestId("agent-run")).toContainText("Run 2");
+        await pwExpect(page.getByTestId("agent-run")).not.toContainText("Test suite ready");
         await pwExpect(page.getByTestId("performance-load").locator("li")).toHaveCount(1);
         await pwExpect(page.getByTestId("performance-pages")).toHaveCount(0);
         await pwExpect(page.getByText("No page was timed in this run.")).toBeVisible();
@@ -192,7 +200,7 @@ describe("the Performance Testing Agent's page", () => {
         // The server's answer is the test's: only what the form sends matters here.
         await page.route("**/api/projects/*/test-generation", (r) => r.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ jobId: jobs.first, status: "QUEUED" }) }));
         const sent = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/test-generation"));
-        await page.locator("form").getByRole("button", { name: /explor/i }).click();
+        await page.locator("form").getByRole("button", { name: "Start", exact: true }).click();
         expect((await sent).postDataJSON()).toMatchObject({ agentId: "performance", loadChecks: true });
         await page.unroute("**/api/projects/*/test-generation");
     });

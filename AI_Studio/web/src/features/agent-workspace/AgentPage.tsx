@@ -1,9 +1,7 @@
-import { History, Play } from "lucide-react";
-import type { Job } from "../../api";
+import { CalendarClock, History, Play } from "lucide-react";
 import { ProjectHub, type HubSection } from "../../components/ProjectHub";
-import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton } from "../../components/ui";
-import { friendlyError, isActive, jobLabel } from "../../lib/labels";
-import { jobHelp } from "../../lib/help";
+import { Badge, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
+import { friendlyError, isActive } from "../../lib/labels";
 import { BadgeKey } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
 import { AGENT_TABS, routes, type AgentTab } from "../../lib/router";
@@ -11,7 +9,8 @@ import { RunDetail } from "../runs/RunDetail";
 import { RelTime } from "../runs/RunTime";
 import type { AgentDetail, AgentId } from "../testing-agents/testing-agents";
 import { AGENT_VIEWS } from "./registry";
-import { statusWords, type WorkspaceAnswer } from "./workspace";
+import { RunStatus } from "./RunStatus";
+import { RUN_STATUS_HELP, runStatusOf, statusWords, type AgentRun, type WorkspaceAnswer } from "./workspace";
 import "./workspace.css";
 
 export const agentTabOf = (v: string | null): AgentTab => ((AGENT_TABS as readonly string[]).includes(v ?? "") ? (v as AgentTab) : "outcome");
@@ -72,38 +71,58 @@ function NotShownYet({ name }: { name: string }) {
     );
 }
 
-/** The default Runs tab: this agent's runs, newest first, each opening the run page. */
+/** Where this agent's schedules are: Schedules, showing this agent's only (W3 review M4). */
+export function AgentSchedulesLink({ projectId, agentId }: { projectId: string; agentId: string }) {
+    return (
+        <p className="t-meta" data-testid="agent-schedules-link">
+            <CalendarClock size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 6 }} />
+            To run this agent on a timetable, open <a href={routes.agentSchedules(projectId, agentId)}>Schedules</a>.
+        </p>
+    );
+}
+
+/** The default Runs tab: this agent's runs, newest first, each with what it found in one line and opening that run's page. */
 function AgentRuns({ projectId, agentId }: { projectId: string; agentId: string }) {
-    const runs = useFetch<Job[]>(`/projects/${projectId}/workspace/${agentId}/runs`, (d) => (d?.some((j) => isActive(j.status)) ? 3000 : null));
+    const runs = useFetch<AgentRun[]>(`/projects/${projectId}/workspace/${agentId}/runs`, (d) => (d?.some((j) => isActive(j.status)) ? 3000 : null));
     if (runs.loading) return <ListSkeleton rows={3} />;
     if (runs.error) return <ErrorState error={friendlyError(runs.error.message)} onRetry={() => void runs.reload()} />;
     const list = runs.data ?? [];
     if (!list.length)
         return (
-            <div className="card">
-                <EmptyState icon={History} title="No runs yet">
-                    Each run of this agent is listed here.
-                </EmptyState>
+            <div className="stack">
+                <div className="card">
+                    <EmptyState icon={History} title="No runs yet">
+                        Each run of this agent is listed here.
+                    </EmptyState>
+                </div>
+                <AgentSchedulesLink projectId={projectId} agentId={agentId} />
             </div>
         );
+    const words = list.map((j) => ({ ...statusWords({ status: runStatusOf(j), lastRun: j }), help: RUN_STATUS_HELP[runStatusOf(j)] ?? "" }));
     return (
-        <>
-        <p className="t-meta">
-            <BadgeKey label="the run statuses" entries={list.map((j) => ({ word: jobLabel(j).label, text: jobHelp(j) }))} />
-        </p>
-        <ul className="card divided ws-runs" data-testid="agent-runs">
-            {list.map((j, i) => (
-                <li key={j.jobId} className="row section">
-                    <a href={routes.projectAgentRun(projectId, agentId, j.jobId)}>Run {list.length - i}</a>
-                    <JobBadge job={j} />
-                    <span className="spacer" />
-                    <span className="t-meta">
-                        Started <RelTime iso={j.createdAt} />
-                    </span>
-                </li>
-            ))}
-        </ul>
-        </>
+        <div className="stack">
+            <p className="t-meta">
+                <BadgeKey label="the run statuses" entries={words.map((w) => ({ word: w.label, text: w.help }))} />
+            </p>
+            <ul className="card divided ws-runs" data-testid="agent-runs">
+                {list.map((j, i) => (
+                    <li key={j.jobId} className="row section">
+                        <a href={routes.projectAgentRun(projectId, agentId, j.jobId)}>Run {list.length - i}</a>
+                        <RunStatus job={j} />
+                        <span className="spacer" />
+                        <span className="t-meta">
+                            Started <RelTime iso={j.createdAt} />
+                        </span>
+                        {j.headline && (
+                            <p className="ws-run-headline" data-testid="run-headline">
+                                {j.headline}
+                            </p>
+                        )}
+                    </li>
+                ))}
+            </ul>
+            <AgentSchedulesLink projectId={projectId} agentId={agentId} />
+        </div>
     );
 }
 

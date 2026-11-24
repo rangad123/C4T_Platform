@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { Gauge, Play } from "lucide-react";
 import type { Job } from "../../../api";
 import { JobProgress } from "../../../components/JobProgress";
-import { Badge, ErrorState, EmptyState, JobBadge, LinkButton, ListSkeleton } from "../../../components/ui";
+import { Badge, ErrorState, EmptyState, LinkButton, ListSkeleton } from "../../../components/ui";
 import { useFetch, useOnFinish } from "../../../lib/hooks";
 import { friendlyError, isActive, type Tone } from "../../../lib/labels";
 import { routes } from "../../../lib/router";
@@ -10,6 +10,7 @@ import type { AgentInputs } from "../../requirements/AgentInputs";
 import { RelTime } from "../../runs/RunTime";
 import { formatValue, METRIC_LABEL, type Measured } from "../../performance/performance";
 import type { AgentView } from "../registry";
+import { RunStatus } from "../RunStatus";
 import "../../environments/environments.css";
 
 const ID = "performance";
@@ -20,7 +21,6 @@ type Endpoint = { testId: string; endpoint: string; verdict: Verdict; note: stri
 interface PerformanceOutcome {
     runs: number;
     pages: Array<{ testId: string; path: string; signedIn: boolean; verdict: Verdict; note: string | null; metrics: Measured[] }>;
-    slowest: Array<Measured & { testId: string; path: string }>;
     calls: Endpoint[];
     load: Endpoint[];
 }
@@ -43,13 +43,13 @@ const value = (metrics: Measured[], metric: string) => {
     return m ? formatValue(m) : "–";
 };
 
-/** Each page's timings, the slowest pages and the load result, of every run or of one. */
+/** Each page's timings (slowest first) and the load result, of every run or of one. */
 function Body({ projectId, run, active }: { projectId: string; run?: string; active: boolean }) {
     const o = useFetch<PerformanceOutcome>(`/projects/${projectId}/workspace/${ID}/outcome${run ? `?run=${run}` : ""}`, () => (active ? 3000 : null));
     useOnFinish(active, () => void o.reload());
     if (!o.data && !o.error) return <ListSkeleton rows={4} />;
     if (!o.data) return <ErrorState error={friendlyError(o.error?.message)} onRetry={() => void o.reload()} />;
-    const { pages, slowest, calls, load } = o.data;
+    const { pages, calls, load } = o.data;
     if (!o.data.runs)
         return (
             <div className="card">
@@ -63,7 +63,7 @@ function Body({ projectId, run, active }: { projectId: string; run?: string; act
             <section className="stack-sm">
                 <div className="section-head">
                     <h3 className="t-section">Pages</h3>
-                    <span className="t-meta">The middle of three fresh loads</span>
+                    <span className="t-meta">Slowest first, the middle of three fresh loads</span>
                 </div>
                 {pages.length ? (
                     <div className="data-table-wrap" role="region" aria-label="Page timings" tabIndex={0}>
@@ -100,23 +100,6 @@ function Body({ projectId, run, active }: { projectId: string; run?: string; act
                     <p className="t-secondary">No page was timed in {run ? "this run" : "its runs"}.</p>
                 )}
             </section>
-            {slowest.length > 0 && (
-                <section className="stack-sm">
-                    <div className="section-head">
-                        <h3 className="t-section">Slowest pages</h3>
-                        <span className="t-meta">By when the main content appears</span>
-                    </div>
-                    <ol className="card list divided" data-testid="performance-slowest">
-                        {slowest.map((s) => (
-                            <li key={s.testId} className="list-row">
-                                <span className="main mono">{s.path}</span>
-                                <span className="tnum">{formatValue(s)}</span>
-                                {s.budget !== undefined && <span className="t-meta">{s.value > s.budget ? `over the ${formatValue({ ...s, value: s.budget })} budget` : "within budget"}</span>}
-                            </li>
-                        ))}
-                    </ol>
-                </section>
-            )}
             {calls.length > 0 && (
                 <section className="stack-sm">
                     <div className="section-head">
@@ -209,7 +192,7 @@ function Run({ projectId, jobId }: { projectId: string; jobId: string }) {
         <div className="stack" data-testid="agent-run">
             <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                 <h3 className="t-card">Run {list.length - at}</h3>
-                <JobBadge job={job} tipFocusable />
+                <RunStatus job={job} />
                 <span className="t-meta">
                     Started <RelTime iso={job.createdAt} />
                 </span>

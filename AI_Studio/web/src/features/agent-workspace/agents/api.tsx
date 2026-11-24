@@ -1,13 +1,14 @@
 import { Network, Play } from "lucide-react";
 import type { Job, Severity } from "../../../api";
 import { JobProgress } from "../../../components/JobProgress";
-import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton, SeverityBadge } from "../../../components/ui";
+import { Badge, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, SeverityBadge } from "../../../components/ui";
 import { useFetch, useOnFinish } from "../../../lib/hooks";
 import { friendlyError, isActive, type Tone } from "../../../lib/labels";
 import { routes } from "../../../lib/router";
 import { agentInputsHref, type AgentInputs } from "../../requirements/AgentInputs";
 import { RelTime } from "../../runs/RunTime";
 import type { AgentView } from "../registry";
+import { RunStatus } from "../RunStatus";
 import "../../environments/environments.css";
 
 const ID = "api";
@@ -139,7 +140,7 @@ function Run({ projectId, jobId }: { projectId: string; jobId: string }) {
         <div className="stack" data-testid="agent-run">
             <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                 <h3 className="t-card">Run {list.length - at}</h3>
-                <JobBadge job={job} tipFocusable />
+                <RunStatus job={job} />
                 <span className="t-meta">
                     Started <RelTime iso={job.createdAt} />
                 </span>

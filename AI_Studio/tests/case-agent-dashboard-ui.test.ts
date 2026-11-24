@@ -521,7 +521,7 @@ describe("the Agent Workspace (W1)", () => {
         await pwExpect(card("performance").getByRole("link", { name: "Run" })).toHaveAttribute("href", routes.newProject({ project: team, agent: "performance" }));
         await pwExpect(card("performance").getByRole("link", { name: "Open" })).toHaveAttribute("href", routes.projectAgent(team, "performance"));
         const flow = page.getByTestId("workspace-flow");
-        await pwExpect(flow).toContainText("One tree of the application");
+        await pwExpect(flow).toContainText("Every agent’s run adds to the site memory that later runs reuse. The tree you see is built by the Test Case Generation agent."); // W3 review M5
         await pwExpect(flow).toContainText("Test cases to a code project");
         await pwExpect(flow).toContainText("Security findings to the Security Assessment");
         await pwExpect(flow).toContainText("Nothing moves by itself");
@@ -552,9 +552,12 @@ describe("the Agent Workspace (W1)", () => {
         await axe("agent page, setup");
     });
 
-    it("the old Runs addresses of a Test Case Generation project open its agent page", async () => {
+    it("the old Runs addresses of a Test Case Generation project open the Workspace and its agent page", async () => {
+        // W3 review M4: an Agent Workspace project's old Runs address opens the Workspace; one run's address opens its agent page.
         await visit(`#/projects/${store}/runs`);
-        await page.waitForURL(`**${routes.projectAgent(store, "test-generation", "runs")}`);
+        await page.waitForURL((u) => u.hash === routes.project(store));
+        await pwExpect(page.getByTestId("workspace")).toBeVisible();
+        await visit(routes.projectAgent(store, "test-generation", "runs"));
         await pwExpect(page.getByTestId("case-runs")).toBeVisible();
         const first = (await api("GET", `/api/projects/${store}/workspace/test-generation/runs`)).body.at(-1).jobId as string;
         await pwExpect(page.locator(`[data-run="${first}"]`).getByRole("link", { name: "See what it found" })).toHaveAttribute("href", routes.projectAgentRun(store, "test-generation", first));

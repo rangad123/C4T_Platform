@@ -146,7 +146,7 @@ export function caseJobLabel(job: Pick<Job, "status" | "error">): { label: strin
         case "PARTIALLY_COMPLETED":
             return { label: "Test cases written, with a problem", tone: "warning" };
         case "FAILED":
-            return job.error === "Cancelled" ? { label: "Stopped", tone: "neutral" } : { label: "Did not finish", tone: "danger" };
+            return job.error === "Cancelled" ? { label: "Stopped", tone: "neutral" } : { label: "Failed", tone: "danger" };
         default:
             return { label: "Exploring", tone: "info" };
     }

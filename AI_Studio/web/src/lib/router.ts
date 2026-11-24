@@ -109,6 +109,8 @@ export const routes = {
     projectAgentRun: (id: string, agentId: string, jobId: string) => `#/projects/${id}/agents/${agentId}/runs/${jobId}`,
     /** Scheduled runs (a run sequence message links to one run with `run`). */
     schedule: (id: string, run?: string) => place(id, "runs", "runs", "schedules", { run }),
+    /** One testing agent's schedules (Agent Workspace): Schedules showing that agent's only. */
+    agentSchedules: (id: string, agentId: string) => place(id, "runs", "runs", "schedules", { agent: agentId }),
     /** Requirements: what the application must do, and which test cases cover it. */
     requirements: (id: string) => `#/projects/${id}/requirements`,
     /** One requirement: what it says and the test cases that cover it. */

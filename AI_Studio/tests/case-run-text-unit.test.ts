@@ -16,7 +16,7 @@ describe("a Test Case Generation run's line", () => {
         expect(caseRunLine({ status: "completed", addedPages: 4, addedCases: 9 })).toBe("Added 4 pages and 9 test cases.");
         expect(caseRunLine({ status: "completed", addedPages: 1, addedCases: 1 })).toBe("Added 1 page and 1 test case.");
         expect(caseRunLine({ status: "stopped", addedPages: 22, addedCases: 14 })).toBe("Stopped. What it found is kept: it added 22 pages and 14 test cases.");
-        expect(caseRunLine({ status: "failed", addedPages: 2, addedCases: 0 })).toBe("Did not finish. What it found is kept: it added 2 pages and 0 test cases.");
+        expect(caseRunLine({ status: "failed", addedPages: 2, addedCases: 0 })).toBe("Failed. What it found is kept: it added 2 pages and 0 test cases."); // the Workspace card's word (CONTRACT status list, W3 review L5)
         expect(caseRunLine({ status: "running", addedPages: 3, addedCases: 0 })).toBe("Added 3 pages and 0 test cases so far.");
         // A requirements-only run adds no pages: it names only its test cases.
         expect(caseRunLine({ status: "completed", addedPages: 0, addedCases: 6 })).toBe("Added 6 test cases.");
@@ -45,7 +45,7 @@ describe("a Test Case Generation run's status (FX8)", () => {
         expect(label("COMPLETED")).toEqual({ label: "Test cases written", tone: "success" });
         expect(label("PARTIALLY_COMPLETED")).toEqual({ label: "Test cases written, with a problem", tone: "warning" });
         expect(label("FAILED", "Cancelled")).toEqual({ label: "Stopped", tone: "neutral" });
-        expect(label("FAILED", "boom")).toEqual({ label: "Did not finish", tone: "danger" });
+        expect(label("FAILED", "boom")).toEqual({ label: "Failed", tone: "danger" });
         expect(label("DISCOVERING").label).toBe("Exploring");
         expect(label("ANALYZING").label).toBe("Understanding");
         expect(label("PLANNING").label).toBe("Writing test cases");

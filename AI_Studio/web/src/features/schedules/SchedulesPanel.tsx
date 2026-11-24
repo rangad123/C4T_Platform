@@ -7,6 +7,7 @@ import { SCHEDULE_HELP } from "../../lib/help";
 import { relativeTime } from "../../lib/format";
 import { useHere } from "../auth/project-access";
 import type { WorkspaceAnswer } from "../agent-workspace/workspace";
+import type { AgentDetail } from "../testing-agents/testing-agents";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
@@ -17,8 +18,10 @@ import "./schedules.css";
 type Frequency = "minutes" | "hours" | "daily" | "weekly";
 
 /** Schedules of one project: what runs when, the next and last run, and the form that creates a new one. */
-export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { projectId: string; reloadKey: number; onRunStarted: () => void }) {
-    const list = useFetch<ScheduleList>(`/projects/${projectId}/schedules`);
+export function SchedulesPanel({ projectId, reloadKey, onRunStarted, agentId }: { projectId: string; reloadKey: number; onRunStarted: () => void; /** One testing agent's schedules only (its Runs tab links here). */ agentId?: string }) {
+    const fetched = useFetch<ScheduleList>(`/projects/${projectId}/schedules`);
+    const agentName = useFetch<AgentDetail>(agentId ? `/testing-agents/${agentId}` : null).data?.agent.name;
+    const list = { ...fetched, data: fetched.data && agentId ? { ...fetched.data, schedules: fetched.data.schedules.filter((s) => s.agentId === agentId) } : fetched.data };
     const [adding, setAdding] = useState(false);
     useEffect(() => {
         if (reloadKey > 0) void list.reload();
@@ -39,7 +42,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
         <section className="card" aria-labelledby="schedules-title">
             <div className="card-head wrap">
                 <CalendarClock size={18} aria-hidden />
-                <h2 className="t-section" id="schedules-title">Scheduled runs</h2>
+                <h2 className="t-section" id="schedules-title">{agentName ? `Scheduled runs of the ${agentName}` : "Scheduled runs"}</h2>
                 {data && <BadgeKey label="the schedule states"entries={data.schedules.map((s) => (s.enabled ? { word: "Active", text: SCHEDULE_HELP.on } : { word: "Paused", text: SCHEDULE_HELP.off }))} />}
                 <span className="spacer" />
                 {data && data.schedules.length > 0 && !adding && (
@@ -75,7 +78,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                     ) : null}
                     {data.schedules.length === 0 && !adding ? (
                         <EmptyState icon={CalendarClock} title="Nothing is scheduled yet" actions={<Button variant="primary" icon={Plus} disabled={Boolean(noRun)} tip={noRun} onClick={() => setAdding(true)}>New schedule</Button>}>
-                            Run your tests automatically — for example every night — and get told when something starts failing.
+                            {agentId ? "Run this agent automatically, for example every night." : "Run your tests automatically — for example every night — and get told when something starts failing."}
                         </EmptyState>
                     ) : (
                         <ul className="list divided">
@@ -89,6 +92,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                     {adding && !noRun && (
                         <NewScheduleForm
                             projectId={projectId}
+                            agentId={agentId}
                             zone={zone}
                             onCancel={() => setAdding(false)}
                             onCreated={() => {
@@ -98,6 +102,11 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                         />
                     )}
                     {data.schedules.length > 0 && <p className="t-meta" style={{ padding: "0 20px 14px" }}>Times are {zone}.</p>}
+                    {agentId && (
+                        <p className="t-meta" style={{ padding: "0 20px 14px" }} data-testid="schedules-agent-only">
+                            Only this agent’s schedules are shown. <a href={routes.runs(projectId, "schedules")}>Show every schedule</a>
+                        </p>
+                    )}
                 </>
             )}
         </section>
@@ -189,8 +198,8 @@ function sentence(kind: ScheduleKind, c: Cadence, suiteName?: string, agentName?
     return `${suiteName ? `Run the suite “${suiteName}”` : agentName && kind === "generate" ? `Run the ${agentName}` : KIND_TEXT[kind]} ${when}`;
 }
 
-function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: string; zone: string; onCancel: () => void; onCreated: () => void }) {
-    const [kind, setKind] = useState<ScheduleKind>("validate");
+function NewScheduleForm({ projectId, zone, onCancel, onCreated, agentId: preset }: { projectId: string; zone: string; onCancel: () => void; onCreated: () => void; agentId?: string }) {
+    const [kind, setKind] = useState<ScheduleKind>(preset ? "generate" : "validate");
     // The suites people built in this project: a schedule can run one of them (its tests, order and settings) instead of every test.
     const suites = useFetch<{ suites: Array<{ id: string; name: string; testCount: number }> }>(`/projects/${projectId}/test-suites`);
     // Exploring is for agent and mixed projects only: a code project is never offered it (its schedules made earlier stay listed).
@@ -201,7 +210,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
     // An Agent Workspace project: an exploration is one agent's run (D1), so each chosen agent is its own choice.
     const workspace = useFetch<WorkspaceAnswer>(explores ? `/projects/${projectId}/workspace` : null);
     const agents = workspace.data?.workspace ? workspace.data.agents : [];
-    const [agentId, setAgentId] = useState("");
+    const [agentId, setAgentId] = useState(preset ?? "");
     const agent = agents.find((a) => a.id === agentId);
     const [suiteId, setSuiteId] = useState("");
     const suite = suites.data?.suites.find((x) => x.id === suiteId);
