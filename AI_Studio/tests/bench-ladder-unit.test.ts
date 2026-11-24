@@ -200,6 +200,10 @@ describe("ladderReport", () => {
         // V12: L4's detection median 7 against L3's 6. V1's baseline: L3's list precision, median 60%.
         expect(md).toContain("V12 (shop): L4 detection median 7 against L3's 6: met");
         expect(md).toContain("V1 baseline list precision (shop, L3): 60% (50%–70%) [2/2]");
+        // One rung whose trials differ in a rung-only flag (an L4 trial without verification) is called out too.
+        run("L4", 3, [...common, "--db", "bench-data"], 7);
+        expect(ladderReport(root)).toContain("did not all use the same harness flags");
+        fs.rmSync(path.join(root, "L4", "shop-3"), { recursive: true, force: true });
         // A trial whose common flags differ is still called out.
         run("L1", 1, ["--level", "quick"], 1);
         expect(ladderReport(root)).toContain("did not all use the same harness flags");
