@@ -91,12 +91,15 @@ function scripted(answer: (prompt: string) => unknown): LlmClient & { prompts: s
 }
 const says = (cls?: string) => () => ({ ...(cls ? { class: cls } : {}), explanation: "The second check ran before the list had loaded.", next: "Rerun with the list's request awaited." });
 
-/** A project, its web test of three checks, and a finding on it (a stored failed run, as failedRunsOf rebuilds one). */
+/**
+ * A project, its web test of three checks, and a finding on it (a stored failed run, as failedRunsOf rebuilds one). Its written expected
+ * result states the values the checks expect (eng-fix3 3a2b69fb judges an execution finding against it; an unstated value waits for a person).
+ */
 async function seed(name: string, steps: unknown[]) {
     const projectId = String(platform.repo.createProject({ name }).id);
     const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5598", { ...DEFAULT_JOB_OPTIONS }, { username: "qa", password: PW });
     const suiteId = platform.repo.getOrCreateSuite(projectId, "Orders", "orders");
-    const spec = TestSpecSchema.parse({ testId: "WEB-001", title: "Order page shows its lines", kind: "web", category: "Orders", source: { origin: "browser-agent", requirements: ["R-1"] }, steps });
+    const spec = TestSpecSchema.parse({ testId: "WEB-001", title: "Order page shows its lines", kind: "web", category: "Orders", source: { origin: "browser-agent", requirements: ["R-1"] }, expectedResults: ["The order lists Lamp, Desk and Chair, in that order"], steps });
     const testId = platform.repo.insertTest({ projectId, suiteId, jobId: null, spec, framework: "playwright", validationStatus: "VALIDATED" });
     const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [testId] });
     const t = platform.repo.getTest(testId)!;
