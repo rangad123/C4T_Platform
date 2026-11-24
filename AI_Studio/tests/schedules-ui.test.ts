@@ -14,6 +14,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
+import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
+import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 
@@ -140,6 +142,24 @@ describe("Schedule tab", () => {
             platform.repo.updateProject(projectId, { testingModes: ["agent", "code"] });
             await page.goto("about:blank");
         }
+    });
+
+    it("in a project with the Agent Workspace, an Explore again schedule is one agent's: the form offers each agent, the preview and the row name it", async () => {
+        const pid = platform.repo.createProject({ name: "Agent shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        platform.repo.createApplication(pid, `http://127.0.0.1:${FIXTURE_PORT}`, { ...DEFAULT_JOB_OPTIONS });
+        await testingAgentsOf(platform).set(pid, ["accessibility", "ux"], "test");
+        await page.goto(`${BASE}/#/projects/${pid}/runs?section=schedules`);
+        await page.getByRole("button", { name: "New schedule" }).click();
+        const form = page.getByRole("form", { name: "New schedule" });
+        const kind = form.getByLabel("What should run");
+        await pwExpect(kind.locator("option")).toHaveText(["Re-run all tests", "Run the Accessibility Testing Agent (uses your AI key)", "Run the UX Testing Agent (uses your AI key)"]);
+        await kind.selectOption("agent:ux");
+        await pwExpect(form.getByText("Run the UX Testing Agent every day at 02:00")).toBeVisible();
+        await form.getByRole("button", { name: "Create schedule" }).click();
+        const row = page.locator("[data-schedule]");
+        await pwExpect(row.locator(".badge", { hasText: "UX Testing Agent" })).toBeVisible();
+        const saved = getScheduleServices(platform).store.list(pid);
+        expect(saved.map((x) => [x.kind, x.agentId])).toEqual([["generate", "ux"]]);
     });
 
     it("adds a webhook channel and sends a test message that really arrives", async () => {

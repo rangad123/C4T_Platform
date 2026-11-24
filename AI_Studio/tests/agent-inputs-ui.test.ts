@@ -140,13 +140,16 @@ describe("what the agents need", () => {
         expect(await page.content()).not.toContain(TOKEN);
         expect(await axeClean(page)).toEqual([]);
 
-        await page.goto(`${BASE}/#/new?project=${shop}`);
+        // A project of several agents runs one of them (Agent Workspace D1): the API agent's Run opens the form with it, and lands on its page.
+        await page.goto(`${BASE}/#/new?project=${shop}&agent=api`);
         await page.getByLabel(/^Focus/).fill("search and checkout only");
         await pwExpect(dialog()).toHaveCount(0);
         await page.getByRole("button", { name: "Start exploring" }).click();
-        await page.waitForURL((u) => u.hash === `#/projects/${shop}`);
+        await page.waitForURL((u) => u.hash === `#/projects/${shop}/agents/api`);
         const job = platform.repo.listJobs(shop)[0]!;
-        expect(job.options).toMatchObject({ scope: "search and checkout only", openApiUrl: "https://shop.example/openapi.json", planOnly: true });
+        expect(job.options).toMatchObject({ scope: "search and checkout only", openApiUrl: "https://shop.example/openapi.json", agentId: "api", contractChecks: true });
+        // A check agent's run has no plan step: it makes and runs its checks.
+        expect(job.options.planOnly).toBeUndefined();
         expect(platform.repo.getApplication(job.applicationId)!.credentials).toMatchObject({ username: "old@shop.example", password: "an earlier password", apiToken: TOKEN });
     });
 

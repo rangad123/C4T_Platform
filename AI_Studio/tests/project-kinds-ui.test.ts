@@ -34,6 +34,8 @@ let server: Awaited<ReturnType<typeof buildServer>>;
 let browser: Browser;
 let page: Page;
 let agent = "";
+/** An agent project with no agents chosen (older ones, the CLI, MCP): it keeps the Dashboard and the Runs tab (Agent Workspace W1). */
+let legacy = "";
 let code = "";
 let ran = "";
 let mixed = "";
@@ -60,6 +62,8 @@ beforeAll(async () => {
     repo.createApplication(agent, "http://127.0.0.1:7809", {});
     // Four agents: three tiles and "+1".
     expect((await api("PUT", `/api/projects/${agent}/testing-agents`, { agents: ["api", "accessibility", "security", "ux"] })).status).toBe(200);
+    legacy = repo.createProject({ name: "Heron agents", platforms: ["web"], testingModes: ["agent"] }).id as string;
+    repo.createApplication(legacy, "http://127.0.0.1:7805", {});
     code = repo.createProject({ name: "Lynx code", platforms: ["android"], testingModes: ["code"] }).id as string;
     // A code project with test scripts and a run: its row shows the result, never "Not explored yet".
     ran = repo.createProject({ name: "Marten code", platforms: ["web"], testingModes: ["code"] }).id as string;
@@ -114,6 +118,8 @@ async function axe() {
 }
 
 const AGENT_TABS = ["Dashboard", "Runs", "Requirements", "Settings"];
+/** An agent project with its agents chosen lands on the Workspace; each agent's runs are on its own page (Agent Workspace D2). */
+const WORKSPACE_TABS = ["Workspace", "Requirements", "Settings"];
 const CODE_TABS = ["Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Runs", "Settings"];
 
 describe("the projects list shows each project's kind", () => {
@@ -219,12 +225,23 @@ describe("the projects list shows each project's kind", () => {
 });
 
 describe("the tabs follow the project's kind", () => {
-    it("an agent project has Dashboard, Runs, Requirements, Settings, on every place", async () => {
-        for (const h of [routes.project(agent), routes.runs(agent), routes.requirements(agent), routes.projectSettings(agent)]) {
+    it("an agent project with no agents chosen has Dashboard, Runs, Requirements, Settings, on every place", async () => {
+        for (const h of [routes.project(legacy), routes.runs(legacy), routes.requirements(legacy), routes.projectSettings(legacy)]) {
             await visit(h);
             expect(await tabNames(), h).toEqual(AGENT_TABS);
             await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(1);
         }
+    });
+
+    it("an agent project with its agents chosen has Workspace, Requirements, Settings, on every place; its old Runs address has no tab", async () => {
+        for (const h of [routes.project(agent), routes.requirements(agent), routes.projectSettings(agent)]) {
+            await visit(h);
+            expect(await tabNames(), h).toEqual(WORKSPACE_TABS);
+            await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(1);
+        }
+        await visit(routes.runs(agent));
+        expect(await tabNames()).toEqual(WORKSPACE_TABS);
+        await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(0);
     });
 
     it("a code project and a mixed project have Dashboard, Requirements, Test cases, Test scripts (count), Test suites, Runs, Settings", async () => {
@@ -239,15 +256,17 @@ describe("the tabs follow the project's kind", () => {
     });
 
     it("no project has an Agent runs tab, and an old Agent runs link still opens with no tab highlighted", async () => {
-        for (const id of [agent, code, mixed]) {
+        for (const id of [agent, legacy, code, mixed]) {
             await visit(routes.project(id));
             await pwExpect(tabs().locator("a.tab").first()).toBeVisible();
             await pwExpect(tabs().getByRole("link", { name: "Agent runs" })).toHaveCount(0);
         }
-        await visit(routes.agentRuns(agent));
-        await pwExpect(page.getByRole("heading", { name: "Agent runs", level: 2 })).toBeVisible();
-        expect(await tabNames()).toEqual(AGENT_TABS);
-        await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(0);
+        for (const [id, want] of [[agent, WORKSPACE_TABS], [legacy, AGENT_TABS]] as const) {
+            await visit(routes.agentRuns(id));
+            await pwExpect(page.getByRole("heading", { name: "Agent runs", level: 2 })).toBeVisible();
+            expect(await tabNames()).toEqual(want);
+            await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(0);
+        }
         // So does a place an agent project has no tab for.
         await visit(routes.scripts(agent));
         await pwExpect(page.getByRole("heading", { name: "Test scripts", level: 2 })).toBeVisible();
@@ -341,10 +360,27 @@ describe("the project header sits above the tabs on every place", () => {
 });
 
 describe("the dashboard follows the project's kind", () => {
-    it("an agent project offers exploring: Not explored yet with Start exploring, and no second button in the header", async () => {
+    it("an agent project with its agents chosen opens on the Workspace: one card per agent, each Not run yet with Run, and no button in the header", async () => {
         await visit(routes.project(agent));
         const head = page.getByTestId("project-head");
         await pwExpect(head.locator("h1")).toHaveText("Kestrel agents");
+        const ws = page.getByTestId("workspace");
+        await pwExpect(ws.locator(".ws-card")).toHaveCount(4);
+        for (const id of ["api", "accessibility", "security", "ux"]) {
+            const card = ws.locator(`.ws-card[data-agent="${id}"]`);
+            await pwExpect(card.getByRole("link", { name: "Run" })).toHaveAttribute("href", routes.newProject({ project: agent, agent: id }));
+            await pwExpect(card.getByRole("link", { name: "Open" })).toHaveAttribute("href", routes.projectAgent(agent, id));
+        }
+        await pwExpect(ws.locator('.ws-card[data-agent="ux"] .badge')).toHaveText("Not run yet");
+        await pwExpect(head.getByRole("link", { name: /Explore again|Start exploring|Run/ })).toHaveCount(0);
+        await pwExpect(page.getByRole("heading", { name: "Not explored yet" })).toHaveCount(0);
+        await shot("workspace-agent-1280");
+    });
+
+    it("an agent project with no agents chosen offers exploring: Not explored yet with Start exploring, and no second button in the header", async () => {
+        await visit(routes.project(legacy));
+        const head = page.getByTestId("project-head");
+        await pwExpect(head.locator("h1")).toHaveText("Heron agents");
         await pwExpect(page.getByRole("heading", { name: "Not explored yet" })).toBeVisible();
         await pwExpect(head.getByRole("link", { name: /Explore again|Start exploring/ })).toHaveCount(0);
         await pwExpect(page.getByRole("link", { name: "Start exploring" })).toBeVisible();

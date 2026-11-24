@@ -210,7 +210,7 @@ describe("before a run", () => {
         await pwExpect(page.getByTestId("accessibility-outcome").getByRole("link", { name: "Run the agent" })).toHaveAttribute("href", routes.newProject({ project: fresh, agent: "accessibility" }));
         await shot("accessibility", "not-run.png");
         await visit(routes.project(pid));
-        await pwExpect(page.locator('.ws-card[data-agent="accessibility"]').getByTestId("agent-headline")).toHaveText("3 pages with issues, 1 clean, 1 not checked, 1 dismissed");
+        await pwExpect(page.locator('.ws-card[data-agent="accessibility"]').getByTestId("agent-headline")).toHaveText("3 pages with issues, 1 clean, 1 not checked, 1 dismissed, 1 needing a person's check");
         await shot("accessibility", "workspace.png");
         expect(consoleErrors).toEqual([]);
     });

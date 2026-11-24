@@ -18,6 +18,8 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { getRunbookServices, type RunbookServices } from "../src/platform/runbook-runner.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
+import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
+import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 
@@ -242,6 +244,29 @@ describe("Runbooks on the Schedule tab", () => {
         await pwExpect(run.locator("[data-step-status='stopped']")).toHaveCount(1);
         await pwExpect(run.locator("[data-step-status='skipped']")).toHaveCount(1);
         await pwExpect(run.getByRole("button", { name: "Cancel the run" })).toHaveCount(0);
+    });
+
+    it("in a project with the Agent Workspace, an Explore again step is one agent's: it saves the agent shown", async () => {
+        const pid = platform.repo.createProject({ name: "Agent shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        platform.repo.createApplication(pid, `http://127.0.0.1:${FIXTURE_PORT}`, { ...DEFAULT_JOB_OPTIONS });
+        await testingAgentsOf(platform).set(pid, ["accessibility", "ux"], "test");
+        await page.goto(`${BASE}/#/projects/${pid}/runs?section=schedules`);
+        await panel().getByRole("button", { name: "Write your own" }).click();
+        const form = panel().getByRole("form", { name: "New run sequence" });
+        await form.getByLabel("Name", { exact: true }).fill("Agent checks");
+        for (let i = 0; i < 2; i++) {
+            await form.getByLabel("Add a step").selectOption("analyze");
+            await form.getByRole("button", { name: "Add step" }).click();
+        }
+        const [a, b] = [form.locator("fieldset[data-step]").nth(1), form.locator("fieldset[data-step]").nth(2)];
+        await pwExpect(a.getByLabel("Testing agent").locator("option")).toHaveText(["Accessibility Testing Agent", "UX Testing Agent"]);
+        await a.getByLabel("Testing agent").selectOption({ label: "UX Testing Agent" });
+        // The other step keeps the agent it shows, the first one.
+        await pwExpect(b.getByLabel("Testing agent")).toHaveValue("accessibility");
+        await form.getByRole("button", { name: "Save run sequence" }).click();
+        await pwExpect(panel().getByText("Run sequence saved. Press Run now to try it.")).toBeVisible();
+        const saved = rb.store.list(pid)[0]!.definition.steps.filter((x) => x.type === "analyze");
+        expect(saved.map((x) => (x as { agentId?: string }).agentId)).toEqual(["ux", "accessibility"]);
     });
 
     it("has no serious accessibility problems, with the editor open too, in light and dark", async () => {
