@@ -35,7 +35,7 @@ import { routes } from "../web/src/lib/router.js";
 
 const PORT = 7812;
 const BASE = `http://127.0.0.1:${PORT}`;
-const SHOTS = process.env.AGENT_SHOTS ?? "/home/aadhaar/projects/c4t-scratch/agent-ws/responsive-ui";
+const SHOTS = process.env.AGENT_SHOTS ?? path.resolve(REPO_ROOT, "../../c4t-scratch/agent-ws/responsive-ui");
 let dataDir = "";
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
