@@ -1,7 +1,8 @@
 /**
  * Founder 2026-11-19 (sheet row 19; SPEC P2.4, P4.1, P4.3, R13) in a real browser against a real platform, no worker:
- * - the plan's "Edit the plan" list shows only the kinds of test the chosen agents do: an Accessibility-only project shows only
- *   "Accessibility"; a mixed project keeps every kind;
+ * - a mixed project's plan keeps every kind of test. An agent-only project with its agents chosen has no plan any more: it lands on
+ *   the Agent Workspace, and a check agent's run has no plan step (Agent Workspace D1, D2), so the R13 list of one agent's kinds is
+ *   not shown anywhere;
  * - a Test Case Generation project's old test script address (#/tests/<id>) and its Test scripts place say where test scripts live,
  *   with no DSL or Code tabs, no Run button and no draft warning; a mixed project's script page is unchanged;
  * - the explore form of a Test Case Generation project says what will happen and has no "checks" wording;
@@ -155,17 +156,12 @@ const content = () => page.locator(".content");
 const kindsShown = async () => page.getByRole("group", { name: "Kinds of test" }).locator(".plan-family > label.check > span > .title").allTextContents();
 
 describe("the plan lists the kinds of test of the chosen agents (R13)", () => {
-    it("an Accessibility-only project's plan shows only Accessibility", async () => {
+    // R13's "only Accessibility in Edit the plan" is superseded: the project below has no plan to edit (W3).
+    it("an agent-only project with the Accessibility agent chosen lands on the Workspace: one card, and no plan", async () => {
         await page.goto(`${BASE}/#/projects/${ids.a11y}`);
-        await pwExpect(page.getByTestId("plan-preview")).toBeVisible();
-        await page.locator("summary", { hasText: "Edit the plan" }).click();
-        expect(await kindsShown()).toEqual(["Accessibility"]);
-        // What the plan would make counts only that kind, too.
-        await pwExpect(page.getByRole("list", { name: "Tests to create" }).getByRole("listitem")).toHaveCount(1);
-        await pwExpect(page.getByRole("list", { name: "Tests to create" })).toContainText("Accessibility");
-        for (const gone of ["API checks", "Page health", "Form input", "Basic security", "Who can open what", "Speed", "Load", "Visual changes", "AI screen review"]) await pwExpect(content().getByText(gone, { exact: true })).toHaveCount(0);
-        await shot("plan-accessibility-only.png");
-        await axeBoth();
+        await pwExpect(page.getByTestId("workspace").locator(".ws-card")).toHaveCount(1);
+        await pwExpect(page.locator('.ws-card[data-agent="accessibility"]')).toBeVisible();
+        await pwExpect(page.getByTestId("plan-preview")).toHaveCount(0);
     });
 
     it("a mixed project's plan keeps every kind (unchanged this round)", async () => {
@@ -187,7 +183,8 @@ describe("a Test Case Generation project has no test scripts (P2.4)", () => {
         await pwExpect(page.getByRole("tab")).toHaveCount(0);
         await pwExpect(page.getByRole("button", { name: /^Run/ })).toHaveCount(0);
         await pwExpect(content().getByText(/a draft|in review/)).toHaveCount(0);
-        await pwExpect(notice.getByRole("link", { name: "Open the test cases" })).toHaveAttribute("href", `#/projects/${ids.tcg}`);
+        // The test cases are on the Test Case Generation agent's page (Agent Workspace W1).
+        await pwExpect(notice.getByRole("link", { name: "Open the test cases" })).toHaveAttribute("href", `#/projects/${ids.tcg}/agents/test-generation`);
         await pwExpect(notice.getByRole("link", { name: "Create a code project" })).toHaveAttribute("href", "#/create");
         await shot("old-script-url.png");
         await axeBoth();
