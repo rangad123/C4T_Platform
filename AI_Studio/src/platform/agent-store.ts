@@ -285,7 +285,7 @@ export interface EnrollmentRecord {
 
 const toEnrollment = (r: Record<string, any>): EnrollmentRecord => ({ id: r.id, hint: r.hint, ownerId: r.owner_id, label: r.label ?? null, createdBy: r.created_by ?? null, createdAt: r.created_at, expiresMs: Number(r.expires_ms), usedMs: r.used_ms ?? null, tokenId: r.token_id ?? null });
 
-export type RedeemOutcome = { ok: true; secret: string; token: AgentTokenRecord; enrollment: EnrollmentRecord; again?: true; replaced?: boolean } | { ok: false; reason: "unknown" | "expired" | "used" };
+export type RedeemOutcome = { ok: true; secret: string; token: AgentTokenRecord; enrollment: EnrollmentRecord; replaced?: boolean } | { ok: false; reason: "unknown" | "expired" | "used" };
 
 /**
  * Migration slot 53: a runner task's phases and attempts, and its live events (protocol 2; docs/features/runner-protocol-2.md).
@@ -819,16 +819,8 @@ export class AgentStore {
             const b = Buffer.from(String(r.code_hash), "hex");
             if (a.length !== b.length || !timingSafeEqual(a, b)) return { ok: false, reason: "unknown" };
             const e = toEnrollment(r);
-            if (e.usedMs !== null) {
-                // The answer was lost on the way: within the code's life, the same computer (same install id) asking again gets a fresh
-                // credential for the same runner, and the one made before stops working. Only while that one was never used; anyone else: "used".
-                const t = e.tokenId ? this.db.get<{ machine_id: string | null; last_used_ms: number | null }>("SELECT machine_id, last_used_ms FROM agent_tokens WHERE id = ?", e.tokenId) : undefined;
-                const sameComputer = Boolean(machine.machineId) && t?.machine_id === machine.machineId;
-                if (!t || !sameComputer || t.last_used_ms !== null || this.clock() >= e.expiresMs) return { ok: false, reason: "used" };
-                const secret = newAgentToken();
-                this.db.run("UPDATE agent_tokens SET token_hash = ?, hint = ?, previous_hash = NULL, previous_until_ms = NULL WHERE id = ?", hashToken(secret), secret.slice(-4), e.tokenId);
-                return { ok: true, secret, token: this.getToken(e.tokenId!)!, enrollment: e, again: true };
-            }
+            // Traded once, whoever asks again (the same computer re-trading a code was a loop of new credentials, 2026-11-24).
+            if (e.usedMs !== null) return { ok: false, reason: "used" };
             if (this.clock() >= e.expiresMs) return { ok: false, reason: "expired" };
             const made = this.createPersonalToken({ ownerId: e.ownerId, label: e.label ?? machine.name, createdBy: e.createdBy ?? "Enrollment code", ...(machine.machineId ? { machineId: machine.machineId } : {}) });
             this.db.run("UPDATE runner_enrollments SET used_ms = ?, token_id = ? WHERE id = ?", this.clock(), made.record.id, e.id);

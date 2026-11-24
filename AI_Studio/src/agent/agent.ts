@@ -405,9 +405,11 @@ export class Agent {
                 try {
                     await saveCredential(dir, out.token, this.opts.credentialStore);
                 } catch (err) {
-                    // Not used, so within the code's 30 minutes this computer may ask again with the same code (the platform allows that once the answer is lost).
-                    this.log.error(`${err instanceof Error ? err.message : "The runner could not keep its credential."} The code still works for this computer for a while: start the runner again.`);
-                    return EXIT.failed;
+                    // The code is used up: deleted, and exit 2, which every launcher takes as "stop". Exit 1 made Setup start the runner again,
+                    // which traded the same code again, about 5 times a minute until it expired (a Windows PC, 2026-11-24).
+                    if (e.file) await fs.rm(e.file, { force: true }).catch(() => undefined);
+                    this.log.error(`This computer could not keep its credential. ${err instanceof Error ? err.message : ""} Download the runner again from Settings, Your runner; if this happens again, ask your IT team whether programs may run PowerShell (Windows) or use the login Keychain (Mac).`);
+                    return EXIT.usage;
                 }
                 if (e.file) await fs.rm(e.file, { force: true }).catch(() => undefined);
                 this.client.setToken(out.token);

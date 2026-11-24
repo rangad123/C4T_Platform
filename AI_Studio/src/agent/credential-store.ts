@@ -76,7 +76,7 @@ export async function saveCredential(dir: string, token: string, deps?: StoreDep
     if (platform === "darwin") {
         const c = keychainCommands(dir).add(token);
         const out = await run(c.cmd, c.args, c.stdin);
-        if (out.code !== 0) throw new CredentialStoreError("The runner could not keep its credential in the login Keychain. Unlock the Keychain (sign in to this Mac), then start the runner again.");
+        if (out.code !== 0) throw new CredentialStoreError("The login Keychain did not take it (it may be locked: sign in to this Mac).");
         return;
     }
     let content = token;
@@ -84,7 +84,7 @@ export async function saveCredential(dir: string, token: string, deps?: StoreDep
         const c = dpapiCommands().protect(token);
         const out = await run(c.cmd, c.args, c.stdin);
         const blob = out.stdout.trim();
-        if (out.code !== 0 || !/^[A-Za-z0-9+/=]{16,}$/.test(blob)) throw new CredentialStoreError("The runner could not protect its credential with Windows data protection. Start it again; if that does not help, add this computer again in Settings, Your runner.");
+        if (out.code !== 0 || !/^[A-Za-z0-9+/=]{16,}$/.test(blob)) throw new CredentialStoreError("Windows data protection did not work (the runner uses it through PowerShell, which this computer may block).");
         content = `dpapi:${blob}`;
     }
     await writePrivate(path.join(dir, CREDENTIAL_FILE), `${content}\n`);

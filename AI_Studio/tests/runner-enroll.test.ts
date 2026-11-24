@@ -138,18 +138,17 @@ describe("enrollment codes", () => {
         expect((await as("t-cora", "GET", `/api/me/runner/enrollments/${made.id}`)).status).toBe(404);
     });
 
-    it("a lost answer: the same computer may ask again while the new credential is unused; anyone else gets 'already used'", async () => {
+    // A repeat was once a fresh success for the same computer (a lost answer); a PC that could not keep its credential then traded one code
+    // about 5 times a minute for 28 minutes (2026-11-24), each time a new credential. A code is now traded exactly once.
+    it("a code is traded once: asking again, from the same computer or another, gets 'already used' and the first credential keeps working", async () => {
         const made = await personalCode();
         const one = await enroll(made.code, M1);
+        expect(one.status).toBe(201);
         const two = await enroll(made.code, M1);
-        expect(two.status).toBe(201);
-        expect(two.body.token).not.toBe(one.body.token);
-        expect(two.body.runnerId).toBe(one.body.runnerId);
-        expect((await hello(one.body.token, { machineId: M1 })).status).toBe(404);
+        expect(two.status).toBe(410);
+        expect(two.body.error).toMatch(/already used/);
         expect((await enroll(made.code, M2)).status).toBe(410);
-        expect((await hello(two.body.token, { machineId: M1 })).status).toBe(200);
-        // Once the credential was used, asking again is refused (it was not lost).
-        expect((await enroll(made.code, M1)).status).toBe(410);
+        expect((await hello(one.body.token, { machineId: M1 })).status).toBe(200);
     });
 
     it("binds the credential to the computer that first used it, and writes a refusal to Activity", async () => {
