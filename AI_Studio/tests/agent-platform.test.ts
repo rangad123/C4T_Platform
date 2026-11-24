@@ -230,12 +230,12 @@ describe("tokens and who may call the agent routes", () => {
         expect(refused.json.error).toMatch(/already used by “shape”/);
     });
 
-    it("hello is limited to 6 a minute per token", async () => {
+    it("hello is limited to 60 a minute per token", async () => {
         const a = new FakeAgent(viaFetch(BASE), await newToken(projectId, "limited"), { name: "limited" });
         const answers: number[] = [];
-        for (let i = 0; i < 8; i++) answers.push((await a.hello()).status);
-        expect(answers.slice(0, 6).every((s) => s === 200)).toBe(true);
-        expect(answers.slice(6)).toEqual([429, 429]);
+        for (let i = 0; i < 62; i++) answers.push((await a.hello()).status);
+        expect(answers.slice(0, 60).every((s) => s === 200)).toBe(true);
+        expect(answers.slice(60)).toEqual([429, 429]);
     });
 });
 

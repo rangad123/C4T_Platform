@@ -49,7 +49,7 @@ The shared contract is one file, `src/agent-protocol/schema.ts`. The backend (`s
 | Sent by | The agent, at start and again after every connection failure (`agent.ts:190-207`) |
 | Request | `HelloRequest` (`schema.ts:178-186`): `protocol`, `name` (1-64 characters), `version`, `capabilities`, `concurrency` (1-8) |
 | Answer | `HelloResponse` (`schema.ts:189-200`): `agentId`, `projectId` (`"shared"` for a runner with no project of its own), `protocol`, `pollSeconds`, `heartbeatSeconds`, `maxFileBytes`, `serverTime`, and `update` when the runner should update |
-| Backend checks | At most 6 per minute per token, else 429 (`agent-services.ts:150,165-168`). A second computer using the same token while another one is online gets 409 (`:173-174`). Creates or updates the `agents` row for this token and name. |
+| Backend checks | At most 60 per minute per token, else 429 (`agent-services.ts:150,165-168`). A second computer using the same token while another one is online gets 409 (`:173-174`). Creates or updates the `agents` row for this token and name. |
 | Agent timeout | 20 s (`client.ts:187`) |
 | Retry | Back-off from 1 s to 30 s with ±25% jitter, honouring `Retry-After` up to 120 s (`src/agent/backoff.ts`, `client.ts:139-140`) |
 | Idempotent | Yes: it updates the same row |
@@ -170,7 +170,7 @@ The website side (`POST /api/runners/enroll`, `GET /api/runners/enrollments/:id`
 
 ### 4.3 Rotate: `POST /api/agent/rotate`
 
-- Answers `RotateResponse`: `{ token, previousValidUntil }`. Limited like hello (6 a minute).
+- Answers `RotateResponse`: `{ token, previousValidUntil }`. Limited like hello (60 a minute).
 - The old credential keeps working until the new one is first used, for at most 24 hours. Asking again with the old one replaces an unused new one, so a lost answer never locks the runner out.
 - The agent rotates when hello says `rotate: true`; a runner that stays connected says hello once a day to check (`rotateCredential`, `src/agent/agent.ts`). Each rotation is an Activity entry (`runner-credential-rotated`).
 
@@ -263,8 +263,8 @@ The website side (`POST /api/runners/enroll`, `GET /api/runners/enrollments/:id`
 | Job limit | 120 minutes | `JOB_MAX_MINUTES` | Built |
 | Sweep of lost tasks | At most every 5 s from polls, every 1 s per waiting task | `SWEEP_EVERY_MS`, `AGENT_WATCH_MS` | Built |
 | Finished tasks kept | 24 hours | `pruneTasks` | Built |
-| Hello rate | 6 a minute per token | `agent-services.ts:150` | Built |
-| Other requests | 900 a minute per token | `agent-services.ts:151` | Built |
+| Hello rate | 60 a minute per token | `agent-services.ts:150` | Built |
+| Other requests | 9,000 a minute per token | `agent-services.ts:151` | Built |
 | Polls | One open poll per computer; a newer one ends the older | `beginPoll` | Built |
 | JSON body | 2 MB; result 8 MB; pushes 1 MB | `routes/agents.ts:30-31` | Built |
 | Agent request timeouts | hello 20 s, poll wait + 20 s, heartbeat 15 s, push 15 s, update 20 s, file 30 min, result 60 s | `client.ts` | Built |
