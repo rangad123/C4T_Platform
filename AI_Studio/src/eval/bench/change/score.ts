@@ -38,7 +38,8 @@ export interface PrStep {
     seed?: string;
     title: string;
     head: string;
-    selection?: { total: number; selected: string[]; explained: string[]; fullRunRecommended: boolean; fullRunReasons: string[]; unmapped: string[]; endpoints: string[] };
+    /** `explained`: selected with a reason from the change's evidence; `stale`: selected only because its own latest recorded run cannot vouch for its coverage (missing in runs before it was recorded). */
+    selection?: { total: number; selected: string[]; explained: string[]; stale?: string[]; fullRunRecommended: boolean; fullRunReasons: string[]; unmapped: string[]; endpoints: string[] };
     runs: RunRecord[];
     /** AI calls made while the PR was analysed and selected (G9). */
     aiCalls: number;
@@ -178,19 +179,26 @@ export function scoreChange(setup: SetupRecord, steps: PrStep[], history?: Histo
         }),
     });
 
-    // G3: every selected test has at least one evidence-backed reason; the decoy selects nothing.
+    // G3: every selected test has at least one evidence-backed reason; the decoy selects nothing. Two kinds of evidence, counted apart:
+    // the change reaches the test's footprint, or the test's own latest recorded run (failed, older version...) leaves its coverage out of
+    // date, so the preview cannot rule it out. A pick with neither (coverage simply not fully known) is named in the notes.
     const withSel = steps.filter((p) => p.selection);
     const selectedN = withSel.reduce((n, p) => n + p.selection!.selected.length, 0);
     const explainedN = withSel.reduce((n, p) => n + p.selection!.selected.filter((k) => p.selection!.explained.includes(k)).length, 0);
+    const bare = withSel.flatMap((p) => p.selection!.selected.filter((k) => !p.selection!.explained.includes(k)).map((k) => ({ k, p, stale: !!p.selection!.stale?.includes(k) })));
+    const staleN = bare.filter((b) => b.stale).length;
+    const reasonless = new Map<string, number[]>();
+    for (const b of bare) if (!b.stale) reasonless.set(b.k, [...(reasonless.get(b.k) ?? []), b.p.number]);
     const decoys = steps.filter((p) => p.kind === "decoy" && p.selection);
     const decoySelected = decoys.reduce((n, p) => n + p.selection!.selected.length, 0);
+    const share = (x: number) => (selectedN ? pct(x / selectedN) : "—");
     criteria.push({
         id: "G3",
         name: "Explanations: selected tests with an evidence-backed reason; selections from the decoy",
         target: "100%; 0",
-        verdict: !selectedN || !decoys.length ? "not measured" : explainedN === selectedN && decoySelected === 0 ? "meets" : "misses",
-        value: `${explainedN} of ${selectedN} selected tests explained (${selectedN ? pct(explainedN / selectedN) : "—"}); decoy selected ${decoys.length ? decoySelected : "—"}`,
-        notes: [],
+        verdict: !selectedN || !decoys.length ? "not measured" : explainedN + staleN === selectedN && decoySelected === 0 ? "meets" : "misses",
+        value: `${explainedN + staleN} of ${selectedN} selected tests explained (${share(explainedN + staleN)}): ${explainedN} by the change's evidence (${share(explainedN)}), ${staleN} by its own out-of-date coverage (its latest recorded run); decoy selected ${decoys.length ? decoySelected : "—"}`,
+        notes: reasonless.size ? [`No evidence-backed reason: ${[...reasonless].map(([k, prs]) => `${k} ×${prs.length} (${prs.slice(0, 8).map((n) => `#${n}`).join(", ")}${prs.length > 8 ? ", …" : ""})`).join("; ")}.`] : [],
     });
 
     // G4: a change in an unmapped file recommends a full run.

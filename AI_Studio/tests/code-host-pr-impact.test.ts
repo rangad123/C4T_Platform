@@ -86,6 +86,7 @@ beforeAll(async () => {
     await app.ready();
     await project("On", true);
     await project("Off", false);
+    await project("Stale", false);
     // A past finding on the changed endpoint (S2's findings list): the order test's previous-defects factor.
     await new CandidateFindingStore(platform.sql).upsert({
         projectId: ids.On!,
@@ -187,5 +188,29 @@ describe("a signed pull request delivery", () => {
         expect(await deliver(hooks.Off!, "pr-off-1")).toBe(202);
         await vi.waitFor(() => expect(selections("Off")).toHaveLength(1), { timeout: 15_000, interval: 50 });
         expect(gh.requests.filter((r) => r.method !== "GET").length).toBe(before);
+    });
+
+    it("marks a test proposed only because its latest run failed as out of date, with the run's date, and no other test", async () => {
+        // Both tests' latest runs of their approved versions failed; the change reaches POST /api/orders, not GET /api/health.
+        const health = testId("Stale", "Health answers");
+        const order = testId("Stale", "Create an order");
+        for (const id of [health, order]) {
+            const v = platform.db.get<{ id: string }>("SELECT id FROM test_versions WHERE test_case_id = ? AND state = 'approved' ORDER BY version DESC", id)!;
+            platform.db.run("INSERT INTO test_executions (id, test_case_id, test_version_id, attempt, status, started_at) VALUES (?, ?, ?, 1, 'failed', ?)", `exec-stale-${id}`, id, v.id, "2026-11-20T10:00:00.000Z");
+        }
+        expect(await deliver(hooks.Stale!, "pr-stale-1")).toBe(202);
+        await vi.waitFor(() => expect(selections("Stale")).toHaveLength(1), { timeout: 15_000, interval: 50 });
+        const reasons = JSON.parse(selections("Stale")[0]!.reasons_json);
+        const h = reasons.tests.find((x: any) => x.testId === health);
+        expect(h.reasons).toEqual([]);
+        expect(h.stale).toBe("Its latest run (2026-11-20) failed, so earlier passing runs no longer show what it touches.");
+        // The order test is out of date too, but the change explains it: no mark. On a project whose health test never ran, the health
+        // pick is unknown, not out of date.
+        const o = reasons.tests.find((x: any) => x.testId === order);
+        expect(o.reasons).toHaveLength(1);
+        expect(o.stale).toBeUndefined();
+        const never = JSON.parse(selections("On")[0]!.reasons_json).tests.find((x: any) => x.testId === testId("On", "Health answers"));
+        expect(never).toMatchObject({ reasons: [] });
+        expect(never.stale).toBeUndefined();
     });
 });

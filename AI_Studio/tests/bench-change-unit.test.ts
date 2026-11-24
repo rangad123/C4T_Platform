@@ -186,10 +186,24 @@ describe("the PR bench's scores", () => {
     });
 
     it("G3 counts selected tests with a reason over every analysed PR (5 of 6) and the decoy's selections", () => {
-        expect(crit(STEPS, "G3")).toMatchObject({ verdict: "misses", value: "5 of 6 selected tests explained (83.3%); decoy selected 0" });
+        expect(crit(STEPS, "G3")).toMatchObject({ verdict: "misses", value: "5 of 6 selected tests explained (83.3%): 5 by the change's evidence (83.3%), 0 by its own out-of-date coverage (its latest recorded run); decoy selected 0" });
         const decoyPicks = STEPS.map((p) => (p.kind === "decoy" ? { ...p, selection: sel(["T9"]) } : p.number === 2 ? { ...p, selection: sel(["T5"]) } : p));
-        expect(crit(decoyPicks, "G3")).toMatchObject({ verdict: "misses", value: "7 of 7 selected tests explained (100%); decoy selected 1" });
+        expect(crit(decoyPicks, "G3")).toMatchObject({ verdict: "misses", value: "7 of 7 selected tests explained (100%): 7 by the change's evidence (100%), 0 by its own out-of-date coverage (its latest recorded run); decoy selected 1" });
         expect(crit(STEPS.map((p) => (p.number === 2 ? { ...p, selection: sel(["T5"]) } : p)), "G3").verdict).toBe("meets");
+    });
+
+    it("G3 counts a pick whose only reason is its own failed latest run apart from the change's evidence, and names the picks with neither", () => {
+        // #2's T5 has no reason from the change; its latest recorded run failed (the selection marks it out of date).
+        const staleT5 = STEPS.map((p) => (p.number === 2 ? { ...p, selection: { ...sel(["T5"], []), stale: ["T5"] } } : p));
+        expect(crit(staleT5, "G3")).toMatchObject({ verdict: "meets", value: "6 of 6 selected tests explained (100%): 5 by the change's evidence (83.3%), 1 by its own out-of-date coverage (its latest recorded run); decoy selected 0" });
+        expect(crit(staleT5, "G3").notes).toEqual([]);
+        // Without the mark, the pick has no evidence-backed reason: it misses, and the note names it.
+        const g3 = crit(STEPS, "G3");
+        expect(g3.verdict).toBe("misses");
+        expect(g3.notes).toEqual(["No evidence-backed reason: T5 ×1 (#2)."]);
+        // A mark on a test the change explains anyway counts once, as the change's.
+        const both = STEPS.map((p) => (p.number === 1 ? { ...p, selection: { ...sel(["T1", "T2"]), stale: ["T1"] } } : p));
+        expect(crit(both, "G3").value).toBe("5 of 6 selected tests explained (83.3%): 5 by the change's evidence (83.3%), 0 by its own out-of-date coverage (its latest recorded run); decoy selected 0");
     });
 
     it("G4 asks every unmapped change for a full run", () => {

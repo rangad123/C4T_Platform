@@ -62,7 +62,17 @@ const cell = (s: string, n = 300) =>
         .replace(/@(?=\w)/g, "@​");
 
 export interface SelectionReasons {
-    tests: Array<{ testId: string; testKey: string; title: string; score: number; risk: string; reasons: string[]; why?: string }>;
+    tests: Array<{
+        testId: string;
+        testKey: string;
+        title: string;
+        score: number;
+        risk: string;
+        reasons: string[];
+        why?: string;
+        /** No reason from the change: proposed because its own latest recorded run cannot vouch for its coverage (coverage.ts freshnessOf), in words. */
+        stale?: string;
+    }>;
     fullRunRecommended: boolean;
     fullRunReasons: string[];
     endpoints: string[];
@@ -134,9 +144,10 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         risk: await riskFacts(p, projectId, c.tests, c.apiPrefix),
         impact: { files: impact.files.length, unmapped: impact.unmapped.map((u) => u.path), shared: impact.shared },
     });
+    const staleOf = new Map(c.tests.flatMap((t) => (t.stale ? [[t.testId, t.stale] as const] : [])));
     const proposed: PreviewTest[] = [...preview.matched, ...preview.unknown].sort((a, b) => b.risk!.score - a.risk!.score || a.testKey.localeCompare(b.testKey));
     const reasons: SelectionReasons = {
-        tests: proposed.map((t) => ({ testId: t.testId, testKey: t.testKey, title: t.title, score: t.risk!.score, risk: t.risk!.reason, reasons: t.reasons.map((r) => r.sentence), ...(t.why ? { why: t.why } : {}) })),
+        tests: proposed.map((t) => ({ testId: t.testId, testKey: t.testKey, title: t.title, score: t.risk!.score, risk: t.risk!.reason, reasons: t.reasons.map((r) => r.sentence), ...(t.why ? { why: t.why } : {}), ...(!t.reasons.length && staleOf.has(t.testId) ? { stale: staleOf.get(t.testId)! } : {}) })),
         fullRunRecommended: preview.fullRunRequired,
         fullRunReasons: preview.fullRunReasons,
         endpoints: impact.endpoints.map((e) => e.route),

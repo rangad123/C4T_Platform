@@ -440,11 +440,12 @@ async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, ma
     if (hook.status !== 202) throw new Error(`The webhook answered ${hook.status} for #${pr.number}: ${hook.body.slice(0, 300)}`);
     const sel = await waitSelection(s, proj.id, pr);
     step.aiCalls = counter.calls - before;
-    const reasons = sel.reasons as { tests: Array<{ testId: string; reasons: string[]; why?: string }>; fullRunRecommended: boolean; fullRunReasons: string[]; unmapped: Array<{ path: string }>; endpoints: string[] };
+    const reasons = sel.reasons as { tests: Array<{ testId: string; reasons: string[]; why?: string; stale?: string }>; fullRunRecommended: boolean; fullRunReasons: string[]; unmapped: Array<{ path: string }>; endpoints: string[] };
     step.selection = {
         total,
         selected: sel.selected.map((id: string) => keyOf.get(id) ?? id).sort(),
         explained: reasons.tests.filter((t) => t.reasons.length > 0).map((t) => keyOf.get(t.testId) ?? t.testId).sort(),
+        stale: reasons.tests.filter((t) => !t.reasons.length && t.stale).map((t) => keyOf.get(t.testId) ?? t.testId).sort(),
         fullRunRecommended: reasons.fullRunRecommended,
         fullRunReasons: reasons.fullRunReasons,
         unmapped: reasons.unmapped.map((u) => u.path),
