@@ -1,13 +1,13 @@
 /**
- * Proof of a web test run: every web test keeps a screenshot (at its end when it passes, at the failing step when it fails) and its
- * recording, with secret fields covered in the picture, and the Run page shows them per test.
+ * Proof of a web test run: every web test keeps a screenshot (at its end when it passes, at the failing step when it fails), with secret
+ * fields covered in the picture, and the Run page shows them per test. No recording is kept (owner 2026-11-24, V9: it cannot be masked).
  *
  * 1. The run itself (runScripts, the code both the platform and a runner's test process use), real Playwright and Chromium against a
- *    local fixture: a passing and a failing hand-written test each keep a screenshot and a video; the failing one's picture is of the
+ *    local fixture: a passing and a failing hand-written test each keep a screenshot and no video; the failing one's picture is of the
  *    failing moment, not of what its afterEach did next; a one-time-code field is covered and an ordinary field is not.
  * 2. The real platform with the REAL runner program: a code project's run of the two tests lists the proof per test; a viewer of the
  *    project sees the run and opens the pictures; a person of another project gets 404; the picture the runner sent is covered too.
- * 3. The Run page in a real browser, signed in as the viewer: thumbnails per test that open larger, and the recording with controls.
+ * 3. The Run page in a real browser, signed in as the viewer: thumbnails per test that open larger, and no recording.
  *
  * Browser-launching, needs web/dist:
  *   node scripts/with-lock.mjs build,browser -- sh -c "npx vite build web && npx vitest run tests/run-proof.test.ts"
@@ -182,7 +182,7 @@ describe("a web test run keeps proof", () => {
     const scratch = loadConfig({}).scratchDir;
     const shot = (r: ScriptRun) => fs.readFileSync(r.artifacts.find((a) => a.kind === "screenshot")!.path);
 
-    it("a passing and a failing test each keep a screenshot and a recording", async () => {
+    it("a passing and a failing test each keep a screenshot and no recording", async () => {
         runs = await runScripts(
             scratch,
             [
@@ -195,8 +195,9 @@ describe("a web test run keeps proof", () => {
         expect(runs.map((r) => [r.testId, r.status])).toEqual([["WEB-001", "passed"], ["WEB-002", "failed"]]);
         for (const r of runs) {
             const kinds = r.artifacts.map((a) => a.kind);
-            expect(kinds, r.testId).toEqual(expect.arrayContaining(["screenshot", "video"]));
-            for (const a of r.artifacts.filter((x) => x.kind === "screenshot" || x.kind === "video")) expect(fs.statSync(a.path).size, `${r.testId} ${a.kind}`).toBeGreaterThan(100);
+            expect(kinds, r.testId).toContain("screenshot");
+            expect(kinds, r.testId).not.toContain("video");
+            for (const a of r.artifacts.filter((x) => x.kind === "screenshot")) expect(fs.statSync(a.path).size, `${r.testId} ${a.kind}`).toBeGreaterThan(100);
             expect(shot(r).subarray(0, 8).toString("hex"), r.testId).toBe("89504e470d0a1a0a");
         }
         // A trace stays for failures only.
@@ -297,7 +298,7 @@ describe("on the platform, from a person's runner", () => {
         fs.rmSync(agentWork, { recursive: true, force: true });
     }, 90_000);
 
-    it("a run of a passing and a failing code test lists a screenshot and a recording for each", async () => {
+    it("a run of a passing and a failing code test lists a screenshot for each, and no recording", async () => {
         // The project's tests run on runners: the server itself does not run code tests.
         for (let i = 0; i < 100 && !(await call(owner.token, "GET", `/api/projects/${projectId}/agents`)).body?.some?.((a: { online: boolean }) => a.online); i++) await new Promise((r) => setTimeout(r, 200));
         const reviews = new ReviewStore(platform.db);
@@ -325,19 +326,19 @@ describe("on the platform, from a person's runner", () => {
         expect((byId.get(ids.fail) as any).state).toBe("failed");
         for (const key of ["pass", "fail"]) {
             const proof = (byId.get(ids[key]!) as any).proof as Array<{ id: string; kind: string; moment?: string }>;
-            expect(proof?.map((p) => p.kind).sort(), key).toEqual(["screenshot", "video"]);
+            expect(proof?.map((p) => p.kind).sort(), key).toEqual(["screenshot"]);
         }
         expect((byId.get(ids.pass) as any).proof.find((p: any) => p.kind === "screenshot").moment).toBe("end");
         expect((byId.get(ids.fail) as any).proof.find((p: any) => p.kind === "screenshot").moment).toBe("failure");
     }, 300_000);
 
-    it("a viewer of the project opens the pictures and the recording; a person of another project gets 404", async () => {
+    it("a viewer of the project opens the pictures; a person of another project gets 404", async () => {
         const proofOf = (key: string) => answer.tests.find((t: any) => t.id === ids[key]).proof as Array<{ id: string; kind: string }>;
         for (const key of ["pass", "fail"]) {
             for (const p of proofOf(key)) {
                 const res = await fetch(`${BASE}/api/artifacts/${p.id}`, { headers: { authorization: `Bearer ${viewer.token}` } });
                 expect(res.status, `${key} ${p.kind}`).toBe(200);
-                expect(res.headers.get("content-type"), `${key} ${p.kind}`).toBe(p.kind === "video" ? "video/webm" : "image/png");
+                expect(res.headers.get("content-type"), `${key} ${p.kind}`).toBe("image/png");
                 const away = await fetch(`${BASE}/api/artifacts/${p.id}`, { headers: { authorization: `Bearer ${outsider.token}` } });
                 expect(away.status, `${key} ${p.kind} from another project`).toBe(404);
             }
@@ -355,7 +356,7 @@ describe("on the platform, from a person's runner", () => {
         expect(p.uniform[1]).toBe(false);
     }, 60_000);
 
-    it("the Run page shows each test's proof: thumbnails that open larger, and the recording with controls", async () => {
+    it("the Run page shows each test's proof: thumbnails that open larger, and no recording", async () => {
         if (!fs.existsSync(path.join(REPO_ROOT, "web/dist/index.html"))) throw new Error("web/dist is missing: build the UI first (see the header of this file)");
         const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
         const page = await context.newPage();
@@ -374,8 +375,7 @@ describe("on the platform, from a person's runner", () => {
             const failShot = failRow.getByRole("button", { name: /screenshot at the failing step/i });
             await pwExpect(passShot).toBeVisible();
             await pwExpect(failShot).toBeVisible();
-            // Under the recording, in plain words: it is not masked.
-            await pwExpect(failRow.getByText("Recordings are not masked: anyone who can view this project sees what was on the screen (password fields show as dots).")).toBeVisible();
+            await pwExpect(failRow.getByRole("button", { name: /recording/i })).toHaveCount(0);
             // The thumbnail has loaded (a picture that failed to load has no size).
             await pwExpect.poll(() => passShot.locator("img").evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBeGreaterThan(100);
             await page.screenshot({ path: path.join(SHOTS, "run-proof-run-page.png"), fullPage: true });
@@ -390,48 +390,11 @@ describe("on the platform, from a person's runner", () => {
             await page.keyboard.press("Escape");
             await pwExpect(dialog).toBeHidden();
 
-            await failRow.getByRole("button", { name: /recording/i }).click();
-            const video = page.getByRole("dialog").locator("video");
-            await pwExpect(video).toBeVisible();
-            expect(await video.evaluate((v: HTMLVideoElement) => v.controls)).toBe(true);
-            await pwExpect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThan(0);
-            await page.screenshot({ path: path.join(SHOTS, "run-proof-recording.png") });
-            await page.keyboard.press("Escape");
-
             // Phone width: the proof stays inside the row.
             await page.setViewportSize({ width: 390, height: 844 });
             await pwExpect(passShot).toBeVisible();
             expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
             await page.screenshot({ path: path.join(SHOTS, "run-proof-run-page-390.png"), fullPage: true });
-        } finally {
-            await context.close();
-        }
-    }, 120_000);
-
-    it("a recording the 7-day rule removed says so on the Run page and at its link", async () => {
-        const video = (answer.tests.find((t: any) => t.id === ids.pass).proof as Array<{ id: string; kind: string }>).find((p) => p.kind === "video")!;
-        const removedOn = "2026-11-12T03:00:00.000Z";
-        platform.db.run("UPDATE artifacts SET pruned_at = ?, pruned_reason = ? WHERE id = ?", removedOn, "recording-age", video.id);
-        const SENTENCE = "This recording was removed after 7 days, on Nov 12, 2026: recordings are kept for 7 days (the project's retention policy).";
-        const proof = (await call(viewer.token, "GET", `/api/projects/${projectId}/runs/${jobId}`)).body.tests.find((t: any) => t.id === ids.pass).proof;
-        expect(proof.find((p: any) => p.id === video.id)).toMatchObject({ kind: "video", removedAt: removedOn, removedReason: "recording-age" });
-        const gone = await call(viewer.token, "GET", `/api/artifacts/${video.id}`);
-        expect(gone.status).toBe(410);
-        expect(gone.body.error).toBe(SENTENCE);
-        const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-        const page = await context.newPage();
-        try {
-            await page.goto(BASE);
-            await page.getByLabel("Email").fill("vera@example.com");
-            await page.getByLabel("Password").fill("vera@example.com long password");
-            await page.getByRole("button", { name: "Sign in" }).click();
-            await pwExpect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
-            await page.goto(`${BASE}/#/projects/${projectId}/runs/${jobId}`);
-            const passRow = page.getByRole("list", { name: "Tests in this run" }).getByRole("listitem").filter({ has: page.getByRole("link", { name: "Fills the form" }) });
-            await pwExpect(passRow.getByText(SENTENCE)).toBeVisible();
-            await pwExpect(passRow.getByRole("button", { name: /recording/i })).toHaveCount(0);
-            await pwExpect(passRow.getByRole("button", { name: /screenshot at the end/i })).toBeVisible();
-            await page.screenshot({ path: path.join(SHOTS, "run-proof-removed-recording.png"), fullPage: true });
         } finally {
             await context.close();
         }

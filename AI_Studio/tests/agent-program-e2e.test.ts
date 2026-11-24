@@ -152,7 +152,7 @@ describe("a validation job that runs on a real agent", () => {
         expect(tests.find((t) => t.id === ids["home"])!.validationStatus).toBe("VALIDATED");
         expect(tests.find((t) => t.id === ids["health"])!.validationStatus).toBe("VALIDATED");
         // Every web run keeps proof (docs/features/failure-evidence.md); the trace is kept for failures only, and an API test has no pictures.
-        expect(platform.db.all<{ kind: string }>("SELECT kind FROM artifacts WHERE project_id = ? AND kind IN ('screenshot','trace','video')", projectId).map((a) => a.kind).sort()).toEqual(["screenshot", "video"]);
+        expect(platform.db.all<{ kind: string }>("SELECT kind FROM artifacts WHERE project_id = ? AND kind IN ('screenshot','trace','video')", projectId).map((a) => a.kind).sort()).toEqual(["screenshot"]);
     }, 180_000);
 
     it("a failing web test is not VALIDATED and its screenshot, trace and evidence are stored like a local run's", async () => {

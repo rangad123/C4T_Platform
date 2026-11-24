@@ -2,7 +2,7 @@
  * Page health checks on a page with a strict style-src policy (no 'unsafe-inline'), through the platform's real run path (runScripts with its
  * Playwright config). The failure video used to draw step titles as markup with an inline style; the page's policy refused it with a console
  * error, and the health check reported that error as the page's own. A clean strict page must pass, a page that really uses an inline style
- * must still be reported, and the failing test must still keep its video.
+ * must still be reported. No video is recorded any more (owner 2026-11-24, V9), and the failing test keeps none.
  *
  * Fixture port: 9541.
  */
@@ -36,7 +36,7 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
 describe("page health on a strict style-src page", () => {
-    it("reports no inline-style error the test's own recording caused, still reports the page's own, and keeps the failure video", async () => {
+    it("reports no inline-style error the test's own recording caused, still reports the page's own, and records no video", async () => {
         const specs: TestSpec[] = generateHealthSpecs(modelFor(origin, [{ path: "/", type: "home" }, { path: "/bad", type: "content" }]), { maxPages: 6 }).map((d, i) => TestSpecSchema.parse({ ...d, testId: `WEB-${String(i + 1).padStart(3, "0")}` }));
         const clean = specs.find((s) => (s.steps[0] as { url: string }).url === "/")!;
         const bad = specs.find((s) => (s.steps[0] as { url: string }).url === "/bad")!;
@@ -56,6 +56,6 @@ describe("page health on a strict style-src page", () => {
         expect(healthFinding(bad, badRun) ?? "").toMatch(/inline style violates the following Content Security Policy/i);
         // Exactly the page's own violation: one error, not one more from the recording.
         expect(badRun.error ?? "").toMatch(/1 JavaScript error was reported/);
-        expect(badRun.artifacts.some((a) => a.kind === "video")).toBe(true);
+        expect(badRun.artifacts.some((a) => a.kind === "video")).toBe(false);
     }, 180_000);
 });

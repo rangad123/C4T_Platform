@@ -22,8 +22,8 @@ const { playwrightAdapter } = await import("../src/engine/frameworks/index.js");
 const { validateBatch } = await import("../src/engine/validation/validator.js");
 
 describe("verification attempts record no video", () => {
-    it("the run config: video off when asked, recorded otherwise; a runner's installed browser is kept either way", () => {
-        expect(runConfigOf([], {})).toContain('video: { mode: "on"');
+    it("the run config: video off whether asked or not (owner 2026-11-24, V9); a runner's installed browser is kept either way", () => {
+        expect(runConfigOf([], {})).toContain('video: "off"');
         const off = runConfigOf([], { video: false });
         expect(off).toContain('video: "off"');
         expect(off).not.toContain('video: { mode: "on"');

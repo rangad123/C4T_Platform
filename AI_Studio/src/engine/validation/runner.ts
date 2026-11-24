@@ -167,10 +167,8 @@ export default defineConfig({
         screenshot: { mode: "on", style: ${JSON.stringify(PROOF_SHOT_STYLE)} },
         // Kept for a failing run (and any retry), with the accessibility tree at each action next to the page itself.
         trace: { mode: "retain-on-failure-and-retries", snapshots: { dom: true, aria: true, screen: true } },
-        // Kept for every test, so reviewers can watch what happened: each action is shown on the video (a passed run's recording is removed at
-        // the next retention pass). No step titles: Playwright draws them as markup with an inline style, which a page's strict style-src policy
-        // refuses with a console error that the page health check would report as the page's own.
-        video: { mode: "on", show: { actions: {} } },
+        // No recording (owner 2026-11-24, V9): a video shows every value on screen and cannot be masked. The screenshot and trace are the proof.
+        video: "off",
         // Routes (the bearer token, deliberate faults) must see every request: a service worker would answer some itself.
         serviceWorkers: "block",
         actionTimeout: 10_000,
@@ -189,9 +187,7 @@ export function configFor(projects: RunnerProject[], testTimeoutMs?: number, bro
     const timed = testTimeoutMs !== undefined && testTimeoutMs !== 60_000 ? CONFIG.replace("    timeout: 60_000,", () => `    timeout: ${Math.round(testTimeoutMs)},`) : CONFIG;
     // A runner that uses the computer's Chrome or Edge (../browsers/choice.ts): Chromium tests run in it. Firefox and WebKit variants keep their own engine.
     const launch = browser?.channel || browser?.executablePath ? `${browser.channel ? `channel: ${JSON.stringify(browser.channel)}, ` : ""}${browser.executablePath ? `launchOptions: { executablePath: ${JSON.stringify(browser.executablePath)} }, ` : ""}`.replace(/, $/, "") : "";
-    // No video tool on this computer (a runner using an installed browser that has not fetched it yet): no recording, rather than no test.
-    const filmed = browser?.video === false ? timed.replace(/video: \{ mode: "on"[^\n]*\},\n/, () => 'video: "off",\n') : timed;
-    const base = launch && projects.length === 0 ? filmed.replace("    use: {\n", () => `    use: {\n        ${launch},\n`) : filmed;
+    const base = launch && projects.length === 0 ? timed.replace("    use: {\n", () => `    use: {\n        ${launch},\n`) : timed;
     if (projects.length === 0) return base;
     const list = projects
         .map((p) => `        { name: ${JSON.stringify(p.name)}, use: { ...devices[${JSON.stringify(p.device)}]${p.viewport ? `, viewport: ${JSON.stringify(p.viewport)}` : ""}${p.use ? `, ...${JSON.stringify(p.use)}` : ""}${launch ? `, ...(devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "firefox" || devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "webkit" ? {} : { ${launch} })` : ""} } },`)
@@ -199,9 +195,8 @@ export function configFor(projects: RunnerProject[], testTimeoutMs?: number, bro
     return base.replace("import { defineConfig }", () => "import { defineConfig, devices }").replace("    use: {", () => `    projects: [\n${list}\n    ],\n    use: {`);
 }
 
-/** The run config before the proxy and the overall limit: no recording when the caller says `video: false` (verification attempts, spec Q6). */
-export const runConfigOf = (projects: RunnerProject[], opts: { testTimeoutMs?: number; browser?: BrowserLaunch; video?: false }): string =>
-    configFor(projects, opts.testTimeoutMs, opts.video === false ? { ...opts.browser, video: false } : opts.browser);
+/** The run config before the proxy and the overall limit. `video` is kept for callers; no run records one (see CONFIG). */
+export const runConfigOf = (projects: RunnerProject[], opts: { testTimeoutMs?: number; browser?: BrowserLaunch; video?: false }): string => configFor(projects, opts.testTimeoutMs, opts.browser);
 
 /** One test finished (Playwright's list reporter, read from the runner's output). Only produced when a caller asks for progress. */
 export interface RunProgress {

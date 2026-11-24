@@ -109,8 +109,8 @@ describe("mobile runner", () => {
         expect(bad.status).toBe("failed");
         expect(bad.failedStepIndex).toBe(0);
         expect(bad.steps[0]!.error).toMatch(/toBeVisible/);
-        // the inline screenshot became a file; video and the self-contained trace are kept
-        expect(bad.artifacts.map((a) => a.kind).sort()).toEqual(["screenshot", "trace", "video"]);
+        // the inline screenshot became a file; the self-contained trace is kept, and no video is recorded (V9)
+        expect(bad.artifacts.map((a) => a.kind).sort()).toEqual(["screenshot", "trace"]);
         const shot = bad.artifacts.find((a) => a.kind === "screenshot")!;
         expect(fs.readFileSync(shot.path).subarray(1, 4).toString()).toBe("PNG");
 
@@ -232,7 +232,7 @@ describe("platform", () => {
 
         const detail = (await call("GET", `/api/tests/${t["MOB-002"]!.id}`)).body;
         expect(detail.executions[0].status).toBe("failed");
-        expect(detail.executions[0].artifacts.map((a: { kind: string }) => a.kind).sort()).toEqual(["screenshot", "trace", "video"]);
+        expect(detail.executions[0].artifacts.map((a: { kind: string }) => a.kind).sort()).toEqual(["screenshot", "trace"]);
         const shot = detail.executions[0].artifacts.find((a: { kind: string }) => a.kind === "screenshot");
         const img = await server.inject({ method: "GET", url: `/api/artifacts/${shot.id}` });
         expect(img.statusCode).toBe(200);

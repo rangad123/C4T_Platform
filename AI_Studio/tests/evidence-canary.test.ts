@@ -5,14 +5,14 @@
  * channel and kind. Through the real API, queue, worker and browser:
  *   1. a test generation with a scripted model double (discovery, understanding, planning, authoring, validation; page health checks on);
  *   2. imported tests that fail on the app (a web test that types the run's password, waits for the profile call and downloads the
- *      export; an API test), so evidence, traces, screenshots and videos are kept;
+ *      export; an API test), so evidence, traces and screenshots are kept (no video: owner 2026-11-24, V9);
  *   3. an issue filed for the failing web test (a local GitHub-shaped tracker keeps what it was sent) and the project report;
  *   4. a candidate finding made of what the app showed (page text, request lines, console lines), through the finding contract.
  * Then every stored row (per table), every stored file (traces unpacked, screenshots by a covered-box check), the runs' scratch files,
  * the API answers, the issue, the report and what was sent to the AI are searched for every canary.
  *
- * What leaks today is listed in KNOWN_LEAKS, each with its line in .scratch/ai-testing-engine/P5-EVIDENCE-AUDIT.md, and shown as a
- * todo. A leak not on the list fails; a listed leak that no longer happens fails too, so the list stays the truth (E2 closes them).
+ * KNOWN_LEAKS is empty (V9 = 0, owner 2026-11-24): any leak fails. A leak accepted later goes there with its line in
+ * .scratch/ai-testing-engine/P5-EVIDENCE-AUDIT.md and shows as a todo; a listed leak that no longer happens fails too.
  * The matrix of what was found is written to .validation/evidence-canary-matrix.json.
  *
  * Ports: canary app 5760, issue tracker 5761. Run under the browser lock:
@@ -76,23 +76,9 @@ const pairsIn = (bytes: Buffer | Uint8Array | string): string[] => {
 
 /**
  * What is still kept, by evidence type: the (channel.kind) pairs found, and the audit line (P5-EVIDENCE-AUDIT.md) that explains them.
- * Every pair left is a value that nothing marks as secret: a password, token or session id written on the page as plain text (in the
- * page itself or in its iframe), with no key word, field or format around it. The redaction cannot tell it from other words, and page
- * text stays in what the engine keeps so it can understand the app; screenshots show page text as it is (only fields are covered).
- * Remove a pair when it no longer happens.
+ * Empty: the bare page-text password, token and session id (L-1, L-2, L-3, L-6) are masked as secret-shaped words (shared/redact-text.ts).
  */
-const P = (s: string) => s.split(" ");
-const KNOWN_LEAKS: Record<string, { audit: string; pairs: string[] }> = {
-    // The finding's observed text quotes the page (step 4): the same bare page-text values as the application model, nothing else.
-    "findings (API)": { audit: "L-6", pairs: P("text.bearer text.cookie text.password") },
-    "row: applications": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
-    "row: candidate_findings": { audit: "L-6", pairs: P("text.bearer text.cookie text.password") },
-    "screenshot (covered-box check)": { audit: "L-7", pairs: P("iframe.address iframe.apiKey iframe.bearer iframe.card iframe.cookie iframe.dbUrl iframe.email iframe.password iframe.phone text.address text.apiKey text.bearer text.card text.cookie text.dbUrl text.email text.password text.phone") },
-    "sent to the AI": { audit: "L-3", pairs: P("text.bearer text.cookie text.password") },
-    "stored database file": { audit: "L-2, L-6", pairs: P("text.bearer text.cookie text.password") },
-    "stored file application-model.json": { audit: "L-2", pairs: P("text.bearer text.cookie text.password") },
-    "stored trace": { audit: "L-1", pairs: P("iframe.cookie iframe.password text.cookie text.password") },
-};
+const KNOWN_LEAKS: Record<string, { audit: string; pairs: string[] }> = {};
 
 const found = new Map<string, Set<string>>();
 const record = (evidence: string, bytes: Buffer | Uint8Array | string) => {
@@ -255,6 +241,12 @@ const BOXES: Array<{ pair: string; x: number; y: number; w: number; h: number }>
     { pair: `iframe.${k}`, x: 880, y: 60 + i * 44 + 10, w: 300, h: 20 },
 ]).concat({ pair: "clave.field", x: 22, y: 562, w: 390, h: 24 });
 
+/**
+ * The boxes the proof cover must hide: the fields. Page text and the iframe are drawn as they are on screen: screenshots stay as they are
+ * (owner 2026-11-24, V9), only fields are covered (L-7).
+ */
+const COVERED = BOXES.filter((b) => !/^(?:text|iframe)\./.test(b.pair));
+
 /** The boxes a screenshot shows: each box whose pixels are not all the proof cover's colour (#475569) and not all blank. */
 async function shownIn(files: string[]): Promise<Map<string, Set<string>>> {
     const out = new Map<string, Set<string>>();
@@ -290,7 +282,7 @@ async function shownIn(files: string[]): Promise<Map<string, Set<string>>> {
                     }
                     return visible;
                 },
-                { src: `data:${mime};base64,${fs.readFileSync(f).toString("base64")}`, boxes: BOXES },
+                { src: `data:${mime};base64,${fs.readFileSync(f).toString("base64")}`, boxes: COVERED },
             );
             for (const p of shown) {
                 const set = out.get(p) ?? new Set<string>();
@@ -344,7 +336,7 @@ describe("evidence audit with canary secrets", () => {
         expect(sentToAi.length).toBeGreaterThan(0);
     }, 300_000);
 
-    it("imported tests fail on the app, keeping evidence, a trace, a screenshot and a video", async () => {
+    it("imported tests fail on the app, keeping evidence, a trace and a screenshot, and no video", async () => {
         const imp = await call("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, credentials: { username: "canary-user", password: PASSWORD }, specs: Object.values(SPECS) });
         expect(imp.status, imp.text).toBe(202);
         Object.keys(SPECS).forEach((k, i) => (ids[k] = imp.body.tests[i].id));
@@ -354,6 +346,7 @@ describe("evidence audit with canary secrets", () => {
         expect((await call("GET", `/api/tests/${ids.web}/evidence`)).body.execution).toMatchObject({ status: "failed", failedStep: SPECS.web.steps.length });
         const kinds = platform.db.all<{ kind: string }>("SELECT DISTINCT kind FROM artifacts WHERE test_case_id = ?", ids.web!).map((r) => r.kind);
         expect(kinds).toEqual(expect.arrayContaining(["evidence", "trace", "screenshot"]));
+        expect(kinds).not.toContain("video");
     }, 300_000);
 
     it("an issue is filed for the failing web test, and the project report is made", async () => {
@@ -425,13 +418,12 @@ describe("evidence audit with canary secrets", () => {
             for (const f of list) {
                 const t = `${where} ${typeOf(f)}`;
                 if (t.endsWith("screenshot")) pictures.push(f);
-                if (t.endsWith("video")) {
-                    searched.add(t); // pictures: what was on screen is in them, and they cannot be covered (P5-EVIDENCE-AUDIT.md)
-                    continue;
-                }
                 searchFile(t, f);
             }
         }
+        // L-9: no video is recorded (owner 2026-11-24, V9): a recording shows every value on screen and cannot be covered.
+        expect([...stored, ...scratch].filter((f) => typeOf(f) === "video").map((f) => path.relative(dataDir, f))).toEqual([]);
+        expect(platform.db.all("SELECT id FROM artifacts WHERE kind = 'video'")).toEqual([]);
         expect(stored.some((f) => typeOf(f) === "trace")).toBe(true);
         // L-8: a job's run folders (page snapshots, reports, traces, recordings) go when the job ends.
         expect(scratch.map((f) => path.relative(REPO_ROOT, f))).toEqual([]);
@@ -447,6 +439,5 @@ describe("evidence audit with canary secrets", () => {
         expect(leaking).toEqual(known);
     }, 180_000);
 
-    it.todo("L-9: videos show every value on screen, fields included, and cannot be covered; they are not searched. Kept 7 days (within every retention period), never in scratch");
     for (const [evidence, leak] of Object.entries(KNOWN_LEAKS)) it.todo(`${leak.audit}: ${evidence} keeps ${leak.pairs.join(", ")}`);
 });

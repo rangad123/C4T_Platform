@@ -195,16 +195,13 @@ describe("the run's Playwright config", () => {
         // Only the projects carry it: the shared `use` block stays as it was, so a Firefox project never inherits a Chromium channel.
         expect(variants.split("projects: [")[1]!.split("    ],")[1]).toBe(configFor(projects).split("projects: [")[1]!.split("    ],")[1]);
     });
-    it("keeps no video when the computer has no video tool, instead of failing every test at its first page", () => {
+    it("records no video, with or without the computer's video tool (owner 2026-11-24, V9); the trace is kept", () => {
         const noVideo = configFor([], undefined, { ...edge, video: false });
         expect(noVideo).toContain('video: "off",');
-        expect(noVideo).not.toContain('video: { mode: "on"');
-        expect(noVideo).toContain('trace: { mode: "retain-on-failure-and-retries"'); // traces need no video tool
-        expect(noVideo.replace('video: "off",', () => 'video: { mode: "on", show: { actions: {} } },')).toBe(configFor([], undefined, edge));
+        expect(noVideo).toContain('trace: { mode: "retain-on-failure-and-retries"');
         expect(configFor(projects, undefined, { ...edge, video: false })).toContain('video: "off",');
-        // With the tool there (or no installed browser at all) videos are kept as before.
-        expect(configFor([], undefined, { ...edge, video: true })).toBe(configFor([], undefined, edge));
-        expect(configFor([])).toContain('video: { mode: "on", show: { actions: {} } },');
+        expect(configFor([], undefined, { ...edge, video: true })).toBe(noVideo);
+        for (const c of [configFor([]), configFor(projects), configFor([], undefined, edge)]) expect(c).not.toMatch(/video: \{|video: "on/);
     });
     it("finds Playwright's video tool only where Playwright keeps a finished install of it", () => {
         const dir = fresh("ffmpeg");

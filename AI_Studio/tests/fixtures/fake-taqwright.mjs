@@ -11,6 +11,8 @@ fs.writeFileSync(
     JSON.stringify({ args: process.argv.slice(2), env: process.env, config: fs.readFileSync(path.join(cwd, "taqwright.config.ts"), "utf8") }),
 );
 
+// Like Taqwright, no recording is attached when the config turns video off.
+const filmed = !/video: "off"/.test(fs.readFileSync(path.join(cwd, "taqwright.config.ts"), "utf8"));
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const specs = [];
 for (const file of fs.readdirSync(cwd).filter((f) => f.endsWith(".spec.ts"))) {
@@ -36,7 +38,7 @@ for (const file of fs.readdirSync(cwd).filter((f) => f.endsWith(".spec.ts"))) {
                         attachments: failed
                             ? [
                                   { name: "screenshot", contentType: "image/png", body: PNG.toString("base64") },
-                                  { name: "taqwright-video", contentType: "video/mp4", path: video },
+                                  ...(filmed ? [{ name: "taqwright-video", contentType: "video/mp4", path: video }] : []),
                                   { name: "taqwright-trace", contentType: "text/html", path: video },
                               ]
                             : [],
