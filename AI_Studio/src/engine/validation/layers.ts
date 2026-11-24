@@ -15,19 +15,31 @@ const LayerState = z.union([z.object({ status: z.literal("ran"), tests: z.number
 export const LayerReportSchema = z.object({ page: LayerState, api: LayerState, storedData: LayerState, database: LayerState, invariants: InvariantReportSchema.optional() }).strict();
 export type LayerReport = z.infer<typeof LayerReportSchema>;
 
-/** The layer a test checks: API tests and the API access checks (an accessDenied assert on an API call) are "api", the rest "page". */
-export function layerOfSpec(spec: { kind: string; steps: Step[] }): Layer {
-    if (spec.kind === "api") return "api";
-    const api = spec.steps.some((s) => {
-        if (s.action !== "assert" || s.check !== "accessDenied" || typeof s.expected !== "string") return false;
-        try {
-            return (JSON.parse(s.expected) as { api?: unknown }).api === true;
-        } catch {
-            return false;
-        }
-    });
-    return api ? "api" : "page";
+/**
+ * The layers a test checks, page or API first: API tests and the API access checks (an accessDenied assert on an API call) are "api",
+ * the rest "page". A C5 probe, C6 backend operation, C7 sequence or C9 read-back (by its generator's tag) also reads stored data back
+ * through the API (spec §4.3), and a test holding a database check (C10) checks the database too.
+ */
+export function layersOfSpec(spec: { kind: string; steps: Step[]; tags?: readonly string[] }): Layer[] {
+    const api =
+        spec.kind === "api" ||
+        spec.steps.some((s) => {
+            if (s.action !== "assert" || s.check !== "accessDenied" || typeof s.expected !== "string") return false;
+            try {
+                return (JSON.parse(s.expected) as { api?: unknown }).api === true;
+            } catch {
+                return false;
+            }
+        });
+    const out: Layer[] = [api ? "api" : "page"];
+    if (STORED_DATA_TAGS.some((t) => spec.tags?.includes(t))) out.push("storedData");
+    if (spec.steps.some((s) => s.action === "assertResponse" && s.check === "dbCheck")) out.push("database");
+    return out;
 }
+const STORED_DATA_TAGS = ["readback", "backend", "invariant", "stateful"];
+
+/** The deepest layer a test checks (its meta.layer): database, then stored data, then the API, then the page. */
+export const layerOfSpec = (spec: Parameters<typeof layersOfSpec>[0]): Layer => layersOfSpec(spec).at(-1)!;
 
 /** The report from the tests made per layer and what the run allowed. A layer with no test says the reason that applies first. */
 /**

@@ -7,8 +7,9 @@
  *
  * Supported: type (incl. integer, and "null" / nullable), enum, required, properties, additionalProperties:false,
  * items, minimum / maximum, minLength / maxLength, pattern, format (date-time, date, email, uuid).
- * Not supported on purpose: a node the documentation expressed as oneOf / anyOf arrives marked "x-aitp-lossy" (the
- * parser kept only its first alternative), so it is skipped rather than judged — no false alarms.
+ * oneOf / anyOf: the response matches one of the documented forms, or the nearest form's worst difference is reported (Q6);
+ * allOf: every part holds. The parser marks a oneOf / anyOf node "x-aitp-lossy" (its own keywords are only the first form's copy,
+ * for the readers that need one shape), so only its forms are judged; an older stored node without its forms is skipped.
  *
  * Severity per line: a missing required field or a wrong type breaks clients -> high; a value outside the documented
  * enum / length / range / pattern -> medium; a wrong format or an undocumented extra field (only when the schema
@@ -40,8 +41,24 @@ function contractShow(v) {
     const s = JSON.stringify(v);
     return s === undefined ? String(v) : s.length > 40 ? s.slice(0, 37) + "..." : s;
 }
+const CONTRACT_RANK = { high: 0, medium: 1, low: 2 };
 function contractWalk(value, schema, path, out, depth) {
-    if (!schema || typeof schema !== "object" || depth > 6 || schema["x-aitp-lossy"]) return;
+    if (!schema || typeof schema !== "object" || depth > 6) return;
+    // shortcut: a value matching several oneOf forms passes, as anyOf would; documents with overlapping forms are common, and that is
+    // a documentation problem, not a response one.
+    const forms = [schema.oneOf, schema.anyOf].find((f) => Array.isArray(f) && f.length);
+    if (forms) {
+        const tries = forms.map((f) => { const o = []; contractWalk(value, f, path, o, depth + 1); return o; });
+        if (!tries.some((o) => o.length === 0)) {
+            // The nearest form has the fewest differences; a field it requires and the response lacks counts twice (the response is
+            // more likely the form whose fields it has).
+            const far = (o) => o.length + o.filter((x) => / is missing, but /.test(x[1])).length;
+            const nearest = tries.reduce((a, b) => (far(b) < far(a) ? b : a)).sort((a, b) => CONTRACT_RANK[a[0]] - CONTRACT_RANK[b[0]]);
+            out.push([nearest[0][0], path + ": matches none of the " + forms.length + " documented forms; nearest: " + nearest[0][1]]);
+        }
+    }
+    if (schema["x-aitp-lossy"]) return;
+    if (Array.isArray(schema.allOf)) for (const part of schema.allOf) contractWalk(value, part, path, out, depth + 1);
     const t = contractTypeOf(value);
     const types = [].concat(schema.type || []).filter(Boolean);
     const nullable = schema.nullable === true || types.indexOf("null") >= 0;
@@ -50,8 +67,9 @@ function contractWalk(value, schema, path, out, depth) {
         if (named.length && !nullable) out.push(["high", path + ": is null, but the documentation says " + named.join(" or ")]);
         return;
     }
-    if (named.length && !named.some((x) => x === t || (x === "number" && t === "integer"))) {
-        out.push(["high", path + ": expected " + named.join(" or ") + ", got " + t]);
+    // A schema that names only "null" refuses every other value.
+    if (named.length ? !named.some((x) => x === t || (x === "number" && t === "integer")) : types.length > 0) {
+        out.push(["high", path + ": expected " + (named.join(" or ") || "null") + ", got " + t]);
         return;
     }
     if (Array.isArray(schema.enum) && schema.enum.length && !schema.enum.some((e) => JSON.stringify(e) === JSON.stringify(value))) {
@@ -96,8 +114,7 @@ function contractAssert(json, schema) {
     // The same mismatch in every element of a list is one problem, not twenty.
     const seen = new Set();
     const unique = out.filter((o) => { const k = o[0] + o[1].replace(/\[\d+\]/g, "[]"); if (seen.has(k)) return false; seen.add(k); return true; });
-    const rank = { high: 0, medium: 1, low: 2 };
-    unique.sort((a, b) => rank[a[0]] - rank[b[0]]);
+    unique.sort((a, b) => CONTRACT_RANK[a[0]] - CONTRACT_RANK[b[0]]);
     const lines = unique.slice(0, CONTRACT_MAX_LINES).map((o) => "- [" + o[0] + "] " + o[1].replace(/\[\d+\]/g, "[]"));
     if (unique.length > CONTRACT_MAX_LINES) lines.push("- [low] ...and " + (unique.length - CONTRACT_MAX_LINES) + " more");
     throw new Error(CONTRACT_PREFIX + " " + unique.length + (unique.length === 1 ? " difference" : " differences") + " between the response and its documentation\n" + lines.join("\n"));

@@ -183,7 +183,7 @@ describe("the stored-data seeds through the generated database checks", () => {
 });
 
 describe("through the engine (runGeneration, API only, data changes on)", () => {
-    type Saved = { testId: string; steps: Step[]; validation?: string; reason?: string | null };
+    type Saved = { testId: string; steps: Step[]; tags: string[]; validation?: string; reason?: string | null };
     async function generate(port: number, defects: string, withProbe: boolean): Promise<{ summary: GenerationSummary; tests: Saved[]; prompts: Array<{ system: string; prompt: string }> }> {
         const app = await startBenchApp("bench-shop", port, defects);
         const forget = withProbe ? registerBenchProbe(app.base, benchDataProbe({ url: app.base, token: BENCH_DATA_TEST_TOKEN })) : undefined;
@@ -196,7 +196,7 @@ describe("through the engine (runGeneration, API only, data changes on)", () => 
             saveModel: async () => undefined,
             nextTestKey: async (prefix) => `${prefix}-${String(++n).padStart(3, "0")}`,
             createTest: async ({ spec }) => {
-                tests.push({ testId: spec.testId, steps: spec.steps });
+                tests.push({ testId: spec.testId, steps: spec.steps, tags: spec.tags });
                 return { id: spec.testId, testId: spec.testId };
             },
             updateTest: async (h, patch) => {
@@ -238,6 +238,11 @@ describe("through the engine (runGeneration, API only, data changes on)", () => 
         expect(dbSteps.length).toBeGreaterThan(0);
         expect(dbSteps.length).toBeLessThanOrEqual(40);
         expect(summary.layers?.database).toEqual({ status: "ran", tests: dbTests.length, checks: dbSteps.length });
+        // Gap 3 (VERIFY-P3-P4): the C9 read-backs and C6 backend operations read stored data back through the API (spec §4.3), so the
+        // report counts them, also those that hold a database check.
+        const readBacks = tests.filter((t) => ["readback", "backend", "invariant", "stateful"].some((x) => t.tags.includes(x)));
+        expect(readBacks.length).toBeGreaterThan(0);
+        expect(summary.layers?.storedData).toEqual({ status: "ran", tests: readBacks.length });
         expect(tests.some((t) => /Database check failed.*orphans cart_items\(cartId\) -> carts\(id\)/.test(t.reason ?? ""))).toBe(true);
         const rules = prompts.filter((p) => /rules each stored row/.test(p.system));
         expect(rules).toHaveLength(1);
