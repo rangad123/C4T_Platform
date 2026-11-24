@@ -2,7 +2,9 @@ import { History, Play } from "lucide-react";
 import type { Job } from "../../api";
 import { ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton } from "../../components/ui";
-import { friendlyError, isActive } from "../../lib/labels";
+import { friendlyError, isActive, jobLabel } from "../../lib/labels";
+import { jobHelp } from "../../lib/help";
+import { BadgeKey } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
 import { AGENT_TABS, routes, type AgentTab } from "../../lib/router";
 import { RunDetail } from "../runs/RunDetail";
@@ -85,6 +87,10 @@ function AgentRuns({ projectId, agentId }: { projectId: string; agentId: string 
             </div>
         );
     return (
+        <>
+        <p className="t-meta">
+            <BadgeKey label="the run statuses" entries={list.map((j) => ({ word: jobLabel(j).label, text: jobHelp(j) }))} />
+        </p>
         <ul className="card divided ws-runs" data-testid="agent-runs">
             {list.map((j, i) => (
                 <li key={j.jobId} className="row section">
@@ -97,6 +103,7 @@ function AgentRuns({ projectId, agentId }: { projectId: string; agentId: string 
                 </li>
             ))}
         </ul>
+        </>
     );
 }
 

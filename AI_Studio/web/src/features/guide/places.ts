@@ -91,6 +91,7 @@ export type PlaceId =
     | "scripts-review"
     | "script-version"
     | "agent-runs"
+    | "project-agent"
     | "settings-general"
     | "settings-members";
 
@@ -794,6 +795,18 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "Open the test cases the AI wrote.", button: "Open test cases", to: here("tests") }],
         topic: "explore-my-app",
     },
+    "project-agent": {
+        title: "A testing agent",
+        what: "One testing agent of the project, opened from its Workspace. Each agent does one job: Outcome shows its result only, Runs its runs only, Setup what it uses.",
+        canDo: [
+            { text: "Choose Run to start this agent again. Its run adds to the project's one tree of pages and grows its outcome.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Run"] },
+            { text: "Open Runs to see each of its runs; a stopped run keeps what it found.", button: "Read about watching the AI", to: { topic: "watch-the-ai" }, ui: ["Runs"] },
+            { text: "Open Setup to see what the agent needs and where each input is kept.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Setup"] },
+        ],
+        words: ["exploration", "run"],
+        next: [{ text: "Go back to the Workspace to see every agent of the project.", button: "Open the Workspace", to: here("overview") }],
+        topic: "explore-my-app",
+    },
     "settings-general": {
         title: "Project settings",
         what: "The project, its one platform and testing mode, the frameworks tests use, and its storage and backup.",
@@ -860,6 +873,7 @@ export function placeOf(route: RouteLike): PlaceId {
         if (c === "requirements") return "requirements";
         if (c === "suites") return d ? "suite-detail" : "suites";
         if (c === "agent") return "agent-runs";
+        if (c === "agents") return "project-agent";
         if (c === "scripts") {
             const s = pick(SCRIPTS_SECTIONS, q.get("section"));
             if ((s === "scripts" || s === "review") && q.get("test") && q.get("version")) return "script-version";
