@@ -423,5 +423,8 @@ export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: As
     const narrowed: JobOptions = { ...applyAgentChoice(options, asked, [agentId]), agentId };
     if (agentId === "test-generation") return caseRunOptions(narrowed);
     const { planOnly: _p, ...rest } = narrowed;
+    // The Performance agent times safe API calls and runs the load check on the API target, without the API tests (the API agent's):
+    // it keeps the target, unless the run asked for the web alone.
+    if (agentId === "performance" && (asked.targets ?? ["web", "api"]).includes("api") && !rest.targets.includes("api")) return { ...rest, targets: [...rest.targets, "api"], apiTests: false };
     return rest;
 }

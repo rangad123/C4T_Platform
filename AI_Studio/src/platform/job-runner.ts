@@ -683,6 +683,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 inputChecks: o.inputChecks,
                 visionChecks: o.visionChecks,
                 contractChecks: o.contractChecks,
+                ...(o.apiTests === false ? { apiTests: false } : {}),
                 performanceBudgets: o.performanceBudgets,
                 visual: o.visual,
                 requirements: o.requirementsText ? { name: o.requirementsName ?? "requirements", text: o.requirementsText } : undefined,
