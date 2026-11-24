@@ -21,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { AgentRunStore } from "../src/platform/agent-run-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { ROUTE_ALIASES, resolveAlias } from "../web/src/lib/aliases.js";
 import { LIBRARY_SECTIONS, RELEASE_SECTIONS, SETUP_SECTIONS, WORKSPACE_SETTINGS_SECTIONS, routes } from "../web/src/lib/router.js";
@@ -43,6 +44,9 @@ let caseId = "";
 let requirementId = "";
 let agentRunId = "";
 let suiteId = "";
+/** A project with the Agent Workspace (agent mode alone, its agents chosen), and one finished run of its agent. */
+let wsId = "";
+let wsJob = "";
 const consoleErrors: string[] = [];
 
 const api = async (method: string, url: string, payload?: unknown) => {
@@ -76,6 +80,10 @@ beforeAll(async () => {
     await agentRuns.finish(agentRun.id, { state: "finished", verdict: "inconclusive", reasoning: "Nothing was checked." });
     agentRunId = agentRun.id;
     suiteId = (await api("POST", `/api/projects/${shop.projectId}/test-suites`, { name: "Checkout suite" })).body.id;
+    wsId = (await api("POST", "/api/projects", { name: "Agent shop", platforms: ["web"], testingModes: ["agent"], agents: ["accessibility"] })).body.id;
+    const wsApp = platform.repo.createApplication(wsId, "http://127.0.0.1:8787", { ...DEFAULT_JOB_OPTIONS });
+    wsJob = (await platform.repo.createJob(wsId, wsApp, { ...DEFAULT_JOB_OPTIONS, agentId: "accessibility" })).id as string;
+    platform.repo.setJobStatus(wsJob, "COMPLETED");
 
     browser = await chromium.launch();
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -708,6 +716,8 @@ describe("every route builder opens a page without an error", () => {
             scripts: [...SCRIPTS.map((k) => routes.scripts(P(), k)), routes.scripts(P(), "steps", "Sign in")],
             agentRuns: [routes.agentRuns(P())],
             agentRun: [routes.agentRun(P(), agentRunId)],
+            projectAgent: [routes.projectAgent(wsId, "accessibility"), routes.projectAgent(wsId, "accessibility", "runs"), routes.projectAgent(wsId, "accessibility", "setup")],
+            projectAgentRun: [routes.projectAgentRun(wsId, "accessibility", wsJob)],
             projectSettings: [...SETTINGS, ...(Object.keys(MOVED) as (keyof typeof MOVED)[])].map((k) => routes.projectSettings(P(), k)),
             setup: [routes.setup(P()), routes.setup(P(), "environments"), routes.setup(P(), "alerts"), routes.setup(P(), "issues")],
             library: [routes.library(P()), routes.library(P(), "data"), routes.library(P(), "accounts")],
