@@ -34,9 +34,9 @@ The tables stay on the test page.
    entries that matter (failed and slow requests, console errors, what happened around the failing step). A test or run without
    evidence is a normal answer with `available: false` and a message; an unknown test or a run of another test is a 404.
 
-## Proof of every run: a screenshot and the recording
+## Proof of every run: a screenshot
 
-Every web test keeps a screenshot and its recording, whether it passed or failed, generated and hand-written (code) tests alike, on
+Every web test keeps a screenshot, whether it passed or failed, generated and hand-written (code) tests alike, on
 the platform and on a person's runner (both run the same Playwright configuration, `src/engine/validation/runner.ts`).
 
 - **When the screenshot is taken.** The moment the test's own code ends: for a passing test that is its end, for a failing test the
@@ -45,18 +45,17 @@ the platform and on a person's runner (both run the same Playwright configuratio
 - **Covered while it is taken.** Fields that are secret by kind (password fields, one-time codes, card numbers and codes; the recorder's
   rule in `src/engine/recorder/act.ts`) are painted over, in frames and shadow roots too (`src/engine/evidence/proof-style.ts`). A stored
   secret typed into an ordinary text field is not found.
-- **Recordings are not masked**: anyone who can view the project sees what was on the screen (password fields show as dots). The Run
-  page says so under Watch the recording.
+- **No video is recorded** (owner decision 2026-11-24, V9): a recording shows every value on screen and cannot be masked. Page text
+  outside the covered fields shows in the screenshot as it was on screen; text that looks like a secret is masked everywhere else.
 - **Where it shows.** The Run page lists, under each test, its screenshots as thumbnails (a click opens the picture larger, with a link to
-  open it in a new tab) and a Watch the recording button that plays it with the browser's controls. `GET /api/projects/:id/runs/:jobId`
+  open it in a new tab); a recording kept from before 2026-11-24 still has its Watch the recording button. `GET /api/projects/:id/runs/:jobId`
   gives each test `proof: [{ id, kind: "screenshot" | "video", moment?: "end" | "failure", removedAt? }]`; the files come from
   `GET /api/artifacts/:id`, which needs read access to that project (another project's file is a 404).
-- **How long it is kept.** Recordings of every run, passed or failed, are kept for 7 days and then removed by the daily retention pass
+- **How long it is kept.** Older recordings are kept for 7 days and then removed by the daily retention pass
   (`RECORDING_DAYS` in `src/engine/retention/rules.ts`), whatever the run periods are set to. Screenshots follow the run periods
   (`storage-and-backup.md`): 30 days for a passed run, the failed-run period otherwise. A removed recording says "This recording was
   removed after 7 days, on <date>" on the Run page, the test page and its download link (410). The trace is still kept for failures only. A browser check (other browsers and screen sizes) keeps files only for
-  the browsers where the test failed; a run against a named environment keeps the screenshot and recording of a pass too.
-- A runner with an installed Chrome or Edge that has not fetched Playwright's video tool keeps screenshots without a recording, as before.
+  the browsers where the test failed; a run against a named environment keeps the screenshot of a pass too.
   A runner whose program is older than this change keeps proof only for failures until it updates.
 
 ## Expected and actual
@@ -148,9 +147,9 @@ Every text part of a trace is now masked with the run's secrets before the trace
 
 Limits: masking is by known value of at least 4 characters. A value the test made itself (a one-time code from the authenticator secret, a
 password a code script keeps in its own source), a secret transformed some other way, and anything inside a compressed part (a zip or
-gzip body the application served) are not found. The failure screenshot and video are pictures: a password field is drawn as dots (two
+gzip body the application served) are not found. The failure screenshot is a picture: a password field is drawn as dots (two
 passwords of the same length give the same picture; `tests/runner-trace-secrets.test.ts`), but a secret shown as text on the page, or
-typed into a field that is not a password field, stays visible in them. A secret that looks like a number but is not only digits (`-1234`,
+typed into a field that is not a password field, stays visible in it. A secret that looks like a number but is not only digits (`-1234`,
 `12.50`), or one equal to a JSON word (`true`, `null`), becomes `[hidden]` where it stands outside a string too, so that JSON line no longer
 parses: the trace still opens, without that step's details. A secret made of digits also changes the numbers it is part of (a timestamp,
 a size). A trace someone already downloaded, or one stored before this change, is not changed.
@@ -173,4 +172,4 @@ cleaner's own list of forms.
 
 ## On the test page
 
-A failing test, or one that needs a look, shows a **What failed** block (see `ux-explain.md`): the failed step in plain words, Expected and Got from the `expected`/`actual` fields, links to the screenshot, recording and trace that still exist, the cause when `failure.kind` names one, and the actions that exist (*Edit steps*, *Switch to code*, *Apply the repair*, *Quarantine*, *Run again*).
+A failing test, or one that needs a look, shows a **What failed** block (see `ux-explain.md`): the failed step in plain words, Expected and Got from the `expected`/`actual` fields, links to the screenshot and trace that still exist (and an older recording), the cause when `failure.kind` names one, and the actions that exist (*Edit steps*, *Switch to code*, *Apply the repair*, *Quarantine*, *Run again*).

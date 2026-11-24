@@ -141,9 +141,9 @@ describe("the issue draft passes the canary grep", () => {
         const report = buildFindingReport({ members: [v], spec: cookieSpec, area: all("text"), environment: { appUrl: `https://shop.example.test/?${enc("url")}` }, rootCause, explanation });
         const draft = findingIssueDraft(report, "https://studio.example.test/#/tests/t-1");
         const rendered = [draft.title, toMarkdown(draft.blocks), JSON.stringify(toAdf(draft.blocks)), JSON.stringify(report)].join("\n");
-        // The fixture really carries every pair (the check is not empty).
-        const planted = [JSON.stringify(v), JSON.stringify(cookieSpec), JSON.stringify(rootCause), JSON.stringify(explanation)].join("\n") + decodeURIComponent(enc("url"));
-        expect(leaks(planted).length).toBeGreaterThan(40);
+        // The fixture really carries every pair (the check is not empty): the raw text it was built from (`view` already masks some).
+        const planted = (Object.keys(CH) as Array<keyof typeof CH>).map((ch) => all(ch)).join("\n");
+        expect(leaks(planted)).toHaveLength(PAIRS.length);
         expect(leaks(rendered)).toEqual([]);
         // Still readable: the words around the values survive.
         expect(toMarkdown(draft.blocks)).toMatch(/The page said/);

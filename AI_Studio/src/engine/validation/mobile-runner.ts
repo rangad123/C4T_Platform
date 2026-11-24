@@ -118,8 +118,8 @@ export default defineConfig({
                     "appium:ignoreUnimportantViews": false,
                     "appium:uiautomator2ServerLaunchTimeout": 60000,
                 },
-                // Recorded for every test, kept only when one fails so reviewers can watch what happened.
-                video: "on-failure",
+                // No recording (owner 2026-11-24, V9): it shows every value on screen and cannot be masked. The screenshot and trace stay.
+                video: "off",
                 trace: "on-failure",
                 expectTimeout: 15000,
             },

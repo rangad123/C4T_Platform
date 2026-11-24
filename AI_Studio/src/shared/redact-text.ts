@@ -2,8 +2,8 @@
  * Pattern redaction for free text, shared by the security module (findings, evidence) and the platform's masking on write
  * (src/platform/redact-text.ts). Moved here from src/security/findings/redact.ts so the platform does not import the security module;
  * the rules live only here. Besides credentials it hides personal data (e-mails, also URL-encoded; phone numbers; postal addresses; card
- * numbers that pass the Luhn check) and query values that are one of these once decoded. It is a pattern filter, not a guarantee: a
- * value with nothing around it that marks it (a token written as plain text) is not found.
+ * numbers that pass the Luhn check), query values that are one of these once decoded, and secret-shaped words (a token written as plain
+ * page text). It is a pattern filter, not a guarantee: a secret that is shaped like an ordinary word, with nothing around it, is not found.
  */
 export const HIDDEN = "[hidden]";
 export const EMAIL_HIDDEN = "[email hidden]";
@@ -148,6 +148,13 @@ const ADDRESS =
     /\b\d{1,6}[A-Za-z]?\s+(?:[A-Z][a-z]+\s+){1,4}(?:Street|St|Road|Rd|Avenue|Ave|Lane|Ln|Boulevard|Blvd|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Close|Crescent|Parkway|Highway|Square|Row)\b\.?(?:,\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2})?/g;
 /** API keys in formats that name themselves (Stripe, GitHub, Slack, AWS, Google), with or without a key word before them. */
 const KEY_FORMAT = /\b(?:(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35})\b/g;
+/**
+ * A secret-shaped word (owner 2026-11-24, V9): a password, token or session id written as plain page text, with no key word around it.
+ * 8 to 64 characters with a digit, whose case goes from lower to upper at least three times, or twice with a symbol inside
+ * (`cnryTxBearerTok7`, `CnryTxPw!7x9`). Product names and identifiers change case at most twice (`iPhone15ProMax`, `addToCart2Btn`).
+ */
+const WORD = /(?<![\w!#$%*^~+-])[\w!#$%*^~+-]{8,64}(?![\w!#$%*^~+-])/g;
+const isSecretShaped = (w: string): boolean => /\d/.test(w) && (w.match(/[a-z][A-Z]/g)?.length ?? 0) + (/[!#$%*^~+]/.test(w) ? 1 : 0) >= 3;
 /** A query parameter's value: hidden whole when, decoded, it holds something the rules hide (an encoded e-mail, address or connection string). */
 const QUERY_VALUE = /([?&;][^=&#\s"'<>?]{1,64}=)([^&#\s"'<>]+)/g;
 const decoded = (v: string): string => {
@@ -219,6 +226,11 @@ function redactCore(input: string, found: Found = () => undefined, depth = 0): s
         .replace(PHONE, (m: string) => (isPhone(m) ? (found(m), HIDDEN) : m))
         .replace(ADDRESS, (m: string) => (found(m), HIDDEN))
         .replace(LONG_HEX, HIDDEN)
-        .replace(LONG_B64, hideLongRun);
+        .replace(LONG_B64, hideLongRun)
+        .replace(WORD, (m: string) => {
+            // Punctuation at the word's ends belongs to the sentence (`!isReady`, `(token)`).
+            const core = m.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "");
+            return core.length >= 8 && isSecretShaped(core) ? (found(core), m.replace(core, HIDDEN)) : m;
+        });
     return s;
 }

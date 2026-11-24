@@ -279,7 +279,7 @@ describe("cross-browser and responsive runs (real Firefox, WebKit, phone, tablet
             expect(phone.ranAt).toBeTruthy();
             const kinds = phone.artifacts.map((a: any) => a.kind);
             expect(kinds).toContain("screenshot");
-            expect(kinds).toContain("video");
+            expect(kinds).not.toContain("video");
             const png = await server.inject({ method: "GET", url: `/api/artifacts/${phone.artifacts.find((a: any) => a.kind === "screenshot").id}` });
             expect(png.statusCode).toBe(200);
             expect(png.headers["content-type"]).toBe("image/png");

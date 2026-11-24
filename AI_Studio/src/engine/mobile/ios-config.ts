@@ -30,7 +30,8 @@ export default defineConfig({
                 ...(bundle ? { appBundleId: bundle } : {}),
                 // Each run has its own Appium port: the previous run's server may still be shutting down on the usual one.
                 appium: { autoStart: true, autoStartDevice: false, connectionTimeout: 300000, ...(process.env.MOBILE_APPIUM_PORT ? { port: Number(process.env.MOBILE_APPIUM_PORT) } : {}) },
-                video: "on-failure",
+                // No recording (owner 2026-11-24, V9): it cannot be masked.
+                video: "off",
                 trace: "on-failure",
                 expectTimeout: 15000,
             },
