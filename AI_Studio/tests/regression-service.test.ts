@@ -46,9 +46,10 @@ afterAll(async () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// The written expected result states the amounts the checks expect (eng-fix3: an unstated amount waits for a person).
 const check = { action: "assert", check: "exactText", locator: { by: "testId", value: "total" }, expected: "$21.00", source: "R-2" };
 const web = (testId: string, title: string, page: string) =>
-    TestSpecSchema.parse({ testId, title, kind: "web", category: "Cart", source: { origin: "browser-agent", requirements: ["R-2"] }, steps: [{ action: "navigate", url: page }, check] });
+    TestSpecSchema.parse({ testId, title, kind: "web", category: "Cart", source: { origin: "browser-agent", requirements: ["R-2"] }, expectedResults: ["The total is $21.00 (rule R-2)"], steps: [{ action: "navigate", url: page }, check] });
 
 const run = (testId: string, outcome: "pass" | "fail", i: number, n: number): ScriptRun => ({
     testId,

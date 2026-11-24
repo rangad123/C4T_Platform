@@ -118,6 +118,7 @@ export interface ProbeResult {
     spec?: DraftSpec;
 }
 
+const SIGN_IN = /\/(?:login|log-in|signin|sign-in|session|sessions)(?:\/|$)/i;
 const REFERENCE = /^[a-z][a-zA-Z0-9]*(?:Id|_id)$/;
 const tmpl = (p: string) => p.replace(/\{[^}]*\}/g, "{}");
 const is2xx = (s: number) => s >= 200 && s < 300;
@@ -323,6 +324,9 @@ async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
         if (!ep || ep.path.includes("{")) return `the setup ${text.slice(0, 80)} cannot be sent (it is not documented, or needs an id)`;
         // The probe signs up its fresh account itself: a setup that names the sign-up again would register the same account twice (HTTP 409).
         if (ep === up) continue;
+        // Nor is a sign-in sent: the probe's session is signed in already (its fresh account by the sign-up, else the run's credential),
+        // and the probe knows no password to send (paid shop-4/-5: "the setup POST /api/login answered HTTP 401" stopped every probe).
+        if (ep.method.toUpperCase() === "POST" && SIGN_IN.test(ep.path)) continue;
         const schema = bodySchema(ep);
         setup.push({ ep, body: inv.setupBodies?.[i] ?? (schema ? sample(schema) : undefined) });
     }

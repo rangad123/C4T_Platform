@@ -17,6 +17,8 @@ const DOC = {
     info: { title: "Shop", version: "1" },
     paths: {
         "/api/register": { post: { requestBody: json({ type: "object", required: ["email", "password"], properties: { email: { type: "string", format: "email" }, password: { type: "string", minLength: 8 } } }), responses: { 201: { description: "Created" } } } },
+        // As bench-shop documents it: no request body.
+        "/api/login": { post: { responses: { 200: { description: "Signed in" }, 401: { description: "Wrong email or password" } } } },
         "/api/products": { get: { responses: { 200: { description: "Products", ...json({ type: "object", properties: { products: { type: "array", items: { type: "object", properties: { id: { type: "string" }, price: { type: "integer" } } } } } }) } } } },
         "/api/cart/items": { post: { requestBody: json({ type: "object", required: ["productId"], properties: { productId: { type: "string" }, quantity: { type: "integer", minimum: 1, maximum: 10 } } }), responses: { 201: { description: "Added", ...json(ref("Cart")) }, 400: { description: "Invalid" } } } },
     },
@@ -47,6 +49,8 @@ function shop(defect?: "BS-02" | "BS-11", o: { listNeedsSignIn?: boolean } = {})
                     requests++;
                     const b = (body ?? {}) as Record<string, unknown>;
                     if (path === "/api/register") return (signedIn = true), { status: 201, json: {} };
+                    // The fresh account's own email and password would sign in; the probe never knows them, so any other body is refused.
+                    if (path === "/api/login") return { status: 401, json: { error: "Email or password is wrong." } };
                     if (path === "/api/products") return o.listNeedsSignIn && !signedIn ? { status: 401, json: { error: "Sign in first." } } : { status: 200, json: { products: PRODUCTS } };
                     if (method === "POST" && path === "/api/cart/items") {
                         const p = PRODUCTS.find((x) => x.id === b.productId);
@@ -258,5 +262,16 @@ describe("invariant probe", () => {
         expect(r.outcome).toBe("failed");
         const spec = TestSpecSchema.parse({ ...r.spec, testId: "API-001" });
         expect(spec.steps.filter((s) => s.action === "request" && s.path === "/api/register")).toHaveLength(1);
+    });
+
+    it("a setup that signs in again is not sent: the probe's fresh account is signed in by its sign-up (paid shop-4/-5: every probe stopped at 'the setup POST /api/login answered HTTP 401')", async () => {
+        for (const setup of [["POST /api/login"], ["POST /api/register", "POST /api/login"]]) {
+            const r = await probeInvariant({ ...SUM, setup }, shop("BS-02"), { seed: 1 });
+            expect(r.reason).toBeUndefined();
+            expect(r.outcome).toBe("failed");
+            const spec = TestSpecSchema.parse({ ...r.spec, testId: "API-001" });
+            expect(spec.steps.filter((s) => s.action === "request" && s.path === "/api/login")).toEqual([]);
+        }
+        expect((await probeInvariant({ ...FREE, setup: ["POST /api/login"] }, shop(), { seed: 1 })).outcome).toBe("held");
     });
 });

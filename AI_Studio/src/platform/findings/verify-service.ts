@@ -47,7 +47,7 @@ import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
 import { SecretBox } from "../secrets.js";
 import { ResetHookStore, sendResetRequest } from "../test-data-reset-store.js";
 import { attemptOf, executionFinding, fromCandidate, withStepRequests, type TestOf } from "./adapters.js";
-import { judgePageCheck } from "../../engine/findings/expectation.js";
+import { judgePageCheck, writtenExpectation } from "../../engine/findings/expectation.js";
 
 /** A test the verification can run: its key, steps and framework. */
 export interface VerifyTest extends TestOf {
@@ -301,7 +301,9 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
 function judgedView(view: ReturnType<typeof fromCandidate>, f: CandidateFindingRecord, test: VerifyTest, tried: readonly Attempt[]): { view: ReturnType<typeof fromCandidate>; review?: string } {
     const failedStep = tried.find((a) => a.outcome === "failed" && !a.stepFault)?.failedStep;
     const correlated = Boolean(f.finding.evidence.layers?.length || view.correlated?.disagreed.length);
-    const j = judgePageCheck({ spec: test.spec, ...(failedStep !== undefined ? { failedStep } : {}), cited: view.expected.text, apiAmount: test.meta?.apiAmount, correlated });
+    // An exploration finding stores the expected result it cites; an execution finding's text also holds the check's own value.
+    const cited = view.source.kind === "exploration" ? view.expected.text : writtenExpectation(test.spec, failedStep);
+    const j = judgePageCheck({ spec: test.spec, ...(failedStep !== undefined ? { failedStep } : {}), cited, apiAmount: test.meta?.apiAmount, correlated });
     if (!j) return { view };
     const expected = { ...view.expected, ...(j.unstated ? { stated: "none" as const } : {}), ...(j.contradictedBy ? { contradictedBy: j.contradictedBy.slice(0, 300) } : {}) };
     return { view: { ...view, expected }, ...(j.review ? { review: j.review } : {}) };
