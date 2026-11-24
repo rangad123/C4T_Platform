@@ -18,7 +18,7 @@ import type { AppModel } from "../understanding/app-model.js";
 import { authorWebSpec, statedSource, statedSourceText } from "../web/author.js";
 import type { ScriptRun } from "./runner.js";
 
-const TriageSchema = z.object({
+export const TriageSchema = z.object({
     category: z.enum(["locator", "timing", "test_data", "assertion", "app_defect", "environment", "other"]),
     fixable: z.boolean().describe("true if the TEST is wrong and can be corrected; false if the application or environment is at fault"),
     reason: z.string().describe("One or two sentences, factual"),
@@ -177,10 +177,16 @@ export function unstatedComputedValue(step: AssertStep, stated: string): string 
     return undefined;
 }
 
-const ApiRepairSchema = z.object({
+const stepOf = (action: "request" | "assertResponse") => StepSchema.options.find((o) => o.shape.action.value === action)!;
+/**
+ * An API test's steps (requests and response checks), defined and validated by StepSchema's own members. The repair answer asks for these
+ * only: with every step kind the schema had 437 optional parameters and Anthropic refuses more than 24 (tests/llm-schema-limits-unit.test.ts).
+ */
+const ApiStepSchema = z.discriminatedUnion("action", [stepOf("request"), stepOf("assertResponse")]);
+export const ApiRepairSchema = z.object({
     verdict: z.enum(["fix", "app_defect", "unfixable"]),
     reason: z.string(),
-    steps: z.array(StepSchema).optional().describe("Complete replacement step list when verdict=fix"),
+    steps: z.array(ApiStepSchema).optional().describe("Complete replacement step list when verdict=fix"),
 });
 
 export async function repairApi(ctx: EngineContext, spec: TestSpec, run: ScriptRun, endpointDoc: unknown): Promise<Repair> {
@@ -214,14 +220,40 @@ Triage: ${t.category} — ${t.reason}`,
     });
 
     if (out.verdict === "fix" && out.steps?.length) {
-        const rejected = weakensApiTest(spec, out.steps as Step[]);
+        const proposed = keepRecords(spec.steps, out.steps as Step[]);
+        const rejected = weakensApiTest(spec, proposed);
         if (rejected) {
             ctx.emit({ stage: "validation", kind: "repair_rejected", level: "warn", message: `${spec.testId}: proposed fix rejected — ${rejected}` });
             return { verdict: "unfixable", reason: `${t.reason} (proposed fix rejected: ${rejected})` };
         }
-        return { verdict: "fixed", reason: out.reason, spec: { ...spec, steps: out.steps as Step[] } };
+        return { verdict: "fixed", reason: out.reason, spec: { ...spec, steps: proposed } };
     }
     return { verdict: out.verdict === "app_defect" ? "app_defect" : "unfixable", reason: out.reason };
+}
+
+/** The fields of an API step that hold an object with free keys (a record), which a grammar-constrained answer can only give as `{}`. */
+const recordKeys = (s: Step): readonly string[] => (s.action === "request" ? ["body", "query", "headers", "extract"] : s.action === "assertResponse" && s.check === "matchesSchema" ? ["schema"] : []);
+const isEmpty = (v: unknown) => v === undefined || (typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+
+/**
+ * A repaired API test keeps the original's records where the answer gives them empty or leaves them out. Anthropic's grammar can only give
+ * `{}` for an object whose keys are not listed, so a repair cannot say them: a real Haiku repair sent the request with body {}. Steps are
+ * paired in order among those of the same kind (the requests; the matchesSchema checks).
+ */
+function keepRecords(original: Step[], proposed: Step[]): Step[] {
+    const kind = (s: Step) => (s.action === "assertResponse" ? `${s.action}:${s.check}` : s.action);
+    const seen = new Map<string, number>();
+    return proposed.map((s) => {
+        const keys = recordKeys(s);
+        if (!keys.length) return s;
+        const n = seen.get(kind(s)) ?? 0;
+        seen.set(kind(s), n + 1);
+        const was = original.filter((o) => kind(o) === kind(s))[n] as Record<string, unknown> | undefined;
+        if (!was) return s;
+        const out: Record<string, unknown> = { ...s };
+        for (const k of keys) if (isEmpty(out[k]) && !isEmpty(was[k])) out[k] = was[k];
+        return out as Step;
+    });
 }
 
 /**

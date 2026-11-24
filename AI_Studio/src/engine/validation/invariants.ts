@@ -18,7 +18,7 @@ import { parseRelation, RELATION_MAX_CHARS } from "./relation.js";
 export const MAX_INVARIANTS = 8;
 
 const Endpoint = z.string().max(300);
-const ProposalSchema = z.object({
+export const ProposalSchema = z.object({
     invariants: z
         .array(
             z.object({

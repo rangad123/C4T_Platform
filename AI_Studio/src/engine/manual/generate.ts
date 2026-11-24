@@ -41,7 +41,7 @@ export interface GeneratedCase {
     input: ManualCaseInput;
 }
 
-const AnswerSchema = z.object({
+export const AnswerSchema = z.object({
     cases: z.array(
         z.object({
             requirement: z.string().describe("The reference of the requirement the case checks, exactly as given (like REQ-12)"),
