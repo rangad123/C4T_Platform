@@ -2,7 +2,7 @@ import { runnerOwnerOf } from "./agent-store.js";
 import { caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { noteCustomSkipped, splitCustom } from "./custom-policy.js";
 import { notePluginSkipped, pluginSkips, type RunShape } from "./plugin-policy.js";
-import { droppedChecksNote, narrowedByChoice, TestingAgentStore, type AgentSwitch, type AskedSwitches } from "./testing-agents.js";
+import { droppedChecksNote, narrowedByChoice, savedAgentRun, TestingAgentStore, type AgentSwitch, type AskedSwitches } from "./testing-agents.js";
 import { adapterForSpec, needsDevice } from "../engine/frameworks/index.js";
 import { localPhoneRunsProblem } from "../engine/mobile/device/choose.js";
 import { isAppUri } from "../engine/desktop/target.js";
@@ -114,13 +114,15 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
         // The project's current testing agents decide the checks, not only what the last exploration ran with: a removed agent's checks
         // are left out (the job's events say which), a chosen agent's checks are on.
         const row = repo.getProject(s.projectId);
+        const store = new TestingAgentStore(repo.db.sql, repo);
         if (row) {
-            const narrowed = await narrowedByChoice(new TestingAgentStore(repo.db.sql, repo), row, options, saved as AskedSwitches, { followChoice: true });
-            options = { ...narrowed.options, loadChecks: false };
+            const narrowed = await narrowedByChoice(store, row, options, saved as AskedSwitches, { followChoice: true });
+            // A Workspace project's schedule is one agent's (D1): that agent's switches only, as its Run button starts them (never the load check).
+            options = { ...((await savedAgentRun(store, row, s.agentId, options)) ?? narrowed.options), loadChecks: false };
             dropped = narrowed.dropped;
         }
     }
-    options = await caseAgentOptions(repo, s.projectId, options); // a Test Case Generation project explores plan-only (case-agent.ts)
+    if (!options.agentId) options = await caseAgentOptions(repo, s.projectId, options); // a Test Case Generation project explores plan-only (case-agent.ts)
     options.trigger = "schedule";
     options.scheduleId = s.id;
     // Who the run belongs to: the schedule and the person who made it (a person's own runner takes only that person's runs).

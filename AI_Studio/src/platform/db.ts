@@ -327,6 +327,7 @@ ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
     /* 70: a project's database checks: the address of the customer's database probe, its SecretBox-encrypted token and the on switch (schema lives in db-probe-store.ts; existing projects have none, so off) */ DB_PROBE_MIGRATION,
     /* 71: the finding lifecycle: each candidate finding's state, class, severity, confidence factors, duplicate group, reproduction attempts and app version, its history (finding_events) and duplicate groups (finding_groups) (schema lives in candidate-finding-store.ts; every existing finding keeps its row and starts as a candidate) */ FINDING_LIFECYCLE_MIGRATION,
     /* 72: change-aware testing: the project's code repository (code_repos), the webhook deliveries it received (pr_events, one per delivery id) and the tests chosen per pull request (pr_selections) (schema lives in code-host/store.ts; a repository kept in integrations as kind `code` moves to code_repos with its encrypted secrets) */ codeHostMigration(sqliteDialect),
+    /* 73: one run = one agent (Agent Workspace D1): the testing agent an Explore again schedule runs (schedule-store.ts; existing schedules have none: null, and run as before or as the project's only agent) */ `ALTER TABLE schedules ADD COLUMN agent_id TEXT;`,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */

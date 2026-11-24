@@ -5,6 +5,7 @@ import { Tooltip } from "../../components/Tooltip";
 import { Button, Callout } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
+import type { WorkspaceAgent, WorkspaceAnswer } from "../agent-workspace/workspace";
 import type { Environment } from "../environments/environments";
 import {
     CHECK_LABEL,
@@ -60,6 +61,9 @@ export function RunbookEditor({
     const suites = useFetch<Array<{ name: string }>>(`/projects/${projectId}/suites`);
     const envs = useFetch<{ environments: Environment[] }>(`/projects/${projectId}/environments`);
     const channels = useFetch<Channel[]>(`/projects/${projectId}/alert-channels`);
+    // An Agent Workspace project: an analyze step is one agent's run (D1); a step that names none is saved as the first agent's, as shown.
+    const workspace = useFetch<WorkspaceAnswer>(`/projects/${projectId}/workspace`);
+    const agents = workspace.data?.workspace ? workspace.data.agents : [];
 
     const setStep = (i: number, patch: Partial<DraftStep>) => setDraft((d) => ({ ...d, steps: d.steps.map((s, k) => (k === i ? { ...s, ...patch } : s)) }));
     const setSteps = (steps: DraftStep[]) => setDraft((d) => ({ ...d, steps: sanitizeRoutes(steps) }));
@@ -92,7 +96,7 @@ export function RunbookEditor({
         setBusy(true);
         setError("");
         try {
-            const body = toDefinition(draft);
+            const body = toDefinition(agents.length ? { ...draft, steps: draft.steps.map((s) => (s.type === "analyze" && !s.agentId ? { ...s, agentId: agents[0]!.id } : s)) } : draft);
             const saved = await api<{ id: string }>(runbookId ? `/projects/${projectId}/runbooks/${runbookId}` : `/projects/${projectId}/runbooks`, { method: runbookId ? "PUT" : "POST", body });
             onSaved(saved.id);
         } catch (e) {
@@ -128,6 +132,7 @@ export function RunbookEditor({
                             suites={suites.data?.map((x) => x.name) ?? []}
                             environments={envs.data?.environments ?? []}
                             channels={channels.data ?? []}
+                            agents={agents}
                             onChange={(patch) => setStep(i, patch)}
                             onUp={i > 0 ? () => move(i, -1) : undefined}
                             onDown={i < draft.steps.length - 1 ? () => move(i, 1) : undefined}
@@ -172,6 +177,7 @@ function StepCard({
     suites,
     environments,
     channels,
+    agents,
     onChange,
     onUp,
     onDown,
@@ -186,6 +192,7 @@ function StepCard({
     suites: string[];
     environments: Environment[];
     channels: Channel[];
+    agents: WorkspaceAgent[];
     onChange: (patch: Partial<DraftStep>) => void;
     onUp?: () => void;
     onDown?: () => void;
@@ -320,6 +327,15 @@ function StepCard({
 
             {s.type === "analyze" && (
                 <div className="rb-fields">
+                    {agents.length > 0 && (
+                        <div className="field span">
+                            <label htmlFor={`${uid}-agent`}>Testing agent</label>
+                            <select id={`${uid}-agent`} className="input" value={s.agentId || agents[0]!.id} onChange={(e) => onChange({ agentId: e.target.value })}>
+                                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </select>
+                            <p className="hint">The step runs this agent’s checks only.</p>
+                        </div>
+                    )}
                     <p className="t-secondary span">Looks at the application again with the settings of the last exploration. It uses the AI key of the person who starts it (for a schedule or a deploy trigger, its maker). These two stay off unless you turn them on here.</p>
                     <label className="check span">
                         <input type="checkbox" checked={s.allowMutating} onChange={(e) => onChange({ allowMutating: e.target.checked })} />

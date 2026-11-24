@@ -6,12 +6,13 @@
  *
  * An Accessibility agent's run keeps every rule at every impact (audit.ts A11Y_ALL_RULES_PREFIX, in the reason of a passed audit too), so a
  * page that passed the "serious" threshold still lists its moderate and minor issues. Older runs have the failure message only (serious and
- * up, five rules named). A page whose finding a person marked "not a bug" (candidate_findings) is dismissed: listed, never counted.
+ * up, five rules named). What axe could not decide by itself ("needs review") is listed apart as "Needs a person's check": counted on its
+ * own, never an issue, never in the rules broken, never a failure. A page whose finding a person marked "not a bug" (candidate_findings) is dismissed: listed, never counted.
  *
  * Each page shows its newest result; a run that could not check a page leaves its older result standing, so each run grows the outcome.
  * Stopped runs count with what they checked.
  */
-import { A11Y_ALL_RULES_PREFIX, A11Y_FAILURE_PREFIX, A11Y_IMPACTS, type A11yImpact } from "../../engine/a11y/audit.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_FAILURE_PREFIX, A11Y_IMPACTS, A11Y_NEEDS_REVIEW_PREFIX, type A11yImpact } from "../../engine/a11y/audit.js";
 import { CandidateFindingStore } from "../candidate-finding-store.js";
 import type { JobRow, TestRow } from "../repo.js";
 import type { AgentOutcomeCtx, AgentOutcomeModule } from "./types.js";
@@ -29,6 +30,8 @@ export interface A11yPage {
     path: string;
     state: "issues" | "clean" | "not-checked" | "dismissed";
     issues: A11yIssue[];
+    /** What axe could not decide by itself (needs review): for a person to check; never an issue. */
+    review: A11yIssue[];
     /** Rules the audit's message left out (it names five at most). */
     moreRules: number;
     /** Why the page was not checked, or who dismissed it and why. */
@@ -48,7 +51,8 @@ export interface AccessibilityOutcome {
     runs: number;
     pages: A11yPage[];
     rules: A11yRule[];
-    counts: { issues: number; clean: number; notChecked: number; dismissed: number };
+    /** needsCheck: the pages with something for a person to check, whatever their state. */
+    counts: { issues: number; clean: number; notChecked: number; dismissed: number; needsCheck: number };
 }
 
 /** One page's newest check of one kind. */
@@ -93,18 +97,24 @@ export async function dismissedTests(ctx: AgentOutcomeCtx): Promise<Map<string, 
 
 /** One rule line of the audit's message: "- <rule> [<impact>]: <help> (<n> node(s): <targets>)". */
 const RULE_LINE = /^- (\S+) \[(\w+)\]: (.*) \((\d+) nodes?: (.*)\)$/;
-/** The full list when the audit kept every rule, else the failure message's lines. */
-function issuesOf(reason: string): { issues: A11yIssue[]; moreRules: number } {
+/** The full list when the audit kept every rule (with what needs a person's check after its own line), else the failure message's lines. */
+function issuesOf(reason: string): { issues: A11yIssue[]; review: A11yIssue[]; moreRules: number } {
     const full = reason.indexOf(A11Y_ALL_RULES_PREFIX);
     const at = full >= 0 ? full : reason.indexOf(A11Y_FAILURE_PREFIX);
     const issues: A11yIssue[] = [];
+    const review: A11yIssue[] = [];
+    let into = issues;
     let moreRules = 0;
     for (const line of at < 0 ? [] : reason.slice(at).split("\n").slice(1)) {
+        if (line === A11Y_NEEDS_REVIEW_PREFIX) {
+            into = review;
+            continue;
+        }
         const m = RULE_LINE.exec(line);
-        if (m) issues.push({ rule: m[1]!, severity: (A11Y_IMPACTS as readonly string[]).includes(m[2]!) ? (m[2] as A11yImpact) : "minor", help: m[3]!, elements: Number(m[4]), where: m[5]! });
+        if (m) into.push({ rule: m[1]!, severity: (A11Y_IMPACTS as readonly string[]).includes(m[2]!) ? (m[2] as A11yImpact) : "minor", help: m[3]!, elements: Number(m[4]), where: m[5]! });
         else moreRules += Number(/^- \.\.\.and (\d+) more rule/.exec(line)?.[1] ?? 0);
     }
-    return { issues, moreRules };
+    return { issues, review, moreRules };
 }
 
 const worst = (s: A11yImpact) => A11Y_IMPACTS.indexOf(s);
@@ -113,11 +123,11 @@ const STATE_ORDER = { issues: 0, "not-checked": 1, dismissed: 2, clean: 3 } as c
 async function build(ctx: AgentOutcomeCtx, runs: readonly JobRow[]): Promise<AccessibilityOutcome> {
     const dismissed = await dismissedTests(ctx);
     const pages: A11yPage[] = newestPerPage(ctx, runs, "accessibility").map(({ path, test, run, jobId }) => {
-        const base = { path, run, jobId, issues: [] as A11yIssue[], moreRules: 0, note: null as string | null };
+        const base = { path, run, jobId, issues: [] as A11yIssue[], review: [] as A11yIssue[], moreRules: 0, note: null as string | null };
         if (test.validationStatus !== "VALIDATED" && test.validationStatus !== "NEEDS_REVIEW") return { ...base, state: "not-checked", note: notCheckedNote(test) };
         // A passed audit lists issues too when it kept every rule (moderate and minor ones pass the "serious" threshold).
         const found = issuesOf(test.validationReason ?? "");
-        if (!found.issues.length && !found.moreRules) return { ...base, state: "clean" };
+        if (!found.issues.length && !found.moreRules) return { ...base, review: found.review, state: "clean" };
         const why = dismissed.get(test.id);
         return why ? { ...base, ...found, state: "dismissed", note: why } : { ...base, ...found, state: "issues" };
     });
@@ -133,7 +143,7 @@ async function build(ctx: AgentOutcomeCtx, runs: readonly JobRow[]): Promise<Acc
         runs: runs.length,
         pages,
         rules: [...rules.values()].sort((a, b) => worst(b.severity) - worst(a.severity) || b.pages - a.pages || a.rule.localeCompare(b.rule)),
-        counts: { issues: count("issues"), clean: count("clean"), notChecked: count("not-checked"), dismissed: count("dismissed") },
+        counts: { issues: count("issues"), clean: count("clean"), notChecked: count("not-checked"), dismissed: count("dismissed"), needsCheck: pages.filter((p) => p.review.length).length },
     };
 }
 
@@ -150,5 +160,5 @@ export const outcome: AgentOutcomeModule<AccessibilityOutcome> = {
         const job = ctx.runs.find((r) => r.id === jobId);
         return job && build(ctx, [job]);
     },
-    headline: (o) => countsLine([[o.counts.issues, "with issues"], [o.counts.clean, "clean"], [o.counts.notChecked, "not checked"], [o.counts.dismissed, "dismissed"]]),
+    headline: (o) => countsLine([[o.counts.issues, "with issues"], [o.counts.clean, "clean"], [o.counts.notChecked, "not checked"], [o.counts.dismissed, "dismissed"], [o.counts.needsCheck, "needing a person's check"]]),
 };

@@ -16,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { A11Y_ALL_RULES_PREFIX, formatA11yAllRules, formatA11yViolations } from "../src/engine/a11y/audit.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, formatA11yAllRules, formatA11yViolations } from "../src/engine/a11y/audit.js";
 import { a11yFinding } from "../src/engine/a11y/specs.js";
 import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
@@ -123,7 +123,7 @@ describe("the Accessibility Testing Agent's outcome", () => {
         const { status, body } = await call(`/api/projects/${pid}/workspace/accessibility/outcome`);
         expect(status).toBe(200);
         expect(body.runs).toBe(3);
-        expect(body.counts).toEqual({ issues: 2, clean: 2, notChecked: 2, dismissed: 0 });
+        expect(body.counts).toEqual({ issues: 2, clean: 2, notChecked: 2, dismissed: 0, needsCheck: 0 });
         expect(page(body, "/")).toMatchObject({
             state: "issues",
             run: 2,
@@ -165,7 +165,7 @@ describe("the Accessibility Testing Agent's outcome", () => {
         expect(status).toBe(200);
         expect(body.runs).toBe(1);
         expect(body.pages.map((x: any) => [x.path, x.state, x.run])).toEqual([["/about", "issues", 3], ["/contact", "not-checked", 3], ["/products", "not-checked", 3]]);
-        expect(body.counts).toEqual({ issues: 1, clean: 0, notChecked: 2, dismissed: 0 });
+        expect(body.counts).toEqual({ issues: 1, clean: 0, notChecked: 2, dismissed: 0, needsCheck: 0 });
         expect((await call(`/api/projects/${pid}/workspace/accessibility/outcome?run=${ids.security}`)).status).toBe(404);
     });
 
@@ -175,9 +175,9 @@ describe("the Accessibility Testing Agent's outcome", () => {
         const ws = await call(`/api/projects/${pid}/workspace`);
         expect(ws.body.agents.find((a: any) => a.id === "accessibility").headline).toBe("2 pages with issues, 2 clean, 2 not checked");
         const none = await call(`/api/projects/${empty}/workspace/accessibility/outcome`);
-        expect(none.body).toEqual({ runs: 0, pages: [], rules: [], counts: { issues: 0, clean: 0, notChecked: 0, dismissed: 0 } });
+        expect(none.body).toEqual({ runs: 0, pages: [], rules: [], counts: { issues: 0, clean: 0, notChecked: 0, dismissed: 0, needsCheck: 0 } });
         expect(accessibility!.headline(none.body)).toBeNull();
-        expect(accessibility!.headline({ ...none.body, runs: 1, pages: [{ state: "clean" }], counts: { issues: 0, clean: 1, notChecked: 0, dismissed: 0 } } as never)).toBe("1 page clean");
+        expect(accessibility!.headline({ ...none.body, runs: 1, pages: [{ state: "clean" }], counts: { issues: 0, clean: 1, notChecked: 0, dismissed: 0, needsCheck: 0 } } as never)).toBe("1 page clean");
     });
 });
 
@@ -231,10 +231,38 @@ describe("every severity, every rule, and a person's not a bug", () => {
     it("shows a page a person marked not a bug as dismissed, with the reason, and leaves it out of the counts", async () => {
         const { body } = await call(`/api/projects/${levels}/workspace/accessibility/outcome`);
         expect(page(body, "/promo")).toMatchObject({ state: "dismissed", note: "A person marked this not a bug: The promo banner is decorative and hidden from screen readers.", issues: [{ rule: "color-contrast" }] });
-        expect(body.counts).toEqual({ issues: 2, clean: 0, notChecked: 0, dismissed: 1 });
+        expect(body.counts).toEqual({ issues: 2, clean: 0, notChecked: 0, dismissed: 1, needsCheck: 0 });
         // Its rule counts nowhere: color-contrast is broken on /many only.
         expect(body.rules.find((r: any) => r.rule === "color-contrast")).toMatchObject({ pages: 1, elements: 4 });
         expect(accessibility!.headline(body)).toBe("2 pages with issues, 1 dismissed");
         expect(body.pages.map((x: any) => x.state)).toEqual(["issues", "issues", "dismissed"]);
+    });
+});
+
+/**
+ * What axe cannot decide by itself ("needs review", its `incomplete` results) is kept apart (W3): each page lists it as "Needs a person's
+ * check", counted on its own, never as an issue, never in the rules broken, and it never fails a page.
+ */
+describe("items that need a person's check", () => {
+    let pid2 = "";
+    const v = (id: string, impact: string) => ({ id, impact, help: `Help for ${id}`, nodes: [{ target: [`#${id}`] }] });
+    beforeAll(async () => {
+        pid2 = await project("Review Store", ["accessibility"]);
+        const job = await run(pid2, "accessibility", "COMPLETED");
+        // Passed with nothing broken, one item for a person: a clean page.
+        check(pid2, job, "accessibility", "/plan", "VALIDATED", formatA11yAllRules([], [v("server-side-image-map", "minor")])!.join("\n"));
+        // Failed: its issue counts as an issue, its item for a person does not.
+        const msg = formatA11yViolations([v("label", "critical")], "serious")!;
+        check(pid2, job, "accessibility", "/form", "NEEDS_REVIEW", [msg, ...formatA11yAllRules([v("label", "critical")], [v("color-contrast", "serious")])!].join("\n"));
+    });
+
+    it("lists them per page apart from the issues, counts them on their own, and never as a failure", async () => {
+        const { body } = await call(`/api/projects/${pid2}/workspace/accessibility/outcome`);
+        expect(page(body, "/plan")).toMatchObject({ state: "clean", issues: [], review: [{ rule: "server-side-image-map", severity: "minor", help: "Help for server-side-image-map", elements: 1, where: "#server-side-image-map" }] });
+        expect(page(body, "/form")).toMatchObject({ state: "issues", issues: [{ rule: "label" }], review: [{ rule: "color-contrast", severity: "serious" }] });
+        expect(page(body, "/form").issues).toHaveLength(1);
+        expect(body.counts).toEqual({ issues: 1, clean: 1, notChecked: 0, dismissed: 0, needsCheck: 2 });
+        expect(body.rules.map((r: any) => r.rule)).toEqual(["label"]);
+        expect(accessibility!.headline(body)).toBe("1 page with issues, 1 clean, 2 needing a person's check");
     });
 });

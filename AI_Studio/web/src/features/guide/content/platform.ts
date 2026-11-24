@@ -11,8 +11,8 @@ export const platform: Topic[] = [
         why: "You always know where to look.",
         steps: [
             step("Choose Projects in the sidebar to see your applications.", "Projects"),
-            step("Open an AI agent project: its tabs are Dashboard, Runs, Requirements and Settings.", "AI agent", "Dashboard", "Runs", "Requirements", "Settings"),
-            step("A code project also has Test cases, Test scripts and Test suites.", "Test cases", "Test scripts", "Test suites"),
+            step("Open an AI agent project: its tabs are Workspace, Requirements and Settings.", "AI agent", "Workspace", "Requirements", "Settings"),
+            step("A code project has Dashboard and Runs instead of Workspace, and also Test cases, Test scripts and Test suites.", "Dashboard", "Runs", "Test cases", "Test scripts", "Test suites"),
             step("Test cases holds the written checks. Test scripts holds what runs.", "Test cases", "Test scripts"),
             step("Press a word with a dotted underline for a one-sentence explanation."),
         ],

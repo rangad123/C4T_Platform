@@ -8,7 +8,8 @@
  *   - GET /api/projects/:id/workspace/:agentId/outcome: Test Case Generation answers the case outcome, each other agent its own (W2), and an
  *     agent whose outcome is not built yet answers 501;
  *   - GET /api/projects/:id/workspace/:agentId/runs: that agent's runs only;
- *   - code and mixed projects start runs exactly as before and have no Workspace.
+ *   - code and mixed projects start runs exactly as before and have no Workspace;
+ *   - a schedule and a runbook's analyze step are one agent's too (W3): they keep the agent, and its run turns on that agent's switches only.
  *
  * Browser-free: node scripts/with-lock.mjs tsc -- npx vitest run tests/agent-workspace.test.ts
  */
@@ -20,6 +21,8 @@ import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions } from "../src/platform/repo.js";
+import { getScheduleServices } from "../src/platform/schedule-services.js";
+import { startScheduledJob } from "../src/platform/scheduler.js";
 import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
 import { buildServer } from "../src/platform/server.js";
 
@@ -30,7 +33,7 @@ let app: Awaited<ReturnType<typeof buildServer>>;
 let dir = "";
 let stopBeat: (() => void) | undefined;
 
-const call = async (method: "GET" | "POST" | "PUT", url: string, payload?: unknown) => {
+const call = async (method: "GET" | "POST" | "PUT" | "PATCH", url: string, payload?: unknown) => {
     const r = await app.inject({ method, url, headers: { "x-api-key": KEY }, ...(payload !== undefined ? { payload: payload as object } : {}) });
     return { status: r.statusCode, body: r.body && /^[[{]/.test(r.body) ? JSON.parse(r.body) : r.body } as { status: number; body: any };
 };
@@ -257,5 +260,81 @@ describe("the Workspace: each agent's status, outcome and runs", () => {
         const a11y = await call("GET", `/api/projects/${pid}/workspace/accessibility/outcome`);
         expect(a11y).toMatchObject({ status: 200, body: { runs: 2, pages: [], rules: [] } });
         expect((await call("GET", `/api/projects/${pid}/workspace/responsive-ui/outcome`)).status).toBe(404);
+    });
+});
+
+describe("a schedule and a runbook step belong to one agent (W3, D1)", () => {
+    const DAILY = { type: "daily", time: "02:00" };
+    const start = async (sid: string) => startScheduledJob(platform.repo, getScheduleServices(platform).store.get(sid)!);
+    const until = async (pid: string, runId: string, done: (run: any) => boolean) => {
+        for (let i = 0; i < 400; i++) {
+            const run = (await call("GET", `/api/projects/${pid}/runbook-runs/${runId}`)).body;
+            if (done(run)) return run;
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        throw new Error("the runbook run did not get there");
+    };
+
+    it("an Explore again schedule keeps its agent, shows it, and runs that agent's switches only", async () => {
+        const pid = await project("Scheduled agents", ["agent"], ["accessibility", "ux"]);
+        // Several agents and none named: the schedule asks which, as the Run button's route does.
+        expect(await call("POST", `/api/projects/${pid}/schedules`, { kind: "generate", cadence: DAILY })).toMatchObject({ status: 400, body: { error: "Choose which testing agent runs: the Accessibility Testing Agent or the UX Testing Agent." } });
+        expect((await call("POST", `/api/projects/${pid}/schedules`, { kind: "generate", cadence: DAILY, agentId: "security" })).status).toBe(409);
+        // Only an exploration is an agent's; re-running tests names none.
+        expect((await call("POST", `/api/projects/${pid}/schedules`, { kind: "validate", cadence: DAILY, agentId: "ux" })).status).toBe(400);
+        const made = await call("POST", `/api/projects/${pid}/schedules`, { kind: "generate", cadence: DAILY, agentId: "ux" });
+        expect(made.status, JSON.stringify(made.body)).toBe(201);
+        expect(made.body).toMatchObject({ agentId: "ux", agentName: "UX Testing Agent" });
+        expect((await call("GET", `/api/projects/${pid}/schedules`)).body.schedules[0]).toMatchObject({ agentId: "ux", agentName: "UX Testing Agent" });
+        const job = await start(made.body.id);
+        expect(job.options).toMatchObject({ agentId: "ux", trigger: "schedule" });
+        expect(switchesOn(job.options)).toEqual(["healthChecks"]);
+        platform.repo.setJobStatus(job.id, "COMPLETED");
+        // Changed to the other agent, the next run is that agent's.
+        expect((await call("PATCH", `/api/projects/${pid}/schedules/${made.body.id}`, { agentId: "accessibility" })).body).toMatchObject({ agentId: "accessibility" });
+        const next = await start(made.body.id);
+        expect(next.options.agentId).toBe("accessibility");
+        expect(switchesOn(next.options)).toEqual(["accessibility"]);
+        platform.repo.setJobStatus(next.id, "COMPLETED");
+        // Its agent taken off the project: the schedule says so instead of running another agent's checks.
+        await testingAgentsOf(platform).set(pid, ["ux"], "test");
+        await expect(start(made.body.id)).rejects.toThrow("The Accessibility Testing Agent is not one of this project's testing agents.");
+    });
+
+    it("a schedule of a project with one agent is that agent's; a mixed project's schedule names none and runs as before", async () => {
+        const one = await project("Scheduled one", ["agent"], ["performance"]);
+        const made = await call("POST", `/api/projects/${one}/schedules`, { kind: "generate", cadence: DAILY });
+        expect(made.body.agentId).toBe("performance");
+        const job = await start(made.body.id);
+        expect(job.options).toMatchObject({ agentId: "performance", performanceChecks: true, loadChecks: false });
+        const mixed = await project("Scheduled mixed", ["agent", "code"], ["accessibility", "ux"]);
+        expect((await call("POST", `/api/projects/${mixed}/schedules`, { kind: "generate", cadence: DAILY, agentId: "ux" })).status).toBe(400);
+        const plain = await call("POST", `/api/projects/${mixed}/schedules`, { kind: "generate", cadence: DAILY });
+        expect(plain.body.agentId).toBeNull();
+        const old = await start(plain.body.id);
+        expect(old.options.agentId).toBeUndefined();
+        expect(old.options).toMatchObject({ accessibility: true, healthChecks: true });
+    });
+
+    it("a runbook's analyze step keeps its agent and runs that agent's switches only; an agent the project did not choose is refused on save", async () => {
+        const pid = await project("Runbook agents", ["agent"], ["accessibility", "ux"]);
+        const book = (agentId?: string) => call("POST", `/api/projects/${pid}/runbooks`, { version: 1, name: `Book ${agentId ?? "none"}`, steps: [{ id: "a", type: "analyze", ...(agentId ? { agentId } : {}) }] });
+        expect((await book("security")).status).toBe(409);
+        const made = await book("ux");
+        expect(made.status, JSON.stringify(made.body)).toBe(201);
+        expect(made.body.definition.steps[0].agentId).toBe("ux");
+        const runId = (await call("POST", `/api/projects/${pid}/runbooks/${made.body.id}/run`)).body.runId as string;
+        const run = await until(pid, runId, (r) => Boolean(r.steps?.[0]?.jobId) || r.finished);
+        const job = platform.repo.getJob(run.steps[0].jobId as string)!;
+        expect(job.options.agentId).toBe("ux");
+        expect(switchesOn(job.options)).toEqual(["healthChecks"]);
+        platform.repo.setJobStatus(job.id, "COMPLETED");
+        await until(pid, runId, (r) => r.finished);
+        // A step that names no agent in a project of several: the step fails with the question, and no job is made.
+        const none = await book();
+        const noneRun = (await call("POST", `/api/projects/${pid}/runbooks/${none.body.id}/run`)).body.runId as string;
+        const failed = await until(pid, noneRun, (r) => r.finished);
+        expect(failed.steps[0]).toMatchObject({ status: "failed", reason: "Choose which testing agent runs: the Accessibility Testing Agent or the UX Testing Agent." });
+        expect(failed.steps[0].jobId ?? null).toBeNull();
     });
 });

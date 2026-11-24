@@ -25,6 +25,8 @@ interface Page {
     path: string;
     state: "issues" | "clean" | "not-checked" | "dismissed";
     issues: Issue[];
+    /** What axe could not decide by itself: for a person to check, never an issue. */
+    review: Issue[];
     moreRules: number;
     note: string | null;
     run: number;
@@ -34,7 +36,7 @@ interface Outcome {
     runs: number;
     pages: Page[];
     rules: Array<{ rule: string; severity: Severity; help: string; pages: number; elements: number }>;
-    counts: { issues: number; clean: number; notChecked: number; dismissed: number };
+    counts: { issues: number; clean: number; notChecked: number; dismissed: number; needsCheck: number };
 }
 
 export const LIST: CSSProperties = { listStyle: "none", margin: 0, padding: 0 };
@@ -161,9 +163,10 @@ function Report({ o, projectId, inRun }: { o: Outcome; projectId: string; inRun:
                     <Metric value={o.counts.clean} label="Clean pages" tone={o.counts.clean ? "ok" : undefined} />
                     <Metric value={o.counts.notChecked} label="Not checked" />
                     <Metric value={o.rules.length} label="Rules broken" />
+                    <Metric value={o.counts.needsCheck} label="Needs a person’s check" />
                 </div>
                 <p className="section t-meta" style={{ margin: 0 }} data-testid="a11y-scope">
-                    Each key page is checked signed out against the WCAG 2.1 A and AA rules (axe-core). A page fails at serious or critical impact, and every issue found is listed with its severity. The rules are facts, not AI judgement, so a finding needs no replay to verify it.
+                    Each key page is checked signed out against the WCAG 2.1 A and AA rules (axe-core). A page fails at serious or critical impact, and every issue found is listed with its severity. The rules are facts, not AI judgement, so a finding needs no replay to verify it. What axe cannot decide by itself is listed as “Needs a person’s check”: it is never counted as an issue and never fails a page.
                     {dismissedLine(o.counts.dismissed)}
                 </p>
             </div>
@@ -206,22 +209,19 @@ function Report({ o, projectId, inRun }: { o: Outcome; projectId: string; inRun:
                                         {p.note}
                                     </p>
                                 )}
-                                {p.issues.length > 0 && (
-                                    <ul className="stack-sm" style={LIST}>
-                                        {p.issues.map((i) => (
-                                            <li key={i.rule} className="row" style={{ alignItems: "baseline", gap: 8, flexWrap: "nowrap" }}>
-                                                <Sev s={i.severity} />
-                                                <span style={WRAP}>
-                                                    <span className="mono">{i.rule}</span>: {i.help}. {counted(i.elements, "element")}: <span className="mono">{i.where}</span>
-                                                </span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
+                                {p.issues.length > 0 && <IssueList issues={p.issues} />}
                                 {p.moreRules > 0 && (
                                     <p className="t-meta" style={{ margin: 0 }}>
                                         And {counted(p.moreRules, "more rule")} broken on this page.
                                     </p>
+                                )}
+                                {p.review.length > 0 && (
+                                    <div className="stack-sm" data-testid="a11y-review">
+                                        <p className="t-meta" style={{ margin: 0 }}>
+                                            Needs a person’s check: axe could not decide these by itself. They are not counted as issues.
+                                        </p>
+                                        <IssueList issues={p.review} />
+                                    </div>
                                 )}
                             </li>
                         ))}
@@ -229,6 +229,21 @@ function Report({ o, projectId, inRun }: { o: Outcome; projectId: string; inRun:
                 )}
             </ListCard>
         </>
+    );
+}
+
+function IssueList({ issues }: { issues: Issue[] }) {
+    return (
+        <ul className="stack-sm" style={LIST}>
+            {issues.map((i) => (
+                <li key={i.rule} className="row" style={{ alignItems: "baseline", gap: 8, flexWrap: "nowrap" }}>
+                    <Sev s={i.severity} />
+                    <span style={WRAP}>
+                        <span className="mono">{i.rule}</span>: {i.help}. {counted(i.elements, "element")}: <span className="mono">{i.where}</span>
+                    </span>
+                </li>
+            ))}
+        </ul>
     );
 }
 

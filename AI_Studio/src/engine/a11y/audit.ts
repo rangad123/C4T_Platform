@@ -31,6 +31,8 @@ export const A11Y_FAILURE_PREFIX = "Accessibility audit failed:";
 export const A11Y_ALL_RULES_TAG = "a11y-all-rules";
 /** First line of that list; one line per rule follows, in the failure message's own format. */
 export const A11Y_ALL_RULES_PREFIX = "Accessibility audit, every rule found:";
+/** In that list, the line before what axe could not decide by itself ("needs review", its `incomplete`): never a failure. */
+export const A11Y_NEEDS_REVIEW_PREFIX = "Needs a person's check:";
 
 /** Rules / targets kept in the message: it is shown to users and the runner truncates step errors at 800 chars. */
 export const A11Y_MAX_RULES = 5;
@@ -79,10 +81,14 @@ export function formatA11yViolations(violations: A11yViolationLike[], minImpact:
     return `${A11Y_FAILURE_PREFIX} ${n} WCAG rule${n === 1 ? "" : "s"} violated at "${minImpact}" impact or above\n${lines.join("\n")}`;
 }
 
-/** Every rule found, worst first, with no cap on rules (targets keep theirs): the prefix, then one line each; undefined for a clean page. */
-export function formatA11yAllRules(violations: A11yViolationLike[]): string[] | undefined {
-    if (violations.length === 0) return undefined;
-    return [A11Y_ALL_RULES_PREFIX, ...[...violations].sort((a, b) => rank(b.impact) - rank(a.impact)).map(ruleLine)];
+/**
+ * Every rule found, worst first, with no cap on rules (targets keep theirs): the prefix, then one line each; then, under their own line,
+ * what axe could not decide (`needsReview`), worst first. Undefined when there is neither.
+ */
+export function formatA11yAllRules(violations: A11yViolationLike[], needsReview: A11yViolationLike[] = []): string[] | undefined {
+    if (violations.length === 0 && needsReview.length === 0) return undefined;
+    const lines = (vs: A11yViolationLike[]) => [...vs].sort((a, b) => rank(b.impact) - rank(a.impact)).map(ruleLine);
+    return [A11Y_ALL_RULES_PREFIX, ...lines(violations), ...(needsReview.length ? [A11Y_NEEDS_REVIEW_PREFIX, ...lines(needsReview)] : [])];
 }
 
 /**

@@ -12,7 +12,7 @@ import path from "node:path";
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
-import { A11Y_ALL_RULES_PREFIX, A11Y_FAILURE_PREFIX, formatA11yAllRules, formatA11yViolations } from "../src/engine/a11y/audit.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_FAILURE_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, formatA11yAllRules, formatA11yViolations } from "../src/engine/a11y/audit.js";
 import { A11Y_ALL_RULES_TAG, a11yFinding, generateA11ySpecs } from "../src/engine/a11y/specs.js";
 import { launchChromium } from "../src/engine/discovery/browser.js";
 import { renderScript } from "../src/engine/generators/index.js";
@@ -142,6 +142,7 @@ describe("a11y audit execution", () => {
         levelsAll: a11ySpec("WEB-011", "/levels", {}, ["a11y", A11Y_ALL_RULES_TAG]),
         levelsPlain: a11ySpec("WEB-012", "/levels"),
         badAll: a11ySpec("WEB-013", "/bad", {}, ["a11y", A11Y_ALL_RULES_TAG]),
+        reviewAll: a11ySpec("WEB-014", "/review", {}, ["a11y", A11Y_ALL_RULES_TAG]),
         missingPage: TestSpecSchema.parse({
             testId: "WEB-010", title: "page never loads", kind: "web", type: "accessibility",
             steps: [{ action: "navigate", url: "/" }, { action: "assert", check: "visible", expected: "Text that is not there" }, { action: "assert", check: "a11y" }],
@@ -213,6 +214,11 @@ describe("a11y audit execution", () => {
         expect(a11yFinding(cases.bad, runs.bad)).not.toContain(A11Y_ALL_RULES_PREFIX);
     });
 
+    it("notes what axe could not decide (needs review) apart from the rules broken, and it never fails the audit", () => {
+        expect(runs.reviewAll.status, runs.reviewAll.error).toBe("passed");
+        expect(runs.reviewAll.notes).toEqual([A11Y_ALL_RULES_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, expect.stringMatching(/^- server-side-image-map \[minor\]: .+ \(1 node: img\)$/)]);
+    });
+
     it("a11yFinding reports violations but not other failures", () => {
         const reason = a11yFinding(cases.bad, runs.bad);
         expect(reason).toMatch(new RegExp(`^${A11Y_FAILURE_PREFIX}`));
@@ -265,6 +271,19 @@ describe("formatA11yAllRules", () => {
         expect(all.slice(1).map((l) => l.split(" ")[1])).toEqual(["c", "b", "e", "f", "g", "d", "a", "h"]);
         expect(all[2]).toBe("- b [serious]: Help for b (5 nodes: #el-0, #el-1, #el-2, ...)");
         expect(formatA11yAllRules([])).toBeUndefined();
+        // What axe could not decide follows under its own line, apart from the rules broken.
+        expect(formatA11yAllRules([], [v("server-side-image-map", "minor", 1)])).toEqual([A11Y_ALL_RULES_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, "- server-side-image-map [minor]: Help for server-side-image-map (1 node: #el-0)"]);
+        const line = (id: string, impact: string) => `- ${id} [${impact}]: Help for ${id} (1 node: #el-0)`;
+        expect(formatA11yAllRules([v("a", "serious", 1)], [v("b", "minor", 1), v("c", "serious", 1)])).toEqual([A11Y_ALL_RULES_PREFIX, line("a", "serious"), A11Y_NEEDS_REVIEW_PREFIX, line("c", "serious"), line("b", "minor")]);
+    });
+
+    it("a failed audit's finding keeps the items for a person's check after the rules broken", () => {
+        const v = (id: string, impact: string) => ({ id, impact, help: `Help for ${id}`, nodes: [{ target: ["#x"] }] });
+        const spec = a11ySpec("WEB-122", "/");
+        const msg = formatA11yViolations([v("label", "critical")], "serious")!;
+        const notes = formatA11yAllRules([v("label", "critical")], [v("server-side-image-map", "minor")]);
+        const reason = a11yFinding(spec, { status: "failed", failedStepIndex: 1, steps: [{ index: 1, title: "2", status: "failed", error: msg }], error: msg, notes, responses: [] } as never)!;
+        expect(reason.split("\n").slice(-4)).toEqual([A11Y_ALL_RULES_PREFIX, "- label [critical]: Help for label (1 node: #x)", A11Y_NEEDS_REVIEW_PREFIX, "- server-side-image-map [minor]: Help for server-side-image-map (1 node: #x)"]);
     });
 
     it("is what the generated script attaches: the same lines", () => {

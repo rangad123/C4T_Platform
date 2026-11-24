@@ -7,7 +7,7 @@ import type { DraftSpec } from "../api/test-specs.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { AppModel, PageModel, PageType } from "../understanding/app-model.js";
 import type { ScriptRun } from "../validation/runner.js";
-import { A11Y_ALL_RULES_PREFIX, A11Y_ALL_RULES_TAG, A11Y_FAILURE_PREFIX, type A11yImpact } from "./audit.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_ALL_RULES_TAG, A11Y_FAILURE_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, type A11yImpact } from "./audit.js";
 
 export { A11Y_ALL_RULES_TAG } from "./audit.js";
 
@@ -210,5 +210,5 @@ export function a11yFinding(spec: TestSpec, run: ScriptRun): string | undefined 
         .slice(0, 1000);
     // An audit that keeps every rule (A11Y_ALL_RULES_TAG) noted them all: they follow the message, whatever their impact.
     const all = run.notes?.indexOf(A11Y_ALL_RULES_PREFIX) ?? -1;
-    return all < 0 ? message : [message, A11Y_ALL_RULES_PREFIX, ...run.notes!.slice(all + 1).filter((l) => l.startsWith("- "))].join("\n");
+    return all < 0 ? message : [message, A11Y_ALL_RULES_PREFIX, ...run.notes!.slice(all + 1).filter((l) => l.startsWith("- ") || l === A11Y_NEEDS_REVIEW_PREFIX)].join("\n");
 }

@@ -84,7 +84,8 @@ beforeAll(async () => {
     check(ids.a1, "accessibility", "/cart", "FAILED_VALIDATION", "Could not open /cart: net::ERR_CONNECTION_REFUSED");
     // Passed the "serious" threshold, with every rule kept: a moderate and a minor issue.
     const lvl = (id: string, impact: string) => ({ id, impact, help: `Help for ${id}`, nodes: [{ target: ["html"] }] });
-    check(ids.a1, "accessibility", "/levels", "VALIDATED", formatA11yAllRules([lvl("html-xml-lang-mismatch", "moderate"), lvl("server-side-image-map", "minor")])!.join("\n"));
+    // And one item axe could not decide (W3): for a person's check, never an issue.
+    check(ids.a1, "accessibility", "/levels", "VALIDATED", formatA11yAllRules([lvl("html-xml-lang-mismatch", "moderate"), lvl("server-side-image-map", "minor")], [lvl("frame-tested", "critical")])!.join("\n"));
     // A person said not a bug.
     const promo = check(ids.a1, "accessibility", "/promo", "NEEDS_REVIEW", audit(["color-contrast", "serious", "Elements must meet minimum color contrast ratio thresholds", 2]));
     const t = platform.repo.getTest(promo)!;
@@ -151,11 +152,15 @@ describe("the Accessibility Testing Agent's page", () => {
     it("Outcome: the issues on each page by rule and severity, and the pages clean and with issues; nothing of another agent", async () => {
         await visit(routes.projectAgent(pid, "accessibility"));
         const out = page.getByTestId("accessibility-outcome");
-        await pwExpect(out.locator(".metric")).toHaveText(["3Pages with issues", "1Clean pages", "1Not checked", "5Rules broken"]);
+        await pwExpect(out.locator(".metric")).toHaveText(["3Pages with issues", "1Clean pages", "1Not checked", "5Rules broken", "1Needs a person’s check"]);
         await pwExpect(page.getByTestId("a11y-rules").locator("li")).toHaveText([/Critical\s*image-alt\s*Images must have alternate text\s*1 page · 3 elements/, /Serious\s*color-contrast\s*.*1 page · 5 elements/, /Serious\s*label/, /Moderate\s*html-xml-lang-mismatch/, /Minor\s*server-side-image-map/]);
         const pages = page.getByTestId("a11y-page");
         await pwExpect(pages).toHaveCount(6);
         await pwExpect(pages.filter({ hasText: "/levels" })).toContainText("html-xml-lang-mismatch: Help for html-xml-lang-mismatch. 1 element: html");
+        const review = pages.filter({ hasText: "/levels" }).getByTestId("a11y-review");
+        await pwExpect(review).toContainText("Needs a person’s check: axe could not decide these by itself. They are not counted as issues.");
+        await pwExpect(review).toContainText("frame-tested: Help for frame-tested. 1 element: html");
+        await pwExpect(page.getByTestId("a11y-rules")).not.toContainText("frame-tested");
         const promo = pages.filter({ hasText: "/promo" });
         await pwExpect(promo.locator(".badge").first()).toHaveText("Not a bug");
         await pwExpect(promo).toContainText("A person marked this not a bug: The banner is decorative.");

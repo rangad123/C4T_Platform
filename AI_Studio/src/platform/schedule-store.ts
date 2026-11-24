@@ -59,6 +59,8 @@ export interface Schedule {
     lastNote: string | null;
     /** The person who made the schedule (a user id); null for schedules made before this was kept, or by an API key. */
     createdBy: string | null;
+    /** The testing agent an Explore again schedule of a Workspace project runs (Agent Workspace D1); null for every other schedule. */
+    agentId: string | null;
     createdAt: string;
     updatedAt: string;
 }
@@ -78,6 +80,7 @@ const toSchedule = (r: Row): Schedule => ({
     lastOutcomeAt: r.last_outcome_at,
     lastNote: r.last_note,
     createdBy: r.created_by ?? null,
+    agentId: r.agent_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
 });
@@ -90,12 +93,12 @@ export class ScheduleStore {
         private readonly clock: () => number = Date.now,
     ) {}
 
-    create(input: { projectId: string; name: string; kind: ScheduleKind; cadence: Cadence; enabled?: boolean; retryFailures?: number; createdBy?: string | null }): Schedule {
+    create(input: { projectId: string; name: string; kind: ScheduleKind; cadence: Cadence; enabled?: boolean; retryFailures?: number; createdBy?: string | null; agentId?: string | null }): Schedule {
         const id = randomUUID();
         const enabled = input.enabled ?? true;
         const t = iso();
         this.db.run(
-            `INSERT INTO schedules (id, project_id, name, kind, cadence_json, enabled, retry_failures, next_run_at, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO schedules (id, project_id, name, kind, cadence_json, enabled, retry_failures, next_run_at, created_by, agent_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
             id,
             input.projectId,
             input.name,
@@ -105,6 +108,7 @@ export class ScheduleStore {
             input.retryFailures ?? 1,
             enabled ? nextRunAfter(input.cadence, this.clock()) : null,
             input.createdBy ?? null,
+            input.agentId ?? null,
             t,
             t,
         );
@@ -124,14 +128,14 @@ export class ScheduleStore {
      * Changing the cadence or re-enabling restarts the clock from now: the next run is never in the past. `createdBy` (the person who last
      * set it up, whose own computer may take its runs) changes only when given.
      */
-    update(id: string, patch: { name?: string; kind?: ScheduleKind; cadence?: Cadence; enabled?: boolean; retryFailures?: number; createdBy?: string | null }): Schedule | undefined {
+    update(id: string, patch: { name?: string; kind?: ScheduleKind; cadence?: Cadence; enabled?: boolean; retryFailures?: number; createdBy?: string | null; agentId?: string | null }): Schedule | undefined {
         const cur = this.get(id);
         if (!cur) return undefined;
         const next = { ...cur, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as Schedule;
         const reschedule = patch.cadence !== undefined || (patch.enabled === true && !cur.enabled);
         const nextRunAt = !next.enabled ? null : reschedule ? nextRunAfter(next.cadence, this.clock()) : cur.nextRunAt;
         this.db.run(
-            "UPDATE schedules SET name = ?, kind = ?, cadence_json = ?, enabled = ?, retry_failures = ?, next_run_at = ?, created_by = ?, updated_at = ? WHERE id = ?",
+            "UPDATE schedules SET name = ?, kind = ?, cadence_json = ?, enabled = ?, retry_failures = ?, next_run_at = ?, created_by = ?, agent_id = ?, updated_at = ? WHERE id = ?",
             next.name,
             next.kind,
             JSON.stringify(next.cadence),
@@ -139,6 +143,7 @@ export class ScheduleStore {
             next.retryFailures,
             nextRunAt,
             next.createdBy ?? null,
+            next.agentId ?? null,
             iso(),
             id,
         );

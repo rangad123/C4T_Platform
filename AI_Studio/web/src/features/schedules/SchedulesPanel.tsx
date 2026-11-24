@@ -6,6 +6,7 @@ import { BadgeKey } from "../../components/Tooltip";
 import { SCHEDULE_HELP } from "../../lib/help";
 import { relativeTime } from "../../lib/format";
 import { useHere } from "../auth/project-access";
+import type { WorkspaceAnswer } from "../agent-workspace/workspace";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
@@ -136,6 +137,7 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock, mayChang
             <div className="row">
                 <h3 className="t-card">{s.name}</h3>
                 <Badge tone={s.enabled ? "success" : "neutral"} tip={s.enabled ? SCHEDULE_HELP.on : SCHEDULE_HELP.off}>{s.enabled ? "Active" : "Paused"}</Badge>
+                {s.agentName && <Badge tone="neutral" tip="Each run is this agent’s, with its own checks only.">{s.agentName}</Badge>}
                 {s.suiteName ? <Badge tone="info" icon={ListOrdered}>Runs the suite “{s.suiteName}”</Badge> : s.runbookName ? <Badge tone="info" icon={Workflow}>Runs the run sequence “{s.runbookName}”</Badge> : s.kind === "generate" && <Badge tone="info" tip="Each run explores the app again with the AI model, which uses AI tokens.">Uses AI</Badge>}
             </div>
             <div className="facts">
@@ -182,9 +184,9 @@ function cadenceOf(freq: Frequency, every: number, time: string, weekday: number
     return freq === "daily" ? { type: "daily", time } : { type: "weekly", weekday, time };
 }
 
-function sentence(kind: ScheduleKind, c: Cadence, suiteName?: string): string {
+function sentence(kind: ScheduleKind, c: Cadence, suiteName?: string, agentName?: string): string {
     const when = c.type === "interval" ? `every ${c.every === 1 ? (c.unit === "hours" ? "hour" : "minute") : `${c.every} ${c.unit}`}` : c.type === "daily" ? `every day at ${c.time}` : `every ${WEEKDAYS[c.weekday]} at ${c.time}`;
-    return `${suiteName ? `Run the suite “${suiteName}”` : KIND_TEXT[kind]} ${when}`;
+    return `${suiteName ? `Run the suite “${suiteName}”` : agentName && kind === "generate" ? `Run the ${agentName}` : KIND_TEXT[kind]} ${when}`;
 }
 
 function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: string; zone: string; onCancel: () => void; onCreated: () => void }) {
@@ -196,6 +198,11 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
     // Runners mode: exploring is not offered (the platform refuses it there, at create and at every fire).
     const runnersOnly = useExecutionMode() === "runners";
     const explores = project.data ? projectKind(project.data) !== "code" && !runnersOnly : false;
+    // An Agent Workspace project: an exploration is one agent's run (D1), so each chosen agent is its own choice.
+    const workspace = useFetch<WorkspaceAnswer>(explores ? `/projects/${projectId}/workspace` : null);
+    const agents = workspace.data?.workspace ? workspace.data.agents : [];
+    const [agentId, setAgentId] = useState("");
+    const agent = agents.find((a) => a.id === agentId);
     const [suiteId, setSuiteId] = useState("");
     const suite = suites.data?.suites.find((x) => x.id === suiteId);
     const [freq, setFreq] = useState<Frequency>("daily");
@@ -212,7 +219,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
         setBusy(true);
         setError("");
         try {
-            await api(`/projects/${projectId}/schedules`, { method: "POST", body: suiteId ? { kind: "validate", cadence, suiteId } : { kind, cadence, retryFailures: kind === "validate" && retry ? 1 : 0 } });
+            await api(`/projects/${projectId}/schedules`, { method: "POST", body: suiteId ? { kind: "validate", cadence, suiteId } : { kind, cadence, retryFailures: kind === "validate" && retry ? 1 : 0, ...(kind === "generate" && agentId ? { agentId } : {}) } });
             onCreated();
         } catch (e) {
             setError(describeApiError(e));
@@ -234,20 +241,21 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
                 <select
                     id="sched-kind"
                     className="input"
-                    value={suiteId ? `suite:${suiteId}` : kind}
+                    value={suiteId ? `suite:${suiteId}` : agentId && kind === "generate" ? `agent:${agentId}` : kind}
                     onChange={(e) => {
                         const v = e.target.value;
-                        if (v.startsWith("suite:")) {
-                            setSuiteId(v.slice(6));
-                            setKind("validate");
-                        } else {
-                            setSuiteId("");
-                            setKind(v as ScheduleKind);
-                        }
+                        setSuiteId(v.startsWith("suite:") ? v.slice(6) : "");
+                        setAgentId(v.startsWith("agent:") ? v.slice(6) : "");
+                        setKind(v.startsWith("agent:") ? "generate" : v.startsWith("suite:") ? "validate" : (v as ScheduleKind));
                     }}
                 >
                     <option value="validate">Re-run all tests</option>
-                    {explores && <option value="generate">Explore again (looks for new things to test; uses your AI key)</option>}
+                    {explores && agents.length === 0 && <option value="generate">Explore again (looks for new things to test; uses your AI key)</option>}
+                    {agents.map((a) => (
+                        <option key={a.id} value={`agent:${a.id}`}>
+                            Run the {a.name} (uses your AI key)
+                        </option>
+                    ))}
                     {(suites.data?.suites ?? []).map((x) => (
                         <option key={x.id} value={`suite:${x.id}`} disabled={x.testCount === 0}>
                             Run the suite “{x.name}”{x.testCount === 0 ? " (no tests yet)" : ""}
@@ -296,7 +304,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
                     </span>
                 </label>
             )}
-            <p className="sched-preview" aria-live="polite">{sentence(kind, cadence, suite?.name)}</p>
+            <p className="sched-preview" aria-live="polite">{sentence(kind, cadence, suite?.name, agent?.name)}</p>
             {error && <Callout tone="danger">{error}</Callout>}
             <div className="row">
                 <Button type="submit" variant="primary" loading={busy}>Create schedule</Button>

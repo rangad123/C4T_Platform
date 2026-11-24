@@ -78,6 +78,8 @@ export const AnalyzeStep = z
         allowMutatingApiTests: z.boolean().optional(),
         /** Include the basic load check. Off unless the runbook says so. */
         loadChecks: z.boolean().optional(),
+        /** The testing agent whose run this is, in a project with the Agent Workspace (platform testing-agents.ts). Left out: the only chosen agent, or Test Case Generation. */
+        agentId: z.string().trim().min(1).max(64).optional(),
     })
     .strict();
 

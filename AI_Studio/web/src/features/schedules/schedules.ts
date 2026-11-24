@@ -29,6 +29,9 @@ export interface Schedule {
     /** The test suite this schedule runs instead of every test (see features/suites). */
     suiteId?: string | null;
     suiteName?: string | null;
+    /** The testing agent an Explore again schedule of an Agent Workspace project runs (null for any other schedule). */
+    agentId?: string | null;
+    agentName?: string | null;
     /** Who made it: its runs go to that person's runner (a name, never an email; missing from an older server). */
     ownerName?: string;
 }

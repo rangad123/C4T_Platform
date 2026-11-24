@@ -431,3 +431,14 @@ export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: As
     if (agentId === "responsive-ui" && asked.variants === undefined) return { ...rest, variants: [...SIZE_VARIANT_IDS] };
     return rest;
 }
+
+/**
+ * A schedule's or a runbook step's exploration (D1): in a project with the Workspace, the run of the agent it keeps (none kept: as
+ * runAgentOf picks), with that agent's own switches as its Run button starts them; `asked` is what the schedule or step itself says.
+ * Undefined in every other project, which runs as before. An agent no longer chosen (409) or none for several agents (400) is refused.
+ */
+export async function savedAgentRun(store: TestingAgentStore, row: Row, agentId: string | null | undefined, options: JobOptions, asked: AskedSwitches = {}): Promise<JobOptions | undefined> {
+    const modes = projectSetupOf(row).testingModes;
+    if (!modes.includes("agent") || modes.includes("code") || !(await store.chosen(String(row.id)))) return undefined;
+    return agentRunOptions((await runAgentOf(store, row, agentId ?? undefined))!, options, asked);
+}

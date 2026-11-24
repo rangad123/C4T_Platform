@@ -8,7 +8,7 @@
  */
 import { riskyGateLine, riskyKindOf } from "../validation/risky.js";
 import { KNOWN_BUG_FAILURE } from "./types.js";
-import { A11Y_ALL_RULES_PREFIX, A11Y_ALL_RULES_TAG, A11Y_FAILURE_PREFIX, A11Y_MAX_RULES, A11Y_MAX_TARGETS, a11yThreshold, WCAG_TAGS } from "../a11y/audit.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_ALL_RULES_TAG, A11Y_FAILURE_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, A11Y_MAX_RULES, A11Y_MAX_TARGETS, a11yThreshold, WCAG_TAGS } from "../a11y/audit.js";
 import { EVIDENCE_HELPER_SOURCE } from "../evidence/capture.js";
 import { CLEANUP_HELPER_SOURCE, runTagOf, webCleanupScriptSource } from "../cleanup/helper.js";
 import { HEALTH_HELPER_SOURCE, isHealthCheck } from "../health/checks.js";
@@ -316,7 +316,7 @@ async function a11yAudit(page: Page, minImpact: string, scope?: string | Locator
         await scope.first().evaluate((el, m) => el.setAttribute("data-a11y-scope", m), mark);
         builder.include(\`[data-a11y-scope="\${mark}"]\`);
     }
-    const { violations } = await builder.analyze();
+    const { violations, incomplete } = await builder.analyze();
     const rank = (i?: string | null) => Math.max(0, A11Y_IMPACTS.indexOf(i ?? "minor"));
     const clip = (s: string, n: number) => {
         const t = s.replace(/\\s+/g, " ").trim();
@@ -330,9 +330,10 @@ async function a11yAudit(page: Page, minImpact: string, scope?: string | Locator
         const count = \`\${v.nodes.length} node\${v.nodes.length === 1 ? "" : "s"}\`;
         return \`- \${v.id} [\${v.impact ?? "minor"}]: \${clip(v.help, 100)} (\${count}: \${targets.join(", ")}\${more})\`;
     };
-    if (A11Y_ALL_RULES && violations.length) {
-        const all = [...violations].sort((a, b) => rank(b.impact) - rank(a.impact)).map(line);
-        await test.info().attach("notes", { body: JSON.stringify([${JSON.stringify(A11Y_ALL_RULES_PREFIX)}, ...all]), contentType: "application/json" });
+    if (A11Y_ALL_RULES && (violations.length || incomplete.length)) {
+        const lines = (vs: typeof violations) => [...vs].sort((a, b) => rank(b.impact) - rank(a.impact)).map(line);
+        const review = incomplete.length ? [${JSON.stringify(A11Y_NEEDS_REVIEW_PREFIX)}, ...lines(incomplete)] : [];
+        await test.info().attach("notes", { body: JSON.stringify([${JSON.stringify(A11Y_ALL_RULES_PREFIX)}, ...lines(violations), ...review]), contentType: "application/json" });
     }
     const failing = violations.filter((v) => rank(v.impact) >= rank(minImpact)).sort((a, b) => rank(b.impact) - rank(a.impact));
     if (failing.length === 0) return;
