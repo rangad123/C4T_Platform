@@ -47,7 +47,7 @@ import { testStepFault } from "./test-fault.js";
 import { deterministicRepairOn } from "../llm/without-ai.js";
 import type { MobileRunEnv } from "./mobile-runner.js";
 import type { IosRunEnv } from "../mobile/ios-runner.js";
-import { missingApiTokenReason } from "../evidence/failure-facts.js";
+import { apiTokenNeeded, MISSING_API_TOKEN_REASON, missingApiTokenReason, SIGNED_IN_401_REASON } from "../evidence/failure-facts.js";
 import { secretsOfRun } from "../evidence/model.js";
 import { KNOWN_BUG_FIXED, markUnfinishedAsNotRun, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
 // A phone run the phone itself could not carry out (device/infra.ts): said plainly, never a failing test of the app, never repaired.
@@ -507,6 +507,8 @@ export async function validateBatch(
         return outcome;
     });
     await Promise.all(crashed);
+    const refused = outcomes.filter((o) => o.reason === MISSING_API_TOKEN_REASON || o.reason === SIGNED_IN_401_REASON).map((o) => o.spec.testId);
+    if (refused.length) ctx.emit({ stage: "validation", kind: "api_token_needed", level: "warn", message: apiTokenNeeded(refused) });
     // Cleanup never changes a test's result and never fails the job: it is reported in the ledger and as a plain job event.
     if (collector && deps.cleanup) {
         try {

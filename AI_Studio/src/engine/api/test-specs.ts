@@ -39,6 +39,8 @@ const SQLI = "' OR '1'='1' --";
 const XSS = "<script>alert(1)</script>";
 
 type Schema = Record<string, any>;
+/** A field that repeats a password: confirmPassword, password_confirmation, repeatPassword, password2, passwordAgain. */
+const CONFIRMS = /confirm|repeat|retype|again|verif|2$/i;
 
 export function sample(schema: Schema | undefined, name = "value", depth = 0): unknown {
     if (!schema || depth > 4) return "test";
@@ -57,6 +59,11 @@ export function sample(schema: Schema | undefined, name = "value", depth = 0): u
         case "object": {
             const out: Record<string, unknown> = {};
             for (const [k, v] of Object.entries<Schema>(schema.properties ?? {})) out[k] = sample(v, k, depth + 1);
+            // A confirmation field repeats the password it confirms (the new one where there are two), else the body is refused.
+            const passwords = Object.keys(out).filter((k) => /pass/i.test(k));
+            const confirms = passwords.filter((k) => CONFIRMS.test(k) && typeof out[k] === "string");
+            const pw = passwords.find((k) => !confirms.includes(k) && /new/i.test(k)) ?? passwords.find((k) => !confirms.includes(k));
+            if (pw) for (const k of confirms) out[k] = out[pw];
             return out;
         }
         default: {

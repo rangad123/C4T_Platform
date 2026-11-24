@@ -46,6 +46,16 @@ const esc = (s: string) => s.replace(/[.*+?^$(){}|[\]\\]/g, "\\$&");
 const anyOf = (list: readonly string[]) => new RegExp(`^\\s*(?:${list.map(esc).join("|")})\\s*$`, "i");
 const clickable = (scope: Page | Locator, name: RegExp | string) => scope.getByRole("button", { name }).or(scope.getByRole("link", { name }));
 
+/**
+ * A banner button pressed by the page's own click, not the mouse: the focus, the place the next Tab starts from and the scroll stay where
+ * the test's steps put them (N2 WEB-031: a mouse click on "Reject all" moved the focus off "Skip to content"). A banner that ignores such a
+ * click gets the mouse click as before.
+ */
+async function pressQuietly(button: Locator): Promise<void> {
+    await button.evaluate((el) => (el as HTMLElement).click(), undefined, { timeout: 2_000 }).catch(() => undefined);
+    if (await button.isVisible().catch(() => false)) await button.click({ timeout: 2_000 }).catch(() => undefined);
+}
+
 /** Consent banners and the notes' overlays are closed before each action on this page. */
 export async function installOverlayHandlers(page: Page, rules: readonly OverlayRule[] = []): Promise<void> {
     const reject = clickable(page, anyOf(CONSENT_REJECT)).or(page.locator(CMP_REJECT.join(", ")));
@@ -53,7 +63,7 @@ export async function installOverlayHandlers(page: Page, rules: readonly Overlay
     await page
         .addLocatorHandler(reject.or(accept).filter({ visible: true }).first(), async () => {
             const refuse = reject.filter({ visible: true }).first();
-            await ((await refuse.count()) ? refuse : accept.filter({ visible: true }).first()).click({ timeout: 2_000 }).catch(() => undefined);
+            await pressQuietly((await refuse.count()) ? refuse : accept.filter({ visible: true }).first());
         }, { noWaitAfter: true })
         .catch(() => undefined);
     for (const rule of rules) {
@@ -81,7 +91,10 @@ async function installOverlayHandlers(page: import("@playwright/test").Page): Pr
     const agree = clickable(page, anyOf(CONSENT_AGREE)).or(page.locator(CMP_AGREE.join(", ")));
     await page.addLocatorHandler(shown(decline.or(agree)), async () => {
         const no = shown(decline);
-        await ((await no.count()) ? no : shown(agree)).click({ timeout: 2_000 }).catch(() => undefined);
+        // The page's own click, not the mouse: the focus and the place the next Tab starts from stay as the test's steps left them.
+        const button = (await no.count()) ? no : shown(agree);
+        await button.evaluate((el) => (el as HTMLElement).click(), undefined, { timeout: 2_000 }).catch(() => undefined);
+        if (await button.isVisible().catch(() => false)) await button.click({ timeout: 2_000 }).catch(() => undefined);
     });
     for (const rule of OVERLAY_RULES) {
         const box = shown(page.locator(${JSON.stringify(OVERLAY_BOXES)}).filter({ hasText: new RegExp(esc(rule.phrase), "i") }));

@@ -66,6 +66,13 @@ export const MISSING_API_TOKEN_REASON = "The test needs the project's API token,
 /** The sentence for a 401 when the test signed in for itself (C1) and still was not let in: no token is missing, the sign-in did not hold. */
 export const SIGNED_IN_401_REASON = "The application answered 401 (not signed in) although the test signed in first with the project's account. Check that this sign-in works and that the API accepts its session, or save an API token for the project, then run the test again.";
 
+/** The run's one setup message for every API test refused with 401 for want of an API token (each test keeps its own reason too). */
+export function apiTokenNeeded(testIds: readonly string[]): string {
+    const n = testIds.length;
+    const shown = testIds.slice(0, 10).join(", ") + (n > 10 ? ` and ${n - 10} more` : "");
+    return `${n} API ${n === 1 ? "test was" : "tests were"} refused with 401 (not signed in) and no API token is saved for the project: ${shown}. Save the project's API token (API access in What the agents need, on the Requirements tab, or the environment the tests run against, under Settings), then run them again.`;
+}
+
 /** True for a stored reason that is the missing-token sentence. */
 export const isMissingApiToken = (reason: string | null | undefined): boolean => !!reason && reason.startsWith("The test needs the project's API token, and none is saved.");
 

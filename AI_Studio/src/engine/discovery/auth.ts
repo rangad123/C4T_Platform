@@ -237,12 +237,21 @@ async function signInHere(page: Page, creds: Credentials, frames?: FrameSink): P
         : { ok: false, error: "Login did not succeed with the supplied credentials", loginPath, mechanisms: ["form"] };
 }
 
+/** A sign-in form on the page: a visible password field with a visible name or email field in its own form (a change-password form has none). */
+async function signInFormShowing(page: Page): Promise<boolean> {
+    return page
+        .locator("input[type=password]:visible")
+        .evaluateAll((pws) => pws.some((pw) => Array.from((pw.closest("form") ?? document.body).querySelectorAll("input")).some((i) => ["text", "email", "tel"].includes((i.getAttribute("type") ?? "text").toLowerCase()) && i.getClientRects().length > 0)))
+        .catch(() => false);
+}
+
 /**
- * Did the sign-in work? Not while a password field is still showing (the form came back, usually with an error).
+ * Did the sign-in work? Not while the form is still showing (it came back, usually with an error): on the same address any password
+ * field, on another one a sign-in form (the account page the practice store opens has a change-password form, N2).
  * Otherwise yes when the app moved to another address, or shows something only a signed-in person sees.
  */
 async function signedIn(page: Page, before: string): Promise<boolean> {
-    if (await hasPasswordField(page)) return false;
+    if (page.url() === before ? await hasPasswordField(page) : await signInFormShowing(page)) return false;
     if (page.url() !== before) return true;
     const text = await page.locator("body").innerText().catch(() => "");
     return SIGNED_IN_TEXT.test(text);

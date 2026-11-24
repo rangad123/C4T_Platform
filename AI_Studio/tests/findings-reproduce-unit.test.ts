@@ -197,6 +197,29 @@ describe("verifyFindings", () => {
         expect(ai.calls - before).toBe(0);
     });
 
+    it("a named account that is the project's own sign-in runs on new accounts too; another named account stays shared (N2 WEB-041)", async () => {
+        const own = { username: "alice@example.test", password: "Password1!" };
+        const verifyAs = async (roles: Array<{ name: string; username: string; password: string }>) => {
+            const { store, test } = await setup();
+            const asCustomer = { ...test, spec: TestSpecSchema.parse({ ...spec, tags: ["role:customer"] }) };
+            const [f] = await harvestExecutionFindings(store, { projectId: "p1", jobId: null, failed: [{ test: asCustomer, run: failingRun() }] });
+            const asked: ExecutionOptions[] = [];
+            const r = await verifyFindings({
+                store, projectId: "p1", findings: [f!], testOf: () => asCustomer, appUrl: "http://127.0.0.1:1", env: { baseUrl: "http://127.0.0.1:1", headless: true, credentials: own, roles },
+                render: { baseUrl: "http://127.0.0.1:1" }, scratchDir: "/nonexistent", ranOn: "the platform", dataChanges: true, signupPath: "/register",
+                execute: async (_a, _b, _e, opts) => (asked.push(opts), [1, 2, 3].map((i) => failingRun(attemptNote(i, 3, opts.freshAccount ? { clean: true, note: "as a newly registered account" } : undefined)))),
+                emit: () => undefined,
+            });
+            return { asked: asked[0]!, verified: r.verified[0]! };
+        };
+        const same = await verifyAs([{ name: "customer", ...own }]);
+        expect(same.asked.freshAccount).toEqual({ signupPath: "/register" });
+        expect(same.verified.to).toBe("reproduced");
+        const other = await verifyAs([{ name: "customer", username: "carol@example.test", password: "Password1!" }]);
+        expect(other.asked.freshAccount).toBeUndefined();
+        expect(other.verified).toMatchObject({ to: "unconfirmed", reason: expect.stringMatching(/named test account, whose rights a new account would not have/) });
+    });
+
     it("without data changes it runs on the shared account and stays Unconfirmed; the budget leaves the rest as candidates with the reason", async () => {
         const { store, test } = await setup();
         const [a] = await harvestExecutionFindings(store, { projectId: "p1", jobId: null, failed: [{ test, run: failingRun() }] });

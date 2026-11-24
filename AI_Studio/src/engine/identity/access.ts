@@ -74,10 +74,13 @@ async function accessSignIn(p, base, role) {
     await user.fill(c.username);
     await pw.fill(c.password);
     const submit = root.locator("button[type=submit]:visible, input[type=submit]:visible").or(root.getByRole("button", { name: /log\s?in|sign\s?in|submit|continue/i })).first();
+    const before = p.url();
     if (await submit.count()) await submit.click({ timeout: 5000 }).catch(() => undefined);
     else await pw.press("Enter");
     await p.waitForLoadState("load").catch(() => undefined);
     await p.waitForTimeout(500);
+    // Still asked: on the same address any password field; on another a sign-in form (a change-password form has no name or email field).
+    const asked = async () => (p.url() === before ? await hasPw() : await p.locator("input[type=password]:visible").evaluateAll((pws) => pws.some((x) => [...(x.closest("form") ?? document.body).querySelectorAll("input")].some((i) => ["text", "email", "tel"].includes((i.getAttribute("type") ?? "text").toLowerCase()) && i.getClientRects().length > 0))));
     if (!(await hasPw()) && (await p.locator(ACCESS_OTP).first().count())) {
         if (!c.totp) throw new Error("Signing in as “" + role + "” needs a one-time code, but no authenticator secret is set for it.");
         const field = p.locator(ACCESS_OTP).first();
@@ -90,7 +93,7 @@ async function accessSignIn(p, base, role) {
         await p.waitForLoadState("load").catch(() => undefined);
         await p.waitForTimeout(500);
     }
-    if ((await hasPw()) || (await p.locator(ACCESS_OTP).first().count())) throw new Error("Could not sign in as “" + role + "”: the sign-in details were not accepted.");
+    if ((await asked()) || (await p.locator(ACCESS_OTP).first().count())) throw new Error("Could not sign in as “" + role + "”: the sign-in details were not accepted.");
 }
 
 /**

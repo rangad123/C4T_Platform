@@ -497,10 +497,16 @@ async function runAttempts(scratchDir: string, scripts: ScriptInput[], env: RunE
     for (let i = 1; i <= n; i++) {
         if (opts.signal?.aborted) throw new Error("Job cancelled");
         const account = freshAccount ? await freshAccountFor(env.baseUrl, freshAccount, opts.browser) : undefined;
-        const runs = await runScripts(scratchDir, scripts, account?.credentials ? { ...env, credentials: account.credentials } : env, once);
+        const runs = await runScripts(scratchDir, scripts, account?.credentials ? freshAccountEnv(env, account.credentials) : env, once);
         out.push(...runs.map((r) => ({ ...r, notes: [attemptNote(i, n, account), ...(r.notes ?? [])] })));
     }
     return out;
+}
+
+/** The run as a newly registered account: the project's own and every named account with the same sign-in (it is the same account). */
+export function freshAccountEnv(env: RunEnv, fresh: { username: string; password: string }): RunEnv {
+    const own = env.credentials?.username;
+    return { ...env, credentials: fresh, ...(env.roles ? { roles: env.roles.map((r) => (own && r.username === own ? { name: r.name, ...fresh } : r)) } : {}) };
 }
 
 /** One newly registered account in a browser of its own (closed again), or the shared account with the reason. */

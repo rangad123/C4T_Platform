@@ -19,7 +19,7 @@ import type { AppModel } from "../src/engine/understanding/app-model.js";
 import { validateBatch } from "../src/engine/validation/validator.js";
 import { authorWebSpec, toSpec, type AuthorOutcome } from "../src/engine/web/author.js";
 import { newerThan, scanPlaywrightApis } from "../src/engine/portable/playwright-apis.js";
-import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, overlayHelperSource, overlayRules, sampleTypeFor } from "../src/engine/web/interruptions.js";
+import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, installOverlayHandlers, overlayHelperSource, overlayRules, sampleTypeFor } from "../src/engine/web/interruptions.js";
 import { uploadFilesOf } from "../src/engine/web/pages.js";
 
 const PORT = 9300;
@@ -41,6 +41,8 @@ const show = () => document.getElementById('o').textContent = 'Order: ' + [...l.
 for (const li of l.children) { li.ondragstart = (e) => { dragged = li; e.dataTransfer.setData('text/plain', li.id); }; li.ondragover = (e) => e.preventDefault(); li.ondrop = (e) => { e.preventDefault(); li.after(dragged); show(); }; }
 </script>`),
     "/download": page("Download", `<h1>Reports</h1><a href="/report.csv">Download report</a>`),
+    // The practice store's consent banner (test-site public/assets/common.js): in the page flow under the header, removed on a choice (N2 WEB-031).
+    "/skip": page("Skip", `<style>a:focus{outline:3px solid #000}</style><header class="site-header"><a href="#main">Skip to content</a> <a href="/">Practice Store</a></header><section aria-label="Cookie consent"><p>We use cookies.</p><button onclick="this.parentElement.remove()">Accept all</button><button onclick="this.parentElement.remove()">Reject all</button></section><main id="main"><a href="/blank">Products</a></main>`),
     "/blank": page("Links", `<h1>Links</h1><a href="/help" target="_blank">Open help</a>`),
     "/help": page("Help", `<h1>Help centre</h1>`),
     "/form": page("Form", `<h1>Form</h1><button onclick="fetch('/api/save',{method:'POST'}).then(r=>{document.getElementById('r').textContent=r.ok?'Saved':'Something went wrong'})">Submit</button><p id="r"></p>`),
@@ -167,6 +169,39 @@ describe("finish flows: authored, rendered, passing in a real run", () => {
         );
         for (const [i, o] of outcomes.entries()) expect(o.status, `${specs[i]!.id}: ${o.reason ?? ""}`).toBe("VALIDATED");
     }, 300_000);
+
+    it("closing a consent banner leaves the focus where the test's keys put it (N2 WEB-031)", async () => {
+        const out: AuthorOutcome = { status: "complete", testData: {}, explanation: "", steps: [
+            { action: "navigate", url: "/skip", description: "" },
+            { action: "press", key: "Tab", description: "" },
+            { action: "assert", check: "focused", locator: { by: "text", value: "Skip to content" }, description: "" },
+            { action: "assert", check: "css", name: "outline-style", expected: "solid", locator: { by: "text", value: "Skip to content" }, description: "" },
+            { action: "press", key: "Tab", description: "" },
+            { action: "assert", check: "focused", locator: { by: "role", role: "link", value: "Practice Store" }, description: "" },
+            { action: "assert", check: "hidden", locator: { by: "role", role: "button", value: "Reject all" }, description: "" },
+        ] };
+        const spec = toSpec(scenarioAt("S-SKIP", "/skip", "x"), out, "WEB-398");
+        const { ctx } = ctxFor(scripted([]).model);
+        const [o] = await validateBatch(
+            ctx,
+            { browser, scratchDir: ctx.config.scratchDir, env: { baseUrl: BASE, headless: true }, render: { baseUrl: BASE }, model: emptyModel(BASE), maxRepairAttempts: 0, workers: 1 },
+            [{ spec, framework: "playwright" as const, scenario: scenarioAt("S-SKIP", "/skip", "x") }],
+            { onAttempt: async () => undefined, onFinal: async () => undefined },
+        );
+        expect(o!.status, o!.reason ?? "").toBe("VALIDATED");
+        // The live session's handlers (exploring, authoring) the same way.
+        const live = await browser.newPage();
+        try {
+            await installOverlayHandlers(live);
+            await live.goto(`${BASE}/skip`);
+            await live.keyboard.press("Tab");
+            await live.getByText("Skip to content").hover();
+            expect(await live.getByRole("button", { name: "Reject all" }).count()).toBe(0);
+            expect(await live.evaluate(() => document.activeElement?.textContent)).toBe("Skip to content");
+        } finally {
+            await live.close();
+        }
+    }, 120_000);
 
     it("a rendered dialog step fails when the dialog says something else", async () => {
         const out: AuthorOutcome = { status: "complete", testData: {}, explanation: "", steps: [

@@ -157,12 +157,22 @@ export async function registerFreshAccount(
             const tagName = await f.evaluate((el) => el.tagName.toLowerCase());
             const type = ((await f.getAttribute("type")) ?? "").toLowerCase();
             const required = (await f.evaluate((el) => (el as HTMLInputElement).required || el.getAttribute("aria-required") === "true"));
+            // A test account takes what a required field asks for, as the API's fresh-account body does (terms: true): the box ticked,
+            // a choice where none is made, the smallest number allowed (the practice store's terms, country and age, N2).
             if (type === "checkbox" || type === "radio") {
-                // Agreeing to terms is a person's decision: a required box ends the attempt.
-                if (required) return { ok: false, why: "the sign-up form has a required checkbox (terms or consent)" };
+                if (required) await f.check();
                 continue;
             }
-            if (tagName === "select") continue; // its default choice
+            if (tagName === "select") {
+                const choice = await f.evaluate((el) => ((el as HTMLSelectElement).value ? null : (Array.from((el as HTMLSelectElement).options).find((o) => o.value && !o.disabled)?.value ?? null)));
+                if (required && choice) await f.selectOption(choice);
+                continue;
+            }
+            // shortcut: 30 when no minimum is given, a plain adult age or count; read the field's hint when a form needs another number.
+            if (type === "number" && required) {
+                await f.fill((await f.getAttribute("min")) || "30");
+                continue;
+            }
             const ask = await askOf(f);
             if (ask === "other") {
                 if (required) return { ok: false, why: "the sign-up form asks for a field the engine cannot fill on its own" };
