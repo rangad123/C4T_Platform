@@ -42,7 +42,7 @@ import { sampleName, sampleTypeFor, SAMPLE_TYPES } from "./interruptions.js";
 import { notesFor, refusalText, refusedBy, type SiteNote } from "../memory/notes.js";
 import { knowledgeBlock, usableRules, type KnowledgeRule } from "../planning/planner.js";
 import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
-import { redactText } from "../../shared/redact-text.js";
+import { HIDDEN, redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
 import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, scenarioWords, startingIdsOf, withOwnUnique } from "./leftovers.js";
 import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
@@ -523,6 +523,30 @@ export function withFormControlChecks(step: Step): Step {
     return field && !l.filter ? { ...step, check: "value" } : step;
 }
 
+/** What a requirement says when it is about accessibility itself: then an accessible-name or error-message check is the requirement's. */
+const ACCESSIBILITY_WORDS = /\b(accessib\w*|aria|screen ?readers?|assistive)\b/i;
+
+/**
+ * A check of a kind the scenario's words do not state is recorded as the plain check they do state: a field's accessible error message
+ * becomes the message shown on the page (paid trial rbac-3 WEB-041 and rbac-5 WEB-023: the message was shown, but not wired with
+ * aria-errormessage), an accessible name becomes the element's text.
+ */
+export function withStatedCheckKinds(step: Step, scenarioWords: string): Step {
+    if (step.action !== "assert" || ACCESSIBILITY_WORDS.test(scenarioWords) || typeof step.expected !== "string" || !step.expected.trim()) return step;
+    if (step.check === "accessibleErrorMessage")
+        return { action: "assert", check: "visible", locator: { by: "text", value: step.expected }, ...(step.source ? { source: step.source } : {}), description: `Verify visible of text "${step.expected}"` } as Step;
+    if (step.check === "accessibleName" && step.locator && !(step.locator.by === "role" && VALUE_ROLES.has(step.locator.role ?? ""))) return { ...step, check: "text" };
+    return step;
+}
+
+/** The evidence mask (a hidden value, "[hidden]") as the value a check expects: the page never shows it, so the check can never be right. */
+export function maskedExpectation(step: Step): string | undefined {
+    if (step.action !== "assert" && step.action !== "assertResponse") return undefined;
+    const s = step as { expected?: unknown; locator?: { value?: unknown } };
+    if (![s.expected, s.locator?.value].some((v) => typeof v === "string" && v.includes(HIDDEN))) return undefined;
+    return `"${HIDDEN}" is how the evidence hides a value from you, not what the page shows: never expect it. Check the value the test typed itself (or {{unique}} in it), or check something else.`;
+}
+
 const target = LocatorSchema.describe("How to find the element");
 /** The longest fixed pause the agent may record (a wait for something is the better step; the review flags fixed ones). */
 const MAX_FIXED_WAIT_MS = 3_000;
@@ -955,7 +979,12 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         const refuse = refusedBy(input.notes);
         let notesShownFor = pathOf(page.url());
         const record = async (step: Step, toolName: string, args: unknown) => {
-            step = withFormControlChecks(withExactRoleNames(step));
+            step = withStatedCheckKinds(withFormControlChecks(withExactRoleNames(step)), scenarioWords(input.scenario));
+            const masked = maskedExpectation(step);
+            if (masked) {
+                input.onAction?.({ tool: toolName, args, ok: false, observation: masked });
+                return { success: false, error: masked, url: here().url() };
+            }
             // The browser crashed or went away: nothing more can be done in it, so the scenario ends here with that reason.
             const lost = session.lostReason({ pageClosedCounts: false });
             if (lost) {
