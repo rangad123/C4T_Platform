@@ -194,9 +194,15 @@ const originalOf = (c: Catalogue, appId: string, seeded: string[]): string[] => 
     return seeded.filter((id) => !ext.has(id));
 };
 
-/** The catalogue's accounts of an app as test accounts (--roles catalogue): named after the email's local part, nothing else of the catalogue. */
-export function catalogueRoles(accounts: Array<{ email: string; password: string }>): Array<{ name: string; username: string; password: string }> {
-    return accounts.map((a) => ({ name: a.email.split("@")[0]!.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 24) || "account", username: a.email, password: a.password }));
+/**
+ * The catalogue's accounts of an app as test accounts (--roles catalogue), nothing else of the catalogue: named after the app role an
+ * account alone holds (admin, manager), as a project names its test accounts, else after the email's local part. A scenario that says
+ * "An admin test account exists" then signs in as that account (role-differences.ts roleCredentials; paid trial rbac-5 WEB-029, WEB-035).
+ */
+export function catalogueRoles(accounts: Array<{ email: string; password: string; role?: string }>): Array<{ name: string; username: string; password: string }> {
+    const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 24);
+    const only = (role: string | undefined) => role !== undefined && clean(role) !== "" && accounts.filter((x) => x.role === role).length === 1;
+    return accounts.map((a) => ({ name: (only(a.role) ? clean(a.role!) : clean(a.email.split("@")[0]!)) || "account", username: a.email, password: a.password }));
 }
 
 function emptyMetrics(seeded: string[]) {

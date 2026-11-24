@@ -3,9 +3,12 @@
  * own saved steps and scenarios (c4t-scratch/eng-paid/trials). Fast tier: no browser, no model.
  */
 import { describe, expect, it } from "vitest";
+import { roleCredentials } from "../src/engine/identity/role-differences.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import { maskedExpectation, withStatedCheckKinds } from "../src/engine/web/author.js";
 import { findLeftoverUse } from "../src/engine/web/leftovers.js";
+import { catalogueRoles } from "../src/eval/bench/controller.js";
+import { loadCatalogueVersion } from "../src/eval/bench/catalogue.js";
 
 const steps = (xs: unknown[]) => xs as Step[];
 
@@ -47,5 +50,18 @@ describe("the leftover gate covers URL and heading checks with hard-coded ids (r
         const typed = [...signIn.slice(0, 2), { action: "fill", locator: { by: "label", value: "Title" }, value: "Plan v42" }, signIn[3]];
         expect(findLeftoverUse(steps([...typed, { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Plan v42" } }]), starting)).toEqual([]);
         expect(findLeftoverUse(steps([...signIn, { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Note n2" } }]), starting)).toEqual([]);
+    });
+});
+
+describe("a role named only in a precondition binds the one account that holds it (rbac-5 WEB-029, WEB-035)", () => {
+    it("the catalogue's only admin and only manager are named after their role, and the trial's scenarios bind them", () => {
+        const roles = catalogueRoles(loadCatalogueVersion("2026-11-21.1").accounts!["bench-rbac"]!);
+        const web035 = { title: "Admin sees People in the main navigation", description: "Sign in with the admin test account and read the main navigation. Click People and observe the page that opens.", preconditions: ["An admin test account exists"] };
+        const web029 = { title: "Manager creates a note like any user", description: "Sign in with the manager test account and read the role on the Account page.", preconditions: ["A manager test account exists", "Signed in as a newly registered account with an empty cart and no orders"] };
+        expect(roleCredentials(web035, roles, "ana@example.test")).toEqual({ name: "admin", credentials: { username: "ada@example.test", password: "Password1!" } });
+        expect(roleCredentials(web029, roles, "ana@example.test")?.credentials.username).toBe("mia@example.test");
+        // Two accounts hold "user": neither is named after it, and a "user test account" binds nobody.
+        expect(roles.filter((r) => r.name === "user")).toEqual([]);
+        expect(roleCredentials({ title: "x", preconditions: ["A user test account exists"] }, roles, "ana@example.test")).toBeUndefined();
     });
 });
