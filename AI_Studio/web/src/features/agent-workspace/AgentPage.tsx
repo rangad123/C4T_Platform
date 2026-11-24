@@ -21,7 +21,8 @@ export const agentTabOf = (v: string | null): AgentTab => ((AGENT_TABS as readon
  * inputs only), under the project's Workspace tab. What each tab shows is the agent's own file in ./agents (registry.ts).
  */
 export function AgentPage({ id, agentId, tab, runId }: { id: string; agentId: string; tab: AgentTab; runId?: string }) {
-    const ws = useFetch<WorkspaceAnswer>(`/projects/${id}/workspace`, (d) => (d?.agents.some((a) => a.status === "running") ? 3000 : null));
+    // Its own card only, polled only while its own run is going.
+    const ws = useFetch<WorkspaceAnswer>(`/projects/${id}/workspace?agent=${encodeURIComponent(agentId)}`, (d) => (d?.agents.some((a) => a.id === agentId && a.status === "running") ? 3000 : null));
     const a = ws.data?.agents.find((x) => x.id === agentId);
     const view = AGENT_VIEWS[agentId as AgentId] ?? null;
     const missing = Boolean(ws.data && !a) || Boolean(ws.error);
