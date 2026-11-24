@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { buildServer } from "../src/platform/server.js";
@@ -882,6 +883,42 @@ describeWin("the one-file download: AITestingRunnerSetup.exe alone, with the kit
         expect(await stop.exited, output(stop)).toBe(0);
         expect(await Promise.race([main.exited, sleep(30_000).then(() => "timeout")]), output(main)).toBe(0);
     }, 400_000);
+
+    // Production, 2026-11-24: a PC that could not keep the credential traded its code, exited, was started again 5 s later by Setup and traded
+    // the same code again, about 5 times a minute for 28 minutes. Here PowerShell (the runner's DPAPI) is refused, as company policy can do.
+    it("on a computer where PowerShell is refused, the runner trades its code once, stops plainly and is not started again", async () => {
+        const kit = await makeKit("one file no powershell");
+        const exe = kit.exe!;
+        fs.rmSync(path.dirname(kit.dir), { recursive: true, force: true });
+        const inst = freshInstallDir();
+        withTools(inst);
+        // A powershell.exe found first on the PATH that refuses every command (where.exe: exit 2 on these arguments, never echoes stdin).
+        const blocked = path.join(tmp, String(++counter), "blocked");
+        fs.mkdirSync(blocked, { recursive: true });
+        fs.copyFileSync(path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "where.exe"), path.join(blocked, "powershell.exe"));
+        const svc = getAgentServices(platform);
+        const original = { enroll: svc.enroll.bind(svc), throttle: svc.throttle.bind(svc) };
+        const calls: Array<{ kind: string; at: number }> = [];
+        svc.enroll = (...a: Parameters<typeof original.enroll>) => (calls.push({ kind: "enroll", at: Date.now() }), original.enroll(...a));
+        svc.throttle = (t, kind) => (calls.push({ kind: kind === "hello" ? "hello" : "other", at: Date.now() }), original.throttle(t, kind));
+        try {
+            const main = launch(exe, ["--silent", "--no-start-at-sign-in", "--install-dir", inst], path.dirname(exe), { PATH: `${blocked};${process.env.PATH ?? process.env.Path ?? ""}` });
+            const code = await Promise.race([main.exited, sleep(120_000).then(() => "timeout")]);
+            const t0 = calls[0]?.at ?? 0;
+            const runnerLog = fs.existsSync(path.join(inst, "logs", "runner.log")) ? fs.readFileSync(path.join(inst, "logs", "runner.log"), "utf8") : "";
+            const said = `${output(main)}\n--- runner.log ---\n${runnerLog}\n--- agent requests (s after the first) ---\n${calls.map((c) => `${((c.at - t0) / 1000).toFixed(1)} ${c.kind}`).join("\n")}`;
+            console.log(said.replaceAll(kit.token, "[code]"));
+            if (code === "timeout") launch(exe, ["--stop", "--install-dir", inst], path.dirname(exe));
+            expect(calls.filter((c) => c.kind === "enroll"), said).toHaveLength(1);
+            expect(code, said).toBe(2);
+            expect(runnerLog).toContain("could not keep its credential");
+            expect(fs.existsSync(path.join(inst, "app", "runner.enroll"))).toBe(false);
+            expect(said.includes(kit.token)).toBe(false);
+        } finally {
+            svc.enroll = original.enroll;
+            svc.throttle = original.throttle;
+        }
+    }, 300_000);
 
     it("a damaged download says so plainly and leaves nothing behind", async () => {
         const kit = await makeKit("one file damaged");
