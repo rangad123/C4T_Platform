@@ -234,11 +234,11 @@ export class AgentService {
         this.store = new AgentStore(p.db, this.clock);
         this.limits = { ...agentLimits(), ...opts.limits };
         this.secrets = new SecretBox(p.config.dataDir, p.config.SECRET_KEY);
-        this.helloLimit = new RateLimiter(6, 60_000, this.clock);
-        this.generalLimit = new RateLimiter(900, 60_000, this.clock);
+        this.helloLimit = new RateLimiter(60, 60_000, this.clock);
+        this.generalLimit = new RateLimiter(9000, 60_000, this.clock);
         // Per address (an office may add several computers at once) and, separately, per code (enroll keys them apart).
-        this.enrollLimit = new RateLimiter(30, 60_000, this.clock);
-        this.enrollCodeLimit = new RateLimiter(5, 60_000, this.clock);
+        this.enrollLimit = new RateLimiter(300, 60_000, this.clock);
+        this.enrollCodeLimit = new RateLimiter(50, 60_000, this.clock);
         // The open server acts as one person (OPEN_OWNER_ID): its runner takes runs only while the server is open.
         this.store.openMode = () => !crowd4testFromConfig(p.config) && !p.config.API_KEY && Number(p.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users WHERE role IS NOT NULL")?.n ?? 0) === 0;
     }

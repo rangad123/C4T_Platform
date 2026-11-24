@@ -21,6 +21,7 @@ import { CapabilityProbe } from "../src/agent/capabilities.js";
 import { parseAgentArgs } from "../src/agent/config.js";
 import { CREDENTIAL_FILE, loadCredential, MACHINE_ID_FILE } from "../src/agent/credential-store.js";
 import { Logger } from "../src/agent/log.js";
+import { main } from "../src/agent/main.js";
 
 const C4T_PORT = 8762;
 const PORT = 8763;
@@ -137,18 +138,17 @@ describe("enrollment codes", () => {
         expect((await as("t-cora", "GET", `/api/me/runner/enrollments/${made.id}`)).status).toBe(404);
     });
 
-    it("a lost answer: the same computer may ask again while the new credential is unused; anyone else gets 'already used'", async () => {
+    // A repeat was once a fresh success for the same computer (a lost answer); a PC that could not keep its credential then traded one code
+    // about 5 times a minute for 28 minutes (2026-11-24), each time a new credential. A code is now traded exactly once.
+    it("a code is traded once: asking again, from the same computer or another, gets 'already used' and the first credential keeps working", async () => {
         const made = await personalCode();
         const one = await enroll(made.code, M1);
+        expect(one.status).toBe(201);
         const two = await enroll(made.code, M1);
-        expect(two.status).toBe(201);
-        expect(two.body.token).not.toBe(one.body.token);
-        expect(two.body.runnerId).toBe(one.body.runnerId);
-        expect((await hello(one.body.token, { machineId: M1 })).status).toBe(404);
+        expect(two.status).toBe(410);
+        expect(two.body.error).toMatch(/already used/);
         expect((await enroll(made.code, M2)).status).toBe(410);
-        expect((await hello(two.body.token, { machineId: M1 })).status).toBe(200);
-        // Once the credential was used, asking again is refused (it was not lost).
-        expect((await enroll(made.code, M1)).status).toBe(410);
+        expect((await hello(one.body.token, { machineId: M1 })).status).toBe(200);
     });
 
     it("binds the credential to the computer that first used it, and writes a refusal to Activity", async () => {
@@ -244,6 +244,53 @@ describe("the real agent program", () => {
             expect(lines.join("\n")).not.toContain(code);
             expect(lines.join("\n")).not.toContain(token!);
         } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    }, 60_000);
+
+    // Production, 2026-11-24: a Windows PC traded its code (201), could not keep the credential, exited 1, was started again by Setup 5 s later
+    // and traded the same code again, about 5 times a minute for 28 minutes (each 201 a new credential), until the code expired. Never online.
+    it("a computer that cannot keep its credential trades the code once, says so plainly and stops; a start after that never trades it again", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-enroll-nokeep-"));
+        const svc = getAgentServices(platform);
+        const original = svc.enroll.bind(svc);
+        let enrolls = 0;
+        svc.enroll = (...a: Parameters<typeof original>) => {
+            enrolls++;
+            return original(...a);
+        };
+        try {
+            const code = (await personalCode()).code;
+            const file = path.join(dir, "runner.enroll");
+            fs.writeFileSync(file, `${code}\n`, { mode: 0o600 });
+            // Windows PowerShell locked down by the company (Constrained Language Mode): DPAPI cannot be used, so nothing can be kept.
+            const credentialStore = { platform: "win32" as const, run: async () => ({ code: 1, stdout: "", stderr: "Cannot add type. Definition of new types is not supported in this language mode." }) };
+            const lines: string[] = [];
+            const log = new Logger({ out: (l) => lines.push(l), err: (l) => lines.push(l) });
+            const env = { PATH: process.env.PATH ?? "", TAQWRIGHT_HOME: "/nonexistent-taqwright" };
+            // What Setup does (RunnerHost.cs): --enroll-file while runner.enroll exists, else no credential argument; a start after an exit.
+            const start = async (): Promise<number> => {
+                const argv = ["--url", BASE, "--work-dir", path.join(dir, "work"), "--name", "Tess locked laptop", ...(fs.existsSync(file) ? ["--enroll-file", file] : [])];
+                if (!fs.existsSync(file)) return main(argv, { env: { ...env, AITP_CREDENTIAL_DIR: dir }, out: (l) => lines.push(l), err: (l) => lines.push(l), credentialStore });
+                const parsed = parseAgentArgs(argv, { AITP_CREDENTIAL_DIR: dir });
+                if (parsed.kind !== "run") throw new Error(parsed.kind);
+                const agent = new Agent({ config: parsed.config, log, env, credentialStore, probe: new CapabilityProbe({ env: { TAQWRIGHT_HOME: path.join(dir, "no-taqwright") }, browsers: () => [], exec: async () => undefined }), backoff: { baseMs: 50, maxMs: 200 } });
+                const ran = agent.run();
+                const stopAt = setTimeout(() => agent.stop(), 15_000);
+                return ran.finally(() => clearTimeout(stopAt));
+            };
+            const first = await start();
+            const second = await start();
+            expect(enrolls, lines.join("\n")).toBe(1);
+            // Exit code 2 stops every launcher (Setup, start-runner.cmd/.sh, the Mac app); 1 makes them start it again.
+            expect([first, second]).toEqual([2, 2]);
+            expect(fs.existsSync(file)).toBe(false);
+            expect(lines.join("\n")).toContain("could not keep its credential");
+            expect(lines.join("\n")).toContain("Download the runner again from Settings");
+            expect(lines.join("\n")).not.toContain("Trying again");
+            expect(lines.join("\n")).not.toContain(code);
+        } finally {
+            svc.enroll = original;
             fs.rmSync(dir, { recursive: true, force: true });
         }
     }, 60_000);

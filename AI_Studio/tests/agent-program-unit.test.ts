@@ -323,6 +323,8 @@ describe("protocol client: every answer is validated", () => {
         expect((await err(client(reply(503, "")).hello(hello))).kind).toBe("network");
         const slow = await err(client(reply(429, "", { "retry-after": "7" })).poll({ agentId: "a", freeSlots: 1 }));
         expect(slow).toMatchObject({ kind: "network", retryAfter: 7 });
+        // The setup window shows this sentence: what is happening and that it recovers by itself, not a bare "slow down".
+        expect(slow.message).toBe("The platform asked the runner to wait: too many attempts in the last minute. It connects again by itself within a minute.");
         // a task route that says 404 is "that task is gone", not "your token is bad"
         expect((await err(client(reply(404, { error: "No such task." })).heartbeat("t1", {}))).kind).toBe("rejected");
     });

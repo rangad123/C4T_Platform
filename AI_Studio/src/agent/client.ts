@@ -198,7 +198,7 @@ export class PlatformClient {
             noteNetworkProblem(message);
             return new PlatformError("network", message, res.status);
         }
-        if (res.status === 429) return new PlatformError("network", "The platform is asking the agent to slow down.", res.status, retryAfter);
+        if (res.status === 429) return new PlatformError("network", "The platform asked the runner to wait: too many attempts in the last minute. It connects again by itself within a minute.", res.status, retryAfter);
         if (res.status >= 500) return new PlatformError("network", `The platform had a problem (HTTP ${res.status}).${said}`, res.status, retryAfter);
         return new PlatformError("rejected", `The platform refused a request to ${what} (HTTP ${res.status}).${said}`, res.status);
     }

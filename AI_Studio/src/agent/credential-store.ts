@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { keychainCommands, dpapiCommands, runCommand, type CommandRunner } from "./credential-store-os.js";
+import { keychainCommands, dpapiCommands, dpapiHelperCommands, runCommand, type Command, type CommandRunner } from "./credential-store-os.js";
 
 export const CREDENTIAL_FILE = "runner.credential";
 export const MACHINE_ID_FILE = "runner.machine";
@@ -29,6 +29,20 @@ export interface StoreDeps {
     platform?: NodeJS.Platform;
     /** Runs a program with stdin; replaced in tests (no real Keychain or DPAPI on the test machine). */
     run?: CommandRunner;
+    /** Windows: Setup's program, which does DPAPI without PowerShell (default AITP_DPAPI_HELPER, set by Setup when it starts the runner). */
+    dpapiHelper?: string;
+}
+
+/** Windows DPAPI: Setup's helper first when there is one, then PowerShell. The first good answer, or undefined. */
+async function dpapi(deps: StoreDeps | undefined, make: (c: ReturnType<typeof dpapiCommands>) => Command, ok: (out: string) => boolean): Promise<string | undefined> {
+    const run = deps?.run ?? runCommand;
+    const helper = deps?.dpapiHelper ?? process.env.AITP_DPAPI_HELPER;
+    for (const c of [...(helper ? [make(dpapiHelperCommands(helper))] : []), make(dpapiCommands())]) {
+        const out = await run(c.cmd, c.args, c.stdin);
+        const text = out.stdout.trim();
+        if (out.code === 0 && ok(text)) return text;
+    }
+    return undefined;
 }
 
 /** Thrown with a plain sentence when the computer's store could not be used. Never carries the token. */
@@ -58,10 +72,9 @@ export async function loadCredential(dir: string, deps?: StoreDeps): Promise<str
     }
     if (platform === "win32") {
         if (!text.startsWith("dpapi:")) return null;
-        const c = dpapiCommands().unprotect(text.slice("dpapi:".length));
-        const out = await run(c.cmd, c.args, c.stdin);
-        if (out.code !== 0) throw new CredentialStoreError("The runner could not read its credential (Windows data protection refused). It works only for the Windows account that added this computer. Add this computer again in Settings, Your runner.");
-        const token = out.stdout.trim();
+        const blob = text.slice("dpapi:".length);
+        const token = await dpapi(deps, (c) => c.unprotect(blob), () => true);
+        if (token === undefined) throw new CredentialStoreError("The runner could not read its credential (Windows data protection refused). It works only for the Windows account that added this computer. Add this computer again in Settings, Your runner.");
         return TOKEN_SHAPE.test(token) ? token : null;
     }
     return TOKEN_SHAPE.test(text) ? text : null;
@@ -76,15 +89,13 @@ export async function saveCredential(dir: string, token: string, deps?: StoreDep
     if (platform === "darwin") {
         const c = keychainCommands(dir).add(token);
         const out = await run(c.cmd, c.args, c.stdin);
-        if (out.code !== 0) throw new CredentialStoreError("The runner could not keep its credential in the login Keychain. Unlock the Keychain (sign in to this Mac), then start the runner again.");
+        if (out.code !== 0) throw new CredentialStoreError("The login Keychain did not take it (it may be locked: sign in to this Mac).");
         return;
     }
     let content = token;
     if (platform === "win32") {
-        const c = dpapiCommands().protect(token);
-        const out = await run(c.cmd, c.args, c.stdin);
-        const blob = out.stdout.trim();
-        if (out.code !== 0 || !/^[A-Za-z0-9+/=]{16,}$/.test(blob)) throw new CredentialStoreError("The runner could not protect its credential with Windows data protection. Start it again; if that does not help, add this computer again in Settings, Your runner.");
+        const blob = await dpapi(deps, (c) => c.protect(token), (b) => /^[A-Za-z0-9+/=]{16,}$/.test(b));
+        if (blob === undefined) throw new CredentialStoreError("Windows data protection did not work (the runner uses it through PowerShell, which this computer may block).");
         content = `dpapi:${blob}`;
     }
     await writePrivate(path.join(dir, CREDENTIAL_FILE), `${content}\n`);

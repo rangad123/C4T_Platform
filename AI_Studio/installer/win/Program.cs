@@ -46,6 +46,9 @@ namespace AITestingRunner
         [STAThread]
         static int Main(string[] args)
         {
+            // The runner's credential store (src/agent/credential-store.ts): DPAPI for this Windows user without PowerShell, which a company
+            // can lock down (Constrained Language Mode refuses its Add-Type). The value travels on stdin and stdout only, never in arguments.
+            if (args.Length == 1 && (args[0] == "--dpapi-protect" || args[0] == "--dpapi-unprotect")) return Dpapi(args[0] == "--dpapi-protect");
             Net.Init();
             string error;
             Options o = Options.Parse(args, out error);
@@ -81,6 +84,23 @@ namespace AITestingRunner
                 return 1;
             }
             finally { Stamp.Cleanup(); }
+        }
+
+        /// <summary>Protect stdin (the token) to base64, or unprotect stdin (base64) to the token, for the current user. Exit 1 on any failure, printing nothing.</summary>
+        static int Dpapi(bool protect)
+        {
+            try
+            {
+                string input;
+                using (StreamReader r = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false))) input = r.ReadToEnd().Trim();
+                string result = protect
+                    ? Convert.ToBase64String(System.Security.Cryptography.ProtectedData.Protect(Encoding.UTF8.GetBytes(input), null, System.Security.Cryptography.DataProtectionScope.CurrentUser))
+                    : Encoding.UTF8.GetString(System.Security.Cryptography.ProtectedData.Unprotect(Convert.FromBase64String(input), null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+                byte[] bytes = Encoding.UTF8.GetBytes(result);
+                using (Stream o = Console.OpenStandardOutput()) o.Write(bytes, 0, bytes.Length);
+                return 0;
+            }
+            catch (Exception) { return 1; }
         }
 
         // ── console plumbing ────────────────────────────────────────────────

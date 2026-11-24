@@ -44,8 +44,9 @@ No download carries a runner credential. The download from Settings holds a sing
 The runner trades the code at first contact: `POST /api/agent/enroll` `{ code, name, machineId }` (no Authorization header; limited per
 address and per code) -> `{ token, runnerId, kind }`. That makes the person's one runner credential and deletes the one they had (at
 most one per person: `agent_tokens.owner_id` is unique), so setting up a new computer (or the same one again) replaces the previous one. A used, expired or unknown code gets a sentence
-saying to download the runner again. If the answer is lost, the same computer (same install id) may ask again with the same code while the
-code is valid and the first credential was never used.
+saying to download the runner again. A code is traded once: asking again, even from the same computer, gets "already used". A runner
+that cannot keep its credential (Windows data protection or the login Keychain refused) deletes the code, says so and exits 2, so no
+launcher starts it again to trade the code once more.
 
 Agent command line: `--enroll <code>`, `--enroll-file <file>` (deleted once used), `--forget-credential` (for uninstalling). With no token
 argument the runner uses the credential it keeps. `--token`, `--token-file` and `AITP_AGENT_TOKEN` keep working for development but are no

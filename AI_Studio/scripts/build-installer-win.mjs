@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const EXE_NAME = "AITestingRunnerSetup.exe";
 export const SOURCES = ["Common.cs", "NodeFinder.cs", "Net.cs", "Engine.cs", "RunnerHost.cs", "Ui.cs", "Program.cs"];
-const REFERENCES = ["System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll", "System.Web.Extensions.dll"];
+const REFERENCES = ["System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll", "System.Web.Extensions.dll", "System.Security.dll"];
 
 /** Where csc.exe is, or undefined. CSC_PATH overrides (tests use it to prove the "not found" message). */
 export function findCsc(env = process.env) {

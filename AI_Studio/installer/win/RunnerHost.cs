@@ -94,7 +94,7 @@ namespace AITestingRunner
                 if (stopRequested) break;
                 if (code == StartFailed) { code = 1; break; }
                 if (code == 0) { Set(RunnerPhase.Stopped, "The runner stopped", 0); break; }
-                if (code == 2) { Set(RunnerPhase.NeedsAttention, "The runner could not read its settings. Check that you unzipped the whole kit, or download a new one from the platform.", 2); break; }
+                if (code == 2) { Set(RunnerPhase.NeedsAttention, "The runner cannot start: its settings or its credential are missing, or this computer could not keep its credential. The log says why. Download the runner again from Settings, Your runner.", 2); break; }
                 if (code == 3) { Set(RunnerPhase.AccessRemoved, "The platform no longer accepts this runner. It was removed, another computer was set up in its place, or its one-time code was already used or has expired. Set up your runner again from Settings, Your runner in the platform.", 3); break; }
                 if (code == 4) { Set(RunnerPhase.NeedsAttention, "This runner and the platform are different versions. Download a new runner from the platform.", 4); break; }
                 if (code == 5) { Set(RunnerPhase.NeedsAttention, "The platform refused this runner. The log says why.", 5); break; }
@@ -124,6 +124,8 @@ namespace AITestingRunner
                 psi.StandardErrorEncoding = Util.Utf8;
                 string path = Environment.GetEnvironmentVariable("PATH") ?? "";
                 psi.EnvironmentVariables["PATH"] = Path.GetDirectoryName(nodePath) + ";" + path;
+                // The runner keeps its credential with DPAPI through this program (Program.cs --dpapi-protect), so a locked-down PowerShell does not matter.
+                psi.EnvironmentVariables["AITP_DPAPI_HELPER"] = File.Exists(lay.SelfCopy) ? lay.SelfCopy : System.Reflection.Assembly.GetExecutingAssembly().Location;
                 p = Process.Start(psi);
             }
             catch (Exception e)
