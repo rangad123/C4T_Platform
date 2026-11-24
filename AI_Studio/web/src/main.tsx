@@ -6,6 +6,7 @@ import { RunDetail } from "./features/runs/RunDetail";
 import { RunsPage } from "./features/runs/RunsPage";
 import { SetupPage } from "./features/setup/SetupPage";
 import { AgentRunsPage } from "./features/workspace/AgentRunsPage";
+import { AgentPage, agentTabOf } from "./features/agent-workspace/AgentPage";
 import { RequirementsPage } from "./features/workspace/RequirementsPage";
 import { ScriptsPage } from "./features/workspace/ScriptsPage";
 import { SuitesPage } from "./features/workspace/SuitesPage";
@@ -39,7 +40,7 @@ function Pages() {
     const [a, b, c, d] = parts;
     if (!a) return <Home />;
     // Explore an existing project; `#/new` without one is redirected to Create a project (lib/aliases.ts).
-    if (a === "new" && query.get("project")) return <NewProject projectId={query.get("project")!} key={query.get("project")!} />;
+    if (a === "new" && query.get("project")) return <NewProject projectId={query.get("project")!} agentId={query.get("agent")} key={`${query.get("project")}/${query.get("agent") ?? ""}`} />;
     // The global places (docs/product-restructure/INFORMATION_ARCHITECTURE.md). `#/` stays the project list.
     if (a === "dashboard") return <DashboardPage />;
     if (a === "create") return <CreateProjectPage />;
@@ -65,6 +66,8 @@ function Pages() {
         if (c === "suites") return <SuitesPage id={b} suiteId={d} key={`${b}/${d ?? ""}`} />;
         if (c === "scripts") return <ScriptsPage id={b} key={b} />;
         if (c === "agent") return <AgentRunsPage id={b} runId={d} key={`${b}/${d ?? ""}`} />;
+        // One testing agent of the Agent Workspace: `#/projects/:id/agents/:agentId[?tab=runs|setup]`, `…/agents/:agentId/runs/:jobId`.
+        if (c === "agents" && d) return <AgentPage id={b} agentId={d} tab={agentTabOf(query.get("tab"))} runId={parts[4] === "runs" ? parts[5] : undefined} key={`${b}/${d}`} />;
         if (c === "runs") return d ? <RunDetail id={b} jobId={d} key={`${b}/${d}`} /> : <RunsPage id={b} key={b} />;
         if (c === "settings") return <SetupPage id={b} key={b} />;
         if (c === "release" && d) return <ReleaseDetail id={b} releaseId={d} key={`${b}/${d}`} />;

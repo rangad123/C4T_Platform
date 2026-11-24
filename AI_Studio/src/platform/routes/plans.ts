@@ -216,7 +216,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         refuseUnlessRunsStart(ctx.p, EXPLORING_OFF_MESSAGE); // tests switched off on this server: nothing is queued
         await ctx.assertNoActiveJob(id);
         // The application keeps the generation settings and the sign-in details of the plan, minus the one-off plan fields.
-        const { fromPlan: _a, excludeIdeas: _b, startedBy: _c, runTestCases: _rt, carryFrom: _d, ...config } = options;
+        const { fromPlan: _a, excludeIdeas: _b, startedBy: _c, runTestCases: _rt, carryFrom: _d, agentId: _ag, ...config } = options;
         const keptMobile = planned.config.mobile;
         const appId = repo.createApplication(id, planned.url, keptMobile ? { ...config, mobile: keptMobile } : config, planned.credentials);
         // The Test Case Generation Agent only writes the test cases: they are run when the person runs them (POST /runs), not here

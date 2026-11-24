@@ -91,6 +91,7 @@ export type PlaceId =
     | "scripts-review"
     | "script-version"
     | "agent-runs"
+    | "project-agent"
     | "settings-general"
     | "settings-members";
 
@@ -106,7 +107,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Look at the Guide when you are not sure where to begin.", button: "Read the start in 10 minutes", to: { topic: "first-steps" } },
         ],
         words: ["test", "run", "passing"],
-        next: [{ text: "Open a project, then look at its Dashboard.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Dashboard"] }],
+        next: [{ text: "Open a project, then look at its Workspace (an AI agent project) or its Dashboard.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Workspace", "Dashboard"] }],
         topic: "places",
     },
     "new-project": {
@@ -115,11 +116,11 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Set the Platform: a website, an Android app or an iPhone app.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Platform"] },
             { text: "Set the Testing mode. An AI agent project is explored by the AI; a code project holds test cases and the scripts that run them.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Testing mode"] },
-            { text: "Choose Create project. The project's Dashboard then lists what is still to set up.", button: "Read the 10-minute start", to: { topic: "first-steps" }, ui: ["Create project", "Dashboard"] },
+            { text: "Choose Create project. The project's Workspace (an AI agent project) or Dashboard then lists what is still to set up.", button: "Read the 10-minute start", to: { topic: "first-steps" }, ui: ["Create project", "Workspace", "Dashboard"] },
             { text: "Go back to your list of projects.", button: "Back to projects", to: here("projects") },
         ],
         words: ["test", "exploration"],
-        next: [{ text: "On an AI agent project's Dashboard, choose Start exploring.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Start exploring", "Dashboard"] }],
+        next: [{ text: "On an AI agent project's Workspace, choose Run on a testing agent's card.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Run", "Workspace"] }],
         topic: "first-steps",
     },
     "explore-again": {
@@ -149,11 +150,12 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         topic: "explore-my-app",
     },
     overview: {
-        title: "Project dashboard",
-        what: "The summary of one project: what the last exploration or run found, which tests need your attention, and what to do next.",
+        title: "Project Workspace or Dashboard",
+        what: "An AI agent project opens on its Workspace: one card per testing agent with its status and last outcome. A code project opens on its Dashboard: what the last run found, which tests need your attention, and what to do next.",
+        ui: ["Workspace", "Dashboard"],
         canDo: [
             { text: "See which tests are failing or need a look.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
-            { text: "In an AI agent project, choose Explore again to look at the application once more and find new things to test.", button: "Read about exploring again", to: { topic: "explore-my-app", search: "explore again" }, ui: ["Explore again"] },
+            { text: "In an AI agent project's Workspace, choose Run on a testing agent's card to start it, or Open to see its outcome.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Workspace", "Run", "Open"] },
             { text: "In a code project, choose Add test scripts to start: code projects are not explored.", button: "Read about writing code", to: { topic: "write-code" }, ui: ["Add test scripts"] },
             { text: "While it explores, turn on Watch live to see the browser the AI is using.", button: "Read how to watch the AI", to: { topic: "watch-the-ai" }, ui: ["Watch live"] },
             { text: "Look at past results in Runs.", button: "Open Runs", to: here("runs"), ui: ["Runs"] },
@@ -794,6 +796,18 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "Open the test cases the AI wrote.", button: "Open test cases", to: here("tests") }],
         topic: "explore-my-app",
     },
+    "project-agent": {
+        title: "A testing agent",
+        what: "One testing agent of the project, opened from its Workspace. Each agent does one job: Outcome shows its result only, Runs its runs only, Setup what it uses.",
+        canDo: [
+            { text: "Choose Run to start this agent again. Its run adds to the project's one tree of pages and grows its outcome.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Run"] },
+            { text: "Open Runs to see each of its runs; a stopped run keeps what it found.", button: "Read about watching the AI", to: { topic: "watch-the-ai" }, ui: ["Runs"] },
+            { text: "Open Setup to see what the agent needs and where each input is kept.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Setup"] },
+        ],
+        words: ["exploration", "run"],
+        next: [{ text: "Go back to the Workspace to see every agent of the project.", button: "Open the Workspace", to: here("overview") }],
+        topic: "explore-my-app",
+    },
     "settings-general": {
         title: "Project settings",
         what: "The project, its one platform and testing mode, the frameworks tests use, and its storage and backup.",
@@ -860,6 +874,7 @@ export function placeOf(route: RouteLike): PlaceId {
         if (c === "requirements") return "requirements";
         if (c === "suites") return d ? "suite-detail" : "suites";
         if (c === "agent") return "agent-runs";
+        if (c === "agents") return "project-agent";
         if (c === "scripts") {
             const s = pick(SCRIPTS_SECTIONS, q.get("section"));
             if ((s === "scripts" || s === "review") && q.get("test") && q.get("version")) return "script-version";

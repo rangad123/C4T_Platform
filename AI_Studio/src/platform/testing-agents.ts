@@ -18,6 +18,7 @@ import type { Row } from "./db.js";
 import type { Sql } from "./sql.js";
 import { HttpError } from "./http-error.js";
 import { projectSetupOf, type ProjectPlatform } from "./project-setup.js";
+import { SIZE_VARIANT_IDS } from "../engine/validation/variants.js";
 
 export const TESTING_AGENTS_MIGRATION = `
 CREATE TABLE project_testing_agents (
@@ -375,4 +376,69 @@ export async function narrowedByChoice(store: TestingAgentStore, row: Row, optio
     if (!chosen) return { options, dropped: [] };
     const n = narrowToChoice(asked, chosen, opts);
     return { options: applyAgentChoice(options, n.asked, chosen), dropped: n.dropped };
+}
+
+// ── one run = one agent (Agent Workspace, owner decision D1) ──
+export const AGENT_RUNS_NEED_WORKSPACE = "A run belongs to one testing agent only in a project tested by the AI agent alone, with its agents chosen in Settings → General.";
+export const agentNotChosen = (a: TestingAgent) => `The ${a.name} is not one of this project's testing agents. Add it in the project's Settings → General first.`;
+const either = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", the ")} or the ${names.at(-1)}` : names[0]!);
+export const chooseAgentToRun = (agents: readonly AgentId[]) => `Choose which testing agent runs: the ${either(agents.map((id) => agentById(id)!.name))}.`;
+
+/**
+ * Whose run this is (D1), for a project with the Agent Workspace: tested by the AI agent alone, with a saved choice. Undefined for every
+ * other project (code, mixed, or agent with no choice saved), which runs as before; naming an agent there is refused (400). In a Workspace
+ * project the agent must be one of the chosen ones (409). Left out, the run is the only chosen agent's, or Test Case Generation's when it
+ * is chosen (owner decision Q6: older callers of such a project, the CLI, MCP and old links, keep getting a test case run); else 400.
+ */
+export async function runAgentOf(store: TestingAgentStore, row: Row, asked: string | undefined): Promise<AgentId | undefined> {
+    const modes = projectSetupOf(row).testingModes;
+    const chosen = modes.includes("agent") && !modes.includes("code") ? await store.chosen(String(row.id)) : undefined;
+    if (!chosen) {
+        if (asked !== undefined) throw new HttpError(400, AGENT_RUNS_NEED_WORKSPACE);
+        return undefined;
+    }
+    if (asked === undefined) {
+        if (chosen.length === 1) return chosen[0];
+        if (chosen.includes("test-generation")) return "test-generation";
+        throw new HttpError(400, chooseAgentToRun(chosen));
+    }
+    const a = agentById(asked);
+    if (!a) throw new HttpError(400, unknownAgent(asked));
+    if (!chosen.includes(a.id)) throw new HttpError(409, agentNotChosen(a));
+    return a.id;
+}
+
+/** A Test Case Generation run: plan-only, with anything that would create from a plan or run test cases left out (case-agent.ts). */
+export function caseRunOptions(options: JobOptions): JobOptions {
+    const { runTestCases: _r, fromPlan: _f, carryFrom: _c, excludeIdeas: _e, ...rest } = options;
+    return { ...rest, mode: "generate", planOnly: true };
+}
+
+/**
+ * The options of one agent's run (D1; generalises caseAgentOptions): that agent's switches only, as applyAgentChoice gives them for a
+ * choice of that one agent, and the run says whose it is. Test Case Generation stays plan-only. A check agent's run has no plan step
+ * (the Workspace shows no plan): it makes and runs its checks. Everything else (the level, the limits, site memory, so the shared tree
+ * is reused and grows) is as asked.
+ */
+export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: AskedSwitches): JobOptions {
+    const narrowed: JobOptions = { ...applyAgentChoice(options, asked, [agentId]), agentId };
+    if (agentId === "test-generation") return caseRunOptions(narrowed);
+    const { planOnly: _p, ...rest } = narrowed;
+    // The Performance agent times safe API calls and runs the load check on the API target, without the API tests (the API agent's):
+    // it keeps the target, unless the run asked for the web alone.
+    if (agentId === "performance" && (asked.targets ?? ["web", "api"]).includes("api") && !rest.targets.includes("api")) return { ...rest, targets: [...rest.targets, "api"], apiTests: false };
+    // The Responsive UI agent checks the phone and tablet sizes beside desktop unless the run names its sizes (none: desktop only).
+    if (agentId === "responsive-ui" && asked.variants === undefined) return { ...rest, variants: [...SIZE_VARIANT_IDS] };
+    return rest;
+}
+
+/**
+ * A schedule's or a runbook step's exploration (D1): in a project with the Workspace, the run of the agent it keeps (none kept: as
+ * runAgentOf picks), with that agent's own switches as its Run button starts them; `asked` is what the schedule or step itself says.
+ * Undefined in every other project, which runs as before. An agent no longer chosen (409) or none for several agents (400) is refused.
+ */
+export async function savedAgentRun(store: TestingAgentStore, row: Row, agentId: string | null | undefined, options: JobOptions, asked: AskedSwitches = {}): Promise<JobOptions | undefined> {
+    const modes = projectSetupOf(row).testingModes;
+    if (!modes.includes("agent") || modes.includes("code") || !(await store.chosen(String(row.id)))) return undefined;
+    return agentRunOptions((await runAgentOf(store, row, agentId ?? undefined))!, options, asked);
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EXTRA_VARIANT_IDS, normalizeVariants, publicVariants, variantEligibility, detectBrowsers, variantAvailability, type ExtraVariantId } from "../../engine/validation/variants.js";
+import { EXTRA_VARIANT_IDS, SIZE_VARIANT_IDS, normalizeVariants, publicVariants, variantEligibility, detectBrowsers, variantAvailability, type ExtraVariantId } from "../../engine/validation/variants.js";
 import { HttpError } from "../http-error.js";
 import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { DEFAULT_JOB_OPTIONS, type Repo, type TestRow } from "../repo.js";
@@ -12,8 +12,11 @@ import type { RouteCtx } from "./types.js";
 const VariantsSchema = z.object({ variants: z.array(z.enum(EXTRA_VARIANT_IDS)).min(1, "Choose at least one browser or screen size").max(EXTRA_VARIANT_IDS.length) });
 const ProjectBody = VariantsSchema.extend({ testIds: z.array(z.string().min(1).max(100)).max(2000).optional() });
 
+/** The phone and tablet sizes are the Responsive UI agent's own (W2c): any other run asking for them is refused (W3 review L8). */
+export const SIZES_ARE_RESPONSIVE_UI = "The phone and tablet sizes are checked by the Responsive UI Testing Agent only: start its run to check them.";
+
 /** The `variants` field of a generation request (the job runs them after the main validation). Validated here, used by the core route. */
-export const JobVariantsSchema = z.array(z.enum(EXTRA_VARIANT_IDS)).max(EXTRA_VARIANT_IDS.length);
+export const JobVariantsSchema = z.array(z.enum([...EXTRA_VARIANT_IDS, ...SIZE_VARIANT_IDS])).max(EXTRA_VARIANT_IDS.length + SIZE_VARIANT_IDS.length);
 
 /** Added to GET /api/config: which browsers exist on this machine, and the variants with whether each can run here. */
 export function variantsConfig() {

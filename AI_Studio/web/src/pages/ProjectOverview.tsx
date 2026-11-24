@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { ArrowRight, ChevronRight, Code2, ExternalLink, ListChecks, Play, RefreshCw, Sparkles, Upload } from "lucide-react";
-import { downloadFrom, projectKind, projectShape, type ProjectDetail, type Severity, type TestSummary, type TestingMode } from "../api";
+import { projectKind, projectShape, type ProjectDetail, type Severity, type TestSummary, type TestingMode } from "../api";
 import { JobProgress } from "../components/JobProgress";
 import { ArchivedNote } from "../components/ProjectHub";
 import { ProjectHead } from "../components/ProjectKind";
@@ -34,22 +34,22 @@ import type { ScheduleList } from "../features/schedules/schedules";
 import { hostOf, plural, relativeTime } from "../lib/format";
 import { cleanReason, friendlyError, friendlyJobErrors, isActive, nothingRan } from "../lib/labels";
 import { useDocumentTitle, useFetch, useOnFinish, useProjectChanged } from "../lib/hooks";
-import { useCaseAgent } from "../features/runs/case-runs";
+import { hasWorkspace } from "../features/agent-workspace/workspace";
+import { Workspace } from "../features/agent-workspace/Workspace";
+import type { ProjectAgents } from "../features/testing-agents/testing-agents";
 import { help } from "../lib/help";
 import { routes } from "../lib/router";
 import { countedSentence } from "../features/quarantine/quarantine";
 import { stoppedLine } from "../features/runs/runs";
 import "../features/quarantine/quarantine.css";
-import { CaseOutcome } from "../features/outcome/CaseOutcome";
-import type { CaseOutcome as Outcome } from "../features/outcome/outcome";
-import { useCan } from "../features/auth/permissions";
 
 const SEV_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const attentionRank = (t: TestSummary) => (t.severity ? SEV_RANK[t.severity.severity] : t.validationStatus === "NEEDS_REVIEW" ? 4 : 5);
 
 /**
  * The project's places. Which of them a project has as tabs depends on its kind (`projectKind`):
- * an AI agent project has Dashboard, Runs, Requirements, Settings; a code project (and a mixed one, made with both modes) has
+ * an AI agent project with its agents chosen has Workspace, Requirements, Settings (Agent Workspace: each agent's runs are on its own
+ * page); one with no choice saved has Dashboard, Runs, Requirements, Settings; a code project (and a mixed one, made with both modes) has
  * Dashboard, Requirements, Test cases, Test scripts, Test suites, Runs, Settings. Agent runs has no tab; its pages still open from
  * a link, and so does any place whose tab a project's kind does not show (no tab is the open one then).
  */
@@ -78,7 +78,11 @@ export function ProjectTabs({
     useProjectChanged(id, fetched.reload);
     // Until the project is known no tab is drawn (a wrong row would flicker); if it cannot be read, every tab shows.
     const known = modes ?? (fetched.data ? projectShape(fetched.data).testingModes : fetched.error ? (["agent", "code"] as TestingMode[]) : undefined);
-    const kind = known ? projectKind({ testingModes: known }) : null;
+    const kinded = known ? projectKind({ testingModes: known }) : null;
+    // An agent project with its agents chosen has the Agent Workspace: Workspace instead of Dashboard, and no Runs tab (each agent has its own).
+    const choice = useFetch<ProjectAgents>(kinded === "agent" && !embedded ? `/projects/${id}/testing-agents` : null);
+    const workspace = kinded === "agent" && known ? (choice.data ? hasWorkspace(known, choice.data) : choice.error ? false : undefined) : false;
+    const kind = workspace === undefined ? null : kinded;
     const scripts = count ?? fetched.data?.test_count;
     const cases = caseCount ?? fetched.data?.case_count;
     // On a narrow screen the tab row scrolls sideways: bring the current tab into view so it is never clipped.
@@ -94,7 +98,13 @@ export function ProjectTabs({
     );
     return (
         <nav className="tabs" aria-label="Project sections" ref={nav} data-tour="project-tabs" data-kind={kind ?? undefined} aria-busy={kind ? undefined : true}>
-            {kind === "agent" && (
+            {kind === "agent" && workspace && (
+                <>
+                    {tab(routes.project(id), "Workspace", "overview", undefined, "tab-overview")}
+                    {tab(routes.requirements(id), "Requirements", "requirements", undefined, "tab-requirements")}
+                </>
+            )}
+            {kind === "agent" && !workspace && (
                 <>
                     {tab(routes.project(id), "Dashboard", "overview", undefined, "tab-overview")}
                     {tab(routes.runs(id), "Runs", "runs", undefined, "tab-runs")}
@@ -128,19 +138,16 @@ export function ProjectOverview({ id }: { id: string }) {
     // A restored project asks for the sign-in details a backup never holds: that needs a person, so it is said here, not only in Settings.
     const storage = useFetch<{ needsSecrets: Array<{ label: string }> }>(`/projects/${id}/storage`);
     const p = project.data;
-    // A Test Case Generation project (SPEC D3; the server's `caseAgent`, FX14) has its outcome as the Dashboard; only it asks for the outcome.
-    const caseAgent = useCaseAgent(id);
-    const outcome = useFetch<Outcome>(caseAgent ? `/projects/${id}/outcome` : null, () => (isActive(project.data?.latestJob?.status) ? 3000 : null));
-    useOnFinish(isActive(p?.latestJob?.status), () => void (tests.reload(), caseAgent && outcome.reload()));
+    // A project with the Agent Workspace (an agent project with its agents chosen, owner decision D2) lands on the Workspace instead.
+    const agents = useFetch<ProjectAgents>(`/projects/${id}/testing-agents`);
+    useOnFinish(isActive(p?.latestJob?.status), () => void tests.reload());
     useDocumentTitle(p?.name ?? "Project");
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: p?.name ?? "…" }], nav: "projects" });
 
     if (project.loading) return <Loading />;
     if (project.error || !p) return <ErrorState error={friendlyError(project.error?.message ?? "Project not found")} onRetry={project.reload} />;
-    // Not `outcome.loading` alone: on the render the project arrives the outcome has not been asked for yet.
-    if (caseAgent === undefined || (caseAgent && !outcome.data && !outcome.error)) return <Loading />;
-    // An outcome that cannot be read shows its sentence and Try again in the outcome's place, never the old agent Dashboard (F3 L4).
-    if (caseAgent) return <CaseAgentDashboard id={id} p={p} outcome={outcome.data} outcomeError={outcome.error?.message} onRetry={() => void outcome.reload()} needsSecrets={storage.data?.needsSecrets ?? []} onChanged={project.reload} />;
+    if (agents.loading) return <Loading />;
+    if (hasWorkspace(projectShape(p).testingModes, agents.data)) return <Workspace id={id} p={p} needsSecrets={storage.data?.needsSecrets ?? []} />;
 
     // The job answer may not say what it explored; a project whose application is a phone app has phone jobs.
     const job = p.latestJob ? phoneJobOf(p.latestJob, p.application?.url) : p.latestJob;
@@ -344,76 +351,6 @@ export function ProjectOverview({ id }: { id: string }) {
  * still to set up, the run while one runs, and the outcome report with its one download. No pass or fail, no tests to run or open, no
  * plan to confirm, no requirements coverage: the agent writes test cases and stops.
  */
-function CaseAgentDashboard({ id, p, outcome, outcomeError, onRetry, needsSecrets, onChanged }: { id: string; p: ProjectDetail; outcome: Outcome | undefined; outcomeError: string | undefined; onRetry: () => void; needsSecrets: Array<{ label: string }>; onChanged: () => void }) {
-    const can = useCan();
-    const [downloadError, setDownloadError] = useState<string | null>(null);
-    const job = p.latestJob ? phoneJobOf(p.latestJob, p.application?.url) : p.latestJob;
-    const active = isActive(job?.status);
-    const url = p.application?.url;
-    const download = async () => {
-        setDownloadError(null);
-        try {
-            await downloadFrom(`/projects/${id}/outcome/workbook`, `${p.name} test cases.xlsx`);
-        } catch (e) {
-            setDownloadError((e as Error).message);
-        }
-    };
-    return (
-        <>
-            <ProjectHead
-                project={p}
-                subtitle={
-                    <>
-                        {url ? (
-                            <a href={url} target="_blank" rel="noreferrer" className="row" style={{ gap: 4 }}>
-                                {hostOf(url)} <ExternalLink size={13} aria-hidden />
-                            </a>
-                        ) : (
-                            !p.mobile && <span>No application yet</span>
-                        )}
-                        {job && <JobBadge job={{ ...job, caseAgent: true }} tipFocusable />}
-                    </>
-                }
-                actions={
-                    <LinkButton href={exploreAgainHref(job, id)} icon={RefreshCw}>
-                        Explore again
-                    </LinkButton>
-                }
-            />
-            <ProjectTabs id={id} active="overview" modes={projectShape(p).testingModes} />
-            {p.archived_at && <ArchivedNote id={id} />}
-            <div className="stack" data-testid="case-agent-dashboard">
-                <SetupChecklist id={id} />
-                {needsSecrets.length > 0 && (
-                    <Callout tone="warning" title="Some details need entering again" actions={<LinkButton size="sm" href={routes.setup(id, "storage")}>Open Storage and backup</LinkButton>}>
-                        {needsSecrets.map((n) => n.label).join("; ")}. They are never part of a backup.
-                    </Callout>
-                )}
-                {job && active && <JobProgress job={job} onChanged={onChanged} />}
-                {downloadError && (
-                    <Callout tone="danger" title="The test cases could not be downloaded">
-                        {downloadError}
-                    </Callout>
-                )}
-                {!outcome ? (
-                    <ErrorState error={{ title: "The test cases could not be loaded", body: outcomeError ?? "" }} onRetry={onRetry} />
-                ) : (
-                    <CaseOutcome
-                        outcome={outcome}
-                        downloadHref={can("ai_studio.reports.export") ? `/api/projects/${id}/outcome/workbook` : null}
-                        onDownload={() => void download()}
-                        emptyActions={
-                            <LinkButton href={routes.newProject({ project: id })} variant="primary" icon={Sparkles}>
-                                Start exploring
-                            </LinkButton>
-                        }
-                    />
-                )}
-            </div>
-        </>
-    );
-}
-
 const notRunLine = (n: number) => `${plural(n, "test case")} ${n === 1 ? "is" : "are"} written and not run yet: run ${n === 1 ? "it" : "them"} when you choose.`;
 
 function Result({ job, total, validated, attention, notRun = 0, projectId, code, onChanged }: { job: NonNullable<ProjectDetail["latestJob"]>; total: number; validated: number; attention: number; /** Tests written and not run yet. */ notRun?: number; projectId: string; /** A code project: nothing offers exploring. */ code: boolean; /** A Continue started a job: the page reads the project again. */ onChanged?: () => void }) {

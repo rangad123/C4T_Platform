@@ -10,6 +10,8 @@ import { getScheduleServices } from "../schedule-services.js";
 import { OverlapError } from "../scheduler.js";
 import { refuseUnlessRunsStart } from "../suite-run.js";
 import { getTriggerServices } from "../trigger-services.js";
+import { runAgentOf } from "../testing-agents.js";
+import { testingAgentsOf } from "./testing-agents.js";
 import type { RouteCtx } from "./types.js";
 
 const FromTemplate = z.object({
@@ -33,7 +35,7 @@ export function registerRunbookRoutes(ctx: RouteCtx): void {
     };
 
     /** A definition from the request body: validated, then checked against what this project has. */
-    const definitionFrom = (projectId: string, body: unknown): RunbookDefinition => {
+    const definitionFrom = async (projectId: string, body: unknown): Promise<RunbookDefinition> => {
         const parsed = parseDefinition(body);
         if (!parsed.ok) throw new HttpError(400, parsed.errors[0]!.message, { issues: parsed.errors });
         const channels = getScheduleServices(p).alertStore;
@@ -45,6 +47,8 @@ export function registerRunbookRoutes(ctx: RouteCtx): void {
             const needsConfirm = problems.some((x) => x.requiresConfirmation);
             throw new HttpError(needsConfirm ? 409 : 400, problems[0]!.message, { issues: problems, ...(needsConfirm ? { requiresConfirmation: true } : {}) });
         }
+        // An analyze step that names its agent (D1) names one this project chose: refused now, not at its first run.
+        for (const s of parsed.definition.steps) if (s.type === "analyze" && s.agentId) await runAgentOf(testingAgentsOf(p), project(projectId), s.agentId);
         return parsed.definition;
     };
 
@@ -89,7 +93,7 @@ export function registerRunbookRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/runbooks", async (req, reply) => {
         const { id } = req.params as { id: string };
         project(id);
-        const def = definitionFrom(id, req.body);
+        const def = await definitionFrom(id, req.body);
         if (store.count(id) >= MAX_RUNBOOKS) throw new HttpError(409, `A project can have up to ${MAX_RUNBOOKS} runbooks. Delete one you no longer use first.`);
         return reply.code(201).send(await publicRunbook(store.create(id, def)));
     });
@@ -103,7 +107,7 @@ export function registerRunbookRoutes(ctx: RouteCtx): void {
         const channelId = body.channelId;
         if (channelId && getScheduleServices(p).alertStore.get(channelId)?.projectId !== id) throw new HttpError(404, "This project has no alert channel with that id.");
         const def = { ...presetDefinition(body.template, channelId), ...(body.name ? { name: body.name } : {}) };
-        const created = store.create(id, definitionFrom(id, def));
+        const created = store.create(id, await definitionFrom(id, def));
         return reply.code(201).send({ ...(await publicRunbook(created)), note: channelId ? null : "No alert channel was chosen, so this runbook has no message step. Add a channel under Alerts, then add a “Tell the team” step." });
     });
 
@@ -117,7 +121,7 @@ export function registerRunbookRoutes(ctx: RouteCtx): void {
         const { id, rid } = req.params as { id: string; rid: string };
         project(id);
         runbook(id, rid);
-        const def = definitionFrom(id, req.body);
+        const def = await definitionFrom(id, req.body);
         return await publicRunbook(store.update(rid, def)!);
     });
 

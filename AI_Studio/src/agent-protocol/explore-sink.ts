@@ -11,7 +11,7 @@ import { LocatorSchema, StepSchema, TestSpecSchema } from "../engine/spec/schema
 import { MemoryChangesSchema, SiteKnowledgeSchema } from "../engine/memory/types.js";
 import { ExploredOnSchema } from "../engine/mobile/phone-settings.js";
 import { CLEANUP_STATUSES } from "../engine/cleanup/ledger.js";
-import { EXTRA_VARIANT_IDS } from "../engine/validation/variants.js";
+import { EXTRA_VARIANT_IDS, SIZE_VARIANT_IDS } from "../engine/validation/variants.js";
 import { SafeName } from "./schema.js";
 
 /** One file's bytes at most (raw, before base64) inside a call. Larger evidence is uploaded in chunks first (`fileChunk`); a baseline over it is refused. */
@@ -100,7 +100,7 @@ export const SinkCall = z.discriminatedUnion("method", [
     z.object({ method: z.literal("restoreTest"), h: WireHandle }),
     z.object({ method: z.literal("saveScript"), h: WireHandle, script: Script, executable: z.boolean() }),
     z.object({ method: z.literal("recordExecution"), h: WireHandle, scriptId: ScriptId, attempt: z.number().int().min(0), run: WireSinkRun, startedAt: Started }),
-    z.object({ method: z.literal("recordVariant"), h: WireHandle, scriptId: ScriptId, r: z.object({ variant: z.enum(EXTRA_VARIANT_IDS), status: z.enum(["passed", "failed", "unavailable", "skipped"]), reason: Text(2000).optional(), run: WireSinkRun.optional() }), startedAt: Started }),
+    z.object({ method: z.literal("recordVariant"), h: WireHandle, scriptId: ScriptId, r: z.object({ variant: z.enum([...EXTRA_VARIANT_IDS, ...SIZE_VARIANT_IDS]), status: z.enum(["passed", "failed", "unavailable", "skipped"]), reason: Text(2000).optional(), run: WireSinkRun.optional() }), startedAt: Started }),
     z.object({ method: z.literal("recordEnvironment"), h: WireHandle, scriptId: ScriptId, r: z.object({ environment: Text(100), status: z.enum(["passed", "failed", "finding", "skipped"]), reason: Text(2000).optional(), run: WireSinkRun.optional() }), startedAt: Started }),
     z.object({ method: z.literal("saveTextArtifact"), kind: Id, name: SafeName, content: Text(4_000_000) }),
     // Sheet #8: one covered page thumbnail (a small JPEG); the platform checks its name, kind and size again and answers its id or null.

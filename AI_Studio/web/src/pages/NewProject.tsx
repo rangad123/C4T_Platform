@@ -1,4 +1,4 @@
-import { Globe, ListChecks, Sparkles } from "lucide-react";
+import { Globe, ListChecks, Play, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type ProjectDetail } from "../api";
 import { Button, Callout, LinkButton, PageHeader } from "../components/ui";
@@ -16,23 +16,34 @@ import { aiProblemOf, aiReadyOf, useMyAi } from "../features/aiconfig/aiconfig";
 import { LevelChoice, projectLevel, ScreenReviewChoice } from "../features/explore/ExploreLevel";
 import { LEVEL_SETTINGS, type ExploreLevel } from "../../../src/engine/levels";
 import { projectAgentView } from "../features/testing-agents/case-agent";
-import type { ProjectAgents } from "../features/testing-agents/testing-agents";
+import type { AgentDetail, ProjectAgents } from "../features/testing-agents/testing-agents";
+import { SIZE_DEFAULT, SizePicker } from "../features/agent-workspace/agents/responsive-ui";
 
 /**
  * Explore an existing project's application (`#/new?project=`): Start exploring the first time, Explore again after (with Explore every
  * page again). A new project is made on Create a project (`#/create`); the old `#/new` without a project is redirected there (lib/aliases.ts).
  */
-export function NewProject({ projectId }: { projectId: string }) {
+export function NewProject({ projectId, agentId }: { projectId: string; /** A run of one testing agent (`#/new?project=&agent=`, Agent Workspace D1). */ agentId?: string | null }) {
     const existing = useFetch<ProjectDetail>(`/projects/${projectId}`);
     // A project that never ran anything is explored for the first time: there is nothing to explore "again" or to reuse.
     const first = existing.data ? !existing.data.latestJob : false;
-    const title = first ? "Start exploring" : "Explore again";
+    // A check agent's run (every agent but Test Case Generation) has no plan step: its page says only what the run does, the address,
+    // the agent's own options and Start (W3 review H1).
+    const checkAgent = Boolean(agentId && agentId !== "test-generation");
+    const catalogue = useFetch<AgentDetail>(checkAgent ? `/testing-agents/${agentId}` : null).data?.agent;
+    const title = checkAgent ? `Run the ${catalogue?.name ?? "testing agent"}` : first ? "Start exploring" : "Explore again";
     useDocumentTitle(title);
-    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: existing.data?.name ?? "Project", href: routes.project(projectId) }, { label: title }], nav: "projects" });
+    usePage({
+        crumbs: checkAgent
+            ? [{ label: "Projects", href: routes.home }, { label: existing.data?.name ?? "Project", href: routes.project(projectId) }, { label: catalogue?.name ?? "Testing agent" }]
+            : [{ label: "Projects", href: routes.home }, { label: existing.data?.name ?? "Project", href: routes.project(projectId) }, { label: title }],
+        nav: "projects",
+    });
     const config = useConfig();
     // What the project's testing agents need lives on its Requirements tab (round 38); here only whether something mandatory is missing.
     const inputs = useFetch<AgentInputs>(`/projects/${projectId}/agent-inputs`);
-    const missing = inputs.data?.missing ?? [];
+    // A run of one agent asks only for what that agent misses.
+    const missing = (inputs.data?.missing ?? []).filter((m) => !agentId || m.agent === agentId);
     const [askOpen, setAskOpen] = useState(false);
     const asked = useRef(false);
     useEffect(() => {
@@ -50,11 +61,17 @@ export function NewProject({ projectId }: { projectId: string }) {
     const [fullExploration, setFullExploration] = useState(false);
     // AI screen review: null = the level decides; set only when the person changes the box.
     const [screenReview, setScreenReview] = useState<boolean | null>(null);
+    // A run of the Performance agent may include a load check (its `allows`); off unless the person ticks it.
+    const [loadCheck, setLoadCheck] = useState(false);
+    // A Responsive UI run: the screen sizes it checks beside desktop (the job's `variants`).
+    const [sizes, setSizes] = useState<string[]>(SIZE_DEFAULT);
     // Hidden when the project's testing agents leave it off (no UX agent).
     const agentSwitches = useFetch<ProjectAgents>(`/projects/${projectId}/testing-agents`);
     const screenReviewOff = agentSwitches.data?.applies === true && agentSwitches.data.switches?.visionChecks === "off";
     // A Test Case Generation project (founder 2026-11-19): the exploration builds the tree and writes test cases, and nothing is run.
-    const caseAgent = projectAgentView(existing.data, agentSwitches.data).caseAgent;
+    const caseAgent = agentId ? agentId === "test-generation" : projectAgentView(existing.data, agentSwitches.data).caseAgent;
+    // Where the person comes from and goes back to: the agent's own page for a run of one agent.
+    const home = agentId ? routes.projectAgent(projectId, agentId) : routes.project(projectId);
     const chosenLevel = level ?? projectLevel(existing.data);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<unknown>(null);
@@ -103,51 +120,111 @@ export function NewProject({ projectId }: { projectId: string }) {
             // sign-in, API access, OpenAPI document and requirements are the ones kept on the Requirements tab.
             await api(`/projects/${id}/test-generation`, {
                 method: "POST",
-                body: { url: address, plan: true, ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}) },
+                body: { url: address, plan: true, ...(agentId ? { agentId } : {}), ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}), ...(agentId === "performance" && loadCheck ? { loadChecks: true } : {}), ...(agentId === "responsive-ui" ? { variants: sizes } : {}) },
             });
-            go(routes.project(id));
+            go(home);
         } catch (err) {
             setError(err);
             setBusy(false);
         }
     }
 
+    const urlField = (hint: string) => (
+        <div className="field">
+            <label htmlFor="url" className="lg">
+                Application URL
+            </label>
+            <p className="hint" id="url-hint">
+                {hint}
+            </p>
+            <div className="input-wrap">
+                <Globe size={18} className="lead" aria-hidden />
+                <input
+                    id="url"
+                    className="input input-lg"
+                    type="text"
+                    inputMode="url"
+                    autoComplete="url"
+                    placeholder="https://example.com"
+                    value={url}
+                    onChange={(e) => {
+                        setUrl(e.target.value);
+                        setUrlError("");
+                    }}
+                    aria-describedby="url-hint"
+                    aria-invalid={!!urlError}
+                />
+            </div>
+            {urlError && <div className="error-text">{urlError}</div>}
+        </div>
+    );
+    const loadCheckBox = agentId === "performance" && (
+        <label className="check">
+            <input type="checkbox" data-testid="load-check" checked={loadCheck} onChange={(e) => setLoadCheck(e.target.checked)} />
+            <span>
+                <span className="title">Include a load check</span>
+                <span className="hint">Up to ten users at once on up to three safe API calls. Never run on a production environment.</span>
+            </span>
+        </label>
+    );
+    // What may stop or change the run, said only when it applies: no AI key, runs that do not start here, a refusal.
+    const blockers = (
+        <>
+            {aiMissing && (
+                <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.aiKeys}>Open AI keys</LinkButton>}>
+                    {aiProblemOf(myAi)} {caseAgent ? "Writing test cases needs it." : "Exploring the web application needs it, so only the application’s API is explored here. API tests are created without the AI."}
+                </Callout>
+            )}
+            {runnersOnly ? (
+                <ExploreOnRunnerNote ready={ready} />
+            ) : config?.runsHere === false && (
+                <Callout tone="warning" title="Exploring does not run here">
+                    <span data-testid="exploring-off">{EXPLORING_OFF_HERE} Explore where tests run, or once tests are switched on here.</span>
+                </Callout>
+            )}
+            {error !== null && <ExploreStartError error={error} />}
+        </>
+    );
+
+    if (checkAgent)
+        return (
+            <div style={{ maxWidth: 720 }}>
+                <PageHeader
+                    title={title}
+                    subtitle={<span data-testid="agent-run-does">{catalogue?.summary ?? ""}</span>}
+                    actions={
+                        <LinkButton href={home} variant="ghost">
+                            Cancel
+                        </LinkButton>
+                    }
+                />
+                <form className="card card-pad stack" onSubmit={submit} noValidate data-testid="agent-run-form">
+                    {urlField("The address of the website this agent checks.")}
+                    {agentId === "responsive-ui" && <SizePicker value={sizes} onChange={setSizes} />}
+                    {loadCheckBox}
+                    {blockers}
+                    <div className="row">
+                        <Button type="submit" variant="primary" size="lg" icon={Play} loading={busy} disabled={blocked}>
+                            {busy ? "Starting…" : "Start"}
+                        </Button>
+                    </div>
+                    {askOpen && <MissingInputsDialog projectId={projectId} missing={missing} onClose={() => setAskOpen(false)} />}
+                </form>
+            </div>
+        );
+
     const form = (
         <form className="stack" onSubmit={submit} noValidate>
             <div className="card card-pad stack">
-                <div className="field">
-                    <label htmlFor="url" className="lg">
-                        Application URL
-                    </label>
-                    <p className="hint" id="url-hint">
-                        {caseAgent ? `Enter the address of the website, or leave it empty to write the test cases from the project’s requirements. ${CASE_AGENT_HINT}` : "Enter the address of the website you want to test. We’ll explore it and show you a plan. Nothing is created until you say so."}
-                    </p>
-                    <div className="input-wrap">
-                        <Globe size={18} className="lead" aria-hidden />
-                        <input
-                            id="url"
-                            className="input input-lg"
-                            type="text"
-                            inputMode="url"
-                            autoComplete="url"
-                            placeholder="https://example.com"
-                            value={url}
-                            onChange={(e) => {
-                                setUrl(e.target.value);
-                                setUrlError("");
-                            }}
-                            aria-describedby="url-hint"
-                            aria-invalid={!!urlError}
-                        />
-                    </div>
-                    {urlError && <div className="error-text">{urlError}</div>}
-                </div>
+                {urlField(caseAgent ? `Enter the address of the website, or leave it empty to write the test cases from the project’s requirements. ${CASE_AGENT_HINT}` : "Enter the address of the website you want to test. We’ll explore it and show you a plan. Nothing is created until you say so.")}
                 <div className="field">
                     <FieldHelp htmlFor="scope" label="Focus (optional)" help={`Told to the AI when it ${caseAgent ? "writes the test cases" : "plans which tests to write"}. The whole application is still explored.`} />
                     <input id="scope" className="input" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Everything — or e.g. “search and checkout only”" />
                 </div>
                 <LevelChoice value={chosenLevel} onChange={setLevel} caseAgent={caseAgent} />
+                {agentId === "responsive-ui" && <SizePicker value={sizes} onChange={setSizes} />}
                 {offerReview && <ScreenReviewChoice level={chosenLevel} canReadImages value={screenReview} onChange={setScreenReview} />}
+                {loadCheckBox}
                 {!first && (
                     <label className="check">
                         <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />
@@ -158,19 +235,7 @@ export function NewProject({ projectId }: { projectId: string }) {
                     </label>
                 )}
 
-                {aiMissing && (
-                    <Callout tone="warning" title="You have no usable AI key" actions={<LinkButton size="sm" href={routes.aiKeys}>Open AI keys</LinkButton>}>
-                        {aiProblemOf(myAi)} {caseAgent ? "Writing test cases needs it." : "Exploring the web application needs it, so only the application’s API is explored here. API tests are created without the AI."}
-                    </Callout>
-                )}
-                {runnersOnly ? (
-                    <ExploreOnRunnerNote ready={ready} />
-                ) : config?.runsHere === false && (
-                    <Callout tone="warning" title="Exploring does not run here">
-                        <span data-testid="exploring-off">{EXPLORING_OFF_HERE} Explore where tests run, or once tests are switched on here.</span>
-                    </Callout>
-                )}
-                {error !== null && <ExploreStartError error={error} />}
+                {blockers}
 
                 <div className="row">
                     <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} disabled={blocked}>
@@ -178,7 +243,7 @@ export function NewProject({ projectId }: { projectId: string }) {
                     </Button>
                     {agents && (
                         <span className="hint" data-testid="explore-agents">
-                            {caseAgent ? caseAgentSentence(agents.names) : agents.source === "chosen" ? `Checked by this project’s testing agents: ${agents.names.join(", ")}.` : "No testing agents saved for this project yet, so every kind of test is planned."}
+                            {agentId ? `The ${CASE_AGENT_NAME} writes this project’s test cases.` : caseAgent ? caseAgentSentence(agents.names) : agents.source === "chosen" ? `Checked by this project’s testing agents: ${agents.names.join(", ")}.` : "No testing agents saved for this project yet, so every kind of test is planned."}
                         </span>
                     )}
                 </div>
@@ -208,7 +273,7 @@ export function NewProject({ projectId }: { projectId: string }) {
                 title={title}
                 subtitle={first ? "Explore this application for the first time. You see a plan before anything is created." : caseAgent ? "Explore this application again. What it finds is added to the same tree, with its test cases." : "Explore this application again. Existing tests are kept."}
                 actions={
-                    <LinkButton href={routes.project(projectId)} variant="ghost">
+                    <LinkButton href={home} variant="ghost">
                         Cancel
                     </LinkButton>
                 }

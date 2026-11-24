@@ -33,11 +33,21 @@ import { laneRounds, sharedLaneCount, testAccountLane } from "./lanes.js";
  */
 export const CONDITION_VARIANT_IDS = ["dark", "locale", "high-contrast", "reduced-motion", "no-js"] as const;
 export type ConditionVariantId = (typeof CONDITION_VARIANT_IDS)[number];
-export const VARIANT_IDS = ["chromium-desktop", "firefox", "webkit", "mobile-chrome", "tablet", ...CONDITION_VARIANT_IDS] as const;
+/**
+ * The Responsive UI agent's screen sizes (Agent Workspace): a phone and a tablet beside the desktop base run. A run of that agent checks
+ * them by default (testing-agents.ts agentRunOptions), and its visual checks are repeated on them, so each page is pictured at each size.
+ * They are not on the browsers-and-sizes list a person picks from elsewhere (EXTRA_VARIANT_IDS).
+ */
+export const SIZE_VARIANT_IDS = ["phone-375", "tablet-768"] as const;
+export type SizeVariantId = (typeof SIZE_VARIANT_IDS)[number];
+export const isSizeVariant = (v: string): v is SizeVariantId => (SIZE_VARIANT_IDS as readonly string[]).includes(v);
+export const VARIANT_IDS = ["chromium-desktop", "firefox", "webkit", "mobile-chrome", "tablet", ...SIZE_VARIANT_IDS, ...CONDITION_VARIANT_IDS] as const;
 export type VariantId = (typeof VARIANT_IDS)[number];
 /** The variants a user can ask for. chromium-desktop is the base run that already happens on every validation. */
 export const EXTRA_VARIANT_IDS = ["firefox", "webkit", "mobile-chrome", "tablet", ...CONDITION_VARIANT_IDS] as const;
 export type ExtraVariantId = (typeof EXTRA_VARIANT_IDS)[number];
+/** What one run may repeat its tests on: the list a person picks from, and the Responsive UI agent's sizes. */
+export type RunVariantId = ExtraVariantId | SizeVariantId;
 
 export type BrowserName = "chromium" | "firefox" | "webkit";
 
@@ -60,6 +70,8 @@ export const VARIANTS: Record<VariantId, VariantDef> = {
     webkit: { id: "webkit", label: "Safari (WebKit)", description: "The engine behind Safari on Mac and iPhone, on a desktop screen.", browser: "webkit", device: "Desktop Safari", viewport: { width: 1280, height: 800 } },
     "mobile-chrome": { id: "mobile-chrome", label: "Phone", description: "A phone-sized screen (390 × 844) with touch and a mobile browser.", browser: "chromium", device: "Pixel 7", viewport: { width: 390, height: 844 } },
     tablet: { id: "tablet", label: "Tablet", description: "A tablet-sized screen (820 × 1180) with touch.", browser: "chromium", device: "Galaxy Tab S4", viewport: { width: 820, height: 1180 } },
+    "phone-375": { id: "phone-375", label: "Phone", description: "A phone-sized screen (375 × 812) with touch and a mobile browser.", browser: "chromium", device: "Pixel 7", viewport: { width: 375, height: 812 } },
+    "tablet-768": { id: "tablet-768", label: "Tablet", description: "A tablet-sized screen (768 × 1024) with touch.", browser: "chromium", device: "Galaxy Tab S4", viewport: { width: 768, height: 1024 } },
     dark: { id: "dark", label: "Dark mode", description: "Chrome on a desktop screen, with the computer set to dark mode.", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { colorScheme: "dark" } },
     locale: { id: "locale", label: "Another language and time zone", description: "Chrome on a desktop screen in German (de-DE), in the New Zealand time zone (about 12 hours ahead of London).", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { locale: "de-DE", timezoneId: "Pacific/Auckland" } },
     "high-contrast": { id: "high-contrast", label: "High contrast", description: "Chrome on a desktop screen with forced colours and more contrast, as people with low vision set it.", browser: "chromium", device: "Desktop Chrome", viewport: { width: 1280, height: 800 }, use: { forcedColors: "active", contrast: "more" } },
@@ -71,7 +83,9 @@ export const VARIANTS: Record<VariantId, VariantDef> = {
 const READING_CHECKS = new Set(["visible", "hidden", "text", "count", "url", "title"]);
 
 /** Whether a test that is repeated at all fits this variant too (JavaScript off: content pages only). */
-export function variantFits(v: ExtraVariantId, spec: TestSpec): { fits: true } | { fits: false; reason: string } {
+export function variantFits(v: RunVariantId, spec: TestSpec): { fits: true } | { fits: false; reason: string } {
+    // A visual check is repeated on the Responsive UI agent's sizes only (variantEligibility `pictures`).
+    if (isVisualCheck(spec) && !isSizeVariant(v)) return { fits: false, reason: VISUAL_NOT_REPEATED };
     if (v !== "no-js") return { fits: true };
     const reading = spec.steps.every((s) => s.action === "navigate" || (s.action === "assert" && READING_CHECKS.has(s.check)));
     return reading ? { fits: true } : { fits: false, reason: "With JavaScript off only tests that open pages and read them are repeated; this one acts on the page." };
@@ -123,12 +137,19 @@ export function publicVariants(browsers: BrowserAvailability) {
 
 // ── Which tests are re-run ──────────────────────────────────────────────────
 
-/** Only a validated, browser-dependent web test is worth repeating on another browser or screen size. */
-export function variantEligibility(spec: TestSpec, validationStatus: string): { eligible: true } | { eligible: false; reason: string } {
+const VISUAL_NOT_REPEATED = "Visual comparisons use one approved screenshot per browser and screen size, so they aren't repeated.";
+const isVisualCheck = (spec: TestSpec) => spec.type === "visual" || hasScreenshotStep(spec);
+
+/**
+ * Only a validated, browser-dependent web test is worth repeating on another browser or screen size. `pictures` (a run on the Responsive
+ * UI agent's sizes): a visual check is repeated too, whatever its desktop result, to picture its page at each size.
+ */
+export function variantEligibility(spec: TestSpec, validationStatus: string, opts: { pictures?: boolean } = {}): { eligible: true } | { eligible: false; reason: string } {
     if (spec.kind !== "web") return { eligible: false, reason: "Only web tests depend on the browser." };
+    if (opts.pictures && isVisualCheck(spec)) return { eligible: true };
     if (validationStatus !== "VALIDATED") return { eligible: false, reason: "It hasn't passed in the main run yet, so there is nothing to compare." };
     if (spec.type === "accessibility" || spec.steps.some((s) => s.action === "assert" && s.check === "a11y")) return { eligible: false, reason: "Accessibility audits are checked once, in the main run." };
-    if (spec.type === "visual" || hasScreenshotStep(spec)) return { eligible: false, reason: "Visual comparisons use one approved screenshot per browser and screen size, so they aren't repeated." };
+    if (isVisualCheck(spec)) return { eligible: false, reason: VISUAL_NOT_REPEATED };
     if (spec.type === "security" || spec.tags.some((t) => /^(health|security)$/i.test(t))) return { eligible: false, reason: "Security and health checks don't depend on the browser." };
     return { eligible: true };
 }
@@ -173,7 +194,7 @@ export interface VariantTest {
 }
 
 export interface VariantRecord {
-    variant: ExtraVariantId;
+    variant: RunVariantId;
     status: CompatStatus;
     reason?: string;
     /** The real Playwright result (absent for skipped / unavailable). */
@@ -203,7 +224,7 @@ export interface VariantSummary {
     /** Tests that passed everywhere they ran, with nothing unavailable. */
     clean: number;
     cells: Record<CompatStatus, number>;
-    unavailable: Array<{ variant: ExtraVariantId; reason: string }>;
+    unavailable: Array<{ variant: RunVariantId; reason: string }>;
 }
 
 /**
@@ -211,7 +232,8 @@ export interface VariantSummary {
  * "skipped" record with the reason so the compatibility view explains the gap instead of leaving it blank.
  */
 export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, tests: VariantTest[], requested: readonly string[]): Promise<VariantSummary> {
-    const variants = normalizeVariants(requested);
+    const variants: RunVariantId[] = [...normalizeVariants(requested), ...SIZE_VARIANT_IDS.filter((v) => requested.includes(v))];
+    const pictures = variants.some(isSizeVariant);
     const summary: VariantSummary = { checked: 0, differing: [], clean: 0, cells: { passed: 0, failed: 0, unavailable: 0, skipped: 0 }, unavailable: [] };
     const startedAt = new Date().toISOString();
     const record = async (t: VariantTest, r: VariantRecord) => {
@@ -229,14 +251,14 @@ export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, te
     const eligible: VariantTest[] = [];
     for (const t of tests) {
         if (t.spec.kind !== "web") continue; // an API test has no browser; no row, no noise
-        const e = variantEligibility(t.spec, t.validationStatus);
+        const e = variantEligibility(t.spec, t.validationStatus, { pictures });
         if (e.eligible) eligible.push(t);
         else for (const v of variants) await record(t, { variant: v, status: "skipped", reason: e.reason });
     }
     if (variants.length === 0 || eligible.length === 0) return summary;
 
     const browsers = (deps.detect ?? detectBrowsers)();
-    const runnable: ExtraVariantId[] = [];
+    const runnable: RunVariantId[] = [];
     for (const v of variants) {
         const a = variantAvailability(v, browsers);
         if (a.available) {
@@ -259,7 +281,7 @@ export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, te
             return { testId: t.spec.testId, filename: s.filename, content: s.content };
         };
         // Variants that take the same tests run together, one Playwright project each (JavaScript off takes only content-page tests).
-        const groups = new Map<string, { tests: VariantTest[]; variants: ExtraVariantId[] }>();
+        const groups = new Map<string, { tests: VariantTest[]; variants: RunVariantId[] }>();
         for (const v of runnable) {
             const tests = eligible.filter((t) => variantFits(v, t.spec).fits);
             const key = tests.map((t) => t.spec.testId).join("|");
@@ -269,10 +291,10 @@ export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, te
             groups.set(key, g);
         }
         const byKey = new Map<string, ScriptRun>();
-        const project = (v: ExtraVariantId): RunnerProject => ({ name: v, device: VARIANTS[v].device, viewport: VARIANTS[v].viewport, ...(VARIANTS[v].use ? { use: VARIANTS[v].use } : {}) });
+        const project = (v: RunVariantId): RunnerProject => ({ name: v, device: VARIANTS[v].device, viewport: VARIANTS[v].viewport, ...(VARIANTS[v].use ? { use: VARIANTS[v].use } : {}) });
         // Firefox and WebKit are heavy: never more than two at once on a small machine.
         const workers = Math.max(1, Math.min(deps.workers, 2));
-        const runOn = async (tests: VariantTest[], variants: ExtraVariantId[]) => {
+        const runOn = async (tests: VariantTest[], variants: RunVariantId[]) => {
             const runs = await (deps.executor ?? ctx.executor ?? localExecutor).execute("playwright", { scratchDir: deps.scratchDir, scripts: tests.map(script), ...(deps.helpers?.length && tests.some((t) => t.custom) ? { helpers: deps.helpers } : {}) }, { run: deps.env }, { workers, signal: ctx.signal, projects: variants.map(project) });
             for (const r of runs) byKey.set(`${r.testId}|${r.variant}`, r);
         };
@@ -280,7 +302,9 @@ export async function runVariantChecks(ctx: EngineContext, deps: VariantDeps, te
             // Tests that sign in as one account never run at the same time (./lanes.ts), on one browser or two: with such a test in the
             // group, each variant runs on its own, in rounds of at most one test per account.
             const lanes = g.tests.map((t) => testAccountLane(t));
-            if (lanes.every((l) => l === undefined) || (g.variants.length === 1 && !sharedLaneCount(lanes))) await runOn(g.tests, g.variants);
+            // A visual check writes its picture under one name whatever the size: two sizes in one run would compare with each other's.
+            const apart = g.variants.length > 1 && g.tests.some((t) => isVisualCheck(t.spec));
+            if (!apart && (lanes.every((l) => l === undefined) || (g.variants.length === 1 && !sharedLaneCount(lanes)))) await runOn(g.tests, g.variants);
             else for (const v of g.variants) for (const round of laneRounds(lanes, workers)) await runOn(round.map((i) => g.tests[i]!), [v]);
         }
         for (const t of eligible) {

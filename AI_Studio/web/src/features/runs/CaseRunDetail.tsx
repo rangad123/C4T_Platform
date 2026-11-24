@@ -43,14 +43,14 @@ export function CaseRunDetail({ id, jobId, number }: { id: string; jobId: string
     const name = project.data?.name;
     const title = caseRunTitle(number);
     useDocumentTitle(`${title} · ${name ?? "Runs"}`);
-    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Runs", href: routes.runs(id) }, { label: title }], nav: "projects" });
+    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Runs", href: routes.projectAgent(id, "test-generation", "runs") }, { label: title }], nav: "projects" });
 
     if (run.loading) return <ListSkeleton rows={5} />;
     if (run.error || !a) {
         return (
             <div className="stack">
                 <ErrorState error={friendlyError(run.error?.message ?? "Run not found")} onRetry={run.reload} />
-                <a className="run-back" href={routes.runs(id)}>
+                <a className="run-back" href={routes.projectAgent(id, "test-generation", "runs")}>
                     <ArrowLeft size={16} aria-hidden /> All runs
                 </a>
             </div>
@@ -78,7 +78,7 @@ export function CaseRunDetail({ id, jobId, number }: { id: string; jobId: string
             <ProjectTabs id={id} active="runs" count={project.data?.test_count} />
 
             <div className="stack" data-testid="case-run">
-                <a className="run-back" href={routes.runs(id)}>
+                <a className="run-back" href={routes.projectAgent(id, "test-generation", "runs")}>
                     <ArrowLeft size={16} aria-hidden /> All runs
                 </a>
 

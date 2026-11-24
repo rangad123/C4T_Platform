@@ -18,6 +18,8 @@ import { runsCanStartHere, suiteStoreFor } from "../suite-run.js";
 import { currentActor } from "../auth/actor.js";
 import { isRunbookStart, OverlapError, runnableTestIds } from "../scheduler.js";
 import { detectFlaky, getRunSummary, trendsFor } from "../trends.js";
+import { agentById, runAgentOf } from "../testing-agents.js";
+import { testingAgentsOf } from "./testing-agents.js";
 import type { RouteCtx } from "./types.js";
 
 const MAX_SCHEDULES = 10;
@@ -41,9 +43,11 @@ const ScheduleBody = z.object({
     runbookId: z.string().min(1).max(64).nullable().optional(),
     /** Run this test suite (its tests, order and settings) instead of every test (see routes/suites.ts). */
     suiteId: z.string().min(1).max(64).nullable().optional(),
+    /** The testing agent an Explore again schedule of a Workspace project runs (D1). Left out: the only chosen agent, or Test Case Generation. */
+    agentId: z.string().min(1).max(64).optional(),
 });
 const SchedulePatch = z
-    .object({ name: z.string().trim().min(1).max(80), kind: z.enum(SCHEDULE_KINDS), cadence: CadenceSchema, enabled: z.boolean(), retryFailures: z.number().int().min(0).max(3), environment: z.string().regex(ENV_NAME).nullable(), confirmProduction: z.boolean(), runbookId: z.string().min(1).max(64).nullable(), suiteId: z.string().min(1).max(64).nullable() })
+    .object({ name: z.string().trim().min(1).max(80), kind: z.enum(SCHEDULE_KINDS), cadence: CadenceSchema, enabled: z.boolean(), retryFailures: z.number().int().min(0).max(3), environment: z.string().regex(ENV_NAME).nullable(), confirmProduction: z.boolean(), runbookId: z.string().min(1).max(64).nullable(), suiteId: z.string().min(1).max(64).nullable(), agentId: z.string().min(1).max(64) })
     .partial()
     .strict();
 
@@ -94,6 +98,8 @@ const publicSchedule = (s: Schedule) => ({
     lastOutcome: s.lastOutcome,
     lastOutcomeAt: s.lastOutcomeAt,
     lastNote: s.lastNote,
+    agentId: s.agentId,
+    agentName: s.agentId ? (agentById(s.agentId)?.name ?? null) : null,
     createdAt: s.createdAt,
 });
 
@@ -155,6 +161,14 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         if (!env) throw new HttpError(404, `This project has no environment called “${name}”.`);
         if (env.production && !confirm) throw new HttpError(409, PRODUCTION_CONFIRM_MESSAGE(env.name), { requiresConfirmation: true });
     };
+    /** Whose runs an Explore again schedule makes (D1): an agent of a Workspace project (testing-agents.ts runAgentOf), else none. */
+    const scheduleAgent = async (projectId: string, kind: Schedule["kind"], asked: string | undefined): Promise<string | null> => {
+        if (kind !== "generate") {
+            if (asked !== undefined) throw new HttpError(400, "Only an “Explore again” schedule runs one testing agent.");
+            return null;
+        }
+        return (await runAgentOf(testingAgentsOf(p), project(projectId), asked)) ?? null;
+    };
     const autoName = (s: { kind: Schedule["kind"]; cadence: Schedule["cadence"] }) => `${KIND_LABEL[s.kind]} · ${describeCadence(s.cadence).replace(/^Every /, "every ")}`;
 
     // ── schedules ──────────────────────────────────────────────────────────────
@@ -174,13 +188,14 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         project(id);
         const body = ScheduleBody.parse(req.body);
         if (svc.store.list(id).length >= MAX_SCHEDULES) throw new HttpError(409, `A project can have up to ${MAX_SCHEDULES} schedules`);
+        const agentId = await scheduleAgent(id, body.kind, body.agentId);
         if (body.suiteId) await checkSuite(id, body.suiteId, body.kind, body);
         else await assertRunnable(id, body.kind);
         if (body.environment) checkScheduleEnvironment(id, body.kind, body.environment, body.confirmProduction);
         if (body.runbookId) checkRunbook(id, body.runbookId);
         // Who made it: a person's own runner may take the runs of that person's schedules (COMMON contract, scheduler.ts startedBy).
         const actor = currentActor();
-        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures, createdBy: makerIdOfActor(actor) });
+        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures, createdBy: makerIdOfActor(actor), agentId });
         if (body.environment) setScheduleEnvironment(repo.db, created.id, { environment: body.environment, confirmProduction: Boolean(body.confirmProduction) });
         if (body.runbookId) runbooks.setScheduleLink(created.id, body.runbookId);
         if (body.suiteId) await suites.setScheduleLink(created.id, body.suiteId);
@@ -201,7 +216,9 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         const wasAuto = cur.name === autoName(cur);
         const next = { kind: patch.kind ?? cur.kind, cadence: patch.cadence ?? cur.cadence };
         const renamed = patch.name === undefined && wasAuto && (patch.kind || patch.cadence) ? autoName(next) : patch.name;
-        const { environment, confirmProduction, runbookId, suiteId, ...own } = patch;
+        const { environment, confirmProduction, runbookId, suiteId, agentId: askedAgent, ...own } = patch;
+        // The agent is worked out again only when the kind or the agent changes: a toggle never fails on an agent removed since.
+        const agentId = askedAgent !== undefined || (patch.kind && patch.kind !== cur.kind) ? await scheduleAgent(id, patch.kind ?? cur.kind, askedAgent) : undefined;
         if (runbookId) checkRunbook(id, runbookId);
         const target = scheduleEnvironment(repo.db, sid);
         const nextEnv = environment === undefined ? target.environment : environment;
@@ -209,7 +226,7 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         if (nextEnv) checkScheduleEnvironment(id, patch.kind ?? cur.kind, nextEnv, nextConfirm);
         // The editor now owns its runs: from here on they go to the editor's own runner, never to the previous maker's.
         const editor = currentActor();
-        const updated = svc.store.update(sid, { ...own, name: renamed, createdBy: makerIdOfActor(editor) })!;
+        const updated = svc.store.update(sid, { ...own, name: renamed, createdBy: makerIdOfActor(editor), ...(agentId !== undefined ? { agentId } : {}) })!;
         if (environment !== undefined || confirmProduction !== undefined) setScheduleEnvironment(repo.db, sid, { environment: nextEnv, confirmProduction: nextConfirm });
         if (runbookId !== undefined) runbooks.setScheduleLink(sid, runbookId);
         if (suiteId !== undefined) await suites.setScheduleLink(sid, suiteId);

@@ -8,7 +8,7 @@
  */
 import { riskyGateLine, riskyKindOf } from "../validation/risky.js";
 import { KNOWN_BUG_FAILURE } from "./types.js";
-import { A11Y_FAILURE_PREFIX, A11Y_MAX_RULES, A11Y_MAX_TARGETS, a11yThreshold, WCAG_TAGS } from "../a11y/audit.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_ALL_RULES_TAG, A11Y_FAILURE_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, A11Y_MAX_RULES, A11Y_MAX_TARGETS, a11yThreshold, WCAG_TAGS } from "../a11y/audit.js";
 import { EVIDENCE_HELPER_SOURCE } from "../evidence/capture.js";
 import { CLEANUP_HELPER_SOURCE, runTagOf, webCleanupScriptSource } from "../cleanup/helper.js";
 import { HEALTH_HELPER_SOURCE, isHealthCheck } from "../health/checks.js";
@@ -297,9 +297,11 @@ function renderAssert(step: Extract<Step, { action: "assert" }>, snapshotName: s
 /**
  * Self-contained axe-core audit emitted into scripts that contain an a11y step. Mirrors
  * runA11yAudit/formatA11yViolations in ../a11y/audit.ts (same tags, threshold and message);
- * tests/a11y.test.ts checks the two produce identical failure messages.
+ * tests/a11y.test.ts checks the two produce identical failure messages. `allRules` (A11Y_ALL_RULES_TAG): it also attaches every rule
+ * found, at every impact, as the run's notes (formatA11yAllRules), passed or failed.
  */
-const A11Y_HELPER = `const A11Y_IMPACTS = ["minor", "moderate", "serious", "critical"];
+const a11yHelper = (allRules: boolean) => `const A11Y_IMPACTS = ["minor", "moderate", "serious", "critical"];
+const A11Y_ALL_RULES = ${allRules};
 
 /** axe-core audit, WCAG 2.0/2.1 A + AA. Fails on violations at or above \`minImpact\`. */
 async function a11yAudit(page: Page, minImpact: string, scope?: string | Locator): Promise<void> {
@@ -314,22 +316,28 @@ async function a11yAudit(page: Page, minImpact: string, scope?: string | Locator
         await scope.first().evaluate((el, m) => el.setAttribute("data-a11y-scope", m), mark);
         builder.include(\`[data-a11y-scope="\${mark}"]\`);
     }
-    const { violations } = await builder.analyze();
+    const { violations, incomplete } = await builder.analyze();
     const rank = (i?: string | null) => Math.max(0, A11Y_IMPACTS.indexOf(i ?? "minor"));
     const clip = (s: string, n: number) => {
         const t = s.replace(/\\s+/g, " ").trim();
         return t.length > n ? t.slice(0, n - 3) + "..." : t;
     };
-    const failing = violations.filter((v) => rank(v.impact) >= rank(minImpact)).sort((a, b) => rank(b.impact) - rank(a.impact));
-    if (failing.length === 0) return;
-    const lines = failing.slice(0, ${A11Y_MAX_RULES}).map((v) => {
+    const line = (v: (typeof violations)[number]) => {
         const targets = v.nodes
             .slice(0, ${A11Y_MAX_TARGETS})
             .map((n) => clip((n.target as unknown[]).map((t) => (Array.isArray(t) ? t.join(" >> ") : String(t))).join(" >> "), 60));
         const more = v.nodes.length > ${A11Y_MAX_TARGETS} ? ", ..." : "";
         const count = \`\${v.nodes.length} node\${v.nodes.length === 1 ? "" : "s"}\`;
         return \`- \${v.id} [\${v.impact ?? "minor"}]: \${clip(v.help, 100)} (\${count}: \${targets.join(", ")}\${more})\`;
-    });
+    };
+    if (A11Y_ALL_RULES && (violations.length || incomplete.length)) {
+        const lines = (vs: typeof violations) => [...vs].sort((a, b) => rank(b.impact) - rank(a.impact)).map(line);
+        const review = incomplete.length ? [${JSON.stringify(A11Y_NEEDS_REVIEW_PREFIX)}, ...lines(incomplete)] : [];
+        await test.info().attach("notes", { body: JSON.stringify([${JSON.stringify(A11Y_ALL_RULES_PREFIX)}, ...lines(violations), ...review]), contentType: "application/json" });
+    }
+    const failing = violations.filter((v) => rank(v.impact) >= rank(minImpact)).sort((a, b) => rank(b.impact) - rank(a.impact));
+    if (failing.length === 0) return;
+    const lines = failing.slice(0, ${A11Y_MAX_RULES}).map(line);
     if (failing.length > ${A11Y_MAX_RULES}) lines.push(\`- ...and \${failing.length - ${A11Y_MAX_RULES}} more rule(s)\`);
     const n = failing.length;
     throw new Error(\`${A11Y_FAILURE_PREFIX} \${n} WCAG rule\${n === 1 ? "" : "s"} violated at "\${minImpact}" impact or above\\n\${lines.join("\\n")}\`);
@@ -443,7 +451,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }, testInfo) => {
     await evidenceAttach(page, testInfo);
 });
-${a11y ? `\n${A11Y_HELPER}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\nconst IGNORE_HTTPS_ERRORS = ${ignoresHttpsErrors(spec)};\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${dbCheckSetup(spec.steps).helper}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
+${a11y ? `\n${a11yHelper(spec.tags.includes(A11Y_ALL_RULES_TAG))}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\nconst IGNORE_HTTPS_ERRORS = ${ignoresHttpsErrors(spec)};\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${dbCheckSetup(spec.steps).helper}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ page }) => {
 ${knownBugLine(spec, ctx)}${riskyGateLine(spec)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${dbCheckSetup(spec.steps).start}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
 });

@@ -221,7 +221,7 @@ export function caseRunLine(r: CaseRunFacts): string {
         case "stopped":
             return `Stopped. What it found is kept: it added ${addedText(r)}.`;
         case "failed":
-            return `Did not finish. What it found is kept: it added ${addedText(r)}.`;
+            return `Failed. What it found is kept: it added ${addedText(r)}.`;
         default:
             return `Added ${addedText(r)}.`;
     }

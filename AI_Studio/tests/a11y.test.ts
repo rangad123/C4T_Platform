@@ -4,15 +4,16 @@
  * finding classifier.
  *
  * Observed axe impacts on examples/a11y-app (axe-core 4.13): /bad → image-alt [critical],
- * label [critical], color-contrast [serious]; /contrast → color-contrast [serious] only.
+ * label [critical], color-contrast [serious]; /contrast → color-contrast [serious] only; /levels → html-xml-lang-mismatch [moderate] only.
+ * (No WCAG A/AA rule of minor impact gives a definite violation in axe-core 4.13: server-side-image-map only asks for a review.)
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
-import { A11Y_FAILURE_PREFIX, formatA11yViolations } from "../src/engine/a11y/audit.js";
-import { a11yFinding, generateA11ySpecs } from "../src/engine/a11y/specs.js";
+import { A11Y_ALL_RULES_PREFIX, A11Y_FAILURE_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, formatA11yAllRules, formatA11yViolations } from "../src/engine/a11y/audit.js";
+import { A11Y_ALL_RULES_TAG, a11yFinding, generateA11ySpecs } from "../src/engine/a11y/specs.js";
 import { launchChromium } from "../src/engine/discovery/browser.js";
 import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema, type Locator, type TestSpec } from "../src/engine/spec/schema.js";
@@ -54,12 +55,13 @@ const model = (pages: PageModel[], loggedIn = false): AppModel => ({
 
 const form = (purpose: PageModel["forms"][number]["purpose"]) => ({ fields: [], purpose });
 
-const a11ySpec = (testId: string, url: string, extra: { expected?: string; locator?: Locator } = {}): TestSpec =>
+const a11ySpec = (testId: string, url: string, extra: { expected?: string; locator?: Locator } = {}, tags: string[] = []): TestSpec =>
     TestSpecSchema.parse({
         testId,
         title: `a11y ${url}`,
         kind: "web",
         type: "accessibility",
+        tags,
         steps: [{ action: "navigate", url }, { action: "assert", check: "a11y", ...extra }],
     });
 
@@ -91,6 +93,12 @@ describe("generateA11ySpecs", () => {
         expect(specs.find((s) => (s.steps[0] as { url: string }).url === "/about")!.priority).toBe("low");
         // Every draft is a valid canonical spec.
         specs.forEach((d, i) => TestSpecSchema.parse({ ...d, testId: `WEB-${String(i + 1).padStart(3, "0")}` }));
+    });
+
+    it("tags the audits to keep every rule only when asked (an Accessibility agent's run)", () => {
+        const m = model([page({ path: "/", type: "home" })]);
+        expect(generateA11ySpecs(m, { maxPages: 5, allRules: true })[0]!.tags).toContain(A11Y_ALL_RULES_TAG);
+        expect(generateA11ySpecs(m, { maxPages: 5 })[0]!.tags).not.toContain(A11Y_ALL_RULES_TAG);
     });
 
     it("respects maxPages and skips account pages that were only reachable logged in", () => {
@@ -130,6 +138,11 @@ describe("a11y audit execution", () => {
         scopedCss: a11ySpec("WEB-007", "/bad", { locator: { by: "css", value: "#signup" } }),
         scopedText: a11ySpec("WEB-008", "/bad", { locator: { by: "text", value: "Low contrast promotional text" } }),
         scopedNthClean: a11ySpec("WEB-009", "/clean", { locator: { by: "css", value: "form", nth: 0 } }),
+        // An Accessibility agent's audits keep every rule at every impact (generateA11ySpecs allRules).
+        levelsAll: a11ySpec("WEB-011", "/levels", {}, ["a11y", A11Y_ALL_RULES_TAG]),
+        levelsPlain: a11ySpec("WEB-012", "/levels"),
+        badAll: a11ySpec("WEB-013", "/bad", {}, ["a11y", A11Y_ALL_RULES_TAG]),
+        reviewAll: a11ySpec("WEB-014", "/review", {}, ["a11y", A11Y_ALL_RULES_TAG]),
         missingPage: TestSpecSchema.parse({
             testId: "WEB-010", title: "page never loads", kind: "web", type: "accessibility",
             steps: [{ action: "navigate", url: "/" }, { action: "assert", check: "visible", expected: "Text that is not there" }, { action: "assert", check: "a11y" }],
@@ -185,6 +198,27 @@ describe("a11y audit execution", () => {
         expect(text).toContain("- color-contrast [serious]");
     });
 
+    it("keeps every rule at every impact for an Accessibility agent's audit; the threshold still decides pass or fail", () => {
+        // Only a moderate issue: it passes, and its notes (a passing test's reason) list the rule.
+        expect(runs.levelsAll.status, runs.levelsAll.error).toBe("passed");
+        expect(runs.levelsAll.notes?.[0]).toBe(A11Y_ALL_RULES_PREFIX);
+        expect(runs.levelsAll.notes!.slice(1)).toEqual([expect.stringMatching(/^- html-xml-lang-mismatch \[moderate\]: .+ \(1 node: html\)$/)]);
+        // An ordinary audit of the same page notes nothing.
+        expect(runs.levelsPlain.status).toBe("passed");
+        expect(runs.levelsPlain.notes ?? []).toEqual([]);
+        // Failed: the finding is the usual message, then the full list.
+        expect(runs.badAll.status).toBe("failed");
+        const reason = a11yFinding(cases.badAll, runs.badAll)!;
+        expect(reason.startsWith(`${A11Y_FAILURE_PREFIX} 3 WCAG rules violated`)).toBe(true);
+        expect(reason.slice(reason.indexOf(A11Y_ALL_RULES_PREFIX)).split("\n")).toHaveLength(4);
+        expect(a11yFinding(cases.bad, runs.bad)).not.toContain(A11Y_ALL_RULES_PREFIX);
+    });
+
+    it("notes what axe could not decide (needs review) apart from the rules broken, and it never fails the audit", () => {
+        expect(runs.reviewAll.status, runs.reviewAll.error).toBe("passed");
+        expect(runs.reviewAll.notes).toEqual([A11Y_ALL_RULES_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, expect.stringMatching(/^- server-side-image-map \[minor\]: .+ \(1 node: img\)$/)]);
+    });
+
     it("a11yFinding reports violations but not other failures", () => {
         const reason = a11yFinding(cases.bad, runs.bad);
         expect(reason).toMatch(new RegExp(`^${A11Y_FAILURE_PREFIX}`));
@@ -227,6 +261,35 @@ describe("a11y audit execution", () => {
             await context.close();
         }
     }, 90_000);
+});
+
+describe("formatA11yAllRules", () => {
+    it("lists every rule worst first, with no cap on rules and the usual cap on targets; nothing when the page is clean", () => {
+        const v = (id: string, impact: string | null, n: number) => ({ id, impact, help: `Help for ${id}`, nodes: Array.from({ length: n }, (_, i) => ({ target: [`#el-${i}`] })) });
+        const all = formatA11yAllRules([v("a", "minor", 1), v("b", "serious", 5), v("c", "critical", 1), v("d", "moderate", 1), v("e", "serious", 1), v("f", "serious", 1), v("g", "serious", 1), v("h", null, 1)])!;
+        expect(all[0]).toBe(A11Y_ALL_RULES_PREFIX);
+        expect(all.slice(1).map((l) => l.split(" ")[1])).toEqual(["c", "b", "e", "f", "g", "d", "a", "h"]);
+        expect(all[2]).toBe("- b [serious]: Help for b (5 nodes: #el-0, #el-1, #el-2, ...)");
+        expect(formatA11yAllRules([])).toBeUndefined();
+        // What axe could not decide follows under its own line, apart from the rules broken.
+        expect(formatA11yAllRules([], [v("server-side-image-map", "minor", 1)])).toEqual([A11Y_ALL_RULES_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, "- server-side-image-map [minor]: Help for server-side-image-map (1 node: #el-0)"]);
+        const line = (id: string, impact: string) => `- ${id} [${impact}]: Help for ${id} (1 node: #el-0)`;
+        expect(formatA11yAllRules([v("a", "serious", 1)], [v("b", "minor", 1), v("c", "serious", 1)])).toEqual([A11Y_ALL_RULES_PREFIX, line("a", "serious"), A11Y_NEEDS_REVIEW_PREFIX, line("c", "serious"), line("b", "minor")]);
+    });
+
+    it("a failed audit's finding keeps the items for a person's check after the rules broken", () => {
+        const v = (id: string, impact: string) => ({ id, impact, help: `Help for ${id}`, nodes: [{ target: ["#x"] }] });
+        const spec = a11ySpec("WEB-122", "/");
+        const msg = formatA11yViolations([v("label", "critical")], "serious")!;
+        const notes = formatA11yAllRules([v("label", "critical")], [v("server-side-image-map", "minor")]);
+        const reason = a11yFinding(spec, { status: "failed", failedStepIndex: 1, steps: [{ index: 1, title: "2", status: "failed", error: msg }], error: msg, notes, responses: [] } as never)!;
+        expect(reason.split("\n").slice(-4)).toEqual([A11Y_ALL_RULES_PREFIX, "- label [critical]: Help for label (1 node: #x)", A11Y_NEEDS_REVIEW_PREFIX, "- server-side-image-map [minor]: Help for server-side-image-map (1 node: #x)"]);
+    });
+
+    it("is what the generated script attaches: the same lines", () => {
+        expect(renderScript(a11ySpec("WEB-120", "/", {}, ["a11y", A11Y_ALL_RULES_TAG]), "playwright", { baseUrl: BASE }).content).toContain("const A11Y_ALL_RULES = true;");
+        expect(renderScript(a11ySpec("WEB-121", "/"), "playwright", { baseUrl: BASE }).content).toContain("const A11Y_ALL_RULES = false;");
+    });
 });
 
 describe("formatA11yViolations", () => {

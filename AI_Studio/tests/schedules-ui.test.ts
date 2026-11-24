@@ -14,6 +14,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
+import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
+import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 
@@ -140,6 +142,42 @@ describe("Schedule tab", () => {
             platform.repo.updateProject(projectId, { testingModes: ["agent", "code"] });
             await page.goto("about:blank");
         }
+    });
+
+    it("in a project with the Agent Workspace, an Explore again schedule is one agent's: the form offers each agent, the preview and the row name it", async () => {
+        const pid = platform.repo.createProject({ name: "Agent shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        platform.repo.createApplication(pid, `http://127.0.0.1:${FIXTURE_PORT}`, { ...DEFAULT_JOB_OPTIONS });
+        await testingAgentsOf(platform).set(pid, ["accessibility", "ux"], "test");
+        await page.goto(`${BASE}/#/projects/${pid}/runs?section=schedules`);
+        await page.getByRole("button", { name: "New schedule" }).click();
+        const form = page.getByRole("form", { name: "New schedule" });
+        const kind = form.getByLabel("What should run");
+        await pwExpect(kind.locator("option")).toHaveText(["Re-run all tests", "Run the Accessibility Testing Agent (uses your AI key)", "Run the UX Testing Agent (uses your AI key)"]);
+        await kind.selectOption("agent:ux");
+        await pwExpect(form.getByText("Run the UX Testing Agent every day at 02:00")).toBeVisible();
+        await form.getByRole("button", { name: "Create schedule" }).click();
+        const row = page.locator("[data-schedule]");
+        await pwExpect(row.locator(".badge", { hasText: "UX Testing Agent" })).toBeVisible();
+        const saved = getScheduleServices(platform).store.list(pid);
+        expect(saved.map((x) => [x.kind, x.agentId])).toEqual([["generate", "ux"]]);
+        // No code-project tooling here (W3 review M4): no run sequences and no release gate.
+        await pwExpect(page.getByText("Run sequences")).toHaveCount(0);
+        await pwExpect(page.getByText("Release gate")).toHaveCount(0);
+
+        // An agent's Runs tab opens Schedules showing that agent's only, with a new schedule already that agent's.
+        await page.goto(`${BASE}/#/projects/${pid}/agents/accessibility?tab=runs`);
+        await page.getByTestId("agent-schedules-link").getByRole("link", { name: "Schedules" }).click();
+        await page.waitForURL((u) => u.hash === `#/projects/${pid}/runs?section=schedules&agent=accessibility`);
+        await pwExpect(page.getByRole("heading", { name: "Scheduled runs of the Accessibility Testing Agent" })).toBeVisible();
+        await pwExpect(page.locator("[data-schedule]")).toHaveCount(0);
+        await pwExpect(page.getByTestId("schedules-agent-only")).toBeVisible();
+        await page.getByRole("button", { name: "New schedule" }).click();
+        await pwExpect(page.getByRole("form", { name: "New schedule" }).getByLabel("What should run")).toHaveValue("agent:accessibility");
+
+        // The old Runs address opens the Workspace.
+        await page.goto(`${BASE}/#/projects/${pid}/runs`);
+        await page.waitForURL((u) => u.hash === `#/projects/${pid}`);
+        await pwExpect(page.getByTestId("workspace")).toBeVisible();
     });
 
     it("adds a webhook channel and sends a test message that really arrives", async () => {

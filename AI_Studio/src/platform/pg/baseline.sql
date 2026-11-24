@@ -279,7 +279,8 @@ CREATE TABLE schedules (
     updated_at TEXT NOT NULL,
     environment TEXT,
     confirm_production BIGINT NOT NULL DEFAULT 0,
-    created_by TEXT
+    created_by TEXT,
+    agent_id TEXT
 );
 CREATE INDEX idx_schedules_due ON schedules (enabled, next_run_at);
 

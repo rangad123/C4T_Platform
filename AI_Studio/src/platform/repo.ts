@@ -18,6 +18,7 @@ import { HttpError } from "./http-error.js";
 import { trackTestVersion, type VersionSource } from "./review-store.js";
 import { currentActor } from "./auth/actor.js";
 import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
+import type { AgentId } from "./testing-agents.js";
 import { HANDED_OVER } from "./runner-handover.js";
 import { maskText, maskValue } from "./redact-text.js";
 
@@ -83,6 +84,8 @@ export interface JobOptions {
     mode?: JobMode;
     /** validate mode: test_cases.id values to execute. */
     testIds?: string[];
+    /** Whose run this is (Agent Workspace D1: one run = one agent, testing-agents.ts agentRunOptions). Absent: a run of a project without the Workspace, or made before it. Never kept on the application. */
+    agentId?: AgentId;
     /** Plan and write the functional test cases of the journeys (web target). Default true; false when the project's testing agents leave out the Test Case Generation Agent (testing-agents.ts). */
     functionalTests?: boolean;
     /** true (evaluation only): the journeys' test cases also run in the job. Absent or false: they are written and not run (engine GenerationRequest.runTestCases). */
@@ -105,6 +108,8 @@ export interface JobOptions {
     visionChecks?: boolean;
     /** Check API responses against the documented schema (OpenAPI). Default true. */
     contractChecks?: boolean;
+    /** False: the API is explored only for the speed and load checks (a Performance agent run), and the API tests themselves are not made. */
+    apiTests?: boolean;
     /** Check that restricted pages stay closed to lesser accounts and visitors (needs test accounts). Default true. */
     accessChecks?: boolean;
     /** Start from (and update) what earlier analyses learned about this application. Default true; false = neither read nor write site memory. */

@@ -22,6 +22,8 @@ export interface StepDef {
     includeMobile?: boolean;
     allowMutatingApiTests?: boolean;
     loadChecks?: boolean;
+    /** An analyze step of an Agent Workspace project: the testing agent whose run it is. */
+    agentId?: string;
     condition?: { check: CheckKind; atLeast?: number };
     channelId?: string;
     message?: string;
@@ -176,6 +178,8 @@ export interface DraftStep {
     includeMobile: boolean;
     allowMutating: boolean;
     loadChecks: boolean;
+    /** "" = none named. */
+    agentId: string;
     check: CheckKind;
     atLeast: number;
     channelId: string;
@@ -212,6 +216,7 @@ export function newStep(type: StepType, existing: DraftStep[]): DraftStep {
         includeMobile: false,
         allowMutating: false,
         loadChecks: false,
+        agentId: "",
         check: "passRate",
         atLeast: 90,
         channelId: "",
@@ -244,6 +249,7 @@ export function toDraft(def: Definition): Draft {
             includeMobile: Boolean(s.includeMobile),
             allowMutating: Boolean(s.allowMutatingApiTests),
             loadChecks: Boolean(s.loadChecks),
+            agentId: s.agentId ?? "",
             check: s.condition?.check ?? "passRate",
             atLeast: s.condition?.atLeast ?? 90,
             channelId: s.channelId ?? "",
@@ -279,6 +285,7 @@ export function toDefinition(d: Draft): Definition {
         } else if (s.type === "analyze") {
             if (s.allowMutating) out.allowMutatingApiTests = true;
             if (s.loadChecks) out.loadChecks = true;
+            if (s.agentId) out.agentId = s.agentId;
         } else if (s.type === "condition") {
             out.condition = s.check === "passRate" ? { check: "passRate", atLeast: s.atLeast } : { check: s.check };
         } else if (s.type === "notify") {

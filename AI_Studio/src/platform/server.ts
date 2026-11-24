@@ -47,10 +47,12 @@ import { loadTargetProblem } from "./load-guard.js";
 import { isLoadSpec, LOAD_MAX_ENDPOINTS, LOAD_MAX_REQUESTS } from "../engine/performance/load.js";
 import { registerFeatureRoutes } from "./routes/index.js";
 import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
+import { agentRunOptions, caseRunOptions, runAgentOf } from "./testing-agents.js";
 import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
 import { adoptSignIn, assertMaySaveSignIn } from "./routes/project-sign-in.js";
-import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
+import { JobVariantsSchema, projectCompat, SIZES_ARE_RESPONSIVE_UI, testCompatibility, variantsConfig } from "./routes/variants.js";
+import { isSizeVariant } from "../engine/validation/variants.js";
 import { dataDrivenSpecIssues, dataSetsFor, EnvironmentChoice, startEnvironmentRun, testEnvironmentInfo } from "./routes/environments.js";
 import { exportObjectsUsedBy, importObjectsFor, objectsFor } from "./routes/locators.js";
 import { tryResolveSpecRefs } from "../engine/locators/refs.js";
@@ -166,6 +168,8 @@ const GenerateSchema = z.object({
     visual: z.boolean().optional(),
     /** Also re-run the tests that validate on these browsers / screen sizes (default none). */
     variants: JobVariantsSchema.optional(),
+    /** Whose run this is, in a project with the Agent Workspace (testing-agents.ts runAgentOf): one of the project's chosen agents. */
+    agentId: z.string().max(40).optional(),
     /** Explore and plan only: the plan is kept for a person to look at and nothing is created or run (confirm it with POST /api/projects/:id/plans/:jobId/create). */
     plan: z.boolean().optional(),
     /** Requirements document (txt, md, pdf, docx) the generated tests should cover. */
@@ -228,6 +232,8 @@ async function assertSpecTargets(spec: ImportedSpec, index: number, baseUrl: str
 const publicJob = (j: JobRow) => ({
     jobId: j.id,
     projectId: j.projectId,
+    // Whose run it is (Agent Workspace D1); absent for runs of projects without the Workspace and for older runs.
+    ...(j.options.agentId ? { agentId: j.options.agentId } : {}),
     status: j.status,
     mode: j.options.mode ?? "generate",
     trigger: j.options.trigger ?? "manual",
@@ -444,9 +450,12 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (wantsPhone) assertPhoneExploration(id, latestMobile(id));
         const phoneOnly = wantsPhone && body0.targets!.every((t) => t === "mobile");
         const phoneUrl = phoneOnly ? `android-app://${latestMobile(id)!.appPackage}` : undefined;
+        // One run = one agent (Agent Workspace D1): undefined for a project without the Workspace, which runs as before.
+        const agentId = await runAgentOf(testingAgentsOf(p), project(id), body0.agentId);
+        if (agentId !== "responsive-ui" && body0.variants?.some(isSizeVariant)) throw new HttpError(400, SIZES_ARE_RESPONSIVE_UI);
         if (!body0.url && !phoneUrl) {
             // A Test Case Generation project without an address writes its test cases from its active requirements (SPEC R16).
-            if (!(await requirementsOnlyRun(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");
+            if ((agentId && agentId !== "test-generation") || !(await requirementsOnlyRun(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");
             await assertNoActiveJob(id);
             // The project's latest application is kept as it is (the form fills its address in next time); a project without one gets an empty one.
             const appId = (repo.getLatestApplicationPublic(id)?.id as string | undefined) ?? repo.createApplication(id, "", {});
@@ -477,9 +486,10 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             ...Object.fromEntries(Object.entries({ scope: body.scope, includePaths: body.includePaths, targets: body.targets, allowMutatingApiTests: body.allowMutatingApiTests, openApiUrl: body.openApiUrl, apiBaseUrl: body.apiBaseUrl, accessibility: body.accessibility, healthChecks: body.healthChecks, securityChecks: body.securityChecks, performanceChecks: body.performanceChecks, loadChecks: body.loadChecks, loadBudgets: body.loadBudgets, inputChecks: body.inputChecks, visionChecks: body.visionChecks,contractChecks: body.contractChecks, accessChecks: body.accessChecks, useMemory: body.useMemory, fullExploration: body.fullExploration, responseCache: body.responseCache, understandingBaseline: body.understandingBaseline, cleanupAfter: body.cleanupAfter, performanceBudgets: body.performanceBudgets, visual: body.visual, variants: body.variants?.length ? body.variants : undefined }).filter(([, v]) => v !== undefined)),
         } as JobOptions;
         // The project's chosen testing agents decide which checks run (routes/testing-agents.ts); a project with none saved runs as asked.
-        let options = await withAgentChoice(p, project(id), asked, body);
+        // A run of one agent turns on that agent's switches only (testing-agents.ts agentRunOptions).
+        let options = agentId ? agentRunOptions(agentId, asked, body) : await withAgentChoice(p, project(id), asked, body);
         // The chosen agents' mandatory inputs (routes/agent-inputs.ts): refused in the words the Explore page's pop-up uses. No saved choice, no refusal.
-        const missing = await missingForExploration(p, project(id), { openApiUrl: body.openApiUrl }, options.targets);
+        const missing = await missingForExploration(p, project(id), { openApiUrl: body.openApiUrl }, options.targets, agentId);
         if (missing.length) throw new HttpError(409, missingInputsMessage(missing));
         if (body.requirements) {
             // Convert at submit time so an unreadable document is rejected now, not mid-job.
@@ -501,9 +511,11 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         // The application keeps the generation settings, minus the (possibly large) requirements text.
         // Evaluation only, for this job only: never kept on the application, so no later job inherits it.
         if (body.runTestCases) options.runTestCases = true;
-        // A Test Case Generation project's explorations are plan-only, whatever the request asks (case-agent.ts).
-        options = await caseAgentOptions(repo, id, options);
-        const { requirementsText: _text, runTestCases: _run, ...appConfig } = options;
+        // A Test Case Generation project's explorations are plan-only, whatever the request asks (case-agent.ts); a run of one agent already is what that agent runs.
+        if (agentId === "test-generation") options = caseRunOptions(options); // again: runTestCases is set after the narrowing
+        else if (!agentId) options = await caseAgentOptions(repo, id, options);
+        // Whose run it was stays with the job: a later Explore again or schedule is not that agent's.
+        const { requirementsText: _text, runTestCases: _run, agentId: _agent, ...appConfig } = options;
         const keptMobile = latestMobile(id);
         adoptSignIn(p, id, body.url, body0.credentials);
         const appId = repo.createApplication(id, body.url, keptMobile ? { ...appConfig, mobile: keptMobile } : appConfig, body.credentials);

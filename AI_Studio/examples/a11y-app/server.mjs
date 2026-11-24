@@ -6,6 +6,8 @@
 //   /clean        clean form page (labelled inputs, alt text, good contrast)
 //   /bad          deliberate violations: image without alt, unlabelled input, low-contrast text
 //   /contrast     only low-contrast text (lets tests check the impact threshold)
+//   /levels       only a moderate violation (html lang / xml:lang mismatch): passes at "serious"
+//   /review       no violation, one item axe cannot decide (a server-side image map): "needs review"
 import http from "node:http";
 
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 5111);
@@ -25,7 +27,8 @@ const PAGES = {
     "/": layout(
         "A11yShop",
         `<h1>A11yShop</h1><p>Welcome to the accessible demo shop.</p>
-<img src="${PIXEL}" alt="Shop logo">`,
+<img src="${PIXEL}" alt="Shop logo">
+<p><a href="/levels">Store map</a></p>`,
     ),
     "/clean": layout(
         "Contact us",
@@ -46,6 +49,14 @@ const PAGES = {
     "/contrast": layout(
         "Faint page",
         `<h1>Notes</h1><p class="faint">Only this paragraph has a contrast problem.</p>`,
+    ),
+    "/levels": layout(
+        "Store map",
+        `<h1>Store map</h1><p><img src="${PIXEL}" alt="Map of the store"></p>`,
+    ).replace('<html lang="en">', '<html lang="en" xml:lang="fr">'),
+    "/review": layout(
+        "Floor plan",
+        `<h1>Floor plan</h1><p><a href="/"><img src="${PIXEL}" alt="Floor plan of the store" ismap></a></p>`,
     ),
 };
 

@@ -395,6 +395,15 @@ export default defineConfig({
             "tests/case-agent-wording-unit.test.ts",
             // F3 round 2: requirement areas are not pages (pure).
             "tests/case-outcome-counts-unit.test.ts",
+            // Agent Workspace (2026-11-24): one run = one agent, and each agent's outcome (Fastify inject on a temp database, or pure).
+            "tests/agent-workspace.test.ts",
+            "tests/agent-outcome-api.test.ts",
+            "tests/agent-outcome-performance.test.ts",
+            "tests/agent-outcome-accessibility.test.ts",
+            "tests/agent-outcome-ux.test.ts",
+            "tests/agent-outcome-security.test.ts",
+            "tests/agent-outcome-responsive-ui.test.ts",
+            "tests/responsive-sizes.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

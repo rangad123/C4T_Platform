@@ -1,8 +1,10 @@
 /**
- * The Dashboard and the Projects row of a Test Case Generation project in a real browser (founder 2026-11-19 P1, P3, P5, P6, P7, R4;
- * PLAN.md U4). Such a project (agent-only, with the test-generation agent chosen, SPEC D3) shows its outcome and nothing else:
+ * The outcome page and the Projects row of a Test Case Generation project in a real browser (founder 2026-11-19 P1, P3, P5, P6, P7, R4;
+ * PLAN.md U4), and its Agent Workspace (.scratch/agent-workspace/SPEC.md, W1). Such a project (agent-only, with the test-generation agent
+ * chosen, SPEC D3) lands on the Workspace: one card per chosen agent and how work moves between them. The agent's own page
+ * (`#/projects/:id/agents/test-generation`, Outcome) shows its outcome and nothing else, as the Dashboard did before the Workspace:
  *
- * - the header (name, kind, Explore again), the setup checklist while something is missing, and the outcome report: one summary line, one
+ * - the header (name, kind; the agent's name and Run), and the outcome report: one summary line, one
  *   tree of pages, the test cases, one Download test cases button; no pass or fail, no tests to run or open, no plan to confirm
  *   ("Create the tests" is gone: the server refuses it with a 409, FX5), no second list of pages, no requirements coverage;
  * - the tree's header count equals its nodes; it is an ARIA tree that works by keyboard, and passes axe with the colour scheme set to light and
@@ -10,8 +12,9 @@
  * - Download test cases saves `<project name> test cases.xlsx`; a refusal shows as its sentence; no button without the export permission;
  * - a project not explored yet offers Start exploring and no download; a stopped run keeps what it found;
  * - the Projects row says "N test cases, M pages" (or Not explored yet), never "Plan ready" or "tests passing";
- * - unchanged: an agent project of other agents (except that no agent Dashboard has requirements coverage), a mixed project and a code
- *   project keep their Dashboards and rows.
+ * - the Workspace: a card per agent with its status and outcome line, Run and Open, the handoffs, and the old Runs addresses going to the
+ *   agent's page; an agent project of other agents lands on the Workspace too;
+ * - unchanged: a mixed project and a code project keep their Dashboards and rows.
  *
  * The platform underneath is real; runs are seeded as a plan-only job leaves them (its plan artifact and events), so no AI and no
  * exploring browser are needed. Where the permission set matters, the page's own /api/auth/state is answered by the test (said in the
@@ -19,7 +22,7 @@
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs build,browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/case-agent-dashboard-ui.test.ts
- * Set CASE_DASH_SHOTS=<folder> to also write screenshots.
+ * Set CASE_DASH_SHOTS=<folder> to also write screenshots (workspace.png and agent-tcg.png are the Workspace and the agent page).
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -52,6 +55,7 @@ let store = ""; // TCG, two runs, and 12 old test scripts with a run (3 failing)
 let fresh = ""; // TCG, never explored
 let quarry = ""; // TCG, its only run stopped after 2 pages
 let access = ""; // agent project of the Accessibility agent only, with test scripts
+let team = ""; // Workspace of five agents: Test Case Generation done, Accessibility done, Security stopped, API needs its document, Performance not run
 let mixed = ""; // mixed (agent and code), with test scripts
 let code = ""; // code, with test scripts
 const consoleErrors: string[] = [];
@@ -141,6 +145,11 @@ beforeAll(async () => {
     const stopped = await planRun(quarry, ["/", "/products"], [["/", "/products"]], [{ title: "Browse the product list", startPath: "/products" }]);
     platform.repo.setJobStatus(stopped, "FAILED", "Cancelled");
     access = await project("Access Store", ["agent"], ["accessibility"]);
+    team = await project("Team Store", ["agent"], ["test-generation", "api", "accessibility", "security", "performance"]);
+    await planRun(team, ["/", "/products", "/cart"], [["/", "/products"], ["/products", "/cart"]], [{ title: "Browse the product list", startPath: "/products" }, { title: "Add a product to the cart", startPath: "/cart" }]);
+    const teamApp = platform.repo.getLatestApplicationPublic(team)!.id as string;
+    platform.repo.setJobStatus((await platform.repo.createJob(team, teamApp, { ...DEFAULT_JOB_OPTIONS, agentId: "accessibility" })).id, "COMPLETED");
+    platform.repo.setJobStatus((await platform.repo.createJob(team, teamApp, { ...DEFAULT_JOB_OPTIONS, agentId: "security" })).id, "FAILED", "Cancelled");
     await oldTests(access, 4, 1);
     mixed = await project("Mixed Store", ["agent", "code"]);
     await oldTests(mixed, 4, 1);
@@ -173,8 +182,9 @@ async function visit(hash: string) {
     await page.goto(`${BASE}/${hash}`);
     await pwExpect(page.locator("h1").first()).toBeVisible();
 }
+/** The Test Case Generation agent's page, Outcome (what the project's Dashboard was before the Workspace). */
 async function dashboard(id: string) {
-    await visit(routes.project(id));
+    await visit(routes.projectAgent(id, "test-generation"));
     await pwExpect(page.getByTestId("project-head")).toBeVisible();
 }
 const contentText = async () => (await page.locator(".content").textContent()) ?? "";
@@ -224,16 +234,19 @@ const NOT_ON_TCG = [
     "Form input",
 ];
 
-describe("the Dashboard of a Test Case Generation project", () => {
-    it("is the outcome: header, setup checklist and the report, with no pass or fail, no tests to run, no plan step and no coverage", async () => {
+describe("the outcome page of a Test Case Generation project", () => {
+    it("is the outcome: header and the report, with no pass or fail, no tests to run, no plan step and no coverage", async () => {
         await dashboard(store);
         const outcome = page.getByTestId("case-outcome");
         await pwExpect(outcome).toBeVisible();
         await pwExpect(page.getByTestId("outcome-summary")).toHaveText("5 pages, 5 test cases, from 2 runs");
         const head = page.getByTestId("project-head");
         await pwExpect(head.locator("h1")).toHaveText("Practice Store");
-        await pwExpect(head.getByRole("link", { name: "Explore again" })).toHaveAttribute("href", routes.newProject({ project: store }));
-        await pwExpect(head.getByRole("link")).toHaveCount(2); // the application's address and Explore again
+        const place = page.getByTestId("place-head");
+        await pwExpect(place.locator("h2")).toHaveText("Test Case Generation Agent");
+        await pwExpect(place.getByRole("link", { name: "Run" })).toHaveAttribute("href", routes.newProject({ project: store, agent: "test-generation" }));
+        await pwExpect(place).toContainText("Done");
+        expect(await page.getByRole("navigation", { name: "Test Case Generation Agent sections" }).getByRole("link").allTextContents()).toEqual(["Outcome", "Runs", "Setup"]);
         await pwExpect(outcome.getByTestId("outcome-download")).toHaveText("Download test cases");
         await pwExpect(page.getByTestId("outcome-not-opened")).toContainText("1 address could not be opened");
         // At most three regions: the setup checklist (only while something is missing) and the report.
@@ -242,9 +255,9 @@ describe("the Dashboard of a Test Case Generation project", () => {
         await pwExpect(page.getByTestId("requirements-coverage")).toHaveCount(0);
         const text = await contentText();
         for (const banned of NOT_ON_TCG) expect(text, banned).not.toContain(banned);
-        // The tabs of an agent project; no Test scripts.
-        expect((await page.getByRole("navigation", { name: "Project sections", exact: true }).locator("a.tab").allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(["Dashboard", "Runs", "Requirements", "Settings"]);
-        await shot("dashboard.png");
+        // The tabs of a Workspace project; no Test scripts and no Runs (each agent has its own).
+        expect((await page.getByRole("navigation", { name: "Project sections", exact: true }).locator("a.tab").allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(["Workspace", "Requirements", "Settings"]);
+        await shot("agent-tcg.png");
     });
 
     it("has no plan card: no 'We will create about', no family counts, no Create the tests, Discard the plan, Edit the plan or What we found (owner 2026-11-20)", async () => {
@@ -371,7 +384,7 @@ describe("the Dashboard of a Test Case Generation project", () => {
 
     it("an outcome that cannot be read shows its sentence and Try again, never the old agent Dashboard (F3 L4; the answer is made by the test)", async () => {
         const sentence = "The outcome could not be read just now.";
-        const outcomeUrl = (u: URL) => u.pathname === `/api/projects/${store}/outcome`;
+        const outcomeUrl = (u: URL) => u.pathname === `/api/projects/${store}/workspace/test-generation/outcome`;
         await page.route(outcomeUrl, (r) => r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: sentence }) }));
         try {
             await dashboard(store);
@@ -393,7 +406,7 @@ describe("the Dashboard of a Test Case Generation project", () => {
         await dashboard(fresh);
         const outcome = page.getByTestId("case-outcome");
         await pwExpect(outcome.getByRole("heading", { name: "Not explored yet" })).toBeVisible();
-        await pwExpect(outcome.getByRole("link", { name: "Start exploring" })).toHaveAttribute("href", routes.newProject({ project: fresh }));
+        await pwExpect(outcome.getByRole("link", { name: "Start exploring" })).toHaveAttribute("href", routes.newProject({ project: fresh, agent: "test-generation" }));
         await pwExpect(page.getByTestId("outcome-download")).toHaveCount(0);
         await pwExpect(page.getByTestId("outcome-summary")).toHaveCount(0);
         const text = await contentText();
@@ -491,21 +504,81 @@ describe("the Projects row of a Test Case Generation project", () => {
     });
 });
 
-describe("other projects keep their Dashboards", () => {
-    it("an agent project of other agents: the same Dashboard (tests, Passing, Not passing), and no requirements coverage (P6)", async () => {
-        await dashboard(access);
+describe("the Agent Workspace (W1)", () => {
+    const card = (agent: string) => page.locator(`.ws-card[data-agent="${agent}"]`);
+
+    it("lands on one card per chosen agent: its job, status, outcome line, Run and Open; and how work moves between agents", async () => {
+        await visit(routes.project(team));
+        await pwExpect(page.getByTestId("workspace")).toBeVisible();
+        expect(await page.locator(".ws-card h3").allTextContents()).toEqual(["API Testing Agent", "Accessibility Testing Agent", "Security Testing Agent", "Performance Testing Agent", "Test Case Generation Agent"]);
+        await pwExpect(card("test-generation").locator(".badge")).toContainText("Done");
+        await pwExpect(card("test-generation").getByTestId("agent-headline")).toHaveText("3 pages, 2 test cases");
+        await pwExpect(card("accessibility").locator(".badge")).toContainText("Done");
+        await pwExpect(card("security").locator(".badge")).toHaveText("Stopped, what it found is kept");
+        await pwExpect(card("performance").locator(".badge")).toHaveText("Not run yet");
+        await pwExpect(card("api").locator(".badge")).toHaveText("Needs input");
+        await pwExpect(card("api").getByTestId("agent-needs")).toContainText("OpenAPI document");
+        await pwExpect(card("performance").getByRole("link", { name: "Run" })).toHaveAttribute("href", routes.newProject({ project: team, agent: "performance" }));
+        await pwExpect(card("performance").getByRole("link", { name: "Open" })).toHaveAttribute("href", routes.projectAgent(team, "performance"));
+        const flow = page.getByTestId("workspace-flow");
+        await pwExpect(flow).toContainText("Every agent’s run adds to the site memory that later runs reuse. The tree you see is built by the Test Case Generation agent."); // W3 review M5
+        await pwExpect(flow).toContainText("Test cases to a code project");
+        await pwExpect(flow).toContainText("Security findings to the Security Assessment");
+        await pwExpect(flow).toContainText("Nothing moves by itself");
+        expect((await page.getByRole("navigation", { name: "Project sections", exact: true }).locator("a.tab").allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(["Workspace", "Requirements", "Settings"]);
+        await pwExpect(page.getByTestId("requirements-coverage")).toHaveCount(0);
+        await axe("workspace");
+        await shot("workspace.png");
+        await page.setViewportSize({ width: 375, height: 800 });
+        try {
+            await page.waitForTimeout(300);
+            await noOverflow();
+            await shot("workspace-375.png");
+        } finally {
+            await page.setViewportSize({ width: 1280, height: 900 });
+        }
+    });
+
+    it("Open shows the agent's own page: its own outcome (W2b), and its Runs are its runs only", async () => {
+        await visit(routes.project(team));
+        await card("accessibility").getByRole("link", { name: "Open" }).click();
+        await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Accessibility Testing Agent");
+        await pwExpect(page.getByTestId("accessibility-outcome")).toBeVisible();
+        await pwExpect(page.getByText("Not shown here yet")).toHaveCount(0);
+        await page.getByRole("navigation", { name: "Accessibility Testing Agent sections" }).getByRole("link", { name: "Runs" }).click();
+        await pwExpect(page.getByTestId("agent-runs").locator("li")).toHaveCount(1);
+        await page.getByRole("navigation", { name: "Accessibility Testing Agent sections" }).getByRole("link", { name: "Setup" }).click();
+        await pwExpect(page.getByTestId("agent-setup")).toContainText("Application address");
+        await axe("agent page, setup");
+    });
+
+    it("the old Runs addresses of a Test Case Generation project open the Workspace and its agent page", async () => {
+        // W3 review M4: an Agent Workspace project's old Runs address opens the Workspace; one run's address opens its agent page.
+        await visit(`#/projects/${store}/runs`);
+        await page.waitForURL((u) => u.hash === routes.project(store));
+        await pwExpect(page.getByTestId("workspace")).toBeVisible();
+        await visit(routes.projectAgent(store, "test-generation", "runs"));
+        await pwExpect(page.getByTestId("case-runs")).toBeVisible();
+        const first = (await api("GET", `/api/projects/${store}/workspace/test-generation/runs`)).body.at(-1).jobId as string;
+        await pwExpect(page.locator(`[data-run="${first}"]`).getByRole("link", { name: "See what it found" })).toHaveAttribute("href", routes.projectAgentRun(store, "test-generation", first));
+        await visit(`#/projects/${store}/runs/${first}`);
+        await page.waitForURL(`**${routes.projectAgentRun(store, "test-generation", first)}`);
+        await pwExpect(page.getByTestId("case-run-summary")).toBeVisible();
+    });
+
+    it("an agent project of other agents lands on the Workspace too, with no requirements coverage (P6)", async () => {
+        await visit(routes.project(access));
+        await pwExpect(card("accessibility")).toBeVisible();
         await pwExpect(page.getByTestId("case-outcome")).toHaveCount(0);
-        await pwExpect(page.locator(".metrics:not(.quality-metrics)")).toContainText("Passing");
-        await pwExpect(page.locator(".metrics:not(.quality-metrics)")).toContainText("Not passing");
-        await pwExpect(page.getByTestId("project-head").getByRole("link", { name: "View tests" })).toBeVisible();
-        await pwExpect(page.getByRole("heading", { name: "Needs your attention" })).toBeVisible();
         await pwExpect(page.getByTestId("requirements-coverage")).toHaveCount(0);
         expect((await api("GET", `/api/projects/${access}/outcome`)).body.caseAgent).toBe(false);
     });
+});
 
+describe("other projects keep their Dashboards", () => {
     it("a mixed project and a code project: the same Dashboard, with requirements coverage", async () => {
         for (const id of [mixed, code]) {
-            await dashboard(id);
+            await visit(routes.project(id));
             await pwExpect(page.locator(".metrics:not(.quality-metrics)")).toContainText("Passing");
             await pwExpect(page.getByTestId("requirements-coverage")).toBeVisible();
             await pwExpect(page.getByTestId("case-outcome")).toHaveCount(0);

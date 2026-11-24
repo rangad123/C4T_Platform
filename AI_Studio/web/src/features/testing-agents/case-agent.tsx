@@ -29,7 +29,7 @@ export function ScriptsInCodeProjects({ projectId }: { projectId: string }) {
                 title={SCRIPTS_IN_CODE_PROJECTS}
                 actions={
                     <>
-                        <LinkButton size="sm" variant="primary" icon={LayoutDashboard} href={routes.project(projectId)}>
+                        <LinkButton size="sm" variant="primary" icon={LayoutDashboard} href={routes.projectAgent(projectId, "test-generation")}>
                             Open the test cases
                         </LinkButton>
                         <LinkButton size="sm" variant="ghost" icon={FolderPlus} href={routes.createProject}>

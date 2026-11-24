@@ -168,8 +168,11 @@ describe("every exploration of a Test Case Generation project is plan-only", () 
             expect(platform.repo.getJob(full.body.jobId)!.options.planOnly).toBeUndefined();
             settle(full.body.jobId);
             const plan = await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, plan: true });
-            expect(plan.body.plan).toBe(true);
-            expect(platform.repo.getJob(plan.body.jobId)!.options.planOnly).toBe(true);
+            // A check agent's run in a project with the Agent Workspace (agent mode alone, a saved choice) has no plan step (D1):
+            // it makes and runs its checks, whatever the request asks. The mixed project plans as asked.
+            const workspace = modes.length === 1;
+            expect(plan.body.plan).toBe(workspace ? undefined : true);
+            expect(platform.repo.getJob(plan.body.jobId)!.options.planOnly).toBe(workspace ? undefined : true);
             settle(plan.body.jobId);
         }
     });

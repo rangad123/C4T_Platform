@@ -1,4 +1,5 @@
-import { projectKind, type ProjectDetail } from "../../api";
+import { useEffect } from "react";
+import { projectKind, projectShape, type ProjectDetail } from "../../api";
 import { ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { ProjectRuns } from "../../pages/ProjectRuns";
 import { ProjectCompliance } from "../../pages/ProjectCompliance";
@@ -7,20 +8,35 @@ import { routes, useRoute, type RunsSection } from "../../lib/router";
 import { ReleasesPage } from "../manual/ReleasesPage";
 import { ProjectSchedule } from "../schedules/ProjectSchedule";
 import { ListSkeleton } from "../../components/ui";
+import { hasWorkspace } from "../agent-workspace/workspace";
+import type { ProjectAgents } from "../testing-agents/testing-agents";
 import { CaseRuns } from "./CaseRuns";
-import { useCaseAgent } from "./case-runs";
 
 /**
  * The Runs place: what happened and when. Every run, the ones that start by themselves, how results develop, and the two views
  * built on runs that used to be the Release place: signing off a version, and which control topics the tests touch.
  */
 export function RunsPage({ id }: { id: string }) {
-    const section = (useRoute().query.get("section") as RunsSection | null) ?? "runs";
+    const query = useRoute().query;
+    const section = (query.get("section") as RunsSection | null) ?? "runs";
+    const project = useFetch<ProjectDetail>(`/projects/${id}`);
     // A code project never explores, so its runs are only runs of tests.
-    const code = projectKind(useFetch<ProjectDetail>(`/projects/${id}`).data) === "code";
+    const code = projectKind(project.data) === "code";
     // A Test Case Generation project's runs each add to its one tree: only its runs and their schedules (founder 2026-11-19, P7.2, O6).
-    const caseAgent = useCaseAgent(id);
-    if (caseAgent === undefined) return <ListSkeleton rows={3} />;
+    const choice = useFetch<ProjectAgents>(`/projects/${id}/testing-agents`);
+    const caseAgent = choice.data ? choice.data.caseAgent === true : choice.loading ? undefined : false;
+    // An Agent Workspace project: each agent's runs are on its own page, so only Schedules is here; everything else opens the Workspace (W3 review M4).
+    const workspace = project.data && choice.data ? hasWorkspace(projectShape(project.data).testingModes, choice.data) : project.loading || choice.loading ? undefined : false;
+    // Its runs live on the Test Case Generation agent's page now (Agent Workspace); only its Schedules stay here.
+    const moved = section === "schedules" ? null : workspace ? routes.project(id) : caseAgent === true && workspace === false ? routes.projectAgent(id, "test-generation", "runs") : null;
+    useEffect(() => {
+        if (moved) location.replace(moved);
+    }, [moved]);
+    if (caseAgent === undefined || workspace === undefined || moved) return <ListSkeleton rows={3} />;
+    if (workspace) {
+        const only: HubSection[] = [{ key: "schedules", label: "Schedules", hint: "Run an agent on a timetable", render: () => <ProjectSchedule id={id} section="schedules" agentId={query.get("agent")} workspace /> }];
+        return <ProjectHub id={id} place="runs" title="Schedules" subtitle="Run a testing agent on a timetable. Each run is that agent’s, with its own checks only, and its results are on the agent’s page." sections={only} current="schedules" hrefOf={() => routes.runs(id, "schedules")} />;
+    }
     if (caseAgent) {
         const tcg: HubSection[] = [
             { key: "runs", label: "All runs", hint: "Every run: what each one added to the tree", render: () => <CaseRuns id={id} /> },

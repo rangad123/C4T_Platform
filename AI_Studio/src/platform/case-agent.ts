@@ -16,6 +16,7 @@ import { HttpError } from "./http-error.js";
 import { projectSetupOf } from "./project-setup.js";
 import type { JobOptions, Repo } from "./repo.js";
 import { RequirementStore } from "./requirement-store.js";
+import { caseRunOptions } from "./testing-agents.js";
 
 export const CASE_AGENT_PLAN_REFUSED = "This project's agent writes test cases only. Import them into a code project to make test scripts.";
 export const CASE_AGENT_RUN_REFUSED = "This project's agent writes test cases only. Test runs belong in a code project.";
@@ -43,8 +44,8 @@ export async function refuseTestsInCaseAgentProject(repo: Repo, projectId: strin
  */
 export async function caseAgentOptions(repo: Repo, projectId: string, options: JobOptions): Promise<JobOptions> {
     if (!(await isCaseAgentProject(repo, projectId))) return options;
-    const { runTestCases: _r, fromPlan: _f, carryFrom: _c, excludeIdeas: _e, ...rest } = options;
-    return { ...rest, mode: "generate", planOnly: true };
+    // A schedule's or a runbook's run of such a project is the Test Case Generation agent's (Agent Workspace D1).
+    return { ...caseRunOptions(options), agentId: "test-generation" };
 }
 
 /**

@@ -198,13 +198,14 @@ describe("one platform and one mode in Settings", () => {
 });
 
 describe("the project menu and runners", () => {
-    it("orders an AI agent project's tabs Dashboard, Runs, Requirements, Settings, with no Runners in Settings", async () => {
-        // Round 38: Gift shop was made with the AI agent mode, so it has an agent project's four tabs (a code project's are in project-kinds-ui).
+    it("orders an AI agent project's tabs Workspace, Requirements, Settings, with no Runners in Settings", async () => {
+        // Round 38: Gift shop was made with the AI agent mode and its agents chosen, so it lands on the Agent Workspace (D2) with its
+        // three tabs (a code project's, and an agent project's with no choice saved, are in project-kinds-ui).
         const id = byName("Gift shop")!.id as string;
         await visit(`#/projects/${id}`);
         const tabs = page.getByRole("navigation", { name: "Project sections" }).locator("a.tab");
         await pwExpect(tabs.first()).toBeVisible();
-        expect((await tabs.allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(["Dashboard", "Runs", "Requirements", "Settings"]);
+        expect((await tabs.allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(["Workspace", "Requirements", "Settings"]);
         await visit(`#/projects/${id}/settings`);
         expect(await page.locator(".subtabs a").allTextContents()).not.toContain("Runners");
     });

@@ -26,6 +26,7 @@ import { assertEnvironmentTargets } from "./environment-run.js";
 import { findEnvironment } from "./environments-store.js";
 import { HttpError } from "./http-error.js";
 import { caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
+import { savedAgentRun, TestingAgentStore } from "./testing-agents.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import { gateJob } from "./quarantine-service.js";
@@ -314,8 +315,12 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
             // and the load check are off unless this step switches them on.
             // Never who started an earlier job (an older application kept it): this run's own starter is recorded (labelOptions).
             const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, runbookRunId: _r, retryFailures: _rf, requirementsText: _rt, startedBy: _sb, ...saved } = config;
-            // A Test Case Generation project explores plan-only (case-agent.ts).
-            const options = await caseAgentOptions(repo, run.projectId, { ...DEFAULT_JOB_OPTIONS, ...saved, mode: "generate", allowMutatingApiTests: step.allowMutatingApiTests === true, loadChecks: step.loadChecks === true } as JobOptions);
+            const base = { ...DEFAULT_JOB_OPTIONS, ...saved, mode: "generate", allowMutatingApiTests: step.allowMutatingApiTests === true, loadChecks: step.loadChecks === true } as JobOptions;
+            // A Workspace project's step is one agent's (D1): that agent's switches only; elsewhere a Test Case Generation project explores
+            // plan-only (case-agent.ts).
+            const row = repo.getProject(run.projectId);
+            const agentRun = row ? await savedAgentRun(new TestingAgentStore(repo.db.sql, repo), row, step.agentId, base, step.loadChecks === true ? { loadChecks: true } : {}) : undefined;
+            const options = agentRun ?? (await caseAgentOptions(repo, run.projectId, base));
             if (options.loadChecks) {
                 const refused = await loadTargetProblem(p.db, run.projectId, [options.apiBaseUrl, app.url as string]);
                 if (refused) throw new StepProblem(refused);
