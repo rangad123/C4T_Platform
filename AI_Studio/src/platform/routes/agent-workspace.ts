@@ -5,7 +5,8 @@
  *                                                           workspace false and no agents for a project without one (code, mixed, no choice saved)
  *   GET /api/projects/:id/workspace/:agentId/outcome[?run=]  → that agent's outcome (agent-outcomes/<agentId>.ts), or one run's part of it;
  *                                                           501 for an agent whose outcome is not built yet, 404 for an agent the project did not choose
- *   GET /api/projects/:id/workspace/:agentId/runs            → that agent's runs only, newest first (the jobs list's shape)
+ *   GET /api/projects/:id/workspace/:agentId/runs            → that agent's runs only, newest first (the jobs list's shape), a check
+ *                                                           agent's run with its own one line (`headline`: what that run found)
  *
  * Who may read the project reads all three (auth/roles.ts).
  */
@@ -92,6 +93,22 @@ export function registerAgentWorkspaceRoutes(ctx: RouteCtx, appModel: AppModelRe
     app.get("/api/projects/:id/workspace/:agentId/runs", async (req) => {
         const { id, agentId } = req.params as { id: string; agentId: string };
         const { agent } = await agentOf(id, agentId);
-        return runsOf(id, agent.id).map(ctx.publicJob);
+        const c = outcomeCtx(id, agent.id);
+        const module = AGENT_OUTCOMES[agent.id];
+        // Test Case Generation's run rows say what each added to the tree (CaseRuns); a check agent's say what that run found.
+        if (!module || agent.id === "test-generation") return c.runs.map(ctx.publicJob);
+        const out = [];
+        // shortcut: one run outcome per row on every read (the list polls while a run goes); cache finished runs' lines if a long list gets slow.
+        for (const j of c.runs) {
+            let headline: string | null = null;
+            try {
+                const one = await module.runOutcome(c, j.id);
+                headline = one === undefined ? null : module.headline(one);
+            } catch (err) {
+                console.error(`[agents] the ${agent.id} run ${j.id.slice(0, 8)} could not be read:`, err);
+            }
+            out.push({ ...ctx.publicJob(j), headline });
+        }
+        return out;
     });
 }

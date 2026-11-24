@@ -1,5 +1,5 @@
 /**
- * The Performance Testing Agent's outcome (SPEC §3): each page's timings, the slowest pages, the timings of the safe API calls it made
+ * The Performance Testing Agent's outcome (SPEC §3): each page's timings, slowest first, the timings of the safe API calls it made
  * (lead, 2026-11-24: they explain what it did), and the load result of the runs that allowed a load check. Computed on read from what its runs saved: the page speed and load checks the engine made (orchestrator.ts persistNew
  * meta.performance / meta.load), their results, and what they measured (perf-store.ts perf_metrics). A newer run's timing of a page or
  * call replaces an older one's; a stopped run's part counts.
@@ -38,15 +38,13 @@ export interface EndpointResult {
 
 export interface PerformanceOutcome {
     runs: number;
+    /** Slowest first, by when the main content appears (else when the page finished loading); unmeasured pages last. */
     pages: PageTiming[];
-    /** The slowest pages by when their main content appears (else when they finished loading), slowest first. */
-    slowest: Array<{ testId: string; path: string; metric: string; value: number; unit: string; budget?: number }>;
     /** Safe API calls timed one at a time. */
     calls: EndpointResult[];
     load: EndpointResult[];
 }
 
-const SLOWEST = 5;
 const pageOf = (t: TestRow): string | undefined => t.spec.steps.filter((s) => s.action === "navigate").map((s) => (s as { url?: string }).url).at(-1);
 /** The check's own sentence, without its prefix, its advice and its severity tags. */
 const own = (reason: string, prefix: string) => reason.slice(reason.indexOf(prefix) + prefix.length).split(/^how to fix:/im)[0]!.replace(/\s*\[(?:high|medium|low)\]/g, "").trim();
@@ -83,14 +81,8 @@ async function build(ctx: AgentOutcomeCtx, runs: JobRow[]): Promise<PerformanceO
             pages.set(key, { testId: t.id, path, title: t.title, signedIn, ...verdictOf(t, PERFORMANCE_FAILURE_PREFIX, metrics.length > 0), metrics, jobId: job.id });
         }
     }
-    const slowest = [...pages.values()]
-        .flatMap((p) => {
-            const m = p.metrics.find((x) => x.metric === "lcp") ?? p.metrics.find((x) => x.metric === "load");
-            return m ? [{ testId: p.testId, path: p.path, ...m }] : [];
-        })
-        .sort((a, b) => b.value - a.value)
-        .slice(0, SLOWEST);
-    return { runs: runs.length, pages: [...pages.values()].sort((a, b) => a.path.localeCompare(b.path)), slowest, calls: [...calls.values()].sort((a, b) => a.endpoint.localeCompare(b.endpoint)), load: [...loads.values()] };
+    const speed = (p: PageTiming) => (p.metrics.find((x) => x.metric === "lcp") ?? p.metrics.find((x) => x.metric === "load"))?.value ?? -1;
+    return { runs: runs.length, pages: [...pages.values()].sort((a, b) => speed(b) - speed(a) || a.path.localeCompare(b.path)), calls: [...calls.values()].sort((a, b) => a.endpoint.localeCompare(b.endpoint)), load: [...loads.values()] };
 }
 
 const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;

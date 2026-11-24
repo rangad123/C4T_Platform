@@ -18,12 +18,15 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { AppModelSchema } from "../src/engine/intel/model.js";
+import { AppIntelStore } from "../src/platform/app-intel-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions } from "../src/platform/repo.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { startScheduledJob } from "../src/platform/scheduler.js";
 import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
+import { SIZES_ARE_RESPONSIVE_UI } from "../src/platform/routes/variants.js";
 import { buildServer } from "../src/platform/server.js";
 
 const KEY = "agent-workspace-key-5d1e";
@@ -124,6 +127,18 @@ describe("a run is one agent's, with that agent's switches only (D1)", () => {
         expect(api.targets).toEqual(["web", "api"]);
         expect(api).not.toHaveProperty("apiTests");
         expect(await start("Cases as before", "test-generation")).not.toHaveProperty("apiTests");
+    });
+
+    it("only a Responsive UI run may carry the phone and tablet sizes; any other run asking for them is refused (W3 review L8)", async () => {
+        const pid = await project("Sizes", ["agent"], ["responsive-ui", "ux"]);
+        const r = await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId: "ux", variants: ["phone-375"] });
+        expect(r).toMatchObject({ status: 400, body: { error: SIZES_ARE_RESPONSIVE_UI } });
+        const code = await project("Sizes code", ["code"]);
+        expect((await call("POST", `/api/projects/${code}/test-generation`, { url: SITE, variants: ["tablet-768"] })).status).toBe(400);
+        expect(platform.repo.listJobs(pid)).toHaveLength(0);
+        // Other browsers stay a choice of any run, and the Responsive UI agent's run keeps its sizes.
+        expect((await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId: "responsive-ui", variants: ["phone-375"] })).status).toBe(202);
+        expect(onlyJob(pid).options.variants).toEqual(["phone-375"]);
     });
 
     it("refuses an agent the project did not choose, and an unknown one, and creates no job", async () => {
@@ -260,6 +275,28 @@ describe("the Workspace: each agent's status, outcome and runs", () => {
         const a11y = await call("GET", `/api/projects/${pid}/workspace/accessibility/outcome`);
         expect(a11y).toMatchObject({ status: 200, body: { runs: 2, pages: [], rules: [] } });
         expect((await call("GET", `/api/projects/${pid}/workspace/responsive-ui/outcome`)).status).toBe(404);
+    });
+
+    it("Test Case Generation's What is missing comes from its own runs' understanding, not another agent's run (W3 review M1)", async () => {
+        const tp = await project("Missing Store", ["agent"], ["test-generation", "performance"]);
+        const app = platform.repo.getLatestApplicationPublic(tp)!.id as string;
+        const store = new AppIntelStore(platform.sql);
+        const tick = () => new Promise((r) => setTimeout(r, 5));
+        const version = (text: string) => store.addVersion({ projectId: tp, model: AppModelSchema.parse({ missingContext: [{ text }] }) });
+        const tcg = await platform.repo.createJob(tp, app, { ...DEFAULT_JOB_OPTIONS, agentId: "test-generation", planOnly: true });
+        platform.repo.setJobStatus(tcg.id, "COMPLETED");
+        await tick();
+        await version("What the test case run left unknown.");
+        await tick();
+        // A Performance run updates the understanding from what it saw, as every exploration does at its end.
+        const perf = await platform.repo.createJob(tp, app, { ...DEFAULT_JOB_OPTIONS, agentId: "performance" });
+        platform.repo.setJobStatus(perf.id, "GENERATING");
+        await tick();
+        await version("13 pages have not changed since the last exploration and were not sent again.");
+        await tick();
+        platform.repo.setJobStatus(perf.id, "COMPLETED");
+        const o = await call("GET", `/api/projects/${tp}/workspace/test-generation/outcome`);
+        expect(o.body.missing).toEqual(["What the test case run left unknown."]);
     });
 });
 

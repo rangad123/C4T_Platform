@@ -51,7 +51,8 @@ import { agentRunOptions, caseRunOptions, runAgentOf } from "./testing-agents.js
 import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
 import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
 import { adoptSignIn, assertMaySaveSignIn } from "./routes/project-sign-in.js";
-import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
+import { JobVariantsSchema, projectCompat, SIZES_ARE_RESPONSIVE_UI, testCompatibility, variantsConfig } from "./routes/variants.js";
+import { isSizeVariant } from "../engine/validation/variants.js";
 import { dataDrivenSpecIssues, dataSetsFor, EnvironmentChoice, startEnvironmentRun, testEnvironmentInfo } from "./routes/environments.js";
 import { exportObjectsUsedBy, importObjectsFor, objectsFor } from "./routes/locators.js";
 import { tryResolveSpecRefs } from "../engine/locators/refs.js";
@@ -451,6 +452,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const phoneUrl = phoneOnly ? `android-app://${latestMobile(id)!.appPackage}` : undefined;
         // One run = one agent (Agent Workspace D1): undefined for a project without the Workspace, which runs as before.
         const agentId = await runAgentOf(testingAgentsOf(p), project(id), body0.agentId);
+        if (agentId !== "responsive-ui" && body0.variants?.some(isSizeVariant)) throw new HttpError(400, SIZES_ARE_RESPONSIVE_UI);
         if (!body0.url && !phoneUrl) {
             // A Test Case Generation project without an address writes its test cases from its active requirements (SPEC R16).
             if ((agentId && agentId !== "test-generation") || !(await requirementsOnlyRun(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");

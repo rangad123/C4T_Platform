@@ -1,5 +1,5 @@
 /**
- * Agent Workspace W2a: the Performance Testing Agent's outcome (SPEC §3: per-page timings, the slowest pages, and the load result when
+ * Agent Workspace W2a: the Performance Testing Agent's outcome (SPEC §3: per-page timings slowest first, and the load result when
  * a load check was allowed; nothing else), computed on read from what its runs saved: the page speed and load tests (meta.performance,
  * meta.load), their results, and the values they measured (perf_metrics).
  *
@@ -122,9 +122,9 @@ describe("the Performance Testing Agent's outcome", () => {
         expect(metric(pages["/about"], "lcp")).toBe(800);
     });
 
-    it("lists the slowest pages by when their main content appears", async () => {
+    it("lists the pages slowest first, by when their main content appears (no separate slowest list: W3 review L3)", async () => {
         const r = await get(`/api/projects/${pid}/workspace/performance/outcome`);
-        expect((r.body.slowest as any[]).map((s) => [s.path, s.value])).toEqual([["/cart", 3400], ["/", 1000], ["/about", 800]]);
+        expect((r.body.pages as any[]).map((p) => [p.path, metric(p, "lcp")])).toEqual([["/cart", 3400], ["/", 1000], ["/about", 800]]);
     });
 
     it("shows the load result of a run that allowed it", async () => {
@@ -144,7 +144,7 @@ describe("the Performance Testing Agent's outcome", () => {
 
     it("holds only this agent's items: no other agent's checks or runs", async () => {
         const r = await get(`/api/projects/${pid}/workspace/performance/outcome`);
-        expect(Object.keys(r.body).sort()).toEqual(["calls", "load", "pages", "runs", "slowest"]);
+        expect(Object.keys(r.body).sort()).toEqual(["calls", "load", "pages", "runs"]);
         const all = JSON.stringify(r.body);
         for (const t of ["a11y", "users"]) expect(all).not.toContain(tests[t]);
         expect((r.body.pages as any[]).every((p) => metric(p, "lcp") !== 9000)).toBe(true);
@@ -164,12 +164,21 @@ describe("the Performance Testing Agent's outcome", () => {
         expect((await get(`/api/projects/${pid}/workspace/performance/outcome?run=${ids.api}`)).status).toBe(404);
     });
 
+    it("gives each of its runs that run's own one line in the Runs list (W3 review M3)", async () => {
+        const runs = await get(`/api/projects/${pid}/workspace/performance/runs`);
+        expect((runs.body as any[]).map((j) => [j.jobId, j.headline])).toEqual([
+            [ids.second, "1 page timed"],
+            [ids.first, "2 pages timed, 1 over budget"],
+            [ids.old, "1 page timed"],
+        ]);
+    });
+
     it("gives the card one line, and none before a run", async () => {
         const ws = await get(`/api/projects/${pid}/workspace`);
         expect(ws.body.agents.find((a: any) => a.id === "performance").headline).toBe("3 pages timed, 1 over budget");
         const bare = platform.repo.createProject({ name: "No runs", platforms: ["web"], testingModes: ["agent"] }).id as string;
         await testingAgentsOf(platform).set(bare, ["performance"], "test");
         expect((await get(`/api/projects/${bare}/workspace`)).body.agents[0]).toMatchObject({ id: "performance", status: "not-run", headline: null });
-        expect((await get(`/api/projects/${bare}/workspace/performance/outcome`)).body).toEqual({ runs: 0, pages: [], slowest: [], calls: [], load: [] });
+        expect((await get(`/api/projects/${bare}/workspace/performance/outcome`)).body).toEqual({ runs: 0, pages: [], calls: [], load: [] });
     });
 });
