@@ -18,6 +18,7 @@ import type { Row } from "./db.js";
 import type { Sql } from "./sql.js";
 import { HttpError } from "./http-error.js";
 import { projectSetupOf, type ProjectPlatform } from "./project-setup.js";
+import { SIZE_VARIANT_IDS } from "../engine/validation/variants.js";
 
 export const TESTING_AGENTS_MIGRATION = `
 CREATE TABLE project_testing_agents (
@@ -426,5 +427,7 @@ export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: As
     // The Performance agent times safe API calls and runs the load check on the API target, without the API tests (the API agent's):
     // it keeps the target, unless the run asked for the web alone.
     if (agentId === "performance" && (asked.targets ?? ["web", "api"]).includes("api") && !rest.targets.includes("api")) return { ...rest, targets: [...rest.targets, "api"], apiTests: false };
+    // The Responsive UI agent checks the phone and tablet sizes beside desktop unless the run names its sizes (none: desktop only).
+    if (agentId === "responsive-ui" && asked.variants === undefined) return { ...rest, variants: [...SIZE_VARIANT_IDS] };
     return rest;
 }

@@ -28,7 +28,7 @@ const spec = (o: Record<string, unknown>) => TestSpecSchema.parse({ testId: "WEB
 describe("variant definitions", () => {
     it("defines the fixed set with plain-language labels and the sizes the brief asks for", () => {
         // The browsers and sizes, then the conditions on desktop Chrome (dark mode, locale, high contrast, reduced motion, JavaScript off).
-        expect(Object.keys(VARIANTS)).toEqual(["chromium-desktop", "firefox", "webkit", "mobile-chrome", "tablet", "dark", "locale", "high-contrast", "reduced-motion", "no-js"]);
+        expect(Object.keys(VARIANTS)).toEqual(["chromium-desktop", "firefox", "webkit", "mobile-chrome", "tablet", "phone-375", "tablet-768", "dark", "locale", "high-contrast", "reduced-motion", "no-js"]);
         expect(VARIANTS.firefox.label).toBe("Firefox");
         expect(VARIANTS.webkit.label).toBe("Safari (WebKit)");
         expect(VARIANTS["mobile-chrome"]).toMatchObject({ label: "Phone", browser: "chromium", viewport: { width: 390, height: 844 } });
