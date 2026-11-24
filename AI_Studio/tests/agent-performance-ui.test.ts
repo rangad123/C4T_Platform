@@ -181,7 +181,7 @@ describe("the Performance Testing Agent's page", () => {
         await axe("performance run");
         await shot("run.png");
         await visit(routes.projectAgentRun(pid, "performance", jobs.first));
-        expect((await rows()).map((r) => r[0])).toEqual(["/", "/cartSigned in", "/products/a-very-long-product-page-address-for-narrow-screens"]);
+        expect((await rows()).map((r) => r[0])).toEqual(["/cartSigned in", "/products/a-very-long-product-page-address-for-narrow-screens", "/"]); // slowest first (W3 review L3)
         await pwExpect(page.getByText("None in this run.", { exact: false })).toBeVisible();
         await narrow("run-375.png");
     });

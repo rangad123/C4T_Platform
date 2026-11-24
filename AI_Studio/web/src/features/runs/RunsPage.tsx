@@ -17,7 +17,7 @@ import { CaseRuns } from "./CaseRuns";
  * built on runs that used to be the Release place: signing off a version, and which control topics the tests touch.
  */
 export function RunsPage({ id }: { id: string }) {
-    const query = useRoute().query;
+    const { parts, query } = useRoute();
     const section = (query.get("section") as RunsSection | null) ?? "runs";
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     // A code project never explores, so its runs are only runs of tests.
@@ -28,7 +28,9 @@ export function RunsPage({ id }: { id: string }) {
     // An Agent Workspace project: each agent's runs are on its own page, so only Schedules is here; everything else opens the Workspace (W3 review M4).
     const workspace = project.data && choice.data ? hasWorkspace(projectShape(project.data).testingModes, choice.data) : project.loading || choice.loading ? undefined : false;
     // Its runs live on the Test Case Generation agent's page now (Agent Workspace); only its Schedules stay here.
-    const moved = section === "schedules" ? null : workspace ? routes.project(id) : caseAgent === true && workspace === false ? routes.projectAgent(id, "test-generation", "runs") : null;
+    // Only while the address is still this place's: a link away changes the route before this page unmounts, and must not be redirected.
+    const here = parts[2] === "runs" && !parts[3];
+    const moved = section === "schedules" || !here ? null : workspace ? routes.project(id) : caseAgent === true && workspace === false ? routes.projectAgent(id, "test-generation", "runs") : null;
     useEffect(() => {
         if (moved) location.replace(moved);
     }, [moved]);

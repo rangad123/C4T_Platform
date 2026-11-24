@@ -18,7 +18,7 @@ import "./schedules.css";
 type Frequency = "minutes" | "hours" | "daily" | "weekly";
 
 /** Schedules of one project: what runs when, the next and last run, and the form that creates a new one. */
-export function SchedulesPanel({ projectId, reloadKey, onRunStarted, agentId }: { projectId: string; reloadKey: number; onRunStarted: () => void; /** One testing agent's schedules only (its Runs tab links here). */ agentId?: string }) {
+export function SchedulesPanel({ projectId, reloadKey, onRunStarted, agentId, workspace }: { projectId: string; reloadKey: number; onRunStarted: () => void; /** One testing agent's schedules only (its Runs tab links here). */ agentId?: string; /** An Agent Workspace project: a schedule runs one agent. */ workspace?: boolean }) {
     const fetched = useFetch<ScheduleList>(`/projects/${projectId}/schedules`);
     const agentName = useFetch<AgentDetail>(agentId ? `/testing-agents/${agentId}` : null).data?.agent.name;
     const list = { ...fetched, data: fetched.data && agentId ? { ...fetched.data, schedules: fetched.data.schedules.filter((s) => s.agentId === agentId) } : fetched.data };
@@ -78,7 +78,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted, agentId }: 
                     ) : null}
                     {data.schedules.length === 0 && !adding ? (
                         <EmptyState icon={CalendarClock} title="Nothing is scheduled yet" actions={<Button variant="primary" icon={Plus} disabled={Boolean(noRun)} tip={noRun} onClick={() => setAdding(true)}>New schedule</Button>}>
-                            {agentId ? "Run this agent automatically, for example every night." : "Run your tests automatically — for example every night — and get told when something starts failing."}
+                            {agentId ? "Run this agent automatically, for example every night." : workspace ? "Run a testing agent automatically, for example every night." : "Run your tests automatically — for example every night — and get told when something starts failing."}
                         </EmptyState>
                     ) : (
                         <ul className="list divided">
