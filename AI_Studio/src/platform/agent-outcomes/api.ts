@@ -13,6 +13,7 @@ import { listSnapshots } from "../drift-store.js";
 import { fromCandidate } from "../findings/adapters.js";
 import type { JobRow, TestRow } from "../repo.js";
 import type { AgentOutcomeCtx, AgentOutcomeModule } from "./types.js";
+import { VERIFIED_STATES as VERIFIED } from "./security.js";
 
 export type ContractMatch = "matches" | "differs" | "not-checked";
 
@@ -48,8 +49,6 @@ export interface ApiOutcome {
     findings: ApiFinding[];
 }
 
-/** Lifecycle states a finding is verified in (Phase 5: confirmed by the engine or a person, then classified and reported). */
-const VERIFIED: readonly FindingState[] = ["confirmed", "classified", "reported"];
 
 /** This agent's own tests in a run: API tests that are not another agent's checks (security, access, speed, load). */
 const isApiTest = (t: TestRow) => t.kind === "api" && !["security", "access", "performance", "load"].some((k) => t.generationMeta?.[k]);

@@ -1,9 +1,12 @@
 /**
  * The Security Testing Agent's page in a real browser (Agent Workspace W2c, .scratch/agent-workspace/SPEC.md §3, CONTRACT.md):
  *
- *   - Outcome: the verified findings with their reproduction, then its checks by area (access control; headers, cookies and HTTPS;
- *     exposure), a problem still being verified named on its check; the link to the Security Assessment; nothing of another agent;
- *   - Runs: its runs only, each opening that run's part (a stopped run's checks kept);
+ *   - Outcome: the counts by severity; the problems: a rule-based one as a fact with its severity, what was requested and what came
+ *     back; an access-control one with how far its verification got, or "Not verified yet", and once verified its reproduction (H2);
+ *     then its checks by area (access control; headers, cookies and HTTPS; exposure), each linking to the run it comes from (L2);
+ *     the link to the Security Assessment; nothing of another agent;
+ *   - Runs: its runs only, each opening that run's part (a stopped run's checks kept); without test accounts, one line says access
+ *     control was not checked (L7);
  *   - Setup: the address and the test accounts, where each is kept;
  *   - axe with the colour scheme light and dark, and no sideways scroll at 375 px.
  *
@@ -82,10 +85,18 @@ beforeAll(async () => {
         { action: "assertResponse", check: "securityHeaders", expected: "csp,frame,nosniff,referrer", description: "Security headers are present" },
     ]);
     ids.headers = add(ids.first, headers, "NEEDS_REVIEW", { security: true }, "Security check failed: 2 browser protections are missing.\n- [medium] No Content-Security-Policy. Add one.\n- [low] No Referrer-Policy. Add one.");
-    add(ids.first, spec("API-002", "Secret and source-control files cannot be downloaded", [{ action: "request", method: "GET", path: "/.env" }, { action: "assertResponse", check: "noExposedFiles" }]), "VALIDATED", { security: true });
+    const secrets = spec("API-002", "Secret and source-control files cannot be downloaded", [
+        { action: "request", method: "GET", path: "/.env" },
+        { action: "request", method: "GET", path: "/.git/HEAD" },
+        { action: "assertResponse", check: "noExposedFiles" },
+    ]);
+    add(ids.first, secrets, "NEEDS_REVIEW", { security: true }, "Security check failed: 2 sensitive files are publicly readable\n- [critical] /.env can be downloaded by anyone (it holds secret settings).\n- [critical] /.git/HEAD can be downloaded by anyone.");
     add(ids.first, spec("API-003", "The server does not reveal software versions or list folders", [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "noInfoDisclosure" }]), "VALIDATED", { security: true });
     const access = spec("WEB-001", "A visitor cannot open /admin", [{ action: "navigate", url: "/admin", description: "Open /admin signed out" }, { action: "assert", check: "url", expected: "/login", description: "The visitor is sent to sign in" }], "web");
     ids.access = add(ids.first, access, "NEEDS_REVIEW", { access: true }, "A visitor could open /admin: it answered the admin page instead of sending them to sign in.");
+    const orders = spec("WEB-003", "A visitor cannot open /orders", [{ action: "navigate", url: "/orders" }, { action: "assert", check: "url", expected: "/login" }], "web");
+    ids.orders = add(ids.first, orders, "NEEDS_REVIEW", { access: true }, "A visitor could open /orders.");
+    add(ids.first, spec("WEB-004", "A visitor cannot open /account", [{ action: "navigate", url: "/account" }, { action: "assert", check: "url", expected: "/login" }], "web"), "NEEDS_REVIEW", { access: true }, "A visitor could open /account.");
     add(ids.stopped, spec("API-004", "Session cookies are protected (/)", [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "cookieFlags" }]), "PENDING", { security: true });
     add(ids.other, spec("WEB-002", "Home page looks the same as its approved baseline (/)", [{ action: "navigate", url: "/" }, { action: "assert", check: "screenshot", expected: 100 }], "web"), "VALIDATED", { visual: true });
     // The first run ran each of its checks once (its page shows what each found then).
@@ -95,16 +106,19 @@ beforeAll(async () => {
     repo.setJobStatus(ids.other, "COMPLETED");
 
     const store = new CandidateFindingStore(platform.sql);
-    const finding = async (testId: string, s: ReturnType<typeof spec>, error: string, verified: boolean) => {
+    const finding = async (testId: string, s: ReturnType<typeof spec>, error: string, verified: boolean, confirm = false) => {
         const f = (await store.upsert({ projectId: pid, jobId: ids.first, testId, finding: executionFinding({ id: testId, title: s.title, spec: s }, failed(error)) })).finding;
         await store.transition(pid, f.id, { to: "verification_pending", by: "engine" });
         if (verified) {
             const a = { outcome: "failed", failedStep: 2, check: "securityHeaders", error };
-            await store.transition(pid, f.id, { to: "reproduced", by: "engine", set: { severity: "medium", attempts: [a, a, a] } });
+            await store.transition(pid, f.id, { to: "reproduced", by: "engine", set: { severity: confirm ? "high" : "medium", attempts: [a, a, a] } });
+            if (confirm) await store.transition(pid, f.id, { to: "confirmed", by: "person", reason: "Seen it myself." });
         }
     };
+    // The headers problem was reproduced (a fact anyway); /admin was confirmed; /orders is still being verified; /account has no finding.
     await finding(ids.headers, headers, "Security check failed: 2 browser protections are missing.", true);
-    await finding(ids.access, access, "Expected /login, got /admin", false);
+    await finding(ids.access, access, "Expected /login, got /admin", true, true);
+    await finding(ids.orders, orders, "Expected /login, got /orders", false);
 
     browser = await chromium.launch();
     page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
@@ -153,21 +167,41 @@ async function at375(name: string) {
 const tabs = () => page.getByRole("navigation", { name: "Security Testing Agent sections" });
 
 describe("the Security Testing Agent's page (W2c)", () => {
-    it("Outcome: the verified finding with its reproduction, the checks by area, the Security Assessment link, nothing else", async () => {
+    it("Outcome: the counts by severity, the problems with their evidence or verification, the checks by area, nothing else", async () => {
         await visit(routes.projectAgent(pid, "security"));
         const out = page.getByTestId("security-outcome");
-        await pwExpect(out).toContainText("2 of 5 checks passed over 2 runs");
-        const f = page.getByTestId("security-finding");
-        await pwExpect(f).toHaveCount(1);
-        await pwExpect(f).toContainText("Browser security headers are set (/)");
-        await pwExpect(f).toContainText("Reproduced");
-        await pwExpect(f).toContainText("Medium severity");
-        await pwExpect(f.locator("ol li")).toHaveText(["Request / (read-only)", "Security headers are present"]);
-        await pwExpect(f).toContainText("Failed the same way in 3 of 3 verification replays");
-        await pwExpect(page.getByTestId("security-area-access")).toContainText("Finding: Verification pending");
+        await pwExpect(out).toContainText("1 of 7 checks passed over 2 runs");
+        // H2: the critical and high problems are counted, not hidden behind "no verified findings".
+        const counts = page.getByTestId("security-counts");
+        for (const [n, label] of [["2", "Critical"], ["1", "High"], ["1", "Medium"], ["1", "Low"], ["2", "Access problems not verified yet"]]) await pwExpect(counts).toContainText(`${n}${label}`);
+        const problems = page.getByTestId("security-problem");
+        await pwExpect(problems).toHaveCount(5);
+        // Worst first: the readable secret files, with what was requested and what came back.
+        const secretsItem = problems.nth(0);
+        await pwExpect(secretsItem).toContainText("Secret and source-control files cannot be downloaded");
+        await pwExpect(secretsItem).toContainText("GET /.env, GET /.git/HEAD");
+        await pwExpect(secretsItem).toContainText("Critical/.env can be downloaded by anyone");
+        // The confirmed access problem with its reproduction.
+        const admin = problems.filter({ hasText: "/admin" });
+        await pwExpect(admin.getByTestId("security-verification")).toContainText("Confirmed");
+        await pwExpect(admin.getByTestId("security-finding")).toContainText("Failed the same way in 3 of 3 verification replays");
+        // Still being verified: how far it got; never verified: "Not verified yet".
+        await pwExpect(problems.filter({ hasText: "/orders" }).getByTestId("security-verification")).toContainText("Verification pending");
+        await pwExpect(problems.filter({ hasText: "/account" }).getByTestId("security-verification")).toContainText("Not verified yet");
+        await pwExpect(page.getByTestId("security-finding")).toHaveCount(1);
+        const headersItem = problems.filter({ hasText: "Browser security headers" });
+        await pwExpect(headersItem).toContainText("MediumNo Content-Security-Policy. Add one.");
+        await pwExpect(headersItem).toContainText("GET /");
         await pwExpect(page.getByTestId("security-area-headers").getByTestId("security-check")).toHaveCount(2);
         await pwExpect(page.getByTestId("security-area-exposure").getByTestId("security-check")).toHaveCount(2);
+        await pwExpect(page.getByTestId("security-area-access").getByTestId("security-check")).toHaveCount(3);
         await pwExpect(page.getByTestId("security-area-exposure")).toContainText("Passed");
+        // L2: a check opens the agent's run it comes from, never a test script page.
+        await pwExpect(page.getByTestId("security-area-headers").getByRole("link", { name: "Browser security headers are set (/)" })).toHaveAttribute("href", routes.projectAgentRun(pid, "security", ids.first));
+        await pwExpect(page.getByTestId("security-area-headers").getByRole("link", { name: "Session cookies are protected (/)" })).toHaveAttribute("href", routes.projectAgentRun(pid, "security", ids.stopped));
+        expect(await out.locator('a[href^="#/tests/"]').count()).toBe(0);
+        // It has access checks, so the no-accounts line is not shown.
+        await pwExpect(page.getByTestId("security-no-accounts")).toHaveCount(0);
         await pwExpect(page.getByTestId("security-assessment-link").getByRole("link", { name: "Security Assessment" })).toHaveAttribute("href", `#/projects/${pid}/security`);
         // Not another agent's: the Responsive UI run's visual check is absent.
         expect(await out.textContent()).not.toContain("approved baseline");
@@ -184,8 +218,12 @@ describe("the Security Testing Agent's page (W2c)", () => {
         await pwExpect(page.getByTestId("security-outcome")).toContainText("0 of 1 checks passed in this run");
         await pwExpect(page.getByTestId("security-check")).toHaveText([/Session cookies are protected/]);
         await pwExpect(page.getByTestId("security-finding")).toHaveCount(0);
+        // No test accounts and no access check in this run: one line says so (L7).
+        const line = page.getByTestId("security-no-accounts");
+        await pwExpect(line).toHaveText("Access control was not checked: add test accounts in Settings.");
+        await pwExpect(line.getByRole("link", { name: "Settings" })).toHaveAttribute("href", routes.projectSettings(pid, "accounts"));
         await visit(routes.projectAgentRun(pid, "security", ids.first));
-        await pwExpect(page.getByTestId("security-check")).toHaveCount(4);
+        await pwExpect(page.getByTestId("security-check")).toHaveCount(6);
         await pwExpect(page.getByTestId("security-finding")).toHaveCount(1);
         await axe("security run");
         await shot("run.png");
