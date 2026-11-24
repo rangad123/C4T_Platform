@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -179,5 +180,56 @@ describe("VERIFY_FINDINGS (owner decision 2026-11-22: on by default)", () => {
         expect(loadConfig({ VERIFY_FINDINGS: "true" }).VERIFY_FINDINGS).toBe(true);
         expect(loadConfig({ VERIFY_FINDINGS: "1" }).VERIFY_FINDINGS).toBe(true);
         expect(loadConfig({ VERIFY_FINDINGS: "false" }).VERIFY_FINDINGS).toBe(false);
+    });
+});
+
+describe("eng-fix3: the budget's leftovers, the expectation check before the vote, and a page attempt's requests", () => {
+    const page = (testId: string, check: Record<string, unknown>) =>
+        TestSpecSchema.parse({ testId, title: `T ${testId}`, kind: "web", category: "Cart", source: { origin: "browser-agent" }, steps: [{ action: "navigate", url: "/cart" }, { action: "click", locator: { by: "role", role: "button", value: "Apply" } }, { action: "assert", source: "expected:1", ...check }] });
+    const failingAt3 = (testId: string, evidence?: string) => [1, 2, 3].map((i) => ({ ...run(testId, "fail", i, 3), failedStepIndex: 2, steps: [{ index: 0, title: "1", status: "passed" as const }, { index: 1, title: "2", status: "passed" as const }, { index: 2, title: "3", status: "failed" as const, error: "Error: expect(locator).toContainText(expected) failed" }], artifacts: evidence ? [{ kind: "evidence", path: evidence }] : [] })) as ScriptRun[];
+    /** A page finding as exploration writes it (its own fingerprint, the cited expected result), on a test with this spec. */
+    async function explored(name: string, spec: ReturnType<typeof page>, cited: string) {
+        const projectId = String(platform.repo.createProject({ name }).id);
+        const appId = platform.repo.createApplication(projectId, "http://127.0.0.1:5591", { ...DEFAULT_JOB_OPTIONS }) as string;
+        const suiteId = platform.repo.getOrCreateSuite(projectId, "Cart", "cart");
+        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "generate" });
+        const id = platform.repo.insertTest({ projectId, suiteId, jobId: job.id, spec, framework: "playwright", validationStatus: "NEEDS_REVIEW" });
+        const { executionFinding } = await import("../src/platform/findings/adapters.js");
+        const t = platform.repo.getTest(id)!;
+        const finding = { ...executionFinding({ id: t.id, title: t.title, spec: t.spec }, run(t.testKey, "fail")), expected: { text: cited, source: "expected:1" }, capture: "captured", independence: "independent", confidence: "high", fingerprint: createHash("sha256").update(`explored-${name}`).digest("hex") };
+        const f = (await store.upsert({ projectId, jobId: job.id, testId: id, finding })).finding;
+        platform.repo.setJobStatus(job.id, "COMPLETED");
+        return { projectId, job: platform.repo.getJob(job.id)!, f, testKey: t.testKey };
+    }
+
+    it("a finding the budget leaves out says why, with its state (V3)", async () => {
+        const s = await project("Budget note", 2);
+        const execute: VerifyDeps["execute"] = async (_a, b) => [1, 2, 3].map((i) => run(b.scripts[0]!.testId, "fail", i, 3));
+        await verifyAfterJob(platform, s.job, { execute, harvested: true, budget: { findingsPerRun: 1, minutesEach: 10 } });
+        const waiting = [];
+        for (const f of s.findings) if ((await store.get(s.projectId, f.id))!.state === "candidate") waiting.push((await store.history(s.projectId, f.id)).at(-1)?.reason);
+        expect(waiting).toEqual([expect.stringMatching(/^Not verified: budget used\. The verification budget of 1 finding per run was used/)]);
+    });
+
+    it("an amount the rule does not state, with no API answer, waits for a person; its attempts carry the failing step's requests (V1, V7)", async () => {
+        const s = await explored("Amount", page("WEB-053", { check: "text", locator: { by: "role", role: "term", value: "Discount (SAVE10)" }, expected: "$4.70" }), '"SAVE10 takes 10% off the order subtotal, rounded to the nearest cent"');
+        const ev = path.join(dir, "evidence-053.json");
+        fs.writeFileSync(ev, JSON.stringify({ v: 1, durationMs: 5, counts: { requests: 2, requestsKept: 2, console: 0, consoleKept: 0 }, steps: [], console: [], requests: [{ t: 1, step: 1, method: "GET", type: "document", path: "/cart", status: 200 }, { t: 2, step: 2, method: "POST", type: "fetch", path: "/api/cart/discount", status: 200 }, { t: 3, step: 2, method: "GET", type: "stylesheet", path: "/site.css", status: 200 }] }));
+        const execute: VerifyDeps["execute"] = async (_a, b) => failingAt3(b.scripts[0]!.testId, ev);
+        await verifyAfterJob(platform, s.job, { execute, findingTests: new Set([s.f.testId!]) });
+        const r = (await store.get(s.projectId, s.f.id))!;
+        expect(r.state).toBe("needs_manual_review");
+        expect((await store.history(s.projectId, s.f.id)).at(-1)?.reason).toMatch(/expects \$4\.70, an amount the cited expectation does not state/);
+        expect((r.attempts as Array<{ requests: unknown[] }>)[0]!.requests).toEqual([{ method: "POST", path: "/api/cart/discount", status: 200, own: true }]);
+    });
+
+    it("a message the cited expectation does not state is an incorrect expectation, never confirmed (V4)", async () => {
+        const s = await explored("Unstated", page("WEB-032", { check: "visible", locator: { by: "text", value: "at least 8 characters" } }), "A message stating the minimum of 8 characters is shown (requirement 2.7)");
+        const execute: VerifyDeps["execute"] = async (_a, b) => failingAt3(b.scripts[0]!.testId);
+        await verifyAfterJob(platform, s.job, { execute, findingTests: new Set([s.f.testId!]) });
+        const r = (await store.get(s.projectId, s.f.id))!;
+        expect(r.findingClass).toBe("incorrect_expectation");
+        expect(r.state).not.toBe("confirmed");
+        expect(r.confidenceDetail?.confidence).toBe("low");
     });
 });

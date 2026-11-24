@@ -38,7 +38,8 @@ import { LocatorStore } from "../locator-store.js";
 import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
 import { SecretBox } from "../secrets.js";
 import { ResetHookStore, sendResetRequest } from "../test-data-reset-store.js";
-import { attemptOf, executionFinding, fromCandidate, type TestOf } from "./adapters.js";
+import { attemptOf, executionFinding, fromCandidate, withStepRequests, type TestOf } from "./adapters.js";
+import { judgePageCheck } from "../../engine/findings/expectation.js";
 
 /** A test the verification can run: its key, steps and framework. */
 export interface VerifyTest extends TestOf {
@@ -140,6 +141,7 @@ export async function verifyFindings(d: VerifyDeps): Promise<VerifyResult> {
     if (run.stopped) {
         out.stopped = run.stopped;
         d.emit(run.stopped, "warn");
+        await noteNotVerified(d.store, d.projectId, run.left.map((r) => r.f), run.stopped);
     }
     await confirmAndGroup(d, out);
     return out;
@@ -186,6 +188,11 @@ async function confirmAndGroup(d: VerifyDeps, out: VerifyResult): Promise<void> 
     }
 }
 
+/** V3: a finding the budget left out still says why it waits, in its own history (its state stays Candidate until a run verifies it). */
+async function noteNotVerified(store: CandidateFindingStore, projectId: string, left: readonly CandidateFindingRecord[], why: string): Promise<void> {
+    for (const f of left) await store.note(projectId, f.id, { by: "engine", reason: `Not verified: budget used. ${why} The next run verifies it.` }).catch(() => undefined);
+}
+
 /** Moves a finding that waits in Verification pending to `to` with only a reason (an attempt that could not run). */
 async function settle(d: VerifyDeps, f: CandidateFindingRecord, to: "unconfirmed", reason: string): Promise<{ to: string; reason: string }> {
     await d.store.transition(d.projectId, f.id, { to, by: "engine", reason }).catch(() => undefined);
@@ -214,9 +221,30 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
     const account: AttemptAccount = plan.register
         ? { clean: notes.every((n) => n?.clean === true), note: notes.find((n) => n?.clean === false)?.note ?? "on a newly registered account each time" }
         : { clean: plan.clean, note: plan.why };
-    const tried = runs.map((x) => attemptOf(x, spec));
-    const view = fromCandidate(f, test);
-    return { runs, notes, account, tried, view, verdict: verdictOf(view, tried, account) };
+    const secrets = runSecretValues(d.env);
+    const tried = await Promise.all(
+        runs.map(async (x) => {
+            const file = x.artifacts.find((a) => a.kind === "evidence");
+            const ev = file ? parseEvidence(await fs.readFile(file.path, "utf8").catch(() => ""), secrets) : undefined;
+            return withStepRequests(attemptOf(x, spec), ev);
+        }),
+    );
+    const view = judgedView(fromCandidate(f, test), f, test, tried);
+    let verdict = verdictOf(view.view, tried, account);
+    // An amount no API answer was compared with is never confirmed by the vote alone: a person checks it.
+    if (view.review && verdict.to === "reproduced")
+        verdict = { to: "needs_manual_review", reason: `${verdict.reason} ${view.review}`, classification: { ...verdict.classification, class: "open", candidates: ["app_defect", "incorrect_expectation"] } };
+    return { runs, notes, account, tried, view: view.view, verdict };
+}
+
+/** The view with the expectation check before the vote (findings/expectation.ts): an unstated or API-contradicted expectation, or why a person checks it. */
+function judgedView(view: ReturnType<typeof fromCandidate>, f: CandidateFindingRecord, test: VerifyTest, tried: readonly Attempt[]): { view: ReturnType<typeof fromCandidate>; review?: string } {
+    const failedStep = tried.find((a) => a.outcome === "failed" && !a.stepFault)?.failedStep;
+    const correlated = Boolean(f.finding.evidence.layers?.length || view.correlated?.disagreed.length);
+    const j = judgePageCheck({ spec: test.spec, ...(failedStep !== undefined ? { failedStep } : {}), cited: view.expected.text, apiAmount: test.meta?.apiAmount, correlated });
+    if (!j) return { view };
+    const expected = { ...view.expected, ...(j.unstated ? { stated: "none" as const } : {}), ...(j.contradictedBy ? { contradictedBy: j.contradictedBy.slice(0, 300) } : {}) };
+    return { view: { ...view, expected }, ...(j.review ? { review: j.review } : {}) };
 }
 
 async function verifyOne(d: VerifyDeps, r: { f: CandidateFindingRecord; test: VerifyTest; adapterId: string }, attempts: number, reset: VerifyDeps["reset"], signal: AbortSignal): Promise<{ to: string; reason: string }> {
@@ -357,8 +385,10 @@ async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions
     const findings = [...own, ...older];
     if (findings.length === 0) return undefined;
     if (!o.execute && getAgentServices(p).routesToAgent(job.projectId)) {
-        const batch = findings.slice(0, Math.max(0, Math.floor((o.budget ?? VERIFY_BUDGET).findingsPerRun)));
+        const cap = Math.max(0, Math.floor((o.budget ?? VERIFY_BUDGET).findingsPerRun));
+        const batch = findings.slice(0, cap);
         const n = `${batch.length} finding${batch.length === 1 ? "" : "s"}`;
+        if (findings.length > cap) await noteNotVerified(store, job.projectId, findings.slice(cap), `The verification budget of ${cap} finding${cap === 1 ? "" : "s"} per run was used.`);
         try {
             // The run's starter's runner does the attempts, as it ran the run (agent-services.ts assertJobAllowed picks it).
             const testIds = [...new Set(batch.map((f) => f.testId!))];

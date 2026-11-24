@@ -3,6 +3,7 @@
  * own saved steps and scenarios (c4t-scratch/eng-paid/trials). Fast tier: no browser, no model.
  */
 import { describe, expect, it } from "vitest";
+import { apiOnAmount, judgePageCheck } from "../src/engine/findings/expectation.js";
 import { roleCredentials } from "../src/engine/identity/role-differences.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import { maskedExpectation, withStatedCheckKinds } from "../src/engine/web/author.js";
@@ -63,5 +64,61 @@ describe("a role named only in a precondition binds the one account that holds i
         // Two accounts hold "user": neither is named after it, and a "user test account" binds nobody.
         expect(roles.filter((r) => r.name === "user")).toEqual([]);
         expect(roleCredentials({ title: "x", preconditions: ["A user test account exists"] }, roles, "ana@example.test")).toBeUndefined();
+    });
+});
+
+/** shop-5 WEB-053's saved steps (cut to what the judgement reads): a computed discount the rule does not state. */
+const web053 = TestSpecSchema.parse({
+    testId: "WEB-053",
+    title: 'As stated: rule "R-a3777ab66902"',
+    kind: "web",
+    source: { origin: "browser-agent" },
+    steps: [
+        { action: "navigate", url: "/" },
+        { action: "fill", locator: { by: "label", value: "Discount code" }, value: "SAVE10" },
+        { action: "click", locator: { by: "role", role: "button", value: "Apply", exact: true } },
+        { action: "assert", check: "text", locator: { by: "role", role: "term", value: "Discount (SAVE10)" }, expected: "$4.70", source: "expected:1" },
+    ],
+});
+const cited053 = '"SAVE10 takes 10% off the order subtotal, rounded to the nearest cent" (source: R-a3777ab66902)';
+
+describe("the expectation check before the vote (V1, V4)", () => {
+    it("an amount the cited rule does not state: needs review, an incorrect expectation when the API lacks it, normal when the API holds it", () => {
+        expect(judgePageCheck({ spec: web053, failedStep: 4, cited: cited053 })?.review).toMatch(/\$4\.70, an amount the cited expectation does not state/);
+        expect(judgePageCheck({ spec: web053, failedStep: 4, cited: cited053, apiAmount: "lacks" })?.contradictedBy).toMatch(/API/);
+        expect(judgePageCheck({ spec: web053, failedStep: 4, cited: cited053, apiAmount: "holds" })).toBeUndefined();
+        // A correlation finding (the API layer disagreed), or an amount the requirement states, is not judged here.
+        expect(judgePageCheck({ spec: web053, failedStep: 4, cited: cited053, correlated: true })).toBeUndefined();
+        expect(judgePageCheck({ spec: web053, failedStep: 4, cited: "Shipping is $4.70 below the threshold" })).toBeUndefined();
+    });
+    it("a text the cited expectation does not state is unstated; a stated message or the test's own typed value is not (rbac-4 WEB-032, BR-08, BR-10)", () => {
+        const page = (check: Record<string, unknown>, fills: string[] = []) =>
+            TestSpecSchema.parse({ testId: "WEB-001", title: "A page check", kind: "web", source: { origin: "browser-agent" }, steps: [{ action: "navigate", url: "/" }, ...fills.map((v) => ({ action: "fill", locator: { by: "label", value: "Title" }, value: v })), { action: "assert", source: "expected:1", ...check }] });
+        const web032 = page({ check: "visible", locator: { by: "text", value: "at least 8 characters" } });
+        expect(judgePageCheck({ spec: web032, failedStep: 2, cited: "A message stating the minimum of 8 characters is shown (requirement 2.7)" })).toEqual({ unstated: true });
+        const br08 = page({ check: "visible", locator: { by: "text", value: "Give the note a title." } });
+        expect(judgePageCheck({ spec: br08, failedStep: 2, cited: "The message 'Give the note a title.' is shown (requirement 3.4)" })).toBeUndefined();
+        const br10 = page({ check: "exactText", locator: { by: "role", role: "heading" }, expected: "<b>Bold {{unique}}</b>" }, ["<b>Bold {{unique}}</b>"]);
+        expect(judgePageCheck({ spec: br10, failedStep: 3, cited: "A note's title and text are always shown as plain text, exactly as typed." })).toBeUndefined();
+        // An API test is never judged here.
+        expect(judgePageCheck({ spec: { ...web032, kind: "api" }, failedStep: 2, cited: "x" })).toBeUndefined();
+    });
+    it("apiOnAmount reads the captured answers in units or cents", () => {
+        const cart = (discount: number) => [{ step: 2, method: "POST", path: "/api/cart/discount", status: 200, body: JSON.stringify({ subtotal: 1250, discount, shipping: 500, total: 1750 - discount }) }];
+        expect(apiOnAmount(web053.steps, "expected:1", cart(125))).toBe("lacks");
+        expect(apiOnAmount(web053.steps, "expected:1", cart(470))).toBe("holds");
+        expect(apiOnAmount(web053.steps, "expected:1", [])).toBeUndefined();
+        expect(apiOnAmount(web053.steps, "expected:9", cart(470))).toBeUndefined();
+    });
+});
+
+describe("a bench trial verifies every candidate (V2, V3)", () => {
+    it("the bench budget leaves none of 42 waiting, where the product's leaves 12", async () => {
+        const { BENCH_VERIFY_BUDGET } = await import("../src/eval/bench/cli.js");
+        const { withinBudget, VERIFY_BUDGET } = await import("../src/engine/findings/reproduce.js");
+        const items = Array.from({ length: 42 }, (_, i) => i);
+        expect((await withinBudget(items, async (i) => i, BENCH_VERIFY_BUDGET)).left).toEqual([]);
+        expect((await withinBudget(items, async (i) => i, VERIFY_BUDGET)).left).toHaveLength(12);
+        expect(BENCH_VERIFY_BUDGET.minutesEach).toBe(VERIFY_BUDGET.minutesEach);
     });
 });
