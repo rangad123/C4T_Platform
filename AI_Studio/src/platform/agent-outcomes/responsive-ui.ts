@@ -4,7 +4,8 @@
  *   grid    page × screen size. Desktop comes from its visual checks (test meta `visual`: a picture compared with the approved one); the
  *           other sizes and browsers from the repeats its runs recorded (variants-store.ts, executions tagged with their variant). Each
  *           cell has its result and the picture kept for it: the run's own screenshot, the approved baseline, or the new picture and its
- *           difference when the page changed. A repeat keeps a picture only when it failed (repo-sink.ts recordVariant).
+ *           difference when the page changed. On the agent's own sizes (variants.ts SIZE_VARIANT_IDS) its visual checks are repeated and
+ *           each keeps its picture ("pictured": nothing approved to compare with at that size); another repeat keeps one only when it failed.
  *   issues  layout issues: a desktop change once it is verified (Phase 5 lifecycle), and a page that passes on desktop but fails on
  *           another size or browser, with its evidence (the repeat is a real run; Phase 5 does not verify repeats).
  *
@@ -20,7 +21,7 @@ import type { TestRow } from "../repo.js";
 import { findingsOfTests, testsOfRuns, VERIFIED_STATES } from "./security.js";
 import type { AgentOutcomeModule } from "./types.js";
 
-export type CellStatus = "same" | "changed" | "passed" | "failed" | "could-not-run" | "not-checked" | "not-run";
+export type CellStatus = "same" | "changed" | "pictured" | "passed" | "failed" | "could-not-run" | "not-checked" | "not-run";
 
 export interface Viewport {
     id: string;
@@ -83,7 +84,7 @@ function pageOf(t: TestRow): string {
 }
 
 /** Worst first: a cell shows the worst result of the tests at that page. */
-const RANK: CellStatus[] = ["changed", "failed", "could-not-run", "not-run", "not-checked", "passed", "same"];
+const RANK: CellStatus[] = ["changed", "failed", "could-not-run", "not-run", "not-checked", "passed", "pictured", "same"];
 const VARIANT_STATUS: Record<string, CellStatus> = { passed: "passed", failed: "failed", unavailable: "could-not-run", skipped: "not-checked" };
 
 async function responsiveOutcome(p: Platform, projectId: string, runIds: readonly string[]): Promise<ResponsiveOutcome> {
@@ -142,12 +143,14 @@ async function responsiveOutcome(p: Platform, projectId: string, runIds: readonl
             const e = newest.get(`${t.id}|${v}`);
             if (!e) continue;
             seen.add(v);
-            const status = VARIANT_STATUS[String(e.status)] ?? "not-checked";
-            put(path, v, { status, testKey: t.testKey, reason: why(e.error), shot: status === "failed" ? artifactsOf(String(e.id), "screenshot") : null, diff: null, finding: null });
+            const ran = VARIANT_STATUS[String(e.status)] ?? "not-checked";
+            const status = ran === "passed" && isVisual(t) ? "pictured" : ran;
+            put(path, v, { status, testKey: t.testKey, reason: why(e.error), shot: artifactsOf(String(e.id), "screenshot"), diff: null, finding: null });
         }
     }
 
-    const viewports = [DESKTOP, ...VIEWPORT_IDS.filter((v) => seen.has(v)).map((v: VariantId) => ({ id: v, label: VARIANTS[v].label, width: VARIANTS[v].viewport.width, height: VARIANTS[v].viewport.height }))];
+    // Narrowest first; desktop last of its width.
+    const viewports = [...VIEWPORT_IDS.filter((v) => seen.has(v)).map((v: VariantId) => ({ id: v, label: VARIANTS[v].label, width: VARIANTS[v].viewport.width, height: VARIANTS[v].viewport.height })), DESKTOP].sort((a, b) => a.width - b.width);
     const pages = [...rows.values()];
     const issues: LayoutIssue[] = [];
     for (const row of pages)

@@ -13,6 +13,7 @@ import type { Repo, JobCounters, JobMode, ValidationState } from "./repo.js";
 import { slugify, type ArtifactStore } from "./storage.js";
 import { localPathOf, putText } from "./object-store.js";
 import { addVariantExecution, isRepeatedSkip } from "./variants-store.js";
+import { isSizeVariant } from "../engine/validation/variants.js";
 import { rememberPhone } from "./phone-run-store.js";
 import { JobWriteQueue } from "./job-write-queue.js";
 import { retryOnUniqueViolation } from "./sql-dialect.js";
@@ -350,9 +351,11 @@ export class RepoSink implements GenerationSink {
             startedAt,
             steps: this.maskSteps(run?.steps ?? []),
         });
-        // Only a run that failed has evidence worth keeping (Playwright keeps screenshot / video / trace on failure).
-        if (r.status !== "failed") return;
-        for (const a of run?.artifacts ?? []) {
+        // A run that failed keeps its evidence (Playwright keeps screenshot / video / trace on failure). A passed run on the Responsive UI
+        // agent's sizes keeps its picture: that page at that size, for the agent's grid.
+        const picture = r.status === "passed" && isSizeVariant(r.variant);
+        if (r.status !== "failed" && !picture) return;
+        for (const a of (run?.artifacts ?? []).filter((x) => !picture || x.kind === "screenshot")) {
             try {
                 const rel = path.posix.join(this.job.projectId, "_artifacts", h.testId, `job-${this.job.id.slice(0, 8)}`, `variant-${r.variant}`, `${a.kind}${path.extname(a.path)}`);
                 const saved = await this.store.putFile(rel, a.path);

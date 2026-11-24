@@ -75,6 +75,8 @@ beforeAll(async () => {
     ids.homeShot = shot(ids.home, ids.first, run(ids.home, ids.first, "passed"), "screenshot");
     variant(ids.home, "mobile-chrome", "skipped", "Visual comparisons use one approved screenshot per browser and screen size, so they aren't repeated.");
     variant(ids.home, "tablet", "unavailable", "Tablet couldn't be started on this computer.");
+    // On the agent's own phone size the visual check is repeated, and its picture kept on a pass.
+    ids.homePhoneShot = shot(ids.home, ids.first, variant(ids.home, "phone-375", "passed"), "screenshot");
     ids.cart = add(ids.first, visual("WEB-002", "/cart"), "NEEDS_REVIEW", { visual: true }, "The page no longer matches its approved baseline: 840 pixels differ.");
     const cartRun = run(ids.cart, ids.first, "failed");
     ids.cartActual = shot(ids.cart, ids.first, cartRun, "visual-actual");
@@ -122,7 +124,9 @@ describe("the Responsive UI Testing Agent's outcome", () => {
         expect(r.status).toBe(200);
         const o = r.body;
         expect(o.runs).toBe(3);
-        expect(o.viewports.map((v: any) => v.id)).toEqual(["desktop", "mobile-chrome", "tablet"]);
+        // Narrowest first, desktop last.
+        expect(o.viewports.map((v: any) => v.id)).toEqual(["phone-375", "mobile-chrome", "tablet", "desktop"]);
+        expect(o.viewports[0]).toMatchObject({ label: "Phone", width: 375, height: 812 });
         expect(o.viewports[1]).toMatchObject({ label: "Phone", width: 390, height: 844 });
         const page = Object.fromEntries(o.pages.map((p: any) => [p.path, p.cells]));
         expect(Object.keys(page)).toEqual(["/", "/cart", "/about", "/orders", "/help", "/checkout"]);
@@ -130,6 +134,7 @@ describe("the Responsive UI Testing Agent's outcome", () => {
         expect(page["/"]["mobile-chrome"]).toMatchObject({ status: "not-checked", shot: null });
         expect(page["/"]["mobile-chrome"].reason).toContain("aren't repeated");
         expect(page["/"].tablet).toMatchObject({ status: "could-not-run" });
+        expect(page["/"]["phone-375"]).toMatchObject({ status: "pictured", shot: ids.homePhoneShot });
         expect(page["/cart"].desktop).toMatchObject({ status: "changed", shot: ids.cartActual, diff: ids.cartDiff, finding: { id: ids.cartFinding, label: "Reproduced", verified: true } });
         expect(page["/about"].desktop).toMatchObject({ status: "changed", finding: { label: "Verification pending", verified: false } });
         expect(page["/checkout"].desktop).toMatchObject({ status: "passed" });
@@ -164,6 +169,6 @@ describe("the Responsive UI Testing Agent's outcome", () => {
 
     it("says on the Workspace card what it found", async () => {
         const ws = await call(`/api/projects/${pid}/workspace`);
-        expect(ws.body.agents.find((a: any) => a.id === "responsive-ui").headline).toBe("2 layout issues, 6 pages on 3 screen sizes");
+        expect(ws.body.agents.find((a: any) => a.id === "responsive-ui").headline).toBe("2 layout issues, 6 pages on 4 screen sizes");
     });
 });

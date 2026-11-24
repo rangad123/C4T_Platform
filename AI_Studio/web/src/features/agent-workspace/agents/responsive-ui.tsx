@@ -13,7 +13,7 @@ import type { AgentView } from "../registry";
 const ID = "responsive-ui";
 
 /** GET /api/projects/:id/workspace/responsive-ui/outcome (src/platform/agent-outcomes/responsive-ui.ts). */
-type CellStatus = "same" | "changed" | "passed" | "failed" | "could-not-run" | "not-checked" | "not-run";
+type CellStatus = "same" | "changed" | "pictured" | "passed" | "failed" | "could-not-run" | "not-checked" | "not-run";
 interface Viewport {
     id: string;
     label: string;
@@ -47,6 +47,7 @@ interface Outcome {
 const STATUS: Record<CellStatus, { label: string; tone: Tone; help: string }> = {
     same: { label: "Same", tone: "success", help: "The page looks the same as its approved picture." },
     changed: { label: "Changed", tone: "warning", help: "The page looks different from its approved picture: the new picture and the difference are kept." },
+    pictured: { label: "Pictured", tone: "success", help: "The page opened at this size and its picture is kept. Only desktop has an approved picture to compare with." },
     passed: { label: "Works", tone: "success", help: "The test at this page passed on this screen size." },
     failed: { label: "Fails", tone: "danger", help: "The test at this page passes on desktop but failed on this screen size." },
     "could-not-run": { label: "Could not run", tone: "neutral", help: "The check could not run here (for example, that browser is not installed); it says nothing about the page." },
@@ -149,7 +150,7 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
                 </div>
                 <p className="t-meta" style={{ margin: 0 }}>
                     {o.pages.length === 1 ? "1 page" : `${o.pages.length} pages`}
-                    {run ? " in this run" : ` over ${o.runs === 1 ? "1 run" : `${o.runs} runs`}`}. A size other than desktop keeps a picture only when the page failed there.
+                    {run ? " in this run" : ` over ${o.runs === 1 ? "1 run" : `${o.runs} runs`}`}. Each page is pictured on the phone and tablet sizes; another browser or size keeps a picture only when the page failed there.
                 </p>
                 <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--type-body-sm-size)" }}>
@@ -242,9 +243,37 @@ function Setup({ projectId }: { projectId: string }) {
                     {d.signIn.username ? `As ${d.signIn.username}: pages behind the sign-in are pictured too` : "None: only pages a visitor can open are pictured"} · <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>
                 </dd>
                 <dt>Screen sizes</dt>
-                <dd>Desktop (1280 × 800) on every run. Phone, tablet and other browsers show in the grid when a run tries them.</dd>
+                <dd>Phone (375 wide), tablet (768 wide) and desktop (1280 wide) on every run. Untick the phone or the tablet when you start a run to leave it out.</dd>
             </dl>
         </section>
+    );
+}
+
+/** The Responsive UI agent's screen sizes beside desktop (src/engine/validation/variants.ts SIZE_VARIANT_IDS): all on by default. */
+export const SIZE_DEFAULT = ["phone-375", "tablet-768"];
+const SIZES = [
+    { id: "phone-375", label: "Phone, 375 wide", hint: "Each page is pictured on a phone-sized screen with touch." },
+    { id: "tablet-768", label: "Tablet, 768 wide", hint: "Each page is pictured on a tablet-sized screen with touch." },
+    { id: "desktop", label: "Desktop, 1280 wide", hint: "Always: the approved picture of each page is taken here and later runs compare with it." },
+];
+
+/** The run form's choice of screen sizes for a Responsive UI run (#/new?agent=responsive-ui): sent as the run's `variants`. */
+export function SizePicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+    return (
+        <fieldset className="stack-sm" style={{ border: 0, margin: 0, padding: 0 }} data-testid="size-picker">
+            <legend className="t-card" style={{ marginBottom: 8 }}>
+                Screen sizes
+            </legend>
+            {SIZES.map((s) => (
+                <label key={s.id} className="check">
+                    <input type="checkbox" checked={s.id === "desktop" || value.includes(s.id)} disabled={s.id === "desktop"} onChange={(e) => onChange(e.target.checked ? [...value, s.id] : value.filter((x) => x !== s.id))} />
+                    <span>
+                        <span className="title">{s.label}</span>
+                        <span className="hint">{s.hint}</span>
+                    </span>
+                </label>
+            ))}
+        </fieldset>
     );
 }
 

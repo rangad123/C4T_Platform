@@ -88,6 +88,8 @@ beforeAll(async () => {
     ids.access = add(ids.first, access, "NEEDS_REVIEW", { access: true }, "A visitor could open /admin: it answered the admin page instead of sending them to sign in.");
     add(ids.stopped, spec("API-004", "Session cookies are protected (/)", [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "cookieFlags" }]), "PENDING", { security: true });
     add(ids.other, spec("WEB-002", "Home page looks the same as its approved baseline (/)", [{ action: "navigate", url: "/" }, { action: "assert", check: "screenshot", expected: 100 }], "web"), "VALIDATED", { visual: true });
+    // The first run ran each of its checks once (its page shows what each found then).
+    for (const t of repo.listTests(pid).filter((x) => x.jobId === ids.first)) repo.addExecution({ testId: t.id, scriptId: null, jobId: ids.first, attempt: 1, status: t.validationStatus === "VALIDATED" ? "passed" : "failed", durationMs: 40, startedAt: new Date().toISOString(), steps: [] });
     repo.setJobStatus(ids.first, "COMPLETED");
     repo.setJobStatus(ids.stopped, "FAILED", "Cancelled");
     repo.setJobStatus(ids.other, "COMPLETED");

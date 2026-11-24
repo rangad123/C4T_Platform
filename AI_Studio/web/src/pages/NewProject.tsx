@@ -17,6 +17,7 @@ import { LevelChoice, projectLevel, ScreenReviewChoice } from "../features/explo
 import { LEVEL_SETTINGS, type ExploreLevel } from "../../../src/engine/levels";
 import { projectAgentView } from "../features/testing-agents/case-agent";
 import type { ProjectAgents } from "../features/testing-agents/testing-agents";
+import { SIZE_DEFAULT, SizePicker } from "../features/agent-workspace/agents/responsive-ui";
 
 /**
  * Explore an existing project's application (`#/new?project=`): Start exploring the first time, Explore again after (with Explore every
@@ -51,6 +52,8 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
     const [fullExploration, setFullExploration] = useState(false);
     // AI screen review: null = the level decides; set only when the person changes the box.
     const [screenReview, setScreenReview] = useState<boolean | null>(null);
+    // A Responsive UI run: the screen sizes it checks beside desktop (the job's `variants`).
+    const [sizes, setSizes] = useState<string[]>(SIZE_DEFAULT);
     // Hidden when the project's testing agents leave it off (no UX agent).
     const agentSwitches = useFetch<ProjectAgents>(`/projects/${projectId}/testing-agents`);
     const screenReviewOff = agentSwitches.data?.applies === true && agentSwitches.data.switches?.visionChecks === "off";
@@ -106,7 +109,7 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
             // sign-in, API access, OpenAPI document and requirements are the ones kept on the Requirements tab.
             await api(`/projects/${id}/test-generation`, {
                 method: "POST",
-                body: { url: address, plan: true, ...(agentId ? { agentId } : {}), ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}) },
+                body: { url: address, plan: true, ...(agentId ? { agentId } : {}), ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}), ...(agentId === "responsive-ui" ? { variants: sizes } : {}) },
             });
             go(home);
         } catch (err) {
@@ -150,6 +153,7 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
                     <input id="scope" className="input" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Everything — or e.g. “search and checkout only”" />
                 </div>
                 <LevelChoice value={chosenLevel} onChange={setLevel} caseAgent={caseAgent} />
+                {agentId === "responsive-ui" && <SizePicker value={sizes} onChange={setSizes} />}
                 {offerReview && <ScreenReviewChoice level={chosenLevel} canReadImages value={screenReview} onChange={setScreenReview} />}
                 {!first && (
                     <label className="check">

@@ -79,7 +79,8 @@ describe("a run is one agent's, with that agent's switches only (D1)", () => {
         api: ["apiTests", "contractChecks"],
         accessibility: ["accessibility"],
         security: ["accessChecks", "securityChecks"],
-        "responsive-ui": ["visual"],
+        // Its phone and tablet sizes are on by default (W2c): the run repeats its visual checks on them.
+        "responsive-ui": ["variants", "visual"],
         ux: ["healthChecks"],
         performance: ["performanceChecks"],
     };

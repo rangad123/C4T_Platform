@@ -5,7 +5,7 @@
  *     evidence), then the page × screen size grid with the picture kept for each cell, and why a cell was not checked; nothing of another
  *     agent;
  *   - Runs: its runs only, each opening that run's part (a stopped run's page kept);
- *   - Setup: the address, the sign-in and the screen sizes;
+ *   - Setup: the address, the sign-in and the screen sizes; the run form offers the three sizes, all ticked, and sends the ones kept;
  *   - axe with the colour scheme light and dark, and no sideways scroll at 375 px (the grid scrolls inside its card).
  *
  * The platform is real; the runs are seeded as the engine leaves them (visual checks with their pictures, repeats tagged with their
@@ -67,7 +67,7 @@ beforeAll(async () => {
     if (!fs.existsSync(path.join(REPO_ROOT, "web/dist/index.html"))) throw new Error("web/dist is missing: build the UI first (see the header of this file)");
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-agent-rui-ui-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "agent-responsive-ui-secret-0123456789", HOST: "127.0.0.1", PORT: String(PORT), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "agent-responsive-ui-secret-0123456789", HOST: "127.0.0.1", PORT: String(PORT), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "true" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     browser = await chromium.launch();
@@ -79,7 +79,7 @@ beforeAll(async () => {
     expect(put.status).toBe(200);
     const suite = repo.getOrCreateSuite(pid, "General", "general");
     const job = async (agentId: string, extra: Record<string, unknown> = {}) => (await repo.createJob(pid, appId, { ...DEFAULT_JOB_OPTIONS, agentId, ...extra } as never)).id;
-    ids.first = await job("responsive-ui", { visual: true, variants: ["mobile-chrome", "tablet"] });
+    ids.first = await job("responsive-ui", { visual: true, variants: ["phone-375", "tablet-768"] });
     ids.stopped = await job("responsive-ui", { visual: true });
     ids.security = await job("security");
     const add = (jobId: string, s: ReturnType<typeof visual>, status: "VALIDATED" | "NEEDS_REVIEW" | "PENDING", meta: Record<string, unknown>, reason?: string) => {
@@ -95,24 +95,28 @@ beforeAll(async () => {
     };
     const variant = (testId: string, v: string, status: "passed" | "failed" | "skipped" | "unavailable", reason?: string) =>
         addVariantExecution(repo.db, { testId, scriptId: null, jobId: ids.first, variant: v, status, ...(reason ? { reason } : {}), durationMs: 800, startedAt: new Date().toISOString(), steps: [] });
-    const notRepeated = "Visual comparisons use one approved screenshot per browser and screen size, so they aren't repeated.";
+    /** A repeat on one of the agent's sizes that passed, with the picture it keeps (repo-sink.ts recordVariant). */
+    const pictured = async (testId: string, v: "phone-375" | "tablet-768", title: string) => keep(testId, variant(testId, v, "passed"), "screenshot", await picture(browser, v === "phone-375" ? 375 : 768, v === "phone-375" ? 812 : 1024, title));
 
     const home = add(ids.first, visual("WEB-001", "/"), "VALIDATED", { visual: true });
     await keep(home, run(home, ids.first, "passed"), "screenshot", await picture(browser, 1280, 800, "Home"));
-    variant(home, "mobile-chrome", "skipped", notRepeated);
-    variant(home, "tablet", "skipped", notRepeated);
+    await pictured(home, "phone-375", "Home");
+    await pictured(home, "tablet-768", "Home");
     const products = add(ids.first, visual("WEB-002", "/products"), "VALIDATED", { visual: true });
     await keep(products, run(products, ids.first, "passed"), "screenshot", await picture(browser, 1280, 800, "Products"));
-    variant(products, "mobile-chrome", "skipped", notRepeated);
+    await pictured(products, "phone-375", "Products");
+    await pictured(products, "tablet-768", "Products");
     ids.cart = add(ids.first, visual("WEB-003", "/cart"), "NEEDS_REVIEW", { visual: true }, "The page no longer matches its approved baseline: 840 pixels differ.");
     const cartRun = run(ids.cart, ids.first, "failed");
     await keep(ids.cart, cartRun, "visual-actual", await picture(browser, 1280, 800, "Your cart (2)"));
     await keep(ids.cart, cartRun, "visual-diff", await picture(browser, 1280, 800, "Your cart (2)", { diff: true }));
+    await pictured(ids.cart, "phone-375", "Your cart (2)");
+    await pictured(ids.cart, "tablet-768", "Your cart (2)");
     const checkout = add(ids.first, TestSpecSchema.parse({ testId: "WEB-010", title: "A visitor checks out", kind: "web", type: "functional", priority: "high", steps: [{ action: "navigate", url: "/checkout" }, { action: "click", locator: { by: "role", role: "button", value: "Pay" } }], expectedResults: ["Paid."] }), "VALIDATED", {});
     await keep(checkout, run(checkout, ids.first, "passed"), "screenshot", await picture(browser, 1280, 800, "Checkout"));
-    const phone = variant(checkout, "mobile-chrome", "failed", "Click Pay - the button is covered by the cookie banner");
-    await keep(checkout, phone, "screenshot", await picture(browser, 390, 844, "Checkout", { banner: true }));
-    variant(checkout, "tablet", "passed");
+    const phone = variant(checkout, "phone-375", "failed", "Click Pay - the button is covered by the cookie banner");
+    await keep(checkout, phone, "screenshot", await picture(browser, 375, 812, "Checkout", { banner: true }));
+    await pictured(checkout, "tablet-768", "Checkout");
     add(ids.stopped, visual("WEB-004", "/orders"), "PENDING", { visual: true });
     add(ids.security, TestSpecSchema.parse({ testId: "API-001", title: "Browser security headers are set (/)", kind: "api", type: "security", priority: "medium", steps: [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "securityHeaders" }], expectedResults: ["Set."] }) as never, "NEEDS_REVIEW", { security: true }, "Security check failed: no CSP.");
     repo.setJobStatus(ids.first, "COMPLETED");
@@ -183,18 +187,20 @@ describe("the Responsive UI Testing Agent's page (W2c)", () => {
         await pwExpect(issues.nth(1)).toContainText("/checkout on Phone");
         await pwExpect(issues.nth(1)).toContainText("covered by the cookie banner");
         const grid = page.getByTestId("responsive-grid");
-        expect(await grid.locator("thead th").allTextContents()).toEqual(["Page", "Desktop 1280 × 800", "Phone 390 × 844", "Tablet 820 × 1180"]);
+        expect(await grid.locator("thead th").allTextContents()).toEqual(["Page", "Phone 375 × 812", "Tablet 768 × 1024", "Desktop 1280 × 800"]);
         expect(await grid.locator("tbody th").allTextContents()).toEqual(["/", "/products", "/cart", "/orders", "/checkout"]);
         const row = (p: string) => grid.locator("tbody tr", { has: page.locator("th", { hasText: new RegExp(`^${p.replace(/\//g, "\\/")}$`) }) });
         await pwExpect(row("/").getByTestId("cell-desktop")).toContainText("Same");
-        await pwExpect(row("/").getByTestId("cell-mobile-chrome")).toContainText("Not checked");
+        await pwExpect(row("/").getByTestId("cell-phone-375")).toContainText("Pictured");
+        await pwExpect(row("/").getByTestId("cell-tablet-768")).toContainText("Pictured");
         await pwExpect(row("/cart").getByTestId("cell-desktop")).toContainText("Changed");
-        await pwExpect(row("/checkout").getByTestId("cell-mobile-chrome")).toContainText("Fails");
-        await pwExpect(row("/checkout").getByTestId("cell-tablet")).toContainText("Works");
+        await pwExpect(row("/checkout").getByTestId("cell-phone-375")).toContainText("Fails");
+        await pwExpect(row("/checkout").getByTestId("cell-tablet-768")).toContainText("Works");
         await pwExpect(row("/orders").getByTestId("cell-desktop")).toContainText("Not run");
-        await pwExpect(row("/products").getByTestId("cell-tablet")).toContainText("Not tried");
-        await pwExpect(page.getByTestId("responsive-notes")).toHaveText(/Phone: Visual comparisons use one approved screenshot/);
-        await pwExpect.poll(() => imagesLoaded(grid)).toEqual([true, true, true, true, true]);
+        await pwExpect(row("/orders").getByTestId("cell-phone-375")).toContainText("Not tried");
+        // A full grid: a picture in every cell but the page whose run was stopped (4 pages × 3 sizes).
+        await pwExpect(page.getByTestId("responsive-notes")).toHaveCount(0);
+        await pwExpect.poll(() => imagesLoaded(grid)).toEqual(Array(12).fill(true));
         expect(await page.getByTestId("responsive-outcome").textContent()).not.toContain("Security");
         await axe("responsive outcome");
         await shot("outcome.png");
@@ -220,11 +226,35 @@ describe("the Responsive UI Testing Agent's page (W2c)", () => {
         await visit(routes.projectAgent(pid, "responsive-ui", "setup"));
         const s = page.getByTestId("agent-setup");
         await pwExpect(s).toContainText("http://127.0.0.1:7829");
-        await pwExpect(s).toContainText("Desktop (1280 × 800) on every run");
+        await pwExpect(s).toContainText("Phone (375 wide), tablet (768 wide) and desktop (1280 wide) on every run");
         await pwExpect(s.getByRole("link", { name: "Settings → Sign-in" })).toBeVisible();
         await axe("responsive setup");
         await shot("setup.png");
         await at375("setup-375.png");
-        expect(consoleErrors).toEqual([]);
+    });
+
+    it("the run form offers the three sizes, all ticked, desktop always; the run sends the ones kept", async () => {
+        let sent: any;
+        await page.route("**/api/projects/*/test-generation", async (r) => {
+            sent = r.request().postDataJSON();
+            await r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "Stopped by the test." }) });
+        });
+        try {
+            await page.goto("about:blank");
+            await page.goto(`${BASE}/${routes.newProject({ project: pid, agent: "responsive-ui" })}`);
+            const picker = page.getByTestId("size-picker");
+            await pwExpect(picker.getByRole("checkbox")).toHaveCount(3);
+            for (const name of ["Phone, 375 wide", "Tablet, 768 wide", "Desktop, 1280 wide"]) await pwExpect(picker.getByRole("checkbox", { name: new RegExp(name) })).toBeChecked();
+            await pwExpect(picker.getByRole("checkbox", { name: /Desktop/ })).toBeDisabled();
+            await axe("run form with sizes");
+            await shot("run-form.png");
+            await picker.getByRole("checkbox", { name: /Tablet/ }).uncheck();
+            await page.locator("form button[type=submit]").click();
+            await pwExpect.poll(() => sent?.variants).toEqual(["phone-375"]);
+            expect(sent.agentId).toBe("responsive-ui");
+        } finally {
+            await page.unroute("**/api/projects/*/test-generation");
+        }
+        expect(consoleErrors.filter((e) => !/Stopped by the test/.test(e))).toEqual([]);
     });
 });

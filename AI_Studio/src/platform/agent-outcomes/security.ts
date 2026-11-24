@@ -12,6 +12,9 @@
  */
 import { reproduction } from "../../engine/findings/classify.js";
 import { STATE_LABEL, type FindingState } from "../../engine/findings/lifecycle.js";
+import { accessFinding } from "../../engine/identity/access.js";
+import { securityFinding } from "../../engine/security/specs.js";
+import type { ScriptRun } from "../../engine/validation/runner.js";
 import { redactText } from "../../shared/redact-text.js";
 import type { Platform } from "../bootstrap.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
@@ -96,15 +99,34 @@ export async function findingsOfTests(p: Platform, projectId: string, testIds: R
 
 const RESULT: Partial<Record<string, CheckResult>> = { VALIDATED: "passed", NEEDS_REVIEW: "problem", FAILED_VALIDATION: "could-not-check" };
 
-// shortcut: a check's result is its current one, also on an older run's page; read the run's own execution if a run page must show history.
-async function securityOutcome(p: Platform, projectId: string, runIds: readonly string[]): Promise<SecurityOutcome> {
+/**
+ * What a check found in one run, from that run's own last execution of it, judged as the validator judges a failed run: a finding is the
+ * check's own message (security or access), anything else could not check. Undefined when that run holds the check's newest execution:
+ * the check's current result (the validator's verdict, repairs included) is then that run's.
+ */
+function resultInRun(p: Platform, t: TestRow, jobId: string): { result: CheckResult; reason: string | null } | undefined {
+    const db = p.repo.db;
+    const runs = db.all<Row>(`SELECT id, job_id, status, error FROM test_executions WHERE test_case_id = ? AND variant IS NULL AND environment IS NULL ORDER BY started_at DESC, ${db.dialect.insertionOrder()} DESC`, t.id);
+    const mine = runs.find((e) => e.job_id === jobId);
+    if (!mine) return { result: "not-run", reason: null };
+    if (mine === runs[0]) return undefined;
+    if (mine.status === "passed") return { result: "passed", reason: null };
+    const steps = db.all<Row>("SELECT idx, title, status, error FROM test_execution_steps WHERE execution_id = ? ORDER BY idx", mine.id).map((x) => ({ index: Number(x.idx), title: String(x.title), status: String(x.status), ...(x.error ? { error: String(x.error) } : {}) }));
+    const run = { status: mine.status, steps, error: mine.error ?? undefined } as unknown as ScriptRun;
+    const found = securityFinding(t.spec, run) ?? accessFinding(t.spec, run);
+    return { result: found ? "problem" : "could-not-check", reason: redactText(found ?? String(mine.error ?? steps.find((x) => x.status === "failed")?.error ?? ""), 600) || null };
+}
+
+/** The outcome over these runs; with `run`, that one run's part, each check as that run found it. */
+async function securityOutcome(p: Platform, projectId: string, runIds: readonly string[], run?: string): Promise<SecurityOutcome> {
     const tests = testsOfRuns(p, projectId, runIds, (t) => areaOf(t) !== undefined);
     const findingOf = await findingsOfTests(p, projectId, new Set(tests.map((t) => t.id)));
     const checks: SecurityCheckItem[] = [];
     const findings: SecurityFindingItem[] = [];
     for (const t of tests) {
         const area = areaOf(t)!;
-        const result = RESULT[t.validationStatus] ?? "not-run";
+        const own = run ? resultInRun(p, t, run) : undefined;
+        const result = own?.result ?? RESULT[t.validationStatus] ?? "not-run";
         const f = findingOf.get(t.id);
         const verified = f !== undefined && VERIFIED_STATES.includes(f.state);
         checks.push({
@@ -113,7 +135,7 @@ async function securityOutcome(p: Platform, projectId: string, runIds: readonly 
             title: t.title,
             area,
             result,
-            reason: result === "problem" || result === "could-not-check" ? redactText(t.validationReason ?? "", 600) || null : null,
+            reason: own ? own.reason : result === "problem" || result === "could-not-check" ? redactText(t.validationReason ?? "", 600) || null : null,
             finding: f ? { id: f.id, state: f.state, label: STATE_LABEL[f.state], verified } : null,
         });
         if (!verified) continue;
@@ -141,7 +163,7 @@ const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
 
 export const outcome: AgentOutcomeModule<SecurityOutcome> = {
     outcome: (ctx) => securityOutcome(ctx.p, ctx.projectId, ctx.runs.map((j) => j.id)),
-    runOutcome: (ctx, jobId) => securityOutcome(ctx.p, ctx.projectId, [jobId]),
+    runOutcome: (ctx, jobId) => securityOutcome(ctx.p, ctx.projectId, [jobId], jobId),
     headline: (o) => {
         if (!o.checks.length) return null;
         const passed = `${o.checks.filter((c) => c.result === "passed").length} of ${counted(o.checks.length, "check")} passed`;

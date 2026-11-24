@@ -18,6 +18,7 @@ import type { Row } from "./db.js";
 import type { Sql } from "./sql.js";
 import { HttpError } from "./http-error.js";
 import { projectSetupOf, type ProjectPlatform } from "./project-setup.js";
+import { SIZE_VARIANT_IDS } from "../engine/validation/variants.js";
 
 export const TESTING_AGENTS_MIGRATION = `
 CREATE TABLE project_testing_agents (
@@ -423,5 +424,7 @@ export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: As
     const narrowed: JobOptions = { ...applyAgentChoice(options, asked, [agentId]), agentId };
     if (agentId === "test-generation") return caseRunOptions(narrowed);
     const { planOnly: _p, ...rest } = narrowed;
+    // The Responsive UI agent checks the phone and tablet sizes beside desktop unless the run names its sizes (none: desktop only).
+    if (agentId === "responsive-ui" && asked.variants === undefined) return { ...rest, variants: [...SIZE_VARIANT_IDS] };
     return rest;
 }

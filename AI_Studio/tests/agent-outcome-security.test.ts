@@ -158,6 +158,49 @@ describe("the Security Testing Agent's outcome", () => {
         expect((await call(`/api/projects/${pid}/workspace/security/outcome?run=${ids.visual}`)).status).toBe(404);
     });
 
+    it("shows an older run's own result on its page, from that run's executions, and the newest run's the current one", async () => {
+        const repo = platform.repo;
+        const hp = repo.createProject({ name: "History shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await testingAgentsOf(platform).set(hp, ["security"] as never, "test");
+        const appId = repo.createApplication(hp, "http://127.0.0.1:6535", { ...DEFAULT_JOB_OPTIONS });
+        const suite = repo.getOrCreateSuite(hp, "General", "general");
+        const older = (await repo.createJob(hp, appId, { ...DEFAULT_JOB_OPTIONS, agentId: "security" } as never)).id;
+        const cors = spec("API-001", "Cross-origin access (CORS) is not wide open", [
+            { action: "request", method: "GET", path: "/", headers: { Origin: "https://untrusted-origin.example" }, description: "Request / from another origin (read-only)" },
+            { action: "assertResponse", check: "corsPolicy", description: "The made-up origin is not trusted" },
+        ]);
+        const tls = spec("API-002", "The HTTPS certificate is valid and not about to expire", [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "tlsCertificate", expected: 14 }]);
+        const ids2 = { cors: repo.insertTest({ projectId: hp, suiteId: suite, jobId: older, spec: cors, framework: "playwright-api", validationStatus: "VALIDATED", meta: { security: true } }), tls: repo.insertTest({ projectId: hp, suiteId: suite, jobId: older, spec: tls, framework: "playwright-api", validationStatus: "VALIDATED", meta: { security: true } }) };
+        const exec = (testId: string, jobId: string, status: string, at: string, steps: Array<{ index: number; title: string; status: string; error?: string }>, error?: string) =>
+            repo.addExecution({ testId, scriptId: null, jobId, attempt: 1, status, durationMs: 10, startedAt: at, steps, ...(error ? { error } : {}) });
+        // The older run: CORS found a problem (the check's own message), TLS could not connect (not a finding).
+        exec(ids2.cors, older, "failed", "2026-11-20T10:00:00.000Z", [{ index: 0, title: "Request /", status: "passed" }, { index: 1, title: "The made-up origin is not trusted", status: "failed", error: "Error: Security check failed: 1 cross-origin problem.\n- [high] The server echoes any Origin with credentials allowed." }]);
+        exec(ids2.tls, older, "failed", "2026-11-20T10:00:01.000Z", [{ index: 0, title: "Request /", status: "failed", error: "connect ECONNREFUSED 127.0.0.1:6535" }], "connect ECONNREFUSED 127.0.0.1:6535");
+        repo.setJobStatus(older, "COMPLETED");
+        // The newer run: both pass now.
+        const newer = (await repo.createJob(hp, appId, { ...DEFAULT_JOB_OPTIONS, agentId: "security" } as never)).id;
+        exec(ids2.cors, newer, "passed", "2026-11-21T10:00:00.000Z", []);
+        exec(ids2.tls, newer, "passed", "2026-11-21T10:00:01.000Z", []);
+        // A list check the validator judged a problem by another rule: the newest run's page keeps the validator's verdict.
+        const list = spec("WEB-001", "Another account's orders stay closed", [{ action: "request", method: "GET", path: "/api/orders" }, { action: "assertResponse", check: "status", expected: 403 }]);
+        const listId = repo.insertTest({ projectId: hp, suiteId: suite, jobId: newer, spec: list, framework: "playwright-api", validationStatus: "NEEDS_REVIEW", meta: { access: true } });
+        repo.updateTest(listId, { reason: "Another account's orders were listed." });
+        exec(listId, newer, "failed", "2026-11-21T10:00:02.000Z", [{ index: 1, title: "status", status: "failed", error: "Expected 403, got 200" }]);
+        repo.setJobStatus(newer, "COMPLETED");
+
+        const result = async (q: string) => Object.fromEntries((await call(`/api/projects/${hp}/workspace/security/outcome${q}`)).body.checks.map((c: any) => [c.testKey, c]));
+        const old = await result(`?run=${older}`);
+        expect(old["API-001"]).toMatchObject({ result: "problem" });
+        expect(old["API-001"].reason).toContain("echoes any Origin");
+        expect(old["API-002"]).toMatchObject({ result: "could-not-check" });
+        expect(old["API-002"].reason).toContain("ECONNREFUSED");
+        const now = await result(`?run=${newer}`);
+        expect([now["API-001"].result, now["API-002"].result]).toEqual(["passed", "passed"]);
+        expect(now["WEB-001"]).toMatchObject({ result: "problem", reason: "Another account's orders were listed." });
+        const all = await result("");
+        expect([all["API-001"].result, all["API-002"].result]).toEqual(["passed", "passed"]);
+    });
+
     it("says on the Workspace card what it found", async () => {
         const ws = await call(`/api/projects/${pid}/workspace`);
         expect(ws.body.agents.find((a: any) => a.id === "security").headline).toBe("1 verified finding, 2 of 5 checks passed");
