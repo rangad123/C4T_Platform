@@ -5,6 +5,12 @@
  * must reach were written by reading the sources by hand (the same truth as tests/impact-routes-unit.test.ts). The test suite here has one
  * test per route, written the way a test's footprint records it, so "the tests that cover it" are known by construction.
  */
+import fs from "node:fs";
+import path from "node:path";
+import { localCodeSource } from "../src/engine/findings/code-source.js";
+import { rootCause } from "../src/engine/findings/root-cause.js";
+import { FindingViewSchema } from "../src/engine/findings/view.js";
+import { routesOf } from "../src/engine/impact/routes.js";
 import { describe, expect, it, vi } from "vitest";
 import { analyzeImpact, type ImpactInput } from "../src/engine/impact/analyze.js";
 import type { CoverageItem, TestCoverage } from "../src/platform/selection/coverage.js";
@@ -82,7 +88,7 @@ describe("each seed PR of the PR bench reaches its endpoint and the tests that c
                 }
                 expect(tests, id).not.toContain("unrelated");
                 // every link says how it gets there
-                for (const e of r.endpoints) expect(e.evidence[0], id).toMatch(/^examples\/bench-\w+\/server\.mjs:\d+ is (inside the handler of|in \w+\(\))/);
+                for (const e of r.endpoints) expect(e.evidence[0], id).toMatch(/^examples\/bench-\w+\/server\.mjs:\d+ is (inside the handler of|in \w+(\(\))? \()/);
                 for (const x of r.tests) expect(x.evidence.join(" "), id).toMatch(/^(its steps call|a recorded run opened) .*, handled by (GET|POST|PUT|PATCH|DELETE|ANY) \//);
                 expect(r.unmapped, id).toEqual([]);
                 expect(r.shared, id).toEqual([]);
@@ -208,5 +214,128 @@ describe("the optional AI link to requirements", () => {
         expect(r.ai).toEqual({ links: [{ id: "REQ-1", name: "REQ-1", evidence: ["AI suggestion, not verified: examples/bench-shop/server.mjs:200: The order check changed."] }], dropped: 2 });
         // never mixed into the evidence-backed links
         expect(r.requirements).toEqual([]);
+    });
+});
+
+// ── the real pull request on the practice store (N2-RESULT.md Part 1; rangad123/C4T_WorkBench#1, express shipping 9.99 → 12.99) ──
+// A trimmed copy of the store's route table (tests/fixtures/practice-store-pr) and the PR's changed lines. On it the engine found no
+// route, called a browser script "a shared part reaching every request" and ignored the changed requirement 7.1.
+const DIR = path.join(import.meta.dirname, "fixtures", "practice-store-pr");
+const read = (f: string) => fs.readFileSync(path.join(DIR, f), "utf8");
+const API = "server/api.mjs";
+const ORDER = "public/assets/order.js";
+const REQS = "docs/REQUIREMENTS.md";
+const sources = { [API]: read(API), [ORDER]: read(ORDER) };
+const lineOf = (f: string, text: string) => read(f).split("\n").findIndex((l) => l.includes(text)) + 1;
+/** A one-line hunk at `line` of the new side. */
+const hunk = (line: number, removed: string, added: string) => `@@ -${line},1 +${line},1 @@\n-${removed}\n+${added}`;
+
+const PR = [
+    { path: API, patch: hunk(lineOf(API, "const SHIPPING"), "const SHIPPING = { standard: 0, express: 999 };", "const SHIPPING = { standard: 0, express: 1299 };") },
+    { path: ORDER, patch: hunk(lineOf(ORDER, "const shipLabel"), "const shipLabel = (m) => (m === 'express' ? 'Express ($9.99, 1 day)' : m || '');", "const shipLabel = (m) => (m === 'express' ? 'Express ($12.99, 1 day)' : m || '');") },
+    {
+        path: REQS,
+        patch: hunk(
+            lineOf(REQS, "7.1 "),
+            "7.1 /checkout must ask for the shipping address (name, street, city, postcode, all required) and a shipping choice: Standard (free, 5 days) or Express (9.99, 1 day).",
+            "7.1 /checkout must ask for the shipping address (name, street, city, postcode, all required) and a shipping choice: Standard (free, 5 days) or Express (12.99, 1 day).",
+        ),
+    },
+];
+const REQUIREMENTS = [
+    { ref: "7.1", text: "/checkout must ask for the shipping address (name, street, city, postcode, all required) and a shipping choice: Standard (free, 5 days) or Express (9.99, 1 day)." },
+    { ref: "7.10", text: "A cancelled order cannot change status again." },
+    { ref: "7.2", text: "/checkout/review must show every line, the subtotal, the discount, the shipping cost and the total." },
+];
+
+describe("a route table one dispatcher reads (the practice store's server/api.mjs)", () => {
+    it("is read as routes: each entry's method and path, its handler the entry's lines; nothing else in the file is a route", () => {
+        const routes = routesOf(API, sources[API]);
+        expect(routes.map((r) => `${r.method} ${r.path}`)).toEqual(["GET /api/cart/items", "POST /api/cart/items", "POST /api/orders", "GET /api/orders/{}", "GET /api/health"]);
+        const orders = routes.find((r) => r.method === "POST" && r.path === "/api/orders")!;
+        expect([orders.start, orders.end]).toEqual([lineOf(API, "method: 'POST', path: '/api/orders'") - 1, lineOf(API, "return { status: 201, body: { order: o } };") + 2]);
+        // An object with a method and no path (a fetch's options) is no route, nor one whose path is not an address.
+        expect(routesOf("x.mjs", "fetch(u, { method: 'POST', body });\nconst r = { method: 'GET', path: 'relative' };\n")).toEqual([]);
+    });
+
+    it("traces a changed constant through the functions that read it to the routes whose handlers call them", async () => {
+        const impact = await analyzeImpact({ files: [PR[0]!], sources });
+        expect(impact.endpoints.map((e) => e.route).sort()).toEqual(["GET /api/cart/items (server/api.mjs:33)", "POST /api/cart/items (server/api.mjs:39)", "POST /api/orders (server/api.mjs:48)"]);
+        expect(impact.endpoints.find((e) => e.path === "/api/orders")!.evidence.join(" ")).toMatch(/server\/api\.mjs:6 is in SHIPPING .*SHIPPING is used at server\/api\.mjs:21, in cartTotals\(\)/);
+        expect(impact.unmapped).toEqual([]);
+        expect(impact.shared).toEqual([]);
+    });
+
+    it("follows top-level constants only: a local `const user = userOf(req)` in the server's callback links nothing by its name", async () => {
+        const server = [
+            "function userOf(req) {",
+            "    return req.headers.cookie ? { id: 1 } : undefined;",
+            "}",
+            "const server = http.createServer(async (req, res) => {",
+            '    const url = new URL(req.url, "http://x");',
+            "    const user = userOf(req);",
+            '    if (url.pathname === "/api/me") return res.end(JSON.stringify(user));',
+            "});",
+            "server.listen(3000);",
+        ].join("\n");
+        // The changed line is in the callback every request runs: a shared part, not a link to each handler that has a `user`.
+        const impact = await analyzeImpact({ files: [{ path: "server.mjs", patch: hunk(6, "    const user = undefined;", "    const user = userOf(req);") }], sources: { "server.mjs": server } });
+        expect(impact.endpoints).toEqual([]);
+        expect(impact.shared).toEqual(["server.mjs:6 is in server (server.mjs:4-8); server is used at server.mjs:9, outside every route handler."]);
+    });
+
+    it("finds the handler of a failing POST /api/orders for root cause through the same route finder", async () => {
+        const member = FindingViewSchema.parse({
+            id: "f-1",
+            projectId: "p-1",
+            source: { kind: "execution", id: "t-1" },
+            state: "reproduced",
+            title: "Express shipping costs the wrong amount",
+            testId: "t-1",
+            detectedAt: "2026-11-24T10:00:00.000Z",
+            expected: { text: "Express costs 9.99.", source: "7.1", stated: "explicit" },
+            observed: "It cost 12.99.",
+            steps: [],
+            attempts: [1, 2].map(() => ({ outcome: "failed", requests: [{ method: "POST", path: "/api/orders", status: 201, own: true }] })),
+        });
+        const r = await rootCause({ members: [member], code: localCodeSource(DIR, "the practice store fixture") });
+        expect(r.handlers.map((h) => `${h.route} ${h.file}:${h.line}`)).toEqual(["POST /api/orders server/api.mjs:47"]);
+        expect(r.helpers.map((h) => h.function)).toContain("cartTotals");
+    });
+});
+
+describe("a script the server hands to the browser", () => {
+    it("is page code: listed with why, never a shared part that reaches every request", async () => {
+        const impact = await analyzeImpact({ files: [PR[1]!], sources });
+        expect(impact.shared).toEqual([]);
+        expect(impact.unmapped).toEqual([{ path: ORDER, why: ["public/assets/order.js is served to the browser (page code): it runs in the pages that load it, not in a route handler on the server."] }]);
+    });
+});
+
+describe("a changed requirement", () => {
+    const links = [
+        { requirement: "7.1", testId: "t-checkout" },
+        { requirement: "7.10", testId: "t-cancel" },
+        { requirement: "7.2", testId: "t-review" },
+    ];
+    it("is found from the changed lines (its id or its stored text), and the tests linked to it are reached, with the line as evidence", async () => {
+        const impact = await analyzeImpact({ files: [PR[2]!], sources, requirements: REQUIREMENTS, requirementLinks: links });
+        expect(impact.changedRequirements).toEqual([{ id: "7.1", name: "7.1", evidence: ["docs/REQUIREMENTS.md:5 changes requirement 7.1"] }]);
+        expect(impact.requirementTests).toEqual([{ id: "t-checkout", name: "t-checkout", evidence: ["linked to requirement 7.1, which this change edits (docs/REQUIREMENTS.md:5)"] }]);
+        // The file is understood, so it is not unmapped; without the project's requirements it is, as before.
+        expect(impact.unmapped).toEqual([]);
+        const without = await analyzeImpact({ files: [PR[2]!], sources, requirementLinks: links });
+        expect(without.changedRequirements).toEqual([]);
+        expect(without.unmapped.map((u) => u.path)).toEqual([REQS]);
+    });
+
+    it("is found by its text when the line carries no id, and a line that only mentions an id inside its text is not one", async () => {
+        const byText = [{ path: "docs/spec.txt", patch: hunk(3, `- ${REQUIREMENTS[1]!.text}`, "- A cancelled order can never change status again.") }];
+        expect((await analyzeImpact({ files: byText, sources, requirements: REQUIREMENTS, requirementLinks: links })).changedRequirements.map((r) => r.id)).toEqual(["7.10"]);
+        // 7.10 is not 7.1 followed by a 0.
+        const ten = [{ path: REQS, patch: hunk(lineOf(REQS, "7.10 "), "7.10 A cancelled order cannot change.", "7.10 A cancelled order can never change.") }];
+        expect((await analyzeImpact({ files: ten, sources, requirements: REQUIREMENTS, requirementLinks: links })).changedRequirements.map((r) => r.id)).toEqual(["7.10"]);
+        const mention = [{ path: "README.md", patch: hunk(1, "See 7.1 for shipping.", "See 7.1 and 7.2 for shipping.") }];
+        expect((await analyzeImpact({ files: mention, sources, requirements: REQUIREMENTS, requirementLinks: links })).changedRequirements).toEqual([]);
     });
 });

@@ -24,6 +24,7 @@ const KEY = "code-host-pr-impact-test-key-51c0";
 const TOKEN = "github_pat_11FAKE0PRIMPACT0TEST0TOKEN0abcdef0123456789";
 const SECRET = "whsec-FAKE-pr-impact-0123456789";
 const HEAD = "2222222222222222222222222222222222222222";
+const HEAD_REQ = "3333333333333333333333333333333333333333";
 const CANARY = "api_key=FAKECANARY0primpact0123456789abcdef";
 
 const OLD = `import express from "express";
@@ -69,7 +70,11 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     gh = await startFakeGithub({
         token: TOKEN,
-        prs: { 7: { headSha: HEAD, files: [{ filename: "server.mjs", patch: PATCH }, { filename: "README.md", patch: "@@ -1 +1 @@\n-a\n+b" }] } },
+        prs: {
+            7: { headSha: HEAD, files: [{ filename: "server.mjs", patch: PATCH }, { filename: "README.md", patch: "@@ -1 +1 @@\n-a\n+b" }] },
+            // Only a requirement's text changes: no route is reached.
+            8: { headSha: HEAD_REQ, files: [{ filename: "docs/REQUIREMENTS.md", patch: "@@ -3 +3 @@\n-R-7 The health check answers within one second.\n+R-7 The health check answers within half a second." }] },
+        },
         source: { "server.mjs": NEW, "README.md": "b\n" },
     });
     process.env.CODE_HOST_GITHUB_API_URL = gh.url;
@@ -87,6 +92,7 @@ beforeAll(async () => {
     await project("On", true);
     await project("Off", false);
     await project("Stale", false);
+    await project("Req", false);
     // A past finding on the changed endpoint (S2's findings list): the order test's previous-defects factor.
     await new CandidateFindingStore(platform.sql).upsert({
         projectId: ids.On!,
@@ -212,5 +218,32 @@ describe("a signed pull request delivery", () => {
         const never = JSON.parse(selections("On")[0]!.reasons_json).tests.find((x: any) => x.testId === testId("On", "Health answers"));
         expect(never).toMatchObject({ reasons: [] });
         expect(never.stale).toBeUndefined();
+    });
+
+    it("proposes the tests linked to a requirement the pull request edits, with the line, and no test the change does not name", async () => {
+        // Both tests passed just now, so what they touch is fully known and neither reaches the change; only the health test is linked to R-7.
+        const now = new Date().toISOString();
+        const health = testId("Req", "Health answers");
+        const order = testId("Req", "Create an order");
+        for (const id of [health, order]) {
+            const v = platform.db.get<{ id: string }>("SELECT id FROM test_versions WHERE test_case_id = ? AND state = 'approved' ORDER BY version DESC", id)!;
+            const script = platform.db.get<{ id: string }>("SELECT id FROM generated_scripts WHERE test_case_id = ? AND is_current = 1", id);
+            platform.db.run("INSERT INTO test_executions (id, test_case_id, test_version_id, script_id, attempt, status, started_at) VALUES (?, ?, ?, ?, 1, 'passed', ?)", `exec-req-${id}`, id, v.id, script?.id ?? null, now);
+        }
+        platform.db.run(
+            "INSERT INTO requirements (id, project_id, ref, ref_key, title, description, priority, status, source, created_at, updated_at) VALUES ('req-7', ?, 'R-7', 'R-7', 'Health answers fast', 'The health check answers within one second.', 'medium', 'active', 'typed', ?, ?)",
+            ids.Req,
+            now,
+            now,
+        );
+        platform.db.run("INSERT INTO requirement_links (id, requirement_id, project_id, test_case_id, origin, created_at) VALUES ('rl-7', 'req-7', ?, ?, 'person', ?)", ids.Req, health, now);
+        const body = JSON.stringify({ action: "opened", number: 8, pull_request: { number: 8, head: { sha: HEAD_REQ, repo: { full_name: "acme/shop" } }, base: { repo: { full_name: "acme/shop" } } }, repository: { full_name: "acme/shop" } });
+        expect(await deliver(hooks.Req!, "pr-req-1", body)).toBe(202);
+        await vi.waitFor(() => expect(selections("Req")).toHaveLength(1), { timeout: 15_000, interval: 50 });
+        const row = selections("Req")[0]!;
+        expect(JSON.parse(row.selected_json)).toEqual([health]);
+        const reasons = JSON.parse(row.reasons_json);
+        expect(reasons.tests[0].reasons).toEqual(["It is linked to requirement R-7, which this change edits (docs/REQUIREMENTS.md:3)."]);
+        expect(reasons.unmapped).toEqual([]);
     });
 });

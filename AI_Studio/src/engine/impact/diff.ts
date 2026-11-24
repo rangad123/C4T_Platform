@@ -227,7 +227,8 @@ export function expressionEnd(scan: JsScan, from: number): number {
 
 export interface SourceSymbol {
     name: string;
-    kind: "function" | "method" | "class";
+    /** "constant": a top-level `const NAME = …` that is not a function (impact/routes.ts follows a changed one by its uses). */
+    kind: "function" | "method" | "class" | "constant";
     /** First and last line (1-based, inclusive). */
     start: number;
     end: number;

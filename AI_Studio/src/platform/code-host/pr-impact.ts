@@ -20,6 +20,7 @@ import { projectCoverage } from "../selection/facts.js";
 import { heldWhy } from "../selection/held.js";
 import { previewSelection, readChanges, type PreviewTest } from "../selection/preview.js";
 import { riskFacts } from "../selection/risk-facts.js";
+import { riskOf } from "../selection/risk.js";
 import { postPrFeedback, type FeedbackOutcome } from "./feedback.js";
 import type { GithubCodeHost } from "./github.js";
 import type { CodeHostStore, PrSelection } from "./store.js";
@@ -117,6 +118,9 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         "SELECT r.ref_key AS requirement, l.test_case_id AS testId FROM requirement_links l JOIN requirements r ON r.id = l.requirement_id WHERE l.project_id = ? AND l.test_case_id IS NOT NULL",
         projectId,
     );
+    const requirements = p.db
+        .all<{ ref: string; title: string; description: string }>("SELECT ref, title, description FROM requirements WHERE project_id = ? AND status != 'retired'", projectId)
+        .map((r) => ({ ref: r.ref, text: r.description || r.title }));
     const impact = await analyzeImpact({
         files: files.map((f) => ({ path: f.path, ...(f.previousPath ? { previousPath: f.previousPath } : {}), status: f.status, ...(f.patch !== undefined ? { patch: f.patch } : {}) })),
         sources,
@@ -125,6 +129,7 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         ...(model ? { model } : {}),
         rules,
         requirementLinks,
+        requirements,
         findings: await pastFindings(p.sql, p.repo, projectId),
     });
 
@@ -137,17 +142,22 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         else if (c.held.has(t.id)) cannotRun.set(t.id, { why: heldWhy(c.held.get(t.id)!), nowhere: true, held: true });
     }
     const { changes, ignored, notProcessed } = readChanges(impact.changes, c.app);
+    const risk = await riskFacts(p, projectId, c.tests, c.apiPrefix);
     const preview = previewSelection(c.tests, changes, ignored, {
         ...(c.apiPrefix ? { apiPrefix: c.apiPrefix } : {}),
         notProcessed,
         cannotRun,
-        risk: await riskFacts(p, projectId, c.tests, c.apiPrefix),
+        risk,
         impact: { files: impact.files.length, unmapped: impact.unmapped.map((u) => u.path), shared: impact.shared },
     });
     const staleOf = new Map(c.tests.flatMap((t) => (t.stale ? [[t.testId, t.stale] as const] : [])));
-    const proposed: PreviewTest[] = [...preview.matched, ...preview.unknown].sort((a, b) => b.risk!.score - a.risk!.score || a.testKey.localeCompare(b.testKey));
+    // A test linked to a requirement the PR edits is proposed for that reason, also when its footprint does not reach the change.
+    const byRequirement = new Map(impact.requirementTests.map((t) => [t.id, t.evidence.map((e) => `It is ${e}.`)]));
+    const linked = preview.notMatched.filter((t) => byRequirement.has(t.testId)).map(({ why: _notProposed, ...t }) => ({ ...t, risk: riskOf(1, risk.get(t.testId)) }));
+    const proposed: PreviewTest[] = [...preview.matched, ...preview.unknown, ...linked].sort((a, b) => b.risk!.score - a.risk!.score || a.testKey.localeCompare(b.testKey));
+    const sentences = (t: PreviewTest) => [...t.reasons.map((r) => r.sentence), ...(byRequirement.get(t.testId) ?? [])];
     const reasons: SelectionReasons = {
-        tests: proposed.map((t) => ({ testId: t.testId, testKey: t.testKey, title: t.title, score: t.risk!.score, risk: t.risk!.reason, reasons: t.reasons.map((r) => r.sentence), ...(t.why ? { why: t.why } : {}), ...(!t.reasons.length && staleOf.has(t.testId) ? { stale: staleOf.get(t.testId)! } : {}) })),
+        tests: proposed.map((t) => ({ testId: t.testId, testKey: t.testKey, title: t.title, score: t.risk!.score, risk: t.risk!.reason, reasons: sentences(t), ...(t.why ? { why: t.why } : {}), ...(!sentences(t).length && staleOf.has(t.testId) ? { stale: staleOf.get(t.testId)! } : {}) })),
         fullRunRecommended: preview.fullRunRequired,
         fullRunReasons: preview.fullRunReasons,
         endpoints: impact.endpoints.map((e) => e.route),

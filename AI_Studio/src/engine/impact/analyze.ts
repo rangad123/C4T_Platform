@@ -4,7 +4,11 @@
  *   changed files and functions (diff.ts) → route handlers that hold or call them (routes.ts) → endpoints and pages → tests whose
  *   declared or observed footprint hits one (selection/coverage.ts) → app-model workflows whose steps send or open one → rules that name
  *   such an endpoint or workflow → the entities those rules name → requirements linked to a reached test → past findings on a reached
- *   endpoint or page.
+ *   endpoint or page. A changed line of a document that is a requirement of the project (its id leads the line, or the line holds its
+ *   stored text) is a changed requirement, and the tests linked to it are reached through it.
+ *
+ * A script under a folder the server hands to the browser as it is (public/, static/, www/, wwwroot/) is page code: it is listed with
+ * why, and never followed as server code (its top-level calls run in the page, not before every request).
  *
  * Nothing is linked by a similar name: a file called `cart-routes.mjs` that registers no route reaches nothing. A changed file with no
  * evidence-backed route is listed as unmapped, with why. A change in code that runs outside every route handler (a session check before
@@ -18,7 +22,7 @@ import type { AppModel, Rule } from "../intel/model.js";
 import type { LlmClient } from "../llm/provider.js";
 import type { CoverageItem, TestCoverage } from "../../platform/selection/coverage.js";
 import { matchesChange, readChanges, type ChangeItem } from "../../platform/selection/preview.js";
-import { analyzeFile, type FileChangeInput } from "./diff.js";
+import { analyzeFile, isJsLike, type FileChangeInput } from "./diff.js";
 import { describeRoute, routesForChange, type RouteEntry } from "./routes.js";
 
 /** A finding seen before, by where it happened (the platform reads them from the findings list: platform/findings/past.ts). */
@@ -43,6 +47,8 @@ export interface ImpactInput {
     rules?: Array<Pick<Rule, "ref" | "description" | "endpoints" | "workflows" | "entities">>;
     /** requirement_links rows: a requirement and a test that covers it. */
     requirementLinks?: Array<{ requirement: string; testId: string }>;
+    /** The project's requirements: a changed document line that carries one is a changed requirement. */
+    requirements?: Array<{ ref: string; text: string }>;
     findings?: PastFinding[];
     /** Off unless given: one AI call to link hunks to these requirements. */
     ai?: { client: Pick<LlmClient, "object">; requirements: Array<{ ref: string; text: string }> };
@@ -69,6 +75,10 @@ export interface ImpactAnalysis {
     rules: Link[];
     entities: Link[];
     requirements: Link[];
+    /** Requirements whose text the change edits, each with the changed lines. */
+    changedRequirements: Link[];
+    /** Tests linked to a changed requirement. */
+    requirementTests: Link[];
     findings: Link[];
     /** Changed files with no evidence-backed route, and why. */
     unmapped: Array<{ path: string; why: string[] }>;
@@ -134,13 +144,63 @@ async function aiRequirementLinks(ai: NonNullable<ImpactInput["ai"]>, files: Fil
     return { links: [...links.values()], dropped };
 }
 
+/** shortcut: by folder name, not by reading how the server serves files; upgrade if a repository serves its browser code from elsewhere. */
+const BROWSER_DIR = /(^|\/)(public|static|www|wwwroot)\//;
+
+/** Documents a requirement can be written in. */
+const DOC = /\.(?:md|markdown|txt|rst|adoc)$/i;
+
+/** Each added or removed line of a patch, with the new-side line it is at. */
+function changedLines(patch: string): Array<{ line: number; text: string }> {
+    const out: Array<{ line: number; text: string }> = [];
+    let n = 0;
+    let inHunk = false;
+    for (const l of patch.split(/\r?\n/)) {
+        const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+        if (h) {
+            n = Number(h[1]);
+            inHunk = true;
+        } else if (!inHunk || l.startsWith("\\")) continue;
+        else if (l.startsWith("+")) out.push({ line: n++, text: l.slice(1) });
+        else if (l.startsWith("-")) out.push({ line: Math.max(1, n), text: l.slice(1) });
+        else n++;
+    }
+    return out;
+}
+
+const flat = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+/** The requirements a changed line carries: its id leads the line (after list or heading marks), or the line holds its stored text. */
+function requirementsOn(text: string, reqs: NonNullable<ImpactInput["requirements"]>): string[] {
+    const bare = text.replace(/^[\s>*+#-]*/, "");
+    return reqs.filter((r) => (r.ref && bare.startsWith(r.ref) && /^(\s|:|\)|$)/.test(bare.slice(r.ref.length))) || (r.text.trim().length >= 20 && flat(bare).includes(flat(r.text)))).map((r) => r.ref);
+}
+
 /** The impact of one PR. Pure apart from the optional AI call. */
 export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis> {
     const files: ImpactAnalysis["files"] = [];
     const unmapped: ImpactAnalysis["unmapped"] = [];
     const shared: string[] = [];
     const endpoints = new Map<string, ImpactEndpoint & { entry: RouteEntry }>();
+    const changedReqs = new Map<string, { link: Link; at: string }>();
     for (const f of input.files) {
+        if (DOC.test(f.path) && f.patch && input.requirements?.length) {
+            for (const c of changedLines(f.patch))
+                for (const ref of requirementsOn(c.text, input.requirements)) {
+                    const at = `${f.path}:${c.line}`;
+                    const r = changedReqs.get(ref.toUpperCase()) ?? { link: { id: ref, name: ref, evidence: [] }, at };
+                    if (!r.link.evidence.includes(`${at} changes requirement ${ref}`)) r.link.evidence.push(`${at} changes requirement ${ref}`);
+                    changedReqs.set(ref.toUpperCase(), r);
+                }
+            if ([...changedReqs.values()].some((r) => r.at.startsWith(`${f.path}:`))) {
+                files.push({ path: f.path, functions: [], mapped: true });
+                continue;
+            }
+        }
+        if (BROWSER_DIR.test(f.path) && isJsLike(f.path)) {
+            files.push({ path: f.path, functions: [], mapped: false });
+            unmapped.push({ path: f.path, why: [`${f.path} is served to the browser (page code): it runs in the pages that load it, not in a route handler on the server.`] });
+            continue;
+        }
         const change = analyzeFile(f, input.sources[f.path]);
         const r = change.touched.length ? routesForChange(input.sources, f.path, change.touched) : { hits: [], unresolved: [] };
         for (const h of r.hits) {
@@ -214,6 +274,19 @@ export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis>
         requirements.set(l.requirement, r);
     }
 
+    const testName = (id: string) => {
+        const t = input.tests?.find((x) => x.testId === id);
+        return t ? `${t.testKey} ${t.title}` : id;
+    };
+    const requirementTests = new Map<string, Link>();
+    for (const l of input.requirementLinks ?? []) {
+        const r = changedReqs.get(l.requirement.trim().toUpperCase());
+        if (!r) continue;
+        const t = requirementTests.get(l.testId) ?? { id: l.testId, name: testName(l.testId), evidence: [] };
+        t.evidence.push(`linked to requirement ${r.link.id}, which this change edits (${r.at})`);
+        requirementTests.set(l.testId, t);
+    }
+
     const findings: Link[] = [];
     for (const f of input.findings ?? []) {
         const { changes: cs } = readChanges({ endpoints: f.endpoints ?? [], pages: f.pages ?? [] });
@@ -232,6 +305,8 @@ export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis>
         rules,
         entities: [...entities.values()],
         requirements: [...requirements.values()],
+        changedRequirements: [...changedReqs.values()].map((r) => r.link),
+        requirementTests: [...requirementTests.values()],
         findings,
         unmapped,
         shared,
