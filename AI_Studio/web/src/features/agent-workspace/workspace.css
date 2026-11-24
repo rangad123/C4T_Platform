@@ -1,0 +1,22 @@
+/* The Agent Workspace (Workspace.tsx, AgentPage.tsx). Design tokens only: no raw colour values in this file. */
+
+.ws-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.ws-card { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.ws-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ws-card-head h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ws-card > .badge { justify-self: start; }
+.ws-headline { margin: 0; color: var(--text-primary); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+.ws-needs { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-secondary); font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
+.ws-actions { gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+.ws-flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.ws-flow li { display: flex; align-items: flex-start; gap: 10px; color: var(--text-secondary); font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
+.ws-flow svg { flex: none; margin-top: 2px; color: var(--text-brand); }
+.ws-flow strong { color: var(--text-primary); font-weight: var(--fw-semibold); }
+
+.ws-runs { list-style: none; margin: 0; padding: 0; }
+.ws-runs li { gap: 10px; flex-wrap: wrap; }
+.ws-inputs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
+.ws-inputs dt { color: var(--text-muted); }
+.ws-inputs dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .ws-inputs { grid-template-columns: 1fr; } .ws-inputs dd { margin-bottom: 8px; } }

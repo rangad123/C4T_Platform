@@ -22,7 +22,7 @@ import type { ProjectAgents } from "../features/testing-agents/testing-agents";
  * Explore an existing project's application (`#/new?project=`): Start exploring the first time, Explore again after (with Explore every
  * page again). A new project is made on Create a project (`#/create`); the old `#/new` without a project is redirected there (lib/aliases.ts).
  */
-export function NewProject({ projectId }: { projectId: string }) {
+export function NewProject({ projectId, agentId }: { projectId: string; /** A run of one testing agent (`#/new?project=&agent=`, Agent Workspace D1). */ agentId?: string | null }) {
     const existing = useFetch<ProjectDetail>(`/projects/${projectId}`);
     // A project that never ran anything is explored for the first time: there is nothing to explore "again" or to reuse.
     const first = existing.data ? !existing.data.latestJob : false;
@@ -32,7 +32,8 @@ export function NewProject({ projectId }: { projectId: string }) {
     const config = useConfig();
     // What the project's testing agents need lives on its Requirements tab (round 38); here only whether something mandatory is missing.
     const inputs = useFetch<AgentInputs>(`/projects/${projectId}/agent-inputs`);
-    const missing = inputs.data?.missing ?? [];
+    // A run of one agent asks only for what that agent misses.
+    const missing = (inputs.data?.missing ?? []).filter((m) => !agentId || m.agent === agentId);
     const [askOpen, setAskOpen] = useState(false);
     const asked = useRef(false);
     useEffect(() => {
@@ -54,7 +55,9 @@ export function NewProject({ projectId }: { projectId: string }) {
     const agentSwitches = useFetch<ProjectAgents>(`/projects/${projectId}/testing-agents`);
     const screenReviewOff = agentSwitches.data?.applies === true && agentSwitches.data.switches?.visionChecks === "off";
     // A Test Case Generation project (founder 2026-11-19): the exploration builds the tree and writes test cases, and nothing is run.
-    const caseAgent = projectAgentView(existing.data, agentSwitches.data).caseAgent;
+    const caseAgent = agentId ? agentId === "test-generation" : projectAgentView(existing.data, agentSwitches.data).caseAgent;
+    // Where the person comes from and goes back to: the agent's own page for a run of one agent.
+    const home = agentId ? routes.projectAgent(projectId, agentId) : routes.project(projectId);
     const chosenLevel = level ?? projectLevel(existing.data);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<unknown>(null);
@@ -103,9 +106,9 @@ export function NewProject({ projectId }: { projectId: string }) {
             // sign-in, API access, OpenAPI document and requirements are the ones kept on the Requirements tab.
             await api(`/projects/${id}/test-generation`, {
                 method: "POST",
-                body: { url: address, plan: true, ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}) },
+                body: { url: address, plan: true, ...(agentId ? { agentId } : {}), ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}) },
             });
-            go(routes.project(id));
+            go(home);
         } catch (err) {
             setError(err);
             setBusy(false);
@@ -178,7 +181,7 @@ export function NewProject({ projectId }: { projectId: string }) {
                     </Button>
                     {agents && (
                         <span className="hint" data-testid="explore-agents">
-                            {caseAgent ? caseAgentSentence(agents.names) : agents.source === "chosen" ? `Checked by this project’s testing agents: ${agents.names.join(", ")}.` : "No testing agents saved for this project yet, so every kind of test is planned."}
+                            {agentId ? oneAgentSentence(agents, agentId) : caseAgent ? caseAgentSentence(agents.names) : agents.source === "chosen" ? `Checked by this project’s testing agents: ${agents.names.join(", ")}.` : "No testing agents saved for this project yet, so every kind of test is planned."}
                         </span>
                     )}
                 </div>
@@ -208,7 +211,7 @@ export function NewProject({ projectId }: { projectId: string }) {
                 title={title}
                 subtitle={first ? "Explore this application for the first time. You see a plan before anything is created." : caseAgent ? "Explore this application again. What it finds is added to the same tree, with its test cases." : "Explore this application again. Existing tests are kept."}
                 actions={
-                    <LinkButton href={routes.project(projectId)} variant="ghost">
+                    <LinkButton href={home} variant="ghost">
                         Cancel
                     </LinkButton>
                 }
@@ -223,6 +226,12 @@ const CASE_AGENT_HINT = "We’ll explore the application, add to its tree and wr
 const CASE_AGENT_NAME = "Test Case Generation Agent";
 /** SPEC R16.2, as the server says it (case-agent.ts NO_ADDRESS_OR_REQUIREMENTS). */
 const NO_ADDRESS_OR_REQUIREMENTS = "Add the application's address or a requirements document first.";
+
+/** A run of one agent (Agent Workspace D1): only that agent works. */
+function oneAgentSentence(agents: { ids: string[]; names: string[] }, agentId: string): string {
+    const name = agents.names[agents.ids.indexOf(agentId)] ?? "testing agent";
+    return agentId === "test-generation" ? `The ${CASE_AGENT_NAME} writes this project’s test cases.` : `Only the ${name} runs: its own checks, nothing else.`;
+}
 
 /** Who writes the test cases; other agents chosen with it wait for their own screens (owner decision Q6, 2026-11-20). */
 function caseAgentSentence(names: string[]): string {

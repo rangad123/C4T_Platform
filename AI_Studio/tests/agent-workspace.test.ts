@@ -206,6 +206,11 @@ describe("the Workspace: each agent's status, outcome and runs", () => {
         await testingAgentsOf(platform).set(bare, ["test-generation"], "test");
         const tcg = (await call("GET", `/api/projects/${bare}/workspace`)).body.agents[0];
         expect(tcg).toMatchObject({ id: "test-generation", status: "needs-input", needs: ["Add the application's address or a requirements document first."] });
+        // A run that is going is said first, even when the agent now misses an input (its document was removed after it started).
+        const going = await project("Going", ["agent"], ["api"]);
+        const j = await platform.repo.createJob(going, platform.repo.getLatestApplicationPublic(going)!.id as string, { ...DEFAULT_JOB_OPTIONS, agentId: "api" });
+        platform.repo.setJobStatus(j.id, "DISCOVERING");
+        expect((await call("GET", `/api/projects/${going}/workspace`)).body.agents[0]).toMatchObject({ id: "api", status: "running", needs: [expect.stringContaining("OpenAPI")] });
     });
 
     it("lists one agent's runs only, newest first; an older test case run is Test Case Generation's", async () => {

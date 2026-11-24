@@ -1,11 +1,12 @@
 /**
- * The Runs place of a Test Case Generation project in a real browser against a real platform (founder 2026-11-19 P2, P3.1, P5.3, P7.2,
+ * The runs of a Test Case Generation project, on its agent page since the Agent Workspace (W1: the old `#/projects/:id/runs` addresses go there), in a real browser against a real platform (founder 2026-11-19 P2, P3.1, P5.3, P7.2,
  * R10.3, Q4, O6, O7; PLAN.md U5, FX8, FX9). The runs are seeded straight into the platform (their pages and test cases as the events a
  * run records), so no model, no site and no worker are needed; the finished-run hook (case-outcome.ts noteCaseRunFinished) writes each
  * run's last word as it does after a real run.
  *
- *   - the hub has only All runs and Schedules; no Run button, no run strip, no "See each test"; each row says what that run added, and a
+ *   - the agent page has Outcome, Runs and Setup, and a line to the Schedules; no Run button, no run strip, no "See each test"; each row says what that run added, and a
  *     stopped one that what it found is kept;
+ *   - the agent's Outcome shows a running run's stages (it was the Dashboard before the Workspace);
  *   - a run's page says "Added N pages and M test cases" and shows that run's part of the tree with its test cases, and none of the old
  *     run page (What ran, On the runner, Tests created, Run these tests, the explorer's site map, the Progress list of pages);
  *   - a running run shows the stages Exploring, Understanding and Writing test cases, on its page and on the Dashboard; when it ends, its
@@ -133,10 +134,12 @@ const OLD_RUN_WORDS = ["Create the tests", "Discard the plan", "Edit the plan", 
 describe("the Runs place of a Test Case Generation project", () => {
     it("has only All runs and Schedules, no Run button, and rows that say what each run added (P7.2, O6, R10.3, Q4, FX8)", async () => {
         await visit(`#/projects/${tcg}/runs`);
+        await page.waitForURL(`**#/projects/${tcg}/agents/test-generation?tab=runs`);
         const list = page.getByTestId("case-runs");
         await list.locator("[data-run]").first().waitFor();
-        const sections = page.getByRole("navigation", { name: /runs/i }).getByRole("link");
-        expect(await sections.allTextContents()).toEqual(["All runs", "Schedules"]);
+        const sections = page.getByRole("navigation", { name: "Test Case Generation Agent sections" }).getByRole("link");
+        expect(await sections.allTextContents()).toEqual(["Outcome", "Runs", "Setup"]);
+        expect(await page.getByTestId("case-runs-schedules").getByRole("link", { name: "Schedules" }).getAttribute("href")).toBe(`#/projects/${tcg}/runs?section=schedules`);
         const text = await mainText();
         for (const gone of ["After a deploy", "Trends", "Releases", "Compliance", "signing off a release"]) expect(text).not.toContain(gone);
         expect(await main().getByRole("button", { name: /^Run\b/ }).count()).toBe(0);
@@ -153,7 +156,7 @@ describe("the Runs place of a Test Case Generation project", () => {
         expect(await row(runs.first).textContent()).toContain("Test cases written");
         expect(await row(runs.running).textContent()).toContain("Exploring");
         expect(await page.getByTestId("case-runs-others").textContent()).toBe("1 earlier run is not part of the tree, so it is not listed.");
-        expect(await row(runs.first).getByRole("link", { name: "See what it found" }).getAttribute("href")).toBe(`#/projects/${tcg}/runs/${runs.first}`);
+        expect(await row(runs.first).getByRole("link", { name: "See what it found" }).getAttribute("href")).toBe(`#/projects/${tcg}/agents/test-generation/runs/${runs.first}`);
         await shot("runs.png");
         await axe("runs");
         await page.setViewportSize({ width: 390, height: 844 });
@@ -165,7 +168,7 @@ describe("the Runs place of a Test Case Generation project", () => {
     it("a run's page says what it added and shows its part of the tree with its test cases, and nothing of the old run page (P3.1, R10.3)", async () => {
         await visit(`#/projects/${tcg}/runs/${runs.first}`);
         await page.getByTestId("case-outcome").waitFor();
-        expect(await page.locator("h1").allTextContents()).toContain("Run 1");
+        expect(await page.locator("h1, h2").allTextContents()).toContain("Run 1");
         expect(await page.getByTestId("case-run-summary").textContent()).toBe("Added 3 pages and 3 test cases.");
         await expect.poll(() => page.getByTestId("case-run-last-word").textContent()).toBe("Test cases written: 3 (3 new)");
         const outcome = page.getByTestId("case-outcome");
@@ -191,7 +194,7 @@ describe("the Runs place of a Test Case Generation project", () => {
     it("a stopped run shows what it kept: its own pages and test cases, with the numbers of the whole outcome (Q4, R10.3)", async () => {
         await visit(`#/projects/${tcg}/runs/${runs.stopped}`);
         await page.getByTestId("case-outcome").waitFor();
-        expect(await page.locator("h1").allTextContents()).toContain("Run 2");
+        expect(await page.locator("h1, h2").allTextContents()).toContain("Run 2");
         expect(await page.getByTestId("case-run-summary").textContent()).toBe("Stopped. What it found is kept: it added 2 pages and 1 test case.");
         await expect.poll(() => page.getByTestId("case-run-last-word").textContent()).toBe("Test cases written: 2 (1 new)");
         expect(await page.getByRole("treeitem").count()).toBe(3);
@@ -223,8 +226,8 @@ describe("the Runs place of a Test Case Generation project", () => {
         expect(await page.getByRole("button", { name: "Stop exploring" }).count()).toBe(1);
         await shot("run-progress.png");
 
-        // The Dashboard's live view of the same run names the same stages, and has no list of pages or test ideas of its own.
-        await visit(`#/projects/${tcg}`);
+        // The agent's Outcome (the Dashboard before the Workspace) shows the same run's stages, and has no list of pages or test ideas of its own.
+        await visit(`#/projects/${tcg}/agents/test-generation`);
         await page.getByTestId("case-run-stages").waitFor();
         expect(await page.getByTestId("case-run-stages").locator(".name").allTextContents()).toEqual(["Exploring", "Understanding", "Writing test cases"]);
         await shot("dashboard-progress.png");

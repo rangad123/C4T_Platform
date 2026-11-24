@@ -59,8 +59,8 @@ export function CaseRuns({ id }: { id: string }) {
                     <ErrorState error={friendlyError((jobs.error ?? outcome.error)!.message)} onRetry={() => void (jobs.reload(), outcome.reload())} />
                 ) : runs.length === 0 ? (
                     <div className="card">
-                        <EmptyState icon={History} title="No runs yet" actions={<a className="btn btn-primary" href={routes.project(id)}>Open the Dashboard</a>}>
-                            Explore the application from the Dashboard. Each run adds pages to the tree and writes test cases for them.
+                        <EmptyState icon={History} title="No runs yet" actions={<a className="btn btn-primary" href={routes.newProject({ project: id, agent: "test-generation" })}>Start exploring</a>}>
+                            Each run explores the application, adds pages to the tree and writes test cases for them.
                         </EmptyState>
                     </div>
                 ) : (
@@ -73,7 +73,7 @@ export function CaseRuns({ id }: { id: string }) {
                             <section className="card card-pad stack-sm" key={r.jobId} data-run={r.jobId}>
                                 <div className="row">
                                     <h2 className="t-card">
-                                        <a href={routes.run(id, r.jobId)}>{title}</a>
+                                        <a href={routes.projectAgentRun(id, "test-generation", r.jobId)}>{title}</a>
                                     </h2>
                                     {j ? <JobBadge job={{ ...j, caseAgent: true }} /> : <Badge tone="info">Exploring</Badge>}
                                     {j && isActive(j.status) && <LiveBadge state={live.state} />}
@@ -94,7 +94,7 @@ export function CaseRuns({ id }: { id: string }) {
                                     </Callout>
                                 ))}
                                 <div className="row">
-                                    <a className="btn btn-sm" href={routes.run(id, r.jobId)}>
+                                    <a className="btn btn-sm" href={routes.projectAgentRun(id, "test-generation", r.jobId)}>
                                         See what it found
                                         <ChevronRight size={16} aria-hidden />
                                     </a>

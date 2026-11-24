@@ -53,6 +53,8 @@ export const SETTINGS_MOVED = { accounts: "signin", frameworks: "general", stora
 export type CasesSection = (typeof CASES_SECTIONS)[number];
 export type ScriptsSection = (typeof SCRIPTS_SECTIONS)[number];
 export type RunsSection = (typeof RUNS_SECTIONS)[number];
+export const AGENT_TABS = ["outcome", "runs", "setup"] as const;
+export type AgentTab = (typeof AGENT_TABS)[number];
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number] | keyof typeof SETTINGS_MOVED;
 
 /** The sections the old places had: their links still work and land where each section lives now (lib/aliases.ts). */
@@ -81,9 +83,11 @@ function place(id: string, name: string, first: string, section?: string, extra?
 export const routes = {
     home: "#/",
     /** Explore a project (`#/new?project=`); without one, Create a project (`#/new` alone is an old link, redirected there). */
-    newProject: (opts?: { project?: string; url?: string }) => {
+    newProject: (opts?: { project?: string; url?: string; agent?: string }) => {
         const q = new URLSearchParams();
         if (opts?.project) q.set("project", opts.project);
+        // A run of one testing agent (Agent Workspace D1).
+        if (opts?.agent) q.set("agent", opts.agent);
         if (opts?.url) q.set("url", opts.url);
         const s = q.toString();
         return `${opts?.project ? "#/new" : "#/create"}${s ? `?${s}` : ""}`;
@@ -99,6 +103,10 @@ export const routes = {
     runs: (id: string, section?: RunsSection) => place(id, "runs", "runs", section),
     /** One run opened: its tests, what changed, ways to run again. */
     run: (id: string, jobId: string) => `#/projects/${id}/runs/${jobId}`,
+    /** One testing agent of a project with the Agent Workspace: its Outcome, Runs or Setup (features/agent-workspace/AgentPage.tsx). */
+    projectAgent: (id: string, agentId: string, tab?: AgentTab) => `#/projects/${id}/agents/${agentId}${tab && tab !== "outcome" ? `?tab=${tab}` : ""}`,
+    /** One run of that agent. */
+    projectAgentRun: (id: string, agentId: string, jobId: string) => `#/projects/${id}/agents/${agentId}/runs/${jobId}`,
     /** Scheduled runs (a run sequence message links to one run with `run`). */
     schedule: (id: string, run?: string) => place(id, "runs", "runs", "schedules", { run }),
     /** Requirements: what the application must do, and which test cases cover it. */

@@ -1,4 +1,5 @@
 import { ArrowLeft, ChevronRight, History } from "lucide-react";
+import { useEffect } from "react";
 import { projectShape, type ProjectDetail } from "../../api";
 import { usePage } from "../../components/Shell";
 import { TechnicalDetails } from "../../components/TechnicalDetails";
@@ -24,20 +25,23 @@ import { Elapsed, RelTime } from "./RunTime";
 import { announceRunsChanged, ranSentence, runTitle, startedByText, STATE_WORD, stoppedLine, useRunAnswer, whereOf, type RunState } from "./runs";
 import { BadgeKey, keyEntries } from "../../components/Tooltip";
 import { RUN_TEST_STATE } from "../../lib/help";
-import { CaseRunDetail } from "./CaseRunDetail";
-import { runNumbers, useCaseAgent } from "./case-runs";
-import type { CaseOutcome } from "../outcome/outcome";
+import { useCaseAgent } from "./case-runs";
 
 const RUN_STATES: RunState[] = ["passed", "finding", "failed", "running", "waiting", "not_run"];
 import "./runs.css";
 
-/** One run opened. A Test Case Generation project's run shows what it added to the tree instead (CaseRunDetail.tsx, founder 2026-11-19). */
+/**
+ * One run opened. A Test Case Generation run lives on that agent's page now (Agent Workspace): its old address goes there, where it shows
+ * what it added to the tree (CaseRunDetail.tsx, founder 2026-11-19). Every other run, another agent's too, is this page.
+ */
 export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
     const caseAgent = useCaseAgent(id);
-    // Only such a run needs the outcome, for its run number.
-    const outcome = useFetch<CaseOutcome>(caseAgent ? `/projects/${id}/outcome` : null);
-    if (caseAgent === undefined || outcome.loading) return <ListSkeleton rows={5} />;
-    if (caseAgent) return <CaseRunDetail id={id} jobId={jobId} number={runNumbers(outcome.data).get(jobId)} />;
+    const caseRuns = useFetch<Array<{ jobId: string }>>(caseAgent ? `/projects/${id}/workspace/test-generation/runs` : null);
+    const moved = Boolean(caseRuns.data?.some((j) => j.jobId === jobId));
+    useEffect(() => {
+        if (moved) location.replace(routes.projectAgentRun(id, "test-generation", jobId));
+    }, [moved, id, jobId]);
+    if (caseAgent === undefined || caseRuns.loading || moved) return <ListSkeleton rows={5} />;
     return <TestRunDetail id={id} jobId={jobId} />;
 }
 

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { projectKind, type ProjectDetail } from "../../api";
 import { ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { ProjectRuns } from "../../pages/ProjectRuns";
@@ -20,7 +21,12 @@ export function RunsPage({ id }: { id: string }) {
     const code = projectKind(useFetch<ProjectDetail>(`/projects/${id}`).data) === "code";
     // A Test Case Generation project's runs each add to its one tree: only its runs and their schedules (founder 2026-11-19, P7.2, O6).
     const caseAgent = useCaseAgent(id);
-    if (caseAgent === undefined) return <ListSkeleton rows={3} />;
+    // Its runs live on the Test Case Generation agent's page now (Agent Workspace); only its Schedules stay here.
+    const moved = caseAgent === true && section !== "schedules";
+    useEffect(() => {
+        if (moved) location.replace(routes.projectAgent(id, "test-generation", "runs"));
+    }, [moved, id]);
+    if (caseAgent === undefined || moved) return <ListSkeleton rows={3} />;
     if (caseAgent) {
         const tcg: HubSection[] = [
             { key: "runs", label: "All runs", hint: "Every run: what each one added to the tree", render: () => <CaseRuns id={id} /> },
