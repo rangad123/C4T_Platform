@@ -153,7 +153,7 @@ export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: 
             spec: t?.spec,
             area: t?.suite,
             environment: { appUrl: app0?.url as string | undefined, appVersion: r.appVersion },
-            rootCause: await causeOf([view]),
+            rootCause: r.rootCause ?? (await causeOf([view])),
         });
         confirmed.push({ rank: SEVERITIES.indexOf(severity), report });
     }

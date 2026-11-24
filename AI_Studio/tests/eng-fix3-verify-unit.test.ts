@@ -283,3 +283,55 @@ describe("3. response bodies in the evidence package", () => {
         expect(bodies[0]!.cut).toBe(true);
     });
 });
+
+describe("4. root cause during verification, stored on the finding", () => {
+    /** Explains when asked; for root cause, cites line 4 of src/app.js (inside total(), the helper the order handler calls). */
+    const both = () =>
+        scripted((prompt) =>
+            prompt.includes("Which shown lines") ? { hypotheses: [{ file: "src/app.js", line: 4, explanation: "The total is doubled." }] } : says()(),
+        );
+    /** Three attempts failing the same check; the failing step called the order API (evidence), no stack frame anywhere. */
+    function orderRuns(dir_: string) {
+        const ev = path.join(dir_, `rc-ev-${Math.random().toString(36).slice(2)}.json`);
+        fs.writeFileSync(ev, JSON.stringify({ v: 1, durationMs: 1, counts: { requests: 1, requestsKept: 1, console: 0, consoleKept: 0 }, steps: [], requests: [{ t: 1, step: 2, method: "GET", type: "fetch", path: "/api/orders/7", status: 200 }], console: [] }));
+        return async () => [1, 2, 3].map(() => failedAt(1, [{ kind: "evidence", path: ev }]));
+    }
+
+    it("locates the cause with the job's model in the connected repository once, keeps it, and the card and report read it without reading GitHub again", async () => {
+        const s = await seed("Stored root cause", THREE_CHECKS);
+        expect((await call("PUT", `/api/projects/${s.projectId}/code-host`, { owner: "acme", repo: "shop", token: GH_TOKEN, apiUrl: gh.url })).status).toBe(201);
+        const llm = both();
+        await verifyFindings({ ...verifyDepsOf(platform, s.job, { execute: orderRuns(dir) }), findings: [s.finding], llm });
+        const hypothesisCalls = llm.prompts.filter((p) => p.includes("Which shown lines"));
+        expect(hypothesisCalls).toHaveLength(1);
+        const r = (await s.store.get(s.projectId, s.finding.id))!;
+        expect(r.rootCause).toMatchObject({ label: "strongly_supported", location: { file: "src/app.js", line: 4 } });
+
+        const seenBefore = gh.requests.length;
+        const card = await call("GET", `/api/projects/${s.projectId}/candidate-findings`);
+        const rv = card.body.findings.find((f: { id: string }) => f.id === s.finding.id).review;
+        expect(rv.cause).toMatchObject({ label: "Strongly supported" });
+        expect(rv.cause.text).toContain("src/app.js:4");
+        const report = await call("GET", `/api/projects/${s.projectId}/report`);
+        expect(report.status).toBe(200);
+        expect(String(report.body)).toContain("src/app.js:4");
+        // Read from the finding: no AI call and no repository read of their own.
+        expect(gh.requests.length).toBe(seenBefore);
+        expect(llm.prompts.filter((p) => p.includes("Which shown lines"))).toHaveLength(1);
+    });
+
+    it("a connected repository that cannot be read: keeps that reason, not 'no code source'", async () => {
+        const s = await seed("Stored unreadable repository", THREE_CHECKS);
+        expect((await call("PUT", `/api/projects/${s.projectId}/code-host`, { owner: "acme", repo: "gone", token: GH_TOKEN, apiUrl: gh.url, verify: false })).status).toBe(201);
+        await verifyFindings({ ...verifyDepsOf(platform, s.job, { execute: orderRuns(dir) }), findings: [s.finding], llm: both() });
+        expect((await s.store.get(s.projectId, s.finding.id))!.rootCause).toMatchObject({ label: "unknown", reason: expect.stringMatching(/^The connected repository acme\/gone could not be read/) });
+    });
+
+    it("without a connected repository, keeps why there is no cause and asks no AI for one", async () => {
+        const s = await seed("Stored no repository", THREE_CHECKS);
+        const llm = both();
+        await verifyFindings({ ...verifyDepsOf(platform, s.job, { execute: orderRuns(dir) }), findings: [s.finding], llm });
+        expect(llm.prompts.filter((p) => p.includes("Which shown lines"))).toHaveLength(0);
+        expect((await s.store.get(s.projectId, s.finding.id))!.rootCause).toMatchObject({ label: "unknown", reason: expect.stringMatching(/No code source is connected/) });
+    });
+});

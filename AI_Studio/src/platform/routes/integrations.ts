@@ -239,8 +239,8 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
                 area: t.suite,
                 environment: { appUrl: repo.getLatestApplicationPublic(id)?.url as string | undefined, appVersion: r.appVersion },
                 evidenceUrl,
-                // The project's connected repository is the code source; without one this says Unknown and why. No AI call is made here.
-                rootCause: await projectRootCause(p, id, views),
+                // The cause verification kept on the group, else the repository's deterministic answer. No AI call is made here.
+                rootCause: members.find((m) => m.rootCause)?.rootCause ?? (await projectRootCause(p, id, views)),
             });
             const draft = findingIssueDraft(report, evidenceUrl);
             try {

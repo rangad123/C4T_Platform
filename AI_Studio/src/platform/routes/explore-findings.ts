@@ -51,8 +51,9 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
         const severity = stored ?? scored.severity;
         const conf = r.confidenceDetail ?? confidenceScore(view);
         const rep = reproduction(view.attempts);
-        // The project's connected repository is the code source (code-host/source.ts); without one, Unknown with its reason. No AI call.
-        const rc = await projectRootCause(p, r.projectId, [view]);
+        // The cause verification kept (with the project's repository and the job's model); a finding verified before that gets the
+        // repository's deterministic answer (code-host/source.ts). No AI call here.
+        const rc = r.rootCause ?? (await projectRootCause(p, r.projectId, [view]));
         const at = rc.location ? `${rc.location.file}:${rc.location.line}${rc.location.function ? ` in ${rc.location.function}()` : ""}. ` : "";
         return {
             label: label({ state: r.state, severity, confidence: conf.confidence, security: false, reproduced: isReproduced(rep) }),

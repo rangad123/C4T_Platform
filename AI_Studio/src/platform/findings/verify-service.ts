@@ -8,7 +8,8 @@
  *
  * A run of saved tests (mode validate) also writes its failed tests into candidate_findings first: a failure that is not the test's own
  * step is an execution (or, with test meta `layer`, a layer) finding. Budget: at most 30 findings per run, 10 minutes each; the rest wait.
- * AI: only with a model given (`llm`), one explanation (findings/explain.ts) per verified finding whose class the rules left open.
+ * AI: only with a model given (`llm`), one explanation (findings/explain.ts) per verified finding whose class the rules left open, and
+ * one root cause hypothesis call per verified group whose run reached code in the project's connected repository (kept on the finding).
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -18,6 +19,8 @@ import { attemptsSetting, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDG
 import { confidenceScore } from "../../engine/findings/score.js";
 import { explainGroup } from "../../engine/findings/explain.js";
 import type { LlmClient } from "../../engine/llm/provider.js";
+import type { CodeSource } from "../../engine/findings/code-source.js";
+import { projectCodeSource, rootCauseWith } from "../code-host/source.js";
 import { responseBodiesInTrace, secretsInTrace } from "../../engine/evidence/trace-scrub.js";
 import type { Attempt } from "../../engine/findings/view.js";
 import { getAdapter, hasAdapter, renderWithAdapter, type ExecutionBatch, type ExecutionEnv, type ExecutionOptions } from "../../engine/frameworks/index.js";
@@ -102,8 +105,10 @@ export interface VerifyDeps {
     emit: (message: string, level?: "info" | "warn") => void;
     budget?: VerifyBudget;
     signal?: AbortSignal;
-    /** The project's model: explains a verified finding whose class the rules left open. Without one, no AI call. */
+    /** The project's model: explains a verified finding whose class the rules left open, and writes root cause's hypotheses. */
     llm?: LlmClient;
+    /** The project's code source for root cause (code-host/source.ts); without it, root cause says none is connected. */
+    code?: () => Promise<{ code?: CodeSource; why?: string }>;
 }
 
 export interface VerifyResult {
@@ -149,7 +154,36 @@ export async function verifyFindings(d: VerifyDeps): Promise<VerifyResult> {
         await noteNotVerified(d.store, d.projectId, run.left.map((r) => r.f), run.stopped);
     }
     await confirmAndGroup(d, out);
+    await keepRootCauses(d, out.verified.map((v) => v.id));
     return out;
+}
+
+/**
+ * The likely cause of each group a finding verified here belongs to (findings/root-cause.ts: the project's code source, then the job's
+ * model for hypotheses over what the run reached), once per group and kept on every member, so the findings card, an issue and the report
+ * read it and make no AI call. A failure keeps the findings as they are.
+ */
+export async function keepRootCauses(d: Pick<VerifyDeps, "store" | "projectId" | "testOf" | "code" | "llm" | "emit">, ids: readonly string[]): Promise<void> {
+    if (!ids.length) return;
+    try {
+        const all = await d.store.list(d.projectId);
+        const groups = new Map<string, CandidateFindingRecord[]>();
+        for (const id of ids) {
+            const r = all.find((x) => x.id === id);
+            if (r && !groups.has(r.groupId ?? r.id)) groups.set(r.groupId ?? r.id, r.groupId ? all.filter((x) => x.groupId === r.groupId) : [r]);
+        }
+        const src = (await d.code?.().catch((e: unknown) => ({ why: `The code source could not be read: ${redactText(e instanceof Error ? e.message : String(e), 300)}` }))) ?? {};
+        for (const members of groups.values()) {
+            const views = members.map((r) => {
+                const t = r.testId ? d.testOf(r.testId) : undefined;
+                return fromCandidate(r, t ? { id: t.id, title: t.title, spec: t.spec, meta: t.meta } : undefined);
+            });
+            const rc = await rootCauseWith(src, views, d.llm).catch(() => undefined);
+            if (rc) await d.store.setRootCause(d.projectId, members.map((m) => m.id), rc);
+        }
+    } catch (e) {
+        d.emit(`The likely causes were not worked out: ${redactText(e instanceof Error ? e.message : String(e), 300)}`, "warn");
+    }
 }
 
 /**
@@ -551,6 +585,7 @@ export function verifyDepsOf(p: Platform, job: JobRow, o: { execute?: VerifyDeps
             }
         },
         emit: o.emit ?? jobEmitter(p, job.id),
+        code: () => projectCodeSource(p, job.projectId),
     };
 }
 

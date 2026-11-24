@@ -292,6 +292,14 @@ describe("POST /api/projects/:id/findings/:fid/issue", () => {
         expect(body).toContain("https://studio.example.test/#/tests/");
     });
 
+    it("files the likely cause verification kept on the finding (eng-fix3-verify), making no root cause of its own", async () => {
+        const fid = await seeded(projectA, "stored cause", "confirmed");
+        await store.setRootCause(projectA, [fid], { label: "strongly_supported", reason: "A cited line lies in the handler.", location: { file: "src/cart.js", line: 12, function: "total", why: "the AI's hypothesis", explanation: "The total adds one line twice." }, handlers: [], helpers: [], frames: [], dataOps: [], commits: [], dropped: [] });
+        expect((await issue(projectA, fid, trackerA)).status).toBe(201);
+        expect(created.at(-1)!.body).toContain("Strongly supported: src/cart.js:12");
+        expect(created.at(-1)!.body).toContain("The total adds one line twice.");
+    });
+
     it("files a finding that needs manual review", async () => {
         const fid = await seeded(projectA, "manual review", "needs_manual_review");
         expect((await issue(projectA, fid, trackerA)).status).toBe(201);

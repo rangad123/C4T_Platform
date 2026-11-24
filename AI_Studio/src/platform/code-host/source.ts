@@ -1,16 +1,16 @@
 /**
- * Root cause (findings/root-cause.ts) on the product's routes, with the project's connected GitHub repository as the code source: its
- * code files at the default branch's head, read through the stored token (pr-impact.ts repositorySources: JS/TS files, at most 300).
- * The files are kept in memory a few minutes per project, so a findings list does not read the repository once per finding. No AI call:
- * a location is found from the run's stack frames inside the handlers its requests reached. Without a connection, root cause says so.
+ * The project's connected GitHub repository as root cause's code source (findings/root-cause.ts): its code files at the default branch's
+ * head, read through the stored token (pr-impact.ts repositorySources: JS/TS files, at most 300), kept in memory a few minutes per
+ * project. Verification works out each group's cause with it and the job's model and keeps it on the finding (verify-service.ts);
+ * `projectRootCause` is the routes' answer for a finding verified before that: no AI call, a location only from a stack frame.
  */
 import { repositoryCodeSource, type CodeSource } from "../../engine/findings/code-source.js";
 import { rootCause, type RootCause } from "../../engine/findings/root-cause.js";
 import type { FindingView } from "../../engine/findings/view.js";
+import type { LlmClient } from "../../engine/llm/provider.js";
 import { redactText } from "../../shared/redact-text.js";
 import type { Db } from "../db.js";
 import { SecretBox } from "../secrets.js";
-import { repositorySources } from "./pr-impact.js";
 import { CodeHostStore } from "./store.js";
 
 const KEEP_MS = 5 * 60_000;
@@ -24,6 +24,8 @@ function codeOf(store: CodeHostStore, projectId: string, c: { owner: string; rep
     const code = (async () => {
         const client = store.client(projectId)!;
         const head = await client.head();
+        // Loaded here: pr-impact.ts reaches schedule-services.ts, which loads verification, which loads this file.
+        const { repositorySources } = await import("./pr-impact.js");
         return repositoryCodeSource(c, head, (await repositorySources(client, head, [])).sources);
     })();
     kept.delete(projectId);
@@ -32,17 +34,28 @@ function codeOf(store: CodeHostStore, projectId: string, c: { owner: string; rep
     return code;
 }
 
-/** Root cause of a group on a product route: the connected repository when there is one, else Unknown with why. */
-export async function projectRootCause(p: { db: Db; config: { dataDir: string; SECRET_KEY?: string } }, projectId: string, members: readonly FindingView[]): Promise<RootCause> {
+type PlatformLike = { db: Db; config: { dataDir: string; SECRET_KEY?: string } };
+
+/** The project's code source: none connected (`{}`), the repository's files, or why they could not be read. */
+export async function projectCodeSource(p: PlatformLike, projectId: string): Promise<{ code?: CodeSource; why?: string }> {
     const store = new CodeHostStore(p.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY));
     const c = store.get(projectId);
-    if (!c) return rootCause({ members });
-    let code: CodeSource;
+    if (!c) return {};
     try {
-        code = await codeOf(store, projectId, c);
+        return { code: await codeOf(store, projectId, c) };
     } catch (e) {
         kept.delete(projectId);
-        return { ...(await rootCause({ members })), reason: `The connected repository ${c.owner}/${c.repo} could not be read: ${redactText(e instanceof Error ? e.message : String(e), 300)}` };
+        return { why: `The connected repository ${c.owner}/${c.repo} could not be read: ${redactText(e instanceof Error ? e.message : String(e), 300)}` };
     }
-    return rootCause({ members, code });
+}
+
+/** Root cause of a group from a code source answer (`llm`: verification's model; the routes pass none). */
+export async function rootCauseWith(src: { code?: CodeSource; why?: string }, members: readonly FindingView[], llm?: LlmClient): Promise<RootCause> {
+    if (src.why) return { ...(await rootCause({ members })), reason: src.why };
+    return rootCause({ members, ...(src.code ? { code: src.code } : {}), ...(llm ? { llm } : {}) });
+}
+
+/** Root cause of a group on a product route, for a finding verification has not kept one for: no AI call. */
+export async function projectRootCause(p: PlatformLike, projectId: string, members: readonly FindingView[]): Promise<RootCause> {
+    return rootCauseWith(await projectCodeSource(p, projectId), members);
 }
