@@ -4,7 +4,8 @@
  *   /login, /register (name, email, password, confirm password), /cart (lines, "Add Mug" / "Add Plate" links, the Total), /add?item=,
  *   /orders (alice's ord-1008, an order an earlier test placed).
  * Seeded defect: a cart with two or more lines adds $5.00 to its Total (Mug $10.00 + Plate $15.00 shows $30.00, not $25.00).
- * Knobs (`shop.mode`): `terms` adds a required terms checkbox to sign-up, `company` a required "Company" field, `verify` makes a new account
+ * Knobs (`shop.mode`): `store` is the practice store's (test-site) sign-up and landing page: a required Age (18+), Country (none chosen)
+ * and terms checkbox, a change-password form on the page signing in opens, and a refused sign-in back at /login?failed=1; `company` a required "Company" field, `verify` makes a new account
  * wait for an e-mailed link (it cannot sign in). `shop.locked` shows alice's cart locked by an open checkout (no Add links).
  */
 import http from "node:http";
@@ -16,7 +17,7 @@ export interface AccountShop {
     registered: string[];
     /** Who signed in, in order (emails). */
     signIns: string[];
-    mode: "plain" | "terms" | "company" | "verify";
+    mode: "plain" | "store" | "company" | "verify";
     locked: boolean;
     /** alice's cart (item names) as earlier tests left it. */
     reset(aliceCart: string[]): void;
@@ -73,7 +74,7 @@ export async function startAccountShop(port: number): Promise<AccountShop> {
     const registerForm = (error = "") =>
         page(
             "Create account",
-            `<h1>Create an account</h1>${error ? `<p role="alert">${error}</p>` : ""}<form method="post" action="/register"><label>Name <input name="name" autocomplete="name"></label><label>Email <input name="email" autocomplete="email"></label>${shop.mode === "company" ? `<label>Company <input name="company" required></label>` : ""}<label>Password <input type="password" name="password" autocomplete="new-password"></label><label>Confirm password <input type="password" name="confirm"></label>${shop.mode === "terms" ? `<label><input type="checkbox" name="terms" required> I accept the terms</label>` : ""}<button type="submit">Create account</button></form>`,
+            `<h1>Create an account</h1>${error ? `<p role="alert">${error}</p>` : ""}<form method="post" action="/register"><label>Name <input name="name" autocomplete="name"></label><label>Email <input name="email" autocomplete="email"></label>${shop.mode === "company" ? `<label>Company <input name="company" required></label>` : ""}<label>Password <input type="password" name="password" autocomplete="new-password"></label><label>Confirm password <input type="password" name="confirm"></label>${shop.mode === "store" ? `<label>Age <input type="number" name="age" required min="18" max="120"></label><label>Country <select name="country" required><option value="">Choose…</option><option value="IN">India</option><option value="GB">United Kingdom</option></select></label><label><input type="checkbox" name="terms" required> I accept the terms</label>` : ""}<button type="submit">Create account</button></form>`,
         );
     const server = http.createServer(async (req, res) => {
         const url = new URL(req.url ?? "/", shop.url);
@@ -84,17 +85,18 @@ export async function startAccountShop(port: number): Promise<AccountShop> {
             const b = await body(req);
             const email = (b.get("email") ?? "").trim().toLowerCase();
             const u = users.get(email);
-            if (!u || u.pending || u.password !== b.get("password")) return send(res, loginForm("Email or password is wrong."), 400);
+            // The store mode sends a refused sign-in back to the form at another address (/login?failed=1).
+            if (!u || u.pending || u.password !== b.get("password")) return shop.mode === "store" ? go(res, "/login?failed=1") : send(res, loginForm("Email or password is wrong."), 400);
             return go(res, "/cart", signIn(email));
         }
-        if (url.pathname === "/login") return send(res, loginForm());
+        if (url.pathname === "/login") return send(res, loginForm(url.searchParams.has("failed") ? "Email or password is wrong." : ""));
         if (url.pathname === "/register" && req.method === "POST") {
             const b = await body(req);
             const email = (b.get("email") ?? "").trim().toLowerCase();
             const password = b.get("password") ?? "";
             if (!b.get("name") || !/^[^@\s]+@[^@\s]+\.[a-z]+$/.test(email) || password.length < 8 || password !== b.get("confirm")) return send(res, registerForm("Check the fields."), 400);
             if (shop.mode === "company" && !b.get("company")) return send(res, registerForm("Enter your company."), 400);
-            if (shop.mode === "terms" && !b.get("terms")) return send(res, registerForm("Accept the terms."), 400);
+            if (shop.mode === "store" && (!b.get("terms") || !b.get("country") || !(Number(b.get("age")) >= 18))) return send(res, registerForm("Accept the terms, choose a country and give an age of 18 or more."), 400);
             if (users.has(email)) return send(res, registerForm("That email is taken."), 409);
             users.set(email, { password, cart: new Set(), pending: shop.mode === "verify", orders: [] });
             shop.registered.push(email);
@@ -117,7 +119,7 @@ export async function startAccountShop(port: number): Promise<AccountShop> {
             const lines = [...user.cart];
             const sum = lines.reduce((s, i) => s + PRICES[i]!, 0) + (lines.length >= 2 ? 500 : 0);
             const adds = locked ? `<p>Your cart is locked by an open checkout.</p>` : Object.keys(PRICES).map((i) => `<a href="/add?item=${i}">Add ${i}</a>`).join(" ");
-            return send(res, page("Cart", `<h1>Cart</h1><ul>${lines.map((i) => `<li>${i} ${money(PRICES[i]!)}</li>`).join("")}</ul><p>${adds}</p><p>Total: <output aria-label="Total">${money(sum)}</output></p><p>Signed in. <a href="/logout">Sign out</a></p>`));
+            return send(res, page("Cart", `<h1>Cart</h1><ul>${lines.map((i) => `<li>${i} ${money(PRICES[i]!)}</li>`).join("")}</ul><p>${adds}</p><p>Total: <output aria-label="Total">${money(sum)}</output></p><p>Signed in. <a href="/logout">Sign out</a></p>${shop.mode === "store" ? `<form><h2>Change password</h2><label>Current password <input type="password" name="current"></label><label>New password <input type="password" name="next"></label><button>Change password</button></form>` : ""}`));
         }
         if (url.pathname === "/orders") return send(res, page("Orders", `<h1>Your orders</h1><ul>${user.orders.map((o) => `<li><a href="/orders/${o}">${o}</a></li>`).join("")}</ul>`));
         const order = /^\/orders\/([\w-]+)$/.exec(url.pathname)?.[1];

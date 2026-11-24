@@ -3,8 +3,8 @@
  * its server (fixtures/account-shop.ts). Row 227 found the independence check and the own-steps replay noisy both ways on the shared
  * test account: a test reading what earlier tests left came out `independent` (WEB-023, 062), the one true positive `state_dependent`
  * (WEB-006), and an observed-only test bound to an earlier test's order passed its own replay (WEB-033).
- *   - registerFreshAccount signs up through the page and checks the new account can sign in; it refuses a required terms box, a
- *     required field it cannot fill, and an account that cannot sign in (an e-mailed link);
+ *   - registerFreshAccount signs up through the page and checks the new account can sign in; it fills a required age, country and
+ *     terms box, and refuses a required field it cannot fill and an account that cannot sign in (an e-mailed link);
  *   - on the shared account, a reproduced failure is `not_on_clean_state` (medium), never `independent`;
  *   - each replay as a newly registered account: the leftover-reading test is `state_dependent`, the true positive `independent` (high),
  *     the observed-only test fails its own replay; each replay its own account;
@@ -17,7 +17,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanReplayPlan, registerFreshAccount, replayAccountPreparer } from "../src/engine/explore/clean-account.js";
 import { confidenceOf } from "../src/engine/explore/finding.js";
 import { checkIndependence, replayOwnSteps, type DefectTest } from "../src/engine/explore/independence.js";
-import { launchChromium } from "../src/engine/discovery/browser.js";
+import { login } from "../src/engine/discovery/auth.js";
+import { BrowserSession, launchChromium } from "../src/engine/discovery/browser.js";
+import { ACCESS_HELPER_SOURCE } from "../src/engine/identity/access.js";
 import type { Step } from "../src/engine/spec/schema.js";
 import { ALICE, startAccountShop, type AccountShop } from "./fixtures/account-shop.js";
 
@@ -65,14 +67,47 @@ describe("registerFreshAccount", () => {
         expect(shop.signIns.filter((e) => e === a.credentials.username)).toHaveLength(2);
     }, 60_000);
 
-    it("refuses a required terms box and a required field it cannot fill, without sending the form", async () => {
-        shop.mode = "terms";
-        const terms = await registerFreshAccount(browser, shop.url, "/register");
-        expect(terms).toEqual({ ok: false, why: expect.stringMatching(/required checkbox/) });
+    it("fills a required age, country and terms box (the practice store's sign-up, N2); refuses a required field it cannot fill, without sending the form", async () => {
+        shop.mode = "store";
+        const terms = await registerFreshAccount(browser, shop.url, "/register", { loginPath: "/login" });
+        expect(terms.ok, terms.ok ? "" : terms.why).toBe(true);
+        expect(shop.registered).toHaveLength(1);
         shop.mode = "company";
         const company = await registerFreshAccount(browser, shop.url, "/register");
         expect(company).toEqual({ ok: false, why: expect.stringMatching(/cannot fill/) });
-        expect(shop.registered).toEqual([]);
+        expect(shop.registered).toHaveLength(1);
+    }, 60_000);
+
+    it("the generated scripts' sign-in takes a landing page with a change-password form as signed in, and still refuses a wrong password (N2 API 401s)", async () => {
+        const { accessSignIn } = new Function("totpCode", "IGNORE_HTTPS_ERRORS", `${ACCESS_HELPER_SOURCE}\nreturn { accessSignIn };`)(() => "000000", false) as { accessSignIn: (page: unknown, base: string, role: string) => Promise<void> };
+        const contexts = [await browser.newContext(), await browser.newContext()];
+        try {
+            shop.mode = "store";
+            process.env.TEST_ALICE_USERNAME = ALICE.username;
+            process.env.TEST_ALICE_PASSWORD = ALICE.password;
+            await accessSignIn(await contexts[0]!.newPage(), shop.url, "alice");
+            expect(shop.signIns).toContain(ALICE.username);
+            process.env.TEST_ALICE_PASSWORD = "not-her-password";
+            await expect(accessSignIn(await contexts[1]!.newPage(), shop.url, "alice")).rejects.toThrow(/the sign-in details were not accepted/);
+        } finally {
+            for (const c of contexts) await c.close();
+            delete process.env.TEST_ALICE_USERNAME;
+            delete process.env.TEST_ALICE_PASSWORD;
+        }
+    }, 60_000);
+
+    it("the engine's sign-in takes that landing page as signed in, and a form sent back to another address as refused", async () => {
+        shop.mode = "store";
+        const as = async (password: string) => {
+            const session = await BrowserSession.launch(browser, { startUrl: shop.url });
+            try {
+                return (await login(session, shop.url, { username: ALICE.username, password }, undefined, { loginPath: "/login" })).ok;
+            } finally {
+                await session.close();
+            }
+        };
+        expect(await as(ALICE.password)).toBe(true);
+        expect(await as("not-her-password")).toBe(false);
     }, 60_000);
 
     it("an account that cannot sign in yet (an e-mailed link) is no clean account", async () => {
@@ -121,11 +156,11 @@ describe("the independence check on clean account state", () => {
     }, 90_000);
 
     it("a registration that fails falls back to the shared account and says why: not checked on clean state", async () => {
-        shop.mode = "terms";
+        shop.mode = "company";
         const r = await checkIndependence(browser, shop.url, leftoverReader, { ...OPTS, prepare: fresh(leftoverReader.steps) });
         expect(r.independence).toBe("not_on_clean_state");
         expect(r.clean).toBe(false);
-        for (const x of r.replays) expect(x.summary).toMatch(/on the shared test account \(a new account could not be registered: the sign-up form has a required checkbox/);
+        for (const x of r.replays) expect(x.summary).toMatch(/on the shared test account \(a new account could not be registered: the sign-up form asks for a field the engine cannot fill on its own/);
     }, 90_000);
 
     it("a prepare hook that throws is the shared account too", async () => {

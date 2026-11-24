@@ -20,6 +20,7 @@ import type { Attempt } from "../../engine/findings/view.js";
 import { getAdapter, hasAdapter, renderWithAdapter, type ExecutionBatch, type ExecutionEnv, type ExecutionOptions } from "../../engine/frameworks/index.js";
 import type { RenderContext } from "../../engine/generators/types.js";
 import { parseEvidence, type Evidence } from "../../engine/evidence/model.js";
+import { roleLane } from "../../engine/validation/lanes.js";
 import { parseAttemptNote, type RunEnv, type ScriptRun } from "../../engine/validation/runner.js";
 import { testStepFault } from "../../engine/validation/test-fault.js";
 import { startingIdsOf } from "../../engine/web/leftovers.js";
@@ -207,7 +208,10 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
     const { spec } = test;
     const adapterId = getAdapter(test.framework).id;
     // Who the attempts run as: a new account per attempt where it is safe (explore/clean-account.ts), else the reason it is not.
-    const plan = cleanReplayPlan({ steps: spec.steps, roleAccount: spec.tags.some((t) => t.startsWith("role:")), dataChanges: d.dataChanges, ...(d.signupPath ? { signupPath: d.signupPath } : {}), ...(d.startingIds ? { startingIds: d.startingIds } : {}) });
+    // A named account with the project's own sign-in is that account, so a new account stands in for it as for the project's (N2 WEB-041).
+    const own = d.env.credentials?.username;
+    const roleAccount = spec.tags.some((t) => t.startsWith("role:") && !(own && d.env.roles?.some((r) => roleLane(r.name) === roleLane(t.slice(5)) && r.username === own)));
+    const plan = cleanReplayPlan({ steps: spec.steps, roleAccount, dataChanges: d.dataChanges, ...(d.signupPath ? { signupPath: d.signupPath } : {}), ...(d.startingIds ? { startingIds: d.startingIds } : {}) });
     const script = renderWithAdapter(spec, adapterId, d.render);
     const runs = await d.execute(adapterId, { scratchDir: d.scratchDir, scripts: [{ testId: spec.testId, filename: script.filename, content: script.content }] }, { run: d.env }, {
         workers: 1,
