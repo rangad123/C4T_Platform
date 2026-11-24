@@ -75,4 +75,18 @@ describe("invariant probe on bench-shop", () => {
             await clean.stop();
         }
     }, 240_000);
+
+    // Paid shop-4/-5 (eng-fix2): the model's own proposals for 4.1 and 4.5 signed up and in as setup, and every probe stopped at
+    // "the setup POST /api/login answered HTTP 401". With that setup the probe now runs on the real app and finds both seeds.
+    it.each(BENCH_SHOP_INVARIANTS.filter((i) => i.requirementId !== "3.9") as Invariant[])("requirement $requirementId with the model's sign-up and sign-in setup still probes and fails on its seed", async (inv) => {
+        const seeded = await startBenchApp("bench-shop", SEEDED, SEED_OF[inv.requirementId]!);
+        try {
+            const withSignIn = { ...inv, setup: ["POST /api/register", "POST /api/login", ...inv.setup], ...(inv.setupBodies ? { setupBodies: [{}, {}, ...inv.setupBodies] } : {}) };
+            const r = await probeInvariant(withSignIn, envAt(seeded.base, SEEDED), { seed: 20261122 });
+            expect(r.reason).toBeUndefined();
+            expect(r.outcome).toBe("failed");
+        } finally {
+            await seeded.stop();
+        }
+    }, 240_000);
 });
