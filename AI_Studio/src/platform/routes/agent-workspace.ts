@@ -1,8 +1,9 @@
 /**
  * The Agent Workspace (agent-workspace.ts; .scratch/agent-workspace/SPEC.md):
  *
- *   GET /api/projects/:id/workspace                       → { workspace, agents: [{ id, name, summary, status, needs, runs, lastRun, headline }] }
- *                                                           workspace false and no agents for a project without one (code, mixed, no choice saved)
+ *   GET /api/projects/:id/workspace[?agent=]              → { workspace, agents: [{ id, name, summary, status, needs, runs, lastRun, headline }] }
+ *                                                           workspace false and no agents for a project without one (code, mixed, no choice saved);
+ *                                                           ?agent= answers that agent's card alone (an agent page); headlines: agent-workspace.ts headlineOf
  *   GET /api/projects/:id/workspace/:agentId/outcome[?run=]  → that agent's outcome (agent-outcomes/<agentId>.ts), or one run's part of it;
  *                                                           501 for an agent whose outcome is not built yet, 404 for an agent the project did not choose
  *   GET /api/projects/:id/workspace/:agentId/runs            → that agent's runs only, newest first (the jobs list's shape), a check
@@ -10,13 +11,14 @@
  *
  * Who may read the project reads all three (auth/roles.ts).
  */
-import { agentStatusOf, jobBelongsTo, workspaceAgents } from "../agent-workspace.js";
+import { agentStatusOf, headlineOf, jobBelongsTo, resultsStamp, workspaceAgents } from "../agent-workspace.js";
 import { AGENT_OUTCOMES } from "../agent-outcomes/index.js";
 import type { AgentOutcomeCtx } from "../agent-outcomes/types.js";
 import { NO_ADDRESS_OR_REQUIREMENTS } from "../case-agent.js";
 import type { AppModelReader } from "../case-outcome.js";
 import { HttpError } from "../http-error.js";
 import type { Row } from "../db.js";
+import { TERMINAL_STATES } from "../repo.js";
 import { RequirementStore } from "../requirement-store.js";
 import { agentById, type AgentId } from "../testing-agents.js";
 import { missingInputs, savedInputsFor } from "./agent-inputs.js";
@@ -57,15 +59,19 @@ export function registerAgentWorkspaceRoutes(ctx: RouteCtx, appModel: AppModelRe
         const row = ctx.project(id);
         const chosen = await workspaceAgents(store, row);
         if (!chosen) return { workspace: false, agents: [] };
+        const only = (req.query as { agent?: unknown }).agent;
+        const going = repo.listJobs(id).filter((j) => !TERMINAL_STATES.includes(j.status)).map((j) => j.id);
+        const stamp = await resultsStamp(p.db.sql, id, going);
         const agents = [];
         for (const agentId of chosen) {
+            if (typeof only === "string" && only && only !== agentId) continue;
             const a = agentById(agentId)!;
             const c = outcomeCtx(id, agentId);
             const needs = await needsOf(row, agentId);
             const module = AGENT_OUTCOMES[agentId];
             let headline: string | null = null;
             try {
-                if (module && c.runs.length) headline = module.headline(await module.outcome(c));
+                if (module && c.runs.length) headline = await headlineOf(id, agentId, c.runs, stamp, async () => module.headline(await module.outcome(c)));
             } catch (err) {
                 // One agent's outcome that cannot be read leaves its card without a headline; the Workspace still shows.
                 console.error(`[agents] the ${agentId} outcome of project ${id.slice(0, 8)} could not be read:`, err);

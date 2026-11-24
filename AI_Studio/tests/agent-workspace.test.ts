@@ -8,6 +8,8 @@
  *   - GET /api/projects/:id/workspace/:agentId/outcome: Test Case Generation answers the case outcome, each other agent its own (W2), and an
  *     agent whose outcome is not built yet answers 501;
  *   - GET /api/projects/:id/workspace/:agentId/runs: that agent's runs only;
+ *   - a card's headline is never stale (M6): a new or changed result, or a person's "not a bug", shows on the next read, whether the run
+ *     is going or finished; `?agent=` answers that agent's card alone (an agent page polls its own agent only);
  *   - code and mixed projects start runs exactly as before and have no Workspace;
  *   - a schedule and a runbook's analyze step are one agent's too (W3): they keep the agent, and its run turns on that agent's switches only.
  *
@@ -18,8 +20,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { formatA11yViolations } from "../src/engine/a11y/audit.js";
 import { AppModelSchema } from "../src/engine/intel/model.js";
+import { TestSpecSchema } from "../src/engine/spec/schema.js";
+import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { AppIntelStore } from "../src/platform/app-intel-store.js";
+import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
+import { executionFinding } from "../src/platform/findings/adapters.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions } from "../src/platform/repo.js";
@@ -297,6 +304,83 @@ describe("the Workspace: each agent's status, outcome and runs", () => {
         platform.repo.setJobStatus(perf.id, "COMPLETED");
         const o = await call("GET", `/api/projects/${tp}/workspace/test-generation/outcome`);
         expect(o.body.missing).toEqual(["What the test case run left unknown."]);
+    });
+});
+
+describe("a card's headline is never stale (M6)", () => {
+    let pid = "";
+    let n = 0;
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    const run = async (status: Parameters<Platform["repo"]["setJobStatus"]>[1]) => {
+        const j = await platform.repo.createJob(pid, platform.repo.getLatestApplicationPublic(pid)!.id as string, { ...DEFAULT_JOB_OPTIONS, agentId: "accessibility" });
+        platform.repo.setJobStatus(j.id, status);
+        return j.id;
+    };
+    const issues = formatA11yViolations([{ id: "image-alt", impact: "critical", help: "Images must have alternate text", nodes: [{ target: ["#hero"] }] }], "serious")!;
+    /** One audit the engine saved in run `jobId`: clean, or with an image-alt issue. */
+    const audit = async (jobId: string, page: string, clean: boolean) => {
+        await tick();
+        const spec = TestSpecSchema.parse({ testId: `WEB-${String(++n).padStart(3, "0")}`, title: `Audit of ${page}`, kind: "web", type: "accessibility", steps: [{ action: "navigate", url: page }, { action: "assert", check: "a11y", expected: "serious" }] });
+        const id = platform.repo.insertTest({ projectId: pid, suiteId: platform.repo.getOrCreateSuite(pid, "Web", "web"), jobId, spec, framework: "playwright", validationStatus: "PENDING", meta: { accessibility: true } });
+        platform.repo.updateTest(id, { validationStatus: clean ? "VALIDATED" : "NEEDS_REVIEW", reason: clean ? null : issues });
+        return id;
+    };
+    const card = async (id: string, query = "") => ((await call("GET", `/api/projects/${pid}/workspace${query}`)).body.agents as any[]).find((a) => a.id === id);
+    const headline = async () => {
+        const first = (await card("accessibility")).headline;
+        // Read twice: the second read must say the same, from whatever the first one kept.
+        expect((await card("accessibility")).headline).toBe(first);
+        return first as string | null;
+    };
+
+    beforeAll(async () => {
+        pid = await project("Fresh Headlines", ["agent"], ["accessibility", "ux"]);
+    });
+
+    it("a finished run: a result added or changed later, and a person's not a bug, show on the next read", async () => {
+        const done = await run("COMPLETED");
+        const home = await audit(done, "/", true);
+        expect(await headline()).toBe("1 page clean");
+        // A result saved in the finished run (a check run again, a verification): the job itself does not change.
+        const cart = await audit(done, "/cart", false);
+        expect(await headline()).toBe("1 page with issues, 1 clean");
+        // A person marks the cart's issue not a bug.
+        const store = new CandidateFindingStore(platform.sql);
+        const t = platform.repo.getTest(cart)!;
+        const failed = { status: "failed", failedStepIndex: 1, steps: [{ index: 1, title: "2", status: "failed", error: issues }], responses: [], error: issues } as unknown as ScriptRun;
+        const { finding } = await store.upsert({ projectId: pid, jobId: done, testId: cart, finding: executionFinding({ id: t.id, title: t.title, spec: t.spec }, failed) });
+        expect(await headline()).toBe("1 page with issues, 1 clean");
+        await tick();
+        await store.transition(pid, finding.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason: "Decorative." });
+        expect(await headline()).toBe("1 page clean, 1 dismissed");
+        // A saved result that changes in place (same number of tests).
+        await tick();
+        platform.repo.updateTest(home, { validationStatus: "NEEDS_REVIEW", reason: issues });
+        expect(await headline()).toBe("1 page with issues, 1 dismissed");
+        // Another agent's card is not touched: UX has no runs.
+        expect((await card("ux")).headline).toBeNull();
+    });
+
+    it("a run that is going: each new result shows on the next poll", async () => {
+        const going = await run("GENERATING");
+        expect((await card("accessibility")).status).toBe("running");
+        await audit(going, "/about", true);
+        expect(await headline()).toBe("1 page with issues, 1 clean, 1 dismissed");
+        await audit(going, "/faq", true);
+        expect(await headline()).toBe("1 page with issues, 2 clean, 1 dismissed");
+        // The run finishes with one more result: still the newest word.
+        await audit(going, "/help", false);
+        platform.repo.setJobStatus(going, "COMPLETED");
+        expect(await headline()).toBe("2 pages with issues, 2 clean, 1 dismissed");
+    });
+
+    it("?agent= answers that agent's card alone, and none for an agent the project did not choose", async () => {
+        const one = await call("GET", `/api/projects/${pid}/workspace?agent=accessibility`);
+        expect(one.status).toBe(200);
+        expect(one.body.workspace).toBe(true);
+        expect((one.body.agents as any[]).map((a) => a.id)).toEqual(["accessibility"]);
+        expect(one.body.agents[0]).toEqual(await card("accessibility"));
+        expect((await call("GET", `/api/projects/${pid}/workspace?agent=performance`)).body).toEqual({ workspace: true, agents: [] });
     });
 });
 
