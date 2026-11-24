@@ -158,6 +158,7 @@ export function toWireEnv(env: RunEnv): WireRunEnv {
     if (env.vars) w.vars = { ...env.vars };
     if (env.cleanup) w.cleanup = env.cleanup === "platform" ? "agent" : env.cleanup;
     if (env.storageState !== undefined) w.storageState = env.storageState;
+    if (env.riskyChecks) w.riskyChecks = env.riskyChecks;
     return WireRunEnv.parse(w);
 }
 

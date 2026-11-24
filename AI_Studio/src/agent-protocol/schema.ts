@@ -398,6 +398,12 @@ export const WireRunEnv = z.object({
     headless: z.boolean(),
     /** The project's saved sign-in (a Playwright storage state, JSON text): scripts marked `session` start signed in with it. A secret, like the credentials. */
     storageState: z.string().max(1_000_000).optional(),
+    /**
+     * The risky-checks gate the platform decided for this task (RunEnv.riskyChecks, validation/risky.ts): only the platform sets it, from the
+     * project's own authorization or this server's bench setting; nothing a runner sends sets it. Absent: risky tests skip themselves. An older
+     * runner drops it, so its risky tests skip as before.
+     */
+    riskyChecks: z.enum(["bench", "fixture", "authorization"]).optional(),
 });
 export type WireRunEnv = z.infer<typeof WireRunEnv>;
 
