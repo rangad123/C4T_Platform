@@ -33,6 +33,7 @@ export function ProjectSchedule({ id, section, agentId, workspace }: { id: strin
                     <SchedulesPanel
                         projectId={id}
                         agentId={agentId ?? undefined}
+                        workspace={workspace}
                         reloadKey={reloadKey}
                         onRunStarted={() => {
                             // A started run shows up in the job list; polling then follows it to the end.

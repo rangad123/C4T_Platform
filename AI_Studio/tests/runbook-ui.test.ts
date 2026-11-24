@@ -246,27 +246,16 @@ describe("Runbooks on the Schedule tab", () => {
         await pwExpect(run.getByRole("button", { name: "Cancel the run" })).toHaveCount(0);
     });
 
-    it("in a project with the Agent Workspace, an Explore again step is one agent's: it saves the agent shown", async () => {
+    // Superseded by W3 review M4 (lead's decision): a Workspace project's Schedules has no run sequences, so its editor's agent picker is
+    // not reached from there; a runbook step's agent is still kept and run as that agent's (tests/agent-workspace.test.ts).
+    it("in a project with the Agent Workspace, Schedules offers no run sequences", async () => {
         const pid = platform.repo.createProject({ name: "Agent shop", platforms: ["web"], testingModes: ["agent"] }).id as string;
         platform.repo.createApplication(pid, `http://127.0.0.1:${FIXTURE_PORT}`, { ...DEFAULT_JOB_OPTIONS });
         await testingAgentsOf(platform).set(pid, ["accessibility", "ux"], "test");
         await page.goto(`${BASE}/#/projects/${pid}/runs?section=schedules`);
-        await panel().getByRole("button", { name: "Write your own" }).click();
-        const form = panel().getByRole("form", { name: "New run sequence" });
-        await form.getByLabel("Name", { exact: true }).fill("Agent checks");
-        for (let i = 0; i < 2; i++) {
-            await form.getByLabel("Add a step").selectOption("analyze");
-            await form.getByRole("button", { name: "Add step" }).click();
-        }
-        const [a, b] = [form.locator("fieldset[data-step]").nth(1), form.locator("fieldset[data-step]").nth(2)];
-        await pwExpect(a.getByLabel("Testing agent").locator("option")).toHaveText(["Accessibility Testing Agent", "UX Testing Agent"]);
-        await a.getByLabel("Testing agent").selectOption({ label: "UX Testing Agent" });
-        // The other step keeps the agent it shows, the first one.
-        await pwExpect(b.getByLabel("Testing agent")).toHaveValue("accessibility");
-        await form.getByRole("button", { name: "Save run sequence" }).click();
-        await pwExpect(panel().getByText("Run sequence saved. Press Run now to try it.")).toBeVisible();
-        const saved = rb.store.list(pid)[0]!.definition.steps.filter((x) => x.type === "analyze");
-        expect(saved.map((x) => (x as { agentId?: string }).agentId)).toEqual(["ux", "accessibility"]);
+        await pwExpect(page.getByRole("heading", { name: "Scheduled runs" })).toBeVisible();
+        await pwExpect(panel()).toHaveCount(0);
+        await pwExpect(page.getByText("Release gate")).toHaveCount(0);
     });
 
     it("has no serious accessibility problems, with the editor open too, in light and dark", async () => {
