@@ -39,6 +39,7 @@ export default defineConfig({
             "tests/web-audit-words-unit.test.ts",
             "tests/deploy-tested-commit-unit.test.ts",
             "tests/agent-platform-unit.test.ts",
+            "tests/runner-risky-gate-unit.test.ts",
             "tests/runner-handover.test.ts",
             "tests/runner-owner-unit.test.ts",
             "tests/runner-reset-migration.test.ts",
