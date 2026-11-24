@@ -374,6 +374,8 @@ describe("a run's environment on the wire", () => {
         headless: true,
         // The saved sign-in travels like the credentials (see src/engine/auth/run-session.ts).
         storageState: '{"cookies":[],"origins":[]}',
+        // The risky-checks gate the platform decided for the run.
+        riskyChecks: "authorization",
     };
     it("round-trips against the protocol's schema, with cleanup moved to the agent", () => {
         const wire = toWireEnv(env);
