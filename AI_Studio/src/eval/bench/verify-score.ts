@@ -109,11 +109,12 @@ export function verifyScore(trial: BenchAppResult, v: Verification | undefined, 
     const silent = v.findings.filter((f) => UNFINISHED.includes(f.state) || !f.reason?.trim()).map((f) => f.id);
     const V3 = { measured: true as const, ...rate(v.findings.length - silent.length, v.findings.length, "The trial has no findings."), silent };
 
-    // V4: (a) harness false positives that describe no seed; (b) person labels. Open counts as not an app defect in `value`; `decided` counts only decided classes.
+    // V4: (a) every reported harness false positive that describes no seed; (b) person labels. Open counts as not an app defect in `value`;
+    // `decided` counts only decided classes. A false positive left without a class (null) was not classed as not an app defect (spec V4).
     const described = new Set(opts.describesSeed ?? []);
     const fps = trial.findings.filter((b) => b.category === "false_positive" && !described.has(b.id) && !(b.label && b.label !== "false_positive")).flatMap((b) => {
         const f = engineOf(b);
-        return f?.findingClass ? [f.findingClass] : [];
+        return f ? [f.findingClass] : [];
     });
     const labelled = trial.findings.filter((b) => b.label).flatMap((b) => {
         const f = engineOf(b);
@@ -123,8 +124,8 @@ export function verifyScore(trial: BenchAppResult, v: Verification | undefined, 
     const V4 = {
         measured: true as const,
         fp: {
-            ...rate(fps.filter((c) => !isApp(c)).length, fps.length, "No classified harness false positive that describes no seed."),
-            decided: fps.length ? fps.filter((c) => decidedOk(c, false)).length / fps.length : null,
+            ...rate(fps.filter((c) => c !== null && !isApp(c)).length, fps.length, "No reported harness false positive that describes no seed."),
+            decided: fps.length ? fps.filter((c) => c !== null && decidedOk(c, false)).length / fps.length : null,
             ...(opts.describesSeed ? {} : { note: "No seed-description list given: only false positives a person labelled with a seed are left out." }),
         },
         labelled: {
@@ -159,12 +160,14 @@ export function verifyScore(trial: BenchAppResult, v: Verification | undefined, 
     if (!withCause.length) V7 = no("No finding has a root cause (C2).");
     else if (!opts.seedLocations?.length) V7 = no("No seed locations were given.");
     else {
-        const loc = new Map(opts.seedLocations.map((s) => [s.seed, s]));
+        // A seed may sit on several lines (BS-03, BS-07, BS-08, BS-10, BS-16): a root cause at any of them counts.
+        const loc = new Map<string, SeedLocation[]>();
+        for (const s of opts.seedLocations) loc.set(s.seed, [...(loc.get(s.seed) ?? []), s]);
         const hits = (f: VerifiedFinding, s: SeedLocation) =>
             (f.rootCause?.label === "verified" || f.rootCause?.label === "strongly_supported") &&
             f.rootCause.locations.some((l) => l.exists && ((l.route !== undefined && s.routes.includes(l.route)) || (l.path.endsWith(s.file) && (l.fn === s.handler || l.line === s.line))));
         const seeded = confirmedGroups.flatMap((g) => {
-            const s = [...new Set(g.flatMap((f) => seedsOf(benchOf(f))))].map((id) => loc.get(id)).filter((x): x is SeedLocation => !!x);
+            const s = [...new Set(g.flatMap((f) => seedsOf(benchOf(f))))].flatMap((id) => loc.get(id) ?? []);
             return s.length ? [{ g, s }] : [];
         });
         V7 = {

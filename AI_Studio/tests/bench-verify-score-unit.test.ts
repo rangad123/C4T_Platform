@@ -57,6 +57,26 @@ describe("verifyScore", () => {
         expect(verifyScore(trial, hypothesis, { seedLocations }).V7).toMatchObject({ value: 0 });
     });
 
+    it("counts a root cause at any of a seed's lines (BS-10 sits in the order API and in the review page)", () => {
+        const one = { ...trial, findings: [b("t1", "confirmed", ["BS-10"])] } as unknown as BenchAppResult;
+        // paid shop API-060: located at POST /api/orders, BS-10's first line.
+        const v = { ...verification, findings: [f("f1", "t1", { state: "confirmed", reason: "r", groupId: "g", findingClass: "app_defect", confidence: "high", rootCause: { label: "strongly_supported", locations: [{ path: SHOP, line: 311, fn: "api", route: "POST /api/orders", exists: true }] } })] };
+        const lines = [
+            { seed: "BS-10", file: SHOP, line: 302, handler: "api", routes: ["POST /api/orders"] },
+            { seed: "BS-10", file: SHOP, line: 413, handler: "pages", routes: ["GET (page) /checkout/review"] },
+        ];
+        // One group of one seed: 1 of 1, whichever line comes last in seed-locations.json.
+        expect(verifyScore(one, v, { seedLocations: lines }).V7).toEqual({ measured: true, invented: 0, value: 1, n: 1 });
+        expect(verifyScore(one, v, { seedLocations: [...lines].reverse() }).V7).toEqual({ measured: true, invented: 0, value: 1, n: 1 });
+    });
+
+    it("counts every reported false positive in V4, and one left without a class as not classed not an app defect", () => {
+        const fps = { ...trial, findings: [b("u1", "false_positive"), b("u2", "false_positive"), b("u3", "false_positive"), b("u4", "false_positive")] } as unknown as BenchAppResult;
+        // u1 classed incorrect expectation, u2 an app defect, u3 left unresolved (stored class null); u4 was never reported (no platform finding).
+        const v = { ...verification, findings: [f("g1", "u1", { state: "not_a_bug", reason: "r", findingClass: "incorrect_expectation" }), f("g2", "u2", { state: "confirmed", reason: "r", findingClass: "app_defect" }), f("g3", "u3", { state: "unconfirmed", reason: "r" })] };
+        expect(verifyScore(fps, v, { describesSeed: [] }).V4).toMatchObject({ measured: true, fp: { value: 1 / 3, n: 3, decided: 1 / 3 } });
+    });
+
     it("calls a group mixed only when it holds findings pinned to different seeds, not a finding whose pin names several", () => {
         const pins = { ...trial, findings: [b("p1", "confirmed", ["BS-06", "BS-18"]), b("p2", "confirmed", ["BS-07", "BS-18"]), b("p3", "confirmed", ["BS-01"]), b("p4", "confirmed", ["BS-02"])] } as unknown as BenchAppResult;
         const v = (groups: Array<string | null>) => ({ ...verification, findings: groups.map((g, i) => f(`q${i + 1}`, `p${i + 1}`, { state: "confirmed", reason: "r", groupId: g })) });

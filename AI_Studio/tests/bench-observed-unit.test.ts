@@ -272,8 +272,8 @@ describe("sessions and E6 from the job's events", () => {
             planned(BUDGETS),
         ]);
         expect(s).toEqual([
-            { jobId: "job-1", stopReason: "ai_calls", detail: "Exploring by objectives stopped: all objectives were pursued.", budgets: { objectives: 4, actions: 50, aiCalls: 60 }, used: { objectives: 3, actions: 40, aiCalls: 61 } },
-            { jobId: "job-1", stopReason: null, detail: "", budgets: { objectives: 4, actions: 50, aiCalls: 60 }, used: null },
+            { jobId: "job-1", stopReason: "ai_calls", detail: "Exploring by objectives stopped: all objectives were pursued.", budgets: { objectives: 4, actions: 50, aiCalls: 60, tokens: 1_000_000, minutes: 30 }, used: { objectives: 3, actions: 40, aiCalls: 61 } },
+            { jobId: "job-1", stopReason: null, detail: "", budgets: { objectives: 4, actions: 50, aiCalls: 60, tokens: 1_000_000, minutes: 30 }, used: null },
         ]);
         expect(overBudget(s[0]!)).toEqual(["aiCalls"]);
         expect(overBudget(s[1]!)).toEqual([]);
@@ -285,6 +285,18 @@ describe("sessions and E6 from the job's events", () => {
         const [bad] = sessionsFromEvents("j", [planned({ actions: "many" }), stopped({ stopReason: "", pursued: -1 })]);
         expect(bad).toMatchObject({ stopReason: null, budgets: null, used: null });
         expect(sessionsFromEvents("j", [])).toEqual([]);
+    });
+
+    it("checks the token and minute budgets too, with what the job's exploration record used (row 230 m6-cand-3: 2,548 tokens over)", () => {
+        const at = (record: { tokens: number; minutes: number }) => sessionsFromEvents("j", [planned(BUDGETS), stopped({ stopReason: "tokens", pursued: 4, actions: 50, aiCalls: 60 })], record)[0]!;
+        expect(at({ tokens: 1_002_548, minutes: 12.5 }).used).toEqual({ objectives: 4, actions: 50, aiCalls: 60, tokens: 1_002_548, minutes: 12.5 });
+        expect(overBudget(at({ tokens: 1_002_548, minutes: 12.5 }))).toEqual(["tokens"]);
+        expect(overBudget(at({ tokens: 10, minutes: 30.4 }))).toEqual(["minutes"]);
+        // Exactly at both: not over.
+        expect(overBudget(at({ tokens: 1_000_000, minutes: 30 }))).toEqual([]);
+        // The record belongs to the job's last session; an earlier one keeps only what its event says.
+        const two = sessionsFromEvents("j", [planned(BUDGETS), stopped({ stopReason: "time", pursued: 1, actions: 2, aiCalls: 3 }), planned(BUDGETS), stopped({ stopReason: "tokens", pursued: 1, actions: 2, aiCalls: 3 })], { tokens: 2_000_000, minutes: 1 });
+        expect(two.map(overBudget)).toEqual([[], ["tokens"]]);
     });
 
     it("a second stop with no session opened stands alone; it never overwrites the closed one", () => {

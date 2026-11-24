@@ -152,10 +152,10 @@ export const ExplorationSessionSchema = z
         /** null: the session has no `exploration_stopped` event (it ended without a recorded stop reason). */
         stopReason: Text(40).nullable(),
         detail: Text(600),
-        /** The budgets the session was given; null when its `objectives_planned` event is missing or unreadable. */
-        budgets: z.object({ objectives: Count, actions: Count, aiCalls: Count }).strict().nullable(),
-        /** What it used, from `exploration_stopped`; null without that event. */
-        used: z.object({ objectives: Count, actions: Count, aiCalls: Count }).strict().nullable(),
+        /** The budgets the session was given; null when its `objectives_planned` event is missing or unreadable. Tokens and minutes: absent in older results. */
+        budgets: z.object({ objectives: Count, actions: Count, aiCalls: Count, tokens: Count.optional(), minutes: z.number().min(0).optional() }).strict().nullable(),
+        /** What it used, from `exploration_stopped`; null without that event. Tokens and minutes from the job's exploration record (its last session only). */
+        used: z.object({ objectives: Count, actions: Count, aiCalls: Count, tokens: Count.optional(), minutes: z.number().min(0).optional() }).strict().nullable(),
     })
     .strict();
 export type ExplorationSession = z.infer<typeof ExplorationSessionSchema>;
@@ -241,8 +241,10 @@ export type PriceRow = z.infer<typeof PriceRowSchema>;
 export const BenchConfigSchema = z
     .object({
         engineCommit: Text(64),
-        /** Uncommitted changes under src/engine at run time (then the commit alone does not identify the engine). */
+        /** Uncommitted changes under src, examples or scripts at run time, or a copy that differs from its stamp (record.ts engineVersion). */
         engineDirty: z.boolean(),
+        /** LADDER.md's tree fingerprint (record.ts treeFingerprint); absent in results written before it. */
+        engineFingerprint: z.string().regex(/^[0-9a-f]{16}$/).optional(),
         prompts: z.array(z.object({ file: Text(200), sha256: z.string().regex(/^[0-9a-f]{64}$/) }).strict()).max(40),
         model: z
             .object({

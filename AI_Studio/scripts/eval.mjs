@@ -11,9 +11,9 @@ import { holdLock } from "./lock.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
-// bench-report only reads result files: no browser, no AI, so no lock and no .env. The ladder only starts `eval.mjs bench` in each
+// bench-report only reads result files and stamp writes one file: no browser, no AI, so no lock and no .env. The ladder only starts `eval.mjs bench` in each
 // rung's tree, and each of those takes the lock and reads its tree's .env itself (holding the lock here would make them wait forever).
-const readOnly = argv[0] === "bench-report" || argv[0] === "ladder";
+const readOnly = argv[0] === "bench-report" || argv[0] === "ladder" || argv[0] === "stamp";
 const envFile = path.join(root, ".env");
 if (!readOnly && fs.existsSync(envFile)) process.loadEnvFile(envFile);
 if (!readOnly && !argv.includes("--help") && !argv.includes("-h")) {

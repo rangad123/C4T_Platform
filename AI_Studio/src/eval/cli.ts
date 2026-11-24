@@ -47,7 +47,8 @@ export const USAGE = `Usage: node scripts/eval.mjs [options]
 Environment: AITP_EVAL_URL and AITP_EVAL_API_KEY to use a running platform instead of starting one (not with --compare).
 The seeded-defect benchmark: node scripts/eval.mjs bench --help
 Observed vs fails on the seeded app, of finished results: node scripts/eval.mjs bench-report --help
-The benchmark on several engine trees (Phase 7 ladder): node scripts/eval.mjs ladder --help`;
+The benchmark on several engine trees (Phase 7 ladder): node scripts/eval.mjs ladder --help
+Record this tree's commit in a copy made without git: node scripts/eval.mjs stamp <the copy's AI_Studio folder>`;
 
 interface Args {
     corpus: string;
@@ -114,6 +115,15 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
     if (argv[0] === "bench-report") {
         const { benchReportMain } = await import("./bench/cli.js");
         return benchReportMain(argv.slice(1), deps);
+    }
+    if (argv[0] === "stamp") {
+        // After copying this tree without git (the VM): `stamp <copy's AI_Studio folder>` records the commit there (record.ts engineVersion).
+        const to = argv[1];
+        if (!to || !fs.existsSync(to)) return ((deps.log ?? console.log)("Usage: node scripts/eval.mjs stamp <the copy's AI_Studio folder>"), 2);
+        const { writeEngineStamp } = await import("./bench/record.js");
+        const st = writeEngineStamp(REPO_ROOT, path.resolve(to));
+        (deps.log ?? console.log)(`Stamped ${to}: ${st.commit}${st.dirty ? " (dirty)" : ""}, fingerprint ${st.fingerprint}`);
+        return 0;
     }
     if (argv[0] === "ladder") {
         const { ladderMain } = await import("./bench/ladder.js");

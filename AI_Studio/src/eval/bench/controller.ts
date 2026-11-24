@@ -516,9 +516,13 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
             ...(o.mode === "discovery" && source === "authoring" ? { candidate: candidateOf(meta?.finding, t.testId) } : {}),
         });
     }
-    // The objective sessions of the app's jobs, from their events (E6, stop reasons).
+    // The objective sessions of the app's jobs, from their events (E6, stop reasons), with the tokens and minutes of the job's exploration record.
     const sessions: ExplorationSession[] = [];
-    for (const id of [jobs.planJobId, ...jobs.createJobIds]) if (id) sessions.push(...sessionsFromEvents(id, await jobEvents(client, id)));
+    for (const id of [jobs.planJobId, ...jobs.createJobIds]) {
+        if (!id) continue;
+        const cov = await client.call("GET", `/api/projects/${projectId}/jobs/${id}/coverage`).catch(() => undefined);
+        sessions.push(...sessionsFromEvents(id, await jobEvents(client, id), cov?.status === 200 && cov.body?.available ? cov.body.usage : undefined));
+    }
 
     const catalogue = new Map(defectsOf(o.catalogue, app.id).map((d) => [d.id, d]));
     const extensionSeeds = seeded.filter((id) => catalogue.get(id)?.set === "extension");
