@@ -111,8 +111,9 @@ async function agentsThatRun(repo: Repo, projectId: string, chosen: readonly Age
     return (await isCaseAgentProject(repo, projectId)) ? chosen.filter((a) => a === "test-generation") : [...chosen];
 }
 
-/** For test-generation: what the chosen agents miss for this exploration (empty for a project with no saved choice). */
-export async function missingForExploration(p: Platform, row: Row, have: { openApiUrl?: string }, targets: readonly string[] | undefined): Promise<MissingInput[]> {
+/** For test-generation: what the chosen agents miss for this exploration (empty for a project with no saved choice); a run of one agent (`agentId`, D1) asks only for that agent's. */
+export async function missingForExploration(p: Platform, row: Row, have: { openApiUrl?: string }, targets: readonly string[] | undefined, agentId?: AgentId): Promise<MissingInput[]> {
+    if (agentId) return missingInputs([agentId], have, targets);
     const chosen = await chosenAgents(p, row);
     return chosen ? missingInputs(chosen, have, targets) : [];
 }

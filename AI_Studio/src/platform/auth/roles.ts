@@ -204,6 +204,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/memory": "read",
     "GET /api/projects/:id/outcome": "read",
     "GET /api/projects/:id/outcome/workbook": "ai_studio.reports.export",
+    // The Agent Workspace (routes/agent-workspace.ts): each agent's status, outcome and runs, read like the project.
+    "GET /api/projects/:id/workspace": "read",
+    "GET /api/projects/:id/workspace/:agentId/outcome": "read",
+    "GET /api/projects/:id/workspace/:agentId/runs": "read",
     // Notes for the AI (routes/notes.ts, round 53): anyone on the project reads them; changing them is a project setting.
     "GET /api/projects/:id/notes": "read",
     "POST /api/projects/:id/notes": "ai_studio.project.settings",
