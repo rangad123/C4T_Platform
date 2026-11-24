@@ -15,12 +15,14 @@ import "../../environments/environments.css";
 const ID = "performance";
 
 type Verdict = "within" | "over" | "not-measured";
+type Endpoint = { testId: string; endpoint: string; verdict: Verdict; note: string | null; metrics: Measured[] };
 /** GET /api/projects/:id/workspace/performance/outcome (src/platform/agent-outcomes/performance.ts). */
 interface PerformanceOutcome {
     runs: number;
     pages: Array<{ testId: string; path: string; signedIn: boolean; verdict: Verdict; note: string | null; metrics: Measured[] }>;
     slowest: Array<Measured & { testId: string; path: string }>;
-    load: Array<{ testId: string; endpoint: string; verdict: Verdict; note: string | null; metrics: Measured[] }>;
+    calls: Endpoint[];
+    load: Endpoint[];
 }
 
 const PAGE_VERDICT: Record<Verdict, { label: string; tone: Tone }> = {
@@ -47,7 +49,7 @@ function Body({ projectId, run, active }: { projectId: string; run?: string; act
     useOnFinish(active, () => void o.reload());
     if (!o.data && !o.error) return <ListSkeleton rows={4} />;
     if (!o.data) return <ErrorState error={friendlyError(o.error?.message)} onRetry={() => void o.reload()} />;
-    const { pages, slowest, load } = o.data;
+    const { pages, slowest, calls, load } = o.data;
     if (!o.data.runs)
         return (
             <div className="card">
@@ -115,6 +117,39 @@ function Body({ projectId, run, active }: { projectId: string; run?: string; act
                     </ol>
                 </section>
             )}
+            {calls.length > 0 && (
+                <section className="stack-sm">
+                    <div className="section-head">
+                        <h3 className="t-section">API call timings</h3>
+                        <span className="t-meta">Safe calls, one at a time</span>
+                    </div>
+                    <div className="data-table-wrap" role="region" aria-label="API call timings" tabIndex={0}>
+                        <table className="data-table" data-testid="performance-calls" style={{ minWidth: 520 }}>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Call</th>
+                                    <th scope="col">{METRIC_LABEL.p50}</th>
+                                    <th scope="col">{METRIC_LABEL.p95}</th>
+                                    <th scope="col">Budget</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {calls.map((c) => (
+                                    <tr key={c.testId}>
+                                        <td className="mono">{c.endpoint}</td>
+                                        <td className="tnum nowrap">{value(c.metrics, "p50")}</td>
+                                        <td className="tnum nowrap">{value(c.metrics, "p95")}</td>
+                                        <td>
+                                            <Badge tone={PAGE_VERDICT[c.verdict].tone}>{PAGE_VERDICT[c.verdict].label}</Badge>
+                                            {c.note && c.verdict !== "within" && <div className="t-meta">{c.note}</div>}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            )}
             <section className="stack-sm">
                 <h3 className="t-section">Load check</h3>
                 {load.length ? (
@@ -140,7 +175,7 @@ function Body({ projectId, run, active }: { projectId: string; run?: string; act
                         ))}
                     </ul>
                 ) : (
-                    <p className="t-secondary">None in {run ? "this run" : "its runs"}. A load check runs only when a run asks for one, and never on a production environment.</p>
+                    <p className="t-secondary">None in {run ? "this run" : "its runs"}. Tick Include a load check when you run the agent. It never runs on a production environment.</p>
                 )}
             </section>
         </div>
@@ -202,7 +237,7 @@ function Setup({ projectId }: { projectId: string }) {
                 <dt>Sign in</dt>
                 <dd>{d.signIn.username ? `As ${d.signIn.username}: pages behind the sign-in are timed signed in` : "None: it times the pages a visitor sees"} · <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a></dd>
                 <dt>Load check</dt>
-                <dd>Only when a run asks for one: up to ten users at once on up to three safe calls, never on a production environment</dd>
+                <dd>When you tick Include a load check for a run: up to ten users at once on up to three safe calls, never on a production environment</dd>
             </dl>
         </section>
     );

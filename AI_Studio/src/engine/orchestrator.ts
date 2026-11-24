@@ -162,6 +162,8 @@ export interface GenerationRequest {
     visionChecks?: boolean;
     /** Check API responses against the documented schema (OpenAPI). Default true. */
     contractChecks?: boolean;
+    /** False: the API target is explored for the speed and load checks only, and the API tests (cases, invariants, sequences, database checks, workflows) are not made. Default true. */
+    apiTests?: boolean;
     /** Budget overrides, e.g. "lcp:3000 weight:5000000 slow-4g". */
     performanceBudgets?: string;
     /** Generate visual-regression baselines for key pages (web target). Default false: noisy on dynamic pages. */
@@ -1363,7 +1365,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4b. API: deterministic from OpenAPI / observed traffic.
         if (wantApi && apis.length) {
-            const { specs, skippedMutating } = generateApiSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxPerEndpoint: 6, contractChecks: req.contractChecks !== false, ...(req.requirements ? { requirementsText: req.requirements.text } : {}) });
+            // Agent Workspace: a Performance agent run keeps the API target for its speed and load checks (4b2, 4b3), not the API tests.
+            const ownApiTests = req.apiTests !== false;
+            const { specs, skippedMutating } = generateApiSpecs(ownApiTests ? apis : [], { allowMutating: req.allowMutatingApiTests, maxPerEndpoint: 6, contractChecks: req.contractChecks !== false, ...(req.requirements ? { requirementsText: req.requirements.text } : {}) });
             if (skippedMutating) {
                 ctx.emit({ stage: "generation", kind: "api_mutating_skipped", message: `Skipped ${skippedMutating} state-changing endpoints (enable allowMutatingApiTests to include them)` });
             }
@@ -1378,10 +1382,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { endpoint: endpointKey });
                 pending.push({ spec, framework: "playwright-api", endpointDoc });
             }
-            ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
+            if (ownApiTests) ctx.emit({ stage: "generation", kind: "api_tests_generated", message: `${specs.length} API tests generated from ${apis.length} endpoints` });
 
             // 4b0. C5 invariants: one AI call proposes them from the stated requirements, and code keeps only the checkable ones.
-            if (requirementList.length) {
+            if (ownApiTests && requirementList.length) {
                 const proposal = await proposeInvariants(ctx, { requirements: requirementList, apis, origins: new Set([origin, new URL(renderCtx.apiBaseUrl).origin]), dataChanges, secrets: authoringSecretsOf(req) });
                 invariants = proposal.invariants;
                 invariantReport = proposal.report;
@@ -1410,7 +1414,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
 
             // 4b0b. C7 stateful sequences on a fresh account, then the states a new account cannot reach, on the project's account's records.
-            const states = dataChanges ? stateModels(apis, req.appKnowledge?.objectiveInputs?.transitions ?? []) : [];
+            const states = ownApiTests && dataChanges ? stateModels(apis, req.appKnowledge?.objectiveInputs?.transitions ?? []) : [];
             if (states.length) {
                 const headers = cleanupHeaders({ apiToken: req.credentials?.apiToken || req.credentials?.oauth2 ? await resolveApiToken(ctx, req.credentials) : undefined, apiAuthHeader: req.credentials?.apiAuthHeader });
                 const env: ProbeEnv = { apis, dataChanges, newClient: async (credential) => fetchClient(renderCtx.apiBaseUrl, credential ? headers : {}, req.cleanup?.fetch) };
@@ -1443,7 +1447,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
             // 4b0c. C10 database checks: from the schema's declared keys, plus one AI proposal of rules over rows (names only). Data changes only:
             // every check follows a write.
-            if (dbProbe && dataChanges) {
+            if (ownApiTests && dbProbe && dataChanges) {
                 try {
                     const schema = await dbProbe.schema();
                     // A customer's probe runs the key and persistence checks only: no relation over rows is proposed for it.
@@ -1508,7 +1512,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
 
             // 4c. Multi-request workflows (list → detail, create → read → delete, login → secured call).
-            const wf = generateApiWorkflowSpecs(apis, { allowMutating: req.allowMutatingApiTests, maxWorkflows: levelSettings(req).apiEndpoints });
+            const wf = generateApiWorkflowSpecs(ownApiTests ? apis : [], { allowMutating: req.allowMutatingApiTests, maxWorkflows: levelSettings(req).apiEndpoints });
             for (const d of wf.specs) {
                 if (await carried(d)) continue;
                 const steps = db ? withDatabaseChecks(d.steps, db.schema, db.absence, db.budget) : d.steps;
@@ -1530,7 +1534,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             }
 
             // 4c1. C8 controlled concurrency (lane D slot, T24): k identical writes at once, only behind the Q4 gate (api/concurrency.ts).
-            const cc = generateConcurrencySpecs(apis, { dataChanges, appUrl: renderCtx.apiBaseUrl, gate: riskyGateFor(req.riskyChecksGate, origin, renderCtx.apiBaseUrl) });
+            const cc = generateConcurrencySpecs(ownApiTests ? apis : [], { dataChanges, appUrl: renderCtx.apiBaseUrl, gate: riskyGateFor(req.riskyChecksGate, origin, renderCtx.apiBaseUrl) });
             for (const d of cc.specs) {
                 if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });

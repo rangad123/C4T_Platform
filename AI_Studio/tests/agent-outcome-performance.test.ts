@@ -77,11 +77,12 @@ beforeAll(async () => {
     await check(ids.old, "about", { page: "/about", meta: { performance: true }, status: "VALIDATED", samples: [ms("lcp", 800, 2500), ms("load", 900)] });
     await check(ids.old, "a11y", { page: "/help", meta: { accessibility: true }, status: "VALIDATED", samples: [ms("lcp", 9000)] });
 
-    // Run 1 (done): the home page within budget, the cart over it; an API call timed too (not in this agent's SPEC row).
+    // Run 1 (done): the home page within budget, the cart over it; a safe API call timed too, one over its budget.
     ids.first = await job("performance", "COMPLETED");
     await check(ids.first, "home", { page: "/", meta: { performance: true }, status: "VALIDATED", samples: [ms("ttfb", 200, 800), ms("lcp", 1200, 2500), ms("load", 1500)] });
     await check(ids.first, "cart", { page: "/cart", meta: { performance: true }, status: "NEEDS_REVIEW", reason: `${PERFORMANCE_FAILURE_PREFIX} Main content appears after 3.4 s (aim for under 2.5 s) [medium]\nHow to fix: make it smaller`, samples: [ms("lcp", 3400, 2500), ms("load", 3600)] });
     await check(ids.first, "latency", { endpoint: "GET /api/items", meta: { performance: true }, status: "VALIDATED", samples: [ms("p95", 120, 800)] });
+    await check(ids.first, "latencySlow", { endpoint: "GET /api/search", meta: { performance: true }, status: "NEEDS_REVIEW", reason: "API speed check failed: 95% of responses within 1.2 s (budget 800 ms) [medium]\nHow to fix: cache it", samples: [ms("p50", 900), ms("p95", 1200, 800)] });
 
     // Another agent's run in the same project: never here.
     ids.api = await job("api", "COMPLETED");
@@ -133,11 +134,19 @@ describe("the Performance Testing Agent's outcome", () => {
         expect(metric(r.body.load[0], "load_p95")).toBe(300);
     });
 
-    it("holds only this agent's items: no API call timings, no other agent's checks or runs", async () => {
+    it("times the safe API calls it made, each with its budget verdict, and leaves the load check out of them", async () => {
         const r = await get(`/api/projects/${pid}/workspace/performance/outcome`);
-        expect(Object.keys(r.body).sort()).toEqual(["load", "pages", "runs", "slowest"]);
+        expect((r.body.calls as any[]).map((c) => [c.endpoint, c.verdict])).toEqual([["GET /api/items", "within"], ["GET /api/search", "over"]]);
+        expect(r.body.calls[1]).toMatchObject({ testId: tests.latencySlow, jobId: ids.first, note: "95% of responses within 1.2 s (budget 800 ms)" });
+        expect(metric(r.body.calls[1], "p95")).toBe(1200);
+        expect(JSON.stringify(r.body.calls)).not.toContain(tests.load);
+    });
+
+    it("holds only this agent's items: no other agent's checks or runs", async () => {
+        const r = await get(`/api/projects/${pid}/workspace/performance/outcome`);
+        expect(Object.keys(r.body).sort()).toEqual(["calls", "load", "pages", "runs", "slowest"]);
         const all = JSON.stringify(r.body);
-        for (const t of ["a11y", "latency", "users"]) expect(all).not.toContain(tests[t]);
+        for (const t of ["a11y", "users"]) expect(all).not.toContain(tests[t]);
         expect((r.body.pages as any[]).every((p) => metric(p, "lcp") !== 9000)).toBe(true);
     });
 
@@ -148,6 +157,7 @@ describe("the Performance Testing Agent's outcome", () => {
         expect((first.body.pages as any[]).map((p) => p.path).sort()).toEqual(["/", "/cart"]);
         expect(metric((first.body.pages as any[]).find((p) => p.path === "/"), "lcp")).toBe(1200);
         expect(first.body.load).toEqual([]);
+        expect(first.body.calls).toHaveLength(2);
         const stopped = await get(`/api/projects/${pid}/workspace/performance/outcome?run=${ids.second}`);
         expect((stopped.body.pages as any[]).map((p) => p.path)).toEqual(["/"]);
         expect(stopped.body.load).toHaveLength(1);
@@ -160,6 +170,6 @@ describe("the Performance Testing Agent's outcome", () => {
         const bare = platform.repo.createProject({ name: "No runs", platforms: ["web"], testingModes: ["agent"] }).id as string;
         await testingAgentsOf(platform).set(bare, ["performance"], "test");
         expect((await get(`/api/projects/${bare}/workspace`)).body.agents[0]).toMatchObject({ id: "performance", status: "not-run", headline: null });
-        expect((await get(`/api/projects/${bare}/workspace/performance/outcome`)).body).toEqual({ runs: 0, pages: [], slowest: [], load: [] });
+        expect((await get(`/api/projects/${bare}/workspace/performance/outcome`)).body).toEqual({ runs: 0, pages: [], slowest: [], calls: [], load: [] });
     });
 });

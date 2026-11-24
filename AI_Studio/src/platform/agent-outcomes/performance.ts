@@ -1,9 +1,10 @@
 /**
- * The Performance Testing Agent's outcome (SPEC §3): each page's timings, the slowest pages, and the load result of the runs that allowed
- * a load check. Computed on read from what its runs saved: the page speed and load checks the engine made (orchestrator.ts persistNew
- * meta.performance / meta.load), their results, and what they measured (perf-store.ts perf_metrics). A newer run's timing of a page
- * replaces an older one's; a stopped run's part counts. Its timings of single API calls are not in the SPEC row, so they are left out.
+ * The Performance Testing Agent's outcome (SPEC §3): each page's timings, the slowest pages, the timings of the safe API calls it made
+ * (lead, 2026-11-24: they explain what it did), and the load result of the runs that allowed a load check. Computed on read from what its runs saved: the page speed and load checks the engine made (orchestrator.ts persistNew
+ * meta.performance / meta.load), their results, and what they measured (perf-store.ts perf_metrics). A newer run's timing of a page or
+ * call replaces an older one's; a stopped run's part counts.
  */
+import { LATENCY_FAILURE_PREFIX } from "../../engine/performance/latency.js";
 import { LOAD_FAILURE_PREFIX } from "../../engine/performance/load.js";
 import { PERFORMANCE_FAILURE_PREFIX } from "../../engine/performance/checks.js";
 import { testHistory, type Sample } from "../perf-store.js";
@@ -25,7 +26,8 @@ export interface PageTiming {
     jobId: string;
 }
 
-export interface LoadResult {
+/** A timed API call, or a load check of one. */
+export interface EndpointResult {
     testId: string;
     endpoint: string;
     verdict: Verdict;
@@ -39,7 +41,9 @@ export interface PerformanceOutcome {
     pages: PageTiming[];
     /** The slowest pages by when their main content appears (else when they finished loading), slowest first. */
     slowest: Array<{ testId: string; path: string; metric: string; value: number; unit: string; budget?: number }>;
-    load: LoadResult[];
+    /** Safe API calls timed one at a time. */
+    calls: EndpointResult[];
+    load: EndpointResult[];
 }
 
 const SLOWEST = 5;
@@ -56,20 +60,22 @@ const latest = async (ctx: AgentOutcomeCtx, t: TestRow): Promise<Sample[]> => (a
 
 async function build(ctx: AgentOutcomeCtx, runs: JobRow[]): Promise<PerformanceOutcome> {
     const pages = new Map<string, PageTiming>();
-    const loads = new Map<string, LoadResult>();
+    const calls = new Map<string, EndpointResult>();
+    const loads = new Map<string, EndpointResult>();
     // Newest run first: a page or endpoint it measured is its row.
     for (const job of runs) {
         for (const t of ctx.p.repo.listTests(ctx.projectId, { jobId: job.id })) {
             const meta = t.generationMeta ?? {};
             if (!meta.performance) continue;
-            if (meta.load && typeof meta.endpoint === "string") {
-                if (loads.has(meta.endpoint)) continue;
+            if (t.kind === "api" && typeof meta.endpoint === "string") {
+                const [into, prefix] = meta.load ? [loads, LOAD_FAILURE_PREFIX] : [calls, LATENCY_FAILURE_PREFIX];
+                if (into.has(meta.endpoint)) continue;
                 const metrics = await latest(ctx, t);
-                loads.set(meta.endpoint, { testId: t.id, endpoint: meta.endpoint, ...verdictOf(t, LOAD_FAILURE_PREFIX, metrics.length > 0), metrics, jobId: job.id });
+                into.set(meta.endpoint, { testId: t.id, endpoint: meta.endpoint, ...verdictOf(t, prefix, metrics.length > 0), metrics, jobId: job.id });
                 continue;
             }
             const path = t.kind === "web" ? pageOf(t) : undefined;
-            if (!path) continue; // an API call's timing: not this agent's row
+            if (!path) continue;
             const signedIn = Boolean(meta.signedIn);
             const key = `${signedIn ? "signed-in " : ""}${path}`;
             if (pages.has(key)) continue;
@@ -84,7 +90,7 @@ async function build(ctx: AgentOutcomeCtx, runs: JobRow[]): Promise<PerformanceO
         })
         .sort((a, b) => b.value - a.value)
         .slice(0, SLOWEST);
-    return { runs: runs.length, pages: [...pages.values()].sort((a, b) => a.path.localeCompare(b.path)), slowest, load: [...loads.values()] };
+    return { runs: runs.length, pages: [...pages.values()].sort((a, b) => a.path.localeCompare(b.path)), slowest, calls: [...calls.values()].sort((a, b) => a.endpoint.localeCompare(b.endpoint)), load: [...loads.values()] };
 }
 
 const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;

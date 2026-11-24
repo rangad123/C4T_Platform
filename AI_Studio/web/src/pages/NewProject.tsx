@@ -51,6 +51,8 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
     const [fullExploration, setFullExploration] = useState(false);
     // AI screen review: null = the level decides; set only when the person changes the box.
     const [screenReview, setScreenReview] = useState<boolean | null>(null);
+    // A run of the Performance agent may include a load check (its `allows`); off unless the person ticks it.
+    const [loadCheck, setLoadCheck] = useState(false);
     // Hidden when the project's testing agents leave it off (no UX agent).
     const agentSwitches = useFetch<ProjectAgents>(`/projects/${projectId}/testing-agents`);
     const screenReviewOff = agentSwitches.data?.applies === true && agentSwitches.data.switches?.visionChecks === "off";
@@ -106,7 +108,7 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
             // sign-in, API access, OpenAPI document and requirements are the ones kept on the Requirements tab.
             await api(`/projects/${id}/test-generation`, {
                 method: "POST",
-                body: { url: address, plan: true, ...(agentId ? { agentId } : {}), ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}) },
+                body: { url: address, plan: true, ...(agentId ? { agentId } : {}), ...(aiMissing && !caseAgent ? { targets: ["api"] } : {}), scope: scope.trim() || undefined, level: chosenLevel, ...(fullExploration && !first ? { fullExploration: true } : {}), ...(screenReview !== null && offerReview ? { visionChecks: screenReview } : {}), ...(agentId === "performance" && loadCheck ? { loadChecks: true } : {}) },
             });
             go(home);
         } catch (err) {
@@ -151,6 +153,15 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
                 </div>
                 <LevelChoice value={chosenLevel} onChange={setLevel} caseAgent={caseAgent} />
                 {offerReview && <ScreenReviewChoice level={chosenLevel} canReadImages value={screenReview} onChange={setScreenReview} />}
+                {agentId === "performance" && (
+                    <label className="check">
+                        <input type="checkbox" data-testid="load-check" checked={loadCheck} onChange={(e) => setLoadCheck(e.target.checked)} />
+                        <span>
+                            <span className="title">Include a load check</span>
+                            <span className="hint">Up to ten users at once on up to three safe API calls. Never run on a production environment.</span>
+                        </span>
+                    </label>
+                )}
                 {!first && (
                     <label className="check">
                         <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />

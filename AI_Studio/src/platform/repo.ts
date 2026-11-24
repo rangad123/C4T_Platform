@@ -108,6 +108,8 @@ export interface JobOptions {
     visionChecks?: boolean;
     /** Check API responses against the documented schema (OpenAPI). Default true. */
     contractChecks?: boolean;
+    /** False: the API is explored only for the speed and load checks (a Performance agent run), and the API tests themselves are not made. */
+    apiTests?: boolean;
     /** Check that restricted pages stay closed to lesser accounts and visitors (needs test accounts). Default true. */
     accessChecks?: boolean;
     /** Start from (and update) what earlier analyses learned about this application. Default true; false = neither read nor write site memory. */

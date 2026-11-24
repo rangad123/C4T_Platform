@@ -50,7 +50,8 @@ function switchesOn(o: JobOptions): string[] {
     const bag = o as unknown as Record<string, unknown>;
     const on: string[] = [];
     if (o.functionalTests !== false) on.push("functionalTests");
-    if (o.targets.includes("api")) on.push("apiTests");
+    // A Performance agent run keeps the API target for its speed and load checks only (apiTests false): that is not the API tests switch.
+    if (o.targets.includes("api") && o.apiTests !== false) on.push("apiTests");
     if (o.variants?.length) on.push("variants");
     for (const k of ["inputChecks", "contractChecks", "accessibility", "securityChecks", "accessChecks", "visual", "healthChecks", "visionChecks", "performanceChecks", "loadChecks"]) if (bag[k] === true) on.push(k);
     return on.sort();
@@ -101,6 +102,24 @@ describe("a run is one agent's, with that agent's switches only (D1)", () => {
             expect(platform.repo.getLatestApplicationPublic(pid)!.config).not.toHaveProperty("agentId");
         });
     }
+
+    it("a performance run keeps the API target for its speed and load checks, without the API tests; API and Test Case Generation runs are as before", async () => {
+        const start = async (name: string, agentId: string, extra: Record<string, unknown> = {}) => {
+            const pid = await project(name, ["agent"], ALL);
+            const r = await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId, openApiUrl: `${SITE}/openapi.json`, ...extra });
+            expect(r.status, JSON.stringify(r.body)).toBe(202);
+            return onlyJob(pid).options;
+        };
+        expect(await start("Speed", "performance", { loadChecks: true })).toMatchObject({ targets: ["web", "api"], apiTests: false, performanceChecks: true, loadChecks: true, contractChecks: false });
+        // Asked for the web alone, it stays on the web: the API target is never added.
+        const web = await start("Speed web", "performance", { targets: ["web"] });
+        expect(web.targets).toEqual(["web"]);
+        // The API agent's run and a test case run carry no such option: they run as they did.
+        const api = await start("Api as before", "api");
+        expect(api.targets).toEqual(["web", "api"]);
+        expect(api).not.toHaveProperty("apiTests");
+        expect(await start("Cases as before", "test-generation")).not.toHaveProperty("apiTests");
+    });
 
     it("refuses an agent the project did not choose, and an unknown one, and creates no job", async () => {
         const pid = await project("Picky", ["agent"], ["accessibility", "ux"]);

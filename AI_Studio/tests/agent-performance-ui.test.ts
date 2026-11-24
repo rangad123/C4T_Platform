@@ -1,7 +1,7 @@
 /**
  * Agent Workspace W2a: the Performance Testing Agent's page in a real browser (SPEC §3). Outcome: each page's timings with its budget,
- * the slowest pages and the load result of a run that allowed one, nothing of another agent's (no API call timings either); Runs: its
- * runs only, each opening what that run timed; Setup: its inputs only. Axe with the colour scheme light and dark, no sideways scroll at
+ * the slowest pages, its API call timings and the load result of a run that allowed one, nothing of another agent's; Runs: its runs
+ * only, each opening what that run timed; Setup: its inputs only. Its run form offers "Include a load check" (off), which sends loadChecks. Axe with the colour scheme light and dark, no sideways scroll at
  * 375 px. Runs are seeded as the worker leaves them (checks, results, perf_metrics); no AI and no exploring browser. Port 7612.
  * Screenshots: c4t-scratch/agent-ws/performance/. Requires web/dist:
  *   node scripts/with-lock.mjs build -- npm run build:web
@@ -18,6 +18,7 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { PERFORMANCE_FAILURE_PREFIX } from "../src/engine/performance/checks.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { recordMetrics, type Sample } from "../src/platform/perf-store.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions, type JobStatus } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
@@ -32,6 +33,7 @@ let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
 let browser: Browser;
 let page: Page;
+let stopBeat: (() => void) | undefined;
 let pid = "";
 let appId = "";
 let n = 0;
@@ -60,6 +62,8 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-agent-perf-ui-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", HOST: "127.0.0.1", PORT: String(PORT), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false" }));
+    // A worker's heartbeat, so the run form may start a run (nothing picks the job up: the test answers the request itself).
+    stopBeat = startHeartbeat(platform.db);
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
 
@@ -91,6 +95,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+    stopBeat?.();
     await browser?.close();
     await server?.close();
     platform?.db.close();
@@ -147,7 +152,10 @@ describe("the Performance Testing Agent's page", () => {
         await pwExpect(load.first()).toContainText("Users at once10");
         await pwExpect(load.first()).toContainText("95% of responses within300 ms");
         const text = (await page.locator(".content").textContent()) ?? "";
-        for (const other of ["/about", "/api/items", "9.0 s", "Test cases", "Passing", "Contract"]) expect(text).not.toContain(other);
+        const calls = page.getByTestId("performance-calls").locator("tbody tr");
+        await pwExpect(calls).toHaveCount(1);
+        expect((await calls.first().locator("td").allTextContents()).map((t) => t.trim())).toEqual(["GET /api/items", "–", "120 ms", "Within budget"]);
+        for (const other of ["/about", "9.0 s", "Test cases", "Passing", "Contract"]) expect(text).not.toContain(other);
         await axe("performance outcome");
         await shot("outcome.png");
         await narrow("outcome-375.png");
@@ -168,6 +176,25 @@ describe("the Performance Testing Agent's page", () => {
         expect((await rows()).map((r) => r[0])).toEqual(["/", "/cartSigned in", "/products/a-very-long-product-page-address-for-narrow-screens"]);
         await pwExpect(page.getByText("None in this run.", { exact: false })).toBeVisible();
         await narrow("run-375.png");
+    });
+
+    it("its run form offers Include a load check, off, which sends loadChecks; another agent's form does not offer it", async () => {
+        await visit(routes.newProject({ project: pid, agent: "accessibility" }));
+        await pwExpect(page.locator("#url")).toBeVisible();
+        await pwExpect(page.getByTestId("load-check")).toHaveCount(0);
+        await visit(routes.newProject({ project: pid, agent: "performance" }));
+        const box = page.getByTestId("load-check");
+        await pwExpect(box).not.toBeChecked();
+        await pwExpect(page.locator("label.check", { has: box })).toContainText("Never run on a production environment");
+        await axe("performance run form");
+        await shot("run-form.png");
+        await box.check();
+        // The server's answer is the test's: only what the form sends matters here.
+        await page.route("**/api/projects/*/test-generation", (r) => r.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ jobId: jobs.first, status: "QUEUED" }) }));
+        const sent = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/test-generation"));
+        await page.locator("form").getByRole("button", { name: /explor/i }).click();
+        expect((await sent).postDataJSON()).toMatchObject({ agentId: "performance", loadChecks: true });
+        await page.unroute("**/api/projects/*/test-generation");
     });
 
     it("Setup: its own inputs: the address, the sign-in, and when a load check runs", async () => {
