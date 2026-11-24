@@ -102,10 +102,20 @@ export interface TestFacts {
  *   - left a footprint that is complete: not cut, no request it could not classify, at least one page or endpoint (extractCoverage).
  * Any other case is stale or incomplete, and the preview then requires a full run. Older passing runs still add pages and endpoints (more
  * matches, never fewer), but never make a test complete. An API test's coverage rests on the steps of its current version (they are the
- * whole test, true of every run), and it counts only with a fresh passing run too (the first four rules; its record is not needed, as
- * runs of API tests keep no footprint): one that never ran is unknown, one whose latest run is not fresh is stale.
+ * whole test, true of every run), and it counts only with a fresh run too (the first four rules; its record is not needed, as runs of API
+ * tests keep no footprint), except that a latest run that did not pass still counts when its steps are fully read (they are what it
+ * calls; lead 2026-11-25): one that never ran is unknown, one whose latest run is otherwise not fresh is stale.
  */
-export type Freshness = { fresh: true; executionId: string } | { fresh: false; why: string; /** No run of what it runs now exists at all: unknown rather than out of date. */ never?: true };
+export type Freshness =
+    | { fresh: true; executionId: string }
+    | {
+          fresh: false;
+          why: string;
+          /** No run of what it runs now exists at all: unknown rather than out of date. */
+          never?: true;
+          /** Only because the latest run did not pass: it ran the current version and script, in the window. Enough for an API test whose steps are fully read (they are its coverage). */
+          notPassed?: true;
+      };
 
 /** The latest execution of a test on the deploy target (any status, with or without a stored record). */
 export interface LatestRun {
@@ -138,15 +148,17 @@ export function freshnessOf(latest: LatestRun | undefined, current: CurrentVersi
     if (!current.versionId) return { fresh: false, why: "It has no approved version, so no run of what it would run now exists.", never: true };
     if (!latest) return { fresh: false, why: "No run of it has been recorded yet, so what it touches is only known from its steps.", never: true };
     const on = latest.startedAt.slice(0, 10);
+    const at = Date.parse(latest.startedAt);
+    const inWindow = Number.isFinite(at) && now - at <= days * 86_400_000;
     if (latest.status !== "passed") {
         const words = STATUS_WORDS[latest.status] ?? `did not pass (${String(latest.status).slice(0, 30)})`;
-        return { fresh: false, why: `Its latest run (${on}) ${words}, so earlier passing runs no longer show what it touches.` };
+        const ranCurrent = latest.versionId === current.versionId && (!current.scriptId || latest.scriptId === current.scriptId) && inWindow;
+        return { fresh: false, why: `Its latest run (${on}) ${words}, so earlier passing runs no longer show what it touches.`, ...(ranCurrent ? { notPassed: true as const } : {}) };
     }
     if (!latest.versionId) return { fresh: false, why: `Its latest run (${on}) is not linked to a version of the test, so it may have run older steps.` };
     if (latest.versionId !== current.versionId) return { fresh: false, why: `It changed after its latest run (${on}): ${current.version ? `version ${current.version}` : "its current version"} has not run yet.` };
     if (current.scriptId && latest.scriptId !== current.scriptId) return { fresh: false, why: `Its code changed after its latest run (${on}), and the new code has not run yet.` };
-    const at = Date.parse(latest.startedAt);
-    if (!Number.isFinite(at) || now - at > days * 86_400_000) return { fresh: false, why: `Its latest run (${on}) is older than ${days} day${days === 1 ? "" : "s"}, so it may no longer show what the test touches.` };
+    if (!inWindow) return { fresh: false, why: `Its latest run (${on}) is older than ${days} day${days === 1 ? "" : "s"}, so it may no longer show what the test touches.` };
     return { fresh: true, executionId: latest.executionId };
 }
 
@@ -529,10 +541,11 @@ export function extractCoverage(t: TestFacts, app: AppFacts = {}): TestCoverage 
         if (steps && kind !== "web" && kind !== "api") limits.push(`What ${kind} tests touch is not mapped yet.`);
     } else if (kind === "api") {
         const declared = requests > 0 && !dynamicRequest && !prefixedRequest && !variablePath && !unreachedBlocks;
-        completeness = declared && fresh.fresh ? "declared-complete" : list.length ? "partial" : "unknown";
+        // A latest run of the current version that did not pass still ran these steps: fully read, they are the coverage (lead 2026-11-25).
+        completeness = declared && (fresh.fresh || fresh.notPassed) ? "declared-complete" : list.length ? "partial" : "unknown";
         if (completeness === "declared-complete") completeFrom = "its steps";
-        // Same freshness rules as web tests: why its latest run cannot vouch for its steps comes first.
-        if (!fresh.fresh) limits.unshift(fresh.why);
+        // Otherwise the same freshness rules as web tests: why its latest run cannot vouch for its steps comes first.
+        else if (!fresh.fresh) limits.unshift(fresh.why);
         if (requests === 0 && !dynamicRequest) limits.push("The test sends no request the mapping can read.");
     } else if (completeRun && !unreachedBlocks && !dynamicRequest && !prefixedRequest && !variablePath && !accessChecks && !linkChecks && !unknownSite) {
         // Also not with a request step whose address is not fully known (web `request` steps run outside the page, so the record never
@@ -548,7 +561,7 @@ export function extractCoverage(t: TestFacts, app: AppFacts = {}): TestCoverage 
         if (!completeRun) limits.push("Pages reached by clicking and requests the pages make are only known from a recorded run, and the latest run of this version is not a recent passing run with a complete record.");
     }
     if (t.runs.length && !completeRun && kind === "web" && t.runs.some((r) => r.status !== "passed")) limits.push("The recorded runs failed or were cut down, so they show only part of what the test does.");
-    const stale = (kind === "web" || kind === "api") && steps && completeness !== "observed-complete" && !fresh.fresh && !fresh.never ? fresh.why : undefined;
+    const stale = (kind === "web" || kind === "api") && steps && completeness !== "observed-complete" && completeness !== "declared-complete" && !fresh.fresh && !fresh.never ? fresh.why : undefined;
     return { testId: t.id, testKey: t.testKey, title: t.title, kind, items: list.sort(byItem), completeness, limits: [...new Set(limits)], ...(completeFrom ? { completeFrom } : {}), ...(stale ? { stale } : {}) };
 }
 

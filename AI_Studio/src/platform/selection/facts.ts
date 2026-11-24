@@ -162,11 +162,13 @@ export async function projectCoverage(repo: Repo, store: ArtifactStore, projectI
         // A shared part changed after the latest run and runs use the change without a new version: that run no longer vouches for it.
         const part = partChanges.get(row.id);
         const last = latest.get(row.id);
-        const partWhy = freshness.fresh && part && last ? changedAfterRun(part, last.startedAt) : undefined;
+        // (Also for a latest run that only did not pass: an API test can still rest on it.)
+        const vouches = () => freshness.fresh || freshness.notPassed === true;
+        const partWhy = vouches() && part && last ? changedAfterRun(part, last.startedAt) : undefined;
         if (partWhy) freshness = { fresh: false, why: partWhy };
         // The application's address moved to another host after the latest run: it touched the old address, not what runs open now.
-        const ranOn = freshness.fresh && last ? baseHostAt(last.startedAt) : undefined;
-        if (freshness.fresh && last && ranOn && app.appHost && ranOn !== app.appHost) {
+        const ranOn = vouches() && last ? baseHostAt(last.startedAt) : undefined;
+        if (vouches() && last && ranOn && app.appHost && ranOn !== app.appHost) {
             freshness = { fresh: false, why: `The application's address changed after its latest run (${last.startedAt.slice(0, 10)}), so what it touched was on the old address.` };
         }
         const facts: TestFacts = { id: row.id, testKey: row.test_key, title: row.title, kind: row.kind, spec, ...(specUnreadable ? { specUnreadable } : {}), runs, freshness };
