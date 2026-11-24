@@ -11,6 +11,7 @@
  */
 import { analyzeImpact } from "../../engine/impact/analyze.js";
 import { isJsLike } from "../../engine/impact/diff.js";
+import { routesOf } from "../../engine/impact/routes.js";
 import { redactText } from "../../shared/redact-text.js";
 import { AppIntelStore } from "../app-intel-store.js";
 import type { Platform } from "../bootstrap.js";
@@ -110,7 +111,9 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
     const { sources, notes } = await repositorySources(client, ev.headSha, files.map((f) => f.path));
     if (limit) notes.unshift(limit);
 
-    const c = await projectCoverage(p.repo, p.store, projectId);
+    // The repository's own route registrations are templates a captured path part can resolve to (`/notes/{{note}}` → ANY /notes/{}).
+    const templates = Object.entries(sources).flatMap(([file, src]) => routesOf(file, src).map((r) => ({ method: r.method, path: r.path })));
+    const c = await projectCoverage(p.repo, p.store, projectId, { templates });
     const intel = new AppIntelStore(p.sql);
     const model = (await intel.latest(projectId))?.model;
     const rules = (await intel.rules(projectId)).filter((r) => r.status !== "rejected");

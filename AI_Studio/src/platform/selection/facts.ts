@@ -41,6 +41,8 @@ export interface CoverageOptions {
     now?: number;
     /** The freshness window; SELECTION_FRESH_DAYS (or 14) by default. */
     freshDays?: number;
+    /** More templates a captured path part can resolve to, beside the app model's (a PR's analysis: the repository's route registrations). */
+    templates?: ReadonlyArray<{ method: string; path: string }>;
 }
 
 function hostOf(url: unknown): string | undefined {
@@ -70,7 +72,7 @@ export async function projectCoverage(repo: Repo, store: ArtifactStore, projectI
     const appRow = repo.getLatestApplicationPublic(projectId);
     const apiBase = (appRow?.config as { apiBaseUrl?: unknown } | undefined)?.apiBaseUrl;
     const apiHost = hostOf(apiBase);
-    const endpoints = modelEndpoints(repo, projectId);
+    const endpoints = [...modelEndpoints(repo, projectId), ...(options.templates ?? [])];
     const app: AppFacts = { appHost: hostOf(appRow?.url), ...(apiHost ? { apiHosts: [apiHost] } : {}), ...(endpoints.length ? { endpoints } : {}) };
     const apiPrefix = prefixOf(apiBase);
     // The application's address over time (a changed address is a new row): a run opened the address in force when it started.
@@ -177,12 +179,14 @@ export async function projectCoverage(repo: Repo, store: ArtifactStore, projectI
     return { tests, app, ...(apiPrefix ? { apiPrefix } : {}), freshDays, held };
 }
 
-/** The documented and observed endpoint templates of the project's latest app model (engine/intel/model.ts); none when it has no model. */
+/** The documented and observed endpoint templates of the project's latest app model (engine/intel/model.ts), and its pages (opened with GET); none when it has no model. */
 function modelEndpoints(repo: Repo, projectId: string): Array<{ method: string; path: string }> {
     const row = repo.db.get<{ model_json: string }>("SELECT model_json FROM app_model_versions WHERE project_id = ? ORDER BY version DESC LIMIT 1", projectId);
     try {
-        const list = (JSON.parse(row?.model_json ?? "{}") as { endpoints?: unknown }).endpoints;
-        return Array.isArray(list) ? list.flatMap((e) => (e && typeof e.method === "string" && typeof e.path === "string" ? [{ method: e.method, path: e.path }] : [])) : [];
+        const model = JSON.parse(row?.model_json ?? "{}") as { endpoints?: unknown; pages?: unknown };
+        const endpoints = Array.isArray(model.endpoints) ? model.endpoints.flatMap((e) => (e && typeof e.method === "string" && typeof e.path === "string" ? [{ method: e.method, path: e.path }] : [])) : [];
+        const pages = Array.isArray(model.pages) ? model.pages.flatMap((p) => (p && typeof p.path === "string" ? [{ method: "GET", path: p.path }] : [])) : [];
+        return [...endpoints, ...pages];
     } catch {
         return [];
     }

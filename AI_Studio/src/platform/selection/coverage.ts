@@ -191,7 +191,8 @@ export interface AppFacts {
     appHost?: string;
     /** Hosts of the application's API (its API base address): the application's own, not "external". */
     apiHosts?: string[];
-    /** The application's documented or observed endpoint templates (the app model): what a captured path part can resolve to. */
+    /** The application's documented or observed endpoint and page templates (the app model; in a PR's analysis also the repository's
+     * route registrations, method "*" for any): what a captured path part can resolve to. */
     endpoints?: ReadonlyArray<{ method: string; path: string }>;
 }
 
@@ -425,7 +426,7 @@ export function extractCoverage(t: TestFacts, app: AppFacts = {}): TestCoverage 
     // The step's path fits a template: each part is the template's, or stands where the template has a variable (`/share/u2`, `/share/{}`).
     const fits = (method: string, path: string) => {
         const segs = path.split("/");
-        return templates.some((t) => t.method === method && t.segs.length === segs.length && t.segs.every((x, i) => x === segs[i] || x === "{}"));
+        return templates.some((t) => (t.method === method || t.method === "*") && t.segs.length === segs.length && t.segs.every((x, i) => x === segs[i] || x === "{}"));
     };
     if (!steps) {
         limits.push(t.specUnreadable ? "The test's stored steps could not be read." : "The test has no readable steps.");
