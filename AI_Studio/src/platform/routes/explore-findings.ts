@@ -7,6 +7,9 @@
  *                                                     is what the results card shows (Phase 5 U1): the status label (findings/score.ts
  *                                                     `label`: never "Confirmed" below high confidence), severity and confidence each
  *                                                     with its basis, reproduction "same of of", the saved test's steps and the
+ *                                                     the headline (what differed), the expected result the failing check names, the
+ *                                                     account it signs in as, the requests the failing attempt sent (with bodies), the
+ *                                                     verification attempts' screenshots, the
  *                                                     likely cause with its label (root-cause.ts; null, with `noCause` saying why,
  *                                                     while none was found), the state's name and rank, and whether a person may Confirm or
  *                                                     call it Not a bug (lifecycle.ts). Computed here, so the page has no rule of
@@ -62,6 +65,15 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
             confidenceBasis: conf.basis,
             reproduction: rep,
             steps: view.steps,
+            // The report's own lines (V10): the difference, the expected result the failing check names, who signed in, what was sent.
+            headline: view.observed,
+            expected: { text: view.expected.text, source: view.expected.source },
+            account: view.account ?? null,
+            requests: (view.attempts.find((a) => a.outcome === "failed" && a.requests.length)?.requests ?? []).map((q) => `${q.method} ${q.path}${q.body ? ` ${q.body}` : ""} → ${q.error ?? q.status ?? "no answer"}`),
+            // The verification attempts' screenshots, kept with the finding's test (verify-service.ts verifyDepsOf keep).
+            screenshots: r.testId
+                ? repo.db.all<{ id: string }>("SELECT id FROM artifacts WHERE project_id = ? AND test_case_id = ? AND kind = 'screenshot' AND path LIKE ? AND pruned_at IS NULL ORDER BY path", r.projectId, r.testId, `%/verify-${r.id.slice(0, 8)}/attempt-%`).map((x) => x.id)
+                : [],
             // A cause only when one was found at a code location; otherwise the reason there is none (said once on the card).
             cause: rc.location ? { label: ROOT_CAUSE_LABEL_TEXT[rc.label], text: `${at}${rc.location.explanation ?? rc.reason}` } : null,
             noCause: rc.location ? null : rc.reason,

@@ -107,7 +107,7 @@ async function accessWriteAssert(page, base, cfg) {
             const w = await call(ctx, cfg.method, cfg.path, body);
             if (refused(w.status)) return;
             if (!ok(w.status)) throw cannot(what + " answered HTTP " + w.status);
-            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not the owner\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user, who reads this record but does not own it, sent " + what + " and it was accepted (HTTP " + w.status + ")" + doc + ". " + (cfg.method === "PUT" ? "The record exactly as read was sent back" : "Only the record's own plain values were sent") + " with " + cfg.method + ", so its content stayed as it was. This is possible broken access control: check that only the owner can change the record");
+            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not the owner\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user, who reads this record but does not own it, sent " + what + " and it was accepted (HTTP " + w.status + ")" + doc + ". " + (cfg.method === "PUT" ? "The record exactly as read was sent back" : "Only the record's own plain values were sent") + " with " + cfg.method + ", so its content stayed as it was. This is possible broken access control: check that only the owner can change the record" + accessSent(cfg.method, cfg.path, w.status, body));
         }
         if (cfg.identityWrite === "role") {
             const roleOf = (body) => Object.keys(body).find((k) => /^(role|roles|user_?role|access_?level)$/i.test(k) && typeof body[k] === "string");
@@ -141,7 +141,7 @@ async function accessWriteAssert(page, base, cfg) {
             if (!ok(w.status)) throw cannot(what + " answered HTTP " + w.status);
             // An accepted change is a privilege the account must not keep: it is changed back before the finding is told.
             const back = await call(ctx, cfg.method, path, { [field]: mine.body[field] });
-            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not allowed to make it\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user gave its own account the " + field + " “" + top.body[field] + "” of “" + by + "” with " + cfg.method + " " + path + " and it was accepted (HTTP " + w.status + ")" + doc + "; it was " + (ok(back.status) ? "changed back" : "NOT changed back (HTTP " + back.status + "): change it back by hand") + ". This is possible broken access control: check that only the accounts allowed to change roles can do so");
+            throw new Error(ACCESS_PREFIX + " 1 write may be open to an account that is not allowed to make it\n- [" + cfg.sev + "] A signed-in “" + cfg.as + "” user gave its own account the " + field + " “" + top.body[field] + "” of “" + by + "”, in place of its own “" + mine.body[field] + "”, with " + cfg.method + " " + path + " and it was accepted (HTTP " + w.status + ")" + doc + "; it was " + (ok(back.status) ? "changed back" : "NOT changed back (HTTP " + back.status + "): change it back by hand") + ". This is possible broken access control: check that only the accounts allowed to change roles can do so" + accessSent(cfg.method, path, w.status, { [field]: top.body[field] }) + accessSent(cfg.method, path, back.status, { [field]: mine.body[field] }));
         }
         if (cfg.identityWrite === "revoke") {
             const reader = await as(cfg.as);
@@ -155,7 +155,7 @@ async function accessWriteAssert(page, base, cfg) {
             const after = await call(reader, "GET", cfg.read);
             if (refused(after.status)) return;
             if (!ok(after.status)) throw cannot("GET " + cfg.read + " answered HTTP " + after.status + " after the share was stopped");
-            throw new Error(ACCESS_PREFIX + " 1 record may stay open after sharing stopped\n- [" + cfg.sev + "] After the owner “" + cfg.by + "” stopped sharing with “" + cfg.as + "” (" + cfg.method + " " + path + ", HTTP " + w.status + "), “" + cfg.as + "” could still call GET " + cfg.read + " (HTTP " + after.status + ")" + doc + ". This is possible broken access control: check that stopping a share takes the record away");
+            throw new Error(ACCESS_PREFIX + " 1 record may stay open after sharing stopped\n- [" + cfg.sev + "] After the owner “" + cfg.by + "” stopped sharing with “" + cfg.as + "” (" + cfg.method + " " + path + ", HTTP " + w.status + "), “" + cfg.as + "” could still call GET " + cfg.read + " (HTTP " + after.status + ")" + doc + ". This is possible broken access control: check that stopping a share takes the record away" + accessSent(cfg.method, path, w.status) + accessSent("GET", cfg.read, after.status));
         }
         throw new Error("This check names no kind of write, so nothing was called.");
     } finally {

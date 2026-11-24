@@ -81,7 +81,8 @@ const open = (candidates: FindingClass[], reason: string, reproduced: Classifica
 /** The most attempts that failed the same way because of the application's answer, of all attempts. */
 export function reproduction(attempts: readonly Attempt[]): Classification["reproduced"] {
     const counts = new Map<string, number>();
-    for (const a of attempts) if (a.outcome === "failed" && causeOf(a) === "app") counts.set(failureKey(a), (counts.get(failureKey(a)) ?? 0) + 1);
+    // A failure with nothing known of it (no step, check or error) says nothing, so two of them are not the same failure (V10 R7, R9).
+    for (const a of attempts) if (a.outcome === "failed" && causeOf(a) === "app" && failureKey(a) !== "error:") counts.set(failureKey(a), (counts.get(failureKey(a)) ?? 0) + 1);
     return { same: Math.max(0, ...counts.values()), of: attempts.length };
 }
 

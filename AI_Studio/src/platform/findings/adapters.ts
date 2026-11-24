@@ -6,10 +6,12 @@
  */
 import { confidenceOf, findingFingerprint, type CandidateFindingInput } from "../../engine/explore/finding.js";
 import { AttemptSchema, FindingViewSchema, type Attempt, type FindingView, type FindingViewInput } from "../../engine/findings/view.js";
-import { redactText } from "../../shared/redact-text.js";
+import { HIDDEN, redactText } from "../../shared/redact-text.js";
 import type { FindingState } from "../../engine/findings/lifecycle.js";
 import type { TestSpec } from "../../engine/spec/schema.js";
 import { testStepFault } from "../../engine/validation/test-fault.js";
+import { testAccountLane } from "../../engine/validation/lanes.js";
+import { namesASecret } from "../../engine/evidence/secret-policy.js";
 import type { ScriptRun } from "../../engine/validation/runner.js";
 import type { SecurityFinding, ValidationState } from "../../security/contract.js";
 import type { CandidateFindingRecord } from "../candidate-finding-store.js";
@@ -41,9 +43,70 @@ const targetOf = (s: Step): string | undefined => {
     const v = loc?.value ?? loc?.ref ?? field(s, "path");
     return typeof v === "string" && v ? v : undefined;
 };
-const stepsOf = (spec: TestSpec | undefined): FindingViewInput["steps"] =>
-    (spec?.steps ?? []).slice(0, 500).map((s) => ({ action: s.action, ...(targetOf(s) ? { target: targetOf(s) } : {}), ...(typeof field(s, "url") === "string" ? { url: field(s, "url") as string } : {}) }));
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+/** A value with every secret-named key's value hidden ({{placeholders}} stay: they hold no value). */
+const hideSecrets = (v: unknown, key = ""): unknown =>
+    key && namesASecret(key) && !(typeof v === "string" && /^\{\{[^}]+\}\}$/.test(v.trim()))
+        ? HIDDEN
+        : Array.isArray(v)
+          ? v.map((x) => hideSecrets(x))
+          : v && typeof v === "object"
+            ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, hideSecrets(x, k)]))
+            : v;
+/** A step's typed or expected value as the report shows it: hidden when the field it goes into names a secret. */
+const valueOf = (s: Step): string | undefined => {
+    const v = field(s, "value") ?? field(s, "expected");
+    if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") return undefined;
+    return String(hideSecrets(String(v), targetOf(s) ?? ""));
+};
+/** The saved test's steps with what a developer needs to repeat them: a request's method and body, a step's value (V10 gap 3). */
+const stepsOf = (spec: TestSpec | undefined): FindingViewInput["steps"] =>
+    (spec?.steps ?? []).slice(0, 500).map((s) => {
+        const body = field(s, "body");
+        const method = str(field(s, "method"));
+        const value = valueOf(s);
+        return {
+            action: s.action,
+            ...(targetOf(s) ? { target: targetOf(s) } : {}),
+            ...(typeof field(s, "url") === "string" ? { url: field(s, "url") as string } : {}),
+            ...(method ? { method: method.slice(0, 10) } : {}),
+            ...(body !== undefined ? { body: JSON.stringify(hideSecrets(body)) } : {}),
+            ...(value !== undefined ? { value } : {}),
+        };
+    });
+
+/**
+ * Who the test signs in as (V10 gap 4), in words: an access check's own account (its settings' `as`), a named account, the project's
+ * test account, or no one. Names only: user names are often e-mail addresses, which stored text hides.
+ */
+export function accountOf(spec: TestSpec): string {
+    for (const s of spec.steps) {
+        if (field(s, "check") !== "accessDenied") continue;
+        let cfg: { as?: unknown; by?: unknown } = {};
+        try {
+            cfg = JSON.parse(String(field(s, "expected")));
+        } catch {
+            /* not settings: read the steps as any test */
+        }
+        if (typeof cfg.as === "string") return `the “${cfg.as}” test account${typeof cfg.by === "string" && cfg.by !== cfg.as ? `, and the “${cfg.by}” test account` : ""}`;
+    }
+    const lane = testAccountLane({ spec }) ?? (spec.steps.some((s) => s.action === "request" && field(s, "auth") === "default") ? "main" : undefined);
+    if (lane) return lane === "main" ? "the project's test account" : `the “${lane.slice(5)}” test account`;
+    return spec.steps.some((s) => s.action === "request" && /regist|sign-?up/i.test(String(field(s, "path") ?? ""))) ? "an account the test registers itself" : "no account (signed out)";
+}
+
+/**
+ * The line of a failure that says what differed (V10 gap 2), not the assertion's own words: Playwright's Expected/Received pair as
+ * "Expected 409, got 200", else a check's first "- [severity] …" detail ("response.total: expected integer, got string"), else the first line.
+ */
+export function headlineOf(error: string): string {
+    const lines = error.split("\n").map((l) => l.trim()).filter(Boolean);
+    const first = (re: RegExp) => lines.map((l) => re.exec(l)?.[1]?.trim()).find((x) => x);
+    const want = first(/^Expected(?: [a-z]+)?:\s*(.+)$/);
+    const got = first(/^Received(?: [a-z]+)?:\s*(.+)$/);
+    if (want && got) return `Expected ${want}, got ${got}`;
+    return first(/^- \[[a-z]+\]\s*(.+)$/) ?? lines[0] ?? "";
+}
 
 /**
  * The fingerprint of a failed run of an ordinary test or layer check (V1): one finding per project, test and expectation. The scenario
@@ -66,6 +129,8 @@ function expectationOf(spec: TestSpec, run: Pick<ScriptRun, "failedStepIndex">):
 export function executionFinding(test: TestOf, run: ScriptRun): CandidateFindingInput {
     const expected = expectationOf(test.spec, run);
     const capture = expected.source ? "captured" : "observed_only";
+    // The first line only: the run's secrets are not known here, and a headline can quote a value (fromCandidate makes it from the
+    // verification attempts, which are masked).
     const observed = ((run.steps.find((st) => st.status === "failed")?.error ?? run.error ?? "").split("\n")[0] ?? "").trim() || `${test.spec.testId} failed.`;
     return {
         objective: null,
@@ -98,6 +163,10 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
               ...(f.capture === "captured" ? [{ outcome: "failed" as const }] : []),
               ...f.replays.map((p) => ({ outcome: p.outcome, ...(p.failedStep ? { failedStep: p.failedStep } : {}), error: p.summary })),
           ];
+    // An execution finding stores the first line of its error; the attempts carry it in full (masked), so the headline comes from them.
+    const error = recorded.find((a) => a.outcome === "failed" && a.error)?.error;
+    const observed = error && error.split("\n")[0]!.trim() === f.observed.trim() ? headlineOf(error) : f.observed;
+    const expected = failingExpectation(f.expected, test?.spec, recorded);
     return FindingViewSchema.parse({
         id: r.id,
         projectId: r.projectId,
@@ -106,9 +175,10 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
         title: test?.title ?? f.expected.text,
         testId: r.testId,
         detectedAt: r.firstSeenAt,
-        expected: { text: f.expected.text, source: f.expected.source, stated: f.expected.source ? "explicit" : execution && f.expected.text ? "inferred" : "none" },
-        observed: f.observed,
+        expected: { text: expected.text, source: expected.source, stated: expected.source ? "explicit" : execution && expected.text ? "inferred" : "none" },
+        observed,
         steps: stepsOf(test?.spec),
+        ...(test ? { account: accountOf(test.spec) } : {}),
         attempts: attempts.slice(0, 6),
         requirements: (test?.spec.source.requirements ?? []).slice(0, 20),
         ...(test ? { priority: test.spec.priority } : {}),
@@ -120,12 +190,32 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
     } satisfies FindingViewInput);
 }
 
+/**
+ * The expectation the attempts' failing check names (V10 R10): a check of `expected:<n>` quotes that expected result, not the one the
+ * finding was first stored with (another check of the same test, which passed). Anything else stays as stored.
+ */
+function failingExpectation(stored: { text: string; source: string | null }, spec: TestSpec | undefined, attempts: readonly Attempt[]): { text: string; source: string | null } {
+    const at = attempts.find((a) => a.outcome === "failed" && a.failedStep !== undefined)?.failedStep;
+    const source = spec && at !== undefined ? str(field(spec.steps[at - 1] ?? ({} as Step), "source")) : undefined;
+    const n = /^expected:(\d+)$/.exec(source ?? "")?.[1];
+    const text = n ? spec!.expectedResults[Number(n) - 1] : undefined;
+    return text && source !== stored.source ? { text, source: source! } : stored;
+}
+
+/** "Request: PUT /api/notes/n3 {…} -> HTTP 200": a request an access check sent itself (identity/access.ts, identity-writes.ts). */
+const SENT = /^Request: ([A-Z]{3,7}) (\/\S*)(?: (.+?))? -> HTTP (\d{1,3})$/gm;
+const sentIn = (error: string) =>
+    [...error.matchAll(SENT)].map((m) => ({ method: m[1]!, path: m[2]!, status: Number(m[4]) >= 100 && Number(m[4]) <= 599 ? Number(m[4]) : null, own: true, ...(m[3] ? { body: m[3] } : {}) }));
+
 /** One run of a test as an attempt: where it stopped, the failing check, and whether the failure is the test's own step. */
 export function attemptOf(run: ScriptRun, spec: TestSpec): Attempt {
+    // A run that skipped itself never ran its checks: it is no failure of the application (V10 R7, R9: an access write without its gate).
+    if (run.status === "skipped") return AttemptSchema.parse({ outcome: "error", environment: `The attempt did not run: the test skipped itself${run.error ? ` (${run.error.split("\n")[0]})` : ""}.` });
     const outcome = run.status === "passed" ? "passed" : run.status === "error" ? "error" : "failed";
     const at = run.failedStepIndex >= 0 ? run.failedStepIndex : undefined;
     const step = at === undefined ? undefined : spec.steps[at];
-    const error = (run.steps.find((s) => s.status === "failed")?.error ?? run.error ?? "").split("\n").slice(0, 6).join("\n");
+    const full = run.steps.find((s) => s.status === "failed")?.error ?? run.error ?? "";
+    const error = full.split("\n").slice(0, 6).join("\n");
     const fault = outcome === "failed" ? testStepFault(run, step) : undefined;
     const value = step ? field(step, "expected") : undefined;
     return AttemptSchema.parse({
@@ -137,7 +227,7 @@ export function attemptOf(run: ScriptRun, spec: TestSpec): Attempt {
         ...(error ? { error } : {}),
         ...(fault ? { stepFault: fault } : {}),
         // An API test's responses are its application's own answers.
-        requests: run.responses.slice(-20).map((x) => ({ method: x.method, path: x.path, status: x.status, own: true })),
+        requests: [...run.responses.map((x) => ({ method: x.method, path: x.path, status: x.status, own: true })), ...sentIn(full)].slice(-20),
     });
 }
 
@@ -181,8 +271,9 @@ export function fromExecution(x: { id: string; projectId: string; test: TestOf; 
         testId: x.test.id,
         detectedAt: x.detectedAt,
         expected: { text: written, source: source ?? null, stated: source ? "explicit" : written ? "inferred" : "none" },
-        observed: ((first?.steps.find((st) => st.status === "failed")?.error ?? first?.error ?? "").split("\n")[0] ?? "").trim(),
+        observed: headlineOf(first?.steps.find((st) => st.status === "failed")?.error ?? first?.error ?? ""),
         steps: stepsOf(spec),
+        account: accountOf(spec),
         attempts: x.runs.slice(0, 6).map((r) => attemptOf(r, spec)),
         requirements: (spec.source.requirements ?? []).slice(0, 20),
         priority: spec.priority,

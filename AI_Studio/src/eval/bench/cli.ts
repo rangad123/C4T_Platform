@@ -21,7 +21,7 @@ import { inProcessClient, ok, remoteClient, type PlatformClient } from "../clien
 import type { EntryResult } from "../run.js";
 import { appVersion, BENCH_APPS, benchApp, requirementsDocument, type BenchApp } from "./apps.js";
 import { CATALOGUE_FILE, isExtension, isUnreachable, loadCatalogue, loadCatalogueVersion, type Catalogue } from "./catalogue.js";
-import { catalogueRoles, plannedTestsLeft, runBenchmark, runUsageSoFar } from "./controller.js";
+import { catalogueRoles, plannedTestsLeft, runBenchmark, runUsageSoFar, type BenchReset } from "./controller.js";
 import { calibrationOf, estimate, estimateLines, loadPrices, tokenLimitsLeft } from "./cost.js";
 import { engineVersion, promptFingerprints, writeBaseline } from "./record.js";
 import { bindLabels, migrateLabels, parseLabels } from "./labels.js";
@@ -595,14 +595,14 @@ export function previousCalibration(dir: string): ReturnType<typeof calibrationO
 export const BENCH_VERIFY_BUDGET = { ...VERIFY_BUDGET, findingsPerRun: Number.MAX_SAFE_INTEGER };
 
 /** `--verify-attempts`: the jobs' findings verified as onJobFinished does (verify-service.ts; no AI), then what the platform recorded. */
-export const verifierOf = (platform: Platform, attempts: number, root = REPO_ROOT) => async (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string): Promise<Verification> => {
+export const verifierOf = (platform: Platform, attempts: number, root = REPO_ROOT) => async (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string, reset?: BenchReset): Promise<Verification> => {
     const { verifyAfterJob } = await import("../../platform/findings/verify-service.js");
     const { CandidateFindingStore } = await import("../../platform/candidate-finding-store.js");
     const t0 = Date.now();
     for (const id of jobIds) {
         const job = platform.repo.getJob(id);
         // A bench trial verifies every candidate (V2, V3): the product's per-run budget would leave some waiting, unscored.
-        if (job) await verifyAfterJob(platform, job, { attempts, budget: BENCH_VERIFY_BUDGET, ...(findingTests ? { findingTests } : {}) });
+        if (job) await verifyAfterJob(platform, job, { attempts, budget: BENCH_VERIFY_BUDGET, ...(findingTests ? { findingTests } : {}), ...(reset ? { reset } : {}) });
     }
     const verified = await verificationOf(new CandidateFindingStore(platform.sql), projectId, { cost: 0, durationMs: Date.now() - t0 });
     return withRootCauses(platform, projectId, verified, source, root);

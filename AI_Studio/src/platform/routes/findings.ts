@@ -19,6 +19,7 @@ import { assertHoldsHere } from "../auth/access.js";
 import { actorLabel, currentActor } from "../auth/actor.js";
 import { FINDING_STATES, type FindingState } from "../../engine/findings/lifecycle.js";
 import type { FindingView } from "../../engine/findings/view.js";
+import { severityOf } from "../../engine/findings/score.js";
 import { securitySettings } from "../../security/settings.js";
 import { securityStoreFor } from "../../security/store.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
@@ -120,7 +121,9 @@ export function registerFindingRoutes(ctx: RouteCtx): void {
         const actor = { id: currentActor().id ?? null, label: actorLabel() };
         const move = async (to: FindingState) => {
             try {
-                return (await store.transition(id, fid, { to, by: "person", actor, reason: b.data.reason ?? null }))!;
+                // A confirmed finding carries its severity, from the rules the card shows, unless it has one already.
+                const severity = to === "confirmed" && !r.severity ? { set: { severity: severityOf(fromCandidate(r, testOf(r))).severity } } : {};
+                return (await store.transition(id, fid, { to, by: "person", actor, reason: b.data.reason ?? null, ...severity }))!;
             } catch (e) {
                 throw new HttpError(409, (e as Error).message);
             }

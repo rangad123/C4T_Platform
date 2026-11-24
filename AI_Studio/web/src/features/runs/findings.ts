@@ -41,7 +41,17 @@ export interface FindingReview {
     confidence: Confidence;
     confidenceBasis: string;
     reproduction: { same: number; of: number };
-    steps: Array<{ action: string; target?: string; url?: string }>;
+    steps: Array<{ action: string; target?: string; url?: string; method?: string; body?: string; value?: string }>;
+    /** What differed ("Expected 409, got 200"); older answers lack it and the finding's own text is shown. */
+    headline?: string;
+    /** The expected result the failing check names. */
+    expected?: { text: string; source: string | null };
+    /** Who the test signs in as ("the “ana” test account"). */
+    account?: string | null;
+    /** The requests the failing attempt sent: "PUT /api/notes/n3 {…} → 200". */
+    requests?: string[];
+    /** Artifact ids of the verification attempts' screenshots. */
+    screenshots?: string[];
     /** Null when no cause was found at a code location; `noCause` says why. */
     cause: { label: string; text: string } | null;
     noCause: string | null;
@@ -167,4 +177,4 @@ export function reproductionText(r: { same: number; of: number }): string {
 export const SEVERITY_WORD: Record<Severity, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
 
 /** One step of the saved test in a line. */
-export const stepText = (s: FindingReview["steps"][number]): string => [s.action, s.target, s.url].filter(Boolean).join(" ");
+export const stepText = (s: FindingReview["steps"][number]): string => [s.action, s.method, s.target, s.url, s.body, s.value !== undefined ? `= ${s.value}` : ""].filter(Boolean).join(" ");

@@ -20,6 +20,9 @@
  * switched (the AI layer retries a rate-limited call on the same model).
  */
 import type { Verification } from "./verify-score.js";
+
+/** A bench app's data reset, as verification sends it before each attempt (verify-service.ts VerifyDeps.reset). */
+export type BenchReset = { hook: { method: string; url: string }; send: (signal: AbortSignal) => Promise<{ ok: boolean; message: string }> };
 import { FixtureHost } from "../fixtures.js";
 import { ok, type PlatformClient } from "../client.js";
 import type { CorpusEntry } from "../corpus.js";
@@ -95,7 +98,7 @@ export interface BenchOptions {
      * `--verify-attempts`: verifies the findings of the app's jobs (with its defects in) and returns what it left (cli.ts verifierOf).
      * `source` is the app's source folder (its server script's folder, relative to the repository root): the code source of root cause.
      */
-    verify?: (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string) => Promise<Verification>;
+    verify?: (projectId: string, jobIds: string[], findingTests: ReadonlySet<string> | undefined, source: string, reset?: BenchReset) => Promise<Verification>;
 }
 
 export interface BenchOutcome {
@@ -477,7 +480,9 @@ async function judgeApp(client: PlatformClient, host: BenchAppHost, app: BenchAp
         await host.start(seeded);
         // The creation's findings as collected: the harness's rerun and the replays have moved their statuses on since the job ended.
         const findingTests = o.mode === "discovery" ? new Set(candidates.map((t) => t.id)) : undefined;
-        verification = await o.verify(projectId, [jobs.planJobId, ...jobs.createJobIds, ...(jobs.validationJobIds ?? [])].filter((x): x is string => Boolean(x)), findingTests, app.script.replace(/\/[^/]*$/, ""));
+        // The app's own data reset before each attempt, so a test that changes data starts every attempt alike (V10 R3).
+        const reset: BenchReset = { hook: { method: "POST", url: `${host.url}/__bench/reset` }, send: () => host.reset().then(() => ({ ok: true, message: "reset" }), (e: Error) => ({ ok: false, message: e.message })) };
+        verification = await o.verify(projectId, [jobs.planJobId, ...jobs.createJobIds, ...(jobs.validationJobIds ?? [])].filter((x): x is string => Boolean(x)), findingTests, app.script.replace(/\/[^/]*$/, ""), reset);
     }
 
     const findings: BenchFinding[] = [];

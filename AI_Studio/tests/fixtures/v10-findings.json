@@ -1,0 +1,1215 @@
+{
+ "R1": {
+  "id": "3b06d05f-72d2-4d54-8b08-833ba780b12d",
+  "projectId": "303e7c92-0bde-4251-a7a6-83a450fbee77",
+  "testId": "e4eb1a4b-c82d-41c1-b568-dc9dd1c155d1",
+  "fingerprint": "0aea9b48b92dfd85e2d4efa5f60a58b2e51afe6d4b48777a811557c859649ae3",
+  "state": "confirmed",
+  "finding": {
+   "objective": null,
+   "actions": {
+    "stepCount": 6
+   },
+   "expected": {
+    "text": "name == $name and address == $address (requirement 7.3)",
+    "source": "7.3"
+   },
+   "observed": "Error: Relation check failed (7.3): name == $write1_name and address == $write1_address. Values: name = \"test-name-17954851727000\", $write1_name = \"test-name-17954851727000\", address = \"\", $write1_address = \"test-address-17954851727000\".",
+   "evidence": {
+    "screenshots": [],
+    "requests": [],
+    "console": []
+   },
+   "capture": "captured",
+   "independence": "not_run",
+   "confidence": "medium",
+   "fingerprint": "0aea9b48b92dfd85e2d4efa5f60a58b2e51afe6d4b48777a811557c859649ae3",
+   "modelVersion": null,
+   "replays": []
+  },
+  "attempts": [
+   {
+    "outcome": "failed",
+    "failedStep": 6,
+    "check": "relation",
+    "error": "Error: Relation check failed (7.3): name == $write1_name and address == $write1_address. Values: name = \"test-name-17954928257550\", $write1_name = \"test-name-17954928257550\", address = \"\", $write1_address = \"test-address-17954928257550\".",
+    "requests": [
+     {
+      "method": "POST",
+      "path": "/api/register",
+      "status": 201,
+      "own": true
+     },
+     {
+      "method": "PUT",
+      "path": "/api/profile",
+      "status": 200,
+      "own": true
+     },
+     {
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 6,
+    "check": "relation",
+    "error": "Error: Relation check failed (7.3): name == $write1_name and address == $write1_address. Values: name = \"test-name-17954928268190\", $write1_name = \"test-name-17954928268190\", address = \"\", $write1_address = \"test-address-17954928268190\".",
+    "requests": [
+     {
+      "method": "POST",
+      "path": "/api/register",
+      "status": 201,
+      "own": true
+     },
+     {
+      "method": "PUT",
+      "path": "/api/profile",
+      "status": 200,
+      "own": true
+     },
+     {
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 6,
+    "check": "relation",
+    "error": "Error: Relation check failed (7.3): name == $write1_name and address == $write1_address. Values: name = \"test-name-17954928279110\", $write1_name = \"test-name-17954928279110\", address = \"\", $write1_address = \"test-address-17954928279110\".",
+    "requests": [
+     {
+      "method": "POST",
+      "path": "/api/register",
+      "status": 201,
+      "own": true
+     },
+     {
+      "method": "PUT",
+      "path": "/api/profile",
+      "status": 200,
+      "own": true
+     },
+     {
+      "method": "GET",
+      "path": "/api/profile",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   }
+  ],
+  "firstSeenAt": "2026-11-24T03:56:05.274Z",
+  "test": {
+   "id": "e4eb1a4b-c82d-41c1-b568-dc9dd1c155d1",
+   "title": "PUT /api/profile: requirement 7.3 holds after each write (name == $name and address == $address)",
+   "spec": {
+    "testId": "API-056",
+    "title": "PUT /api/profile: requirement 7.3 holds after each write (name == $name and address == $address)",
+    "description": "A property probe (fast-check seed 2015116729) on a fresh account: the smallest failing case found, 1 write; the relation held 0 times before it failed.",
+    "kind": "api",
+    "category": "API · Invariants",
+    "type": "functional",
+    "priority": "high",
+    "preconditions": [],
+    "steps": [
+     {
+      "action": "request",
+      "method": "POST",
+      "path": "/api/register",
+      "body": {
+       "name": "test-name-{{unique}}",
+       "email": "qa+{{unique}}@example.com",
+       "password": "test-password-{{unique}}"
+      },
+      "auth": "none",
+      "description": "Create a fresh account for this check"
+     },
+     {
+      "action": "assertResponse",
+      "check": "statusClass",
+      "expected": "2xx",
+      "description": "The fresh account is created",
+      "source": "7.3"
+     },
+     {
+      "action": "request",
+      "method": "PUT",
+      "path": "/api/profile",
+      "body": {
+       "name": "test-name-{{unique}}",
+       "address": "test-address-{{unique}}"
+      },
+      "auth": "none",
+      "description": "Write 1 of 1: {\"name\":\"test-name-{{unique}}\",\"address\":\"test-address-{{unique}}\"}"
+     },
+     {
+      "action": "assertResponse",
+      "check": "statusClass",
+      "expected": "2xx",
+      "description": "The write is accepted",
+      "source": "7.3"
+     },
+     {
+      "action": "request",
+      "method": "GET",
+      "path": "/api/profile",
+      "auth": "none",
+      "description": "Read the result back"
+     },
+     {
+      "action": "assertResponse",
+      "check": "relation",
+      "expression": "name == $write1_name and address == $write1_address",
+      "source": "7.3",
+      "description": "Requirement 7.3 holds"
+     }
+    ],
+    "expectedResults": [
+     "name == $name and address == $address (requirement 7.3)"
+    ],
+    "testData": {
+     "write1_name": "test-name-{{unique}}",
+     "write1_address": "test-address-{{unique}}",
+     "probeSeed": "2015116729"
+    },
+    "tags": [
+     "api",
+     "invariant",
+     "probe"
+    ],
+    "source": {
+     "origin": "requirements",
+     "requirements": [
+      "7.3"
+     ]
+    }
+   },
+   "meta": {
+    "invariant": {
+     "requirementId": "7.3",
+     "seed": 2015116729,
+     "held": 0,
+     "outcome": "failed"
+    },
+    "modelVersion": "aecdf45f-01b4-4d71-ba98-15dacf7f4756",
+    "layer": "api"
+   },
+   "testKey": "API-056"
+  }
+ },
+ "R2": {
+  "id": "d3cb32ab-a7a4-49fd-9806-4621975880f6",
+  "projectId": "303e7c92-0bde-4251-a7a6-83a450fbee77",
+  "testId": "801278fd-f046-423f-b5e5-d67272857fe4",
+  "fingerprint": "ba16295f9ef6dc24a810d722c0714e862345c4e4255732f72c2985a26bf5bb13",
+  "state": "confirmed",
+  "finding": {
+   "objective": null,
+   "actions": {
+    "stepCount": 2
+   },
+   "expected": {
+    "text": "GET /api/orders/ord-1001 is refused for the “alice” account ({\"api\":true,\"refuse\":true,\"as\":\"alice\",\"path\":\"/api/orders/ord-1001\",\"by\":\"bob\",\"of\":\"bob\",\"sev\":\"high\",\"documented\":\"404\"})",
+    "source": "API document: GET /api/orders/{id} 404"
+   },
+   "observed": "Error: Access control check failed: 1 record may be open to another account",
+   "evidence": {
+    "screenshots": [],
+    "requests": [],
+    "console": []
+   },
+   "capture": "captured",
+   "independence": "not_run",
+   "confidence": "medium",
+   "fingerprint": "ba16295f9ef6dc24a810d722c0714e862345c4e4255732f72c2985a26bf5bb13",
+   "modelVersion": null,
+   "replays": []
+  },
+  "attempts": [
+   {
+    "outcome": "failed",
+    "failedStep": 2,
+    "check": "accessDenied",
+    "value": "{\"api\":true,\"refuse\":true,\"as\":\"alice\",\"path\":\"/api/orders/ord-1001\",\"by\":\"bob\",\"of\":\"bob\",\"sev\":\"high\",\"documented\":\"404\"}",
+    "error": "Error: Access control check failed: 1 record may be open to another account\n- [high] A signed-in “alice” user can call GET /api/orders/ord-1001 (HTTP 200), a record listed for the “bob” account and not for “alice” (documented: HTTP 404), so this is possible broken access control between accounts: check that the API refuses one account's records to another account",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 2,
+    "check": "accessDenied",
+    "value": "{\"api\":true,\"refuse\":true,\"as\":\"alice\",\"path\":\"/api/orders/ord-1001\",\"by\":\"bob\",\"of\":\"bob\",\"sev\":\"high\",\"documented\":\"404\"}",
+    "error": "Error: Access control check failed: 1 record may be open to another account\n- [high] A signed-in “alice” user can call GET /api/orders/ord-1001 (HTTP 200), a record listed for the “bob” account and not for “alice” (documented: HTTP 404), so this is possible broken access control between accounts: check that the API refuses one account's records to another account",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 2,
+    "check": "accessDenied",
+    "value": "{\"api\":true,\"refuse\":true,\"as\":\"alice\",\"path\":\"/api/orders/ord-1001\",\"by\":\"bob\",\"of\":\"bob\",\"sev\":\"high\",\"documented\":\"404\"}",
+    "error": "Error: Access control check failed: 1 record may be open to another account\n- [high] A signed-in “alice” user can call GET /api/orders/ord-1001 (HTTP 200), a record listed for the “bob” account and not for “alice” (documented: HTTP 404), so this is possible broken access control between accounts: check that the API refuses one account's records to another account",
+    "requests": [],
+    "stack": []
+   }
+  ],
+  "firstSeenAt": "2026-11-24T03:56:05.286Z",
+  "test": {
+   "id": "801278fd-f046-423f-b5e5-d67272857fe4",
+   "title": "“alice” account: cannot read a record of “bob” through the API (GET /api/orders/ord-1001)",
+   "spec": {
+    "testId": "WEB-066",
+    "title": "“alice” account: cannot read a record of “bob” through the API (GET /api/orders/ord-1001)",
+    "description": "The “alice” account signs in and calls GET /api/orders/ord-1001, a record the API listed for “bob” and not for “alice”. Fails if the answer is a success with the record (documented: HTTP 404). A single GET request; nothing is changed.",
+    "kind": "web",
+    "category": "Access control",
+    "type": "security",
+    "priority": "high",
+    "preconditions": [
+     "Test accounts named “alice” and “bob” are set up for this project"
+    ],
+    "steps": [
+     {
+      "action": "navigate",
+      "url": "/",
+      "description": "Start at the home page"
+     },
+     {
+      "action": "assert",
+      "check": "accessDenied",
+      "expected": "{\"api\":true,\"refuse\":true,\"as\":\"alice\",\"path\":\"/api/orders/ord-1001\",\"by\":\"bob\",\"of\":\"bob\",\"sev\":\"high\",\"documented\":\"404\"}",
+      "description": "The “alice” account is refused GET /api/orders/ord-1001 (HTTP 404)",
+      "source": "API document: GET /api/orders/{id} 404"
+     }
+    ],
+    "expectedResults": [
+     "GET /api/orders/ord-1001 is refused for the “alice” account"
+    ],
+    "testData": {},
+    "tags": [
+     "security",
+     "access-control",
+     "api",
+     "cross-account"
+    ],
+    "source": {
+     "origin": "access-check"
+    }
+   },
+   "meta": {
+    "access": true,
+    "modelVersion": "aecdf45f-01b4-4d71-ba98-15dacf7f4756",
+    "layer": "api"
+   },
+   "testKey": "WEB-066"
+  }
+ },
+ "R3": {
+  "id": "0b608179-64b9-45cf-b28a-03cf967fc2b0",
+  "projectId": "303e7c92-0bde-4251-a7a6-83a450fbee77",
+  "testId": "fd46a565-fa2f-4390-b67d-72e940a6e060",
+  "fingerprint": "51cfc0ac38fe4367ed1d59ad7738d1c36d61f56ea20bac17185d3731da71b7aa",
+  "state": "confirmed",
+  "finding": {
+   "objective": null,
+   "actions": {
+    "stepCount": 4
+   },
+   "expected": {
+    "text": "HTTP 409 (Shipped or already cancelled), as the API document says (409)",
+    "source": "API document: POST /api/orders/{id}/cancel 409"
+   },
+   "observed": "Error: expect(received).toBe(expected) // Object.is equality",
+   "evidence": {
+    "screenshots": [],
+    "requests": [],
+    "console": []
+   },
+   "capture": "captured",
+   "independence": "not_run",
+   "confidence": "medium",
+   "fingerprint": "51cfc0ac38fe4367ed1d59ad7738d1c36d61f56ea20bac17185d3731da71b7aa",
+   "modelVersion": null,
+   "replays": []
+  },
+  "attempts": [
+   {
+    "outcome": "failed",
+    "failedStep": 4,
+    "check": "status",
+    "value": "409",
+    "error": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 409\nReceived: 200",
+    "requests": [
+     {
+      "method": "GET",
+      "path": "/api/orders/ord-1000",
+      "status": 200,
+      "own": true
+     },
+     {
+      "method": "POST",
+      "path": "/api/orders/ord-1000/cancel",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 2,
+    "check": "jsonPath",
+    "target": "status",
+    "value": "shipped",
+    "error": "Error: expect(received).toEqual(expected) // deep equality\n\nExpected: \"shipped\"\nReceived: \"cancelled\"",
+    "requests": [
+     {
+      "method": "GET",
+      "path": "/api/orders/ord-1000",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 2,
+    "check": "jsonPath",
+    "target": "status",
+    "value": "shipped",
+    "error": "Error: expect(received).toEqual(expected) // deep equality\n\nExpected: \"shipped\"\nReceived: \"cancelled\"",
+    "requests": [
+     {
+      "method": "GET",
+      "path": "/api/orders/ord-1000",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   }
+  ],
+  "firstSeenAt": "2026-11-24T03:56:05.282Z",
+  "test": {
+   "id": "fd46a565-fa2f-4390-b67d-72e940a6e060",
+   "title": "POST /api/orders/{id}/cancel: a shipped order is refused with HTTP 409",
+   "spec": {
+    "testId": "API-059",
+    "title": "POST /api/orders/{id}/cancel: a shipped order is refused with HTTP 409",
+    "description": "order ord-1000 of the project's account is shipped, a state a new account cannot reach; the API document says cancel is refused there (\"Shipped or already cancelled\"). Known limit (data changes are on): if the application wrongly allows it, ord-1000 leaves the shipped state, so a rerun stops at the state check instead of the refusal.",
+    "kind": "api",
+    "category": "API · States",
+    "type": "negative",
+    "priority": "high",
+    "preconditions": [
+     "order ord-1000 is shipped"
+    ],
+    "steps": [
+     {
+      "action": "request",
+      "method": "GET",
+      "path": "/api/orders/ord-1000",
+      "auth": "default",
+      "description": "Read order ord-1000"
+     },
+     {
+      "action": "assertResponse",
+      "check": "jsonPath",
+      "path": "status",
+      "expected": "shipped",
+      "description": "It is still shipped"
+     },
+     {
+      "action": "request",
+      "method": "POST",
+      "path": "/api/orders/ord-1000/cancel",
+      "auth": "default",
+      "description": "Cancel it"
+     },
+     {
+      "action": "assertResponse",
+      "check": "status",
+      "expected": 409,
+      "description": "Refused with the documented HTTP 409",
+      "source": "API document: POST /api/orders/{id}/cancel 409"
+     }
+    ],
+    "expectedResults": [
+     "HTTP 409 (Shipped or already cancelled), as the API document says"
+    ],
+    "testData": {},
+    "tags": [
+     "api",
+     "stateful",
+     "documented"
+    ],
+    "source": {
+     "origin": "openapi"
+    }
+   },
+   "meta": {
+    "stateful": true,
+    "modelVersion": "aecdf45f-01b4-4d71-ba98-15dacf7f4756",
+    "layer": "api"
+   },
+   "testKey": "API-059"
+  }
+ },
+ "R5": {
+  "id": "f957474a-78ed-4876-8102-0a1c348d45c6",
+  "projectId": "303e7c92-0bde-4251-a7a6-83a450fbee77",
+  "testId": "30ad1eb4-abd9-45a1-9369-c6667a82ff9a",
+  "fingerprint": "fe2f6c491cad0a93bdee896dccd7cf3610267c3fa8558c01da4c3f2870be0b30",
+  "state": "confirmed",
+  "finding": {
+   "objective": null,
+   "actions": {
+    "stepCount": 4
+   },
+   "expected": {
+    "text": "Returns a successful response matching the documented contract",
+    "source": "API document: GET /api/orders/{id} 200"
+   },
+   "observed": "Error: API contract check failed: 1 difference between the response and its documentation",
+   "evidence": {
+    "screenshots": [],
+    "requests": [],
+    "console": []
+   },
+   "capture": "captured",
+   "independence": "not_run",
+   "confidence": "medium",
+   "fingerprint": "fe2f6c491cad0a93bdee896dccd7cf3610267c3fa8558c01da4c3f2870be0b30",
+   "modelVersion": null,
+   "replays": []
+  },
+  "attempts": [
+   {
+    "outcome": "failed",
+    "failedStep": 4,
+    "check": "matchesSchema",
+    "error": "Error: API contract check failed: 1 difference between the response and its documentation\n- [high] response.total: expected integer, got string",
+    "requests": [
+     {
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "own": true
+     },
+     {
+      "method": "GET",
+      "path": "/api/orders/ord-1000",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 4,
+    "check": "matchesSchema",
+    "error": "Error: API contract check failed: 1 difference between the response and its documentation\n- [high] response.total: expected integer, got string",
+    "requests": [
+     {
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "own": true
+     },
+     {
+      "method": "GET",
+      "path": "/api/orders/ord-1000",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 4,
+    "check": "matchesSchema",
+    "error": "Error: API contract check failed: 1 difference between the response and its documentation\n- [high] response.total: expected integer, got string",
+    "requests": [
+     {
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "own": true
+     },
+     {
+      "method": "GET",
+      "path": "/api/orders/ord-1000",
+      "status": 200,
+      "own": true
+     }
+    ],
+    "stack": []
+   }
+  ],
+  "firstSeenAt": "2026-11-24T03:56:05.270Z",
+  "test": {
+   "id": "30ad1eb4-abd9-45a1-9369-c6667a82ff9a",
+   "title": "GET /api/orders/{id}: succeeds with a valid request",
+   "spec": {
+    "testId": "API-052",
+    "title": "GET /api/orders/{id}: succeeds with a valid request",
+    "description": "One of your orders",
+    "kind": "api",
+    "category": "API · Orders",
+    "type": "functional",
+    "priority": "high",
+    "preconditions": [],
+    "steps": [
+     {
+      "action": "request",
+      "method": "GET",
+      "path": "/api/orders",
+      "auth": "default",
+      "extract": {
+       "id": "orders.0.id"
+      },
+      "description": "Take a real id from GET /api/orders"
+     },
+     {
+      "action": "request",
+      "method": "GET",
+      "path": "/api/orders/{{id}}",
+      "auth": "default",
+      "description": "Send a valid GET request"
+     },
+     {
+      "action": "assertResponse",
+      "check": "statusClass",
+      "expected": "2xx",
+      "description": "Request succeeds"
+     },
+     {
+      "action": "assertResponse",
+      "check": "matchesSchema",
+      "schema": {
+       "type": "object",
+       "required": [
+        "id",
+        "status",
+        "lines",
+        "subtotal",
+        "discount",
+        "shipping",
+        "total",
+        "address",
+        "placedAt"
+       ],
+       "properties": {
+        "id": {
+         "type": "string",
+         "pattern": "^ord-\\d{4}$"
+        },
+        "status": {
+         "type": "string",
+         "enum": [
+          "placed",
+          "paid",
+          "shipped",
+          "cancelled"
+         ]
+        },
+        "lines": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "required": [
+           "productId",
+           "name",
+           "unitPrice",
+           "quantity",
+           "lineTotal"
+          ],
+          "properties": {
+           "productId": {
+            "type": "string"
+           },
+           "name": {
+            "type": "string"
+           },
+           "unitPrice": {
+            "type": "integer",
+            "minimum": 0
+           },
+           "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+           },
+           "lineTotal": {
+            "type": "integer",
+            "minimum": 0
+           }
+          }
+         }
+        },
+        "subtotal": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "discount": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "shipping": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "total": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "address": {
+         "type": "string"
+        },
+        "placedAt": {
+         "type": "string",
+         "format": "date-time"
+        }
+       }
+      },
+      "description": "Response matches the documented schema",
+      "source": "API document: GET /api/orders/{id} 200"
+     }
+    ],
+    "expectedResults": [
+     "Returns a successful response matching the documented contract"
+    ],
+    "testData": {},
+    "tags": [
+     "api",
+     "happy-path"
+    ],
+    "source": {
+     "origin": "openapi"
+    }
+   },
+   "meta": {
+    "endpoint": "GET /api/orders/{id}",
+    "modelVersion": "aecdf45f-01b4-4d71-ba98-15dacf7f4756",
+    "layer": "api"
+   },
+   "testKey": "API-052"
+  }
+ },
+ "R7": {
+  "id": "e833d661-5bf3-4f03-abdc-c7bafaebbecc",
+  "projectId": "babb5331-9814-4845-a56e-9c04c8027f52",
+  "testId": "a9071234-6f33-42fe-934e-68ba13cfaab7",
+  "fingerprint": "fa00c3f4e59f8b0882bcd4c47b1503e807a059d06a8246e816ddd32e146da3c2",
+  "state": "confirmed",
+  "finding": {
+   "objective": null,
+   "actions": {
+    "stepCount": 2
+   },
+   "expected": {
+    "text": "PUT /api/notes/n3 is refused to the “ana” account ({\"identityWrite\":\"owner\",\"as\":\"ana\",\"method\":\"PUT\",\"path\":\"/api/notes/n3\",\"documented\":\"403 or 404\",\"sev\":\"high\"})",
+    "source": "API document: PUT /api/notes/{id} 403 or 404"
+   },
+   "observed": "Error: Access control check failed: 1 write may be open to an account that is not the owner",
+   "evidence": {
+    "screenshots": [],
+    "requests": [],
+    "console": []
+   },
+   "capture": "captured",
+   "independence": "not_run",
+   "confidence": "medium",
+   "fingerprint": "fa00c3f4e59f8b0882bcd4c47b1503e807a059d06a8246e816ddd32e146da3c2",
+   "modelVersion": null,
+   "replays": []
+  },
+  "attempts": [
+   {
+    "outcome": "failed",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "requests": [],
+    "stack": []
+   }
+  ],
+  "firstSeenAt": "2026-11-24T03:07:13.011Z",
+  "test": {
+   "id": "a9071234-6f33-42fe-934e-68ba13cfaab7",
+   "title": "“ana” account: cannot change a record it does not own (PUT /api/notes/n3)",
+   "spec": {
+    "testId": "WEB-067",
+    "title": "“ana” account: cannot change a record it does not own (PUT /api/notes/n3)",
+    "description": "The “ana” account reads /api/notes/n3, a record it lists but does not own, and sends PUT /api/notes/n3 with the record's own values. Fails if the write is accepted (documented: HTTP 403 or 404). Data changes: at most 1 write.",
+    "kind": "web",
+    "category": "Access control",
+    "type": "security",
+    "priority": "high",
+    "preconditions": [
+     "A test account named “ana” is set up for this project"
+    ],
+    "steps": [
+     {
+      "action": "navigate",
+      "url": "/",
+      "description": "Start at the home page"
+     },
+     {
+      "action": "assert",
+      "check": "accessDenied",
+      "expected": "{\"identityWrite\":\"owner\",\"as\":\"ana\",\"method\":\"PUT\",\"path\":\"/api/notes/n3\",\"documented\":\"403 or 404\",\"sev\":\"high\"}",
+      "description": "PUT /api/notes/n3 is refused to the “ana” account",
+      "source": "API document: PUT /api/notes/{id} 403 or 404"
+     }
+    ],
+    "expectedResults": [
+     "PUT /api/notes/n3 is refused to the “ana” account"
+    ],
+    "testData": {},
+    "tags": [
+     "security",
+     "access-control",
+     "api",
+     "identity-write"
+    ],
+    "source": {
+     "origin": "access-check"
+    }
+   },
+   "meta": {
+    "access": true,
+    "modelVersion": "8fa012ae-7e57-4bb2-bd4c-4fc1203cb918",
+    "layer": "page"
+   },
+   "testKey": "WEB-067"
+  }
+ },
+ "R9": {
+  "id": "189186d8-0dbd-484b-b8c9-24cc98f7f363",
+  "projectId": "babb5331-9814-4845-a56e-9c04c8027f52",
+  "testId": "86ea3121-2219-44fc-8c8c-fefbfd9e5df1",
+  "fingerprint": "32ea99ec451aac29bb406a6cd8c32493f57001ddf0766fda201a6eefd6a52548",
+  "state": "confirmed",
+  "finding": {
+   "objective": null,
+   "actions": {
+    "stepCount": 2
+   },
+   "expected": {
+    "text": "PATCH /api/admin/users/{id} is refused to the “mia” account ({\"identityWrite\":\"role\",\"as\":\"mia\",\"pool\":[\"ana\",\"ben\",\"ada\"],\"allowedRoles\":[\"admin\"],\"method\":\"PATCH\",\"path\":\"/api/admin/users/{id}\",\"param\":\"id\",\"whoAmI\":\"/api/me\",\"documented\":\"403\",\"sev\":\"high\"})",
+    "source": "API document: PATCH /api/admin/users/{id} 403"
+   },
+   "observed": "Error: Access control check failed: 1 write may be open to an account that is not allowed to make it",
+   "evidence": {
+    "screenshots": [],
+    "requests": [],
+    "console": []
+   },
+   "capture": "captured",
+   "independence": "not_run",
+   "confidence": "medium",
+   "fingerprint": "32ea99ec451aac29bb406a6cd8c32493f57001ddf0766fda201a6eefd6a52548",
+   "modelVersion": null,
+   "replays": []
+  },
+  "attempts": [
+   {
+    "outcome": "failed",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "requests": [],
+    "stack": []
+   }
+  ],
+  "firstSeenAt": "2026-11-24T03:07:13.022Z",
+  "test": {
+   "id": "86ea3121-2219-44fc-8c8c-fefbfd9e5df1",
+   "title": "“mia” account: cannot change its own role (PATCH /api/admin/users/{id})",
+   "spec": {
+    "testId": "WEB-071",
+    "title": "“mia” account: cannot change its own role (PATCH /api/admin/users/{id})",
+    "description": "The “mia” account reads its role from GET /api/me; unless it is the role the API names as allowed, it sends PATCH /api/admin/users/{id} with its own id and that role, read from an account that has it. Fails if the change is accepted (documented: HTTP 403); an accepted change is changed back at once. Data changes: at most 2 writes.",
+    "kind": "web",
+    "category": "Access control",
+    "type": "security",
+    "priority": "high",
+    "preconditions": [
+     "A test account named “mia” is set up for this project"
+    ],
+    "steps": [
+     {
+      "action": "navigate",
+      "url": "/",
+      "description": "Start at the home page"
+     },
+     {
+      "action": "assert",
+      "check": "accessDenied",
+      "expected": "{\"identityWrite\":\"role\",\"as\":\"mia\",\"pool\":[\"ana\",\"ben\",\"ada\"],\"allowedRoles\":[\"admin\"],\"method\":\"PATCH\",\"path\":\"/api/admin/users/{id}\",\"param\":\"id\",\"whoAmI\":\"/api/me\",\"documented\":\"403\",\"sev\":\"high\"}",
+      "description": "PATCH /api/admin/users/{id} is refused to the “mia” account",
+      "source": "API document: PATCH /api/admin/users/{id} 403"
+     }
+    ],
+    "expectedResults": [
+     "PATCH /api/admin/users/{id} is refused to the “mia” account"
+    ],
+    "testData": {},
+    "tags": [
+     "security",
+     "access-control",
+     "api",
+     "identity-write"
+    ],
+    "source": {
+     "origin": "access-check"
+    }
+   },
+   "meta": {
+    "access": true,
+    "modelVersion": "8fa012ae-7e57-4bb2-bd4c-4fc1203cb918",
+    "layer": "page"
+   },
+   "testKey": "WEB-071"
+  }
+ },
+ "R10": {
+  "id": "eb5ee08d-071a-4133-bf93-117f0df4203d",
+  "projectId": "babb5331-9814-4845-a56e-9c04c8027f52",
+  "testId": "8dd2fac6-92a5-4723-a1c2-0653b0548800",
+  "fingerprint": "536d877670c99355685349014054644918cfada3e3c052262321384254131ad8",
+  "state": "confirmed",
+  "finding": {
+   "objective": null,
+   "actions": {
+    "stepCount": 9
+   },
+   "expected": {
+    "text": "The text shows the literal characters a < b > c & <em>x</em> with visible angle brackets and no italic styling (requirement 3.15)",
+    "source": "expected:2"
+   },
+   "observed": "Created a note with title \"<b>qa1x0y</b> {{unique}}\" and text \"a < b > c & <em>x</em> {{unique}}\", saved it and opened /notes/n44. The body text shows the literal \"a < b > c & <em>x</em>\" (expected:2 passes). The title heading shows \"qa1x0y 1795482092564\": the <b> tags were interpreted as HTML and stripped, so the literal \"<b>qa1x0y</b>\" is not visible (expected:1 fails, requirement 3.15). The Title edit field still holds the literal \"<b>qa1x0y</b>\", so the stored value is correct and the title is rendered as HTML in the note view.",
+   "evidence": {
+    "screenshots": [
+     "e36e14d7-a21e-4208-9149-80b885d5d88e",
+     "f3e6c8b2-d608-457c-94e2-606a153c94b4"
+    ],
+    "requests": [],
+    "console": []
+   },
+   "capture": "captured",
+   "independence": "state_dependent",
+   "confidence": "medium",
+   "fingerprint": "536d877670c99355685349014054644918cfada3e3c052262321384254131ad8",
+   "modelVersion": "8fa012ae-7e57-4bb2-bd4c-4fc1203cb918",
+   "replays": [
+    {
+     "label": "Replay 1 in a fresh browser",
+     "outcome": "failed",
+     "failedStep": 9,
+     "summary": "Replay 1 in a fresh browser as a newly registered account: stopped at step 9 (Verify text of heading \"qa1x0y\" = a < b > c & <em>x</em>), the check of expected:2: expect(locator).toContainText(expected) failed. It failed at the captured check, but saw another value: captured qa1x0y 1795482092564, replay saw qa1x0y 1795482141912, so it does not reproduce the defect."
+    },
+    {
+     "label": "Replay 2 in a fresh browser",
+     "outcome": "failed",
+     "failedStep": 9,
+     "summary": "Replay 2 in a fresh browser as a newly registered account: stopped at step 9 (Verify text of heading \"qa1x0y\" = a < b > c & <em>x</em>), the check of expected:2: expect(locator).toContainText(expected) failed. It failed at the captured check, but saw another value: captured qa1x0y 1795482092564, replay saw qa1x0y 1795482155345, so it does not reproduce the defect."
+    }
+   ]
+  },
+  "attempts": [
+   {
+    "outcome": "failed",
+    "failedStep": 9,
+    "check": "count",
+    "target": "h1 b",
+    "value": "0",
+    "error": "Error: 9. Title has no bold element\n\nexpect(locator).toHaveCount(expected) failed\n\nLocator:  locator('h1 b')\nExpected: 0",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 9,
+    "check": "count",
+    "target": "h1 b",
+    "value": "0",
+    "error": "Error: 9. Title has no bold element\n\nexpect(locator).toHaveCount(expected) failed\n\nLocator:  locator('h1 b')\nExpected: 0",
+    "requests": [],
+    "stack": []
+   },
+   {
+    "outcome": "failed",
+    "failedStep": 9,
+    "check": "count",
+    "target": "h1 b",
+    "value": "0",
+    "error": "Error: 9. Title has no bold element\n\nexpect(locator).toHaveCount(expected) failed\n\nLocator:  locator('h1 b')\nExpected: 0",
+    "requests": [],
+    "stack": []
+   }
+  ],
+  "firstSeenAt": "2026-11-24T01:02:46.363Z",
+  "test": {
+   "id": "8dd2fac6-92a5-4723-a1c2-0653b0548800",
+   "title": "Note title and text are shown as plain text",
+   "spec": {
+    "testId": "WEB-045",
+    "title": "Note title and text are shown as plain text",
+    "description": "Create a note whose title and text contain HTML-like characters such as angle brackets and tags. Save it, open the note and read the title and text exactly as shown.",
+    "kind": "web",
+    "category": "Security",
+    "type": "security",
+    "priority": "high",
+    "preconditions": [
+     "Signed in as a user"
+    ],
+    "steps": [
+     {
+      "action": "navigate",
+      "url": "/notes/new",
+      "description": "Open /notes/new"
+     },
+     {
+      "action": "fill",
+      "locator": {
+       "by": "label",
+       "value": "Email"
+      },
+      "value": "{{credentials.username}}",
+      "description": "Enter \"{{credentials.username}}\" into label \"Email\""
+     },
+     {
+      "action": "fill",
+      "locator": {
+       "by": "label",
+       "value": "Password"
+      },
+      "value": "{{credentials.password}}",
+      "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+     },
+     {
+      "action": "click",
+      "locator": {
+       "by": "role",
+       "role": "button",
+       "value": "Sign in",
+       "exact": true
+      },
+      "description": "Click button \"Sign in\""
+     },
+     {
+      "action": "wait",
+      "ms": 0,
+      "until": "visible",
+      "locator": {
+       "by": "role",
+       "role": "link",
+       "value": "New note",
+       "exact": true
+      },
+      "description": "Wait until link \"New note\" is visible"
+     },
+     {
+      "action": "fill",
+      "locator": {
+       "by": "label",
+       "value": "Title"
+      },
+      "value": "<b>qa1x0y</b> {{unique}}",
+      "description": "Enter \"<b>qa1x0y</b> {{unique}}\" into label \"Title\""
+     },
+     {
+      "action": "fill",
+      "locator": {
+       "by": "label",
+       "value": "Text"
+      },
+      "value": "a < b > c & <em>x</em> {{unique}}",
+      "description": "Enter \"a < b > c & <em>x</em> {{unique}}\" into label \"Text\""
+     },
+     {
+      "action": "click",
+      "locator": {
+       "by": "role",
+       "role": "button",
+       "value": "Save note",
+       "exact": true
+      },
+      "description": "Click button \"Save note\""
+     },
+     {
+      "action": "assert",
+      "check": "count",
+      "locator": {
+       "by": "css",
+       "value": "h1 b"
+      },
+      "expected": 0,
+      "source": "expected:1",
+      "description": "Title has no bold element"
+     },
+     {
+      "action": "assert",
+      "check": "text",
+      "locator": {
+       "by": "css",
+       "value": "main"
+      },
+      "expected": "a < b > c & <em>x</em>",
+      "source": "expected:2",
+      "description": "Text shows literal characters"
+     },
+     {
+      "action": "assert",
+      "check": "count",
+      "locator": {
+       "by": "css",
+       "value": "main em"
+      },
+      "expected": 0,
+      "source": "expected:2",
+      "description": "Text has no italic element"
+     },
+     {
+      "action": "assert",
+      "check": "text",
+      "locator": {
+       "by": "role",
+       "role": "heading",
+       "value": "qa1x0y"
+      },
+      "expected": "<b>qa1x0y</b>",
+      "source": "expected:1",
+      "description": "Title shows literal <b>qa1x0y</b>"
+     }
+    ],
+    "expectedResults": [
+     "The title shows the literal characters <b>qa1x0y</b> with visible angle brackets and no bold styling (requirement 3.15)",
+     "The text shows the literal characters a < b > c & <em>x</em> with visible angle brackets and no italic styling (requirement 3.15)"
+    ],
+    "testData": {
+     "runTag": "qat6y8"
+    },
+    "tags": [
+     "security",
+     "high"
+    ],
+    "source": {
+     "scenarioId": "S-045",
+     "journey": "View a note",
+     "origin": "browser-agent",
+     "requirements": [
+      "3.15"
+     ]
+    }
+   },
+   "meta": {
+    "model": "claude-haiku-5-5",
+    "scenario": {
+     "title": "Note title and text are shown as plain text",
+     "description": "Create a note whose title and text contain HTML-like characters such as angle brackets and tags. Save it, open the note and read the title and text exactly as shown.",
+     "category": "Security",
+     "type": "security",
+     "priority": "high",
+     "journey": "View a note",
+     "startPath": "/notes/new",
+     "preconditions": [
+      "Signed in as a user"
+     ],
+     "expectedResults": [
+      "The title shows the literal characters <b>qa1x0y</b> with visible angle brackets and no bold styling (requirement 3.15)",
+      "The text shows the literal characters a < b > c & <em>x</em> with visible angle brackets and no italic styling (requirement 3.15)"
+     ],
+     "requiresAuth": true,
+     "requiredData": [
+      "create a note with generated data using HTML-like characters"
+     ],
+     "requirements": [
+      "3.15"
+     ],
+     "scenarioId": "S-045"
+    },
+    "authoring": "defect",
+    "explanation": "Created a note with title \"<b>qa1x0y</b> {{unique}}\" and text \"a < b > c & <em>x</em> {{unique}}\", saved it and opened /notes/n44. The body text shows the literal \"a < b > c & <em>x</em>\" (expected:2 passes). The title heading shows \"qa1x0y 1795482092564\": the <b> tags were interpreted as HTML and stripped, so the literal \"<b>qa1x0y</b>\" is not visible (expected:1 fails, requirement 3.15). The Title edit field still holds the literal \"<b>qa1x0y</b>\", so the stored value is correct and the title is rendered as HTML in the note view.",
+    "capture": "captured",
+    "capturedCheck": {
+     "source": "expected:2",
+     "observed": "expect(locator).toContainText(expected) failed Locator: getByRole('heading', { name: 'qa1x0y' }) Expected substring: \"a < b > c & <em>x</em>\" Received string: \"qa1x0y 1795482092564\" Timeout: 6000ms"
+    },
+    "modelVersion": "8fa012ae-7e57-4bb2-bd4c-4fc1203cb918",
+    "layer": "page",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 9
+     },
+     "expected": {
+      "text": "The text shows the literal characters a < b > c & <em>x</em> with visible angle brackets and no italic styling (requirement 3.15)",
+      "source": "expected:2"
+     },
+     "observed": "Created a note with title \"<b>qa1x0y</b> {{unique}}\" and text \"a < b > c & <em>x</em> {{unique}}\", saved it and opened /notes/n44. The body text shows the literal \"a < b > c & <em>x</em>\" (expected:2 passes). The title heading shows \"qa1x0y 1795482092564\": the <b> tags were interpreted as HTML and stripped, so the literal \"<b>qa1x0y</b>\" is not visible (expected:1 fails, requirement 3.15). The Title edit field still holds the literal \"<b>qa1x0y</b>\", so the stored value is correct and the title is rendered as HTML in the note view.",
+     "evidence": {
+      "screenshots": [
+       "e36e14d7-a21e-4208-9149-80b885d5d88e",
+       "f3e6c8b2-d608-457c-94e2-606a153c94b4"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "state_dependent",
+     "confidence": "medium",
+     "fingerprint": "536d877670c99355685349014054644918cfada3e3c052262321384254131ad8",
+     "modelVersion": "8fa012ae-7e57-4bb2-bd4c-4fc1203cb918",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 9,
+       "summary": "Replay 1 in a fresh browser as a newly registered account: stopped at step 9 (Verify text of heading \"qa1x0y\" = a < b > c & <em>x</em>), the check of expected:2: expect(locator).toContainText(expected) failed. It failed at the captured check, but saw another value: captured qa1x0y 1795482092564, replay saw qa1x0y 1795482141912, so it does not reproduce the defect."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 9,
+       "summary": "Replay 2 in a fresh browser as a newly registered account: stopped at step 9 (Verify text of heading \"qa1x0y\" = a < b > c & <em>x</em>), the check of expected:2: expect(locator).toContainText(expected) failed. It failed at the captured check, but saw another value: captured qa1x0y 1795482092564, replay saw qa1x0y 1795482155345, so it does not reproduce the defect."
+      }
+     ]
+    }
+   },
+   "testKey": "WEB-045"
+  }
+ }
+}
