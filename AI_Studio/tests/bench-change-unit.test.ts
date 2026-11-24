@@ -12,7 +12,8 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeImpact } from "../src/engine/impact/analyze.js";
 import { BenchAppHost, benchApp } from "../src/eval/bench/apps.js";
-import { gitOf, parseChangeArgs, prFiles, treeOf, type ManifestPr } from "../src/eval/bench/change/run.js";
+import { deploymentPayload, gitOf, parseChangeArgs, prFiles, treeOf, type ManifestPr } from "../src/eval/bench/change/run.js";
+import { decide } from "../src/platform/code-host/webhook.js";
 import { caught, renderChangeMd, scoreChange, type PrStep, type RunRecord, type SetupRecord } from "../src/eval/bench/change/score.js";
 
 const BUILD = path.join(import.meta.dirname, "..", "examples", "bench-repo", "build.mjs");
@@ -107,6 +108,15 @@ describe("a benchmark app's start", () => {
 });
 
 describe("the command's options", () => {
+    it("deploys the same commit twice as two deliveries, so the second is not dropped as a replay of the first's body", () => {
+        // webhook.ts acts once per body: the fix deployed again after the bug's return must be a new deployment of that commit.
+        const sha = "a".repeat(40);
+        const first = JSON.stringify(deploymentPayload(sha, 31));
+        const again = JSON.stringify(deploymentPayload(sha, 32));
+        expect(again).not.toBe(first);
+        for (const body of [first, again]) expect(decide("deployment_status", JSON.parse(body))).toMatchObject({ headSha: sha, queued: "reverify" });
+    });
+
     it("needs a folder, and a repository unless only reporting", () => {
         expect(() => parseChangeArgs(["--repo", "x"])).toThrow(/--out/);
         expect(() => parseChangeArgs(["--out", "x"])).toThrow(/--repo/);
