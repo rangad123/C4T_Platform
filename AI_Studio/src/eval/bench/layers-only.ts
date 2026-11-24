@@ -4,6 +4,7 @@
  * deterministic checks (API cases with their contract checks, access checks) and the replays (seeded, clean, single).
  */
 import type { z } from "zod";
+import { ExplainAnswerSchema } from "../../engine/findings/explain.js";
 import type { LlmClient } from "../../engine/llm/provider.js";
 
 /** The check families of a layers-only trial: the deterministic API and access layers on, everything else off. */
@@ -40,7 +41,12 @@ export function layersOnlyLlm(): LlmClient {
         model: undefined as never,
         usage: { inputTokens: 0, outputTokens: 0 },
         text: async () => "",
-        object: (async (args: { schema: z.ZodTypeAny }) => {
+        object: (async (args: { schema: z.ZodTypeAny; prompt?: string }) => {
+            // Verification's explanation of an open class (findings/explain.ts): it names the first open class that is not app_defect.
+            if (args.schema === ExplainAnswerSchema) {
+                const pick = /Candidate classes: ([a-z_, ]+)\./.exec(args.prompt ?? "")?.[1]?.split(", ").find((c) => c !== "app_defect");
+                return { ...(pick ? { class: pick } : {}), explanation: "Scripted explanation: the rules left the class open.", next: "Scripted: compare the attempts." };
+            }
             for (const a of ANSWERS) {
                 const r = args.schema.safeParse(a);
                 if (r.success) return r.data;

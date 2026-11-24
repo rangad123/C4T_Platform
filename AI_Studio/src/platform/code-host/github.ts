@@ -209,6 +209,13 @@ export class GithubCodeHost {
         return { name: b.name, sha: str(b.commit?.sha) ?? "", protected: b.protected === true };
     }
 
+    /** The head commit of the repository's default branch (the code root cause reads, findings/code-source.ts). */
+    async head(): Promise<string> {
+        const name = str(((await this.get("")) as Json | undefined)?.default_branch);
+        if (!name) throw new TrackerError("rejected", "GitHub did not say which branch is the repository's default.");
+        return sha((await this.branch(name)).sha);
+    }
+
     /** Every file of the repository at a commit, in one call; `truncated` when GitHub cut the list (it lists about 100,000 entries). */
     async tree(commit: string): Promise<{ files: TreeFile[]; truncated: boolean }> {
         const t = (await this.get(`/git/trees/${sha(commit)}?recursive=1`)) as Json | undefined;

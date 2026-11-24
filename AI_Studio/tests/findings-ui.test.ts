@@ -334,8 +334,9 @@ describe("a finished exploration with findings", () => {
         await crit.getByText(/^Evidence/).click();
         await pwExpect(crit.getByTestId("finding-reasons").getByRole("listitem")).toHaveText([/^Critical severity/, "High confidence: the same failure in 2 of 3 attempts"]);
         await crit.getByText(/^Evidence/).click();
-        // No code source: no likely cause and no line about it (nothing on screen can connect one yet); no model line on a row.
-        await pwExpect(section().getByTestId("run-findings-no-cause")).toHaveCount(0);
+        // No code repository connected: no likely cause, and one line above the list that says so, with where to connect one.
+        await pwExpect(section().getByTestId("run-findings-no-repo")).toHaveCount(1);
+        await pwExpect(section().getByTestId("run-findings-no-repo").getByRole("link", { name: "Integrations" })).toHaveAttribute("href", "#/integrations");
         await pwExpect(section().getByTestId("finding-cause")).toHaveCount(0);
         await pwExpect(section()).not.toContainText("model-7");
         await crit.getByTestId("finding-actions").click();

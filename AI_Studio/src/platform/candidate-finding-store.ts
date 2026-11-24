@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { CandidateFindingSchema, type CandidateFinding } from "../engine/explore/finding.js";
 import { checkTransition, FINDING_STATES, type Actor, type FindingState } from "../engine/findings/lifecycle.js";
+import type { RootCause } from "../engine/findings/root-cause.js";
 import type { ConfidenceScore } from "../engine/findings/score.js";
 import { redactText } from "../shared/redact-text.js";
 import type { Sql } from "./sql.js";
@@ -78,6 +79,13 @@ CREATE INDEX idx_cand_find_state ON candidate_findings (project_id, state);
 CREATE INDEX idx_cand_find_group ON candidate_findings (group_id);
 `;
 
+/**
+ * Migration slot 74 (eng-fix3-verify): the likely cause verification found for the finding's group (findings/root-cause.ts, with the
+ * project's code source and the job's model), so the findings card, an issue and the report read it instead of working one out. Existing
+ * findings have none until they are verified again.
+ */
+export const FINDING_ROOT_CAUSE_MIGRATION = `ALTER TABLE candidate_findings ADD COLUMN root_cause_json TEXT;`;
+
 export const CANDIDATE_STATUS = "candidate";
 
 export interface CandidateFindingRecord {
@@ -102,6 +110,8 @@ export interface CandidateFindingRecord {
     groupId: string | null;
     attempts: unknown[];
     appVersion: string | null;
+    /** Slot 74: the likely cause verification kept, or null. */
+    rootCause: RootCause | null;
 }
 
 /** What a transition may record with the move (each left out keeps its value). */
@@ -155,6 +165,7 @@ interface FindingRow {
     group_id: string | null;
     attempts_json: string;
     app_version: string | null;
+    root_cause_json: string | null;
 }
 
 const toRecord = (r: FindingRow): CandidateFindingRecord => {
@@ -180,6 +191,7 @@ const toRecord = (r: FindingRow): CandidateFindingRecord => {
         groupId: r.group_id,
         attempts: JSON.parse(r.attempts_json) as unknown[],
         appVersion: r.app_version,
+        rootCause: r.root_cause_json ? (JSON.parse(r.root_cause_json) as RootCause) : null,
     };
 };
 
@@ -325,6 +337,14 @@ export class CandidateFindingStore {
             projectId, id,
         );
         return rows.map((r) => ({ seq: Number(r.seq), at: r.at, actor: r.actor, actorId: r.actor_id, by: r.by_kind as Actor, from: r.from_state as FindingState | null, to: r.to_state as FindingState, reason: r.reason }));
+    }
+
+    /** Keeps the likely cause on these findings of the project (a group's members share it); moves nothing, adds no history. */
+    async setRootCause(projectId: string, findingIds: readonly string[], rc: RootCause): Promise<void> {
+        const json = JSON.stringify(rc);
+        await this.sql.tx(async (t) => {
+            for (const id of new Set(findingIds)) await t.run("UPDATE candidate_findings SET root_cause_json = ? WHERE id = ? AND project_id = ?", json, id, projectId);
+        });
     }
 
     /** A new duplicate group of these findings (each leaves the group it was in); every id must be a finding of the project. */

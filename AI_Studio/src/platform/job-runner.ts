@@ -138,7 +138,7 @@ export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boole
 }
 
 /** A verification job: the findings of the run it names, or a claimed fix, are verified through `executor`; this job tells the outcome. */
-async function runVerifyJob(p: Platform, job: JobRow, executor: ScriptExecutor, signal: AbortSignal, emit: EngineContext["emit"]): Promise<void> {
+async function runVerifyJob(p: Platform, job: JobRow, executor: ScriptExecutor, signal: AbortSignal, emit: EngineContext["emit"], llm?: LlmClient): Promise<void> {
     const source = job.options.verifyJobId ? p.repo.getJob(job.options.verifyJobId) : undefined;
     if (!job.options.fixCheck && (!source || source.projectId !== job.projectId)) throw new Error("The run whose findings this job verifies no longer exists.");
     emit({ stage: "validation", kind: "job_started", message: job.options.fixCheck ? `Checking the fix ${job.options.fixCheck.source} claimed.` : `Verifying the findings of run ${source!.id.slice(0, 8)}.` });
@@ -150,7 +150,7 @@ async function runVerifyJob(p: Platform, job: JobRow, executor: ScriptExecutor, 
         emit({ stage: "validation", kind: "finding_verification", message: `Fix check (${job.options.fixCheck.source}): ${fixed} of ${done.length} finding${done.length === 1 ? "" : "s"} fixed.${done.filter((d) => !d.fixed).map((d) => ` ${d.reason}`).join("")}` });
         return;
     }
-    const r = await verifyAfterJob(p, source!, { execute, signal, ranOn, harvested: true });
+    const r = await verifyAfterJob(p, source!, { execute, signal, ranOn, harvested: true, ...(llm ? { llm } : {}) });
     const counts = new Map<string, number>();
     for (const v of r?.verified ?? []) counts.set(v.to, (counts.get(v.to) ?? 0) + 1);
     const told = [...counts].map(([to, n]) => `${n} ${to.replace(/_/g, " ")}`);
@@ -419,10 +419,10 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     // This job's scratch files (each run's folder: page snapshots, reports, traces, recordings) are its own and go when it ends.
     const jobScratch = path.join(config.scratchDir, `job-${job.id}`);
     try {
-        // Phase 5: verifying a finished run's findings on the project's runner (findings/verify-service.ts). No AI; the attempts go through
-        // this job's executor, which is the starter's runner, as a run's tests do.
+        // Phase 5: verifying a finished run's findings on the project's runner (findings/verify-service.ts). The attempts go through this
+        // job's executor, which is the starter's runner, as a run's tests do; the job's model only explains open classes (none when blocked).
         if (o.mode === "verify") {
-            await runVerifyJob({ ...deps, db: repo.db, sql: repo.db.sql }, job, executorFor({ projectId: job.projectId, jobId: job.id, mode: o.mode }), abort.signal, emit);
+            await runVerifyJob({ ...deps, db: repo.db, sql: repo.db.sql }, job, executorFor({ projectId: job.projectId, jobId: job.id, mode: o.mode }), abort.signal, emit, ai.blocked ? undefined : llm);
             if (abort.signal.aborted) throw abort.signal.reason ?? new Error("Cancelled");
             await finish("COMPLETED");
             return;

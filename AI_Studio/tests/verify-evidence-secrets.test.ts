@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
@@ -21,7 +22,9 @@ const HDRV = "cnryhdr-value-9w";
 const NEWPW = "cnry-newpw-5521x";
 const NEWPW2 = "cnry-newpw-7731y";
 const APIK = "cnry-apikey-v-4410";
-const CANARIES = { password: PW, apiToken: TOK, authHeaderValue: HDRV, password_confirmation: NEWPW, passwordConfirm: NEWPW2, apiKeyValue: APIK };
+// A session cookie the application set: only the trace says it is a secret (secretsInTrace), and its body echoes it as a plain value.
+const SID = "cnrysid4471q";
+const CANARIES = { password: PW, apiToken: TOK, authHeaderValue: HDRV, password_confirmation: NEWPW, passwordConfirm: NEWPW2, apiKeyValue: APIK, sessionCookie: SID };
 
 let platform: Platform;
 let dir = "";
@@ -57,6 +60,10 @@ it("no run secret reaches the stored evidence package, finding row or events", a
     const store = new CandidateFindingStore(platform.sql);
     const evPath = path.join(dir, "ev.json");
     fs.writeFileSync(evPath, JSON.stringify({ v: 1, durationMs: 1, counts: { requests: 0, requestsKept: 0, console: 1, consoleKept: 1 }, steps: [], requests: [], console: [{ t: 1, step: 2, type: "log", text: `header sent ${HDRV}` }] }));
+    // The attempt's trace holds the profile call's response body with every canary in it (eng-fix3-verify: bodies in the package).
+    const tracePath = path.join(dir, "trace.zip");
+    const snapshot = { type: "resource-snapshot", snapshot: { request: { method: "GET", url: "http://127.0.0.1:5599/api/profile" }, response: { status: 200, headers: [{ name: "set-cookie", value: `sid=${SID}; HttpOnly` }], content: { mimeType: "application/json", _file: "resources/p.json" } } } };
+    fs.writeFileSync(tracePath, zipSync({ "0-trace.network": strToU8(JSON.stringify(snapshot)), "resources/p.json": strToU8(JSON.stringify({ name: "QA", ...CANARIES, header: `X-Api-Key: ${HDRV}`, s: SID })) }));
     const run = (i: number, n: number, withEvidence: boolean): ScriptRun => ({
         testId: "WEB-001",
         status: "failed",
@@ -66,8 +73,8 @@ it("no run secret reaches the stored evidence package, finding row or events", a
             { index: 0, title: `1. Type "${PW}" into Password`, status: "passed" },
             { index: 1, title: "2. check", status: "failed", error: `Error: expect(locator).toHaveText(expected) failed\nExpected: "QA"\nReceived: "${PW}"` },
         ],
-        artifacts: withEvidence ? [{ kind: "evidence", path: evPath }] : [],
-        responses: [{ method: "GET", path: `/api/session/${TOK}`, status: 500 }],
+        artifacts: withEvidence ? [{ kind: "evidence", path: evPath }, { kind: "trace", path: tracePath }] : [],
+        responses: [{ method: "GET", path: `/api/session/${TOK}`, status: 500 }, { method: "GET", path: "/api/profile", status: 200 }],
         notes: [`Attempt ${i} of ${n}: the test never signs in`],
     });
     // As failedRunsOf rebuilds a stored run: the steps as stored, no responses.
@@ -85,6 +92,9 @@ it("no run secret reaches the stored evidence package, finding row or events", a
     const stored = await store.get(projectId, f!.id);
     scan("finding row (attempts)", JSON.stringify(stored!.attempts));
     scan("finding (candidate record)", JSON.stringify(stored));
-    expect(filesUnder(dir).filter((x) => x.endsWith("package.json"))).toHaveLength(3);
+    const packages = filesUnder(dir).filter((x) => x.endsWith("package.json"));
+    expect(packages).toHaveLength(3);
+    // The body is there (masked), so the scan above looked at it.
+    expect(JSON.parse(fs.readFileSync(packages[0]!, "utf8")).responseBodies).toEqual([expect.objectContaining({ request: "GET /api/profile -> 200", body: expect.stringContaining('"name":"QA"') })]);
     expect(leaks).toEqual({});
 });

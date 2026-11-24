@@ -19,7 +19,8 @@ import { projectCompat } from "../routes/variants.js";
 import type { ArtifactStore } from "../storage.js";
 import { passRate } from "../../engine/summary/pass-rate.js";
 import { isReproduced, reproduction } from "../../engine/findings/classify.js";
-import { rootCause } from "../../engine/findings/root-cause.js";
+import { rootCause, type RootCause } from "../../engine/findings/root-cause.js";
+import type { FindingView } from "../../engine/findings/view.js";
 import { confidenceScore, label, severityOf } from "../../engine/findings/score.js";
 import { CandidateFindingStore } from "../candidate-finding-store.js";
 import { fromCandidate } from "../findings/adapters.js";
@@ -79,7 +80,7 @@ function seconds(ms: number): string {
     return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
-export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: string, now = new Date()): Promise<ProjectReportData | undefined> {
+export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: string, now = new Date(), causeOf: (members: FindingView[]) => Promise<RootCause> = (members) => rootCause({ members })): Promise<ProjectReportData | undefined> {
     const project = repo.getProject(projectId);
     if (!project) return undefined;
     // Judged on the steps a test really has, reusable steps included.
@@ -152,7 +153,7 @@ export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: 
             spec: t?.spec,
             area: t?.suite,
             environment: { appUrl: app0?.url as string | undefined, appVersion: r.appVersion },
-            rootCause: await rootCause({ members: [view] }),
+            rootCause: r.rootCause ?? (await causeOf([view])),
         });
         confirmed.push({ rank: SEVERITIES.indexOf(severity), report });
     }

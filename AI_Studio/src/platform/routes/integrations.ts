@@ -5,7 +5,7 @@ import { refuseTestsInCaseAgentProject } from "../case-agent.js";
 import { HttpError } from "../http-error.js";
 import { blockView } from "../block-store.js";
 import { evidenceSentence } from "../evidence-read.js";
-import { rootCause } from "../../engine/findings/root-cause.js";
+import { projectRootCause } from "../code-host/source.js";
 import type { FindingState } from "../../engine/findings/lifecycle.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import { fromCandidate } from "../findings/adapters.js";
@@ -239,8 +239,8 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
                 area: t.suite,
                 environment: { appUrl: repo.getLatestApplicationPublic(id)?.url as string | undefined, appVersion: r.appVersion },
                 evidenceUrl,
-                // No code source is connected to projects yet (Phase 6), so this says Unknown and why; no AI call is made here.
-                rootCause: await rootCause({ members: views }),
+                // The cause verification kept on the group, else the repository's deterministic answer. No AI call is made here.
+                rootCause: members.find((m) => m.rootCause)?.rootCause ?? (await projectRootCause(p, id, views)),
             });
             const draft = findingIssueDraft(report, evidenceUrl);
             try {

@@ -12,7 +12,7 @@ import { z } from "zod";
 import { redactText } from "../../shared/redact-text.js";
 import { isBudgetExceeded } from "../llm/usage.js";
 import type { LlmClient } from "../llm/provider.js";
-import { classify, FINDING_CLASSES, type FindingClass } from "./classify.js";
+import { classify, FINDING_CLASSES, type Classification, type FindingClass } from "./classify.js";
 import { confidenceScore, type ConfidenceScore } from "./score.js";
 import type { FindingView } from "./view.js";
 
@@ -92,8 +92,7 @@ function memberLines(f: FindingView, n: number): string[] {
 }
 
 /** The prompt for a group: the rules' result, then each member (at most EXPLAIN_LIMITS.members) fenced. */
-export function explainPrompt(members: readonly FindingView[]): string {
-    const rules = classify(members[0]!);
+export function explainPrompt(members: readonly FindingView[], rules: Classification = classify(members[0]!)): string {
     const head =
         rules.class === "open"
             ? `The rules left the class open. Candidate classes: ${rules.candidates.join(", ")}. The rules' reason: ${rules.reason}`
@@ -109,17 +108,20 @@ export function explainPrompt(members: readonly FindingView[]): string {
 
 const isClass = (s: string): s is FindingClass => (FINDING_CLASSES as readonly string[]).includes(s);
 
-/** One AI call for the group (`members`, the first is the one shown as the group); without a model, the rules' result alone. */
-export async function explainGroup(llm: LlmClient | undefined, members: readonly FindingView[]): Promise<Explanation> {
+/**
+ * One AI call for the group (`members`, the first is the one shown as the group); without a model, the rules' result alone. `verdict` is
+ * the verdict's classification when verification has one (its expectation check can leave open what the view alone decides).
+ */
+export async function explainGroup(llm: LlmClient | undefined, members: readonly FindingView[], verdict?: Classification): Promise<Explanation> {
     if (!members.length) throw new Error("A group to explain has at least one finding.");
     const first = members[0]!;
-    const rules = classify(first);
+    const rules = verdict ?? classify(first);
     const plain = (warning: string): Explanation => ({ class: rules.class, aiClass: false, explanation: null, next: null, confidence: confidenceScore(first), warnings: [warning] });
     if (!llm) return plain("No explanation: no AI model is set up for this project.");
 
     let answer: z.infer<typeof ExplainAnswerSchema>;
     try {
-        answer = await llm.object({ system: SYSTEM, prompt: explainPrompt(members), schema: ExplainAnswerSchema, maxOutputTokens: L.outputTokens, purpose: "review" });
+        answer = await llm.object({ system: SYSTEM, prompt: explainPrompt(members, rules), schema: ExplainAnswerSchema, maxOutputTokens: L.outputTokens, purpose: "review" });
     } catch (e) {
         if (isBudgetExceeded(e)) throw e;
         return plain(`No explanation: the AI call failed (${cell((e as Error).message, 200)}).`);
