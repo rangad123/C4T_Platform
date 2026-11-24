@@ -23,6 +23,15 @@ export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] as const;
 /** First words of every a11y-violation failure; a11yFinding keys on it. */
 export const A11Y_FAILURE_PREFIX = "Accessibility audit failed:";
 
+/**
+ * An Accessibility agent's audits keep every rule they find, at every impact (spec tag below, a11y/specs.ts allRules): the generated script
+ * attaches the list as the run's notes, so a passing test keeps it as its reason (validator) and a11yFinding appends it to a failing one's.
+ * The threshold still decides pass or fail. Only the generated script does this; the live interpreter keeps the failure message only.
+ */
+export const A11Y_ALL_RULES_TAG = "a11y-all-rules";
+/** First line of that list; one line per rule follows, in the failure message's own format. */
+export const A11Y_ALL_RULES_PREFIX = "Accessibility audit, every rule found:";
+
 /** Rules / targets kept in the message: it is shown to users and the runner truncates step errors at 800 chars. */
 export const A11Y_MAX_RULES = 5;
 export const A11Y_MAX_TARGETS = 3;
@@ -47,6 +56,16 @@ const clip = (s: string, n: number): string => {
     return t.length > n ? t.slice(0, n - 3) + "..." : t;
 };
 
+/** One rule: id, impact, help text, node count, first targets. */
+function ruleLine(v: A11yViolationLike): string {
+    const targets = v.nodes
+        .slice(0, A11Y_MAX_TARGETS)
+        .map((n) => clip(n.target.map((t) => (Array.isArray(t) ? t.join(" >> ") : String(t))).join(" >> "), 60));
+    const more = v.nodes.length > A11Y_MAX_TARGETS ? ", ..." : "";
+    const count = `${v.nodes.length} node${v.nodes.length === 1 ? "" : "s"}`;
+    return `- ${v.id} [${v.impact ?? "minor"}]: ${clip(v.help, 100)} (${count}: ${targets.join(", ")}${more})`;
+}
+
 /**
  * Compact, human-readable failure message for the violations at or above `minImpact`, or
  * undefined when none qualify. One line per rule: id, impact, help text, node count, first targets.
@@ -54,17 +73,16 @@ const clip = (s: string, n: number): string => {
 export function formatA11yViolations(violations: A11yViolationLike[], minImpact: A11yImpact): string | undefined {
     const failing = violations.filter((v) => rank(v.impact) >= rank(minImpact)).sort((a, b) => rank(b.impact) - rank(a.impact));
     if (failing.length === 0) return undefined;
-    const lines = failing.slice(0, A11Y_MAX_RULES).map((v) => {
-        const targets = v.nodes
-            .slice(0, A11Y_MAX_TARGETS)
-            .map((n) => clip(n.target.map((t) => (Array.isArray(t) ? t.join(" >> ") : String(t))).join(" >> "), 60));
-        const more = v.nodes.length > A11Y_MAX_TARGETS ? ", ..." : "";
-        const count = `${v.nodes.length} node${v.nodes.length === 1 ? "" : "s"}`;
-        return `- ${v.id} [${v.impact ?? "minor"}]: ${clip(v.help, 100)} (${count}: ${targets.join(", ")}${more})`;
-    });
+    const lines = failing.slice(0, A11Y_MAX_RULES).map(ruleLine);
     if (failing.length > A11Y_MAX_RULES) lines.push(`- ...and ${failing.length - A11Y_MAX_RULES} more rule(s)`);
     const n = failing.length;
     return `${A11Y_FAILURE_PREFIX} ${n} WCAG rule${n === 1 ? "" : "s"} violated at "${minImpact}" impact or above\n${lines.join("\n")}`;
+}
+
+/** Every rule found, worst first, with no cap on rules (targets keep theirs): the prefix, then one line each; undefined for a clean page. */
+export function formatA11yAllRules(violations: A11yViolationLike[]): string[] | undefined {
+    if (violations.length === 0) return undefined;
+    return [A11Y_ALL_RULES_PREFIX, ...[...violations].sort((a, b) => rank(b.impact) - rank(a.impact)).map(ruleLine)];
 }
 
 /**

@@ -142,6 +142,8 @@ export interface GenerationRequest {
     runTestCases?: boolean;
     /** Generate axe-core accessibility audits for key pages (web target). Default true. */
     accessibility?: boolean;
+    /** The audits keep every rule they find, at every impact (an Accessibility agent's run, a11y/audit.ts A11Y_ALL_RULES_TAG). */
+    a11yAllRules?: boolean;
     /** Generate page health checks (JavaScript errors, failed requests, broken links...) for key pages (web target). Default true. */
     healthChecks?: boolean;
     /** Generate passive, read-only security checks (headers, cookies, CORS, exposed files, TLS) for the application origin. Default true. */
@@ -1556,7 +1558,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
 
         // 4d. Accessibility audits (deterministic, axe-core) for key discovered pages.
         if (wantWeb && req.accessibility !== false && model.pages.length) {
-            const a11y = generateA11ySpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale });
+            const a11y = generateA11ySpecs(model, { maxPages: levelSettings(req).checkPages, perTypeScale: levelSettings(req).perTypeScale, allRules: req.a11yAllRules === true });
             for (const d of a11y) {
                 if (await carried(d)) continue;
                 const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("WEB") });

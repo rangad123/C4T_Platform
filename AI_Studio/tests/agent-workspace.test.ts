@@ -5,7 +5,8 @@
  *     (one test per agent id); the Test Case Generation run stays plan-only, a check agent's run is not (the Workspace has no plan step);
  *   - an agent id that is not chosen is refused (409), an unknown one too (400), and a project of several agents asks which one (400);
  *   - GET /api/projects/:id/workspace: each chosen agent's status, from its own runs and the inputs it misses;
- *   - GET /api/projects/:id/workspace/:agentId/outcome: Test Case Generation answers the case outcome, the others 501 until their wave;
+ *   - GET /api/projects/:id/workspace/:agentId/outcome: Test Case Generation answers the case outcome, each other agent its own (W2), and an
+ *     agent whose outcome is not built yet answers 501;
  *   - GET /api/projects/:id/workspace/:agentId/runs: that agent's runs only;
  *   - code and mixed projects start runs exactly as before and have no Workspace.
  *
@@ -243,7 +244,7 @@ describe("the Workspace: each agent's status, outcome and runs", () => {
         expect((await call("GET", `/api/projects/${pid}/workspace/nope/runs`)).status).toBe(404);
     });
 
-    it("dispatches the outcome: Test Case Generation's is the case outcome, an agent not built yet answers 501", async () => {
+    it("dispatches the outcome: Test Case Generation's is the case outcome, the Accessibility agent's its own (W2b)", async () => {
         const tcg = await call("GET", `/api/projects/${pid}/workspace/test-generation/outcome`);
         expect(tcg.status).toBe(200);
         expect(tcg.body).toMatchObject({ caseAgent: true, runs: expect.any(Array), tree: expect.any(Array), cases: expect.any(Array) });
@@ -252,8 +253,8 @@ describe("the Workspace: each agent's status, outcome and runs", () => {
         expect(one.status).toBe(200);
         expect(one.body.runs.map((r: any) => r.jobId)).toEqual([ids.case]);
         expect((await call("GET", `/api/projects/${pid}/workspace/test-generation/outcome?run=${ids.a11y}`)).status).toBe(404);
-        const later = await call("GET", `/api/projects/${pid}/workspace/accessibility/outcome`);
-        expect(later).toMatchObject({ status: 501, body: { error: "The Accessibility Testing Agent's outcome is not shown here yet." } });
+        const a11y = await call("GET", `/api/projects/${pid}/workspace/accessibility/outcome`);
+        expect(a11y).toMatchObject({ status: 200, body: { runs: 2, pages: [], rules: [] } });
         expect((await call("GET", `/api/projects/${pid}/workspace/responsive-ui/outcome`)).status).toBe(404);
     });
 });
