@@ -92,7 +92,7 @@ const add = (product: string, quantity: string) => [
     { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Your cart" } },
 ];
 const spec = (testId: string, title: string, steps: unknown[]) =>
-    TestSpecSchema.parse({ testId, title, kind: "web", category: "Cart", source: { origin: "browser-agent", requirements: ["R-2"] }, expectedResults: ["The cart adds up its lines"], steps });
+    TestSpecSchema.parse({ testId, title, kind: "web", category: "Cart", source: { origin: "browser-agent", requirements: ["R-2"] }, expectedResults: ["The cart adds up its lines: $21.00 for one p1 and two p3, $17.50 for one p1 with shipping"], steps });
 const seed = spec("WEB-021", "Subtotal of two lines", [...signIn, ...add("p1", "1"), ...add("p3", "2"), { action: "assert", check: "exactText", locator: { by: "testId", value: "subtotal" }, expected: "$21.00", source: "R-2" }]);
 const stateBound = spec("WEB-022", "Total of one line", [...signIn, ...add("p1", "1"), { action: "assert", check: "exactText", locator: { by: "testId", value: "total" }, expected: "$17.50", source: "R-2" }]);
 
