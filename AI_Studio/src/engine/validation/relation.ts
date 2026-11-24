@@ -19,6 +19,8 @@
  *   suffix  := "." name | "[" digits "]" | "[*]"     ([*] maps the rest of the path over every element; nested ones flatten)
  *
  * Arithmetic and < > need numbers, == and != compare JSON values exactly, and / or / implies need true or false (and short-circuit).
+ * Arithmetic and < > also take lists of numbers ([*] paths) element by element, or a list with one number: `lines[*].lineTotal ==
+ * lines[*].unitPrice * lines[*].quantity` compares two lists, and `lines[*].quantity <= 10` holds when every element keeps it.
  * Caps: 300 characters, 120 tokens, nesting 20, 12 path parts, 1000 list elements. Only own properties of the data are read.
  *
  * Like ../contracts/check.ts, the checker is plain JavaScript text: scripts carry it verbatim (so a downloaded script runs on its
@@ -308,15 +310,24 @@ function relationRun(tree, text, body, vars, seen) {
                 const r = ev(n.r);
                 if (op === "==") return relationSame(l, r);
                 if (op === "!=") return !relationSame(l, r);
-                const x = num(n.l, l);
-                const y = num(n.r, r);
-                if (op === "<") return x < y;
-                if (op === "<=") return x <= y;
-                if (op === ">") return x > y;
-                if (op === ">=") return x >= y;
-                if (op === "/" && y === 0) throw new Error(src(n.r) + " is 0, so " + src(n) + " has no value");
-                const v = op === "+" ? x + y : op === "-" ? x - y : op === "*" ? x * y : x / y;
-                return note(n, num(n, v));
+                const one = (x, y) => {
+                    num(n.l, x);
+                    num(n.r, y);
+                    if (op === "<") return x < y;
+                    if (op === "<=") return x <= y;
+                    if (op === ">") return x > y;
+                    if (op === ">=") return x >= y;
+                    if (op === "/" && y === 0) throw new Error(src(n.r) + " is 0, so " + src(n) + " has no value");
+                    return num(n, op === "+" ? x + y : op === "-" ? x - y : op === "*" ? x * y : x / y);
+                };
+                if (!Array.isArray(l) && !Array.isArray(r)) return op === "<" || op === "<=" || op === ">" || op === ">=" ? one(l, r) : note(n, one(l, r));
+                // Lists ([*] paths) element by element, a number with each element: arithmetic gives the list of results, < <= > >= hold
+                // when they hold for every element.
+                if (Array.isArray(l) && Array.isArray(r) && l.length !== r.length) throw new Error(src(n.l) + " has " + l.length + " values and " + src(n.r) + " has " + r.length);
+                const k = Array.isArray(l) ? l.length : r.length;
+                const out = [];
+                for (let i = 0; i < k; i++) out.push(one(Array.isArray(l) ? l[i] : l, Array.isArray(r) ? r[i] : r));
+                return op === "<" || op === "<=" || op === ">" || op === ">=" ? out.every((b) => b) : note(n, out);
             }
         }
         throw new Error("unknown part of the expression");
@@ -362,15 +373,17 @@ function relationAssert(text, body, vars, source) {
 export type RelationParse = { ok: true; refs: { paths: string[]; vars: string[] } } | { ok: false; error: string };
 export type RelationResult = { held: true; values: Array<[string, unknown]> } | { held: false; values: Array<[string, unknown]>; message: string };
 
+type RelationNode = { t: string; op?: string; v?: unknown; s: number; e: number; l?: RelationNode; r?: RelationNode; x?: RelationNode; args?: RelationNode[] };
 interface RelationRuntime {
     relationParse(text: string): RelationParse;
     relationEval(text: string, body: unknown, vars: Record<string, unknown>, source?: string): RelationResult;
+    relationParseTree(text: string): RelationNode;
 }
 
 let runtime: RelationRuntime | undefined;
 /** The exact helper the scripts carry, compiled once from its constant text (never from an expression). */
 function relationRuntime(): RelationRuntime {
-    runtime ??= new Function(`${RELATION_HELPER_SOURCE}\nreturn { relationParse, relationEval };`)() as RelationRuntime;
+    runtime ??= new Function(`${RELATION_HELPER_SOURCE}\nreturn { relationParse, relationEval, relationParseTree };`)() as RelationRuntime;
     return runtime;
 }
 
@@ -385,4 +398,30 @@ export function parseRelation(text: string): RelationParse {
  */
 export function checkRelation(text: string, input: { body: unknown; vars?: Record<string, unknown> }, source?: string): RelationResult {
     return relationRuntime().relationEval(text, input.body, input.vars ?? {}, source);
+}
+
+/**
+ * The comparisons of an expression with a number (`(subtotal - discount) >= 50`): the other side's text, the operator as if the number
+ * were on the right, and the number. Empty for an expression outside the grammar.
+ */
+export function numberComparisons(text: string): Array<{ side: string; op: "<" | "<=" | ">" | ">="; limit: number }> {
+    let tree: RelationNode;
+    try {
+        tree = relationRuntime().relationParseTree(text);
+    } catch {
+        return [];
+    }
+    const flip = { "<": ">", "<=": ">=", ">": "<", ">=": "<=" } as const;
+    const out: Array<{ side: string; op: "<" | "<=" | ">" | ">="; limit: number }> = [];
+    const isNum = (n?: RelationNode) => n?.t === "lit" && typeof n.v === "number";
+    const walk = (n?: RelationNode): void => {
+        if (!n) return;
+        if (n.t === "bin" && n.op && n.op in flip && isNum(n.l) !== isNum(n.r)) {
+            const [side, limit, op] = isNum(n.r) ? [n.l!, n.r!.v as number, n.op as keyof typeof flip] : [n.r!, n.l!.v as number, flip[n.op as keyof typeof flip]];
+            out.push({ side: text.slice(side.s, side.e).trim(), op, limit });
+        }
+        for (const c of [n.l, n.r, n.x, ...(n.args ?? [])]) walk(c);
+    };
+    walk(tree);
+    return out;
 }

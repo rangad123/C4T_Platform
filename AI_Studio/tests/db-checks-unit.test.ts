@@ -315,6 +315,39 @@ describe("stored-data rules over rows (C5 over the database)", () => {
         expect((await proposeRowRelations(scripted(answer, []), { requirements: reqs, schema: empty, secrets: [], probe: none })).checks).toHaveLength(2);
     });
 
+    // paid-shop-2 API-067: the model's rule 4.5 is in dollars (50, 5) while the rows hold cents. The orders written while the tests were
+    // authored kept it (free shipping from 5000) and the starting ones broke it, so "every row breaks it" kept it, and the BS-12
+    // read-back failed on the clean app at this rule.
+    it("drops a rule whose number is 100 times off the stored values; keeps the same rule in the stored unit, defect rows and all", async () => {
+        const shopSchema = cleanSchema({
+            tables: [{ name: "orders", columns: ["id", "subtotal", "discount", "shipping", "total"], primaryKey: ["id"], uniqueKeys: [], foreignKeys: [], rowCount: 5 }],
+        });
+        const order = (id: string, subtotal: number, shipping: number) => ({ id, subtotal, discount: 0, shipping, total: subtotal + shipping });
+        const rows = {
+            orders: [
+                order("ord-1000", 850, 500), order("ord-1001", 3450, 500), order("ord-1002", 6250, 0), order("ord-1003", 2500, 500),
+                // One row a defect left (BS-11: no free shipping at exactly 5000).
+                order("ord-1004", 5000, 500),
+            ],
+        };
+        const shopProbe: DatabaseProbe = { schema: async () => shopSchema, check: async (t, p) => runOnRows(validateCheck(t, p, shopSchema), rows, Buffer.alloc(32, 7)) };
+        const reqs = [{ id: "4.5", text: "Orders of $50.00 or more after the discount ship free; others pay $5.00 shipping." }, { id: "3.6", text: "Shipping is at most $5.00 and an order is at least $1.00, or 20 cents of goods." }];
+        const answer = {
+            relations: [
+                { requirementId: "4.5", table: "orders", expression: "((subtotal - discount) >= 50 implies shipping == 0) and ((subtotal - discount) < 50 implies shipping == 5)" },
+                { requirementId: "4.5", table: "orders", expression: "(subtotal - discount) >= 5000 implies shipping == 0" },
+                // Stated amounts in the stored unit, or a bound every row meets: kept.
+                { requirementId: "3.6", table: "orders", expression: "shipping <= 500 and subtotal >= 100" },
+                // A number the requirement does not write as an amount is not judged for its scale (100 times it does fall among the rows).
+                { requirementId: "3.6", table: "orders", expression: "total >= 20" },
+            ],
+        };
+        const r = await proposeRowRelations(scripted(answer, []), { requirements: reqs, schema: shopSchema, secrets: [], probe: shopProbe });
+        expect(r.checks.map((c) => c.name)).toEqual(["relation orders: (subtotal - discount) >= 5000 implies shipping == 0", "relation orders: shipping <= 500 and subtotal >= 100", "relation orders: total >= 20"]);
+        expect(r.report.dropped).toEqual([{ requirementId: "4.5", table: "orders", reason: expect.stringMatching(/compares \(subtotal - discount\) with the requirement's amount 50, .* while 5000 falls among them, so the stored numbers are 100 times/) }]);
+        for (const v of ["6250", "3450", "ord-1002"]) expect(r.report.dropped[0]!.reason).not.toContain(v);
+    });
+
     it("no requirement, no call", async () => {
         const prompts: string[] = [];
         expect((await proposeRowRelations(scripted({ relations: [] }, prompts), { requirements: [], schema: SCHEMA, secrets: [] })).checks).toEqual([]);

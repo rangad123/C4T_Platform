@@ -196,3 +196,14 @@ describe("ARIA snapshot templates", () => {
         expect(classPattern("big").test("bigger")).toBe(false);
     });
 });
+
+describe("a role locator without its role (paid rbac-2 WEB-038: within {by: role, value: Main})", () => {
+    it("is never rendered as a button: the script stops at that step with the one sentence that says what to fix", async () => {
+        const { ROLE_MISSING } = await import("../src/engine/spec/schema.js");
+        const call = locatorCall("page", { by: "role", role: "link", value: "People", exact: true, within: { by: "role", value: "Main" } });
+        expect(call).not.toContain('"button"');
+        expect(call).toContain(JSON.stringify(ROLE_MISSING));
+        expect(locatorCall("page", { by: "role", role: "navigation", value: "Main" })).toBe('page.getByRole("navigation", { name: "Main" })');
+    });
+});
+

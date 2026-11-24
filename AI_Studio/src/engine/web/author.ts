@@ -44,7 +44,7 @@ import { knowledgeBlock, usableRules, type KnowledgeRule } from "../planning/pla
 import { maskObservedText, observedTextSecrets } from "../evidence/observed-text.js";
 import { redactText } from "../../shared/redact-text.js";
 import { TEST_DATA_AUTHORING_NOTE, testValueTool, type TestData } from "../testdata/generate.js";
-import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, startingIdsOf } from "./leftovers.js";
+import { findLeftoverUse, LEFTOVER_REDO, leftoverReason, scenarioWords, startingIdsOf, withOwnUnique } from "./leftovers.js";
 import { elementSender, requestTarget, STATE_CHANGING_METHODS } from "../explore/request-target.js";
 import { engineWordingIn } from "../explore/perturb.js";
 import { failsAsCaptured } from "../explore/independence.js";
@@ -509,6 +509,20 @@ export function withExactRoleNames(step: Step): Step {
     return out;
 }
 
+/** Controls whose content is the value typed into them: their text is always empty, so a text check on one can never pass. */
+const VALUE_ROLES = new Set(["textbox", "searchbox", "spinbutton", "slider"]);
+
+/**
+ * A text check on a form field (by its role or its placeholder) checks the field's value instead: Playwright's toHaveText reads an
+ * input's text, which is always "" (paid trial shop-2 WEB-045, `exactText` 10 on the Quantity spinbutton, failed the same on every app).
+ */
+export function withFormControlChecks(step: Step): Step {
+    if (step.action !== "assert" || (step.check !== "text" && step.check !== "exactText") || !step.locator) return step;
+    const l = step.locator;
+    const field = (l.by === "role" && VALUE_ROLES.has(l.role ?? "")) || l.by === "placeholder";
+    return field && !l.filter ? { ...step, check: "value" } : step;
+}
+
 const target = LocatorSchema.describe("How to find the element");
 /** The longest fixed pause the agent may record (a wait for something is the better step; the review flags fixed ones). */
 const MAX_FIXED_WAIT_MS = 3_000;
@@ -608,15 +622,17 @@ export function authorWebSpec(input: AuthorInput): Promise<AuthorOutcome> {
         if (out.status === "complete" && input.review && !input.resume) out = await reviewAndFix(input, out);
         if (input.leftoverCheck && !input.resume && out.status !== "blocked") {
             const starting = startingIdsOf(input.model);
-            const uses = findLeftoverUse(out.steps, starting);
+            const stated = scenarioWords(input.scenario);
+            out = { ...out, steps: withOwnUnique(out.steps) };
+            const uses = findLeftoverUse(out.steps, starting, stated);
             if (uses.length) {
                 const redo = `${leftoverReason(uses)} ${LEFTOVER_REDO}`;
                 input.ctx.emit({ stage: "generation", kind: "leftover_redo", level: "warn", message: `${input.scenario.scenarioId}: written again from the start: ${leftoverReason(uses)}`, data: { steps: uses.map((u) => u.step) } });
                 let again = await authorScenario({ ...input, redo });
                 if (again.status === "complete" && input.review) again = await reviewAndFix({ ...input, redo }, again);
                 // A second try that could not finish keeps the first test (still flagged: the caller saves it for review).
-                if (again.status !== "blocked") out = again;
-                if (findLeftoverUse(out.steps, starting).length) return out;
+                if (again.status !== "blocked") out = { ...again, steps: withOwnUnique(again.steps) };
+                if (findLeftoverUse(out.steps, starting, stated).length) return out;
             }
         }
         // A disagreement between layers (C4) is judged by code on the real answers, like a documented case the API accepted: no AI verdict.
@@ -939,7 +955,7 @@ async function authorScenario(input: AuthorInput): Promise<AuthorOutcome> {
         const refuse = refusedBy(input.notes);
         let notesShownFor = pathOf(page.url());
         const record = async (step: Step, toolName: string, args: unknown) => {
-            step = withExactRoleNames(step);
+            step = withFormControlChecks(withExactRoleNames(step));
             // The browser crashed or went away: nothing more can be done in it, so the scenario ends here with that reason.
             const lost = session.lostReason({ pageClosedCounts: false });
             if (lost) {
@@ -1575,7 +1591,7 @@ export function toSpec(scenario: Scenario, outcome: AuthorOutcome, testId: strin
         type: scenario.type,
         priority: scenario.priority,
         preconditions: scenario.preconditions,
-        steps: outcome.steps,
+        steps: withOwnUnique(outcome.steps),
         expectedResults: scenario.expectedResults,
         testData: outcome.testData,
         tags: [scenario.type, scenario.priority],

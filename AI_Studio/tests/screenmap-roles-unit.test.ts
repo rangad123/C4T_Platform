@@ -229,6 +229,29 @@ describe("a role scenario", () => {
         expect(script).not.toContain("teacher-pw");
     });
 
+    it("a scenario without a role that names one of the project's accounts is written and run as that account (paid rbac-2 WEB-038, WEB-047)", () => {
+        const roles = ["ana", "ben", "mia", "ada"].map((n) => ({ name: n, username: `${n}@example.test`, password: "pw" }));
+        // The trial's own scenarios (generation_meta_json.scenario): no role, the account named in their words.
+        const web038 = { title: "Admin main navigation shows the People entry", description: "Sign in as the admin account and read the main navigation links.", preconditions: [], requiredData: ["admin test account ada"], expectedResults: ["The main navigation shows a People link next to Notes, New note, Account and Sign out (requirement 2.3.b)"] };
+        const web047 = { title: "Admin creates and deletes a note with owner controls", description: "Admin ada creates a generated note, confirms she has the same owner controls as a user, then deletes the note the test created.", preconditions: ["Signed in as the admin test account ada"], requiredData: ["note with generated data: title qamosn {{unique}}, text qamosn generated text"], expectedResults: ["The new note page shows ada as owner with Edit, Share and Delete controls visible (requirement 1.5.a)"] };
+        for (const sc of [web038, web047]) expect(roleCredentials(sc, roles)).toEqual({ name: "ada", credentials: { username: "ada@example.test", password: "pw" } });
+        expect(roleCredentials({ title: "Read-only note", description: "Mia opens a note owned by someone else and confirms it is read-only.", preconditions: ["Signed in as the test user mia"] }, roles)?.name).toBe("mia");
+        // Naming none, or two accounts, keeps the project's account; a role the planner set wins over the words.
+        expect(roleCredentials({ ...web038, requiredData: [] }, roles)).toBeUndefined();
+        expect(roleCredentials({ ...web047, preconditions: ["Signed in as the admin test account ada, then as ben"], description: "Ben signs in after ada" }, roles)).toBeUndefined();
+        expect(roleCredentials({ ...web047, role: "ben" }, roles)?.name).toBe("ben");
+        // The project's own account (ana) named in the words stays the project's account.
+        const web046 = { title: "Whitespace title refused", description: "Enters spaces as the title.", preconditions: ["Signed in as the test user ana"] };
+        expect(roleCredentials(web046, roles)?.name).toBe("ana");
+        expect(roleCredentials(web046, roles, "ana@example.test")).toBeUndefined();
+        expect(roleCredentials(web038, roles, "ana@example.test")?.name).toBe("ada");
+        // An account named as data is not who signs in (the trial's WEB-040: the owner shares with ben, then signs in as the colleague).
+        const web040 = { title: "Stopping sharing hides the note from the colleague", description: "As the owner, create a note, share it with a colleague, then click the stop-sharing control for that colleague and sign out. Sign in as the colleague and open the note's address.", preconditions: ["Owner account and colleague account exist"], requiredData: ["create a note with generated data tagged qamosn", "colleague test account email (ben)"], expectedResults: ["ben no longer sees the note"] };
+        expect(roleCredentials(web040, roles)).toBeUndefined();
+        // A name inside another word is not a mention ("canada", "bench").
+        expect(roleCredentials({ title: "Bench note shows in canada", description: "Sign in as the bench user", requiredData: [] }, roles)).toBeUndefined();
+    });
+
     it("uses the project's account when the scenario's role is not one of its accounts", () => {
         expect(roleCredentials({ role: "ghost" }, [{ name: "teacher", username: "t", password: "p" }])).toBeUndefined();
         expect(roleCredentials({}, [{ name: "teacher", username: "t", password: "p" }])).toBeUndefined();

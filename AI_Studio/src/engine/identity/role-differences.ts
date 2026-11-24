@@ -52,9 +52,39 @@ export function roleDifferences(reach: Reach[], max = 24): string[] {
 
 const ROLE_KEY = /^[a-z][a-z0-9_-]*$/;
 
-/** The sign-in details a role scenario is written with: its account's, or undefined (then the project's own account is used). */
-export function roleCredentials(scenario: { role?: string }, roles: RoleLogin[] | undefined): { name: string; credentials: Credentials } | undefined {
-    const r = scenario.role ? roles?.find((x) => x.name === scenario.role) : undefined;
+type RoleScenario = { role?: string; title?: string; description?: string; preconditions?: string[]; requiredData?: string[]; expectedResults?: string[] };
+
+/**
+ * The one test account a scenario without a role says it signs in as, or undefined when it says none or more than one: "Signed in as the
+ * admin test account ada", "admin test account ada" in its data, or a description that starts with the account ("Mia opens a note").
+ * An account named as data ("colleague test account email (ben)", "share it with ben") is not who signs in. Paid trial rbac-2 WEB-038,
+ * WEB-044, WEB-045 and WEB-047 named their account this way and ran as the project's.
+ */
+function namedRole(scenario: RoleScenario, roles: RoleLogin[]): string | undefined {
+    const text = [scenario.title, scenario.description, ...(scenario.preconditions ?? []), ...(scenario.requiredData ?? [])].join("\n").toLowerCase();
+    const opening = (scenario.description ?? "").toLowerCase();
+    const named = roles.filter((r) => {
+        const n = r.name.toLowerCase();
+        if (!ROLE_KEY.test(n)) return false;
+        const end = "(?![a-z0-9_-])";
+        return (
+            new RegExp(`\\b(?:signed|signs|sign|logged|logs|log) in as (?:the |an? )?(?:[a-z]+ ){0,3}${n}${end}`).test(text) ||
+            new RegExp(`\\btest (?:account|user) ${n}${end}|(?<![a-z0-9_-])${n} test account\\b`).test(text) ||
+            new RegExp(`^(?:[a-z]+ )?${n}${end}`).test(opening)
+        );
+    });
+    return named.length === 1 ? named[0]!.name : undefined;
+}
+
+/**
+ * The sign-in details a role scenario is written with: its account's, or undefined (then the project's own account is used). A scenario
+ * the planner gave no role is a role scenario when its words say it signs in as exactly one of the project's accounts other than
+ * `mainUsername`'s.
+ */
+export function roleCredentials(scenario: RoleScenario, roles: RoleLogin[] | undefined, mainUsername?: string): { name: string; credentials: Credentials } | undefined {
+    // The project's own account named in the words stays the project's account (its fresh-account and lane handling stay as they are).
+    const role = scenario.role ?? (roles?.length ? namedRole(scenario, roles.filter((r) => r.username !== mainUsername)) : undefined);
+    const r = role ? roles?.find((x) => x.name === role) : undefined;
     if (!r || !ROLE_KEY.test(r.name.toLowerCase())) return undefined;
     return { name: r.name, credentials: { username: r.username, password: r.password, ...(r.totpSecret ? { totpSecret: r.totpSecret } : {}) } };
 }

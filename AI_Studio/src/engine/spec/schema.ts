@@ -637,6 +637,9 @@ export function expandRepeats(value: string): string {
  * Replace {{name}} placeholders. `{{unique}}` resolves to a per-call token; `{{repeat.<c>.<n>}}` to `c` written `n` times (before any
  * data value, as the rendered script does).
  */
+/** Why a by="role" locator without its role is refused (paid rbac-2 WEB-038 was rendered as a button and never matched). */
+export const ROLE_MISSING = 'A locator with by="role" needs its role (button, link, navigation, heading...): add the role, or use by="text" or by="label".';
+
 export function interpolate(template: string, data: Record<string, string>): string {
     return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (m, key: string) => {
         const r = repeatOf(key);

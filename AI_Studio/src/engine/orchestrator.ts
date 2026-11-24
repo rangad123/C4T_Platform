@@ -63,7 +63,7 @@ import { validateBatch, type TestUnderValidation, type ValidationOutcome } from 
 import { isKeyTest, runVariantChecks, type VariantRecord } from "./validation/variants.js";
 import type { ScriptRun } from "./validation/runner.js";
 import { authorWebSpec, statedSource, toSpec, WRITER_STOPPED, type ActionGate, type AuthorOutcome } from "./web/author.js";
-import { findLeftoverUse, leftoverReason, startingIdsOf } from "./web/leftovers.js";
+import { findLeftoverUse, leftoverReason, scenarioWords, startingIdsOf } from "./web/leftovers.js";
 import { checkStrength } from "./mutation/strength.js";
 import { CANDIDATE_FINDING_LIMITS, CandidateFindingSchema, confidenceOf, findingFingerprint, type CandidateFinding, type CaptureState, type FindingConfidence } from "./explore/finding.js";
 import { checkIndependence, replayOwnSteps, type IndependenceCheck, type IndependenceReplay } from "./explore/independence.js";
@@ -1035,7 +1035,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const meta = { model: ctx.llm.modelName, scenario, authoring: outcome.status, explanation: outcome.explanation, ...(outcome.observations?.length ? { visionObservations: outcome.observations } : {}) };
             // The leftover check (web/leftovers.ts, no AI): a test that still acts on or checks an item its own steps never added or opened,
             // after its second try, leans on what the account held. Saved for review, never validated, and never a finding.
-            const leftovers = findLeftoverUse(written.steps, startingIdsOf(model));
+            const leftovers = findLeftoverUse(written.steps, startingIdsOf(model), scenarioWords(scenario));
             if (leftovers.length) {
                 const why = leftoverReason(leftovers);
                 const h = await persistNew(spec, "playwright", "NEEDS_REVIEW", `${outcome.status === "defect" ? "Not reported as a finding" : "Not validated"}: ${why.replace(/\.$/, "")}. The test writer's account: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.`, { ...meta, leftovers });
@@ -1146,7 +1146,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (scenarios.length) {
             // One lane per account: scenarios that sign in as the same account share its state on the server (cart, discount,
             // profile), so they are written one at a time; signed-out ones and other accounts' run beside them, up to CONCURRENCY.
-            const laneOf = (scenario: Scenario): string | undefined => scenarioAccountLane(scenario, roleCredentials(scenario, req.roles)?.name, Boolean(creds && authState.loggedIn));
+            const laneOf = (scenario: Scenario): string | undefined => scenarioAccountLane(scenario, roleCredentials(scenario, req.roles, creds?.username)?.name, Boolean(creds && authState.loggedIn));
             const sharing = scenarios.filter((s, _, all) => laneOf(s) !== undefined && all.filter((o) => laneOf(o) === laneOf(s)).length > 1).length;
             if (sharing) ctx.emit({ stage: "generation", kind: "account_lanes", message: `${sharing} scenarios that sign in as the same account are written one at a time` });
             const results = await mapLanes(scenarios, ctx.config.CONCURRENCY, laneOf, async (scenario) => {
@@ -1155,7 +1155,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const runId = await sink.startAgentRun("web-authoring", `${scenario.scenarioId} ${scenario.title}`);
                 try {
                     // A role scenario is written signed in as its own test account, and its script runs as that account.
-                    const asAccount = roleCredentials(scenario, req.roles);
+                    const asAccount = roleCredentials(scenario, req.roles, creds?.username);
                     const scenarioRules = rulesForScenario(scenario, req.appKnowledge);
                     const as = await authoringAccount(scenario, { objective: false, roleAccount: Boolean(asAccount), signsInAsMain: laneOf(scenario) === "main" });
                     const outcome = await authorWebSpec({

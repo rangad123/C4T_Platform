@@ -31,6 +31,7 @@ beforeAll(async () => {
         }
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         if (req.url === "/products") return void res.end(`<!doctype html><title>Products</title><h1>Products</h1><a href="/cart">Cart</a>`);
+        if (req.url === "/qty") return void res.end(`<!doctype html><title>Cart</title><h1>Cart</h1><label>Quantity <input type="number" value="9"></label>`);
         if (req.url === "/profile")
             return void res.end(
                 `<!doctype html><title>Profile</title><h1>Profile</h1><p id="msg"></p><button onclick="fetch('/api/profile', { method: 'PUT' }).then(() => { document.querySelector('#msg').textContent = 'Saved.'; })">Save</button><script>fetch('/api/account')</script>`,
@@ -95,6 +96,49 @@ describe("authoring guards against false positives (row 228)", () => {
         expect(refused).toHaveLength(2);
         for (const a of refused) expect(a.observation).toMatch(/how the scenario words its expected result/);
         expect(out.steps.filter((s) => s.action === "assert")).toHaveLength(1);
+    }, 120_000);
+
+    it("a text check on a form field is recorded and run as a value check (paid shop-2 WEB-045: toHaveText on a spinbutton is always empty)", async () => {
+        const actions: Array<{ tool: string; ok: boolean; observation: string }> = [];
+        const out = await authorWebSpec({
+            ctx: ctxFor(
+                scripted([
+                    { tool: "assert", input: { check: "exactText", target: { by: "role", role: "spinbutton", value: "Quantity" }, expected: "9", source: "expected:1" } },
+                    { tool: "finish", input: { result: "complete", explanation: "The quantity shows 9" } },
+                ]),
+            ),
+            browser, baseUrl: BASE, model: emptyModel, scenario: { ...scenario, scenarioId: "S-QTY", startPath: "/qty", expectedResults: ["The cart line keeps quantity 9"] }, onAction: (a) => actions.push(a),
+        });
+        expect(actions.find((a) => a.tool === "assert")?.ok).toBe(true);
+        expect(out.steps.filter((s) => s.action === "assert")).toEqual([expect.objectContaining({ check: "value", expected: "9", locator: { by: "role", role: "spinbutton", value: "Quantity", exact: true } })]);
+        const { withFormControlChecks } = await import("../src/engine/web/author.js");
+        // A check of a field by its placeholder too; other elements, and a check that is not of text, are left alone.
+        const ph: Step = { action: "assert", check: "text", locator: { by: "placeholder", value: "Search" }, expected: "mug", description: "" };
+        expect(withFormControlChecks(ph)).toEqual({ ...ph, check: "value" });
+        const heading: Step = { action: "assert", check: "exactText", locator: { by: "role", role: "heading", value: "Cart" }, expected: "Cart", description: "" };
+        expect(withFormControlChecks(heading)).toEqual(heading);
+        const visible: Step = { action: "assert", check: "visible", locator: { by: "role", role: "textbox", value: "Name" }, description: "" };
+        expect(withFormControlChecks(visible)).toEqual(visible);
+    }, 120_000);
+
+    it("refuses a role locator without its role, with one sentence, and records nothing of it (paid rbac-2 WEB-038)", async () => {
+        const { ROLE_MISSING } = await import("../src/engine/spec/schema.js");
+        const actions: Array<{ tool: string; ok: boolean; observation: string }> = [];
+        const out = await authorWebSpec({
+            ctx: ctxFor(
+                scripted([
+                    { tool: "assert", input: { check: "visible", target: { by: "role", role: "link", value: "Products", within: { by: "role", value: "Main" } }, source: "expected:1" } },
+                    { tool: "assert", input: { check: "visible", target: { by: "role", role: "heading", value: "Cart" }, source: "expected:1" } },
+                    // A writer that reads the refusal as the defect: the refused check must not become the captured one.
+                    { tool: "finish", input: { result: "defect", explanation: "The menu link is missing" } },
+                ]),
+            ),
+            browser, baseUrl: BASE, model: emptyModel, scenario: { ...scenario, scenarioId: "S-ROLE", expectedResults: ["The cart page opens"] }, onAction: (a) => actions.push(a),
+        });
+        const refused = actions.find((a) => a.tool === "assert" && !a.ok);
+        expect(refused?.observation).toContain(ROLE_MISSING);
+        expect(out.steps.filter((s) => s.action === "assert")).toEqual([expect.objectContaining({ locator: expect.objectContaining({ role: "heading" }) })]);
+        expect(out.status === "defect" && out.capture).not.toBe("captured");
     }, 120_000);
 
     it("keeps the substring match for containers and for a name the writer set exact=false on", async () => {
