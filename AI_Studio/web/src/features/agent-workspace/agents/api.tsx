@@ -86,7 +86,7 @@ function Body({ projectId, run, active }: { projectId: string; run?: string; act
                             <li key={f.id} className="card-pad stack-sm">
                                 <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                                     <h4 className="t-card" style={{ margin: 0 }}>{f.title}</h4>
-                                    {f.severity && SEVERITIES.includes(f.severity) && <SeverityBadge severity={f.severity as Severity} />}
+                                    {f.severity && SEVERITIES.includes(f.severity) && <SeverityBadge severity={f.severity as Severity} tipFocusable />}
                                     <Badge tone="danger">{f.stateLabel}</Badge>
                                 </div>
                                 <dl className="ws-inputs">
@@ -139,7 +139,7 @@ function Run({ projectId, jobId }: { projectId: string; jobId: string }) {
         <div className="stack" data-testid="agent-run">
             <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                 <h3 className="t-card">Run {list.length - at}</h3>
-                <JobBadge job={job} />
+                <JobBadge job={job} tipFocusable />
                 <span className="t-meta">
                     Started <RelTime iso={job.createdAt} />
                 </span>

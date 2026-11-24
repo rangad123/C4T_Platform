@@ -10,7 +10,7 @@ export const bigPicture: Topic[] = [
         what: "The first page to open each day: is it healthy, and what needs me?",
         why: "You see the latest result and the most serious problems in one place.",
         steps: [
-            step("Open a project. An AI agent project opens on its Workspace, a code project on its Dashboard.", "Workspace", "Dashboard"),
+            step("Open a project's Workspace (AI agent) or Dashboard (code).", "AI agent", "Workspace", "Dashboard"),
             step("Read the latest result and the ribbon of Passing, Needs a look, Failing and Not run yet."),
             step("Read Needs your attention. It lists the five most serious tests.", "Needs your attention"),
             step("Open View technical details for detailed activity.", "View technical details"),

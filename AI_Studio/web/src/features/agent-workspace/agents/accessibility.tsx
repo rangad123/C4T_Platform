@@ -63,7 +63,7 @@ export function OutcomeFrame<T extends { runs: number }>(props: { projectId: str
                     <h3 className="t-card" style={{ margin: 0 }}>
                         Run {runs.data!.length - at}
                     </h3>
-                    <JobBadge job={job} />
+                    <JobBadge job={job} tipFocusable />
                     <span className="t-meta">
                         Started <RelTime iso={job.createdAt} />
                     </span>

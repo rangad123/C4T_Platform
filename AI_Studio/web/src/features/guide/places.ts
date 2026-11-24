@@ -120,7 +120,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Go back to your list of projects.", button: "Back to projects", to: here("projects") },
         ],
         words: ["test", "exploration"],
-        next: [{ text: "On an AI agent project's Workspace, choose Run on an agent's card.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Run", "Workspace"] }],
+        next: [{ text: "On an AI agent project's Workspace, choose Run on a testing agent's card.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Run", "Workspace"] }],
         topic: "first-steps",
     },
     "explore-again": {
@@ -154,9 +154,8 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "An AI agent project opens on its Workspace: one card per testing agent with its status and last outcome. A code project opens on its Dashboard: what the last run found, which tests need your attention, and what to do next.",
         ui: ["Workspace", "Dashboard"],
         canDo: [
-            { text: "In an AI agent project's Workspace, choose Run on an agent's card to start that agent, or Open to see its outcome.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Workspace", "Run", "Open"] },
             { text: "See which tests are failing or need a look.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
-            { text: "In an AI agent project, choose Explore again to look at the application once more and find new things to test.", button: "Read about exploring again", to: { topic: "explore-my-app", search: "explore again" }, ui: ["Explore again"] },
+            { text: "In an AI agent project's Workspace, choose Run on a testing agent's card to start it, or Open to see its outcome.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Workspace", "Run", "Open"] },
             { text: "In a code project, choose Add test scripts to start: code projects are not explored.", button: "Read about writing code", to: { topic: "write-code" }, ui: ["Add test scripts"] },
             { text: "While it explores, turn on Watch live to see the browser the AI is using.", button: "Read how to watch the AI", to: { topic: "watch-the-ai" }, ui: ["Watch live"] },
             { text: "Look at past results in Runs.", button: "Open Runs", to: here("runs"), ui: ["Runs"] },

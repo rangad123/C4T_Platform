@@ -209,7 +209,7 @@ function Run({ projectId, jobId }: { projectId: string; jobId: string }) {
         <div className="stack" data-testid="agent-run">
             <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                 <h3 className="t-card">Run {list.length - at}</h3>
-                <JobBadge job={job} />
+                <JobBadge job={job} tipFocusable />
                 <span className="t-meta">
                     Started <RelTime iso={job.createdAt} />
                 </span>
