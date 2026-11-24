@@ -28,12 +28,12 @@
  * Besides the run's own secrets, the values the trace itself shows to be secret are masked the same way (secretsInTrace): every cookie
  * value, the value of a header or JSON key whose name says secret, the value of a field that is secret or personal by its attributes (as
  * the screenshot cover decides, proof-style.ts), and whatever the shared redaction hides in any text of the trace (e-mails, phone
- * numbers, addresses, card numbers, credentials after a key word, a connection string's password, a query value that is one of those).
- * A value with nothing that marks it (a token shown as plain page text) is not found.
+ * numbers, addresses, card numbers, credentials after a key word, a connection string's password, a query value that is one of those, a
+ * secret-shaped word shown as page text). A secret shaped like an ordinary word, with nothing that marks it, is not found.
  *
  * Limits: masking is by known value (at least 4 characters). A value the test made itself (a code generated from an authenticator secret,
  * a password a code script holds in its own source), a secret transformed some other way, and anything inside a compressed part (a zip or
- * gzip body the application served) are not found. Screenshots and the video are pictures: a password field is drawn as dots, but a secret
+ * gzip body the application served) are not found. Screenshots are pictures (no video is recorded): a password field is drawn as dots, but a secret
  * shown as text on the page stays visible in them. Environment variables are plain settings, not secrets: only those whose name says they
  * are one (`DB_PASSWORD`, `API_KEY`, `..._TOKEN`) are masked like an account's password. A secret that looks like a number but is not
  * only digits (`-1234`, `12.50`), or one equal to a JSON word (`true`, `null`), becomes "[hidden]" where it stands outside a string too,

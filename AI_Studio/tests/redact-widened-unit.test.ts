@@ -82,6 +82,21 @@ describe("what is not a secret stays readable", () => {
     });
 });
 
+describe("secret-shaped page text (owner 2026-11-24, V9): a password, token or session id written as a bare word", () => {
+    it("is hidden with nothing around it that marks it, in a sentence, a list or a snapshot line", () => {
+        expect(redactText("Your password is CnryTxPw!7x9.")).toBe(`Your password is ${HIDDEN}.`);
+        for (const w of ["CnryTxPw!7x9", "cnryTxBearerTok7", "cnryTxSessCk7q", "CnryIfPw!8x9", "aZ3kQ9mXp2", "Xk9#mP2qL"]) expect(gone(`shown (${w}) | next`, w)).toBe(`shown (${HIDDEN}) | next`);
+    });
+
+    it("product names, codes and identifiers stay: they change case at most twice, or have no digit", () => {
+        for (const w of ["iPhone15ProMax", "MacBookPro2023", "PlayStation5", "addToCart2Btn", "AdminUser01", "SAVE10", "v2.3.1Beta", "!isA11yStep", "COVID19", "getElementById", "WelcomeBack10", "x9Y"]) expect(redactText(`Buy ${w} now`), w).toBe(`Buy ${w} now`);
+    });
+
+    it("secretsInText names it, so a trace masks it by value", () => {
+        expect(secretsInText('["DIV",{"id":"t-password"},"CnryTxPw!7x9"]')).toEqual(["CnryTxPw!7x9"]);
+    });
+});
+
 describe("secretsInText: the values the rules would hide, for masking by value elsewhere (traces)", () => {
     it("names the hidden values, not their keys", () => {
         const found = secretsInText("password: CnryCoPw!6x9 | phone: +1 415 555 0166 | see postgres://shop_admin:CnryDbCoPw6@db.internal/shop and cnry.co6@people.example");
@@ -95,7 +110,7 @@ describe("secretsInText: the values the rules would hide, for masking by value e
 });
 
 describe("where the widened redaction is applied", () => {
-    it("an ARIA snapshot (the app model's page view, the AI's page view): secret and personal field values go, page text stays", async () => {
+    it("an ARIA snapshot (the app model's page view, the AI's page view): secret and personal field values go, so do secret-shaped words; other page text stays", async () => {
         const { maskSnapshot } = await import("../src/engine/evidence/observed-text.js");
         const snap = [
             '- heading "Canary account" [level=1]',
@@ -104,12 +119,18 @@ describe("where the widened redaction is applied", () => {
             '- textbox "E-mail": cnry.fd1@people.example',
             '- textbox "City": Springfield',
             "- text: Welcome back, call +1 415 555 0177",
+            "- text: cnryTxSessCk7q",
             '- link "Share":',
             "  - /url: /?bearer=cnryUrBearerTok5&page=2",
         ].join("\n");
         const out = maskSnapshot(snap);
-        for (const s of ["cnryFdBearerTok1", "cnryFdSessCk1q", "cnry.fd1@people.example", "+1 415 555 0177", "cnryUrBearerTok5"]) expect(out.includes(s), s).toBe(false);
-        for (const s of ['- heading "Canary account" [level=1]', '- textbox "City": Springfield', "- text: Welcome back, call", '- textbox "Access token": [hidden]', "page=2"]) expect(out, s).toContain(s);
+        for (const s of ["cnryFdBearerTok1", "cnryFdSessCk1q", "cnry.fd1@people.example", "+1 415 555 0177", "cnryUrBearerTok5", "cnryTxSessCk7q"]) expect(out.includes(s), s).toBe(false);
+        for (const s of ['- heading "Canary account" [level=1]', '- textbox "City": Springfield', "- text: Welcome back, call", "- text: [hidden]", '- textbox "Access token": [hidden]', "page=2"]) expect(out, s).toContain(s);
+    });
+
+    it("text the app showed while the AI works (a dialog, a page error) loses secret-shaped words too", async () => {
+        const { maskObservedText } = await import("../src/engine/evidence/observed-text.js");
+        expect(maskObservedText("Your new session is cnryTxSessCk7q, keep it", [])).toBe(`Your new session is ${HIDDEN}, keep it`);
     });
 
     it("evidence is masked with it when it is stored and read (console lines, request paths)", async () => {
