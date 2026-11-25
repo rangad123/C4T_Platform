@@ -33,6 +33,7 @@ import { TestDataPanel } from "../environments/TestDataPanel";
 import { SignInTab } from "../identity/SignInTab";
 import { ResetHookCard } from "../webpages/ResetHookCard";
 import { TestFilesCard } from "../webpages/TestFilesCard";
+import { AgentSettingsList } from "../agent-workspace/AgentSettings";
 import "./setup.css";
 
 function FrameworksSetting({ id }: { id: string }) {
@@ -91,6 +92,8 @@ const Part = ({ id, tour, children }: { id: string; /** The guided tour's mark, 
 function GeneralSetting({ id }: { id: string }) {
     return (
         <div className="stack">
+            {/* A project with the Agent Workspace: links to each agent's own Settings (level, model and its own options live there), first so both levels are found. */}
+            <AgentSettingsList projectId={id} />
             <ProjectGeneral id={id} />
             {/* The project's testing type (functional, security assessment or both); it shows only when the security module is on. */}
             <TestingTypeSetting id={id} />

@@ -18,6 +18,7 @@ import { LEVEL_SETTINGS, type ExploreLevel } from "../../../src/engine/levels";
 import { projectAgentView } from "../features/testing-agents/case-agent";
 import type { AgentDetail, ProjectAgents } from "../features/testing-agents/testing-agents";
 import { SIZE_DEFAULT, SizePicker } from "../features/agent-workspace/agents/responsive-ui";
+import { agentSettingsPath, type AgentSettingsAnswer } from "../features/agent-workspace/AgentSettings";
 
 /**
  * Explore an existing project's application (`#/new?project=`): Start exploring the first time, Explore again after (with Explore every
@@ -65,6 +66,16 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
     const [loadCheck, setLoadCheck] = useState(false);
     // A Responsive UI run: the screen sizes it checks beside desktop (the job's `variants`).
     const [sizes, setSizes] = useState<string[]>(SIZE_DEFAULT);
+    // A run of one agent starts from that agent's saved settings (its Settings tab); what the person changes here is for this run only.
+    const mine = useFetch<AgentSettingsAnswer>(agentId ? agentSettingsPath(projectId, agentId) : null).data?.settings;
+    const prefilled = useRef(false);
+    useEffect(() => {
+        if (!mine || prefilled.current) return;
+        prefilled.current = true;
+        if (mine.level) setLevel(mine.level);
+        if (mine.variants) setSizes(mine.variants);
+        if (mine.visionChecks !== undefined) setScreenReview(mine.visionChecks);
+    }, [mine]);
     // Hidden when the project's testing agents leave it off (no UX agent).
     const agentSwitches = useFetch<ProjectAgents>(`/projects/${projectId}/testing-agents`);
     const screenReviewOff = agentSwitches.data?.applies === true && agentSwitches.data.switches?.visionChecks === "off";
@@ -89,7 +100,8 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
     const aiReady = aiReadyOf(myAi);
     const aiMissing = aiReady === false;
     // The AI screen review is the level's: offered only where the level turns it on, as a way to keep screenshots from the AI provider.
-    const offerReview = !screenReviewOff && LEVEL_SETTINGS[chosenLevel].visionByDefault && aiReady === true;
+    // The UX agent's run offers it at every level: the screen review is that agent's own choice.
+    const offerReview = !screenReviewOff && (LEVEL_SETTINGS[chosenLevel].visionByDefault || agentId === "ux") && aiReady === true;
     const agents = inputs.data?.applies && inputs.data.agents ? inputs.data.agents : null;
     // A Test Case Generation project may work from its active requirements alone, with no address (SPEC R16).
     const activeRequirements = useFetch<{ requirements: unknown[] }>(caseAgent ? `/projects/${projectId}/requirements?status=active` : null);
@@ -167,6 +179,11 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
             </span>
         </label>
     );
+    const agentSettingsNote = agentId && (
+        <p className="t-meta" data-testid="agent-settings-note">
+            This run starts from the agent’s <a href={routes.projectAgent(projectId, agentId, "settings")}>Settings</a>, its AI model too. What you change here is for this run only.
+        </p>
+    );
     // What may stop or change the run, said only when it applies: no AI key, runs that do not start here, a refusal.
     const blockers = (
         <>
@@ -201,7 +218,9 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
                 <form className="card card-pad stack" onSubmit={submit} noValidate data-testid="agent-run-form">
                     {urlField("The address of the website this agent checks.")}
                     {agentId === "responsive-ui" && <SizePicker value={sizes} onChange={setSizes} />}
+                    {offerReview && <ScreenReviewChoice level={chosenLevel} canReadImages value={screenReview} onChange={setScreenReview} />}
                     {loadCheckBox}
+                    {agentSettingsNote}
                     {blockers}
                     <div className="row">
                         <Button type="submit" variant="primary" size="lg" icon={Play} loading={busy} disabled={blocked}>
@@ -225,6 +244,7 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
                 {agentId === "responsive-ui" && <SizePicker value={sizes} onChange={setSizes} />}
                 {offerReview && <ScreenReviewChoice level={chosenLevel} canReadImages value={screenReview} onChange={setScreenReview} />}
                 {loadCheckBox}
+                {agentSettingsNote}
                 {!first && (
                     <label className="check">
                         <input type="checkbox" data-testid="full-exploration" checked={fullExploration} onChange={(e) => setFullExploration(e.target.checked)} />

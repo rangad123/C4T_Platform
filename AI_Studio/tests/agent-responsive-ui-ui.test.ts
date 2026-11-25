@@ -225,7 +225,7 @@ describe("the Responsive UI Testing Agent's page (W2c)", () => {
     });
 
     it("Setup: the address, the sign-in and the screen sizes", async () => {
-        await visit(routes.projectAgent(pid, "responsive-ui", "setup"));
+        await visit(routes.projectAgent(pid, "responsive-ui", "settings"));
         const s = page.getByTestId("agent-setup");
         await pwExpect(s).toContainText("http://127.0.0.1:7829");
         await pwExpect(s).toContainText("Phone (375 wide), tablet (768 wide) and desktop (1280 wide) on every run");
@@ -233,6 +233,44 @@ describe("the Responsive UI Testing Agent's page (W2c)", () => {
         await axe("responsive setup");
         await shot("setup.png");
         await at375("setup-375.png");
+    });
+
+    it("Settings: its own defaults (level, model, sizes, no screen review); saved sizes prefill the run form, which can still change them", async () => {
+        await visit(routes.projectAgent(pid, "responsive-ui", "settings"));
+        const d = page.getByTestId("agent-defaults");
+        await pwExpect(d.getByTestId("explore-level")).toBeVisible();
+        await pwExpect(d.getByTestId("agent-model")).toBeVisible();
+        await pwExpect(d.getByTestId("screen-review")).toHaveCount(0);
+        await pwExpect(page.getByTestId("agent-schedules-link").getByRole("link", { name: "Schedules" })).toHaveAttribute("href", routes.agentSchedules(pid, "responsive-ui"));
+        await axe("responsive settings");
+        await shot("settings-agent-responsive-ui-1280.png");
+        await at375("settings-agent-responsive-ui-375.png");
+        await d.getByTestId("size-picker").getByRole("checkbox", { name: /Phone/ }).uncheck();
+        await d.getByRole("radio", { name: /Deep/ }).check();
+        await d.getByRole("button", { name: "Save" }).click();
+        await pwExpect(d.locator(".callout")).toContainText("Saved.");
+        let sent: any;
+        await page.route("**/api/projects/*/test-generation", async (r) => {
+            sent = r.request().postDataJSON();
+            await r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "Stopped by the test." }) });
+        });
+        try {
+            await page.goto("about:blank");
+            await page.goto(`${BASE}/${routes.newProject({ project: pid, agent: "responsive-ui" })}`);
+            const picker = page.getByTestId("size-picker");
+            await pwExpect(picker.getByRole("checkbox", { name: /Phone/ })).not.toBeChecked();
+            await pwExpect(picker.getByRole("checkbox", { name: /Tablet/ })).toBeChecked();
+            await pwExpect(page.getByTestId("agent-settings-note").getByRole("link", { name: "Settings" })).toHaveAttribute("href", routes.projectAgent(pid, "responsive-ui", "settings"));
+            // The run sends the saved level and sizes (the form always sends a level, so it must be the agent's).
+            await page.locator("form button[type=submit]").click();
+            await pwExpect.poll(() => sent?.level).toBe("deep");
+            expect(sent.variants).toEqual(["tablet-768"]);
+        } finally {
+            await page.unroute("**/api/projects/*/test-generation");
+            // Back to none saved, for the run form test below.
+            const r = await fetch(`${BASE}/api/projects/${pid}/workspace/responsive-ui/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
+            expect(r.status).toBe(200);
+        }
     });
 
     it("the run form offers the three sizes, all ticked, desktop always; the run sends the ones kept", async () => {

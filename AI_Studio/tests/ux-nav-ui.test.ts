@@ -716,7 +716,7 @@ describe("every route builder opens a page without an error", () => {
             scripts: [...SCRIPTS.map((k) => routes.scripts(P(), k)), routes.scripts(P(), "steps", "Sign in")],
             agentRuns: [routes.agentRuns(P())],
             agentRun: [routes.agentRun(P(), agentRunId)],
-            projectAgent: [routes.projectAgent(wsId, "accessibility"), routes.projectAgent(wsId, "accessibility", "runs"), routes.projectAgent(wsId, "accessibility", "setup")],
+            projectAgent: [routes.projectAgent(wsId, "accessibility"), routes.projectAgent(wsId, "accessibility", "runs"), routes.projectAgent(wsId, "accessibility", "settings")],
             projectAgentRun: [routes.projectAgentRun(wsId, "accessibility", wsJob)],
             agentSchedules: [routes.agentSchedules(wsId, "accessibility")],
             projectSettings: [...SETTINGS, ...(Object.keys(MOVED) as (keyof typeof MOVED)[])].map((k) => routes.projectSettings(P(), k)),

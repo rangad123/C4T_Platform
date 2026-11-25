@@ -453,20 +453,23 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         // One run = one agent (Agent Workspace D1): undefined for a project without the Workspace, which runs as before.
         const agentId = await runAgentOf(testingAgentsOf(p), project(id), body0.agentId);
         if (agentId !== "responsive-ui" && body0.variants?.some(isSizeVariant)) throw new HttpError(400, SIZES_ARE_RESPONSIVE_UI);
+        // The agent's own saved defaults (its Settings tab) fill what the request leaves out (testing-agents.ts AgentSettings).
+        const mine = agentId ? await testingAgentsOf(p).settingsOf(id, agentId) : {};
+        const aiModel = mine.model ? { aiModel: mine.model } : {};
         if (!body0.url && !phoneUrl) {
             // A Test Case Generation project without an address writes its test cases from its active requirements (SPEC R16).
             if ((agentId && agentId !== "test-generation") || !(await requirementsOnlyRun(repo, id))) throw new HttpError(400, "Give the address of the website or API to test");
             await assertNoActiveJob(id);
             // The project's latest application is kept as it is (the form fills its address in next time); a project without one gets an empty one.
             const appId = (repo.getLatestApplicationPublic(id)?.id as string | undefined) ?? repo.createApplication(id, "", {});
-            const job = await repo.createJob(id, appId, await caseAgentOptions(repo, id, { ...DEFAULT_JOB_OPTIONS, requirementsOnly: true }));
+            const job = await repo.createJob(id, appId, { ...(await caseAgentOptions(repo, id, { ...DEFAULT_JOB_OPTIONS, requirementsOnly: true })), ...aiModel });
             return reply.code(202).send({ jobId: job.id, status: job.status, plan: true });
         }
         // What the request leaves out comes from the inputs saved on the Requirements tab (routes/agent-inputs.ts), on the same site only;
         // saved credentials never go to an API address or OpenAPI document nobody saved them for (409). A sign-in the request brings
         // becomes the project's saved sign-in below (Settings wins); nothing else saved changes.
         const saved = savedInputsForExploration(p, id, (body0.url ?? phoneUrl)!, body0);
-        const body = { ...body0, url: (body0.url ?? phoneUrl)!, credentials: body0.credentials ?? saved.credentials, openApiUrl: body0.openApiUrl ?? saved.openApiUrl, allowMutatingApiTests: body0.allowMutatingApiTests ?? saved.allowMutatingApiTests };
+        const body = { ...body0, level: body0.level ?? mine.level, variants: body0.variants ?? mine.variants, visionChecks: body0.visionChecks ?? mine.visionChecks, url: (body0.url ?? phoneUrl)!, credentials: body0.credentials ?? saved.credentials, openApiUrl: body0.openApiUrl ?? saved.openApiUrl, allowMutatingApiTests: body0.allowMutatingApiTests ?? saved.allowMutatingApiTests };
         if (!phoneOnly) await assertAllowedTarget(body.url);
         if (body.openApiUrl) await assertAllowedTarget(body.openApiUrl);
         if (body.apiBaseUrl) await assertAllowedTarget(body.apiBaseUrl);
@@ -487,7 +490,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         } as JobOptions;
         // The project's chosen testing agents decide which checks run (routes/testing-agents.ts); a project with none saved runs as asked.
         // A run of one agent turns on that agent's switches only (testing-agents.ts agentRunOptions).
-        let options = agentId ? agentRunOptions(agentId, asked, body) : await withAgentChoice(p, project(id), asked, body);
+        let options = agentId ? { ...agentRunOptions(agentId, asked, body), ...aiModel } : await withAgentChoice(p, project(id), asked, body);
         // The chosen agents' mandatory inputs (routes/agent-inputs.ts): refused in the words the Explore page's pop-up uses. No saved choice, no refusal.
         const missing = await missingForExploration(p, project(id), { openApiUrl: body.openApiUrl, capturedApis: options.targets.includes("api") && capturedApisFor(repo, id, body.url) }, options.targets, agentId);
         if (missing.length) throw new HttpError(409, missingInputsMessage(missing));
@@ -515,7 +518,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         if (agentId === "test-generation") options = caseRunOptions(options); // again: runTestCases is set after the narrowing
         else if (!agentId) options = await caseAgentOptions(repo, id, options);
         // Whose run it was stays with the job: a later Explore again or schedule is not that agent's.
-        const { requirementsText: _text, runTestCases: _run, agentId: _agent, ...appConfig } = options;
+        const { requirementsText: _text, runTestCases: _run, agentId: _agent, aiModel: _model, ...appConfig } = options;
         const keptMobile = latestMobile(id);
         adoptSignIn(p, id, body.url, body0.credentials);
         const appId = repo.createApplication(id, body.url, keptMobile ? { ...appConfig, mobile: keptMobile } : appConfig, body.credentials);

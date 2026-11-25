@@ -155,18 +155,23 @@ describe("Settings, General (FX11, FX13)", () => {
         await pwExpect(panel.getByTestId("project-agents-about")).toContainText("The Test Case Generation Agent explores this project’s application or reads its requirements, builds a tree and writes test cases.");
         await pwExpect(panel.getByTestId("agent-picker")).toContainText("The Test Case Generation Agent explores the application or reads its requirements, builds a tree and writes test cases.");
         expect(await panel.getByTestId("project-agents-about").innerText()).not.toMatch(/checks/);
-        await pwExpect(page.getByTestId("explore-level-setting")).toContainText(`about ${N} test cases from the AI.`);
-        expect(await page.getByTestId("explore-level-setting").innerText()).not.toMatch(/screen review/i);
+        // How much to explore is the agent's own (its Settings tab), linked from the project's Settings.
+        await pwExpect(page.getByTestId("explore-level-setting")).toHaveCount(0);
+        await pwExpect(page.getByTestId("agent-settings-list").getByRole("link", { name: "Test Case Generation Agent" })).toBeVisible();
         await panel.scrollIntoViewIfNeeded();
         await shot("fx11-settings-tcg.png");
         await axeBoth();
         await onPhone("fx11-settings-tcg-phone.png");
+        await page.goto(`${BASE}/#/projects/${ids.tcg}/agents/test-generation?tab=settings`);
+        await pwExpect(page.getByTestId("agent-defaults").getByTestId("explore-level")).toContainText(`about ${N} test cases from the AI.`);
+        expect(await page.getByTestId("agent-defaults").getByTestId("explore-level").innerText()).not.toMatch(/screen review/i);
     });
 
     it("an Accessibility project keeps the checks wording and tests per level", async () => {
         await page.goto(`${BASE}/#/projects/${ids.a11y}/settings`);
         await pwExpect(page.getByTestId("project-agents-about")).toContainText("The agents decide which checks run when the AI explores this project’s application.");
-        await pwExpect(page.getByTestId("explore-level-setting")).toContainText(`about ${N} tests from the AI.`);
+        await page.goto(`${BASE}/#/projects/${ids.a11y}/agents/accessibility?tab=settings`);
+        await pwExpect(page.getByTestId("agent-defaults").getByTestId("explore-level")).toContainText(`about ${N} tests from the AI.`);
     });
 
     it("logged no script errors", () => {

@@ -4,6 +4,7 @@ import { Button, Callout } from "../../components/ui";
 import { describeApiError } from "../../lib/labels";
 import { useFetch } from "../../lib/hooks";
 import type { ProjectAgents } from "../testing-agents/testing-agents";
+import { hasWorkspace } from "../agent-workspace/workspace";
 import { LEVEL_SETTINGS, LEVELS, isLevel, type ExploreLevel } from "../../../../src/engine/levels";
 
 const NAME: Record<ExploreLevel, string> = { thorough: "Thorough", deep: "Deep", everything: "Everything" };
@@ -64,7 +65,8 @@ export function ScreenReviewChoice({ level, canReadImages, value, onChange }: { 
 /**
  * Project Settings → General: the level later explorations and schedules start from. Not shown for a project that tests only a phone
  * app (phone explorations have their own "How thorough" under Settings → Mobile app, and this level is not read there), nor for a
- * code project, which never explores. A project tested by both the AI agent and code keeps it.
+ * code project, which never explores, nor for a project with the Agent Workspace, whose agents each have their own. A project tested by both
+ * the AI agent and code keeps it.
  */
 export function ExploreLevelSetting({ id }: { id: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
@@ -77,6 +79,8 @@ export function ExploreLevelSetting({ id }: { id: string }) {
     useEffect(() => setLevel(saved), [saved]);
     if (!project.data) return null;
     if (!projectShape(project.data).platforms.includes("web") || projectKind(project.data) === "code") return null;
+    // A project with the Agent Workspace: each agent has its own level, on its Settings tab (agent-workspace/AgentSettings.tsx).
+    if (agents.loading || hasWorkspace(projectShape(project.data).testingModes, agents.data)) return null;
     async function save() {
         setBusy(true);
         setMsg(null);

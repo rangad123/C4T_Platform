@@ -193,7 +193,7 @@ describe("the Accessibility Testing Agent's page", () => {
     });
 
     it("Setup: its inputs only, with where each is kept", async () => {
-        await visit(routes.projectAgent(pid, "accessibility", "setup"));
+        await visit(routes.projectAgent(pid, "accessibility", "settings"));
         const setup = page.getByTestId("agent-setup");
         await pwExpect(setup).toContainText(SITE);
         await pwExpect(setup.getByRole("link", { name: "Settings → General" })).toHaveAttribute("href", routes.projectSettings(pid, "general"));

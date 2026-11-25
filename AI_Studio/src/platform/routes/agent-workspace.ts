@@ -8,8 +8,11 @@
  *                                                           501 for an agent whose outcome is not built yet, 404 for an agent the project did not choose
  *   GET /api/projects/:id/workspace/:agentId/runs            → that agent's runs only, newest first (the jobs list's shape), a check
  *                                                           agent's run with its own one line (`headline`: what that run found)
+ *   GET /api/projects/:id/workspace/:agentId/settings        → { keys, settings }: the defaults this agent has and the ones saved (testing-agents.ts)
+ *   PUT /api/projects/:id/workspace/:agentId/settings        { level?, model?, variants?, visionChecks? } → the same; replaces them all
  *
- * Who may read the project reads all three (auth/roles.ts).
+ * Who may read the project reads them; saving an agent's settings is a project setting (auth/roles.ts). A model is saved only when the
+ * person saving may use it (as the project's AI model, routes/project-ai-model.ts).
  */
 import { agentStatusOf, headlineOf, jobBelongsTo, resultsStamp, workspaceAgents } from "../agent-workspace.js";
 import { AGENT_OUTCOMES } from "../agent-outcomes/index.js";
@@ -20,7 +23,10 @@ import { HttpError } from "../http-error.js";
 import type { Row } from "../db.js";
 import { TERMINAL_STATES } from "../repo.js";
 import { RequirementStore } from "../requirement-store.js";
-import { agentById, type AgentId } from "../testing-agents.js";
+import { agentById, agentSettingKeys, parseAgentSettings, type AgentId } from "../testing-agents.js";
+import { aiOwnerOfActor, modelChoicesOf, PROJECT_MODEL_NOT_YOURS } from "../ai-config.js";
+import { actorOf } from "../auth/access.js";
+import { actorLabel, currentActor } from "../auth/actor.js";
 import { capturedApisFor, missingInputs, savedInputsFor } from "./agent-inputs.js";
 import { testingAgentsOf } from "./testing-agents.js";
 import type { RouteCtx } from "./types.js";
@@ -116,5 +122,24 @@ export function registerAgentWorkspaceRoutes(ctx: RouteCtx, appModel: AppModelRe
             out.push({ ...ctx.publicJob(j), headline });
         }
         return out;
+    });
+
+    const settingsAnswer = async (id: string, agentId: AgentId) => ({ keys: agentSettingKeys(agentId), settings: await store.settingsOf(id, agentId) });
+
+    app.get("/api/projects/:id/workspace/:agentId/settings", async (req) => {
+        const { id, agentId } = req.params as { id: string; agentId: string };
+        const { agent } = await agentOf(id, agentId);
+        return settingsAnswer(id, agent.id);
+    });
+
+    app.put("/api/projects/:id/workspace/:agentId/settings", async (req) => {
+        const { id, agentId } = req.params as { id: string; agentId: string };
+        const { agent } = await agentOf(id, agentId);
+        const settings = parseAgentSettings(agent.id, req.body);
+        const before = (await store.settingsOf(id, agent.id)).model;
+        const changed = settings.model && (settings.model.provider !== before?.provider || settings.model.model !== before?.model);
+        if (changed && !(await modelChoicesOf({ sql: p.sql, config: p.config }, aiOwnerOfActor(currentActor()))).some((c) => c.provider === settings.model!.provider && c.model === settings.model!.model)) throw new HttpError(403, PROJECT_MODEL_NOT_YOURS);
+        await store.setSettings(id, agent.id, settings, actorLabel(actorOf(req) ?? currentActor()));
+        return settingsAnswer(id, agent.id);
     });
 }

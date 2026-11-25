@@ -181,7 +181,7 @@ async function sinkFor(p: Platform, task: ExploreTaskRef): Promise<TaskSink> {
     await fs.mkdir(path.join(dir, "uploads"), { recursive: true });
     // A person's own key: the tests' provenance does not name its model (as on the server, job-runner.ts).
     const repoSink = new RepoSink(p.repo, p.store, { id: job.id, projectId: job.projectId, applicationId: job.applicationId, mode: job.options.mode });
-    if ((await resolveAiFor({ sql: p.sql, config: p.config }, aiOwnerOfJob(job.options), job.projectId)).billing.owner === "personal") repoSink.modelShownAs = PERSONAL_KEY_MODEL;
+    if ((await resolveAiFor({ sql: p.sql, config: p.config }, aiOwnerOfJob(job.options), job.projectId, job.options.aiModel)).billing.owner === "personal") repoSink.modelShownAs = PERSONAL_KEY_MODEL;
     // The project's sign-in details are masked in what this task's saves write as text (events, reasons, summaries), as on the server.
     repoSink.addSecrets(agentServiceOf(job.projectId)?.projectSecrets(job.projectId) ?? []);
     // And what this task's offer carried: an environment's own sign-in, roles, token and header, with their Basic-auth and header-value forms.

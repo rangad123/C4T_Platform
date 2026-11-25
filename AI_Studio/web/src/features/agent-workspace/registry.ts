@@ -19,7 +19,7 @@ export interface AgentView {
     Runs?: ComponentType<{ projectId: string }>;
     /** One of its runs (`#/projects/:id/agents/:agentId/runs/:jobId`); default: the run page every project has. */
     Run?: ComponentType<{ projectId: string; jobId: string }>;
-    /** The Setup tab: this agent's inputs only; default: what the agent needs, with where each is kept. */
+    /** What it uses, on the Settings tab under its saved defaults: this agent's inputs only; default: what the agent needs, with where each is kept. */
     Setup?: ComponentType<{ projectId: string }>;
 }
 

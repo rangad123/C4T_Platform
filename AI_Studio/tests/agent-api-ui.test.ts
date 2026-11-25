@@ -236,7 +236,7 @@ describe("the API Testing Agent's page", () => {
     });
 
     it("Setup: its own inputs, with Needs input while the OpenAPI document is missing", async () => {
-        await visit(routes.projectAgent(pid, "api", "setup"));
+        await visit(routes.projectAgent(pid, "api", "settings"));
         const setup = page.getByTestId("agent-setup");
         await pwExpect(setup.locator(".callout")).toContainText("The API Testing Agent needs the API documentation");
         await pwExpect(setup).toContainText("OpenAPI document");

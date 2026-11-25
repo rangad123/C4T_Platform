@@ -4,20 +4,19 @@ import { Badge, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton } from
 import { friendlyError, isActive } from "../../lib/labels";
 import { BadgeKey } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
-import { AGENT_TABS, routes, type AgentTab } from "../../lib/router";
+import { routes, type AgentTab } from "../../lib/router";
 import { RunDetail } from "../runs/RunDetail";
 import { RelTime } from "../runs/RunTime";
 import type { AgentDetail, AgentId } from "../testing-agents/testing-agents";
+import { AgentDefaults } from "./AgentSettings";
 import { AGENT_VIEWS } from "./registry";
 import { RunStatus } from "./RunStatus";
 import { RUN_STATUS_HELP, runStatusOf, statusWords, type AgentRun, type WorkspaceAnswer } from "./workspace";
 import "./workspace.css";
 
-export const agentTabOf = (v: string | null): AgentTab => ((AGENT_TABS as readonly string[]).includes(v ?? "") ? (v as AgentTab) : "outcome");
-
 /**
- * One testing agent of a project with the Agent Workspace (SPEC §2): Outcome (its result only), Runs (its runs only) and Setup (its
- * inputs only), under the project's Workspace tab. What each tab shows is the agent's own file in ./agents (registry.ts).
+ * One testing agent of a project with the Agent Workspace (SPEC §2): Outcome (its result only), Runs (its runs only) and Settings (its own
+ * saved defaults, its schedules and the inputs it uses; the old Setup tab), under the project's Workspace tab. What each tab shows is the agent's own file in ./agents (registry.ts).
  */
 export function AgentPage({ id, agentId, tab, runId }: { id: string; agentId: string; tab: AgentTab; runId?: string }) {
     // Its own card only, polled only while its own run is going.
@@ -35,7 +34,19 @@ export function AgentPage({ id, agentId, tab, runId }: { id: string; agentId: st
             hint: "This agent’s runs only",
             render: body(() => (runId ? view?.Run ? <view.Run projectId={id} jobId={runId} /> : <RunDetail id={id} jobId={runId} /> : view?.Runs ? <view.Runs projectId={id} /> : <AgentRuns projectId={id} agentId={agentId} />)),
         },
-        { key: "setup", label: "Setup", hint: "What this agent uses, and where each is kept", render: body(() => (view?.Setup ? <view.Setup projectId={id} /> : <AgentNeeds projectId={id} agentId={agentId} needs={a!.needs} />)) },
+        {
+            key: "settings",
+            label: "Settings",
+            hint: "How this agent runs, its schedules, and what it uses",
+            render: body(() => (
+                <div className="stack" data-testid="agent-settings">
+                    <AgentDefaults projectId={id} agentId={agentId} />
+                    <AgentSchedulesLink projectId={id} agentId={agentId} />
+                    <h3 className="t-section">What it uses</h3>
+                    {view?.Setup ? <view.Setup projectId={id} /> : <AgentNeeds projectId={id} agentId={agentId} needs={a!.needs} />}
+                </div>
+            )),
+        },
     ];
     const s = a ? statusWords(a) : null;
     return (
@@ -127,7 +138,7 @@ function AgentRuns({ projectId, agentId }: { projectId: string; agentId: string 
     );
 }
 
-/** The default Setup tab: what the agent needs (the catalogue's words) and what it misses now. */
+/** The default What it uses part of the Settings tab: what the agent needs (the catalogue's words) and what it misses now. */
 function AgentNeeds({ projectId, agentId, needs }: { projectId: string; agentId: string; needs: string[] }) {
     const agent = useFetch<AgentDetail>(`/testing-agents/${agentId}`);
     return (

@@ -250,7 +250,7 @@ describe("the Security Testing Agent's page (W2c)", () => {
     });
 
     it("Setup: the address and the test accounts, where each is kept; a project not run yet offers to run", async () => {
-        await visit(routes.projectAgent(pid, "security", "setup"));
+        await visit(routes.projectAgent(pid, "security", "settings"));
         const s = page.getByTestId("agent-setup");
         await pwExpect(s).toContainText("http://127.0.0.1:7819");
         await pwExpect(s).toContainText("None: the access checks are left out");

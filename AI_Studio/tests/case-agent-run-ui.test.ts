@@ -141,7 +141,7 @@ describe("the Runs place of a Test Case Generation project", () => {
         const list = page.getByTestId("case-runs");
         await list.locator("[data-run]").first().waitFor();
         const sections = page.getByRole("navigation", { name: "Test Case Generation Agent sections" }).getByRole("link");
-        expect(await sections.allTextContents()).toEqual(["Outcome", "Runs", "Setup"]);
+        expect(await sections.allTextContents()).toEqual(["Outcome", "Runs", "Settings"]);
         expect(await page.getByTestId("case-runs-schedules").getByRole("link", { name: "Schedules" }).getAttribute("href")).toBe(`#/projects/${tcg}/runs?section=schedules&agent=test-generation`);
         const text = await mainText();
         for (const gone of ["After a deploy", "Trends", "Releases", "Compliance", "signing off a release"]) expect(text).not.toContain(gone);

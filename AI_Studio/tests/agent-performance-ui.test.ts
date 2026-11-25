@@ -206,7 +206,7 @@ describe("the Performance Testing Agent's page", () => {
     });
 
     it("Setup: its own inputs: the address, the sign-in, and when a load check runs", async () => {
-        await visit(routes.projectAgent(pid, "performance", "setup"));
+        await visit(routes.projectAgent(pid, "performance", "settings"));
         const setup = page.getByTestId("agent-setup");
         await pwExpect(setup).toContainText("Application address");
         await pwExpect(setup).toContainText("Sign in");

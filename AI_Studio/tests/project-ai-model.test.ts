@@ -79,8 +79,8 @@ const ask = async (ownerId: string) => {
     return r;
 };
 /** Runs a job of the project started by this person; returns the settings its model client was built with and its events. */
-const runAs = async (personId: string, worker: string) => {
-    const queued = await platform.repo.createJob(pid, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy: { kind: "user", id: personId } } as never);
+const runAs = async (personId: string, worker: string, extra: Record<string, unknown> = {}) => {
+    const queued = await platform.repo.createJob(pid, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy: { kind: "user", id: personId }, ...extra } as never);
     const job = platform.repo.claimNextJob(60_000, worker)!;
     expect(job.id).toBe(queued.id);
     const cfgs: Config[] = [];
@@ -189,6 +189,19 @@ describe("choosing a project's AI model", () => {
         expect(seen).toEqual([{ key: ORG_KEY, model: "model-org" }]);
         // Back to empty.
         expect((await choose("t-sam", null)).body.selected).toBeNull();
+    });
+
+    it("a testing agent's own model (job.options.aiModel, its Settings tab) wins over the project's for that run, checked the same way", async () => {
+        expect((await choose("t-cora", "model-a")).status).toBe(200);
+        expect((await resolveAiFor(deps(), ids["t-cora"]!, pid, pick("model-b"))).configuration?.model).toBe("model-b");
+        const job = await runAs(ids["t-cora"]!, "w-agent-model", { aiModel: pick("model-b") });
+        expect(job.cfgs[0]).toMatchObject({ LLM_API_KEY: CORA_B, LLM_MODEL: "model-b" });
+        // A model the person starting it may not use: their default AI, said as for the project's model.
+        const other = await resolveAiFor(deps(), ids["t-cora"]!, pid, pick("model-dan"));
+        expect(other.configuration?.model).toBe("model-a");
+        expect(other.note).toBe(PROJECT_MODEL_FALLBACK);
+        // No agent model: the project's, as before.
+        expect((await resolveAiFor(deps(), ids["t-cora"]!, pid)).configuration?.model).toBe("model-a");
     });
 
     it("a model the person may not use is refused at save with its sentence, and nothing changes", async () => {
