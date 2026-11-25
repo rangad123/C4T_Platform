@@ -11,6 +11,7 @@ import { ProjectTabs } from "../../pages/ProjectOverview";
 import { sec } from "../security/security";
 import { AgentAvatar } from "../testing-agents/testing-agents";
 import { SetupChecklist } from "../workspace/SetupChecklist";
+import { AGENT_VIEWS } from "./registry";
 import { statusWords, type WorkspaceAgent, type WorkspaceAnswer } from "./workspace";
 import "./workspace.css";
 
@@ -84,11 +85,17 @@ function AgentCard({ projectId, a }: { projectId: string; a: WorkspaceAgent }) {
             </div>
             <Badge tone={s.tone}>{s.label}</Badge>
             <p className="t-secondary">{a.summary}</p>
-            {a.headline && (
-                <p className="ws-headline" data-testid="agent-headline">
-                    {a.headline}
-                </p>
-            )}
+            {(() => {
+                const Card = AGENT_VIEWS[a.id]?.Card;
+                if (Card) return <Card projectId={projectId} agent={a} />;
+                return (
+                    a.headline && (
+                        <p className="ws-headline" data-testid="agent-headline">
+                            {a.headline}
+                        </p>
+                    )
+                );
+            })()}
             {a.status === "needs-input" && (
                 <ul className="ws-needs" data-testid="agent-needs">
                     {a.needs.map((n) => (

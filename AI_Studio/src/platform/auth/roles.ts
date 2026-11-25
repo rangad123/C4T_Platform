@@ -211,6 +211,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/workspace/:agentId/settings": "read",
     // Each agent's own saved defaults (its Settings tab): changing them is a project setting.
     "PUT /api/projects/:id/workspace/:agentId/settings": "ai_studio.project.settings",
+    "GET /api/projects/:id/workspace/api/report": "ai_studio.reports.export",
     // Notes for the AI (routes/notes.ts, round 53): anyone on the project reads them; changing them is a project setting.
     "GET /api/projects/:id/notes": "read",
     "POST /api/projects/:id/notes": "ai_studio.project.settings",

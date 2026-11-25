@@ -4,6 +4,7 @@
  */
 import type { ComponentType } from "react";
 import type { AgentId } from "../testing-agents/testing-agents";
+import type { WorkspaceAgent } from "./workspace";
 import { view as accessibility } from "./agents/accessibility";
 import { view as api } from "./agents/api";
 import { view as performance } from "./agents/performance";
@@ -21,6 +22,8 @@ export interface AgentView {
     Run?: ComponentType<{ projectId: string; jobId: string }>;
     /** What it uses, on the Settings tab under its saved defaults: this agent's inputs only; default: what the agent needs, with where each is kept. */
     Setup?: ComponentType<{ projectId: string }>;
+    /** What its Workspace card shows below the summary; default: the card's one line (headline). */
+    Card?: ComponentType<{ projectId: string; agent: WorkspaceAgent }>;
 }
 
 /** By agent id; null: not built yet (the Outcome tab says so). Edit an agent's own file, never this map. */
