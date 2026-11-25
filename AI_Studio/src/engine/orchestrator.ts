@@ -1917,7 +1917,8 @@ export function defectFinding(p: {
         : `No failing check of a stated expectation was kept, so it was seen, not kept as a check (confidence ${confidence}).`;
     const problems = p.outcome.evidence ?? [];
     const isConsole = (line: string) => /^(Console error|Page error):/.test(line) || !/^[A-Z]+ \S+ (answered|failed)/.test(line);
-    // The requests of the last step that made any (the action the failing check checks), with their answers, masked when captured (web/author.ts).
+    // The requests of the last step that made any (the action the failing check checks), with their answers, masked when captured (web/author.ts);
+    // they replace the same requests' summary lines.
     const calls = p.outcome.calls ?? [];
     const last = Math.max(-1, ...calls.map((c) => c.step ?? -1));
     const sent = calls.filter((c) => c.step === last).map((c) => `${c.method} ${c.path} answered ${c.status}${c.body ? `: ${c.body}` : ""}`);
@@ -1927,7 +1928,7 @@ export function defectFinding(p: {
         actions: { stepCount: Math.min(p.stepCount, L.stepsMax) },
         expected: { text: expected, source },
         observed: p.outcome.explanation,
-        evidence: { screenshots: (p.independence.screenshots ?? []).slice(0, FINDING_SCREENSHOTS_MAX), requests: [...problems.filter((l) => !isConsole(l)), ...sent].slice(0, L.requestsMax), console: problems.filter(isConsole).slice(0, L.consoleMax), ...(p.outcome.layers ? { layers: p.outcome.layers } : {}) },
+        evidence: { screenshots: (p.independence.screenshots ?? []).slice(0, FINDING_SCREENSHOTS_MAX), requests: [...problems.filter((l) => !isConsole(l) && !sent.some((s) => s.startsWith(l))), ...sent].slice(0, L.requestsMax), console: problems.filter(isConsole).slice(0, L.consoleMax), ...(p.outcome.layers ? { layers: p.outcome.layers } : {}) },
         capture,
         independence: p.independence.independence,
         confidence,

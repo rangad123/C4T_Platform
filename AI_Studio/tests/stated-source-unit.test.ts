@@ -211,12 +211,12 @@ describe("defectFinding keeps the rule", () => {
         expect(unknown).toMatchObject({ confidence: "low", source: null });
     });
 
-    it("keeps the masked requests and answers of the last step that made any, beside the failed-request lines (E7, L13)", () => {
+    it("keeps the masked requests and answers of the last step that made any, in place of their summary lines (E7, L13)", () => {
         const calls = [
             { step: 0, method: "GET", path: "/cart", status: 200, body: "{}" },
             { step: 2, method: "POST", path: "/api/cart/total", status: 200, body: '{"total":30}' },
         ];
-        const found = defectFinding({ scenario: planned(["The total is $25.00"]), rules: [RULE], outcome: { ...outcome("R-TOTAL"), calls, evidence: ["POST /api/coupon failed: 500"] }, capture: "captured", independence: notRun, stepCount: 4, modelVersion: null });
+        const found = defectFinding({ scenario: planned(["The total is $25.00"]), rules: [RULE], outcome: { ...outcome("R-TOTAL"), calls, evidence: ["POST /api/coupon failed: 500", "POST /api/cart/total answered 200"] }, capture: "captured", independence: notRun, stepCount: 4, modelVersion: null });
         expect(found.finding!.evidence.requests).toEqual(["POST /api/coupon failed: 500", 'POST /api/cart/total answered 200: {"total":30}']);
     });
 
