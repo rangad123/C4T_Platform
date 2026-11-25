@@ -824,6 +824,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                               warnings: summary.errors,
                               ...(testData ? { testData: { tag: testData.tag } } : {}),
                               allowPurchases: dataChanges,
+                              writtenCases: req.planOnly === true,
                           });
                 // A planning call that did not finish is said as a warning when the others answered (planner.ts).
                 if (summary.errors.length > warningsBefore) planningFailed = summary.errors[summary.errors.length - 1];

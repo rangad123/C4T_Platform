@@ -24,9 +24,11 @@
  */
 import type { Platform } from "./bootstrap.js";
 import type { CaseOutcome, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeRunStatus, CaseOutcomeTreeNode } from "./case-outcome-types.js";
+import { caseDataOf } from "../engine/spec/schema.js";
 import { isCaseAgentProject } from "./case-agent.js";
 import { loadStoredPlan } from "./plan-store.js";
 import type { JobRow } from "./repo.js";
+import { RequirementStore } from "./requirement-store.js";
 
 /** What one run found, before it is merged with the others. Pages and cases are in the order the run found them. */
 export interface CaseRunPart {
@@ -184,6 +186,7 @@ export function mergeCaseRuns(inputs: readonly CaseRunInput[]): MergedRuns {
                 priority: c.priority,
                 preconditions: c.preconditions.length ? c.preconditions : had.preconditions,
                 steps: c.steps.length ? c.steps : had.steps,
+                testData: c.testData?.length ? c.testData : had.testData,
                 expected: c.expected.length ? c.expected : had.expected,
                 requirement: c.requirement || had.requirement,
             });
@@ -228,6 +231,7 @@ interface ModelLike {
     navigation?: Array<{ from?: unknown; to?: unknown }>;
 }
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const stepsOf = (v: unknown) => (Array.isArray(v) ? v.map((s: { action?: unknown; expected?: unknown } | null) => ({ action: str(s?.action).trim(), expected: str(s?.expected).trim() })).filter((s) => s.action) : []);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && Boolean(x.trim())) : []);
 
 /** Finished runs never change: what each found, by job id (bounded; the oldest entries go first). */
@@ -285,12 +289,13 @@ export async function readCaseRun(p: Platformish, job: JobRow): Promise<CaseRunP
     if (plan.ok) {
         cases = plan.plan.scenarios.map((s) => ({
             title: s.title,
-            // Exploration test cases are Automated (SPEC D1): a title, a page, preconditions and expected results; no steps (Q1).
+            // Exploration test cases are Automated (SPEC D1): a title, a page, preconditions, numbered steps, test data and expected results.
             type: "automated" as const,
             priority: priorityOf(s.priority),
             page: s.startPath || "/",
             preconditions: strings(s.preconditions),
-            steps: [],
+            steps: stepsOf(s.caseSteps),
+            testData: caseDataOf(s.caseData),
             expected: strings(s.expectedResults),
             requirement: strings(s.requirements).join(", "),
         }));
@@ -302,8 +307,8 @@ export async function readCaseRun(p: Platformish, job: JobRow): Promise<CaseRunP
                 const m = /^\S+ \[[^/\]]*\/([a-z]+)\] (.*)$/.exec(e.message);
                 const d = dataOf(e);
                 // A case written from the requirements alone (case-agent.ts writeCasesFromRequirements) also says its type, steps and area.
-                const steps = Array.isArray(d.steps) ? d.steps.map((s: { action?: unknown; expected?: unknown }) => ({ action: str(s?.action), expected: str(s?.expected) })).filter((s) => s.action) : [];
-                return { title: str(d.title) || m?.[2] || "", type: d.type === "manual" ? ("manual" as const) : ("automated" as const), priority: priorityOf(m?.[1]), page: "", preconditions: [], steps, expected: [], requirement: str(d.requirement), ...(str(d.area) ? { area: str(d.area) } : {}) };
+                // So does a plan-only exploration (planner.ts writtenCases): steps, test data and requirement.
+                return { title: str(d.title) || m?.[2] || "", type: d.type === "manual" ? ("manual" as const) : ("automated" as const), priority: priorityOf(m?.[1]), page: "", preconditions: [], steps: stepsOf(d.steps), testData: caseDataOf(d.testData), expected: [], requirement: str(d.requirement), ...(str(d.area) ? { area: str(d.area) } : {}) };
             });
     }
     // An address that could not be loaded (crawler.ts page_failed "Could not load <url>: ..."); "Could not try ... again" kept its page.
@@ -350,11 +355,49 @@ async function caseRunsOf(p: Platformish, projectId: string): Promise<JobRow[]> 
     });
 }
 
-export async function mergedOf(p: Platformish, projectId: string): Promise<MergedRuns> {
+// ── the check after generation (sheet items 31-33) ───────────────────────────────────────────────────────────────────────────────────
+
+export const CASE_FLAGS = {
+    noSteps: "No execution steps",
+    noRequirement: "Not linked to a requirement",
+    unmarked: (field: string) => `Test data “${field}” has no value and is not marked missing`,
+    filledMissing: (field: string) => `Test data “${field}” is marked missing but has a value: check it is real`,
+};
+
+/** A requirement reference as cases cite it, for matching ("req-1" is REQ-1). */
+const refKey = (s: string) => s.trim().toUpperCase();
+const refsOf = (requirement: string) => requirement.split(/[,;\s]+/).map(refKey).filter(Boolean);
+
+/**
+ * What a generated test case lacks, in plain words; deterministic, and it changes nothing (a missing value is reported, never filled).
+ * `requirementRefs`: the project's active requirement references; with none, a case is not expected to link to one.
+ */
+export function caseFlags(c: Pick<CaseOutcomeCase, "steps" | "requirement" | "testData">, requirementRefs: ReadonlySet<string>): string[] {
+    const flags: string[] = [];
+    if (!c.steps.some((s) => s.action.trim())) flags.push(CASE_FLAGS.noSteps);
+    if (requirementRefs.size && !refsOf(c.requirement).length) flags.push(CASE_FLAGS.noRequirement);
+    for (const d of c.testData ?? []) {
+        if (!d.missing && !d.value.trim()) flags.push(CASE_FLAGS.unmarked(d.field));
+        if (d.missing && d.value.trim()) flags.push(CASE_FLAGS.filledMissing(d.field));
+    }
+    return flags;
+}
+
+/** The requirements no case links to, in their own order (sheet item 33). */
+export function uncoveredRequirements<R extends { ref: string }>(requirements: readonly R[], cases: ReadonlyArray<Pick<CaseOutcomeCase, "requirement">>): R[] {
+    const cited = new Set(cases.flatMap((c) => refsOf(c.requirement)));
+    return requirements.filter((r) => !cited.has(refKey(r.ref)));
+}
+
+export async function mergedOf(p: Platformish, projectId: string): Promise<MergedRuns & { uncovered: Array<{ ref: string; title: string }> }> {
     const jobs = await caseRunsOf(p, projectId);
     const inputs: CaseRunInput[] = [];
     for (const j of jobs) inputs.push({ run: { jobId: j.id, startedAt: j.startedAt ?? j.createdAt, status: runStatusOf(j) }, part: await readCaseRun(p, j) });
-    return mergeCaseRuns(inputs);
+    const merged = mergeCaseRuns(inputs);
+    const active = (await new RequirementStore(p.db.sql).list(projectId)).filter((r) => r.status === "active").map((r) => ({ ref: r.ref, title: r.title }));
+    const refs = new Set(active.map((r) => refKey(r.ref)));
+    const cases = merged.cases.map((c) => ({ ...c, flags: caseFlags(c, refs) }));
+    return { ...merged, cases, uncovered: uncoveredRequirements(active, cases) };
 }
 
 /** The project's latest application model, as its own route reads it (routes/app-intel.ts `latestAppModel`, handed in by routes/index.ts). */
@@ -374,6 +417,10 @@ export async function caseOutcomeOf(p: Platformish, projectId: string, appModel:
 }
 
 export const CASES_WRITTEN = (written: number, added: number) => `Test cases written: ${written} (${added} new)`;
+const some = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** The check after generation, said once at the end of a run: what needs a look before the cases are used. */
+export const CASE_CHECK = (flagged: number, uncovered: number) =>
+    [flagged && `${some(flagged, "test case needs", "test cases need")} a look (no steps, no requirement, or test data not marked missing)`, uncovered && `${some(uncovered, "requirement has", "requirements have")} no test case`].filter(Boolean).join("; ") + ".";
 
 /**
  * A run of a Test Case Generation project ends by saying what it wrote (founder 2026-11-19, R1): "Test cases written: N (M new)" as
@@ -389,6 +436,10 @@ export async function noteCaseRunFinished(p: Platformish, job: JobRow): Promise<
         const run = merged.runs.find((r) => r.jobId === job.id);
         if (!run) return;
         const written = merged.written.get(job.id) ?? 0;
+        const mine = new Set(merged.byRun.get(job.id)?.cases ?? []);
+        const flagged = merged.cases.filter((c) => mine.has(c.id) && c.flags?.length).length;
+        // Before the count, which stays the run's last word (R1).
+        if (flagged || merged.uncovered.length) p.repo.addEvent(job.id, { stage: "orchestration", kind: "case_check", level: "warn", message: CASE_CHECK(flagged, merged.uncovered.length), data: { flagged, uncovered: merged.uncovered.map((r) => r.ref) } });
         p.repo.addEvent(job.id, { stage: "orchestration", kind: "case_outcome_written", message: CASES_WRITTEN(written, run.addedCases), data: { written, added: run.addedCases, addedPages: run.addedPages } });
     } catch (err) {
         console.error(`[job ${job.id.slice(0, 8)}] could not say how many test cases were written:`, err);

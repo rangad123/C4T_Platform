@@ -37,7 +37,8 @@ export interface WorkbookImport {
 export function stepsFromCell(cell: string): Array<{ action: string; expected: string }> {
     return clean(cell)
         .split("\n")
-        .map((l) => l.trim())
+        // The export numbers its steps ("1. Open the cart"); the number is not part of the step.
+        .map((l) => l.trim().replace(/^\d{1,3}[.)]\s+/, ""))
         .filter(Boolean)
         .map((line) => {
             const at = line.indexOf("=>");

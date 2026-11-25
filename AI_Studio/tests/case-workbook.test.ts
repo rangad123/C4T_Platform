@@ -213,7 +213,7 @@ describe("the workbook", () => {
         expect(book.map((s) => s.name)).toEqual(["Test cases", "Pages", "Tree"]);
         const [cases, pages, tree] = book.map((s) => s.rows);
         // R3: exactly the Q3 columns, no script column.
-        expect(cases![0]).toEqual(["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement"]);
+        expect(cases![0]).toEqual(["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement", "Test data", "Check"]);
         expect(pages![0]).toEqual(["Page", "Address", "Purpose"]);
         expect(tree![0]).toEqual(["Node", "Parent", "Page"]);
         const outcome = (await as("t-cora", "GET", `/api/projects/${PA}/outcome`)).body;

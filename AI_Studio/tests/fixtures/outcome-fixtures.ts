@@ -102,5 +102,31 @@ export const SAME_TITLE: CaseOutcome = {
     ],
 };
 
-export const OUTCOMES = { full: FULL, stopped: STOPPED, empty: EMPTY, "stopped-empty": STOPPED_EMPTY, "running-empty": RUNNING_EMPTY, requirements: REQUIREMENTS, "same-title": SAME_TITLE } as const;
+/** Sheet items 31-33: a case with numbered steps, test data (one value marked missing), what the check flagged, and requirements with no case. */
+export const CHECKED: CaseOutcome = {
+    ...FULL,
+    cases: FULL.cases.map((c) =>
+        c.id === "TC-010"
+            ? {
+                  ...c,
+                  steps: [
+                      { action: "Open checkout with one item in the cart.", expected: "The address form shows." },
+                      { action: "Fill in the address and press Place order.", expected: "The confirmation shows an order number." },
+                  ],
+                  testData: [
+                      { field: "Postcode", kind: "valid", value: "SW1A 1AA", missing: false },
+                      { field: "Postcode", kind: "invalid", value: "12", missing: false },
+                      { field: "Gift card number", kind: "valid", value: "", missing: true },
+                  ],
+                  flags: ["Test data “Coupon” has no value and is not marked missing"],
+              }
+            : c,
+    ),
+    uncovered: [
+        { ref: "REQ-4", title: "Customers can save a wish list" },
+        { ref: "REQ-9", title: "Refunds reach the card in five days" },
+    ],
+};
+
+export const OUTCOMES = { checked: CHECKED, full: FULL, stopped: STOPPED, empty: EMPTY, "stopped-empty": STOPPED_EMPTY, "running-empty": RUNNING_EMPTY, requirements: REQUIREMENTS, "same-title": SAME_TITLE } as const;
 export type OutcomeFixture = keyof typeof OUTCOMES;

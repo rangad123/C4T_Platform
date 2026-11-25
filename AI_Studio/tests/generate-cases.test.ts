@@ -108,12 +108,12 @@ describe("reading the AI's answer", () => {
             batch,
         );
         expect(out.map((c) => c.input)).toEqual([
-            // An Automated case is a title only: the steps it was given are dropped (they are written with its script).
-            expect.objectContaining({ title: "Verify sign in", priority: "high", automation: "automated", requirementId: "r1", area: "REQ-1 Sign in", steps: [] }),
+            // Every case keeps its steps (sheet item 32), an Automated one too; a step without an action is dropped.
+            expect.objectContaining({ title: "Verify sign in", priority: "high", automation: "automated", requirementId: "r1", area: "REQ-1 Sign in", steps: [{ action: "Open the page", expected: "The form shows" }] }),
             expect.objectContaining({ title: "Check the logo", priority: "medium", automation: "manual", steps: [] }),
         ]);
     });
-    it("writes steps only for Manual cases", () => {
+    it("keeps steps for every case, Automated and Manual (sheet item 32)", () => {
         const out = casesFromAnswer(
             {
                 cases: [
@@ -125,7 +125,7 @@ describe("reading the AI's answer", () => {
             batch,
         );
         expect(out.map((c) => [c.input.automation, c.input.steps])).toEqual([
-            ["automated", []],
+            ["automated", [{ action: "Open the page", expected: "The form shows" }]],
             ["manual", [{ action: "Open the inbox", expected: "The email is there" }]],
             ["manual", [{ action: "Look", expected: "Seen" }]],
         ]);
@@ -165,9 +165,9 @@ describe("generating test cases", () => {
             { id: basket.id, ref: basket.ref, created: 1, failed: false },
         ]);
         expect(r.body.cases.map((c: any) => [c.ref, c.title, c.automation, c.priority, c.requirementId, c.steps.length])).toEqual([
-            ["TC-001", "Verify paying by card", "automated", "high", pay.id, 0],
+            ["TC-001", "Verify paying by card", "automated", "high", pay.id, 1],
             ["TC-002", "Check the bank statement shows one charge", "manual", "critical", pay.id, 1],
-            ["TC-003", "Verify the basket after signing in", "automated", "medium", basket.id, 0],
+            ["TC-003", "Verify the basket after signing in", "automated", "medium", basket.id, 1],
         ]);
         // One call for the two requirements, with what each says and where the application is.
         expect(fake.seen).toHaveLength(1);

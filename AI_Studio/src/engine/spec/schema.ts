@@ -578,6 +578,39 @@ export type TestSpec = z.infer<typeof TestSpecSchema>;
 /** What an exploration objective comes from (explore/objectives.ts). */
 export const OBJECTIVE_KINDS = ["rule", "workflow", "constraint", "transition", "coverage-gap"] as const;
 
+/** A step of a written test case, for a person to follow: what to do and what should happen. */
+export const CaseStepSchema = z.object({ action: z.string(), expected: z.string() });
+
+export const CASE_DATA_KINDS = ["valid", "invalid", "boundary"] as const;
+export type CaseDataKind = (typeof CASE_DATA_KINDS)[number];
+/** One value a written test case uses. A value nobody can know from the inputs (a real account, a real coupon code) is `missing`, never made up. */
+export interface CaseData {
+    field: string;
+    kind: CaseDataKind;
+    value: string;
+    missing: boolean;
+}
+/** The test data of a written test case as the AI writes it (kind is checked when read, by caseDataOf, so one bad row never drops the case). */
+export const CaseDataSchema = z.object({
+    field: z.string().describe("The input or thing the value is for, like “Coupon code” or “Email”"),
+    kind: z.string().describe("valid, invalid or boundary"),
+    value: z.string().describe("The exact value to type or choose; empty when it cannot be known"),
+    missing: z.boolean().describe("true when the value cannot be known from what you were given (a real account, a real coupon code, an existing order number): leave value empty, never make one up"),
+});
+const MAX_CASE_DATA = 30;
+const cut = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+
+/** Test data rows as read from an AI answer or a saved run: a row without a field or with an unknown kind is left out; nothing is filled in. */
+export function caseDataOf(rows: unknown): CaseData[] {
+    if (!Array.isArray(rows)) return [];
+    return rows.flatMap((r: Partial<Record<keyof CaseData, unknown>> | null) => {
+        const field = cut(r?.field, 200);
+        const kind = cut(r?.kind, 20).toLowerCase() as CaseDataKind;
+        if (!field || !CASE_DATA_KINDS.includes(kind)) return [];
+        return [{ field, kind, value: cut(r?.value, 500), missing: r?.missing === true }];
+    }).slice(0, MAX_CASE_DATA);
+}
+
 /** A planned scenario: what to test, before concrete steps exist. */
 export const ScenarioSchema = z.object({
     scenarioId: z.string(),
@@ -597,6 +630,9 @@ export const ScenarioSchema = z.object({
     requirements: z.array(z.string()).default([]),
     /** The named test account this scenario signs in as (role scenarios, see ../identity/role-differences.ts). Absent: the project's own account. */
     role: z.string().optional(),
+    /** A plan-only run's written test case (sheet items 31, 32): numbered steps for a person, and its valid, invalid and boundary data. */
+    caseSteps: z.array(CaseStepSchema).optional(),
+    caseData: z.array(CaseDataSchema).optional(),
     /** The exploration objective this scenario pursues: its id, kind, the ref of what it comes from, and the operator applied, if any. */
     objective: z
         .object({

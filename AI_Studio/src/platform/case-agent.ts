@@ -73,13 +73,13 @@ export async function writeCasesFromRequirements(repo: Repo, projectId: string, 
     for (const batch of batchesOf(active.map((r) => ({ id: r.id, ref: r.ref, title: r.title, description: r.description, acceptanceCriteria: r.acceptanceCriteria })))) {
         signal.throwIfAborted();
         const refOf = new Map(batch.map((r) => [r.id, r.ref]));
-        for (const { requirementId, input } of await generateCasesForBatch(llm, batch, { address: null, platform })) {
+        for (const { requirementId, input, testData } of await generateCasesForBatch(llm, batch, { address: null, platform })) {
             n++;
             emit({
                 stage: "planning",
                 kind: "scenario_planned",
                 message: `S-${String(n).padStart(3, "0")} [requirement/${input.priority}] ${input.title}`,
-                data: { scenarioId: `S-${String(n).padStart(3, "0")}`, title: input.title, type: input.automation ?? "manual", priority: input.priority, steps: input.steps, area: input.area, requirement: refOf.get(requirementId) ?? "" },
+                data: { scenarioId: `S-${String(n).padStart(3, "0")}`, title: input.title, type: input.automation ?? "manual", priority: input.priority, steps: input.steps, testData, area: input.area, requirement: refOf.get(requirementId) ?? "" },
             });
         }
     }

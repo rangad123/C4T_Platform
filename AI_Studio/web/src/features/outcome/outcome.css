@@ -85,6 +85,11 @@
 .oc-steps li > span { display: block; }
 .oc-expect { color: var(--text-muted); }
 .oc-req { margin: 0; }
+/* The check after generation (sheet items 31-33): what a case lacks, and data that cannot be known. */
+.oc-flag-count { display: inline-flex; align-items: center; gap: 4px; color: var(--status-warning-fg); font-weight: var(--fw-medium); }
+.oc-flags { margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--status-warning-line); border-radius: var(--radius-sm); background: var(--status-warning-bg); color: var(--status-warning-fg); }
+.oc-data { list-style: none; padding-left: 0 !important; gap: 6px !important; }
+.oc-data-missing { padding: 1px 6px; border-radius: var(--radius-xs); background: var(--status-warning-bg); color: var(--status-warning-fg); font-weight: var(--fw-semibold); }
 
 @media (max-width: 900px) {
     .oc-body { grid-template-columns: minmax(0, 1fr); }

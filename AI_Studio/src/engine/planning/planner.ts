@@ -56,6 +56,8 @@ export interface PlanOptions {
     allowPurchases?: boolean;
     /** What is known about the application (its latest model version): usable rules and the workflows reach every planning call. */
     knowledge?: AppKnowledge;
+    /** A plan-only run: each scenario is also a written test case, with numbered steps and test data (sheet items 31, 32). */
+    writtenCases?: boolean;
 }
 
 /** A rule as the engine receives it: what it expects, whether a source states it, and what people decided about it. */
@@ -508,8 +510,13 @@ ${model.authentication.required ? "" : "- No login form was detected; do not pla
         opts.roles && opts.roles.length > 1
             ? `- Test accounts: ${opts.roles.join(", ")}. What each may reach is checked separately; where the UI shows the signed-in account role-dependent content (menus, disabled actions, "not allowed" messages), plan scenarios that assert it.\n`
             : ""
-    }${opts.testData ? `${testDataPlanningRule(opts.testData)}\n` : ""}`;
+    }${opts.testData ? `${testDataPlanningRule(opts.testData)}\n` : ""}${opts.writtenCases ? `${WRITTEN_CASE_RULE}\n` : ""}`;
 }
+
+/** Sheet items 31-33: a plan-only run's scenarios are the written test cases people read and export. */
+const WRITTEN_CASE_RULE = `- Each scenario is also a written test case for a person: in "caseSteps" write 2 to 10 clear steps in order, each with what should happen.
+- In "caseData" list the values its steps type or choose: a valid value, and for negative and edge scenarios the invalid and boundary values (the limits shown on the page or in the requirements, and just past them), each marked valid, invalid or boundary. When a value cannot be known from the model (a real account, a real coupon code, an existing order number), set missing true and leave value empty: never make one up. Placeholders such as {{credentials.username}} and {{unique}} are known values.
+- When requirements are listed, name in "requirements" the id of every requirement the scenario checks.`;
 
 export async function planScenarios(ctx: EngineContext, model: AppModel, opts: PlanOptions): Promise<Scenario[]> {
     const elements = opts.digestElementsPerPage ?? LEVEL_SETTINGS.thorough.digestElementsPerPage;
@@ -626,7 +633,8 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
             const res = await ctx.llm.object({
                 system: planningSystem(opts.allowPurchases === true),
                 schema: PlanSchema,
-                maxOutputTokens: Math.min(16_000, 2_000 + 320 * c.quota),
+                // A written test case (steps and data) is about three times a scenario's size.
+                maxOutputTokens: opts.writtenCases ? Math.min(32_000, 2_000 + 1_000 * c.quota) : Math.min(16_000, 2_000 + 320 * c.quota),
                 purpose: "planning",
                 prompt: c.prompt,
                 cachePrefix: summary,
@@ -728,7 +736,8 @@ export async function planScenarios(ctx: EngineContext, model: AppModel, opts: P
             kind: "scenario_planned",
             message: `${s.scenarioId} [${s.category}/${s.priority}] ${s.title}`,
             // The progress tree on the exploration's page lists the ideas by these (web/src/features/explore/explore-tree.ts).
-            data: { scenarioId: s.scenarioId, title: s.title },
+            // A plan-only run stopped before its plan was saved keeps its written cases from these (platform/case-outcome.ts readCaseRun).
+            data: { scenarioId: s.scenarioId, title: s.title, ...(opts.writtenCases ? { steps: s.caseSteps ?? [], testData: s.caseData ?? [], requirement: s.requirements.join(", ") } : {}) },
         });
     }
     return scenarios;

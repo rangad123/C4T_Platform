@@ -79,6 +79,21 @@ export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, t
                 <Empty outcome={outcome} actions={emptyActions} />
             ) : (
                 <>
+                    {(outcome.uncovered?.length ?? 0) > 0 && (
+                        <div className="oc-missing" data-testid="outcome-uncovered">
+                            <h3 className="oc-subhead">
+                                <TriangleAlert size={16} aria-hidden />
+                                {plural(outcome.uncovered!.length, "requirement")} with no test case
+                            </h3>
+                            <ul>
+                                {outcome.uncovered!.map((r) => (
+                                    <li key={r.ref}>
+                                        <span className="oc-mono">{r.ref}</span> {r.title}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                     {outcome.missing.length > 0 && (
                         <div className="oc-missing" data-testid="outcome-missing">
                             <h3 className="oc-subhead">
@@ -172,6 +187,8 @@ function CaseRow({ c, pageTitle }: { c: CaseOutcomeCase; pageTitle?: string }) {
     const [open, setOpen] = useState(false);
     const detailId = useId();
     const manual = c.type === "manual";
+    const flags = c.flags ?? [];
+    const data = c.testData ?? [];
     return (
         <li className="oc-case" data-case={c.id}>
             <button type="button" className="oc-case-btn" aria-expanded={open} aria-controls={detailId} onClick={() => setOpen(!open)}>
@@ -186,12 +203,27 @@ function CaseRow({ c, pageTitle }: { c: CaseOutcomeCase; pageTitle?: string }) {
                         <span className={`oc-prio is-${c.priority}`}>{PRIORITY_LABEL[c.priority]} priority</span>
                         <span className="oc-case-page">{pageTitle ?? (c.page || "No page")}</span>
                         {c.start && <span className="oc-mono oc-case-start">{c.start}</span>}
+                        {flags.length > 0 && (
+                            <span className="oc-flag-count">
+                                <TriangleAlert size={14} aria-hidden />
+                                Needs a look
+                            </span>
+                        )}
                     </span>
                 </span>
             </button>
             <div className="oc-detail" id={detailId} hidden={!open}>
-                {manual ? (
-                    c.steps.length > 0 ? (
+                {flags.length > 0 && (
+                    <ul className="oc-flags" data-testid="case-flags">
+                        {flags.map((f, i) => (
+                            <li key={i}>{f}</li>
+                        ))}
+                    </ul>
+                )}
+                <Lines label="Before you start" lines={c.preconditions} />
+                {c.steps.length > 0 && (
+                    <div className="oc-lines">
+                        <span className="oc-label">Steps</span>
                         <ol className="oc-steps">
                             {c.steps.map((s, i) => (
                                 <li key={i}>
@@ -200,17 +232,22 @@ function CaseRow({ c, pageTitle }: { c: CaseOutcomeCase; pageTitle?: string }) {
                                 </li>
                             ))}
                         </ol>
-                    ) : (
-                        <p className="oc-quiet">No steps written yet.</p>
-                    )
-                ) : (
-                    <>
-                        <Lines label="Before you start" lines={c.preconditions} />
-                        <Lines label="Expected result" lines={c.expected} />
-                        {c.preconditions.length === 0 && c.expected.length === 0 && <p className="oc-quiet">Only a title. Its steps are written when its test script is made in a code project.</p>}
-                    </>
+                    </div>
                 )}
-                {manual && c.expected.length > 0 && <Lines label="Expected result" lines={c.expected} />}
+                {data.length > 0 && (
+                    <div className="oc-lines">
+                        <span className="oc-label">Test data</span>
+                        <ul className="oc-data">
+                            {data.map((d, i) => (
+                                <li key={i}>
+                                    <span className={`badge ${d.kind === "valid" ? "badge-neutral" : "badge-brand"}`}>{DATA_KIND[d.kind]}</span> {d.field}:{" "}
+                                    {d.missing ? <mark className="oc-data-missing">Missing, fill in before running</mark> : <span className="oc-mono">{d.value}</span>}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+                <Lines label="Expected result" lines={c.expected} />
                 {c.requirement && (
                     <p className="oc-req">
                         <span className="oc-label">Requirement</span>
@@ -221,6 +258,8 @@ function CaseRow({ c, pageTitle }: { c: CaseOutcomeCase; pageTitle?: string }) {
         </li>
     );
 }
+
+const DATA_KIND = { valid: "Valid", invalid: "Invalid", boundary: "Boundary" } as const;
 
 function Lines({ label, lines }: { label: string; lines: string[] }) {
     if (!lines.length) return null;
