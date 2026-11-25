@@ -12,6 +12,7 @@
 import type { Browser } from "playwright";
 import { z } from "zod";
 import type { EngineContext } from "../context.js";
+import { jsonText, pairs, recordOf } from "../llm/free-keys.js";
 import type { KnowledgeRule } from "../planning/planner.js";
 import { StepSchema, type Scenario, type Step, type TestSpec } from "../spec/schema.js";
 import type { AppModel } from "../understanding/app-model.js";
@@ -177,17 +178,44 @@ export function unstatedComputedValue(step: AssertStep, stated: string): string 
     return undefined;
 }
 
-const stepOf = (action: "request" | "assertResponse") => StepSchema.options.find((o) => o.shape.action.value === action)!;
+type StepMember<A extends string> = Extract<(typeof StepSchema.options)[number], { shape: { action: z.ZodLiteral<A> } }>;
+const stepOf = <A extends "request" | "assertResponse">(action: A) => StepSchema.options.find((o) => o.shape.action.value === action)! as StepMember<A>;
 /**
  * An API test's steps (requests and response checks), defined and validated by StepSchema's own members. The repair answer asks for these
  * only: with every step kind the schema had 437 optional parameters and Anthropic refuses more than 24 (tests/llm-schema-limits-unit.test.ts).
  */
 const ApiStepSchema = z.discriminatedUnion("action", [stepOf("request"), stepOf("assertResponse")]);
+/**
+ * The same steps as the model answers them: a request's query, headers and extract as { name, value } pairs, its body and a matchesSchema
+ * check's schema as JSON text, because a grammar-constrained answer can only give {} for an object whose keys are not listed
+ * (llm/free-keys.ts). stepOfAnswer turns each one back into the test's step.
+ */
+const ApiStepAnswerSchema = z.discriminatedUnion("action", [
+    stepOf("request").extend({
+        query: pairs(z.string()).optional(),
+        headers: pairs(z.string()).optional(),
+        extract: pairs(z.string()).optional().describe('Values to capture from the JSON answer: [{"name": "productId", "value": "0.id"}]'),
+        body: jsonText(20_000).optional().describe("The JSON body, as text"),
+    }),
+    stepOf("assertResponse").extend({ schema: jsonText(20_000, true).optional().describe("matchesSchema only: the documented response schema, as JSON text") }),
+]);
 export const ApiRepairSchema = z.object({
     verdict: z.enum(["fix", "app_defect", "unfixable"]),
     reason: z.string(),
-    steps: z.array(ApiStepSchema).optional().describe("Complete replacement step list when verdict=fix"),
+    steps: z.array(ApiStepAnswerSchema).optional().describe("Complete replacement step list when verdict=fix"),
 });
+
+/** An answered step as the test's step: pairs become objects, JSON text is parsed, and StepSchema's own member validates the result. */
+function stepOfAnswer(s: z.infer<typeof ApiStepAnswerSchema>): Step {
+    if (s.action === "request") {
+        const { query, headers, extract, body, ...rest } = s;
+        const records = { query, headers, extract };
+        const objects = Object.fromEntries(Object.entries(records).flatMap(([k, v]) => (v ? [[k, recordOf(v)]] : [])));
+        return ApiStepSchema.parse({ ...rest, ...objects, ...(body !== undefined ? { body: JSON.parse(body) } : {}) }) as Step;
+    }
+    const { schema, ...rest } = s;
+    return ApiStepSchema.parse({ ...rest, ...(schema !== undefined ? { schema: JSON.parse(schema) } : {}) }) as Step;
+}
 
 export async function repairApi(ctx: EngineContext, spec: TestSpec, run: ScriptRun, endpointDoc: unknown): Promise<Repair> {
     const t = await triage(ctx, spec, run);
@@ -204,7 +232,8 @@ export async function repairApi(ctx: EngineContext, spec: TestSpec, run: ScriptR
         system: `You correct a failing API test. The test was generated from an API description and executed against the real service.
 If the service legitimately behaves differently from what the test assumed (e.g. returns 422 instead of 400, a different status class, a different body shape), correct the test's request/assertions to match the real behaviour **only when that behaviour is reasonable and not a security or correctness defect**.
 If the service behaves in a way that is a real defect (5xx on bad input, unauthenticated access allowed, injection reflected), answer verdict=app_defect and keep the test unchanged.
-Never loosen an assertion just to make it pass.`,
+Never loosen an assertion just to make it pass.
+In your answer, a request's query, headers and extract are lists of { name, value } pairs, and its body (and a matchesSchema check's schema) is JSON text.`,
         prompt: `Spec:
 ${JSON.stringify({ title: spec.title, steps: spec.steps, expectedResults: spec.expectedResults }, null, 1)}
 
@@ -220,7 +249,7 @@ Triage: ${t.category} — ${t.reason}`,
     });
 
     if (out.verdict === "fix" && out.steps?.length) {
-        const proposed = keepRecords(spec.steps, out.steps as Step[]);
+        const proposed = keepRecords(spec.steps, out.steps.map(stepOfAnswer));
         const rejected = weakensApiTest(spec, proposed);
         if (rejected) {
             ctx.emit({ stage: "validation", kind: "repair_rejected", level: "warn", message: `${spec.testId}: proposed fix rejected — ${rejected}` });
@@ -231,13 +260,13 @@ Triage: ${t.category} — ${t.reason}`,
     return { verdict: out.verdict === "app_defect" ? "app_defect" : "unfixable", reason: out.reason };
 }
 
-/** The fields of an API step that hold an object with free keys (a record), which a grammar-constrained answer can only give as `{}`. */
+/** The fields of an API step that hold an object with free keys (a record; the answer gives them as pairs or JSON text). */
 const recordKeys = (s: Step): readonly string[] => (s.action === "request" ? ["body", "query", "headers", "extract"] : s.action === "assertResponse" && s.check === "matchesSchema" ? ["schema"] : []);
 const isEmpty = (v: unknown) => v === undefined || (typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
 
 /**
- * A repaired API test keeps the original's records where the answer gives them empty or leaves them out. Anthropic's grammar can only give
- * `{}` for an object whose keys are not listed, so a repair cannot say them: a real Haiku repair sent the request with body {}. Steps are
+ * A repaired API test keeps the original's records where the answer gives them empty or leaves them out, so a repair never drops what the
+ * test sends or checks in silence (before the answer could give them, a real Haiku repair sent the request with body {}). Steps are
  * paired in order among those of the same kind (the requests; the matchesSchema checks).
  */
 function keepRecords(original: Step[], proposed: Step[]): Step[] {

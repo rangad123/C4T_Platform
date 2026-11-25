@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import type { ApiEndpointModel } from "../src/engine/understanding/app-model.js";
-import { invariantPrompt, proposeInvariants, type Invariant, type InvariantInput } from "../src/engine/validation/invariants.js";
+import { asAnswered, invariantPrompt, proposeInvariants, type Invariant, type InvariantInput } from "../src/engine/validation/invariants.js";
 import { LayerReportSchema, layerReport } from "../src/engine/validation/layers.js";
 
 const ORIGIN = "http://localhost:4400";
@@ -55,7 +55,8 @@ function scripted(answer: (prompt: string) => Invariant[] | Error) {
             prompts.push(args.system + "\n" + args.prompt);
             const a = answer(args.prompt);
             if (a instanceof Error) throw a;
-            return args.schema.parse({ invariants: a });
+            // Setup bodies as the model gives them: { name, value } pairs (the grammar can only give {} for an object with free keys).
+            return args.schema.parse({ invariants: a.map(asAnswered) });
         }) as LlmClient["object"],
     } satisfies LlmClient;
     return { ctx: { llm }, prompts };

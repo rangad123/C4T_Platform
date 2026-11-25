@@ -3,9 +3,10 @@
  * how a model's API plan becomes steps (and what it can never become), and the "passed but checks almost nothing" verdict.
  */
 import { describe, expect, it } from "vitest";
-import { buildApiSteps, operationList, type ApiPlan } from "../src/engine/authoring/api.js";
+import { ApiPlanAnswerSchema, buildApiSteps, operationList, planApiCall, type ApiPlan } from "../src/engine/authoring/api.js";
 import { detectKind, expectedOf, namesPath, refusalFor, scenarioFor, startPathOf, titleOf } from "../src/engine/authoring/describe.js";
 import { finalVerdict, weakNote } from "../src/engine/authoring/plain.js";
+import type { LlmClient } from "../src/engine/llm/provider.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import type { ApiEndpointModel } from "../src/engine/understanding/app-model.js";
 import type { ValidationOutcome } from "../src/engine/validation/validator.js";
@@ -131,6 +132,33 @@ describe("a model's API plan becomes steps (and only steps for known operations)
         const text = operationList(APIS);
         expect(text).toContain("GET /api/products/{id}");
         expect(text).toContain("id (path, required, e.g. 1)");
+    });
+});
+
+describe("the model's API plan, in the form a grammar-constrained answer can give", () => {
+    // Anthropic's grammar can only give {} for an object whose keys are not listed: path values and query come as { name, value } pairs, the
+    // body as JSON text, and the answer schema validates them (a refused answer is asked again by the client).
+    const answering = (answer: unknown): LlmClient => ({
+        modelName: "scripted",
+        model: undefined as never,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        text: async () => "",
+        object: (async (a: { schema: { parse(v: unknown): unknown } }) => a.schema.parse(answer)) as LlmClient["object"],
+    });
+    const base = { operation: "POST /api/products", explanation: "Adds one.", expect: { fields: [], bodyContains: [] } };
+
+    it("path values, query and body become the plan's objects, and the body reaches the request", async () => {
+        const plan = await planApiCall(answering({ ...base, pathValues: [{ name: "id", value: "1" }], query: [{ name: "q", value: "mug" }], body: '{"name":"Fork","price":3}' }), "Add a fork", APIS);
+        expect(plan).toMatchObject({ pathValues: { id: "1" }, query: { q: "mug" }, body: { name: "Fork", price: 3 } });
+        expect(buildApiSteps(plan, APIS, { allowChanges: true }).steps[0]).toMatchObject({ action: "request", method: "POST", body: { name: "Fork", price: 3 } });
+    });
+
+    it("a null body is no body; a body that is not a JSON object is refused", async () => {
+        expect((await planApiCall(answering({ ...base, body: null }), "x", APIS)).body).toBeUndefined();
+        // Refused by the answer schema itself, so the client asks again (not a crash further on).
+        expect(ApiPlanAnswerSchema.safeParse({ ...base, body: "not json" }).success).toBe(false);
+        await expect(planApiCall(answering({ ...base, body: "not json" }), "x", APIS)).rejects.toThrow(/not valid JSON/);
+        await expect(planApiCall(answering({ ...base, body: "[1, 2]" }), "x", APIS)).rejects.toThrow(/not a JSON object/);
     });
 });
 

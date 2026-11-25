@@ -8,7 +8,7 @@ import { roleCredentials } from "../src/engine/identity/role-differences.js";
 import { TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import type { LlmClient } from "../src/engine/llm/provider.js";
 import type { ApiEndpointModel } from "../src/engine/understanding/app-model.js";
-import { proposeInvariants } from "../src/engine/validation/invariants.js";
+import { asAnswered, proposeInvariants, type Invariant } from "../src/engine/validation/invariants.js";
 import { maskedExpectation, withStatedCheckKinds } from "../src/engine/web/author.js";
 import { findLeftoverUse } from "../src/engine/web/leftovers.js";
 import { catalogueRoles } from "../src/eval/bench/controller.js";
@@ -129,7 +129,7 @@ describe("the deterministic invariant proposal joins the model's (shop BS-01 / B
         { id: "4.1", text: "The shop has one discount code, SAVE10, which takes 10% off the order subtotal, rounded to the nearest cent." },
         { id: "4.5", text: "Shipping is free when the subtotal after the discount is $50.00 or more." },
     ];
-    const llm = (invariants: unknown[]): LlmClient => ({ modelName: "scripted", model: undefined as never, usage: { inputTokens: 0, outputTokens: 0 }, text: async () => "", object: (async (a: { schema: { parse(v: unknown): unknown } }) => a.schema.parse({ invariants })) as LlmClient["object"] });
+    const llm = (invariants: unknown[]): LlmClient => ({ modelName: "scripted", model: undefined as never, usage: { inputTokens: 0, outputTokens: 0 }, text: async () => "", object: (async (a: { schema: { parse(v: unknown): unknown } }) => a.schema.parse({ invariants: (invariants as Invariant[]).map(asAnswered) })) as LlmClient["object"] });
 
     it("a model that proposes only 3.9 still gets 4.1 and 4.5, as the scripted bench proposal has them", async () => {
         const r = await proposeInvariants({ llm: llm([BENCH_SHOP_INVARIANTS[0]]) }, { requirements, apis, origins: new Set([O]), dataChanges: true, secrets: [] });

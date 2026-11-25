@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { parseBenchArgs } from "../src/eval/bench/cli.js";
+import { InvariantAnswerSchema } from "../src/engine/validation/invariants.js";
 import { LAYERS_ONLY_EXPLORATION, layersOnlyLlm } from "../src/eval/bench/layers-only.js";
 
 describe("--layers-only", () => {
@@ -30,6 +31,8 @@ describe("--layers-only", () => {
         // Every Phase 4 proposal call is answered, so a free trial completes: the invariants (T12) and the stored-data rules (T23, none).
         expect(await call(z.object({ invariants: z.array(z.unknown()) }))).toMatchObject({ invariants: expect.any(Array) });
         expect(await call(z.object({ relations: z.array(z.unknown()) }))).toEqual({ relations: [] });
+        // The invariants in the form the real call asks for (setup bodies as { name, value } pairs), so the trial's proposal is not lost.
+        expect((await llm.object({ system: "s", prompt: "p", schema: InvariantAnswerSchema })).invariants.find((i) => i.requirementId === "4.1")).toMatchObject({ setupBodies: [[{ name: "code", value: "SAVE10" }]] });
         expect(llm.modelName).toBe("scripted");
     });
 });
