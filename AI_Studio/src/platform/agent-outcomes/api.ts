@@ -1,13 +1,15 @@
 /**
- * The API Testing Agent's outcome (SPEC §3): the endpoint table (method, path, the statuses the API answered, whether the answers match
- * the API document) and its verified API findings. Computed on read from what its runs saved: the API tests the engine made per endpoint
- * (orchestrator.ts persistNew meta.endpoint), the statuses each run saw (drift-store.ts api_snapshots), and the findings of its tests
- * (candidate_findings, verified states only). A newer run's word on an endpoint replaces an older one's; a stopped run's part counts.
+ * The API Testing Agent's outcome (SPEC §3; owner 2026-11-25: "only test the APIs and show results, PASS and FAIL"): one table of its API
+ * tests (method, path, the status and contract each expects, PASS or FAIL, and for a failure what was sent and what came back) and its
+ * verified API findings. Computed on read from what its runs saved: the API tests the engine made (orchestrator.ts persistNew,
+ * meta.endpoint), the statuses each run saw (drift-store.ts api_snapshots), and the findings of its tests (candidate_findings, verified
+ * states only). A newer run's tests of an endpoint replace an older run's; a stopped run's part counts.
  */
 import { CONTRACT_FAILURE_PREFIX } from "../../engine/contracts/check.js";
 import { operationKey } from "../../engine/contracts/drift.js";
 import { reproduction } from "../../engine/findings/classify.js";
 import { STATE_LABEL, type FindingState } from "../../engine/findings/lifecycle.js";
+import type { TestSpec } from "../../engine/spec/schema.js";
 import { CandidateFindingStore } from "../candidate-finding-store.js";
 import { listSnapshots } from "../drift-store.js";
 import { fromCandidate } from "../findings/adapters.js";
@@ -16,17 +18,30 @@ import type { AgentOutcomeCtx, AgentOutcomeModule } from "./types.js";
 import { VERIFIED_STATES as VERIFIED } from "./security.js";
 
 export type ContractMatch = "matches" | "differs" | "not-checked";
+export type ApiResult = "pass" | "fail" | "not-run";
 
-export interface ApiEndpoint {
+/** What a failed API test sent and what came back: the request as the test states it, the statuses answered, and why it failed. */
+export interface ApiEvidence {
+    request: { method: string; path: string; query: Record<string, string> | null; body: string | null };
+    response: { statuses: number[]; reason: string };
+}
+
+export interface ApiTestRow {
+    testId: string;
+    testKey: string;
+    title: string;
     method: string;
     path: string;
-    /** Every HTTP status it answered in that run, ascending; empty when no answer was recorded. */
-    statuses: number[];
+    /** The status the test expects ("200", "2xx"), or null when it checks none. */
+    expectedStatus: string | null;
     contract: ContractMatch;
     /** What differs from the document, when it differs. */
     contractNote: string | null;
+    result: ApiResult;
     /** The run this row comes from. */
     jobId: string;
+    /** A failed test's evidence; null otherwise. */
+    evidence: ApiEvidence | null;
 }
 
 export interface ApiFinding {
@@ -45,10 +60,13 @@ export interface ApiFinding {
 
 export interface ApiOutcome {
     runs: number;
-    endpoints: ApiEndpoint[];
+    /** The card's line, said again above the table (apiHeadline). */
+    headline: string;
+    /** The counts the card's headline and the Outcome tab both say. */
+    summary: { tests: number; passed: number; failed: number; notRun: number };
+    tests: ApiTestRow[];
     findings: ApiFinding[];
 }
-
 
 /** This agent's own tests in a run: API tests that are not another agent's checks (security, access, speed, load). */
 const isApiTest = (t: TestRow) => t.kind === "api" && !["security", "access", "performance", "load"].some((k) => t.generationMeta?.[k]);
@@ -73,26 +91,54 @@ function statusesOf(ops: Record<string, { statuses: number[] }> | undefined, met
     return [...new Set(all.flatMap(([, o]) => o.statuses))].sort((a, b) => a - b);
 }
 
-function endpointsOf(ctx: AgentOutcomeCtx, runs: JobRow[]): ApiEndpoint[] {
+const RESULT: Record<string, ApiResult> = { VALIDATED: "pass", FAILED_VALIDATION: "fail", NEEDS_REVIEW: "fail" };
+const firstStep = <A extends TestSpec["steps"][number]["action"]>(t: TestRow, action: A, ok: (s: Extract<TestSpec["steps"][number], { action: A }>) => boolean = () => true) =>
+    t.spec.steps.find((s): s is Extract<TestSpec["steps"][number], { action: A }> => s.action === action && ok(s as never));
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+function rowOf(t: TestRow, job: JobRow, ops: Record<string, { statuses: number[] }> | undefined): ApiTestRow {
+    const req = firstStep(t, "request");
+    const [method = req?.method ?? "", ...rest] = (endpointOf(t) ?? `${req?.method ?? ""} ${req?.path ?? ""}`).split(" ");
+    const path = rest.join(" ");
+    const status = firstStep(t, "assertResponse", (s) => s.check === "status" || s.check === "statusClass");
+    const reason = t.validationReason ?? "";
+    const contract: ContractMatch = reason.includes(CONTRACT_FAILURE_PREFIX) ? "differs" : hasContract(t) && t.validationStatus === "VALIDATED" ? "matches" : "not-checked";
+    const result = RESULT[t.validationStatus] ?? "not-run";
+    const body = req?.body === undefined ? null : clip(typeof req.body === "string" ? req.body : JSON.stringify(req.body, null, 2), 2000);
+    return {
+        testId: t.id,
+        testKey: t.testKey,
+        title: t.title,
+        method,
+        path,
+        expectedStatus: status?.expected === undefined ? null : String(status.expected),
+        contract,
+        contractNote: contract === "differs" ? contractNote(reason) : null,
+        result,
+        jobId: job.id,
+        evidence:
+            result === "fail"
+                ? { request: { method: req?.method ?? method, path: req?.path ?? path, query: req?.query ?? null, body }, response: { statuses: statusesOf(ops, method, path), reason: clip(reason.trim(), 1500) } }
+                : null,
+    };
+}
+
+/** Its API tests, the newest run's tests of an endpoint (or of a workflow, by its title) replacing an older run's. */
+function testsOf(ctx: AgentOutcomeCtx, runs: JobRow[]): ApiTestRow[] {
     const snapshots = new Map(listSnapshots(ctx.p.db, ctx.projectId).map((s) => [s.jobId, s.operations]));
-    const out = new Map<string, ApiEndpoint>();
-    // Newest run first: an endpoint it tested is its row.
+    const claimed = new Set<string>();
+    const out: ApiTestRow[] = [];
     for (const job of runs) {
-        const mine = new Map<string, ApiEndpoint>();
+        const mine = new Set<string>();
         for (const t of apiTestsOf(ctx, job)) {
-            const key = endpointOf(t);
-            if (!key || out.has(key)) continue;
-            const [method = "", ...rest] = key.split(" ");
-            const path = rest.join(" ");
-            const row = mine.get(key) ?? { method, path, statuses: statusesOf(snapshots.get(job.id), method, path), contract: "not-checked" as ContractMatch, contractNote: null, jobId: job.id };
-            // One test of the endpoint whose answer differed from the document is enough; it matches when a contract check passed.
-            if (t.validationReason?.includes(CONTRACT_FAILURE_PREFIX)) Object.assign(row, { contract: "differs", contractNote: contractNote(t.validationReason) });
-            else if (row.contract === "not-checked" && hasContract(t) && t.validationStatus === "VALIDATED") row.contract = "matches";
-            mine.set(key, row);
+            const key = endpointOf(t) ?? t.title;
+            if (claimed.has(key)) continue;
+            mine.add(key);
+            out.push(rowOf(t, job, snapshots.get(job.id)));
         }
-        for (const [k, v] of mine) out.set(k, v);
+        for (const k of mine) claimed.add(k);
     }
-    return [...out.values()].sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+    return out.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method) || a.testKey.localeCompare(b.testKey));
 }
 
 async function findingsOf(ctx: AgentOutcomeCtx, runs: JobRow[]): Promise<ApiFinding[]> {
@@ -107,8 +153,21 @@ async function findingsOf(ctx: AgentOutcomeCtx, runs: JobRow[]): Promise<ApiFind
     });
 }
 
-const build = async (ctx: AgentOutcomeCtx, runs: JobRow[]): Promise<ApiOutcome> => ({ runs: runs.length, endpoints: endpointsOf(ctx, runs), findings: await findingsOf(ctx, runs) });
+async function build(ctx: AgentOutcomeCtx, runs: JobRow[]): Promise<ApiOutcome> {
+    const tests = testsOf(ctx, runs);
+    const n = (r: ApiResult) => tests.filter((t) => t.result === r).length;
+    const summary = { tests: tests.length, passed: n("pass"), failed: n("fail"), notRun: n("not-run") };
+    const findings = await findingsOf(ctx, runs);
+    return { runs: runs.length, headline: apiHeadline({ summary, findings }), summary, tests, findings };
+}
 const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** The one line the Workspace card shows, and the Outcome tab above its table: "12 API tests: 10 passed, 2 failed, 1 verified finding". */
+export function apiHeadline(o: Pick<ApiOutcome, "summary" | "findings">): string {
+    const s = o.summary;
+    const parts = [`${s.passed} passed`, `${s.failed} failed`, s.notRun ? `${s.notRun} not run` : null, o.findings.length ? counted(o.findings.length, "verified finding") : null].filter(Boolean);
+    return `${counted(s.tests, "API test")}: ${parts.join(", ")}`;
+}
 
 export const outcome: AgentOutcomeModule<ApiOutcome> = {
     outcome: (ctx) => build(ctx, ctx.runs),
@@ -116,9 +175,5 @@ export const outcome: AgentOutcomeModule<ApiOutcome> = {
         const run = ctx.runs.find((j) => j.id === jobId);
         return run && build(ctx, [run]);
     },
-    headline: (o) => {
-        if (!o.runs) return null;
-        const differs = o.endpoints.filter((e) => e.contract === "differs").length;
-        return [counted(o.endpoints.length, "endpoint"), differs ? `${differs} off its contract` : null, o.findings.length ? counted(o.findings.length, "verified finding") : null].filter(Boolean).join(", ");
-    },
+    headline: (o) => (o.runs ? o.headline : null),
 };

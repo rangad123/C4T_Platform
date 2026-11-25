@@ -71,10 +71,12 @@ export const continuesStopped = (options: { resumeFrom?: string; carryFrom?: str
  * P3-21: exploring by objectives (GenerationRequest.objectives, Phase 3). It is part of an exploration of an AI agent project whose
  * "Explore by objectives" switch is on (Settings → General; never saved means on, agent-inputs-store.ts); every level is Thorough or
  * above (engine/levels.ts). Data-changing operators need the server setting EXPLORE_DATA_OPERATORS=true as well (Decision 6; the engine
- * also needs the run's data-changes setting and reads no environment itself).
+ * also needs the run's data-changes setting and reads no environment itself). A check agent's run (Agent Workspace D1: accessibility,
+ * security, UX...) runs its own checks only: pursuing objectives writes functional tests, so it never explores by objectives.
  */
-export function objectivesOf(project: { testingModes: readonly string[]; exploreByObjectives?: boolean }, dataOperatorsAllowed: boolean): { objectives?: true; dataOperators?: true } {
+export function objectivesOf(project: { testingModes: readonly string[]; exploreByObjectives?: boolean }, dataOperatorsAllowed: boolean, run: { agentId?: string } = {}): { objectives?: true; dataOperators?: true } {
     if (!project.testingModes.includes("agent") || project.exploreByObjectives === false) return {};
+    if (run.agentId && run.agentId !== "test-generation") return {};
     return { objectives: true, ...(dataOperatorsAllowed ? { dataOperators: true } : {}) };
 }
 

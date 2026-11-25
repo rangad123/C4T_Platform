@@ -1,8 +1,8 @@
 /**
  * Agent Workspace W2a (lead 2026-11-24): a Performance agent run keeps the API target for its speed and load checks, and makes none of
- * the API agent's tests; an API agent run is as before. Really run by the worker against a local fixture (two pages, an OpenAPI
+ * the API agent's tests; an API agent run tests the API only (owner 2026-11-25). Really run by the worker against a local fixture (two pages, an OpenAPI
  * document, two safe reads and one write) with the scripted model of the free bench trial (eval/bench/layers-only.ts): no AI spend.
- * Then each agent's outcome shows it: the Performance agent's API call timings and load result, the API agent's endpoint table.
+ * Then each agent's outcome shows it: the Performance agent's API call timings and load result, the API agent's PASS/FAIL table.
  * Fixture port 7650. Starts browsers, so under the browser lock:
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/agent-performance-run.test.ts
  */
@@ -110,9 +110,11 @@ describe("a Performance agent run on the API target", () => {
         expect(o.pages.map((p: any) => p.path)).toContain("/");
     }, 400_000);
 
-    it("an API agent run is as before: its API tests with contract checks, and no speed or load checks", async () => {
+    it("an API agent run tests the API only: its API tests with contract checks, no page tests, and no speed or load checks", async () => {
         const { jobId, tests } = await run("api");
         expect(platform.repo.getJob(jobId)!.status).toMatch(/COMPLETED/);
+        expect(platform.repo.getJob(jobId)!.options.targets).toEqual(["api"]);
+        expect(tests.filter((t) => t.kind !== "api").map((t) => t.title)).toEqual([]);
         const own = tests.filter((t) => typeof meta(t).endpoint === "string" && !meta(t).performance);
         expect(own.map((t) => meta(t).endpoint)).toEqual(expect.arrayContaining(["GET /api/items", "GET /api/status"]));
         expect(own.some((t) => t.spec.steps.some((s) => (s as { check?: string }).check === "matchesSchema"))).toBe(true);
@@ -120,6 +122,7 @@ describe("a Performance agent run on the API target", () => {
         expect(tests.some((t) => meta(t).workflow), tests.map((t) => t.title).join("\n")).toBe(true);
         expect(tests.filter((t) => meta(t).performance)).toEqual([]);
         const o = (await call("GET", `/api/projects/${pid}/workspace/api/outcome`)).body;
-        expect(o.endpoints.map((e: any) => `${e.method} ${e.path}`)).toEqual(expect.arrayContaining(["GET /api/items", "GET /api/status"]));
+        expect(o.tests.map((e: any) => `${e.method} ${e.path}`)).toEqual(expect.arrayContaining(["GET /api/items", "GET /api/status"]));
+        expect(o.tests.every((e: any) => ["pass", "fail"].includes(e.result))).toBe(true);
     }, 400_000);
 });

@@ -250,11 +250,11 @@ describe("mandatory inputs", () => {
         expect(platform.repo.listJobs(id)).toHaveLength(0);
         // The same through the access key (the CLI and MCP): one rule for every caller.
         expect((await asKey("POST", `/api/projects/${id}/test-generation`, { url: SITE })).status).toBe(409);
-        // Given with the request, or an exploration without the API, is not refused.
+        // Given with the request, it is not refused. The API agent's run tests the API whatever targets it asks for (owner 2026-11-25),
+        // so asking for the web alone still needs the document.
         expect((await asKey("POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true, openApiUrl: "https://shop.example/v2/openapi.json" })).status).toBe(202);
         finishJobs(id);
-        expect((await asKey("POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true, targets: ["web"] })).status).toBe(202);
-        finishJobs(id);
+        expect((await asKey("POST", `/api/projects/${id}/test-generation`, { url: SITE, plan: true, targets: ["web"] })).status).toBe(409);
         // Saved on the Requirements tab: nothing is missing any more.
         const saved = await as("t-cora", "PUT", `/api/projects/${id}/agent-inputs`, { openApiUrl: "https://shop.example/openapi.json" });
         expect(saved.body.missing).toEqual([]);

@@ -38,6 +38,7 @@ import { assertAllowedTarget } from "../net-guard.js";
 import type { Platform } from "../bootstrap.js";
 import { projectSetupOf } from "../project-setup.js";
 import type { Credentials, Repo } from "../repo.js";
+import { knownApisOf } from "../../engine/memory/probe-reuse.js";
 import { RequirementStore } from "../requirement-store.js";
 import { agentById, type AgentId } from "../testing-agents.js";
 import { testingAgentsOf } from "./testing-agents.js";
@@ -80,12 +81,16 @@ export interface MissingInput {
     text: string;
 }
 
-/** What is missing for these agents, given what is saved or sent. `targets`: what the exploration covers (the API agent needs its document only when the API is explored). */
-export function missingInputs(agents: readonly AgentId[], have: { openApiUrl?: string | null }, targets?: readonly string[]): MissingInput[] {
+/**
+ * What is missing for these agents, given what is saved or sent. `targets`: what the exploration covers (the API agent needs its document
+ * only when the API is explored). `capturedApis`: earlier explorations captured API calls on the site (capturedApisFor), which the API
+ * agent tests without a document (Agent Workspace D4).
+ */
+export function missingInputs(agents: readonly AgentId[], have: { openApiUrl?: string | null; capturedApis?: boolean }, targets?: readonly string[]): MissingInput[] {
     const out: MissingInput[] = [];
     for (const agent of agents) {
         for (const r of REQUIRED_INPUTS[agent] ?? []) {
-            if (r.input === "openApiUrl" && (have.openApiUrl || (targets && !targets.includes("api")))) continue;
+            if (r.input === "openApiUrl" && (have.openApiUrl || have.capturedApis || (targets && !targets.includes("api")))) continue;
             out.push({ agent, agentName: agentById(agent)!.name, input: r.input, inputName: AGENT_INPUT_WORDS[r.input], text: r.text });
         }
     }
@@ -111,8 +116,14 @@ async function agentsThatRun(repo: Repo, projectId: string, chosen: readonly Age
     return (await isCaseAgentProject(repo, projectId)) ? chosen.filter((a) => a === "test-generation") : [...chosen];
 }
 
+/** Whether the project's earlier explorations captured API calls on the site of `url` (the shared tree, D4; memory/probe-reuse.ts knownApisOf). */
+export function capturedApisFor(repo: Repo, projectId: string, url: string | null | undefined): boolean {
+    const known = knownApisOf(repo.getLatestAppModel(projectId));
+    return Boolean(url && known && sameSite(known.origin, url));
+}
+
 /** For test-generation: what the chosen agents miss for this exploration (empty for a project with no saved choice); a run of one agent (`agentId`, D1) asks only for that agent's. */
-export async function missingForExploration(p: Platform, row: Row, have: { openApiUrl?: string }, targets: readonly string[] | undefined, agentId?: AgentId): Promise<MissingInput[]> {
+export async function missingForExploration(p: Platform, row: Row, have: { openApiUrl?: string; capturedApis?: boolean }, targets: readonly string[] | undefined, agentId?: AgentId): Promise<MissingInput[]> {
     if (agentId) return missingInputs([agentId], have, targets);
     const chosen = await chosenAgents(p, row);
     return chosen ? missingInputs(chosen, have, targets) : [];
@@ -258,7 +269,7 @@ export function registerAgentInputRoutes(ctx: RouteCtx): void {
             requirements: { active },
             agents: agents ? { ids: agents.agents, names: agents.agents.map((a) => agentById(a)?.name ?? a), source: agents.source } : null,
             // Only a saved choice makes an input mandatory (a project with none explores as before and is never refused).
-            missing: agents?.source === "chosen" ? missingInputs(await agentsThatRun(repo, id, agents.agents), { openApiUrl }) : [],
+            missing: agents?.source === "chosen" ? missingInputs(await agentsThatRun(repo, id, agents.agents), { openApiUrl, capturedApis: agents.agents.includes("api") && capturedApisFor(repo, id, latest?.url as string | undefined) }) : [],
         };
     };
 

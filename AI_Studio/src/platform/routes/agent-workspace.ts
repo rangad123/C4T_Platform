@@ -21,7 +21,7 @@ import type { Row } from "../db.js";
 import { TERMINAL_STATES } from "../repo.js";
 import { RequirementStore } from "../requirement-store.js";
 import { agentById, type AgentId } from "../testing-agents.js";
-import { missingInputs, savedInputsFor } from "./agent-inputs.js";
+import { capturedApisFor, missingInputs, savedInputsFor } from "./agent-inputs.js";
 import { testingAgentsOf } from "./testing-agents.js";
 import type { RouteCtx } from "./types.js";
 
@@ -38,7 +38,7 @@ export function registerAgentWorkspaceRoutes(ctx: RouteCtx, appModel: AppModelRe
         const id = String(row.id);
         const latest = repo.getLatestApplicationPublic(id);
         const openApiUrl = latest ? savedInputsFor(p, id, String(latest.url)).openApiUrl : undefined;
-        const needs = missingInputs([agentId], { openApiUrl }).map((m) => m.text);
+        const needs = missingInputs([agentId], { openApiUrl, capturedApis: agentId === "api" && capturedApisFor(repo, id, latest?.url as string | undefined) }).map((m) => m.text);
         if (agentId === "test-generation" && !latest?.url && !row.url && !latest?.config?.mobile) {
             if (!(await new RequirementStore(p.db.sql).list(id)).some((r) => r.status === "active")) needs.push(NO_ADDRESS_OR_REQUIREMENTS);
         }

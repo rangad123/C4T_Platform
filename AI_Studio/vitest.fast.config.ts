@@ -400,6 +400,7 @@ export default defineConfig({
             // Agent Workspace (2026-11-24): one run = one agent, and each agent's outcome (Fastify inject on a temp database, or pure).
             "tests/agent-workspace.test.ts",
             "tests/agent-outcome-api.test.ts",
+            "tests/agent-run-scope-unit.test.ts",
             "tests/agent-outcome-performance.test.ts",
             "tests/agent-outcome-accessibility.test.ts",
             "tests/agent-outcome-ux.test.ts",

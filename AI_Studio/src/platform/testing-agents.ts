@@ -424,6 +424,9 @@ export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: As
     const narrowed: JobOptions = { ...applyAgentChoice(options, asked, [agentId]), agentId };
     if (agentId === "test-generation") return caseRunOptions(narrowed);
     const { planOnly: _p, ...rest } = narrowed;
+    // The API agent tests the API only (owner 2026-11-25): no page exploration, page checks or page tests, whatever targets were asked.
+    // It works from the OpenAPI document or the calls earlier explorations captured (routes/agent-inputs.ts missingInputs).
+    if (agentId === "api") return { ...rest, targets: ["api"] };
     // The Performance agent times safe API calls and runs the load check on the API target, without the API tests (the API agent's):
     // it keeps the target, unless the run asked for the web alone.
     if (agentId === "performance" && (asked.targets ?? ["web", "api"]).includes("api") && !rest.targets.includes("api")) return { ...rest, targets: [...rest.targets, "api"], apiTests: false };

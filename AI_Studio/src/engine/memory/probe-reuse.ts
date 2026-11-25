@@ -133,6 +133,18 @@ export function sameProbes(a: PageProbes, b: PageProbes): boolean {
     return norm(a) === norm(b);
 }
 
+/** The API calls earlier explorations captured on a site (traffic, the site's own API list): what an API-only run, which crawls no pages, tests too. */
+export interface KnownApis {
+    origin: string;
+    apis: ApiEndpointModel[];
+}
+
+/** The captured calls of an application model (not its OpenAPI operations: a run reads the document itself), or undefined when there are none. */
+export function knownApisOf(model: AppModel | null | undefined): KnownApis | undefined {
+    const apis = (model?.apis ?? []).filter((a) => a.source !== "openapi");
+    return model && apis.length ? { origin: model.origin, apis } : undefined;
+}
+
 /** The known pages of an application model (pages whose probes ran in a crawl that records when), for the next exploration. */
 export function knownPagesOf(model: AppModel | null | undefined): KnownPages | undefined {
     if (!model?.pages?.length) return undefined;

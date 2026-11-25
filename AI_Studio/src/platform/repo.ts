@@ -540,6 +540,16 @@ export class Repo {
         return r ? JSON.parse(r.m) : null;
     }
 
+    /** The latest model whose exploration crawled pages: an API-only run's model has none, and must not hide the pages known before. */
+    getLatestCrawledAppModel(projectId: string): AppModel | null {
+        const rows = this.db.all<{ m: string }>(`SELECT app_model_json AS m FROM applications WHERE project_id = ? AND app_model_json IS NOT NULL ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC LIMIT 20`, projectId);
+        for (const r of rows) {
+            const m = JSON.parse(r.m) as AppModel;
+            if (m.pages?.length) return m;
+        }
+        return null;
+    }
+
     setAppModel(applicationId: string, model: AppModel): void {
         this.db.run("UPDATE applications SET app_model_json = ?, model_updated_at = ? WHERE id = ?", JSON.stringify(model), now(), applicationId);
     }

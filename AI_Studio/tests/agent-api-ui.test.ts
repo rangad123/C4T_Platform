@@ -1,6 +1,8 @@
 /**
- * Agent Workspace W2a: the API Testing Agent's page in a real browser (SPEC §3). Outcome: the endpoint table (method, path, status,
- * contract) and the verified findings, nothing of another agent's; Runs: its runs only, each opening what that run tested; Setup: its
+ * Agent Workspace W2a: the API Testing Agent's page in a real browser (SPEC §3; owner 2026-11-25: "only test the APIs and show results,
+ * PASS and FAIL"). Outcome: one table of its API tests (method, path, expected status and contract, PASS or FAIL, a failure opening its
+ * request and response), the card's line said again, and the verified findings; nothing of another agent's, no pages or exploration.
+ * A going run shows the API steps only. Runs: its runs only, each opening what that run tested; Setup: its
  * inputs only, with Needs input while the OpenAPI document is missing. Axe with the colour scheme light and dark, no sideways scroll at
  * 375 px. Runs are seeded as the worker leaves them (tests, the API snapshot, findings); no AI and no exploring browser. Port 7611.
  * Screenshots: c4t-scratch/agent-ws/api/. Requires web/dist:
@@ -49,7 +51,7 @@ async function job(agentId: string, status: JobStatus, error?: string) {
 }
 function test(jobId: string, name: string, endpoint: string, o: { schema?: boolean; meta?: Record<string, unknown>; status: "VALIDATED" | "NEEDS_REVIEW"; reason?: string; kind?: "api" | "web" }) {
     const [method, p] = endpoint.split(" ");
-    const spec = TestSpecSchema.parse({ testId: `API-${String(++n).padStart(3, "0")}`, title: `${endpoint}: succeeds with a valid request`, kind: o.kind ?? "api", category: "API", steps: [{ action: "request", method, path: p }, ...(o.schema ? [{ action: "assertResponse", check: "matchesSchema", schema: { type: "object" } }] : [])] });
+    const spec = TestSpecSchema.parse({ testId: `API-${String(++n).padStart(3, "0")}`, title: `${endpoint}: succeeds with a valid request`, kind: o.kind ?? "api", category: "API", steps: [{ action: "request", method, path: p }, { action: "assertResponse", check: "status", expected: 200 }, ...(o.schema ? [{ action: "assertResponse", check: "matchesSchema", schema: { type: "object" } }] : [])] });
     const id = platform.repo.insertTest({ projectId: pid, suiteId: platform.repo.getOrCreateSuite(pid, "API", "api"), jobId, spec, framework: "playwright-api", validationStatus: "PENDING", meta: { endpoint, ...o.meta } });
     platform.repo.updateTest(id, { validationStatus: o.status, reason: o.reason ?? null });
     tests[name] = id;
@@ -148,18 +150,36 @@ async function narrow(name: string) {
     }
 }
 const tabs = () => page.getByRole("navigation", { name: "API Testing Agent sections" });
-const cells = async () => (await pwExpect(page.getByTestId("api-endpoints")).toBeVisible(), await page.getByTestId("api-endpoints").locator("tbody tr").all()).map(async (r) => (await r.locator("td").allTextContents()).map((t) => t.trim()));
+const cells = async () => (await pwExpect(page.getByTestId("api-tests")).toBeVisible(), await page.getByTestId("api-tests").locator("tbody tr:not([hidden])").all()).map(async (r) => (await r.locator("td").allTextContents()).map((t) => t.trim()));
+/** Nothing of a UI exploration: no page list, exploration tree, browser view, test ideas or page pictures. */
+async function noUiExploration() {
+    for (const id of ["explore-tree", "explorer-watch", "created-tests", "page-evidence"]) await pwExpect(page.getByTestId(id)).toHaveCount(0);
+    const text = (await page.locator(".content").textContent()) ?? "";
+    for (const word of ["Explore your application", "Exploring your application", "user journeys", "test ideas", "pages", "Screenshot"]) expect(text).not.toContain(word);
+    await pwExpect(page.locator(".content img")).toHaveCount(0);
+}
 
 describe("the API Testing Agent's page", () => {
-    it("Outcome: the endpoint table and the verified findings, and nothing of another agent's", async () => {
+    it("Outcome: one PASS/FAIL table of its API tests, a failure opening its evidence, the verified findings, and nothing else", async () => {
         await visit(routes.projectAgent(pid, "api"));
         await pwExpect(page.getByTestId("api-outcome")).toBeVisible();
-        expect(await page.getByTestId("api-endpoints").locator("thead th").allTextContents()).toEqual(["Method", "Path", "Status", "Contract"]);
+        expect(await page.getByTestId("api-tests").locator("thead th").allTextContents()).toEqual(["Method", "Path", "Expected", "Result"]);
         expect(await Promise.all(await cells())).toEqual([
-            ["GET", "/api/health", "500", "Not checked"],
-            ["POST", "/api/orders", "201", 'Differsthe field "total" is missing'],
-            ["GET", "/api/users/{id}", "200", "Matches"],
+            ["GET", "/api/healthsucceeds with a valid request", "HTTP 200Contract not checked", "FAIL"],
+            ["POST", "/api/orderssucceeds with a valid request", 'HTTP 200Contract differsthe field "total" is missing', "FAIL"],
+            ["GET", "/api/users/{id}succeeds with a valid request", "HTTP 200Contract matches", "PASS"],
         ]);
+        // The card's line, said again above the table.
+        await pwExpect(page.getByTestId("api-headline")).toHaveText("3 API tests: 1 passed, 2 failed, 1 verified finding");
+        // A FAIL opens what was sent and what came back.
+        const health = page.getByTestId("api-tests").locator("tbody tr").first();
+        await health.getByRole("button", { name: "FAIL: show the request and response" }).click();
+        await pwExpect(health.getByRole("button", { name: "FAIL: hide the request and response" })).toHaveAttribute("aria-expanded", "true");
+        const ev = page.getByTestId("api-evidence").first();
+        await pwExpect(ev).toBeVisible();
+        await pwExpect(ev).toContainText("RequestGET /api/health");
+        await pwExpect(ev).toContainText("ResponseHTTP 500");
+        await pwExpect(ev).toContainText("Server error: GET /api/health returned 500");
         const findings = page.getByTestId("api-findings").locator("li");
         await pwExpect(findings).toHaveCount(1);
         await pwExpect(findings.first()).toContainText("GET /api/health: succeeds with a valid request");
@@ -170,24 +190,47 @@ describe("the API Testing Agent's page", () => {
         await pwExpect(findings.first()).toContainText("Failed the same way 3 of 3 times");
         const text = (await page.locator(".content").textContent()) ?? "";
         for (const other of ["/api/admin", "Missing header", "Test cases", "Passing", "Page speed", "Accessibility"]) expect(text).not.toContain(other);
+        await noUiExploration();
         await axe("api outcome");
         await shot("outcome.png");
         await narrow("outcome-375.png");
     });
 
+    it("the Workspace card says what the Outcome tab says", async () => {
+        await visit(routes.project(pid));
+        await pwExpect(page.getByText("3 API tests: 1 passed, 2 failed, 1 verified finding")).toBeVisible();
+    });
+
+    it("a going run shows the API steps only: finding the calls, writing and running the API tests", async () => {
+        jobs.going = await job("api", "VALIDATING");
+        platform.repo.setPhase(jobs.going, "discovery", "done");
+        try {
+            await visit(routes.projectAgentRun(pid, "api", jobs.going));
+            const progress = page.getByTestId("api-progress");
+            await pwExpect(progress).toBeVisible();
+            expect((await progress.locator(".step .name").allTextContents()).map((t) => t.trim())).toEqual(["Finding the app's API calls", "Writing the API tests", "Running the API tests"]);
+            await pwExpect(progress.getByRole("button", { name: /Stop/ })).toBeVisible();
+            await noUiExploration();
+            await axe("api progress");
+            await shot("progress.png");
+        } finally {
+            platform.repo.setJobStatus(jobs.going, "FAILED", "Cancelled");
+        }
+    });
+
     it("Runs: its runs only, each opening what that run tested, a stopped run's part included", async () => {
         await visit(routes.projectAgent(pid, "api", "runs"));
         const list = page.getByTestId("agent-runs").locator("li");
-        await pwExpect(list).toHaveCount(2);
-        await list.nth(1).getByRole("link", { name: "Run 1" }).click();
+        await pwExpect(list).toHaveCount(3);
+        await list.nth(2).getByRole("link", { name: "Run 1" }).click();
         await pwExpect(page.getByTestId("agent-run")).toContainText("Run 1");
-        expect((await Promise.all(await cells())).map((r) => r[1])).toEqual(["/api/orders", "/api/users/{id}"]);
+        expect((await Promise.all(await cells())).map((r) => r[1])).toEqual(["/api/orderssucceeds with a valid request", "/api/users/{id}succeeds with a valid request"]);
         await pwExpect(page.getByTestId("api-findings")).toHaveCount(0);
         await axe("api run");
         await shot("run.png");
         await visit(routes.projectAgentRun(pid, "api", jobs.second));
         await pwExpect(page.getByTestId("agent-run")).toContainText("Run 2");
-        expect((await Promise.all(await cells())).map((r) => r[1])).toEqual(["/api/health"]);
+        expect((await Promise.all(await cells())).map((r) => r[1])).toEqual(["/api/healthsucceeds with a valid request"]);
         await pwExpect(page.getByTestId("api-findings").locator("li")).toHaveCount(1);
         await narrow("run-375.png");
     });

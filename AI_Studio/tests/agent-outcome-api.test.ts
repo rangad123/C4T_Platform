@@ -1,6 +1,6 @@
 /**
- * Agent Workspace W2a: the API Testing Agent's outcome (SPEC §3: an endpoint table of method, path, status and contract match, plus
- * its verified API findings; nothing else), computed on read from what its runs saved: the API tests (meta.endpoint), the statuses the
+ * Agent Workspace W2a: the API Testing Agent's outcome (SPEC §3; owner 2026-11-25: one table of its API tests with method, path, the
+ * expected status and contract, PASS or FAIL and a failure's evidence, plus its verified API findings; nothing else), computed on read from what its runs saved: the API tests (meta.endpoint), the statuses the
  * API answered (api_snapshots) and the findings of its tests (candidate_findings, verified states only).
  *
  *   GET /api/projects/:id/workspace/api/outcome[?run=]   and the card's headline in GET /api/projects/:id/workspace
@@ -138,28 +138,42 @@ afterAll(async () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const row = (o: any, key: string) => (o.endpoints as any[]).find((e) => `${e.method} ${e.path}` === key);
+/** The table's rows of one endpoint ("GET /users/{id}"), by test. */
+const rows = (o: any, key: string) => (o.tests as any[]).filter((t) => `${t.method} ${t.path}` === key);
+const keys = (o: any) => [...new Set((o.tests as any[]).map((t) => `${t.method} ${t.path}`))];
 
 describe("the API Testing Agent's outcome", () => {
-    it("is an endpoint table (method, path, status, contract match) grown by each run, the newest run's word per endpoint", async () => {
+    it("is one table of its API tests (method, path, expected status and contract, PASS or FAIL), the newest run's tests per endpoint", async () => {
         const r = await get(`/api/projects/${pid}/workspace/api/outcome`);
         expect(r.status).toBe(200);
         expect(r.body.runs).toBe(3);
-        expect((r.body.endpoints as any[]).map((e) => `${e.method} ${e.path}`)).toEqual(["GET /health", "GET /items/{id}", "POST /orders", "GET /users/{id}"]);
-        expect(row(r.body, "GET /users/{id}")).toMatchObject({ statuses: [200, 404], contract: "not-checked", jobId: ids.second });
-        expect(row(r.body, "POST /orders")).toMatchObject({ statuses: [201], contract: "differs", jobId: ids.first });
-        expect(row(r.body, "POST /orders").contractNote).toBe('the field "total" is missing');
-        expect(row(r.body, "POST /orders").contractNote).not.toContain("How to fix");
-        expect(row(r.body, "GET /health")).toMatchObject({ statuses: [500], contract: "not-checked" });
-        // Called with an id that does not look like one: its statuses are still the endpoint's.
-        expect(row(r.body, "GET /items/{id}")).toMatchObject({ statuses: [200], jobId: ids.old });
+        expect(keys(r.body)).toEqual(["GET /health", "GET /items/{id}", "POST /orders", "GET /users/{id}"]);
+        // The stopped run is the newest: its read of the users replaces run 1's.
+        expect(rows(r.body, "GET /users/{id}")).toEqual([expect.objectContaining({ testId: tests.users2, expectedStatus: "200", contract: "not-checked", result: "pass", jobId: ids.second, evidence: null })]);
+        // Both of run 1's order tests: the one whose answer differed from the document fails, the other passes.
+        const orders = rows(r.body, "POST /orders");
+        expect(orders.map((t: any) => [t.testId, t.result, t.contract])).toEqual([[tests.orders, "fail", "differs"], [tests.orders2, "pass", "matches"]]);
+        expect(orders[0].contractNote).toBe('the field "total" is missing');
+        expect(rows(r.body, "GET /health")[0]).toMatchObject({ result: "fail", expectedStatus: "200", contract: "not-checked" });
+        expect(rows(r.body, "GET /items/{id}")[0]).toMatchObject({ result: "pass", jobId: ids.old });
+        expect(r.body.summary).toEqual({ tests: 5, passed: 3, failed: 2, notRun: 0 });
     });
 
-    it("holds only this agent's items: no other agent's endpoints or findings, no page checks or test cases", async () => {
+    it("opens a failed test's evidence: the request it sent and the response it got; a passed test has none", async () => {
         const r = await get(`/api/projects/${pid}/workspace/api/outcome`);
-        expect(Object.keys(r.body).sort()).toEqual(["endpoints", "findings", "runs"]);
-        expect(row(r.body, "GET /admin")).toBeUndefined();
-        expect(row(r.body, "GET /slow")).toBeUndefined();
+        expect(rows(r.body, "GET /health")[0].evidence).toEqual({ request: { method: "GET", path: "/health", query: null, body: null }, response: { statuses: [500], reason: "Server error: GET /health returned 500" } });
+        const order = rows(r.body, "POST /orders")[0];
+        expect(order.evidence.request).toMatchObject({ method: "POST", path: "/orders" });
+        expect(order.evidence.response.statuses).toEqual([201]);
+        expect(order.evidence.response.reason).toContain('the field "total" is missing');
+        for (const t of (r.body.tests as any[]).filter((x) => x.result === "pass")) expect(t.evidence).toBeNull();
+    });
+
+    it("holds only this agent's items: no other agent's tests or findings, no pages, page checks or test cases", async () => {
+        const r = await get(`/api/projects/${pid}/workspace/api/outcome`);
+        expect(Object.keys(r.body).sort()).toEqual(["findings", "headline", "runs", "summary", "tests"]);
+        expect(rows(r.body, "GET /admin")).toEqual([]);
+        expect(rows(r.body, "GET /slow")).toEqual([]);
         expect((r.body.findings as any[]).map((f) => f.testId)).toEqual([tests.health]);
     });
 
@@ -173,22 +187,23 @@ describe("the API Testing Agent's outcome", () => {
         const first = await get(`/api/projects/${pid}/workspace/api/outcome?run=${ids.first}`);
         expect(first.status).toBe(200);
         expect(first.body.runs).toBe(1);
-        expect((first.body.endpoints as any[]).map((e) => `${e.method} ${e.path}`)).toEqual(["POST /orders", "GET /users/{id}"]);
-        expect(row(first.body, "GET /users/{id}")).toMatchObject({ statuses: [200], contract: "matches" });
+        expect(keys(first.body)).toEqual(["POST /orders", "GET /users/{id}"]);
+        expect(rows(first.body, "GET /users/{id}")[0]).toMatchObject({ result: "pass", contract: "matches" });
         expect(first.body.findings).toEqual([]);
         const stopped = await get(`/api/projects/${pid}/workspace/api/outcome?run=${ids.second}`);
-        expect((stopped.body.endpoints as any[]).map((e) => `${e.method} ${e.path}`)).toEqual(["GET /health", "GET /users/{id}"]);
+        expect(keys(stopped.body)).toEqual(["GET /health", "GET /users/{id}"]);
         expect(stopped.body.findings.map((f: any) => f.id)).toEqual([ids.verified]);
         expect((await get(`/api/projects/${pid}/workspace/api/outcome?run=${ids.security}`)).status).toBe(404);
     });
 
-    it("gives the card one line, and none before a run", async () => {
+    it("gives the card the same line the Outcome tab says, and none before a run", async () => {
         const ws = await get(`/api/projects/${pid}/workspace`);
-        expect(ws.body.agents.find((a: any) => a.id === "api").headline).toBe("4 endpoints, 1 off its contract, 1 verified finding");
+        expect(ws.body.agents.find((a: any) => a.id === "api").headline).toBe("5 API tests: 3 passed, 2 failed, 1 verified finding");
+        expect((await get(`/api/projects/${pid}/workspace/api/outcome`)).body.headline).toBe("5 API tests: 3 passed, 2 failed, 1 verified finding");
         const bare = platform.repo.createProject({ name: "No runs", platforms: ["web"], testingModes: ["agent"] }).id as string;
         await testingAgentsOf(platform).set(bare, ["api"], "test");
         const empty = await get(`/api/projects/${bare}/workspace`);
         expect(empty.body.agents[0]).toMatchObject({ id: "api", status: "needs-input", headline: null });
-        expect((await get(`/api/projects/${bare}/workspace/api/outcome`)).body).toEqual({ runs: 0, endpoints: [], findings: [] });
+        expect((await get(`/api/projects/${bare}/workspace/api/outcome`)).body).toEqual({ runs: 0, headline: "0 API tests: 0 passed, 0 failed", summary: { tests: 0, passed: 0, failed: 0, notRun: 0 }, tests: [], findings: [] });
     });
 });
