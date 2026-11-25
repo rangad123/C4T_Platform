@@ -610,7 +610,7 @@ export class Repo {
     }
 
     listJobs(projectId: string): JobRow[] {
-        return this.db.all("SELECT * FROM generation_jobs WHERE project_id = ? ORDER BY created_at DESC", projectId).map(toJob);
+        return this.db.all(`SELECT * FROM generation_jobs WHERE project_id = ? ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`, projectId).map(toJob);
     }
 
     /**

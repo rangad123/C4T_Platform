@@ -98,7 +98,7 @@ export async function projectCoverage(repo: Repo, store: ArtifactStore, projectI
         `SELECT e.test_case_id, e.id AS execution_id, e.status, e.started_at, e.script_id, a.path, a.pruned_at
            FROM artifacts a JOIN test_executions e ON e.id = a.execution_id
           WHERE a.project_id = ? AND a.kind = 'evidence' AND e.variant IS NULL AND e.environment IS NULL
-          ORDER BY e.started_at DESC`,
+          ORDER BY e.started_at DESC, ${repo.db.dialect.insertionOrder("e")} DESC`,
         projectId,
     );
     // What runs execute now: the latest approved version of each test.

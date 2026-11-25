@@ -35,7 +35,7 @@ import { hostOf, plural, relativeTime } from "../lib/format";
 import { cleanReason, friendlyError, friendlyJobErrors, isActive, nothingRan } from "../lib/labels";
 import { useDocumentTitle, useFetch, useOnFinish, useProjectChanged } from "../lib/hooks";
 import { hasWorkspace } from "../features/agent-workspace/workspace";
-import { Workspace } from "../features/agent-workspace/Workspace";
+import { Workspace } from "../features/agent-workspace/WorkspacePage";
 import type { ProjectAgents } from "../features/testing-agents/testing-agents";
 import { help } from "../lib/help";
 import { routes } from "../lib/router";
