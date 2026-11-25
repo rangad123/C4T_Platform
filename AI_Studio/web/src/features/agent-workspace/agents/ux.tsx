@@ -204,7 +204,7 @@ function Setup({ projectId }: { projectId: string }) {
                             To explore and find the pages · <a href={routes.aiKeys}>Settings → AI keys</a>
                         </dd>
                         <dt>AI screen review</dt>
-                        <dd>Needs a model that can read images, and each picture is a paid AI call. It is on at Deep and Everything when your model can read images; turn it on or off for a run when you start it.</dd>
+                        <dd>Needs a model that can read images, and each picture is a paid AI call. It is on at Deep and Everything when your model can read images, unless How this agent runs above says otherwise; turn it on or off for one run when you start it.</dd>
                     </dl>
                 </>
             )}

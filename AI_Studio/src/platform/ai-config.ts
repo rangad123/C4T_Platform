@@ -179,15 +179,17 @@ export async function projectModelOf(sql: Sql, projectId: string): Promise<AiMod
 }
 
 /**
- * The AI this person's work uses right now. `ownerId` is from aiOwnerOfActor / aiOwnerOfJob. With `projectId`, the project's AI model when
+ * The AI this person's work uses right now. `ownerId` is from aiOwnerOfActor / aiOwnerOfJob. With `projectId`, the project's AI model (or
+ * `agentModel`, an agent run's own) when
  * this person may use it, through one of their own keys: their chosen key first, then an organisational key assigned to them (Crowd4Test
  * pays), then a personal one; else their default with `note` set. Never throws.
  */
-export async function resolveAiFor(d: AiDeps, ownerId: string | null, projectId?: string | null): Promise<WorkAi> {
+export async function resolveAiFor(d: AiDeps, ownerId: string | null, projectId?: string | null, agentModel?: AiModelPick | null): Promise<WorkAi> {
     const base = await defaultAiFor(d, ownerId);
     if (!projectId) return base;
     try {
-        const pick = await projectModelOf(d.sql, projectId);
+        // A run of a testing agent with its own model saved (job.options.aiModel) uses that one, checked the same way.
+        const pick = agentModel ?? (await projectModelOf(d.sql, projectId));
         if (!pick) return base;
         const store = aiConfigStore(d);
         const matching = (await usableKeysOf(d, ownerId)).filter((k) => k.provider === pick.provider && k.model === pick.model);

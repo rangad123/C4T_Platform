@@ -86,6 +86,8 @@ export interface JobOptions {
     testIds?: string[];
     /** Whose run this is (Agent Workspace D1: one run = one agent, testing-agents.ts agentRunOptions). Absent: a run of a project without the Workspace, or made before it. Never kept on the application. */
     agentId?: AgentId;
+    /** The AI model the run's agent is set to use (its Settings tab, testing-agents.ts AgentSettings); checked again when the job runs (ai-config.ts resolveAiFor). Never kept on the application. */
+    aiModel?: { provider: string; model: string };
     /** Plan and write the functional test cases of the journeys (web target). Default true; false when the project's testing agents leave out the Test Case Generation Agent (testing-agents.ts). */
     functionalTests?: boolean;
     /** true (evaluation only): the journeys' test cases also run in the job. Absent or false: they are written and not run (engine GenerationRequest.runTestCases). */

@@ -262,7 +262,7 @@ export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEven
     const { repo, config } = deps;
     // Which AI this job uses and who pays: the project's AI model when its starter (a schedule's or trigger's maker) may use it, else their
     // chosen key, read once, here (ai-config.ts).
-    const resolved = await resolveAiFor({ sql: repo.db.sql, config }, aiOwnerOfJob(job.options), job.projectId);
+    const resolved = await resolveAiFor({ sql: repo.db.sql, config }, aiOwnerOfJob(job.options), job.projectId, job.options.aiModel);
     // A job is read by everyone on its project: a blocked job says so in words that name no key and no person.
     const ai: WorkAi = resolved.blocked ? { ...resolved, blocked: jobSentenceOf(resolved.blocked) } : resolved;
     // A client per job so its token usage is this job's alone (the shared client's counters span jobs).

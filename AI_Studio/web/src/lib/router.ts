@@ -53,8 +53,10 @@ export const SETTINGS_MOVED = { accounts: "signin", frameworks: "general", stora
 export type CasesSection = (typeof CASES_SECTIONS)[number];
 export type ScriptsSection = (typeof SCRIPTS_SECTIONS)[number];
 export type RunsSection = (typeof RUNS_SECTIONS)[number];
-export const AGENT_TABS = ["outcome", "runs", "setup"] as const;
+export const AGENT_TABS = ["outcome", "runs", "settings"] as const;
 export type AgentTab = (typeof AGENT_TABS)[number];
+/** An agent page's tab from `?tab=`; the old Setup tab (`?tab=setup`) is now Settings, so its links still land there. */
+export const agentTabOf = (v: string | null): AgentTab => (v === "setup" ? "settings" : (AGENT_TABS as readonly string[]).includes(v ?? "") ? (v as AgentTab) : "outcome");
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number] | keyof typeof SETTINGS_MOVED;
 
 /** The sections the old places had: their links still work and land where each section lives now (lib/aliases.ts). */
@@ -103,7 +105,7 @@ export const routes = {
     runs: (id: string, section?: RunsSection) => place(id, "runs", "runs", section),
     /** One run opened: its tests, what changed, ways to run again. */
     run: (id: string, jobId: string) => `#/projects/${id}/runs/${jobId}`,
-    /** One testing agent of a project with the Agent Workspace: its Outcome, Runs or Setup (features/agent-workspace/AgentPage.tsx). */
+    /** One testing agent of a project with the Agent Workspace: its Outcome, Runs or Settings (features/agent-workspace/AgentPage.tsx). */
     projectAgent: (id: string, agentId: string, tab?: AgentTab) => `#/projects/${id}/agents/${agentId}${tab && tab !== "outcome" ? `?tab=${tab}` : ""}`,
     /** One run of that agent. */
     projectAgentRun: (id: string, agentId: string, jobId: string) => `#/projects/${id}/agents/${agentId}/runs/${jobId}`,

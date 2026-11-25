@@ -243,7 +243,7 @@ function Setup({ projectId }: { projectId: string }) {
                     {d.signIn.username ? `As ${d.signIn.username}: pages behind the sign-in are pictured too` : "None: only pages a visitor can open are pictured"} · <a href={routes.projectSettings(projectId, "signin")}>Settings → Sign-in</a>
                 </dd>
                 <dt>Screen sizes</dt>
-                <dd>Phone (375 wide), tablet (768 wide) and desktop (1280 wide) on every run. Untick the phone or the tablet when you start a run to leave it out.</dd>
+                <dd>Phone (375 wide), tablet (768 wide) and desktop (1280 wide) on every run, unless How this agent runs above leaves the phone or the tablet out. Change them for one run when you start it.</dd>
             </dl>
         </section>
     );

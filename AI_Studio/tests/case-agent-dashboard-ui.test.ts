@@ -171,6 +171,19 @@ afterAll(async () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
+/** The page at desktop and at 375 wide (no sideways scroll), each pictured when shots are asked for. */
+async function bothWidths(name: string) {
+    await shot(`${name}-1280.png`);
+    await page.setViewportSize({ width: 375, height: 800 });
+    try {
+        await page.waitForTimeout(300);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+        await shot(`${name}-375.png`);
+    } finally {
+        await page.setViewportSize({ width: 1280, height: 900 });
+    }
+}
+
 async function shot(name: string) {
     if (!shots) return;
     fs.mkdirSync(shots, { recursive: true });
@@ -246,7 +259,7 @@ describe("the outcome page of a Test Case Generation project", () => {
         await pwExpect(place.locator("h2")).toHaveText("Test Case Generation Agent");
         await pwExpect(place.getByRole("link", { name: "Run" })).toHaveAttribute("href", routes.newProject({ project: store, agent: "test-generation" }));
         await pwExpect(place).toContainText("Done");
-        expect(await page.getByRole("navigation", { name: "Test Case Generation Agent sections" }).getByRole("link").allTextContents()).toEqual(["Outcome", "Runs", "Setup"]);
+        expect(await page.getByRole("navigation", { name: "Test Case Generation Agent sections" }).getByRole("link").allTextContents()).toEqual(["Outcome", "Runs", "Settings"]);
         await pwExpect(outcome.getByTestId("outcome-download")).toHaveText("Download test cases");
         await pwExpect(page.getByTestId("outcome-not-opened")).toContainText("1 address could not be opened");
         // At most three regions: the setup checklist (only while something is missing) and the report.
@@ -547,9 +560,29 @@ describe("the Agent Workspace (W1)", () => {
         await pwExpect(page.getByText("Not shown here yet")).toHaveCount(0);
         await page.getByRole("navigation", { name: "Accessibility Testing Agent sections" }).getByRole("link", { name: "Runs" }).click();
         await pwExpect(page.getByTestId("agent-runs").locator("li")).toHaveCount(1);
-        await page.getByRole("navigation", { name: "Accessibility Testing Agent sections" }).getByRole("link", { name: "Setup" }).click();
+        await page.getByRole("navigation", { name: "Accessibility Testing Agent sections" }).getByRole("link", { name: "Settings" }).click();
         await pwExpect(page.getByTestId("agent-setup")).toContainText("Application address");
-        await axe("agent page, setup");
+        await axe("agent page, settings");
+    });
+
+    it("two levels of settings: the project's Settings link to each agent's Settings tab; Test Case Generation's has its level and model only", async () => {
+        await visit(routes.projectSettings(team));
+        const list = page.getByTestId("agent-settings-list");
+        await pwExpect(list.getByRole("link")).toHaveCount(5);
+        await pwExpect(list.getByRole("link", { name: "Test Case Generation Agent" })).toHaveAttribute("href", routes.projectAgent(team, "test-generation", "settings"));
+        // How much to explore is each agent's own now, not the project's.
+        await pwExpect(page.getByTestId("project-ai-model")).toBeVisible();
+        await pwExpect(page.getByTestId("explore-level-setting")).toHaveCount(0);
+        await axe("project settings with agent settings");
+        await bothWidths("settings-project");
+        await list.getByRole("link", { name: "Test Case Generation Agent" }).click();
+        const d = page.getByTestId("agent-defaults");
+        await pwExpect(d.getByTestId("explore-level")).toBeVisible();
+        await pwExpect(d.getByTestId("agent-model")).toBeVisible();
+        await pwExpect(d.getByTestId("size-picker")).toHaveCount(0);
+        await pwExpect(d.getByTestId("screen-review")).toHaveCount(0);
+        await axe("test generation settings");
+        await bothWidths("settings-agent-test-generation");
     });
 
     it("the old Runs addresses of a Test Case Generation project open the Workspace and its agent page", async () => {

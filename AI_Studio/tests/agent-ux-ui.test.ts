@@ -168,8 +168,15 @@ describe("the UX Testing Agent's page", () => {
         await shot("ux", "run.png");
     });
 
-    it("Setup: its inputs only, with where each is kept", async () => {
-        await visit(routes.projectAgent(pid, "ux", "setup"));
+    it("Settings (an old ?tab=setup link lands here): its own defaults with the screen review, its schedules, then its inputs only", async () => {
+        // The old Setup tab's address: still works, as the Settings tab.
+        await visit(`#/projects/${pid}/agents/ux?tab=setup`);
+        await pwExpect(tab("UX Testing Agent", "Settings")).toHaveAttribute("aria-current", "page");
+        const d = page.getByTestId("agent-defaults");
+        await pwExpect(d.getByTestId("explore-level")).toBeVisible();
+        await pwExpect(d.getByTestId("screen-review")).toBeVisible();
+        await pwExpect(d.getByTestId("size-picker")).toHaveCount(0);
+        await pwExpect(page.getByTestId("agent-schedules-link")).toBeVisible();
         const setup = page.getByTestId("agent-setup");
         await pwExpect(setup).toContainText(SITE);
         await pwExpect(setup).toContainText("AI screen review");

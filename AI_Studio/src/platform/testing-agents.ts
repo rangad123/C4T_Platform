@@ -18,7 +18,9 @@ import type { Row } from "./db.js";
 import type { Sql } from "./sql.js";
 import { HttpError } from "./http-error.js";
 import { projectSetupOf, type ProjectPlatform } from "./project-setup.js";
+import { z } from "zod";
 import { SIZE_VARIANT_IDS } from "../engine/validation/variants.js";
+import { effectiveLimits, LEVELS, type ExploreLevel } from "../engine/levels.js";
 
 export const TESTING_AGENTS_MIGRATION = `
 CREATE TABLE project_testing_agents (
@@ -29,6 +31,21 @@ CREATE TABLE project_testing_agents (
     PRIMARY KEY (project_id, agent_id)
 );
 CREATE INDEX idx_project_testing_agents_agent ON project_testing_agents(agent_id);
+`;
+
+/**
+ * Each agent's own saved defaults in a project (migration slot 75): its Settings tab. Kept apart from project_testing_agents, whose rows
+ * are replaced whenever the choice is saved, so an agent taken off and added back keeps its settings.
+ */
+export const AGENT_SETTINGS_MIGRATION = `
+CREATE TABLE project_agent_settings (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,              -- an id of TESTING_AGENTS
+    settings_json TEXT NOT NULL,         -- AgentSettings: only the keys agentSettingKeys gives that agent
+    updated_by TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, agent_id)
+);
 `;
 
 export const AGENT_IDS = ["api", "accessibility", "security", "chatbot", "responsive-ui", "ux", "performance", "test-generation"] as const;
@@ -245,6 +262,59 @@ export interface ProjectAgents {
     chosenAt: string | null;
 }
 
+/** One agent's saved defaults: used by every run of that agent (its Run form, schedules, runbook steps, CLI) unless the run says otherwise. */
+export interface AgentSettings {
+    /** How much it explores; none: the project's saved level. */
+    level?: ExploreLevel;
+    /** The AI model its runs use; none: the project's model. */
+    model?: { provider: string; model: string };
+    /** Responsive UI: the sizes it checks beside desktop. */
+    variants?: string[];
+    /** UX: the AI screen review on or off; none: the level decides. */
+    visionChecks?: boolean;
+}
+export type AgentSettingKey = keyof AgentSettings;
+
+const AgentSettingsSchema = z
+    .object({
+        level: z.enum(LEVELS).optional(),
+        model: z.object({ provider: z.string().min(1, "Choose an AI model.").max(64), model: z.string().min(1, "Choose an AI model.").max(200) }).strict().optional(),
+        variants: z.array(z.enum(SIZE_VARIANT_IDS)).max(SIZE_VARIANT_IDS.length).optional(),
+        visionChecks: z.boolean().optional(),
+    })
+    .strict();
+
+/**
+ * The saved defaults an agent has: only the options its run uses. Every agent explores (level) with the AI (model); an `allows` switch is
+ * a default only where it costs nothing extra to repeat (sizes, screen review). The load check stays a choice per run: it sends real load.
+ */
+export function agentSettingKeys(id: AgentId): AgentSettingKey[] {
+    const a = agentById(id);
+    if (!a?.available) return [];
+    return ["level", "model", ...(a.allows.includes("variants") ? (["variants"] as const) : []), ...(a.allows.includes("visionChecks") ? (["visionChecks"] as const) : [])];
+}
+export const noSuchAgentSetting = (a: TestingAgent, key: string) => `The ${a.name} has no setting "${key.slice(0, 40)}".`;
+
+/** A PUT body checked for this agent (400 in words for anything else). */
+export function parseAgentSettings(id: AgentId, raw: unknown): AgentSettings {
+    const r = AgentSettingsSchema.safeParse(raw ?? {});
+    if (!r.success) throw new HttpError(400, r.error.issues[0]?.message ?? "Invalid request");
+    const extra = Object.keys(r.data).find((k) => !agentSettingKeys(id).includes(k as AgentSettingKey));
+    if (extra) throw new HttpError(400, noSuchAgentSetting(agentById(id)!, extra));
+    return r.data;
+}
+
+/**
+ * A run of this agent with its saved defaults filled in where the request said nothing: the level (with its limits, so the earlier
+ * application's numbers do not hold it back), the sizes, the screen review and the model.
+ */
+export function withAgentSettings(d: AgentSettings, options: JobOptions, asked: AskedSwitches): { options: JobOptions; asked: AskedSwitches } {
+    return {
+        options: { ...options, ...(d.level ? { level: d.level, ...effectiveLimits({ level: d.level }) } : {}), ...(d.model ? { aiModel: d.model } : {}) },
+        asked: { ...(d.variants ? { variants: d.variants } : {}), ...(d.visionChecks !== undefined ? { visionChecks: d.visionChecks } : {}), ...asked },
+    };
+}
+
 export class TestingAgentStore {
     constructor(
         private readonly sql: Sql,
@@ -269,6 +339,35 @@ export class TestingAgentStore {
     async chosen(projectId: string): Promise<AgentId[] | undefined> {
         const rows = await this.stored(projectId);
         return rows.length ? ordered(rows.map((r) => String(r.agent_id))) : undefined;
+    }
+
+    /** One agent's saved defaults ({} when none); a key the agent no longer has is left out. */
+    async settingsOf(projectId: string, agentId: AgentId): Promise<AgentSettings> {
+        const r = await this.sql.get<{ settings_json: string }>("SELECT settings_json FROM project_agent_settings WHERE project_id = ? AND agent_id = ?", projectId, agentId);
+        if (!r) return {};
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(r.settings_json);
+        } catch {
+            return {};
+        }
+        const ok = AgentSettingsSchema.safeParse(parsed);
+        if (!ok.success) return {};
+        const keys = agentSettingKeys(agentId);
+        return Object.fromEntries(Object.entries(ok.data).filter(([k]) => keys.includes(k as AgentSettingKey))) as AgentSettings;
+    }
+
+    /** Replaces one agent's saved defaults (already checked by parseAgentSettings). */
+    async setSettings(projectId: string, agentId: AgentId, settings: AgentSettings, by: string | null): Promise<void> {
+        await this.sql.run(
+            `INSERT INTO project_agent_settings (project_id, agent_id, settings_json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (project_id, agent_id) DO UPDATE SET settings_json = excluded.settings_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+            projectId,
+            agentId,
+            JSON.stringify(settings),
+            by,
+            new Date().toISOString(),
+        );
     }
 
     /** Replaces the project's choice (already validated). */
@@ -440,5 +539,8 @@ export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: As
 export async function savedAgentRun(store: TestingAgentStore, row: Row, agentId: string | null | undefined, options: JobOptions, asked: AskedSwitches = {}): Promise<JobOptions | undefined> {
     const modes = projectSetupOf(row).testingModes;
     if (!modes.includes("agent") || modes.includes("code") || !(await store.chosen(String(row.id)))) return undefined;
-    return agentRunOptions((await runAgentOf(store, row, agentId ?? undefined))!, options, asked);
+    const id = (await runAgentOf(store, row, agentId ?? undefined))!;
+    // The agent's own saved defaults (its Settings tab) fill what the schedule or step leaves out.
+    const d = withAgentSettings(await store.settingsOf(String(row.id), id), options, asked);
+    return agentRunOptions(id, d.options, d.asked);
 }
