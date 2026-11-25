@@ -11,6 +11,7 @@
  */
 import type { Browser } from "playwright";
 import { z } from "zod";
+import { withStatedSources } from "../api/stated-source.js";
 import type { EngineContext } from "../context.js";
 import { jsonText, pairs, recordOf } from "../llm/free-keys.js";
 import type { KnowledgeRule } from "../planning/planner.js";
@@ -106,7 +107,10 @@ export async function repairWeb(args: {
         // source does not give (a total or an order number read from what the account held), the value is the test's, not the source's:
         // triage's verdict stands and the test is repaired like any other (row 227: WEB-055, 056, 060 and C1e's WEB-028).
         const computed = TEST_FAULTS.has(t.category) ? unstatedComputedValue(failedStep, statedSourceText(failedStep.source, args.scenario, args.rules)) : undefined;
-        if (computed === undefined) return { verdict: "app_defect", reason: `a stated expectation is not met (${failedStep.source}): ${t.reason}` };
+        // Triage read the test's data or expectation as wrong (WEB-002: "the app is sorting correctly"): still a finding of the stated
+        // check, but its reason says so, and verification never confirms it on the vote alone (verify-service.ts).
+        const disputed = TEST_FAULTS.has(t.category) ? `, but ${ANALYSIS_BLAMES_TEST} (${t.category})` : "";
+        if (computed === undefined) return { verdict: "app_defect", reason: `a stated expectation is not met (${failedStep.source})${disputed}: ${t.reason}` };
         ctx.emit({
             stage: "validation",
             kind: "computed_value_test_fault",
@@ -148,6 +152,8 @@ export async function repairWeb(args: {
     return { verdict: "unfixable", reason: outcome.explanation };
 }
 
+/** The words a stated check's finding carries when the failure analysis says the test, not the application, is wrong. */
+export const ANALYSIS_BLAMES_TEST = "the failure analysis reads the test as wrong";
 /** Triage categories that say the test is wrong, not the application: its data or its expected result. */
 const TEST_FAULTS: ReadonlySet<string> = new Set(["test_data", "assertion"]);
 /** An amount as written on a page: a currency sign next to a number, or a number with two decimals ($664.99, 1,234.50, 12,50 €). */
@@ -255,7 +261,12 @@ Triage: ${t.category} — ${t.reason}`,
             ctx.emit({ stage: "validation", kind: "repair_rejected", level: "warn", message: `${spec.testId}: proposed fix rejected — ${rejected}` });
             return { verdict: "unfixable", reason: `${t.reason} (proposed fix rejected: ${rejected})` };
         }
-        return { verdict: "fixed", reason: out.reason, spec: { ...spec, steps: proposed } };
+        // The answer's steps name no source: the API document, standard rule or requirement the checks cite is put back as generation
+        // gives it (API-084: without it a documented 409 read as the planner's guess and the finding as an incorrect expectation).
+        const repaired = { ...spec, steps: proposed };
+        const doc = endpointDoc as { method?: unknown; path?: unknown; spec?: { responses?: unknown } } | null | undefined;
+        withStatedSources(repaired, doc && typeof doc.method === "string" && typeof doc.path === "string" && Array.isArray(doc.spec?.responses) ? [doc as Parameters<typeof withStatedSources>[1][number]] : []);
+        return { verdict: "fixed", reason: out.reason, spec: repaired };
     }
     return { verdict: out.verdict === "app_defect" ? "app_defect" : "unfixable", reason: out.reason };
 }

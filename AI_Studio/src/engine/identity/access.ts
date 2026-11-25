@@ -32,8 +32,21 @@ import { SESSION_END_HELPER_SOURCE } from "./session-end.js";
 /** First words of every access-control failure; the finding classifier keys on it. */
 export const ACCESS_FAILURE_PREFIX = "Access control check failed:";
 
+/**
+ * Script-side, under a name of its own in each helper (both can be in one script): a signed-in caller refused with 403 or 404 where the
+ * API document names the refusals and not that one (practice store NOTE_403: 403 where it says 401 or 404, requirement 10.5 "404, never
+ * 403") is a contract mismatch, medium: the message, or undefined. Nothing beyond 401 named, a visitor, or no document: no judgement.
+ */
+const offDocumentSource = (name: string, prefix: string) => String.raw`function ${name}(cfg, status) {
+    const doc = String(cfg.documented || "").match(/\d{3}/g) || [];
+    if (cfg.as === "anonymous" || !doc.some((d) => d !== "401") || (status !== 403 && status !== 404) || doc.includes(String(status))) return undefined;
+    return ${prefix} + " 1 refusal differs from the API document\n- [medium] A signed-in “" + cfg.as + "” caller of GET " + cfg.path + " was refused with HTTP " + status + ", but the API document gives HTTP " + cfg.documented + " for it, so the answer differs from the documented contract (a 403 where 404 is documented tells the caller the record exists): check which refusal the API should give";
+}
+`;
+
 // The script declares IGNORE_HTTPS_ERRORS (ignoresHttpsErrors in generators/api.ts): the sign-in contexts follow it.
 export const ACCESS_HELPER_SOURCE = String.raw`const ACCESS_PREFIX = ${JSON.stringify(ACCESS_FAILURE_PREFIX)};
+${offDocumentSource("accessOffDocument", "ACCESS_PREFIX")}
 const ACCESS_OTP = 'input[autocomplete="one-time-code"]:visible, input[name*="otp" i]:visible, input[name*="totp" i]:visible, input[name*="2fa" i]:visible, input[name*="mfa" i]:visible, input[name*="verif" i]:visible, input[name="code" i]:visible, input[id*="otp" i]:visible, input[id*="code" i]:visible, input[placeholder*="code" i]:visible';
 
 /** A request this check sent itself, on a line of its own that the finding's report reads (platform/findings/adapters.ts): secret-named values hidden. */
@@ -161,6 +174,8 @@ async function accessApiAssert(page, base, cfg) {
     // A refusal check (signed-in API access): one GET as cfg.as. Open only on a 2xx answer; for another account's record, a 2xx JSON one.
     if (cfg.refuse) {
         const read = await accessApiRead(page, base, cfg, cfg.as, origin, target, where);
+        const offDoc = read && accessOffDocument(cfg, read.status);
+        if (offDoc) throw new Error(offDoc + accessSent("GET", where, read.status));
         if (!read || read.status < 200 || read.status >= 300 || (cfg.of && read.body === undefined)) return;
         const who = cfg.as === "anonymous" ? "Anyone who is not signed in" : "A signed-in “" + cfg.as + "” user";
         const doc = cfg.documented ? " (documented: HTTP " + cfg.documented + ")" : "";
@@ -274,10 +289,13 @@ ${SESSION_END_HELPER_SOURCE}${IDENTITY_WRITES_HELPER_SOURCE}`;
 
 /** Script-side check for API endpoints: the answer to a request must be a refusal. */
 export const ACCESS_API_HELPER_SOURCE = String.raw`const ACCESS_API_PREFIX = ${JSON.stringify(ACCESS_FAILURE_PREFIX)};
-/** spec = JSON {as, path, by, of?, sev} (of: another account's record). Refusal = 401 / 403 / 404 / redirect. A 2xx is open to someone who may be restricted. */
+${offDocumentSource("accessApiOffDocument", "ACCESS_API_PREFIX")}
+/** spec = JSON {as, path, by, of?, sev, documented?} (of: another account's record). Refusal = 401 / 403 / 404 / redirect (one the document names, when it names them). A 2xx is open to someone who may be restricted. */
 function accessStatusAssert(last, spec) {
     const cfg = JSON.parse(spec);
     const s = last.status;
+    const offDoc = accessApiOffDocument(cfg, s);
+    if (offDoc) throw new Error(offDoc);
     if (s === 401 || s === 403 || s === 404 || (s >= 300 && s < 400)) return;
     if (s < 200 || s >= 300) throw new Error("The endpoint answered HTTP " + s + ", so it could not be judged whether it is open or closed.");
     const who = cfg.as === "anonymous" ? "A caller without credentials" : "A caller with the “" + cfg.as + "” account\u2019s token";
@@ -1048,7 +1066,7 @@ function tokenSpec(c: Refusal): DraftSpec {
         preconditions: c.as === "anonymous" ? [] : [`A test account named “${c.as}” with an API token is set up for this project`],
         steps: [
             { action: "request", method: "GET", path: c.path, auth: "none", ...(headers ? { headers } : {}), description: `Call GET ${shown} as ${c.as === "anonymous" ? "a caller without credentials" : `the “${c.as}” account`}` },
-            { action: "assertResponse", check: "statusDenied", expected: JSON.stringify({ as: c.as, path: shown, by: c.by, ...(c.of ? { of: c.of } : {}), sev: "high" }), description: `${who} is refused (${refusalText(c.documented)})` },
+            { action: "assertResponse", check: "statusDenied", expected: JSON.stringify({ as: c.as, path: shown, by: c.by, ...(c.of ? { of: c.of } : {}), sev: "high", ...(c.documented?.length ? { documented: c.documented.join(" or ") } : {}) }), description: `${who} is refused (${refusalText(c.documented)})` },
         ],
         expectedResults: [`GET ${shown} is refused for ${c.as === "anonymous" ? "callers without credentials" : `the “${c.as}” account`}`],
         testData: {},

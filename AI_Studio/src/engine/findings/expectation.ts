@@ -6,8 +6,10 @@
  *   - An amount the check expects that the cited expectation does not state is the test writer's arithmetic. It is an incorrect
  *     expectation when the API's own answers (captured while the test was written) do not hold it either; it can be confirmed only when
  *     they do (the page and the API disagree on it); with no API answer to compare it waits for a person (Needs manual review).
- * A check of the application's API layer (a correlation step, a relation) is not judged here.
+ * A check of the application's API layer (a correlation step, a relation) is not judged here, except one: an API check that a repeated
+ * identical write is refused (409) is an incorrect expectation when the test's own API document text says a repeat adds to what is there.
  */
+import { repeatAdds } from "../api/stated-source.js";
 import type { CapturedCall } from "../web/correlation.js";
 import type { TestSpec } from "../spec/schema.js";
 
@@ -101,4 +103,18 @@ export function apiOnAmount(steps: readonly Step[], source: string | undefined, 
     }
     if (!numbers.size) return undefined;
     return amounts.every((a) => numbers.has(a) || numbers.has(Math.round(a * 100))) ? "holds" : "lacks";
+}
+
+/**
+ * An API test whose failing check expects a refusal (409) of a write it sent the same way before, while the API document's summary it
+ * carries (spec.description) says a repeat adds to what is there (practice store API-070: "adds to the line if it is already in the cart").
+ */
+export function judgeRepeatRefusal(spec: TestSpec, failedStep: number | undefined): PageCheckJudgement | undefined {
+    if (spec.kind !== "api" || failedStep === undefined || !repeatAdds(spec.description)) return undefined;
+    const step = spec.steps[failedStep - 1];
+    if (step?.action !== "assertResponse" || step.check !== "status" || Number(step.expected) !== 409) return undefined;
+    const sent = spec.steps.slice(0, failedStep - 1).flatMap((s) => (s.action === "request" ? [JSON.stringify([s.method, s.path, s.body ?? null])] : []));
+    const last = sent.at(-1);
+    if (!last || !sent.slice(0, -1).includes(last)) return undefined;
+    return { contradictedBy: `the API document ("${spec.description.slice(0, 200)}": a repeat adds to what is there)` };
 }
