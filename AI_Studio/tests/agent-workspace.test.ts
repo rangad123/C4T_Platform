@@ -118,7 +118,7 @@ describe("a run is one agent's, with that agent's switches only (D1)", () => {
         });
     }
 
-    it("a performance run keeps the API target for its speed and load checks, without the API tests; API and Test Case Generation runs are as before", async () => {
+    it("a performance run keeps the API target for its speed and load checks, without the API tests; an API run explores the API only; Test Case Generation runs are as before", async () => {
         const start = async (name: string, agentId: string, extra: Record<string, unknown> = {}) => {
             const pid = await project(name, ["agent"], ALL);
             const r = await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId, openApiUrl: `${SITE}/openapi.json`, ...extra });
@@ -129,10 +129,12 @@ describe("a run is one agent's, with that agent's switches only (D1)", () => {
         // Asked for the web alone, it stays on the web: the API target is never added.
         const web = await start("Speed web", "performance", { targets: ["web"] });
         expect(web.targets).toEqual(["web"]);
-        // The API agent's run and a test case run carry no such option: they run as they did.
-        const api = await start("Api as before", "api");
-        expect(api.targets).toEqual(["web", "api"]);
+        // The API agent's run tests the API only (owner 2026-11-25): no page exploration, whatever targets the run asked for.
+        const api = await start("Api only", "api");
+        expect(api.targets).toEqual(["api"]);
         expect(api).not.toHaveProperty("apiTests");
+        expect((await start("Api asked web", "api", { targets: ["web", "api"] })).targets).toEqual(["api"]);
+        expect((await start("Api asked web only", "api", { targets: ["web"] })).targets).toEqual(["api"]);
         expect(await start("Cases as before", "test-generation")).not.toHaveProperty("apiTests");
     });
 
@@ -185,6 +187,21 @@ describe("a run is one agent's, with that agent's switches only (D1)", () => {
         expect(refused.status).toBe(409);
         expect(refused.body.error).toMatch(/OpenAPI document/);
         expect((await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId: "ux" })).status).toBe(202);
+    });
+
+    it("the API agent runs without a document when earlier explorations captured API calls on the site (D4), and only then", async () => {
+        const pid = await project("Api from the tree", ["agent"], ["api", "test-generation"]);
+        const appId = String(platform.repo.getLatestApplicationPublic(pid)!.id);
+        const captured = (origin: string) => ({ url: origin, origin, pages: [], navigation: [], apis: [{ method: "GET", path: "/api/cart", origin, statuses: [200], source: "network", usedIn: ["/cart"], requiresAuth: false }], authentication: { required: false, mechanisms: [], loggedIn: false }, externalDependencies: [], documentedTestCases: [], stats: { pagesVisited: 0, pagesSkipped: 0, apisFound: 1, durationMs: 1 }, siteType: "unknown", purpose: "", features: [], journeys: [] });
+        // Captured on another site: they are not this site's calls.
+        platform.repo.setAppModel(appId, captured("http://127.0.0.1:6999") as never);
+        expect((await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId: "api" })).status).toBe(409);
+        expect((await call("GET", `/api/projects/${pid}/workspace?agent=api`)).body.agents[0].status).toBe("needs-input");
+        platform.repo.setAppModel(appId, captured(SITE) as never);
+        expect((await call("GET", `/api/projects/${pid}/workspace?agent=api`)).body.agents[0]).toMatchObject({ status: "not-run", needs: [] });
+        const r = await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId: "api" });
+        expect(r.status, JSON.stringify(r.body)).toBe(202);
+        expect(onlyJob(pid).options).toMatchObject({ agentId: "api", targets: ["api"] });
     });
 });
 

@@ -49,7 +49,7 @@ import { registerFeatureRoutes } from "./routes/index.js";
 import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
 import { agentRunOptions, caseRunOptions, runAgentOf } from "./testing-agents.js";
 import { CASE_AGENT_PLAN_REFUSED, caseAgentOptions, refuseTestsInCaseAgentProject, requirementsOnlyRun } from "./case-agent.js";
-import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
+import { capturedApisFor, missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
 import { adoptSignIn, assertMaySaveSignIn } from "./routes/project-sign-in.js";
 import { JobVariantsSchema, projectCompat, SIZES_ARE_RESPONSIVE_UI, testCompatibility, variantsConfig } from "./routes/variants.js";
 import { isSizeVariant } from "../engine/validation/variants.js";
@@ -489,7 +489,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         // A run of one agent turns on that agent's switches only (testing-agents.ts agentRunOptions).
         let options = agentId ? agentRunOptions(agentId, asked, body) : await withAgentChoice(p, project(id), asked, body);
         // The chosen agents' mandatory inputs (routes/agent-inputs.ts): refused in the words the Explore page's pop-up uses. No saved choice, no refusal.
-        const missing = await missingForExploration(p, project(id), { openApiUrl: body.openApiUrl }, options.targets, agentId);
+        const missing = await missingForExploration(p, project(id), { openApiUrl: body.openApiUrl, capturedApis: options.targets.includes("api") && capturedApisFor(repo, id, body.url) }, options.targets, agentId);
         if (missing.length) throw new HttpError(409, missingInputsMessage(missing));
         if (body.requirements) {
             // Convert at submit time so an unreadable document is rejected now, not mid-job.

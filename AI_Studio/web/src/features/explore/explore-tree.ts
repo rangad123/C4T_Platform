@@ -88,6 +88,16 @@ function settle(n: TreeNode, input: TreeInput): TreeNode {
     return { ...n, state: "skipped", detail, children };
 }
 
+/**
+ * The stages a job's tree shows: a plan stops after planning; a check agent's run (Agent Workspace D1: accessibility, UX...) plans no
+ * test ideas, which are Test Case Generation's work, so that stage is not part of it.
+ */
+export function treePhases(job: { planOnly?: boolean; agentId?: string }): PhaseKey[] {
+    if (job.planOnly) return ["discovery", "understanding", "planning"];
+    if (job.agentId && job.agentId !== "test-generation") return ["discovery", "understanding", "generation", "validation"];
+    return ["discovery", "understanding", "planning", "generation", "validation"];
+}
+
 export function foldExploreTree(input: TreeInput): StageNode[] {
     const pages: TreeNode[] = [];
     const ideasPlanned: TreeNode[] = [];

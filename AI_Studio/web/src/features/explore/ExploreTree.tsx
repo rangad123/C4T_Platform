@@ -4,7 +4,7 @@ import { api, type EventRow, type Job, type PhaseKey, type PhaseState } from "..
 import { mergeEvents, type JobStream } from "../../lib/stream";
 import type { RunTest } from "../runs/run-text";
 import { useRunAnswer } from "../runs/runs";
-import { foldExploreTree, STATE_LABEL, tally, type NodeState, type TreeNode } from "./explore-tree";
+import { foldExploreTree, STATE_LABEL, tally, treePhases, type NodeState, type TreeNode } from "./explore-tree";
 import "./explore-tree.css";
 
 const PAGE = 500;
@@ -157,10 +157,10 @@ const itemWord = (n: TreeNode, count: number): string => {
  * Nested lists with a disclosure button per branch, so a screen reader hears the structure and every state as a word. A running stage starts
  * open on a wide screen; on a small one every branch starts folded and says what it holds on its button.
  */
-export function ExploreTree({ job, active, tests, events, stageText }: { job: Pick<Job, "progress" | "planOnly" | "cancelled" | "error">; active: boolean; tests: readonly RunTest[]; events: readonly EventRow[]; /** The words of a stage (the checklist's own, lib/labels phaseText). */ stageText: (phase: PhaseKey, state: PhaseState) => { title: string; detail?: string } }) {
-    const phases: PhaseKey[] = job.planOnly ? ["discovery", "understanding", "planning"] : ["discovery", "understanding", "planning", "generation", "validation"];
+export function ExploreTree({ job, active, tests, events, stageText }: { job: Pick<Job, "progress" | "planOnly" | "cancelled" | "error" | "agentId">; active: boolean; tests: readonly RunTest[]; events: readonly EventRow[]; /** The words of a stage (the checklist's own, lib/labels phaseText). */ stageText: (phase: PhaseKey, state: PhaseState) => { title: string; detail?: string } }) {
+    const phases = treePhases(job);
     const stopped = job.error === "Cancelled";
-    const stages = useMemo(() => foldExploreTree({ phases, progress: job.progress, events, tests, active, stopped }), [job.progress, job.planOnly, events, tests, active, stopped]); // eslint-disable-line react-hooks/exhaustive-deps
+    const stages = useMemo(() => foldExploreTree({ phases, progress: job.progress, events, tests, active, stopped }), [job.progress, job.planOnly, job.agentId, events, tests, active, stopped]); // eslint-disable-line react-hooks/exhaustive-deps
     const [narrow] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(NARROW).matches);
     return (
         <ol className="steps xtree" aria-label="Exploration progress" data-testid="explore-tree">
@@ -178,7 +178,7 @@ export function ExploreTree({ job, active, tests, events, stageText }: { job: Pi
  * The tree for a job of its own: reads the job's events (useTreeEvents) and, for one that creates tests, the run's tests (the same answer
  * the Runs page reads).
  */
-export function JobExploreTree({ job, active, stream, stageText, tests }: { job: Pick<Job, "jobId" | "projectId" | "progress" | "planOnly" | "cancelled" | "error">; active: boolean; stream: JobStream; stageText: (phase: PhaseKey, state: PhaseState) => { title: string; detail?: string }; /** Already read by the page; else read here. */ tests?: readonly RunTest[] }) {
+export function JobExploreTree({ job, active, stream, stageText, tests }: { job: Pick<Job, "jobId" | "projectId" | "progress" | "planOnly" | "cancelled" | "error" | "agentId">; active: boolean; stream: JobStream; stageText: (phase: PhaseKey, state: PhaseState) => { title: string; detail?: string }; /** Already read by the page; else read here. */ tests?: readonly RunTest[] }) {
     const events = useTreeEvents(job.jobId, active, stream);
     // The page's own live stream of this job, never a second one (useRunAnswer's `shared`).
     const own = useRunAnswer(job.projectId, tests || job.planOnly ? null : job.jobId, active, stream);

@@ -46,7 +46,7 @@ import { planScenarios, requirementsCoverage, rulesForScenario } from "./plannin
 import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
 import { reuseMessage } from "./memory/reuse.js";
-import { ProbeReuse, type KnownPages } from "./memory/probe-reuse.js";
+import { ProbeReuse, type KnownApis, type KnownPages } from "./memory/probe-reuse.js";
 import { EVENT_PAGES_REUSED, explorationReuseOn } from "./llm/without-ai.js";
 import { levelSettings, visionOn, type ExplorationBudgets, type ExploreLevel } from "./levels.js";
 import { buildScreenMap, coverWithTests, type CrawlTransition, type RoleCrawl } from "./screenmap/map.js";
@@ -194,6 +194,8 @@ export interface GenerationRequest {
      * for the same origin. The host hands over its own project's model only.
      */
     knownPages?: KnownPages;
+    /** An API-only run (no "web" target): the calls this project's earlier explorations captured (memory/probe-reuse.ts knownApisOf), tested too. Same origin only. */
+    knownApis?: KnownApis;
     /**
      * Keep a covered thumbnail of each page the crawl opens (discovery/thumbnails.ts), stored through `GenerationSink.savePageThumbnail`.
      * The host decides (the project's "Keep page thumbnails" switch); absent or false: none is taken. A host without that method keeps none.
@@ -654,9 +656,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     (a) => a.path !== specPath && !/\/(openapi|swagger)(\.json|\.ya?ml)?$|\/api-docs$/i.test(a.path),
                 );
                 // Pages whose probes were reused did not call what their menus and tabs call: those endpoints come from the last exploration.
-                if (known?.reused.length) {
+                // An API-only run crawls no pages: the calls earlier explorations captured on this site are its calls too (Agent Workspace D4).
+                const carriedApis = [...(known?.reused.length ? known.reusedApis() : []), ...(!wantWeb && req.knownApis?.origin === origin ? req.knownApis.apis : [])];
+                if (carriedApis.length) {
                     const have = new Set(apis.map((a) => templateKey(a.method, a.path)));
-                    for (const a of known.reusedApis()) {
+                    for (const a of carriedApis) {
                         if (!allowed.has(a.origin) || have.has(templateKey(a.method, a.path))) continue;
                         have.add(templateKey(a.method, a.path));
                         apis.push(a);

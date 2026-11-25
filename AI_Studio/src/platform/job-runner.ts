@@ -73,7 +73,7 @@ import { projectSetupOf } from "./project-setup.js";
 import { handOverExploreLlm } from "./explore-llm.js";
 import { handOverExploreSinks } from "./explore-sink.js";
 import { EXPLORE_ADAPTER_ID } from "./explore-task.js";
-import { knownPagesOf } from "../engine/memory/probe-reuse.js";
+import { knownApisOf, knownPagesOf } from "../engine/memory/probe-reuse.js";
 import { secretValues } from "../engine/memory/session.js";
 import { noteRunInMemory, type RunJourneyResult } from "./memory-store.js";
 import { runnersOnly } from "./runner-only.js";
@@ -701,12 +701,15 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 // Phase 3 (P3-21): explore by objectives in an AI agent project whose "Explore by objectives" switch is on (never saved: on);
                 // data operators only with EXPLORE_DATA_OPERATORS=true. On a runner too old for it, explore-dispatch.ts takes it off again
                 // and the job says why.
-                ...((project) => (project ? objectivesOf({ ...projectSetupOf(project), exploreByObjectives: new AgentInputsStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY)).exploreByObjectives(job.projectId) }, config.EXPLORE_DATA_OPERATORS) : {}))(repo.getProject(job.projectId)),
+                ...((project) => (project ? objectivesOf({ ...projectSetupOf(project), exploreByObjectives: new AgentInputsStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY)).exploreByObjectives(job.projectId) }, config.EXPLORE_DATA_OPERATORS, { agentId: o.agentId }) : {}))(repo.getProject(job.projectId)),
                 // What the project's last exploration by objectives explored: the others rank higher ("not explored yet", priority.ts).
                 ...(await exploredObjectivesOf(repo, store, job.projectId)),
                 ...(o.fullExploration ? { fullExploration: true } : {}),
                 // Reuse earlier runs: this project's own latest model, as known pages (the engine uses them only for the same origin).
-                ...(!fromPlan && !o.resumeFrom && !o.fullExploration && o.useMemory !== false && !o.understandingBaseline ? knownPagesRequest(repo.getLatestAppModel(job.projectId)) : {}),
+                // (The latest model that crawled pages: an API-only run's model has none.)
+                ...(!fromPlan && !o.resumeFrom && !o.fullExploration && o.useMemory !== false && !o.understandingBaseline ? knownPagesRequest(repo.getLatestCrawledAppModel(job.projectId)) : {}),
+                // An API-only run (the API agent's): the calls earlier explorations captured, which it tests beside the OpenAPI document's.
+                ...(!fromPlan && !o.resumeFrom && o.targets?.includes("api") && !o.targets.includes("web") ? knownApisRequest(repo.getLatestAppModel(job.projectId)) : {}),
                 ...(o.understandingBaseline ? { pageUnderstanding: false } : {}),
                 // "Keep page thumbnails" (Settings → General; never saved means on): a covered thumbnail of each page, kept with this job.
                 ...(new AgentInputsStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY)).keepThumbnails(job.projectId) ? { pageThumbnails: true } : {}),
@@ -940,6 +943,12 @@ async function noteRunForMemory(
 function knownPagesRequest(model: Parameters<typeof knownPagesOf>[0]): Pick<GenerationRequest, "knownPages"> {
     const knownPages = knownPagesOf(model);
     return knownPages ? { knownPages } : {};
+}
+
+/** The calls the project's latest model captured, for an API-only run (none when it captured none). */
+function knownApisRequest(model: Parameters<typeof knownApisOf>[0]): Pick<GenerationRequest, "knownApis"> {
+    const knownApis = knownApisOf(model);
+    return knownApis ? { knownApis } : {};
 }
 
 async function resumeOf(repo: Repo, store: ArtifactStore, stoppedJobId: string, emit: (e: EngineEvent) => void): Promise<{ resume?: ExploreCheckpoint }> {

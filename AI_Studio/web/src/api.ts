@@ -54,6 +54,8 @@ export interface Job {
     canWatch?: boolean;
     /** What an exploration looks at ("mobile" is an Android app on a phone or emulator). Absent on jobs made before phone exploration. */
     targets?: Array<"web" | "api" | "mobile">;
+    /** Whose run it is (Agent Workspace D1): absent for runs of projects without the Workspace and for older runs. */
+    agentId?: string;
     /** Deploy runs: what the pipeline said about the deploy. */
     deploy?: { commit?: string; environment?: string; label?: string } | null;
     progress: Record<PhaseKey, PhaseState>;
