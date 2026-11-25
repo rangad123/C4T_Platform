@@ -133,14 +133,15 @@ describe("repeat passes", () => {
 });
 
 describe("failure context", () => {
-    it("the aria snapshot at the failing check is read, masked, and reaches the repair prompt; trace and video are kept", async () => {
+    it("the aria snapshot at the failing check is read, masked, and reaches the repair prompt; the trace is kept and no video is recorded (V9, owner 2026-11-24)", async () => {
         const failing = script("CTX-001", `    await page.goto(${JSON.stringify(`${BASE}/secret`)});\n    await expect(page.getByRole("button", { name: "Pay later" })).toBeVisible({ timeout: 2000 });`);
         const [run] = await runScripts(scratch(), [failing], { baseUrl: BASE, headless: true, credentials: { username: "u", password: SECRET } }, { workers: 1 });
         expect(run!.status).toBe("failed");
         expect(run!.errorContext).toContain('button "Pay now"');
         expect(run!.errorContext).not.toContain(SECRET);
         expect(run!.errorContext).toContain("[hidden]");
-        expect(run!.artifacts.map((a) => a.kind)).toEqual(expect.arrayContaining(["trace", "video"]));
+        expect(run!.artifacts.map((a) => a.kind)).toEqual(expect.arrayContaining(["trace", "screenshot"]));
+        expect(run!.artifacts.map((a) => a.kind)).not.toContain("video");
         const prompts: string[] = [];
         const { ctx } = ctxWith(async (a) => (prompts.push(a.prompt), { category: "locator", fixable: true, reason: "renamed" }) as never);
         await triage(ctx, spec("CTX-001", [{ action: "navigate", url: "/secret" }]), run!);

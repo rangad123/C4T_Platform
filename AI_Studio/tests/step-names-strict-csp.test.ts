@@ -49,7 +49,8 @@ describe("step names on a strict style-src page, without the video's step captio
         const [run] = await runScripts(loadConfig({}).scratchDir, [{ testId: spec.testId, filename: r.filename, content: r.content }], { baseUrl: origin, headless: true }, { workers: 1, onLive: (e) => live.push(e) });
 
         expect(run!.status).toBe("failed");
-        expect(run!.artifacts.some((a) => a.kind === "video")).toBe(true);
+        // No video is recorded (V9, owner 2026-11-24), so the step names must come from the step results and live events alone.
+        expect(run!.artifacts.some((a) => a.kind === "video")).toBe(false);
         // Step results (what repo.recordExecution stores per step): one per step, each with its numbered name, the failing one included.
         expect(run!.steps.map((s) => s.index)).toEqual([0, 1, 2]);
         for (const s of run!.steps) expect(s.title).toMatch(new RegExp(`^${s.index + 1}\\.\\s+\\S`));
