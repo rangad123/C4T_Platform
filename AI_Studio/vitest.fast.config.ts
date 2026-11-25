@@ -43,6 +43,7 @@ export default defineConfig({
             "tests/finding-report-v10-unit.test.ts",
             "tests/eng-fix3-verify-unit.test.ts",
             "tests/realapp-practice-store-unit.test.ts",
+            "tests/llm-schema-limits-unit.test.ts",
             "tests/runner-handover.test.ts",
             "tests/runner-owner-unit.test.ts",
             "tests/runner-reset-migration.test.ts",
