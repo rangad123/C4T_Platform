@@ -290,8 +290,9 @@ describe("no project AI anywhere", () => {
         const bad = files.filter((f) => /\/projects\/\$\{[^}]+\}\/ai(?![\w-])|\/ai-configurations|ProjectAiSettings|AI configuration|who pays|managed AI/i.test(fs.readFileSync(f, "utf8"))).map((f) => path.relative(REPO_ROOT, f));
         expect(bad).toEqual([]);
         const modelCalls = files.filter((f) => /\/projects\/\$\{[^}]+\}\/ai-model/.test(fs.readFileSync(f, "utf8"))).map((f) => path.relative(REPO_ROOT, f));
-        expect(modelCalls).toEqual(["web/src/features/workspace/ProjectAiModel.tsx"]);
-        expect(fs.readFileSync(path.join(REPO_ROOT, "web/src/features/workspace/ProjectAiModel.tsx"), "utf8")).not.toMatch(/apiKey|secret/i);
+        // The project's model choice, and an agent's own model choice (its Settings tab reads the same allowed models).
+        expect(modelCalls.sort()).toEqual(["web/src/features/agent-workspace/AgentSettings.tsx", "web/src/features/workspace/ProjectAiModel.tsx"]);
+        for (const f of modelCalls) expect(fs.readFileSync(path.join(REPO_ROOT, f), "utf8")).not.toMatch(/apiKey|secret/i);
     });
 
     it("a project's Settings has no AI section", async () => {

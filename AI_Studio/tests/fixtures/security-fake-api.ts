@@ -294,6 +294,8 @@ export class SecurityFake {
             if (method === "GET" && (rest === "tests" || rest === "jobs")) return { body: [] };
             if (method === "GET" && rest === "testing-agents") return { body: { applies: false, agents: [], source: "matched", chosenBy: null, chosenAt: null, switches: {}, platforms: ["web"] } };
             if (method === "GET" && rest === "notes") return { body: { notes: [], max: 50 } };
+            // General settings' "Agent settings" list: a project without the Agent Workspace (routes/agent-workspace.ts).
+            if (method === "GET" && rest === "workspace") return { body: { workspace: false, agents: [] } };
             // The project's AI model (General settings): none chosen and no models of this person's keys (routes/project-ai-model.ts).
             if (method === "GET" && rest === "ai-model") return { body: { selected: null, selectedYours: true, choices: [] } };
             // What the agents need (General settings' "Keep page thumbnails" reads it): a project not tested by the AI agent, nothing
