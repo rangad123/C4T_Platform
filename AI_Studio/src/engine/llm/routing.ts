@@ -47,6 +47,7 @@ export const ROUTE_TABLE: Readonly<Record<RouteTask, { model: "fast" | "main"; w
     review: { model: "main", what: "Reviewing each written web test against its scenario" },
     repair: { model: "main", what: "Why a test failed, repairing it (including the agent re-writing a failing web test), phone repair suggestions" },
     vision: { model: "main", what: "Anything with images (screenshot judgements), unless the fast model is marked as able to see images" },
+    layers: { model: "main", what: "Proposing the layer checks: API invariants and stored-data rules from the requirements" },
     other: { model: "main", what: "Anything not labelled" },
 };
 
@@ -55,7 +56,7 @@ export const ROUTE_TABLE: Readonly<Record<RouteTask, { model: "fast" | "main"; w
  * Never the fast model. A call is strong by the task of the route scope it runs in, else by its purpose; a review is strong in any scope
  * (it runs inside a scenario's authoring scope). The phone explorer's turns, labelled analysis inside their own scope, stay as they were.
  */
-export const STRONG_TASKS: ReadonlySet<RouteTask> = new Set<RouteTask>(["analysis", "planning", "review"]);
+export const STRONG_TASKS: ReadonlySet<RouteTask> = new Set<RouteTask>(["analysis", "planning", "review", "layers"]);
 export function isStrongCall(purpose: unknown, scope: RouteScope | undefined): boolean {
     const p = normalisePurpose(purpose);
     return p === "review" || STRONG_TASKS.has(scope?.task ?? p);

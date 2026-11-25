@@ -484,7 +484,7 @@ async function verifyAfterJobNow(p: Platform, job: JobRow, o: VerifyAfterOptions
     // A run's failed tests are findings; a creation job's are only the ones it left as findings (Needs review: Phase 4 layer checks among
     // them), not the tests it could not make pass for their own reasons.
     const isFinding = (id: string) => (o.findingTests ? o.findingTests.has(id) : p.repo.getTest(id)?.validationStatus === "NEEDS_REVIEW");
-    const failed = o.harvested ? [] : failedRunsOf(p, job, testOf).filter((x) => mode === "validate" || isFinding(x.test.id));
+    const failed = o.harvested ? [] : (await failedRunsOf(p, job, testOf)).filter((x) => mode === "validate" || isFinding(x.test.id));
     if (failed.length) await harvestExecutionFindings(store, { projectId: job.projectId, jobId: job.id, failed });
     // This run's new findings first, then older ones still waiting, oldest first. withinBudget caps the whole list; findings it cannot
     // verify (another kind of test) cost no budget, so the older ones are read past them.
@@ -622,8 +622,8 @@ export function verifyDepsOf(p: Platform, job: JobRow, o: { execute?: VerifyDeps
     };
 }
 
-/** The last run of each test in this job that failed, rebuilt from its stored execution (the steps' results, not the files). */
-function failedRunsOf(p: Platform, job: JobRow, testOf: (id: string) => VerifyTest | undefined): Array<{ test: VerifyTest; run: ScriptRun }> {
+/** The last run of each test in this job that failed, rebuilt from its stored execution (the steps' results and request summaries, not the files). */
+async function failedRunsOf(p: Platform, job: JobRow, testOf: (id: string) => VerifyTest | undefined): Promise<Array<{ test: VerifyTest; run: ScriptRun }>> {
     const rows = p.repo.db.all<{ id: string; test_case_id: string; status: string; error: string | null; attempt: number }>(
         "SELECT e.id, e.test_case_id, e.status, e.error, e.attempt FROM test_executions e JOIN test_cases t ON t.id = e.test_case_id WHERE e.job_id = ? AND t.project_id = ? ORDER BY e.attempt, e.started_at",
         job.id,
@@ -638,6 +638,9 @@ function failedRunsOf(p: Platform, job: JobRow, testOf: (id: string) => VerifyTe
         if (!test) continue;
         const steps = p.repo.db.all<{ idx: number; title: string; status: string; error: string | null }>("SELECT idx, title, status, error FROM test_execution_steps WHERE execution_id = ? ORDER BY idx", r.id);
         const failed = steps.find((s) => s.status === "failed");
+        const kept = p.repo.db.get<{ path: string }>("SELECT path FROM artifacts WHERE execution_id = ? AND kind = 'responses'", r.id);
+        const list: unknown = kept ? await p.store.getBytes(kept.path).then((b) => JSON.parse(b.toString("utf8")) as unknown).catch(() => []) : [];
+        const responses = (Array.isArray(list) ? list : []).filter((x): x is ScriptRun["responses"][number] => typeof x?.method === "string" && typeof x.path === "string" && typeof x.status === "number");
         out.push({
             test,
             run: {
@@ -648,7 +651,7 @@ function failedRunsOf(p: Platform, job: JobRow, testOf: (id: string) => VerifyTe
                 failedStepIndex: failed ? Number(failed.idx) : -1,
                 steps: steps.map((s) => ({ index: Number(s.idx), title: s.title, status: s.status === "failed" ? "failed" : "passed", ...(s.error ? { error: s.error } : {}) })),
                 artifacts: [],
-                responses: [],
+                responses,
             },
         });
     }

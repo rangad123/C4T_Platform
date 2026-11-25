@@ -18,7 +18,8 @@ export const PAID_PROVIDER = "anthropic";
 export const PAID_MODEL = "claude-haiku-5-5";
 export const PAID_KEY_ENV = "BENCH_ANTHROPIC_API_KEY";
 
-const Tier = z.object({ inputPerMTok: z.number().min(0), outputPerMTok: z.number().min(0) }).strict();
+/** Prompt-cache reads and writes have their own prices; without them they are charged as ordinary input. */
+const Tier = z.object({ inputPerMTok: z.number().min(0), outputPerMTok: z.number().min(0), cachedInputPerMTok: z.number().min(0).optional(), cacheWritePerMTok: z.number().min(0).optional() }).strict();
 export const PaidPricesSchema = z
     .object({
         provider: z.literal(PAID_PROVIDER),
@@ -42,11 +43,15 @@ export function paidPricesIn(file: string): PaidPrices | undefined {
     return p.success ? p.data : undefined;
 }
 
-/** What one call costs in dollars: the higher tier for the whole call when its prompt is longer than the first tier allows. */
-export function callCost(prices: PaidPrices, inputTokens: number, outputTokens: number): number {
+/**
+ * What one call costs in dollars: the higher tier for the whole call when its prompt (`inputTokens`, cache reads and writes included) is
+ * longer than the first tier allows; the `cache` part of the prompt at the tier's cache prices.
+ */
+export function callCost(prices: PaidPrices, inputTokens: number, outputTokens: number, cache = { read: 0, write: 0 }): number {
     const [low, high] = prices.tiers;
     const t = inputTokens > low.upToInputTokens ? high : low;
-    return (inputTokens * t.inputPerMTok + outputTokens * t.outputPerMTok) / 1_000_000;
+    const plain = Math.max(0, inputTokens - cache.read - cache.write);
+    return (plain * t.inputPerMTok + cache.read * (t.cachedInputPerMTok ?? t.inputPerMTok) + cache.write * (t.cacheWritePerMTok ?? t.inputPerMTok) + outputTokens * t.outputPerMTok) / 1_000_000;
 }
 
 /** The output limit the SDK asks for when a call sets none (it caps an unknown model at this). */
@@ -95,9 +100,10 @@ export class SpendGuard {
             if (res.ok) {
                 try {
                     const u = ((await res.clone().json()) as { usage?: Record<string, number> }).usage ?? {};
-                    // Cache reads and writes are charged as ordinary input here: never less than the real cost.
-                    const inputTokens = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
-                    this.spent += callCost(this.prices, inputTokens, u.output_tokens ?? 0);
+                    // Cache reads and writes at the table's cache prices (as ordinary input when it has none).
+                    const cache = { read: u.cache_read_input_tokens ?? 0, write: u.cache_creation_input_tokens ?? 0 };
+                    const inputTokens = (u.input_tokens ?? 0) + cache.read + cache.write;
+                    this.spent += callCost(this.prices, inputTokens, u.output_tokens ?? 0, cache);
                     this.calls++;
                 } catch {
                     // An answer without readable usage: charge its worst case.

@@ -226,7 +226,7 @@ export async function proposeInvariants(ctx: Pick<EngineContext, "llm">, input: 
     let error: string | undefined;
     try {
         // Parsed again here: an answer that is not the schema's shape is a failed proposal, never a failed run.
-        const answer = InvariantAnswerSchema.parse(await ctx.llm.object({ system: SYSTEM, prompt: invariantPrompt(input), schema: InvariantAnswerSchema, purpose: "planning", maxOutputTokens: 4096 }));
+        const answer = InvariantAnswerSchema.parse(await ctx.llm.object({ system: SYSTEM, prompt: invariantPrompt(input), schema: InvariantAnswerSchema, purpose: "layers", maxOutputTokens: 4096 }));
         proposed = ProposalSchema.parse({ invariants: answer.invariants.map((i) => (i.setupBodies ? { ...i, setupBodies: i.setupBodies.map(recordOf) } : i)) }).invariants;
     } catch (e) {
         proposed = [];
