@@ -771,7 +771,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         // A creation that continued a stopped one also ran the tests the stopped one had made (GenerationRequest.carry).
         const total = summary.testsGenerated + (summary.testsCarried ?? 0);
         // Test cases this generation job wrote and did not run (runTestCases not true): still "Not run yet", here or on a runner.
-        const leftToRun = () => ((o.mode ?? "generate") === "generate" && o.runTestCases !== true ? repo.listTests(job.projectId, { jobId: job.id, validationStatus: "PENDING" }).length : 0);
+        // So are the scripts a test case's job built and did not run (case-scripts.ts, sheet #27).
+        const leftToRun = () => (((o.mode ?? "generate") === "generate" && o.runTestCases !== true) || (o.mode === "plain" && o.plainCaseId) ? repo.listTests(job.projectId, { jobId: job.id, validationStatus: "PENDING" }).length : 0);
         if (total === 0) {
             await finish("FAILED", summary.errors[0] ?? (o.mode === "variants" ? "None of the selected tests can be checked on other browsers" : validateOnly ? "No executable tests to validate" : "No tests could be generated for this application"));
         } else if (summary.testsValidated + leftToRun() === total && summary.errors.length === 0) {

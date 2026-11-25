@@ -113,5 +113,7 @@ export async function plainRequestOf(args: Omit<PlainJobArgs, "ctx" | "sink">): 
         ...(args.siteNotes?.length ? { siteNotes: args.siteNotes } : {}),
         cleanup: args.cleanup,
         replace,
+        // A test case's script (Generate test scripts) is built, not run: the person starts the run (sheet #27).
+        ...(o.plainCaseId ? { buildOnly: true } : {}),
     };
 }

@@ -52,6 +52,11 @@ export interface PlainRequest {
     siteNotes?: import("../memory/notes.js").SiteNote[];
     /** Rebuild this test from the new description instead of adding one (same id, new script version, history kept). */
     replace?: { handle: TestHandle; spec: TestSpec };
+    /**
+     * Build and save the test, never run it: a script made from a written test case (platform/case-scripts.ts) waits, "Not run yet",
+     * until the person runs it with Run (sheet #27).
+     */
+    buildOnly?: boolean;
 }
 
 /** Plain-language text for a test that passed but checks very little. */
@@ -241,7 +246,9 @@ export async function runPlainAuthoring(ctx: EngineContext, req: PlainRequest, s
         throwIfAborted(ctx.signal);
 
         // ── 3. Run it for real ────────────────────────────────────────────────
-        if (!pending.length) {
+        if (!pending.length || req.buildOnly) {
+            // Built only: the test stays "Not run yet" (PENDING) until the person runs it.
+            if (req.buildOnly) for (const t of pending) ctx.emit({ stage: "generation", kind: "script_ready_to_run", message: `${t.spec.testId} ${t.spec.title} is ready to run. It has not been run.` });
             await sink.phase("VALIDATING", "validation", "skipped");
         } else {
             await sink.phase("VALIDATING", "validation", "running");

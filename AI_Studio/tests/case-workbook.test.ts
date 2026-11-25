@@ -8,7 +8,8 @@
  *   - no runs: 404 with a sentence; not a Test Case Generation project: caseAgent false, empty lists, and no workbook;
  *   - more than 5,000 test cases (the Import's limit): the workbook still downloads with every case, and its first sheet says how many more
  *     there are than the Import takes (lead decision 2026-11-20);
- *   - the CI validation of such a project is refused before it saves a new application record (FX4).
+ *   - the CI validation of such a project is refused before it saves a new application record (FX4);
+ *   - one earlier run's workbook (`?run=`, sheet #29) holds only the test cases that run wrote, named for its date; another project's run is a 404.
  * No browser, no AI: runs are seeded as a plan-only job would leave them (its plan artifact and events).
  */
 import fs from "node:fs";
@@ -27,7 +28,7 @@ import { CASE_AGENT_RUN_REFUSED } from "../src/platform/case-agent.js";
 import { XLSX_MAX_ROWS as CASE_IMPORT_MAX_ROWS } from "../src/engine/manual/xlsx-read.js";
 import { PLAN_ARTIFACT } from "../src/platform/plan-store.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
-import { NO_CASE_RUNS, NOT_A_CASE_AGENT_PROJECT } from "../src/platform/routes/case-outcome.js";
+import { NO_CASE_RUNS, NO_SUCH_RUN, NOT_A_CASE_AGENT_PROJECT } from "../src/platform/routes/case-outcome.js";
 import { buildServer } from "../src/platform/server.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;
@@ -121,6 +122,8 @@ async function seededRun(pid: string, paths: string[], ideas: Array<{ title: str
 
 let PA = ""; // a Test Case Generation project of org-a
 let PB = ""; // one of org-b
+let firstRun = ""; // PA's first run
+let bravoRun = ""; // PB's run
 
 beforeAll(async () => {
     api = http.createServer((req, res) => {
@@ -144,9 +147,9 @@ beforeAll(async () => {
     PB = await tcgProject("Bravo Shop", "org-b");
     for (const t of ["t-cora", "t-reader"]) expect((await asKey("POST", `/api/projects/${PA}/members`, { personId: await personOf(t) })).status).toBe(201);
     expect((await asKey("POST", `/api/projects/${PB}/members`, { personId: await personOf("t-bea") })).status).toBe(201);
-    await seededRun(PA, ["/", "/products", "/about"], [{ title: "Browse the products", startPath: "/products" }, { title: "Read about us", startPath: "/about" }], ["/broken"]);
+    firstRun = await seededRun(PA, ["/", "/products", "/about"], [{ title: "Browse the products", startPath: "/products" }, { title: "Read about us", startPath: "/about" }], ["/broken"]);
     await seededRun(PA, ["/", "/products", "/cart"], [{ title: "Browse the products", startPath: "/products" }, { title: "Add a product to the cart", startPath: "/cart" }]);
-    await seededRun(PB, ["/", "/secret-page-of-bravo"], [{ title: "Bravo's own test case", startPath: "/" }]);
+    bravoRun = await seededRun(PB, ["/", "/secret-page-of-bravo"], [{ title: "Bravo's own test case", startPath: "/" }]);
 }, 60_000);
 
 afterAll(async () => {
@@ -231,6 +234,21 @@ describe("the workbook", () => {
             ["/about", "/", "/about"],
             ["/cart", "/", "/cart"],
         ]);
+    });
+
+    it("of one earlier run holds only that run's test cases, named for its date; another project's run is a 404 (sheet #29)", async () => {
+        const r = await as("t-cora", "GET", `/api/projects/${PA}/outcome/workbook?run=${firstRun}`);
+        expect(r.status).toBe(200);
+        const day = platform.repo.getJob(firstRun)!.createdAt.slice(0, 10);
+        expect(r.headers["content-disposition"]).toBe(`attachment; filename="Alpha Shop test cases, run of ${day}.xlsx"; filename*=UTF-8''${encodeURIComponent(`Alpha Shop test cases, run of ${day}.xlsx`)}`);
+        const cases = sheets(new Uint8Array(r.raw))[0]!.rows;
+        // The first run wrote two; the later run's "Add a product to the cart" is not in it.
+        expect(cases.slice(1).map((c) => [c[0], c[1]])).toEqual([
+            ["TC-001", "Browse the products"],
+            ["TC-002", "Read about us"],
+        ]);
+        expect(await as("t-cora", "GET", `/api/projects/${PA}/outcome/workbook?run=${bravoRun}`)).toMatchObject({ status: 404, body: { error: NO_SUCH_RUN } });
+        expect((await as("t-reader", "GET", `/api/projects/${PA}/outcome/workbook?run=${firstRun}`)).status).toBe(403);
     });
 
     it("needs ai_studio.reports.export: 403 for a reader, who still gets the outcome", async () => {

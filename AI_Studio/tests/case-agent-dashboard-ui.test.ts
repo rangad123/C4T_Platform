@@ -481,6 +481,30 @@ describe("the Projects row of a Test Case Generation project", () => {
         expect((await api("GET", `/api/projects/${access}/outcome?counts=1`)).body).toEqual({ caseAgent: false, runs: [], counts: { cases: 0, pages: 0, areas: 0 } });
     });
 
+    it("shows each row's project icon at 24 px, centred in its tile, at 1280 and 375 px (sheet #30)", async () => {
+        for (const width of [1280, 375]) {
+            await page.setViewportSize({ width, height: 900 });
+            try {
+                await visit("#/?page=all");
+                for (const name of ["Practice Store", "Code Store"]) {
+                    const tile = row(name).getByTestId("kind-tile");
+                    const t = (await tile.boundingBox())!;
+                    const i = (await tile.locator("svg").boundingBox())!;
+                    expect([i.width, i.height], `${name} ${width}`).toEqual([24, 24]);
+                    expect(Math.abs(t.x + t.width / 2 - (i.x + i.width / 2)), `${name} ${width}`).toBeLessThanOrEqual(0.5);
+                    expect(Math.abs(t.y + t.height / 2 - (i.y + i.height / 2)), `${name} ${width}`).toBeLessThanOrEqual(0.5);
+                    // The tile sits in the middle of its row, beside the name.
+                    const r = (await row(name).boundingBox())!;
+                    if (width === 1280) expect(Math.abs(r.y + r.height / 2 - (t.y + t.height / 2)), name).toBeLessThanOrEqual(1);
+                }
+                await noOverflow();
+                await shot(`projects-icon-${width}.png`);
+            } finally {
+                await page.setViewportSize({ width: 1280, height: 900 });
+            }
+        }
+    });
+
     it("rows of other projects are unchanged: pass counts and their ribbon", async () => {
         await visit("#/?page=all");
         for (const name of ["Access Store", "Mixed Store", "Code Store"]) {

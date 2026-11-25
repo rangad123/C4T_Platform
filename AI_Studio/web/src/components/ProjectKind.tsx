@@ -27,7 +27,8 @@ export const PLATFORM_ICONS: Record<Platform, LucideIcon> = { web: Globe, androi
 export function KindTile({ kind, size = "md", labelled = false }: { kind: ProjectKind; size?: "sm" | "md" | "lg"; labelled?: boolean }) {
     const k = kind === "code" ? "code" : "agent";
     const Icon = KIND_ICON[k];
-    const icon = <Icon size={size === "lg" ? 26 : size === "sm" ? 14 : 18} aria-hidden />;
+    // lucide's sizes (16/24/32), centred in a tile that leaves the icon room (sheet #30).
+    const icon = <Icon size={size === "lg" ? 32 : size === "sm" ? 16 : 24} aria-hidden />;
     if (!labelled)
         return (
             <span className={`pk-tile pk-${k} pk-${size}`} data-kind={kind} aria-hidden>

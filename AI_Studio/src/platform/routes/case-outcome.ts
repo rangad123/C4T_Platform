@@ -13,6 +13,8 @@ import type { RouteCtx } from "./types.js";
  *   GET /api/projects/:id/outcome?run=<job>  → the same shape for one run: what that run found (case-run-outcome.ts), 404 for a run that is not one of the project's
  *   GET /api/projects/:id/outcome?counts=1   → CaseOutcomeCounts: the runs and two counts, for the Projects row
  *   GET /api/projects/:id/outcome/workbook   → the three-sheet workbook (case-workbook.ts), as `<project name> test cases.xlsx`
+ *   GET /api/projects/:id/outcome/workbook?run=<job> → the same workbook holding only what that run found (the run page's outcome), as
+ *                                              `<project name> test cases, run of <date>.xlsx`; 404 for a run that is not one of the project's
  *
  * Who may read the project gets its outcome; the workbook is a download and needs ai_studio.reports.export (auth/roles.ts). A project
  * out of reach (another organisation's, or one the person was not added to) is a 404 before either answers (auth/project-scope.ts).
@@ -20,10 +22,11 @@ import type { RouteCtx } from "./types.js";
 export const NOT_A_CASE_AGENT_PROJECT = "This project does not use the Test Case Generation agent, so it has no test cases to download here.";
 export const NO_SUCH_RUN = "This run is not one of this project's runs, or what it found was forgotten.";
 export const NO_CASE_RUNS = "There are no test cases to download yet. Explore the application first.";
+export const NO_CASES_IN_RUN = "This run wrote no test cases, so there is nothing to download from it.";
 
 /** `name test cases.xlsx` as a header value: a plain ASCII fallback plus the exact name (RFC 6266). */
-export function workbookDisposition(projectName: string): string {
-    const name = `${projectName.replace(/[\r\n"\\/]+/g, " ").trim() || "Project"} test cases.xlsx`;
+export function workbookDisposition(projectName: string, suffix = ""): string {
+    const name = `${projectName.replace(/[\r\n"\\/]+/g, " ").trim() || "Project"} test cases${suffix}.xlsx`;
     const ascii = name.replace(/[^\x20-\x7e]+/g, "_");
     return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
@@ -50,12 +53,17 @@ export function registerCaseOutcomeRoutes(ctx: RouteCtx, appModel: AppModelReade
     app.get("/api/projects/:id/outcome/workbook", async (req, reply) => {
         const { id } = req.params as { id: string };
         const project = ctx.project(id);
-        const outcome = await caseOutcomeOf(p, id, appModel);
+        const run = (req.query as { run?: unknown }).run;
+        // One earlier run's test cases (sheet #29): what its page shows, in the same workbook.
+        const one = typeof run === "string" && run ? await caseRunOutcomeOf(p, id, run) : undefined;
+        if (typeof run === "string" && run && !one) throw new HttpError(404, NO_SUCH_RUN);
+        const outcome = one ?? (await caseOutcomeOf(p, id, appModel));
         if (!outcome.caseAgent) throw new HttpError(404, NOT_A_CASE_AGENT_PROJECT);
         if (!outcome.runs.length) throw new HttpError(404, NO_CASE_RUNS);
+        if (one && !one.cases.length) throw new HttpError(404, NO_CASES_IN_RUN);
         return reply
             .header("content-type", XLSX_CONTENT_TYPE)
-            .header("content-disposition", workbookDisposition(String(project.name ?? "")))
+            .header("content-disposition", workbookDisposition(String(project.name ?? ""), one ? `, run of ${one.runs[0]!.startedAt.slice(0, 10)}` : ""))
             .header("cache-control", "no-store")
             .send(Buffer.from(buildCaseWorkbook(outcome)));
     });

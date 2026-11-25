@@ -1,6 +1,6 @@
 import { ArrowLeft, Check, LoaderCircle, Minus, Network, OctagonPause, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, type EventRow, type Job, type ProjectDetail } from "../../api";
+import { api, downloadFrom, type EventRow, type Job, type ProjectDetail } from "../../api";
 import { usePage } from "../../components/Shell";
 import { Callout, EmptyState, ErrorState, JobBadge, ListSkeleton, PageHeader } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
@@ -13,7 +13,8 @@ import { LiveLine } from "../live/LiveStatus";
 import { CaseOutcome } from "../outcome/CaseOutcome";
 import { StopRun } from "./StopDialog";
 import { announceRunsChanged, CASE_STAGES, caseRunLine, caseRunTitle, caseStageText, useRunAnswer } from "./runs";
-import { useCaseOutcome } from "./case-runs";
+import { runWorkbookPath, useCaseOutcome } from "./case-runs";
+import { useCan } from "../auth/permissions";
 import "./runs.css";
 
 /** The event a run of such a project ends with once it has said what it wrote (src/platform/case-outcome.ts noteCaseRunFinished). */
@@ -33,6 +34,8 @@ export function CaseRunDetail({ id, jobId, number }: { id: string; jobId: string
     const active = Boolean(a?.active);
     const outcome = useCaseOutcome(id, jobId, (o) => active || o?.runs[0]?.status === "running");
     const last = useFinalWord(jobId, a ? active : undefined, run.stream);
+    const can = useCan();
+    const [downloadError, setDownloadError] = useState<string | null>(null);
     // The status turned final: read what the run found once more, so the last pages and test cases show without a reload.
     const wasActive = useRef(false);
     useEffect(() => {
@@ -111,6 +114,11 @@ export function CaseRunDetail({ id, jobId, number }: { id: string; jobId: string
                     </Callout>
                 ))}
 
+                {downloadError && (
+                    <Callout tone="danger" title="The test cases could not be downloaded">
+                        {downloadError}
+                    </Callout>
+                )}
                 {outcome.error ? (
                     <Callout tone="info" title="Nothing from this run to show">
                         {outcome.error.message}
@@ -131,7 +139,16 @@ export function CaseRunDetail({ id, jobId, number }: { id: string; jobId: string
                     </div>
                 ) : (
                     // The run's status is shown above; the report is told it finished so it adds no note about "the last run".
-                    <CaseOutcome outcome={{ ...o, runs: o.runs.map((r) => ({ ...r, status: "completed" as const })) }} title="What this run found" />
+                    <CaseOutcome
+                        outcome={{ ...o, runs: o.runs.map((r) => ({ ...r, status: "completed" as const })) }}
+                        title="What this run found"
+                        // This run's test cases, as the latest run's are downloaded on the agent's Outcome (sheet #29); once it has ended.
+                        downloadHref={!active && o.cases.length > 0 && can("ai_studio.reports.export") ? `/api${runWorkbookPath(id, jobId)}` : null}
+                        onDownload={() => {
+                            setDownloadError(null);
+                            downloadFrom(runWorkbookPath(id, jobId), `${name ?? "Project"} test cases.xlsx`).catch((e: Error) => setDownloadError(e.message));
+                        }}
+                    />
                 )}
             </div>
             {isActive(job.status) && <p className="sr-only" role="status">This run is still going.</p>}

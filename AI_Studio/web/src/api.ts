@@ -60,6 +60,8 @@ export interface Job {
     counters: Counters;
     /** A job that builds a written test case's script (Generate test scripts): that case's id. */
     caseId?: string;
+    /** With `caseId`: how many test cases are queued to be built after this one. */
+    casesLeft?: number;
     error: string | null;
     /** Only for a run that was cancelled: how many tests reached a result and how many did not run, and a sentence made from those facts. */
     cancelled?: { planned: number; ran: number; notRun: number; note: string } | null;

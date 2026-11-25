@@ -19,6 +19,11 @@ export function useCaseAgent(projectId: string | null): boolean | undefined {
     return a.loading ? undefined : false;
 }
 
+/** The workbook of one run's test cases (GET /api/projects/:id/outcome/workbook?run=), for downloadFrom (sheet #29). */
+export function runWorkbookPath(projectId: string, jobId: string): string {
+    return `/projects/${projectId}/outcome/workbook?run=${encodeURIComponent(jobId)}`;
+}
+
 /** Runs are numbered from the first: the outcome lists them newest first, so run n is at index length − n. */
 export function runNumbers(o: Pick<CaseOutcome, "runs"> | undefined): Map<string, number> {
     const runs = o?.runs ?? [];

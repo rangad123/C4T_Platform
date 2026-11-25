@@ -1,7 +1,8 @@
-import { ChevronRight, History } from "lucide-react";
-import type { Job, ProjectDetail } from "../../api";
+import { ChevronRight, Download, History } from "lucide-react";
+import { useState } from "react";
+import { downloadFrom, type Job, type ProjectDetail } from "../../api";
 import { usePage } from "../../components/Shell";
-import { Badge, Callout, EmptyState, ErrorState, JobBadge, ListSkeleton, PageHeader } from "../../components/ui";
+import { Badge, Button, Callout, EmptyState, ErrorState, JobBadge, ListSkeleton, PageHeader } from "../../components/ui";
 import { BadgeKey } from "../../components/Tooltip";
 import { duration } from "../../lib/format";
 import { jobHelp } from "../../lib/help";
@@ -13,7 +14,8 @@ import { LiveBadge } from "../live/LiveStatus";
 import { ScheduledBadge } from "../schedules/ScheduledBadge";
 import { RelTime } from "./RunTime";
 import { caseRunLine, caseRunTitle } from "./run-text";
-import { runNumbers, useCaseOutcome } from "./case-runs";
+import { runNumbers, runWorkbookPath, useCaseOutcome } from "./case-runs";
+import { useCan } from "../auth/permissions";
 import "./runs.css";
 
 /**
@@ -32,6 +34,8 @@ export function CaseRuns({ id, jobsPath }: { id: string; /** Whose runs to count
         void outcome.reload();
     });
     const name = project.data?.name;
+    const can = useCan();
+    const [downloadError, setDownloadError] = useState<string | null>(null);
     useDocumentTitle(name ? `Runs · ${name}` : "Runs");
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Runs" }], nav: "projects" });
 
@@ -53,6 +57,11 @@ export function CaseRuns({ id, jobsPath }: { id: string; /** Whose runs to count
                 }
             />
             <div className="stack" data-testid="case-runs">
+                {downloadError && (
+                    <Callout tone="danger" title="The test cases could not be downloaded">
+                        {downloadError}
+                    </Callout>
+                )}
                 {jobs.loading || outcome.loading ? (
                     <ListSkeleton rows={3} />
                 ) : jobs.error || outcome.error ? (
@@ -98,6 +107,21 @@ export function CaseRuns({ id, jobsPath }: { id: string; /** Whose runs to count
                                         See what it found
                                         <ChevronRight size={16} aria-hidden />
                                     </a>
+                                    {/* Every ended run's own test cases, as the latest run's are downloaded on Outcome (sheet #29). */}
+                                    {r.status !== "running" && can("ai_studio.reports.export") && (
+                                        <Button
+                                            size="sm"
+                                            icon={Download}
+                                            data-testid="case-run-download"
+                                            tip="Downloads the test cases this run wrote as the test case workbook (.xlsx)."
+                                            onClick={() => {
+                                                setDownloadError(null);
+                                                downloadFrom(runWorkbookPath(id, r.jobId), `${name ?? "Project"} test cases.xlsx`).catch((e: Error) => setDownloadError(e.message));
+                                            }}
+                                        >
+                                            Download test cases
+                                        </Button>
+                                    )}
                                 </div>
                             </section>
                         );

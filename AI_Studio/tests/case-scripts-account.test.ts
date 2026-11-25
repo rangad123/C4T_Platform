@@ -1,7 +1,8 @@
 /**
  * Test scripts made from written test cases (Test cases, Generate test scripts) through the real platform: HTTP API -> one plain job per
  * case, one after the other -> the real authoring agent signing in with the project's saved sign-in in a real Chromium against a local
- * application whose signed-in page says "Account" (never "Dashboard") -> real validation run -> stored test, linked to its case.
+ * application whose signed-in page says "Account" (never "Dashboard") -> stored test, linked to its case, NOT run (sheet #27: the person
+ * runs it with Run; a test described on Test scripts, Describe it, is still run once).
  * The model is a scripted double (MockLanguageModelV3 for the agent's tool calls): no real model is called, so this proves the
  * pipeline, not model quality.
  *
@@ -135,7 +136,7 @@ const SIGN_IN_CASE = { title: "Sign in with valid credentials", steps: [{ action
 describe("test scripts from test cases", () => {
     let fromCase: any;
 
-    it("a case's script checks what the application shows after signing in (Account), and passes; the next case gets its script too", async () => {
+    it("a case's script checks what the application shows after signing in (Account) and is not run; the next case gets its script too", async () => {
         const pid = project("Account app");
         const signIn = await addCase(pid, SIGN_IN_CASE.title, SIGN_IN_CASE.steps);
         const home = await addCase(pid, "Home page opens", [{ action: "Open the home page", expected: "The page shows Workspace" }]);
@@ -151,8 +152,9 @@ describe("test scripts from test cases", () => {
         const [script] = (await caseOf(pid, signIn.id)).linkedTestIds;
         expect(script).toBeTruthy();
         fromCase = await detail(script!);
-        expect(fromCase.validationStatus).toBe("VALIDATED");
-        expect(fromCase.executions[0].status).toBe("passed");
+        // Built, never run (sheet #27): "Not run yet" until the person runs it, and no run of it exists.
+        expect(fromCase.validationStatus).toBe("PENDING");
+        expect(fromCase.executions).toEqual([]);
         expect(fromCase.spec.title).toBe(SIGN_IN_CASE.title);
         // The check after signing in is the page the agent saw; the guessed page name failed there and is not in the script.
         const checks = fromCase.spec.steps.filter((s: any) => s.action === "assert").map((s: any) => s.locator?.value);
@@ -166,7 +168,8 @@ describe("test scripts from test cases", () => {
 
         // The second case's job started when the first ended, and its test is that case's script.
         const [second] = (await caseOf(pid, home.id)).linkedTestIds;
-        expect((await detail(second!)).validationStatus).toBe("VALIDATED");
+        expect((await detail(second!)).validationStatus).toBe("PENDING");
+        expect((await detail(second!)).executions).toEqual([]);
     }, 300_000);
 
     it("a case imported from the test case workbook starts on its page and gives the agent its preconditions and expected result (SPEC R6.5)", async () => {
@@ -196,7 +199,7 @@ describe("test scripts from test cases", () => {
         expect(prompts).not.toContain("Type in the old way");
         const t = ((await call("GET", `/api/projects/${pid}/tests`)).body as any[])[0];
         const made = await detail(t.id);
-        expect(made.validationStatus).toBe("VALIDATED");
+        expect(made.validationStatus).toBe("PENDING");
         // It starts on the case's page: the first step opens /login.
         expect(made.spec.steps[0].action).toBe("navigate");
         expect(JSON.stringify(made.spec.steps[0])).toContain("/login");
@@ -214,7 +217,9 @@ describe("test scripts from test cases", () => {
         expect(job!.status, job!.error ?? "").toBe("COMPLETED");
         const t = ((await call("GET", `/api/projects/${pid}/tests`)).body as any[])[0];
         const described = await detail(t.id);
+        // Describe it still runs the test once after building it.
         expect(described.validationStatus).toBe("VALIDATED");
+        expect(described.executions[0].status).toBe("passed");
         expect(described.spec.title).toBe(fromCase.spec.title);
         expect(described.spec.description).toBe(fromCase.spec.description);
         expect(described.spec.expectedResults).toEqual(fromCase.spec.expectedResults);

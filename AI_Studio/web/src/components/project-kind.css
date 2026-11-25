@@ -1,7 +1,8 @@
 /* A project's kind (agent or code) and platform, in the projects list and the project's header. Design tokens only. */
 .pk-tile { display: inline-grid; place-items: center; flex: none; border-radius: var(--radius-sm); }
 .pk-tile.pk-sm { width: 24px; height: 24px; border-radius: 6px; }
-.pk-tile.pk-md { width: 36px; height: 36px; }
+.pk-tile.pk-md { width: 40px; height: 40px; }
+.pk-tile > svg { display: block; }
 .pk-tile.pk-lg { width: 52px; height: 52px; border-radius: var(--radius-card); }
 .pk-tile.pk-agent { background: var(--status-info-bg); color: var(--status-info-fg); }
 .pk-tile.pk-code { background: var(--surface-brand-subtle); color: var(--text-brand); }
@@ -12,7 +13,8 @@
 .pk-tags > *, .pk-agents > * { flex: none; }
 .pk-tags .pk-platform { height: 28px; padding: 0 10px; border: 1px solid var(--border-default); border-radius: var(--radius-full); font-size: var(--type-caption-size); font-weight: var(--fw-medium); }
 .pk-agents { display: inline-flex; align-items: center; gap: 6px; }
-.pk-agent { display: inline-flex; }
+/* The agent tags only: an agent project's kind tile is also .pk-agent (KindTile), and must stay a centring grid (sheet #30). */
+.pk-agent:not(.pk-tile) { display: inline-flex; }
 .pk-agents .ta-avatar.ta-sm { width: 28px; height: 28px; border-radius: var(--radius-full); }
 .pk-agent-named { align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 0; border-radius: var(--radius-full); background: var(--surface-brand-subtle); color: var(--text-brand); font-size: var(--type-caption-size); font-weight: var(--fw-medium); white-space: nowrap; }
 .pk-more { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; border-radius: var(--radius-full); border: 1px solid var(--border-default); color: var(--text-secondary); font-size: var(--type-caption-size); font-variant-numeric: tabular-nums; }
@@ -27,7 +29,7 @@
 .pk-name-row h1 { overflow-wrap: anywhere; min-width: 0; }
 .place-head { margin-bottom: 24px; }
 .t-place { font-size: var(--type-heading-md-size); line-height: var(--type-heading-md-line); font-weight: var(--fw-semibold); letter-spacing: var(--type-heading-md-tracking); }
-@media (max-width: 640px) { .pk-tile.pk-lg { width: 44px; height: 44px; } .project-head { margin-bottom: 20px; } }
+@media (max-width: 640px) { .pk-tile.pk-lg { width: 44px; height: 44px; } .pk-tile.pk-lg > svg { width: 24px; height: 24px; } .project-head { margin-bottom: 20px; } }
 
 /* The projects list: tile, name, tags, ribbon, status and chevron are columns shared by every row (subgrid), so each column starts
    at the same place on every row whatever the row holds. */
@@ -44,7 +46,10 @@
 @media (max-width: 640px) {
     .pk-list, .pk-list > li { display: block; }
     .pk-list > li > .list-row { display: flex; }
-    .pk-facts { margin-left: 52px; flex: 0 1 auto; }
+    /* Under the name: the tile's 40px and the row's 16px gap. */
+    .pk-facts, .pk-list .list-row .tail { margin-left: 56px; }
+    .pk-facts { flex: 0 1 auto; }
+    .pk-list .list-row .tail { flex-basis: calc(100% - 56px); }
     .pk-ribbon { flex: none; }
     .pk-ribbon:empty { display: none; }
     .pk-list .tail { justify-content: flex-start; }
