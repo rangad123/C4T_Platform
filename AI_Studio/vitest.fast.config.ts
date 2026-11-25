@@ -410,6 +410,7 @@ export default defineConfig({
             "tests/finding-evidence-detection-unit.test.ts",
             "tests/verify-model-cost-unit.test.ts",
             "tests/agent-settings.test.ts",
+            "tests/n2b-precision-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
