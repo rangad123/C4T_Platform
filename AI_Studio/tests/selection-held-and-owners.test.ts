@@ -94,7 +94,7 @@ afterAll(async () => {
 });
 
 describe("1. API tests need a fresh passing run", () => {
-    it("is unknown before any run, out of date after a failed one, and not matched only after a recent pass", async () => {
+    it("is unknown before any run, fully known from its steps after a failed or passing recent run, and out of date outside the window", async () => {
         const id = await importSpec({ title: "Health answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/health" }, { action: "assertResponse", check: "status", expected: 200 }] });
         const change = { endpoints: ["POST /orders"] };
         let p = await preview(change);
@@ -102,8 +102,8 @@ describe("1. API tests need a fresh passing run", () => {
         expect(p.fullRunRequired).toBe(true);
         recordRun(id, "failed", ago(1, 600));
         p = await preview(change);
-        expect(byTitle(p.unknown, "Health answers")?.why).toBe(`Proposed because its recorded coverage is out of date: its latest run (${ago(1).slice(0, 10)}) failed, so earlier passing runs no longer show what it touches.`);
-        expect(p.fullRunReasons[0]).toMatch(/^1 test's recorded coverage is out of date/);
+        // A failed run of its current version: its steps are still what it calls, so it stays fully known (lead 2026-11-25).
+        expect(byTitle(p.notMatched, "Health answers")?.why).toBe("Not proposed: what it touches is fully known from its steps (1 page or endpoint), and none of it is in the change.");
         recordRun(id, "passed", ago(1, 660));
         p = await preview(change);
         expect(byTitle(p.notMatched, "Health answers")?.why).toBe("Not proposed: what it touches is fully known from its steps (1 page or endpoint), and none of it is in the change.");
