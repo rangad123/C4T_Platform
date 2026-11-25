@@ -47,6 +47,10 @@ async function readCapped(res: Response, max: number, deadline: number, timeoutM
         }
     } catch (e) {
         await reader.cancel().catch(() => undefined);
+        // The fetch's own time limit can abort the body a moment before our timer fires: that is the same time limit, so say so.
+        if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError" || /abort/i.test(e.message))) {
+            throw new Error(`the database probe took longer than ${timeoutMs} ms to answer`);
+        }
         throw e;
     } finally {
         clearTimeout(timer);
