@@ -48,12 +48,15 @@ import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
 import { SecretBox } from "../secrets.js";
 import { ResetHookStore, sendResetRequest } from "../test-data-reset-store.js";
 import { attemptOf, executionFinding, fromCandidate, withStepRequests, type TestOf } from "./adapters.js";
-import { judgePageCheck, writtenExpectation } from "../../engine/findings/expectation.js";
+import { judgePageCheck, judgeRepeatRefusal, writtenExpectation } from "../../engine/findings/expectation.js";
+import { ANALYSIS_BLAMES_TEST } from "../../engine/validation/repair.js";
 
 /** A test the verification can run: its key, steps and framework. */
 export interface VerifyTest extends TestOf {
     testKey: string;
     framework: string;
+    /** Why its run left it as it is (validation's reason): a failure analysis that blamed the test keeps the finding from confirming. */
+    validationReason?: string | null;
 }
 
 /** One attempt's evidence package (plan V1), every text masked; artifact ids name the stored screenshot and trace. */
@@ -295,9 +298,12 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
     if (!reset) tried.splice(0, tried.length, ...carriedOver(tried));
     const view = judgedView(fromCandidate(f, test), f, test, tried);
     let verdict = verdictOf(view.view, tried, account);
-    // An amount no API answer was compared with is never confirmed by the vote alone: a person checks it.
-    if (view.review && verdict.to === "reproduced")
-        verdict = { to: "needs_manual_review", reason: `${verdict.reason} ${view.review}`, classification: { ...verdict.classification, class: "open", candidates: ["app_defect", "incorrect_expectation"] } };
+    // An amount no API answer was compared with, or a check whose own failure analysis says the application is right (WEB-002), is never
+    // confirmed by the vote alone: a person checks it.
+    const disputed = test.validationReason?.includes(ANALYSIS_BLAMES_TEST) ? `When the test was made, ${clip(test.validationReason, 600)}` : undefined;
+    const review = view.review ?? disputed;
+    if (review && verdict.to === "reproduced")
+        verdict = { to: "needs_manual_review", reason: `${verdict.reason} ${review}`, classification: { ...verdict.classification, class: "open", candidates: ["app_defect", "incorrect_expectation"] } };
     return { runs, notes, account, tried, view: view.view, verdict };
 }
 
@@ -307,7 +313,7 @@ function judgedView(view: ReturnType<typeof fromCandidate>, f: CandidateFindingR
     const correlated = Boolean(f.finding.evidence.layers?.length || view.correlated?.disagreed.length);
     // An exploration finding stores the expected result it cites; an execution finding's text also holds the check's own value.
     const cited = view.source.kind === "exploration" ? view.expected.text : writtenExpectation(test.spec, failedStep);
-    const j = judgePageCheck({ spec: test.spec, ...(failedStep !== undefined ? { failedStep } : {}), cited, apiAmount: test.meta?.apiAmount, correlated });
+    const j = judgePageCheck({ spec: test.spec, ...(failedStep !== undefined ? { failedStep } : {}), cited, apiAmount: test.meta?.apiAmount, correlated }) ?? judgeRepeatRefusal(test.spec, failedStep);
     if (!j) return { view };
     const expected = { ...view.expected, ...(j.unstated ? { stated: "none" as const } : {}), ...(j.contradictedBy ? { contradictedBy: j.contradictedBy.slice(0, 300) } : {}) };
     return { view: { ...view, expected }, ...(j.review ? { review: j.review } : {}) };
@@ -557,7 +563,7 @@ function testsOf(p: Platform, projectId: string): (id: string) => VerifyTest | u
         // As job-runner.ts resolveRefs.
         const expanded = tryExpandBlocks(t.spec, blocks);
         const r = expanded.ok ? tryResolveSpecRefs(expanded.spec, objects) : undefined;
-        return r?.ok ? { id: t.id, title: t.title, spec: r.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework } : undefined;
+        return r?.ok ? { id: t.id, title: t.title, spec: r.spec, meta: t.generationMeta, testKey: t.testKey, framework: t.framework, validationReason: t.validationReason } : undefined;
     };
 }
 

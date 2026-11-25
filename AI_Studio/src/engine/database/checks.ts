@@ -101,6 +101,9 @@ const CREDENTIAL = /pass(word)?|secret|token|otp|pin$|key$/i;
 const WRITES = new Set(["POST", "PUT", "PATCH"]);
 type Request = Extract<Step, { action: "request" }>;
 
+/** A path's resource that is the signed-in account's own record. */
+const SELF = /^(?:me|my|self|profile|account|current-?user)$/i;
+
 /** The table a path's resource is stored in: the one table whose name is that resource (orders, order, order_s...). */
 function tableOf(path: string, schema: DbSchema): DbTable | undefined {
     const r = resourceName(path).replace(/[-_]/g, "");
@@ -141,13 +144,14 @@ export function persistenceCheck(step: Request, schema: DbSchema): string | unde
         if (Object.keys(params).length < 2) return undefined; // nothing written to compare
         return dbCheckName({ kind: "exists", table: t.name, where: Object.keys(params) }, params);
     }
-    // The one table that has every written field (a field it lacks may be stored elsewhere, so nothing is guessed).
+    // The table of the resource the request wrote (the signed-in account's own record for /me, /profile, /account: its users table),
+    // holding every written field; a field it lacks may be stored elsewhere, and another table that happens to hold the field is never
+    // guessed (API-159: PATCH /api/me checked in products).
+    const t = tableOf(step.path, schema) ?? (SELF.test(resourceName(step.path)) ? (tableOf("/users", schema) ?? tableOf("/accounts", schema)) : undefined);
     const sent = writtenColumns(step.body, { name: "", columns: Object.keys((step.body ?? {}) as object), primaryKey: [], uniqueKeys: [], foreignKeys: [], rowCount: 0 });
-    const candidates = sent ? schema.tables.filter((t) => Object.keys(sent).every((k) => t.columns.includes(k))) : [];
-    if (candidates.length !== 1) return undefined;
-    const t = candidates[0]!;
-    const fields = sent!;
-    return dbCheckName({ kind: "exists", table: t.name, where: Object.keys(fields!) }, fields!);
+    const fields = t && sent && Object.keys(sent).every((k) => t.columns.includes(k)) ? sent : undefined;
+    if (!t || !fields) return undefined;
+    return dbCheckName({ kind: "exists", table: t.name, where: Object.keys(fields) }, fields);
 }
 
 const dbStep = (name: string, description: string, source?: string): Step => ({ action: "assertResponse", check: "dbCheck", name, description, ...(source ? { source } : {}) }) as Step;

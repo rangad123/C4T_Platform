@@ -21,6 +21,14 @@ export const STANDARD_RULES = {
     revoke: "a revoked share is gone",
 } as const;
 
+/**
+ * A document's words saying a repeat of a write adds to (or updates) what is already there, so the repeat is accepted, not refused as a
+ * duplicate: "Add a product (adds to the line if it is already in the cart)", "updates it if it already exists", "create or update".
+ */
+const REPEAT_ADDS =
+    /\b(?:adds? to|increases?|increments?|updates?|merges?|replaces?)\b[^.;]{0,60}\bif (?:it(?: is|'s)? |one is )?already\b|\balready (?:in|exists?|there)\b[^.;]{0,60}\b(?:adds? to|increases?|increments?|updates?|merges?)\b|\b(?:creates? or updates?|upserts?)\b/i;
+export const repeatAdds = (text: string | undefined): boolean => REPEAT_ADDS.test(text ?? "");
+
 /** Which standard rule a check proves, read from the check itself (and, for read-back, the test's `readback` tag). */
 function standardRule(step: Record<string, unknown>, tags: readonly string[], afterParallel: boolean): string | undefined {
     if (step.action === "assert" && step.check === "accessDenied" && typeof step.expected === "string") {

@@ -13,6 +13,7 @@
  */
 import { confidenceOf, type FindingConfidence } from "../explore/finding.js";
 import { priorityOf } from "../explore/priority.js";
+import { parseAccessReason } from "../identity/access.js";
 import { SEVERITIES, type Severity } from "../validation/severity.js";
 import { isReproduced, reproduction } from "./classify.js";
 import { STATE_LABEL, type FindingState } from "./lifecycle.js";
@@ -52,6 +53,12 @@ const CRASH = /page crashed|\bcrash(?:ed|es)?\b|service unavailable|\bunavailabl
 type SeverityInput = Pick<FindingView, "title" | "expected" | "priority" | "baseSeverity" | "security" | "origin" | "layer" | "scope" | "attempts">;
 
 export function severityOf(f: SeverityInput): SeverityScore {
+    // An access check that rates its own failure below a broken access control (a refusal with another status than documented) keeps it.
+    const own = f.origin === "access-check" ? parseAccessReason(f.attempts.find((a) => a.outcome === "failed" && a.error)?.error ?? "") : undefined;
+    if (own === "medium" || own === "low") {
+        const factor = { value: own, reason: "the access check rates it so (a refusal that differs from the API document)" };
+        return { severity: own, basis: `security: ${factor.reason}`, factors: { business: none("rated by the access check"), security: factor, dataIntegrity: none("no stored-data check"), scope: none("rated by the access check"), availability: none("rated by the access check") } };
+    }
     const base: Factor<Severity> = f.baseSeverity
         ? { value: f.baseSeverity.severity, reason: f.baseSeverity.basis }
         : { value: f.priority ?? "medium", reason: `a ${f.priority ?? "medium"}-priority journey${f.priority ? "" : " (priority not recorded)"}` };

@@ -10,6 +10,7 @@
  */
 import type { Step } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
+import { repeatAdds } from "./stated-source.js";
 import { freshAccountSteps, signUpOf, violations } from "./test-specs.js";
 import { AUTH_PATH, draft, listItemIdPath, okSchemas, propsOf, queryFor, req, resourceName, resp, setupFor, slug, trimSlash, writeBody, type Chain } from "./workflows.js";
 
@@ -22,6 +23,8 @@ const MAX_TRANSACTIONS = 6;
 const MAX_FIELDS = 12;
 
 const documents = (ep: ApiEndpointModel, status: string) => ep.spec?.responses.some((r) => r.status === status) ?? false;
+/** A documented 409 that refuses a repeat: not when the document says a repeat adds to what is there (the cart's "adds to the line"). */
+const refusesRepeat = (ep: ApiEndpointModel) => documents(ep, "409") && !repeatAdds(ep.summary);
 const writable = (ep: ApiEndpointModel) => ["POST", "PUT", "PATCH"].includes(ep.method) && !ep.path.includes("{") && !AUTH_PATH.test(ep.path) && !SIGN_UP.test(ep.path);
 const relation = (expression: string, description: string): Step => ({ action: "assertResponse", check: "relation", expression, description });
 
@@ -39,7 +42,7 @@ function duplicateChains(endpoints: ApiEndpointModel[], fresh: Step[]): Chain[] 
     for (const ep of endpoints) {
         if (ep.method !== "POST" || !writable(ep)) continue;
         const keyParam = ep.spec?.parameters.find((p) => p.location === "header" && /^idempotency-key$/i.test(p.name));
-        if (!documents(ep, "409") && !keyParam) continue;
+        if (!refusesRepeat(ep) && !keyParam) continue;
         const base = trimSlash(ep.path);
         const list = endpoints.find((e) => e.method === "GET" && trimSlash(e.path) === base);
         const item = list && listItemIdPath(okSchemas(list)[0], resourceName(base));
@@ -50,7 +53,7 @@ function duplicateChains(endpoints: ApiEndpointModel[], fresh: Step[]): Chain[] 
         const { before, body } = writeBody(ep, endpoints);
         const headers = keyParam ? { [keyParam.name]: "c6-{{unique}}" } : undefined;
         const write = (description: string, extract?: Record<string, string>) => req("POST", base, { query: queryFor(ep), ...(headers ? { headers } : {}), ...(body !== undefined ? { body } : {}), ...(extract ? { extract } : {}) }, description);
-        const again: Step[] = documents(ep, "409")
+        const again: Step[] = refusesRepeat(ep)
             ? [resp("status", 409, undefined, "The repeat is refused with the documented HTTP 409")]
             : [resp("statusClass", "2xx", undefined, "The repeat is accepted (same idempotency key)"), ...(idPath ? [resp("jsonPath", "{{firstId}}", idPath, "The repeat answers with the same id")] : [])];
         chains.push({
@@ -59,7 +62,7 @@ function duplicateChains(endpoints: ApiEndpointModel[], fresh: Step[]): Chain[] 
             spec: draft(
                 [ep, list],
                 `Backend: the same write twice makes one record (POST ${ep.path})`,
-                `Sends the identical POST ${ep.path} twice; the second is ${documents(ep, "409") ? "refused as documented (409)" : "answered with the same id (idempotency key)"}, and GET ${list.path} holds one record more, not two.`,
+                `Sends the identical POST ${ep.path} twice; the second is ${refusesRepeat(ep) ? "refused as documented (409)" : "answered with the same id (idempotency key)"}, and GET ${list.path} holds one record more, not two.`,
                 "high",
                 ["Mutating API tests are allowed — this test creates data"],
                 [

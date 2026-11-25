@@ -18,7 +18,7 @@
  *            | "(" expr ")"
  *   suffix  := "." name | "[" digits "]" | "[*]"     ([*] maps the rest of the path over every element; nested ones flatten)
  *
- * Arithmetic and < > need numbers, == and != compare JSON values exactly, and / or / implies need true or false (and short-circuit).
+ * Arithmetic and < > need numbers, == and != compare JSON values exactly (a path absent on both sides is the same), and / or / implies need true or false (and short-circuit).
  * Arithmetic and < > also take lists of numbers ([*] paths) element by element, or a list with one number: `lines[*].lineTotal ==
  * lines[*].unitPrice * lines[*].quantity` compares two lists, and `lines[*].quantity <= 10` holds when every element keeps it.
  * Caps: 300 characters, 120 tokens, nesting 20, 12 path parts, 1000 list elements. Only own properties of the data are read.
@@ -306,10 +306,19 @@ function relationRun(tree, text, body, vars, seen) {
                 if (op === "and") return bool(n.l, ev(n.l)) ? bool(n.r, ev(n.r)) : false;
                 if (op === "or") return bool(n.l, ev(n.l)) ? true : bool(n.r, ev(n.r));
                 if (op === "implies") return bool(n.l, ev(n.l)) ? bool(n.r, ev(n.r)) : true;
+                if (op === "==" || op === "!=") {
+                    // A field the answer leaves out on both sides is the same (absent before and after a refused write: unchanged).
+                    const side = (x) => { try { return { v: ev(x) }; } catch (e) { return { e: e, gone: x.t === "path" && /^no value at /.test(String(e && e.message)) }; } };
+                    const a = side(n.l);
+                    if (a.e && !a.gone) throw a.e;
+                    const b = side(n.r);
+                    if (a.gone && b.gone) return op === "==";
+                    if (a.e) throw a.e;
+                    if (b.e) throw b.e;
+                    return op === "==" ? relationSame(a.v, b.v) : !relationSame(a.v, b.v);
+                }
                 const l = ev(n.l);
                 const r = ev(n.r);
-                if (op === "==") return relationSame(l, r);
-                if (op === "!=") return !relationSame(l, r);
                 const one = (x, y) => {
                     num(n.l, x);
                     num(n.r, y);

@@ -16,6 +16,7 @@
 import { CONTRACT_MAX_SCHEMA_BYTES } from "../contracts/check.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
+import { repeatAdds } from "./stated-source.js";
 import { resourceName, stripIdSuffix } from "./workflows.js";
 
 export type DraftSpec = Omit<TestSpec, "testId">;
@@ -469,7 +470,8 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
                 documentedCases.push(documentedCase(`rejects an unknown "${field}"`, notFound, [req(ep, filledPath, { query: queryObj, body: { ...realBody, [field]: "does-not-exist-000" } }, `Use a ${field} that does not exist`)]));
             }
         }
-        const conflict = ep.method === "POST" && !unresolved.length ? documentedStatus(ep, "409") : undefined;
+        // A write whose document says a repeat adds to what is there (the cart's "adds to the line") accepts the repeat: no duplicate case.
+        const conflict = ep.method === "POST" && !unresolved.length && !repeatAdds(ep.summary) ? documentedStatus(ep, "409") : undefined;
         if (conflict) {
             const first = [req(ep, filledPath, { query: queryObj, body: realBody }, "Send a valid request"), resp("statusClass", "2xx", undefined, "The first one is accepted")];
             documentedCases.push(documentedCase("rejects the same request twice (a duplicate)", conflict, [...first, req(ep, filledPath, { query: queryObj, body: realBody }, "Send the same request again")]));
