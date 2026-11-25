@@ -11,6 +11,7 @@
  */
 import { analyzeImpact } from "../../engine/impact/analyze.js";
 import { isJsLike } from "../../engine/impact/diff.js";
+import { routesOf } from "../../engine/impact/routes.js";
 import { redactText } from "../../shared/redact-text.js";
 import { AppIntelStore } from "../app-intel-store.js";
 import type { Platform } from "../bootstrap.js";
@@ -20,6 +21,7 @@ import { projectCoverage } from "../selection/facts.js";
 import { heldWhy } from "../selection/held.js";
 import { previewSelection, readChanges, type PreviewTest } from "../selection/preview.js";
 import { riskFacts } from "../selection/risk-facts.js";
+import { riskOf } from "../selection/risk.js";
 import { postPrFeedback, type FeedbackOutcome } from "./feedback.js";
 import type { GithubCodeHost } from "./github.js";
 import type { CodeHostStore, PrSelection } from "./store.js";
@@ -62,7 +64,17 @@ const cell = (s: string, n = 300) =>
         .replace(/@(?=\w)/g, "@​");
 
 export interface SelectionReasons {
-    tests: Array<{ testId: string; testKey: string; title: string; score: number; risk: string; reasons: string[]; why?: string }>;
+    tests: Array<{
+        testId: string;
+        testKey: string;
+        title: string;
+        score: number;
+        risk: string;
+        reasons: string[];
+        why?: string;
+        /** No reason from the change: proposed because its own latest recorded run cannot vouch for its coverage (coverage.ts freshnessOf), in words. */
+        stale?: string;
+    }>;
     fullRunRecommended: boolean;
     fullRunReasons: string[];
     endpoints: string[];
@@ -99,7 +111,9 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
     const { sources, notes } = await repositorySources(client, ev.headSha, files.map((f) => f.path));
     if (limit) notes.unshift(limit);
 
-    const c = await projectCoverage(p.repo, p.store, projectId);
+    // The repository's own route registrations are templates a captured path part can resolve to (`/notes/{{note}}` → ANY /notes/{}).
+    const templates = Object.entries(sources).flatMap(([file, src]) => routesOf(file, src).map((r) => ({ method: r.method, path: r.path })));
+    const c = await projectCoverage(p.repo, p.store, projectId, { templates });
     const intel = new AppIntelStore(p.sql);
     const model = (await intel.latest(projectId))?.model;
     const rules = (await intel.rules(projectId)).filter((r) => r.status !== "rejected");
@@ -107,6 +121,9 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         "SELECT r.ref_key AS requirement, l.test_case_id AS testId FROM requirement_links l JOIN requirements r ON r.id = l.requirement_id WHERE l.project_id = ? AND l.test_case_id IS NOT NULL",
         projectId,
     );
+    const requirements = p.db
+        .all<{ ref: string; title: string; description: string }>("SELECT ref, title, description FROM requirements WHERE project_id = ? AND status != 'retired'", projectId)
+        .map((r) => ({ ref: r.ref, text: r.description || r.title }));
     const impact = await analyzeImpact({
         files: files.map((f) => ({ path: f.path, ...(f.previousPath ? { previousPath: f.previousPath } : {}), status: f.status, ...(f.patch !== undefined ? { patch: f.patch } : {}) })),
         sources,
@@ -115,6 +132,7 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         ...(model ? { model } : {}),
         rules,
         requirementLinks,
+        requirements,
         findings: await pastFindings(p.sql, p.repo, projectId),
     });
 
@@ -127,16 +145,22 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         else if (c.held.has(t.id)) cannotRun.set(t.id, { why: heldWhy(c.held.get(t.id)!), nowhere: true, held: true });
     }
     const { changes, ignored, notProcessed } = readChanges(impact.changes, c.app);
+    const risk = await riskFacts(p, projectId, c.tests, c.apiPrefix);
     const preview = previewSelection(c.tests, changes, ignored, {
         ...(c.apiPrefix ? { apiPrefix: c.apiPrefix } : {}),
         notProcessed,
         cannotRun,
-        risk: await riskFacts(p, projectId, c.tests, c.apiPrefix),
+        risk,
         impact: { files: impact.files.length, unmapped: impact.unmapped.map((u) => u.path), shared: impact.shared },
     });
-    const proposed: PreviewTest[] = [...preview.matched, ...preview.unknown].sort((a, b) => b.risk!.score - a.risk!.score || a.testKey.localeCompare(b.testKey));
+    const staleOf = new Map(c.tests.flatMap((t) => (t.stale ? [[t.testId, t.stale] as const] : [])));
+    // A test linked to a requirement the PR edits is proposed for that reason, also when its footprint does not reach the change.
+    const byRequirement = new Map(impact.requirementTests.map((t) => [t.id, t.evidence.map((e) => `It is ${e}.`)]));
+    const linked = preview.notMatched.filter((t) => byRequirement.has(t.testId)).map(({ why: _notProposed, ...t }) => ({ ...t, risk: riskOf(1, risk.get(t.testId)) }));
+    const proposed: PreviewTest[] = [...preview.matched, ...preview.unknown, ...linked].sort((a, b) => b.risk!.score - a.risk!.score || a.testKey.localeCompare(b.testKey));
+    const sentences = (t: PreviewTest) => [...t.reasons.map((r) => r.sentence), ...(byRequirement.get(t.testId) ?? [])];
     const reasons: SelectionReasons = {
-        tests: proposed.map((t) => ({ testId: t.testId, testKey: t.testKey, title: t.title, score: t.risk!.score, risk: t.risk!.reason, reasons: t.reasons.map((r) => r.sentence), ...(t.why ? { why: t.why } : {}) })),
+        tests: proposed.map((t) => ({ testId: t.testId, testKey: t.testKey, title: t.title, score: t.risk!.score, risk: t.risk!.reason, reasons: sentences(t), ...(t.why ? { why: t.why } : {}), ...(!sentences(t).length && staleOf.has(t.testId) ? { stale: staleOf.get(t.testId)! } : {}) })),
         fullRunRecommended: preview.fullRunRequired,
         fullRunReasons: preview.fullRunReasons,
         endpoints: impact.endpoints.map((e) => e.route),

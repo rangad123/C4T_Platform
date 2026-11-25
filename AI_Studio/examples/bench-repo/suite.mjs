@@ -71,7 +71,7 @@ const rbac = [
     spec("A title longer than 120 characters is refused", "Notes", ["3.5"], [...newAccount("long"), req("POST", "/api/notes", { title: "{{repeat.a.121}}" }), status(400)]),
     spec("Someone else's private note is not found", "Notes", ["3.7", "3.8"], [...login("ana@example.test"), req("GET", "/api/notes/n2"), status(404)], "critical"),
     spec("A manager reads every note", "Notes", ["1.4"], [...login("mia@example.test"), req("GET", "/api/notes/n2"), status(200)]),
-    spec("A shared note can be read by the colleague", "Sharing", ["3.7"], [...login("ana@example.test"), req("GET", "/api/notes/n3"), status(200), json("title", "Team lunch ideas")]),
+    spec("A shared note can be read by the colleague", "Sharing", ["3.7"], [...login("ana@example.test"), req("GET", "/api/notes/n3"), status(200), json("id", "n3")]),
     spec("Only the owner can change a note", "Notes", ["3.10"], [...login("ana@example.test"), req("PUT", "/api/notes/n3", { title: "Changed by Ana" }), status(403)], "critical"),
     spec("The owner saves changes to a note", "Notes", ["3.11", "3.12"], [...newAccount("editor"), req("POST", "/api/notes", { title: "Draft" }, { note: "id" }), status(201), req("PUT", `/api/notes/${NOTE}`, { title: "Final", body: "Done" }), status(200), json("title", "Final")]),
     spec("Only the owner can delete a note", "Notes", ["3.13"], [...login("ana@example.test"), req("DELETE", "/api/notes/n3"), status(403)]),

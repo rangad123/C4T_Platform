@@ -12,7 +12,8 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeImpact } from "../src/engine/impact/analyze.js";
 import { BenchAppHost, benchApp } from "../src/eval/bench/apps.js";
-import { gitOf, parseChangeArgs, prFiles, treeOf, type ManifestPr } from "../src/eval/bench/change/run.js";
+import { deploymentPayload, gitOf, parseChangeArgs, prFiles, treeOf, type ManifestPr } from "../src/eval/bench/change/run.js";
+import { decide } from "../src/platform/code-host/webhook.js";
 import { caught, renderChangeMd, scoreChange, type PrStep, type RunRecord, type SetupRecord } from "../src/eval/bench/change/score.js";
 
 const BUILD = path.join(import.meta.dirname, "..", "examples", "bench-repo", "build.mjs");
@@ -107,6 +108,33 @@ describe("a benchmark app's start", () => {
 });
 
 describe("the command's options", () => {
+    it("the frozen suite checks no field of a seeded note that another test writes: a seed letting that write through cannot fail it by order", async () => {
+        // BR-02 lets API-015's refused rename of n3 through; API-014 then read the new title when it ran after API-015 (G6, B2).
+        const { SUITE } = (await import(path.join(import.meta.dirname, "..", "examples", "bench-repo", "suite.mjs"))) as { SUITE: Record<string, Array<{ title: string; steps: Array<Record<string, any>> }>> };
+        const rbac = SUITE["bench-rbac"]!;
+        const conflicts: string[] = [];
+        rbac.forEach((t, i) => {
+            let read: string | undefined;
+            for (const s of t.steps) {
+                if (s.action === "request") read = s.method === "GET" && /^\/api\/notes\/n\d+$/.test(s.path) ? s.path : undefined;
+                else if (read && s.check === "jsonPath") {
+                    const field = String(s.path).split(".")[0]!;
+                    rbac.forEach((o, j) => o.steps.forEach((w) => j !== i && w.action === "request" && ["PUT", "PATCH"].includes(w.method) && w.path === read && w.body && field in w.body && conflicts.push(`${t.title} reads ${field} of ${read}; ${o.title} writes it`)));
+                }
+            }
+        });
+        expect(conflicts).toEqual([]);
+    });
+
+    it("deploys the same commit twice as two deliveries, so the second is not dropped as a replay of the first's body", () => {
+        // webhook.ts acts once per body: the fix deployed again after the bug's return must be a new deployment of that commit.
+        const sha = "a".repeat(40);
+        const first = JSON.stringify(deploymentPayload(sha, 31));
+        const again = JSON.stringify(deploymentPayload(sha, 32));
+        expect(again).not.toBe(first);
+        for (const body of [first, again]) expect(decide("deployment_status", JSON.parse(body))).toMatchObject({ headSha: sha, queued: "reverify" });
+    });
+
     it("needs a folder, and a repository unless only reporting", () => {
         expect(() => parseChangeArgs(["--repo", "x"])).toThrow(/--out/);
         expect(() => parseChangeArgs(["--out", "x"])).toThrow(/--repo/);
@@ -186,10 +214,24 @@ describe("the PR bench's scores", () => {
     });
 
     it("G3 counts selected tests with a reason over every analysed PR (5 of 6) and the decoy's selections", () => {
-        expect(crit(STEPS, "G3")).toMatchObject({ verdict: "misses", value: "5 of 6 selected tests explained (83.3%); decoy selected 0" });
+        expect(crit(STEPS, "G3")).toMatchObject({ verdict: "misses", value: "5 of 6 selected tests explained (83.3%): 5 by the change's evidence (83.3%), 0 by its own out-of-date coverage (its latest recorded run); decoy selected 0" });
         const decoyPicks = STEPS.map((p) => (p.kind === "decoy" ? { ...p, selection: sel(["T9"]) } : p.number === 2 ? { ...p, selection: sel(["T5"]) } : p));
-        expect(crit(decoyPicks, "G3")).toMatchObject({ verdict: "misses", value: "7 of 7 selected tests explained (100%); decoy selected 1" });
+        expect(crit(decoyPicks, "G3")).toMatchObject({ verdict: "misses", value: "7 of 7 selected tests explained (100%): 7 by the change's evidence (100%), 0 by its own out-of-date coverage (its latest recorded run); decoy selected 1" });
         expect(crit(STEPS.map((p) => (p.number === 2 ? { ...p, selection: sel(["T5"]) } : p)), "G3").verdict).toBe("meets");
+    });
+
+    it("G3 counts a pick whose only reason is its own failed latest run apart from the change's evidence, and names the picks with neither", () => {
+        // #2's T5 has no reason from the change; its latest recorded run failed (the selection marks it out of date).
+        const staleT5 = STEPS.map((p) => (p.number === 2 ? { ...p, selection: { ...sel(["T5"], []), stale: ["T5"] } } : p));
+        expect(crit(staleT5, "G3")).toMatchObject({ verdict: "meets", value: "6 of 6 selected tests explained (100%): 5 by the change's evidence (83.3%), 1 by its own out-of-date coverage (its latest recorded run); decoy selected 0" });
+        expect(crit(staleT5, "G3").notes).toEqual([]);
+        // Without the mark, the pick has no evidence-backed reason: it misses, and the note names it.
+        const g3 = crit(STEPS, "G3");
+        expect(g3.verdict).toBe("misses");
+        expect(g3.notes).toEqual(["No evidence-backed reason: T5 ×1 (#2)."]);
+        // A mark on a test the change explains anyway counts once, as the change's.
+        const both = STEPS.map((p) => (p.number === 1 ? { ...p, selection: { ...sel(["T1", "T2"]), stale: ["T1"] } } : p));
+        expect(crit(both, "G3").value).toBe("5 of 6 selected tests explained (83.3%): 5 by the change's evidence (83.3%), 0 by its own out-of-date coverage (its latest recorded run); decoy selected 0");
     });
 
     it("G4 asks every unmapped change for a full run", () => {

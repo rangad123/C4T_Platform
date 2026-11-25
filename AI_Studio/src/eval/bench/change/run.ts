@@ -198,7 +198,8 @@ const prPayload = (pr: ManifestPr) => ({
     pull_request: { number: pr.number, title: pr.title, head: { sha: pr.head, ref: pr.branch, repo: { full_name: `${OWNER}/${REPO}` } }, base: { sha: pr.base, ref: "main", repo: { full_name: `${OWNER}/${REPO}` } } },
     repository: { full_name: `${OWNER}/${REPO}` },
 });
-const deploymentPayload = (sha: string) => ({ deployment: { sha, environment: "bench" }, deployment_status: { state: "success" }, repository: { full_name: `${OWNER}/${REPO}` } });
+/** A successful deployment of `sha`. Each deployment has its own id, as on GitHub: webhook.ts acts once per body, so a commit deployed again needs a new one. */
+export const deploymentPayload = (sha: string, id: number) => ({ deployment: { id, sha, environment: "bench" }, deployment_status: { id, state: "success" }, repository: { full_name: `${OWNER}/${REPO}` } });
 
 /** One run of these tests through the platform's run route on a freshly started app: wall time from the job, each test's state. */
 async function runTests(s: Side, host: BenchAppHost, projectId: string, ids: string[], keyOf: Map<string, string>): Promise<Omit<RunRecord, "repeat" | "arm">> {
@@ -440,11 +441,12 @@ async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, ma
     if (hook.status !== 202) throw new Error(`The webhook answered ${hook.status} for #${pr.number}: ${hook.body.slice(0, 300)}`);
     const sel = await waitSelection(s, proj.id, pr);
     step.aiCalls = counter.calls - before;
-    const reasons = sel.reasons as { tests: Array<{ testId: string; reasons: string[]; why?: string }>; fullRunRecommended: boolean; fullRunReasons: string[]; unmapped: Array<{ path: string }>; endpoints: string[] };
+    const reasons = sel.reasons as { tests: Array<{ testId: string; reasons: string[]; why?: string; stale?: string }>; fullRunRecommended: boolean; fullRunReasons: string[]; unmapped: Array<{ path: string }>; endpoints: string[] };
     step.selection = {
         total,
         selected: sel.selected.map((id: string) => keyOf.get(id) ?? id).sort(),
         explained: reasons.tests.filter((t) => t.reasons.length > 0).map((t) => keyOf.get(t.testId) ?? t.testId).sort(),
+        stale: reasons.tests.filter((t) => !t.reasons.length && t.stale).map((t) => keyOf.get(t.testId) ?? t.testId).sort(),
         fullRunRecommended: reasons.fullRunRecommended,
         fullRunReasons: reasons.fullRunReasons,
         unmapped: reasons.unmapped.map((u) => u.path),
@@ -504,7 +506,7 @@ async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, ma
             const host = await hostFor(pr.app, checkout(git, args.out, pr.head));
             await host.start("none");
             const after = new Date().toISOString();
-            const d = await deliver(s, proj.hookPath, "deployment_status", `dep-${pr.number}-${pr.head.slice(0, 12)}`, deploymentPayload(pr.head));
+            const d = await deliver(s, proj.hookPath, "deployment_status", `dep-${pr.number}-${pr.head.slice(0, 12)}`, deploymentPayload(pr.head, pr.number * 10 + 1));
             check.delivery = d.status;
             check.jobId = await fixCheckJob(s, proj.id, after);
             const suite = await new SuiteStore(s.platform.sql).findByName(proj.id, REGRESSION_SUITE);
@@ -538,7 +540,8 @@ async function doPr(s: Side, args: ChangeArgs, git: ReturnType<typeof gitOf>, ma
                 const host = await hostFor(pr.app, checkout(git, args.out, pr.head));
                 await host.start("none");
                 const after = new Date().toISOString();
-                await deliver(s, proj.hookPath, "deployment_status", `dep2-${pr.number}-${pr.head.slice(0, 12)}`, deploymentPayload(pr.head));
+                const again = await deliver(s, proj.hookPath, "deployment_status", `dep2-${pr.number}-${pr.head.slice(0, 12)}`, deploymentPayload(pr.head, pr.number * 10 + 2));
+                if (again.status !== 202) throw new Error(`The webhook answered ${again.status} for #${pr.number}'s second deployment: ${again.body.slice(0, 300)}`);
                 await fixCheckJob(s, proj.id, after);
                 for (const f of fixed) f.fixedAgain = ok(await s.client.call("GET", `/api/projects/${proj.id}/findings/${f.id}`), "Reading a finding").finding.state === "fixed";
             }

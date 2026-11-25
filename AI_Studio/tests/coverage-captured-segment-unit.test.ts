@@ -44,6 +44,15 @@ describe("a captured value as a whole part of a request path", () => {
         expect(extractCoverage(api([make, { action: "request", method: "DELETE", path: "/api/{{note}}/n1/share/u2" }]), app).limits).toContain(PATH_LIMIT);
     });
 
+    it("a captured value in a page path resolves to a page template: the app model's page, or a route the repository registers for any method", () => {
+        const make = { action: "request", method: "POST", path: "/api/notes", extract: { note: "id" } };
+        const view = { action: "request", method: "GET", path: "/notes/{{note}}" };
+        expect(extractCoverage(api([make, view]), { endpoints: [{ method: "GET", path: "/notes/{id}" }] }).completeness).toBe("declared-complete");
+        expect(extractCoverage(api([make, view]), { endpoints: [{ method: "*", path: "/notes/{}" }] }).completeness).toBe("declared-complete");
+        // A template for another method still does not fit.
+        expect(extractCoverage(api([make, view]), { endpoints: [{ method: "POST", path: "/notes/{}" }] }).limits).toContain(PATH_LIMIT);
+    });
+
     it("stays not fully known without a documented or observed template of that method and path", () => {
         const pay = { action: "request", method: "POST", path: "/api/orders/{{order}}/pay" };
         expect(extractCoverage(api([place, pay]), { appHost: "shop.test" }).limits).toContain(PATH_LIMIT);
@@ -77,6 +86,14 @@ describe("the project's endpoint templates", () => {
             const endpoints = [{ method: "POST", path: "/api/orders/{id}/pay", origin: "documented" }];
             p.db.run("INSERT INTO app_model_versions (id, project_id, version, model_json, created_at) VALUES (?,?,?,?,?)", "m1", projectId, 1, JSON.stringify({ endpoints }), new Date().toISOString());
             expect(await limits()).not.toContain(PATH_LIMIT);
+            // A page test: its page path resolves to the model's page, or to a template a PR's analysis passes (the repository's routes).
+            const page = TestSpecSchema.parse({ testId: "API-002", title: "A note page", kind: "api", category: "Notes", steps: [{ action: "request", method: "POST", path: "/api/notes", extract: { note: "id" } }, { action: "request", method: "GET", path: "/notes/{{note}}" }] });
+            p.repo.insertTest({ projectId, suiteId, jobId: null, spec: page, framework: "playwright-api", validationStatus: "VALIDATED" });
+            const pageLimits = async (o = {}) => (await projectCoverage(p.repo, p.store, projectId, o)).tests.find((t) => t.testKey === "API-002")!.limits;
+            expect(await pageLimits()).toContain(PATH_LIMIT);
+            expect(await pageLimits({ templates: [{ method: "*", path: "/notes/{}" }] })).not.toContain(PATH_LIMIT);
+            p.db.run("INSERT INTO app_model_versions (id, project_id, version, model_json, created_at) VALUES (?,?,?,?,?)", "m2", projectId, 2, JSON.stringify({ endpoints, pages: [{ id: "note", path: "/notes/{id}" }] }), new Date().toISOString());
+            expect(await pageLimits()).not.toContain(PATH_LIMIT);
         } finally {
             p.db.close();
             fs.rmSync(dir, { recursive: true, force: true });

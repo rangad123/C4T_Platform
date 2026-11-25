@@ -5,12 +5,14 @@
  *   - `app.get("/x", …)`, `router.post(…)`, `fastify.put(…)`, `server.delete(…)` (Express, Koa router, Fastify), and receivers made
  *     by `express()`, `express.Router()`, `Router()`, `Fastify()`, `new Router()` in the same file;
  *   - `fastify.route({ method, url })`;
+ *   - a route table one dispatcher reads: an object literal with a literal `method` and `path` of its own
+ *     (`{ method: 'POST', path: '/api/orders', handler(ctx) {…} }`); its handler is the whole object;
  *   - Next.js `app/**\/route.ts` files: each exported GET/POST/… handler, the path from the folders;
  *   - plain `if` dispatch on the request path, as in a bare `node:http` server: `if (p === "/api/cart" && m === "POST")`, a path
  *     regular expression matched into a variable (`mm = p.match(/^\/api\/orders\/([\w-]+)$/)`, then `if (mm)`), and method or capture
  *     checks nested inside such a block (`if (m === "PUT")`, `if (mm[2] === "cancel")`).
  * Each route has the line range of its handler. A changed line inside a range reaches that route (the innermost one). A changed line
- * in a function outside every route reaches the routes whose handlers use that function by name (in the same file, or in a file that
+ * in a function (or, for the changed line itself, in a top-level constant that is not one: `const SHIPPING = {…}`) outside every route reaches the routes whose handlers use that function by name (in the same file, or in a file that
  * imports it by name), followed through other functions; each step is kept as evidence. Paths use `{}` for a variable segment, as the
  * test footprints do (platform/selection/coverage.ts).
  *
@@ -31,7 +33,7 @@ export interface RouteEntry {
     /** The handler's first and last line (inclusive). */
     start: number;
     end: number;
-    style: "call" | "route-object" | "next" | "if";
+    style: "call" | "route-object" | "next" | "if" | "table";
 }
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -196,6 +198,41 @@ function callRoutes(file: string, src: string, scan: JsScan): RouteEntry[] {
     return out;
 }
 
+/** The `{` of the object literal around an offset (code view: strings and comments do not count), if any. */
+function enclosingBrace(code: string, at: number): number | undefined {
+    let depth = 0;
+    for (let k = at - 1; k >= 0; k--) {
+        const ch = code[k];
+        if (ch === "}") depth++;
+        else if (ch === "{") {
+            if (depth === 0) return k;
+            depth--;
+        }
+    }
+    return undefined;
+}
+
+/** Route tables: `{ method: 'GET', path: '/api/cart/items', handler: … }`, both literal properties of the same object. */
+function tableRoutes(file: string, src: string, scan: JsScan): RouteEntry[] {
+    const { code, pair, lineAt } = scan;
+    const out: RouteEntry[] = [];
+    for (const m of src.matchAll(/\bmethod\s*:\s*(['"])(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\1/gi)) {
+        if (code[m.index!] === " ") continue;
+        const open = enclosingBrace(code, m.index!);
+        if (open === undefined || !(pair[open]! > open)) continue;
+        let path: string | undefined;
+        for (const p of src.slice(open, pair[open]! + 1).matchAll(/\bpath\s*:\s*(['"`])(\/[^'"`\n]*)\1/g)) {
+            const at = open + p.index!;
+            if (code[at] !== " " && enclosingBrace(code, at) === open && !p[2]!.includes("${")) {
+                path = p[2];
+                break;
+            }
+        }
+        if (path) out.push({ file, method: m[2]!.toUpperCase(), path: routeTemplate(path), line: lineAt(m.index!), start: lineAt(open), end: lineAt(pair[open]!), style: "table" });
+    }
+    return out;
+}
+
 function nextRoutes(file: string, symbols: SourceSymbol[]): RouteEntry[] {
     const path = nextRoutePath(file);
     if (!path) return [];
@@ -315,7 +352,7 @@ function ifRoutes(file: string, src: string, scan: JsScan): RouteEntry[] {
 export function routesOf(file: string, source: string): RouteEntry[] {
     if (!isJsLike(file)) return [];
     const scan = scanJs(source);
-    return [...callRoutes(file, source, scan), ...nextRoutes(file, symbolsOf(file, source, scan)), ...ifRoutes(file, source, scan)];
+    return [...callRoutes(file, source, scan), ...tableRoutes(file, source, scan), ...nextRoutes(file, symbolsOf(file, source, scan)), ...ifRoutes(file, source, scan)];
 }
 
 // ── from changed lines to routes ──────────────────────────────────────────────
@@ -390,6 +427,23 @@ export function routesForChange(sources: Record<string, string>, file: string, l
         cache.set(f, ix);
         return ix;
     };
+    /** The top-level constant (not a function) whose statement holds the line: the last one that starts before it and reaches it. */
+    const constantAt = (ix: FileIndex, line: number): SourceSymbol | undefined => {
+        let found: SourceSymbol | undefined;
+        const code = ix.scan.code;
+        let depth = 0;
+        let k = 0;
+        for (const m of code.matchAll(/(?<![\w$.])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g)) {
+            const start = ix.scan.lineAt(m.index!);
+            if (start > line) break;
+            // Only at the top of the file: a local `const user = …` inside a callback is another name in every handler.
+            for (; k < m.index!; k++) depth += "([{".includes(code[k]!) ? 1 : ")]}".includes(code[k]!) ? -1 : 0;
+            if (depth !== 0 || innermost(ix.symbols, start)) continue;
+            const end = ix.scan.lineAt(expressionEnd(ix.scan, m.index! + m[0].length));
+            if (line <= end) found = { name: m[1]!, kind: "constant", start, end, at: m.index! + m[0].indexOf(m[1]!, m[0].search(/\s/)) };
+        }
+        return found;
+    };
     const routesAt = (ix: FileIndex, line: number): RouteEntry[] => {
         const best = innermost(ix.routes, line);
         return best ? ix.routes.filter((r) => r.start === best.start && r.end === best.end) : [];
@@ -434,9 +488,9 @@ export function routesForChange(sources: Record<string, string>, file: string, l
             for (const r of direct) hit(r, [`${target}:${line} is inside the handler of ${describeRoute(r)}`]);
             continue;
         }
-        const sym = innermost(ix.symbols, line);
+        const sym = innermost(ix.symbols, line) ?? constantAt(ix, line);
         if (!sym) unresolved.push(`${target}:${line} is outside every route handler and every function.`);
-        else enqueue(target, sym, [`${target}:${line} is in ${sym.name}() (${target}:${sym.start}-${sym.end})`]);
+        else enqueue(target, sym, [`${target}:${line} is in ${sym.name}${sym.kind === "constant" ? "" : "()"} (${target}:${sym.start}-${sym.end})`]);
     }
     for (let q = 0; q < queue.length && q < 500; q++) {
         const { f, sym, chain } = queue[q]!;

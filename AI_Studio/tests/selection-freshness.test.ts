@@ -90,21 +90,38 @@ describe("1. freshness: only the latest relevant run can make a test complete", 
         const never = health(undefined);
         expect(never).toMatchObject({ completeness: "partial", limits: ["No run of it has been recorded yet, so what it touches is only known from its steps."] });
         expect(never.stale).toBeUndefined();
-        // Failed, older version, older code, outside the window: stale, each with its reason.
-        expect(health(latest({ status: "failed" }))).toMatchObject({ completeness: "partial", stale: "Its latest run (2026-11-13) failed, so earlier passing runs no longer show what it touches." });
+        // Its latest run failed or ended with an error: its steps are still what it calls, so it stays complete (lead 2026-11-25).
+        for (const status of ["failed", "error"]) {
+            expect(health(latest({ status }))).toMatchObject({ completeness: "declared-complete", completeFrom: "its steps", limits: [] });
+            expect(health(latest({ status })).stale).toBeUndefined();
+        }
+        // A failed run of an older version, or one older than the window, still leaves it out of date.
+        expect(health(latest({ status: "failed", versionId: "v1" })).stale).toBe("Its latest run (2026-11-13) failed, so earlier passing runs no longer show what it touches.");
+        expect(health(latest({ status: "failed", startedAt: "2026-10-01T10:00:00.000Z" })).stale).toBe("Its latest run (2026-10-01) failed, so earlier passing runs no longer show what it touches.");
+        // Older version, older code, outside the window: stale, each with its reason.
         expect(health(latest({ versionId: "v1" })).stale).toBe("It changed after its latest run (2026-11-13): version 2 has not run yet.");
         expect(health(latest({ scriptId: "s1" })).stale).toBe("Its code changed after its latest run (2026-11-13), and the new code has not run yet.");
         expect(health(latest({ startedAt: "2026-10-01T10:00:00.000Z" })).stale).toBe("Its latest run (2026-10-01) is older than 14 days, so it may no longer show what the test touches.");
         // Not matched only when fresh; a stale one is proposed and a full run is required.
         const { changes } = readChanges({ endpoints: ["POST /orders"] });
         expect(previewSelection([health(latest())], changes).notMatched.map((t) => t.testKey)).toEqual(["API-001"]);
-        const stale = previewSelection([health(latest({ status: "error" }))], changes);
+        expect(previewSelection([health(latest({ status: "failed" }))], changes).notMatched.map((t) => t.testKey)).toEqual(["API-001"]);
+        const stale = previewSelection([health(latest({ versionId: "v1" }))], changes);
         expect(stale.notMatched).toEqual([]);
-        expect(stale.unknown[0]!.why).toBe("Proposed because its recorded coverage is out of date: its latest run (2026-11-13) ended with an error, so earlier passing runs no longer show what it touches.");
+        expect(stale.unknown[0]!.why).toBe("Proposed because its recorded coverage is out of date: it changed after its latest run (2026-11-13): version 2 has not run yet.");
         expect(stale.fullRunRequired).toBe(true);
         const never2 = previewSelection([health(undefined)], changes);
         expect(never2.unknown[0]!.why).toBe("Proposed because what it touches is not fully known: No run of it has been recorded yet, so what it touches is only known from its steps.");
         expect(never2.fullRunReasons).toEqual(["What 1 test touches is not fully known, so the preview cannot rule out that it reaches the change."]);
+    });
+
+    it("a failed latest run leaves a web test, and an API test whose steps are not fully read, out of date", () => {
+        const failed = freshnessOf(latest({ status: "failed" }), CURRENT, NOW);
+        const w = extractCoverage(web("w1", "WEB-001", [run({ status: "failed", requests: [{ method: "GET", type: "document", path: "/cart" }] })], latest({ status: "failed" })), {});
+        expect(w.stale).toBe("Its latest run (2026-11-13) failed, so earlier passing runs no longer show what it touches.");
+        const partly = extractCoverage({ id: "a", testKey: "API-001", title: "a", kind: "api", spec: { steps: [{ action: "request", method: "GET", path: "/api/notes/{{note}}" }] }, runs: [], freshness: failed }, {});
+        expect(partly.completeness).toBe("partial");
+        expect(partly.stale).toBe("Its latest run (2026-11-13) failed, so earlier passing runs no longer show what it touches.");
     });
 
     it("a shared part changed after the latest run makes it out of date when runs use the change without a new approval", () => {
@@ -175,7 +192,7 @@ function sampleProject() {
         { id: "m1", testKey: "MOB-001", title: "MOB-001", kind: "mobile", spec: { steps: [{ action: "tap" }] }, runs: [], freshness: freshnessOf(undefined, CURRENT, NOW) },
         // fully known from its steps (its latest run passed on version 2), not in the change.
         { id: "a2", testKey: "API-002", title: "API-002", kind: "api", spec: { steps: [{ action: "request", method: "GET", path: "/api/health" }] }, runs: [], freshness: freshnessOf(latest(), CURRENT, NOW) },
-        // An API test that calls POST /api/orders, whose latest run failed: matched, and stale.
+        // An API test that calls POST /api/orders, whose latest run failed: matched; its steps are its coverage, so not out of date.
         { id: "a3", testKey: "API-003", title: "API-003", kind: "api", spec: { steps: [{ action: "request", method: "POST", path: "/api/orders" }] }, runs: [], freshness: freshnessOf(latest({ status: "failed" }), CURRENT, NOW) },
         // Held back by runs, its reusable steps changed after approval (the route lists it as Cannot run).
         web("w8", "WEB-008", [run({ requests: [{ method: "GET", type: "document", path: "/search" }] })], latest()),
@@ -228,7 +245,7 @@ describe("worked example (review pack v4)", () => {
         ]);
         expect(p.fullRunRequired).toBe(true);
         expect(p.fullRunReasons).toEqual([
-            "4 tests' recorded coverage is out of date (the latest run did not pass, ran an older version, is older than the freshness window, or ran before a shared part it uses changed), so what they touch now is not known.",
+            "3 tests' recorded coverage is out of date (the latest run did not pass, ran an older version, is older than the freshness window, or ran before a shared part it uses changed), so what they touch now is not known.",
             "What 3 tests touch is not fully known, so the preview cannot rule out that they reach the change.",
             "1 test cannot run on your runner, so the preview did not judge it; a deploy run on another runner may still run it.",
             // Approved policy: a held test always requires a full run, named with why.
