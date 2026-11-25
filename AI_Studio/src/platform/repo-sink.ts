@@ -315,6 +315,16 @@ export class RepoSink implements GenerationSink {
         // Validation-only jobs run the same test again later; keep each run's artifacts apart so an
         // earlier execution's screenshot/trace is never overwritten by a re-validation.
         const runDir = this.job.mode === "validate" || this.job.mode === "plain" ? path.posix.join(`job-${this.job.id.slice(0, 8)}`, `attempt-${attempt}`) : `attempt-${attempt}`;
+        // A failed run's request summaries, for the finding written from the stored run after the job (verify-service.ts failedRunsOf).
+        if (run.status !== "passed" && run.responses.length) {
+            try {
+                const rel = path.posix.join(this.job.projectId, "_artifacts", h.testId, runDir, "responses.json");
+                const saved = await putText(this.store, rel, this.maskReason(JSON.stringify(run.responses.slice(-20).map((r) => ({ method: r.method, path: r.path, status: r.status })))));
+                this.repo.addArtifact({ projectId: this.job.projectId, jobId: this.job.id, testId: h.id, executionId, kind: "responses", path: rel, size: saved.size });
+            } catch {
+                /* the finding then has no request lines — non-fatal */
+            }
+        }
         const named = new Set<string>();
         for (const a of run.artifacts) {
             try {

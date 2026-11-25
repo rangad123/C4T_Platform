@@ -6,9 +6,9 @@
  * Only counts and labels ever pass through this module: never a prompt, an answer or an image.
  */
 
-/** What a model call was for. A call site passes one of these when it is cheap to do so; otherwise "other". */
-export type LlmPurpose = "analysis" | "planning" | "review" | "authoring" | "repair" | "vision" | "plain" | "other";
-export const PURPOSES: readonly LlmPurpose[] = ["analysis", "planning", "review", "authoring", "repair", "vision", "plain", "other"];
+/** What a model call was for. A call site passes one of these when it is cheap to do so; otherwise "other". `layers`: proposing the layer checks (API invariants, stored-data rules). */
+export type LlmPurpose = "analysis" | "planning" | "review" | "authoring" | "repair" | "vision" | "plain" | "layers" | "other";
+export const PURPOSES: readonly LlmPurpose[] = ["analysis", "planning", "review", "authoring", "repair", "vision", "plain", "layers", "other"];
 
 export function normalisePurpose(p: unknown): LlmPurpose {
     return typeof p === "string" && (PURPOSES as readonly string[]).includes(p) ? (p as LlmPurpose) : "other";

@@ -132,12 +132,20 @@ export function executionFinding(test: TestOf, run: ScriptRun): CandidateFinding
     // The first line only: the run's secrets are not known here, and a headline can quote a value (fromCandidate makes it from the
     // verification attempts, which are masked).
     const observed = ((run.steps.find((st) => st.status === "failed")?.error ?? run.error ?? "").split("\n")[0] ?? "").trim() || `${test.spec.testId} failed.`;
+    // A stored-data check failing after the API accepted its write (the last answer is the read-back): the API and the stored data disagree.
+    const write = run.responses.findLast((r) => r.method.toUpperCase() !== "GET");
+    const readBack = test.meta?.layer === "storedData" && write && write.status >= 200 && write.status < 300 && run.responses.at(-1)?.method.toUpperCase() === "GET";
     return {
         objective: null,
         actions: { stepCount: test.spec.steps.length },
         expected,
         observed,
-        evidence: { screenshots: [], requests: run.responses.slice(-20).map((x) => `${x.method} ${x.path} -> ${x.status}`), console: [] },
+        evidence: {
+            screenshots: [],
+            requests: run.responses.slice(-20).map((x) => `${x.method} ${x.path} -> ${x.status}`),
+            console: [],
+            ...(readBack ? { layers: [{ layer: "api" as const, observed: `${write.method} ${write.path} answered ${write.status}` }, { layer: "stored data" as const, observed }] } : {}),
+        },
         capture,
         independence: "not_run",
         confidence: confidenceOf({ sourced: expected.source !== null, capture, independence: "not_run" }),
@@ -187,6 +195,7 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
         confidence: f.confidence,
         ...(layer ? { layer } : {}),
         ...(execution && test ? { origin: test.spec.source.origin } : {}),
+        ...(f.evidence.layers?.length ? { correlated: { disagreed: f.evidence.layers.map((l) => l.layer) } } : {}),
     } satisfies FindingViewInput);
 }
 

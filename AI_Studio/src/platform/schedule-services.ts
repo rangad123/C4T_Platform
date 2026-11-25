@@ -2,7 +2,7 @@ import { fireDueSecuritySchedules } from "../security/schedules.js";
 import { assessmentLoopOf } from "../security/routes/assessments.js";
 import { writeDesignationDraft } from "../security/cross-account-store.js";
 import { hasCurrentAuthorization } from "../security/authorization-gate.js";
-import type { RunnerDeps } from "./job-runner.js";
+import { jobLlm, type RunnerDeps } from "./job-runner.js";
 import type { Platform } from "./bootstrap.js";
 import { AlertService, AlertStore, isAlertable, type DeliveryOptions } from "./alerts.js";
 import { serverSmtp } from "./alert-email.js";
@@ -29,6 +29,8 @@ export interface ScheduleServiceOptions {
     clock?: () => number;
     delivery?: DeliveryOptions;
     startRun?: (s: Schedule) => Promise<JobRow | RunbookStart>;
+    /** Builds the model the verification after a job uses (RunnerDeps.makeLlm). Tests hand in a scripted double; production leaves it unset. */
+    makeLlm?: RunnerDeps["makeLlm"];
 }
 
 /** The schedules feature wired to one platform: shared by the API routes, the scheduler and the worker hook. */
@@ -127,7 +129,11 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
             track(
                 (async () => {
                     for (const f of await reopenReturned(p, job)) notifyReopened(f);
-                    if (p.config.VERIFY_FINDINGS) await verifyAfterJob(p, job);
+                    if (!p.config.VERIFY_FINDINGS) return;
+                    // The project's model, as a verification job on a runner gets it (job-runner.ts): the AI explanation and the model root cause.
+                    // Its usage rows are the job's; no meter.finish(), which would add a second call summary to a job that has ended.
+                    const { ai, llm } = await jobLlm({ repo: p.repo, config: p.config, ...(opts.makeLlm ? { makeLlm: opts.makeLlm } : {}) }, job, () => undefined);
+                    await verifyAfterJob(p, job, ai.blocked ? {} : { llm });
                 })(),
             );
             try {

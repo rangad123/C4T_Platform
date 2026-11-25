@@ -257,6 +257,8 @@ describe("the finding a read-back makes", () => {
         const found = defectFinding({ scenario: scenarioOf(c), rules: [], requirementIds: [c.req], outcome: out, capture: "captured", independence, stepCount: out.steps.length, modelVersion: null });
         expect(found).toMatchObject({ confidence: "high", source: "expected:1" });
         expect(found.finding?.evidence.layers?.map((l) => l.layer)).toEqual(["api", "stored data"]);
-        expect(found.finding?.evidence.requests).toEqual(["PUT /api/profile answered 200", "GET /api/profile answered 200"]);
+        // The correlation's request lines, now with the answers' masked bodies (the action step's captured calls).
+        const requests = found.finding?.evidence.requests ?? [];
+        for (const line of ["PUT /api/profile answered 200", "GET /api/profile answered 200"]) expect(requests.filter((r) => r.startsWith(line)), JSON.stringify(requests)).toHaveLength(1);
     }, 240_000);
 });

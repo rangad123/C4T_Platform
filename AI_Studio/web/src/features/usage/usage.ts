@@ -108,6 +108,7 @@ export const PURPOSE_LABEL: Record<string, string> = {
     repair: "Repairing tests",
     vision: "Looking at screenshots",
     plain: "Plain-English tests",
+    layers: "Proposing layer checks",
     other: "Other",
 };
 

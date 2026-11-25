@@ -86,7 +86,7 @@ export async function proposeRowRelations(
     if (!input.requirements.length || !input.schema.tables.length) return { checks: [], report: { proposed: 0, kept: 0, dropped: [] } };
     let proposed: z.infer<typeof ProposalSchema>["relations"];
     try {
-        proposed = (await ctx.llm.object({ system: SYSTEM, prompt: rowRelationPrompt(input), schema: ProposalSchema, purpose: "planning", maxOutputTokens: 2048 })).relations;
+        proposed = (await ctx.llm.object({ system: SYSTEM, prompt: rowRelationPrompt(input), schema: ProposalSchema, purpose: "layers", maxOutputTokens: 2048 })).relations;
     } catch (e) {
         return { checks: [], report: { proposed: 0, kept: 0, dropped: [], error: `The stored-data rule proposal failed: ${maskSecrets(e instanceof Error ? e.message : String(e), input.secrets)}`.slice(0, 300) } };
     }

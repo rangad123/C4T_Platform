@@ -2,8 +2,8 @@
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
     "tiers": [
-        { "upToInputTokens": 100000, "inputPerMTok": 0.1, "outputPerMTok": 0.5 },
-        { "inputPerMTok": 0.5, "outputPerMTok": 2.5 }
+        { "upToInputTokens": 100000, "inputPerMTok": 0.1, "outputPerMTok": 0.5, "cachedInputPerMTok": 0.01, "cacheWritePerMTok": 0.125 },
+        { "inputPerMTok": 0.5, "outputPerMTok": 2.5, "cachedInputPerMTok": 0.05, "cacheWritePerMTok": 0.625 }
     ],
-    "note": "US dollars per million tokens; a call whose prompt is longer than 100,000 tokens is charged at the second tier as a whole"
+    "note": "US dollars per million tokens; a call whose prompt is longer than 100,000 tokens is charged at the second tier as a whole; prompt-cache reads at 0.1x and writes at 1.25x the input price"
 }

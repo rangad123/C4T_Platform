@@ -239,7 +239,8 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
             tests = list.map((t) => ({ id: t.id, testId: t.testId, title: t.title, firstRun: firstOf.has(t.id) ? toVerdict(firstOf.get(t.id)!.state) : null, reruns: reruns.get(t.id)!, reason: reasons.get(t.id), duplicate: duplicate.has(t.id) }));
         }
 
-        // AI use, from the platform's usage records of the jobs that use the model (the reruns make no AI calls).
+        // AI use, from the platform's usage records of the exploration and creation jobs. The reruns make AI calls too (repairing, re-writing and
+        // reviewing tests that fail again), not counted here; the run's whole usage is the controller's (bench/controller.ts runUsageSoFar).
         let aiCalls = 0, inputTokens = 0, outputTokens = 0;
         let cost: number | null = null;
         const usage: UsageDetail = { cacheReadTokens: 0, cacheWriteTokens: 0, escalations: 0, byModel: [], repairsFixed, repairsWithoutAi: 0, pagesReused: 0 };
