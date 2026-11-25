@@ -1,7 +1,7 @@
 import { ArrowLeft, ShieldCheck, ShieldOff, Sparkles } from "lucide-react";
 import type { Job } from "../../../api";
 import { JobProgress } from "../../../components/JobProgress";
-import { Badge, EmptyState, ErrorState, LinkButton, ListSkeleton } from "../../../components/ui";
+import { Badge, EmptyState, ErrorState, LinkButton, ListSkeleton, Metric } from "../../../components/ui";
 import type { Tone } from "../../../lib/labels";
 import { isActive } from "../../../lib/labels";
 import { useFetch, useOnFinish } from "../../../lib/hooks";
@@ -15,6 +15,7 @@ const ID = "security";
 
 /** GET /api/projects/:id/workspace/security/outcome (src/platform/agent-outcomes/security.ts). */
 type Area = "access" | "headers" | "exposure";
+type Severity = "critical" | "high" | "medium" | "low";
 interface Check {
     testId: string;
     testKey: string;
@@ -23,6 +24,12 @@ interface Check {
     result: "passed" | "problem" | "could-not-check" | "not-run";
     reason: string | null;
     finding: { id: string; state: string; label: string; verified: boolean } | null;
+    severity: Severity | null;
+    problems: Array<{ severity: Severity; text: string }>;
+    requested: string[];
+    jobId: string | null;
+    /** A person marked it not a bug: listed, never counted. */
+    dismissed: string | null;
 }
 interface Finding {
     id: string;
@@ -41,6 +48,7 @@ interface Outcome {
     runs: number;
     checks: Check[];
     findings: Finding[];
+    counts: Record<Severity, number> & { notVerified: number };
 }
 
 const AREAS: Array<{ id: Area; title: string; what: string }> = [
@@ -54,12 +62,21 @@ const RESULT: Record<Check["result"], { label: string; tone: Tone }> = {
     "could-not-check": { label: "Could not check", tone: "neutral" },
     "not-run": { label: "Not run", tone: "neutral" },
 };
+const SEVERITY: Record<Severity, { label: string; tone: Tone }> = {
+    critical: { label: "Critical", tone: "danger" },
+    high: { label: "High", tone: "danger" },
+    medium: { label: "Medium", tone: "warning" },
+    low: { label: "Low", tone: "neutral" },
+};
+const RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+const Sev = ({ s }: { s: Severity }) => <Badge tone={SEVERITY[s].tone}>{SEVERITY[s].label}</Badge>;
 const LIST = { listStyle: "none", margin: 0, padding: 0 } as const;
 const ROW = { flexWrap: "wrap", gap: 8 } as const;
 
-/** What the agent checked and its verified findings, over all its runs or for one (`run`). */
+/** What the agent checked, the problems it found and its verified findings, over all its runs or for one (`run`). */
 function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
     const can = useCan();
+    const roles = useFetch<{ roles: unknown[] }>(`/projects/${projectId}/roles`);
     const runs = useFetch<Job[]>(`/projects/${projectId}/workspace/${ID}/runs`, (d) => (isActive(d?.[0]?.status) ? 2000 : null));
     const job = run ? runs.data?.find((j) => j.jobId === run) : runs.data?.[0];
     const active = isActive(job?.status);
@@ -98,52 +115,118 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
             </div>
         );
     const passed = o.checks.filter((c) => c.result === "passed").length;
+    const problems = o.checks.filter((c) => c.result === "problem" && !c.dismissed).sort((a, b) => RANK[a.severity ?? "low"] - RANK[b.severity ?? "low"]);
+    // The check's own run: on a run's page it is that run, so the title is plain text.
+    const name = (c: Check) =>
+        run || !c.jobId ? (
+            <strong style={{ overflowWrap: "anywhere" }}>{c.title}</strong>
+        ) : (
+            <a href={routes.projectAgentRun(projectId, ID, c.jobId)} style={{ overflowWrap: "anywhere" }}>
+                {c.title}
+            </a>
+        );
+    const dismissed = o.checks.filter((c) => c.dismissed).length;
+    const noAccounts = roles.data?.roles.length === 0 && !o.checks.some((c) => c.area === "access");
     return (
         <div className="stack" data-testid="security-outcome">
             {progress}
-            <p className="t-secondary" style={{ margin: 0 }}>
-                {passed} of {o.checks.length} checks passed{run ? " in this run" : ` over ${o.runs === 1 ? "1 run" : `${o.runs} runs`}`}. A problem becomes a finding once it is verified: replayed and seen again.
-            </p>
-            <section className="card card-pad stack-sm" aria-labelledby="sec-findings" data-testid="security-findings">
-                <h3 className="t-card" id="sec-findings">
-                    Verified findings ({o.findings.length})
-                </h3>
-                {o.findings.length === 0 ? (
-                    <p className="t-meta" style={{ margin: 0 }}>
-                        None. A problem a check found is listed under its check below, with how far its verification got.
-                    </p>
-                ) : (
+            <div className="card divided" style={{ overflow: "hidden" }}>
+                <div className="metrics" data-testid="security-counts">
+                    {(["critical", "high", "medium", "low"] as const).map((s) => (
+                        <Metric key={s} value={o.counts[s]} label={SEVERITY[s].label} tone={o.counts[s] && s !== "low" ? "warn" : undefined} />
+                    ))}
+                    {o.checks.some((c) => c.area === "access") && <Metric value={o.counts.notVerified} label="Access problems not verified yet" />}
+                </div>
+                <p className="section t-meta" style={{ margin: 0 }}>
+                    {passed} of {o.checks.length} checks passed{run ? " in this run" : ` over ${o.runs === 1 ? "1 run" : `${o.runs} runs`}`}. Headers, cookies, cross-origin access, HTTPS and exposed files are judged by fixed rules, so what they find is a fact and is counted at once. An access-control problem depends on the test accounts, so it counts once a replay has confirmed it.
+                    {dismissed ? ` ${dismissed === 1 ? "1 check" : `${dismissed} checks`} a person marked not a bug ${dismissed === 1 ? "is" : "are"} listed below and left out of these counts.` : ""}
+                </p>
+            </div>
+            {problems.length > 0 && (
+                <section className="card card-pad stack-sm" aria-labelledby="sec-problems" data-testid="security-problems">
+                    <h3 className="t-card" id="sec-problems">
+                        Problems
+                    </h3>
                     <ul className="stack-sm" style={LIST}>
-                        {o.findings.map((f) => (
-                            <li key={f.id} className="stack-sm" style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }} data-testid="security-finding">
-                                <div className="row" style={ROW}>
-                                    <strong style={{ overflowWrap: "anywhere" }}>{f.title}</strong>
-                                    <Badge tone="danger">{f.label}</Badge>
-                                    {f.severity && <Badge tone="warning">{`${f.severity[0]!.toUpperCase()}${f.severity.slice(1)} severity`}</Badge>}
-                                    <span className="t-meta">{AREAS.find((a) => a.id === f.area)!.title}</span>
-                                </div>
-                                <dl className="ws-inputs">
-                                    <dt>Expected</dt>
-                                    <dd>{f.expected}</dd>
-                                    <dt>Found</dt>
-                                    <dd style={{ whiteSpace: "pre-line" }}>{f.observed}</dd>
-                                    <dt>Reproduction</dt>
-                                    <dd>
-                                        <ol style={{ margin: "0 0 4px", paddingLeft: 20 }}>
-                                            {f.steps.map((s, i) => (
-                                                <li key={i}>{s}</li>
-                                            ))}
-                                        </ol>
-                                        <span className="t-meta">
-                                            Failed the same way in {f.reproduced.same} of {f.reproduced.of} verification replays · <a href={routes.test(f.testId)}>{f.testKey}</a>
-                                        </span>
-                                    </dd>
-                                </dl>
-                            </li>
-                        ))}
+                        {problems.map((c) => {
+                            const f = c.area === "access" && c.finding?.verified ? o.findings.find((x) => x.id === c.finding!.id) : undefined;
+                            return (
+                                <li key={c.testId} className="stack-sm" style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }} data-testid="security-problem">
+                                    <div className="row" style={ROW}>
+                                        {name(c)}
+                                        <span className="t-meta">{AREAS.find((a) => a.id === c.area)!.title}</span>
+                                    </div>
+                                    {c.area === "access" ? (
+                                        <>
+                                            <div className="row" style={ROW} data-testid="security-verification">
+                                                {c.severity && <Sev s={c.severity} />}
+                                                <Badge tone={c.finding?.verified ? "danger" : "neutral"}>{c.finding?.label ?? "Not verified yet"}</Badge>
+                                                {c.finding && !c.finding.verified && <span className="t-meta">Not verified yet: it counts once a replay confirms it.</span>}
+                                            </div>
+                                            {f ? (
+                                                <dl className="ws-inputs" data-testid="security-finding">
+                                                    <dt>Expected</dt>
+                                                    <dd>{f.expected}</dd>
+                                                    <dt>Found</dt>
+                                                    <dd style={{ whiteSpace: "pre-line" }}>{f.observed}</dd>
+                                                    <dt>Reproduction</dt>
+                                                    <dd>
+                                                        <ol style={{ margin: "0 0 4px", paddingLeft: 20 }}>
+                                                            {f.steps.map((s, i) => (
+                                                                <li key={i}>{s}</li>
+                                                            ))}
+                                                        </ol>
+                                                        <span className="t-meta">
+                                                            Failed the same way in {f.reproduced.same} of {f.reproduced.of} verification replays
+                                                        </span>
+                                                    </dd>
+                                                </dl>
+                                            ) : (
+                                                c.reason && (
+                                                    <span className="t-meta" style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
+                                                        {c.reason}
+                                                    </span>
+                                                )
+                                            )}
+                                        </>
+                                    ) : (
+                                        <dl className="ws-inputs">
+                                            {c.requested.length > 0 && (
+                                                <>
+                                                    <dt>Requested</dt>
+                                                    <dd className="mono" style={{ overflowWrap: "anywhere" }}>
+                                                        {c.requested.join(", ")}
+                                                    </dd>
+                                                </>
+                                            )}
+                                            <dt>Came back</dt>
+                                            <dd>
+                                                {c.problems.length ? (
+                                                    <ul className="stack-sm" style={LIST}>
+                                                        {c.problems.map((x, i) => (
+                                                            <li key={i} className="row" style={{ ...ROW, alignItems: "baseline", flexWrap: "nowrap" }}>
+                                                                <Sev s={x.severity} />
+                                                                <span style={{ overflowWrap: "anywhere", minWidth: 0 }}>{x.text}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                ) : (
+                                                    <span style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{c.reason}</span>
+                                                )}
+                                            </dd>
+                                        </dl>
+                                    )}
+                                </li>
+                            );
+                        })}
                     </ul>
-                )}
-            </section>
+                </section>
+            )}
+            {noAccounts && (
+                <p className="t-meta" style={{ margin: 0 }} data-testid="security-no-accounts">
+                    Access control was not checked: add test accounts in <a href={routes.projectSettings(projectId, "accounts")}>Settings</a>.
+                </p>
+            )}
             {AREAS.map((a) => {
                 const list = o.checks.filter((c) => c.area === a.id);
                 if (!list.length) return null;
@@ -159,13 +242,16 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
                             {list.map((c) => (
                                 <li key={c.testId} className="stack-sm" style={{ padding: "8px 0" }} data-testid="security-check">
                                     <div className="row" style={ROW}>
-                                        <a href={routes.test(c.testId)} style={{ overflowWrap: "anywhere" }}>
-                                            {c.title}
-                                        </a>
-                                        <Badge tone={RESULT[c.result].tone}>{RESULT[c.result].label}</Badge>
-                                        {c.finding && <span className="t-meta">{c.finding.verified ? "Verified finding" : `Finding: ${c.finding.label}`}</span>}
+                                        {name(c)}
+                                        {c.dismissed ? <Badge tone="neutral">Not a bug</Badge> : <Badge tone={RESULT[c.result].tone}>{RESULT[c.result].label}</Badge>}
+                                        {c.severity && !c.dismissed && <Sev s={c.severity} />}
                                     </div>
-                                    {c.reason && (
+                                    {c.dismissed && (
+                                        <span className="t-meta" style={{ overflowWrap: "anywhere" }} data-testid="security-dismissed">
+                                            {c.dismissed}
+                                        </span>
+                                    )}
+                                    {c.result === "could-not-check" && c.reason && (
                                         <span className="t-meta" style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
                                             {c.reason}
                                         </span>

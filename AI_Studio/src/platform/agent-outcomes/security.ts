@@ -2,17 +2,22 @@
  * The Security Testing Agent's outcome (SPEC §3), read from what its runs saved:
  *
  *   checks    each check its runs made or ran: test meta `security` (headers, cookies, CORS and HTTPS; exposed files and version banners)
- *             and meta `access` (pages and API calls that must stay closed to lesser accounts and visitors), with its result and the
- *             state of the finding its problem became
- *   findings  the verified ones only (Phase 5 lifecycle: reproduced, confirmed, classified, reported), each with its reproduction: the
- *             check's steps and how many verification replays failed the same way
+ *             and meta `access` (pages and API calls that must stay closed to lesser accounts and visitors), with its result, the
+ *             state of the finding its problem became, and the newest of the runs that made or ran it
+ *   problems  a rule-based check's failure is a fact, as an axe rule is for Accessibility: each "- [severity]" line of its message,
+ *             with what was requested; counted whatever its finding's state. An access problem depends on the accounts' state, so it
+ *             counts once verified, else as not verified yet. A problem a person marked "not a bug" is dismissed, whatever its
+ *             verification state: listed, never counted (as Accessibility, dismissedTests)
+ *   findings  the verified access problems only (VERIFIED_STATES), each with its reproduction: the check's steps and how many
+ *             verification replays failed the same way
  *
  * Tests without those metas are another agent's and are left out. The Security Assessment module keeps its own findings; the web links
  * to it and nothing of it is repeated here.
  */
 import { reproduction } from "../../engine/findings/classify.js";
+import { worstTag } from "../../engine/health/checks.js";
 import { STATE_LABEL, type FindingState } from "../../engine/findings/lifecycle.js";
-import { accessFinding } from "../../engine/identity/access.js";
+import { accessFinding, parseAccessReason } from "../../engine/identity/access.js";
 import { securityFinding } from "../../engine/security/specs.js";
 import type { ScriptRun } from "../../engine/validation/runner.js";
 import { redactText } from "../../shared/redact-text.js";
@@ -21,10 +26,12 @@ import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate
 import type { Row } from "../db.js";
 import { fromCandidate } from "../findings/adapters.js";
 import type { TestRow } from "../repo.js";
-import type { AgentOutcomeModule } from "./types.js";
+import { dismissedTests } from "./accessibility.js";
+import type { AgentOutcomeCtx, AgentOutcomeModule } from "./types.js";
 
 export type SecurityArea = "access" | "headers" | "exposure";
 export type CheckResult = "passed" | "problem" | "could-not-check" | "not-run";
+export type Severity = "critical" | "high" | "medium" | "low";
 
 export interface SecurityCheckItem {
     testId: string;
@@ -36,6 +43,16 @@ export interface SecurityCheckItem {
     reason: string | null;
     /** The finding its problem became: its state in words, `verified` when it is one of `findings`. */
     finding: { id: string; state: FindingState; label: string; verified: boolean } | null;
+    /** The worst of its problems; an access problem's from its finding, else its message. Null unless it found a problem. */
+    severity: Severity | null;
+    /** A rule-based check's problems, in its message's words (what came back); empty for an access check. */
+    problems: Array<{ severity: Severity; text: string }>;
+    /** What it requested, as "GET /path". */
+    requested: string[];
+    /** The newest of the agent's runs that made or ran it: its link opens that run. */
+    jobId: string | null;
+    /** A problem a person marked "not a bug": who said so and why. It is listed and never counted. */
+    dismissed: string | null;
 }
 
 export interface SecurityFindingItem {
@@ -60,10 +77,24 @@ export interface SecurityOutcome {
     runs: number;
     checks: SecurityCheckItem[];
     findings: SecurityFindingItem[];
+    /** Rule-based problems and verified access findings by severity; access problems not verified yet apart. */
+    counts: Record<Severity, number> & { notVerified: number };
 }
 
-/** Verified: the engine reproduced it, then it may have been confirmed, classified and reported (engine/findings/lifecycle.ts). */
-export const VERIFIED_STATES: readonly FindingState[] = ["reproduced", "confirmed", "classified", "reported"];
+/**
+ * Verified, for every agent: confirmed (by the engine at high confidence, or a person), then classified and reported
+ * (engine/findings/lifecycle.ts). Reproduced alone is not yet.
+ */
+export const VERIFIED_STATES: readonly FindingState[] = ["confirmed", "classified", "reported"];
+const SEVERITIES: readonly Severity[] = ["critical", "high", "medium", "low"];
+
+/** The "- [severity] problem." lines of a rule-based check's message. */
+function problemsOf(reason: string): SecurityCheckItem["problems"] {
+    return reason.split("\n").flatMap((l) => {
+        const m = /^- \[(critical|high|medium|low)\] (.+)$/.exec(l.trim());
+        return m ? [{ severity: m[1] as Severity, text: m[2]! }] : [];
+    });
+}
 
 const HEADER_CHECKS = new Set(["securityHeaders", "cookieFlags", "corsPolicy", "tlsCertificate"]);
 
@@ -118,27 +149,47 @@ function resultInRun(p: Platform, t: TestRow, jobId: string): { result: CheckRes
 }
 
 /** The outcome over these runs; with `run`, that one run's part, each check as that run found it. */
-async function securityOutcome(p: Platform, projectId: string, runIds: readonly string[], run?: string): Promise<SecurityOutcome> {
+async function securityOutcome(ctx: AgentOutcomeCtx, runIds: readonly string[], run?: string): Promise<SecurityOutcome> {
+    const { p, projectId } = ctx;
+    const notABug = await dismissedTests(ctx);
     const tests = testsOfRuns(p, projectId, runIds, (t) => areaOf(t) !== undefined);
     const findingOf = await findingsOfTests(p, projectId, new Set(tests.map((t) => t.id)));
+    const ranIn = new Set(
+        runIds.length ? p.repo.db.all<Row>(`SELECT DISTINCT job_id, test_case_id FROM test_executions WHERE job_id IN (${runIds.map(() => "?").join(",")})`, ...runIds).map((r) => `${r.job_id} ${r.test_case_id}`) : [],
+    );
     const checks: SecurityCheckItem[] = [];
     const findings: SecurityFindingItem[] = [];
+    const counts = { critical: 0, high: 0, medium: 0, low: 0, notVerified: 0 };
     for (const t of tests) {
         const area = areaOf(t)!;
         const own = run ? resultInRun(p, t, run) : undefined;
         const result = own?.result ?? RESULT[t.validationStatus] ?? "not-run";
         const f = findingOf.get(t.id);
         const verified = f !== undefined && VERIFIED_STATES.includes(f.state);
+        const reason = own ? own.reason : result === "problem" || result === "could-not-check" ? redactText(t.validationReason ?? "", 1500) || null : null;
+        const problems = result === "problem" && area !== "access" ? problemsOf(reason ?? "") : [];
+        // An access message's severity defaults to low, as parseAccessReason judges it.
+        const severity = result !== "problem" ? null : area === "access" ? ((SEVERITIES as readonly string[]).includes(f?.severity ?? "") ? (f!.severity as Severity) : (parseAccessReason(reason ?? "") ?? "low")) : (worstTag(reason ?? "") ?? null);
+        // A person's verdict outranks the verification state.
+        const dismissed = result === "problem" ? (notABug.get(t.id) ?? null) : null;
+        if (dismissed) void 0; // listed, never counted
+        else if (area !== "access") for (const x of problems) counts[x.severity]++;
+        else if (severity) verified ? counts[severity]++ : counts.notVerified++;
         checks.push({
             testId: t.id,
             testKey: t.testKey,
             title: t.title,
             area,
             result,
-            reason: own ? own.reason : result === "problem" || result === "could-not-check" ? redactText(t.validationReason ?? "", 600) || null : null,
+            reason,
             finding: f ? { id: f.id, state: f.state, label: STATE_LABEL[f.state], verified } : null,
+            severity,
+            problems,
+            requested: t.spec.steps.flatMap((s) => (s.action === "request" ? [`${s.method} ${s.path}`] : [])),
+            jobId: runIds.find((r) => r === t.jobId || ranIn.has(`${r} ${t.id}`)) ?? null,
+            dismissed,
         });
-        if (!verified) continue;
+        if (!verified || area !== "access") continue;
         const v = fromCandidate(f, { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta });
         findings.push({
             id: f.id,
@@ -156,17 +207,18 @@ async function securityOutcome(p: Platform, projectId: string, runIds: readonly 
             firstSeenAt: f.firstSeenAt,
         });
     }
-    return { runs: runIds.length, checks, findings };
+    return { runs: runIds.length, checks, findings, counts };
 }
 
 const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export const outcome: AgentOutcomeModule<SecurityOutcome> = {
-    outcome: (ctx) => securityOutcome(ctx.p, ctx.projectId, ctx.runs.map((j) => j.id)),
-    runOutcome: (ctx, jobId) => securityOutcome(ctx.p, ctx.projectId, [jobId], jobId),
+    outcome: (ctx) => securityOutcome(ctx, ctx.runs.map((j) => j.id)),
+    runOutcome: (ctx, jobId) => securityOutcome(ctx, [jobId], jobId),
     headline: (o) => {
         if (!o.checks.length) return null;
-        const passed = `${o.checks.filter((c) => c.result === "passed").length} of ${counted(o.checks.length, "check")} passed`;
-        return o.findings.length ? `${counted(o.findings.length, "verified finding")}, ${passed}` : `${passed}, no verified findings`;
+        const parts = SEVERITIES.flatMap((s) => (o.counts[s] ? [`${o.counts[s]} ${s}`] : []));
+        if (o.counts.notVerified) parts.push(`${counted(o.counts.notVerified, "access problem")} not verified yet`);
+        return [...parts, `${o.checks.filter((c) => c.result === "passed").length} of ${counted(o.checks.length, "check")} passed`].join(", ");
     },
 };

@@ -129,6 +129,8 @@ beforeAll(async () => {
     await store.transition(pid, f.id, { to: "verification_pending", by: "engine" });
     const a = { outcome: "failed", failedStep: 2, check: "screenshot", error: "840 pixels are different" };
     await store.transition(pid, f.id, { to: "reproduced", by: "engine", set: { severity: "low", attempts: [a, a] } });
+    // Verified means confirmed, classified or reported, as for every agent (security.ts VERIFIED_STATES).
+    await store.transition(pid, f.id, { to: "confirmed", by: "person", reason: "Seen it myself." });
 
     page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
     page.on("console", (m) => {
@@ -182,7 +184,7 @@ describe("the Responsive UI Testing Agent's page (W2c)", () => {
         await pwExpect(issues).toHaveCount(2);
         await pwExpect(issues.nth(0)).toContainText("/cart on Desktop");
         await pwExpect(issues.nth(0)).toContainText("Looks different");
-        await pwExpect(issues.nth(0)).toContainText("Reproduced");
+        await pwExpect(issues.nth(0)).toContainText("Confirmed");
         await pwExpect(issues.nth(0).locator("img")).toHaveCount(2);
         await pwExpect(issues.nth(1)).toContainText("/checkout on Phone");
         await pwExpect(issues.nth(1)).toContainText("covered by the cookie banner");

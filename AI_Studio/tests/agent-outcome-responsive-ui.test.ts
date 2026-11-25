@@ -104,6 +104,8 @@ beforeAll(async () => {
         if (verified) {
             const attempt = { outcome: "failed", failedStep: 2, check: "screenshot", error };
             await store.transition(pid, f.id, { to: "reproduced", by: "engine", set: { severity: "low", attempts: [attempt, attempt] } });
+            // Verified means confirmed, classified or reported, as for every agent (security.ts VERIFIED_STATES).
+            await store.transition(pid, f.id, { to: "confirmed", by: "person", reason: "Seen it myself." });
         }
         return f.id;
     };
@@ -135,7 +137,7 @@ describe("the Responsive UI Testing Agent's outcome", () => {
         expect(page["/"]["mobile-chrome"].reason).toContain("aren't repeated");
         expect(page["/"].tablet).toMatchObject({ status: "could-not-run" });
         expect(page["/"]["phone-375"]).toMatchObject({ status: "pictured", shot: ids.homePhoneShot });
-        expect(page["/cart"].desktop).toMatchObject({ status: "changed", shot: ids.cartActual, diff: ids.cartDiff, finding: { id: ids.cartFinding, label: "Reproduced", verified: true } });
+        expect(page["/cart"].desktop).toMatchObject({ status: "changed", shot: ids.cartActual, diff: ids.cartDiff, finding: { id: ids.cartFinding, label: "Confirmed", verified: true } });
         expect(page["/about"].desktop).toMatchObject({ status: "changed", finding: { label: "Verification pending", verified: false } });
         expect(page["/checkout"].desktop).toMatchObject({ status: "passed" });
         expect(page["/checkout"]["mobile-chrome"]).toMatchObject({ status: "failed", shot: ids.phoneShot });
