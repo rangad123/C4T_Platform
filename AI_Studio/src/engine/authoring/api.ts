@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { fillPath, queryFor } from "../api/test-specs.js";
+import { jsonText, pairs, recordOf } from "../llm/free-keys.js";
 import type { LlmClient } from "../llm/provider.js";
 import type { Step } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
@@ -43,6 +44,16 @@ export const ApiPlanSchema = z.object({
         .default({ fields: [], bodyContains: [] }),
 });
 export type ApiPlan = z.infer<typeof ApiPlanSchema>;
+
+/**
+ * The plan as the model answers it: path values and query as { name, value } pairs and the body as JSON text, because a grammar-constrained
+ * answer can only give {} for an object whose keys are not listed (llm/free-keys.ts). planApiCall turns it into an ApiPlan.
+ */
+export const ApiPlanAnswerSchema = ApiPlanSchema.extend({
+    pathValues: pairs(Scalar, 10).default([]).describe('Values for {placeholders} in the path, e.g. [{"name": "id", "value": "1"}]'),
+    query: pairs(Scalar, 8).default([]).describe("Query parameters to send"),
+    body: jsonText(MAX_BODY_CHARS, true).nullable().describe('JSON body as text, e.g. "{\\"name\\": \\"Fork\\"}", only for operations that send data; null otherwise'),
+});
 
 const SYSTEM = `You turn a plain-English description of an API check into a precise plan. You are given the list of operations the application is known to have.
 - Choose exactly one operation from the list, copying its first line exactly. If none fits, set operation to null and explain why in one sentence. Never invent an operation.
@@ -131,13 +142,14 @@ export async function planApiCall(llm: LlmClient, description: string, apis: Api
     const tokens = [...description.matchAll(/(\/[A-Za-z0-9_\-./{}]*[A-Za-z0-9_}])/g)].map((m) => m[1]!);
     const named = apis.filter((a) => tokens.some((t) => namesPath(t, a.path)));
     const ordered = [...named, ...apis.filter((a) => !named.includes(a))];
-    return llm.object({
+    const a = await llm.object({
         system: SYSTEM,
         prompt: `Description:\n${description}\n\nKnown operations:\n${operationList(ordered)}`,
-        schema: ApiPlanSchema,
+        schema: ApiPlanAnswerSchema,
         maxOutputTokens: 1500,
         purpose: "plain",
     });
+    return ApiPlanSchema.parse({ ...a, pathValues: recordOf(a.pathValues ?? []), query: recordOf(a.query ?? []), body: a.body ? JSON.parse(a.body) : undefined });
 }
 
 /** The draft of an API spec (everything but the id), for a plan that was built or for the placeholder kept with the explanation. */

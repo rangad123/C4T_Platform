@@ -38,6 +38,7 @@ let dir: string;
 // ── the scripted model ────────────────────────────────────────────────────────
 type Call = { tool: string; input: Record<string, unknown> } | { hang: true };
 const queue: Call[] = [];
+/** The model's API plans, as it answers them (ApiPlanAnswerSchema: pairs and JSON text, see authoring/api.ts). */
 const plans: unknown[] = [];
 const seenPrompts: string[] = [];
 const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
@@ -418,8 +419,8 @@ describe("plain-English tests: API", () => {
         plans.push({
             operation: "GET /api/products/{id}",
             explanation: "The description asks for one product.",
-            pathValues: { id: "1" },
-            query: {},
+            pathValues: [{ name: "id", value: "1" }],
+            query: [],
             expect: { fields: [{ path: "name", equals: "Blue Mug" }], bodyContains: [] },
         });
         const res = await create(projectId, { description: "GET /api/products/1 should return the Blue Mug" });
@@ -443,12 +444,12 @@ describe("plain-English tests: API", () => {
 
     it("keeps a data-changing choice as 'needs review' without sending it, and an unknown operation with the reason", async () => {
         site.log.length = 0;
-        plans.push({ operation: "POST /api/products", explanation: "Adds a product.", pathValues: {}, query: {}, body: { name: "Fork" }, expect: { status: 201, fields: [], bodyContains: [] } });
+        plans.push({ operation: "POST /api/products", explanation: "Adds a product.", pathValues: [], query: [], body: '{"name":"Fork"}', expect: { status: 201, fields: [], bodyContains: [] } });
         const post = await create(projectId, { description: "Check that adding a product answers with success", kind: "api" });
         expect(post.status).toBe(202);
         expect((await waitJob(post.body.jobId)).status).toBe("PARTIALLY_COMPLETED");
 
-        plans.push({ operation: "GET /api/orders", explanation: "", pathValues: {}, query: {}, expect: { fields: [], bodyContains: [] } });
+        plans.push({ operation: "GET /api/orders", explanation: "", pathValues: [], query: [], body: null, expect: { fields: [], bodyContains: [] } });
         const unknown = await create(projectId, { description: "Check that the list of orders is not empty", kind: "api" });
         expect((await waitJob(unknown.body.jobId)).status).toBe("PARTIALLY_COMPLETED");
 
@@ -465,7 +466,7 @@ describe("plain-English tests: API", () => {
     }, 300_000);
 
     it("does not call a bare success check green", async () => {
-        plans.push({ operation: "GET /api/products", explanation: "The list.", pathValues: {}, query: {}, expect: { fields: [], bodyContains: [] } });
+        plans.push({ operation: "GET /api/products", explanation: "The list.", pathValues: [], query: [], body: null, expect: { fields: [], bodyContains: [] } });
         const res = await create(projectId, { description: "GET /api/products should work", kind: "api" });
         const job = await waitJob(res.body.jobId);
         expect(job.status).toBe("PARTIALLY_COMPLETED");

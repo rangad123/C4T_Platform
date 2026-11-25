@@ -82,9 +82,12 @@ describe("an API repair with a request body", () => {
     it("goes out with a provider-valid schema and the fixed body comes back as the model gave it", async () => {
         const formats: unknown[] = [];
         const body = { name: "Mug", qty: 2, gift: false, note: null };
+        // The repair changes the body: as JSON text, the one form of a free-keyed object the grammar can give.
+        const fixed = { ...body, qty: 3 };
         const steps = [
-            { action: "request", method: "POST", path: "/api/cart", body, auth: "default" },
+            { action: "request", method: "POST", path: "/api/cart", body: JSON.stringify(fixed), auth: "default" },
             { action: "assertResponse", check: "status", expected: 201 },
+            { action: "assertResponse", check: "matchesSchema", schema: '{"type":"object","required":["id"]}' },
         ];
         const m = new MockLanguageModelV3({
             doGenerate: async (o) => {
@@ -108,11 +111,48 @@ describe("an API repair with a request body", () => {
         const run = { testId: "API-001", status: "failed" as const, durationMs: 1, failedStepIndex: 1, steps: [], artifacts: [], responses: [], error: "expected 200, got 201" };
         const out = await repairApi(ctx, spec, run, null);
         expect(out.verdict).toBe("fixed");
-        expect(out.spec?.steps[0]).toMatchObject({ action: "request", body });
+        expect(out.spec?.steps[0]).toMatchObject({ action: "request", body: fixed });
         expect(out.spec?.steps[1]).toMatchObject({ expected: 201 });
+        expect(out.spec?.steps[2]).toMatchObject({ check: "matchesSchema", schema: { type: "object", required: ["id"] } });
         // Both calls (triage, repair) sent a schema the provider accepts.
         expect(formats).toHaveLength(2);
         for (const f of formats) expect(refused(f)).toEqual([]);
+    });
+
+    it("a body, query, headers, extract or response schema the answer gives empty or leaves out is kept from the original test", async () => {
+        // Anthropic's grammar can only give {} for an object whose keys are not listed (a record): a real Haiku repair sent the request
+        // with body {} (ENG-FIX3-REPAIR). The test must keep sending what it sent and checking what it checked.
+        const original = [
+            { action: "request", method: "POST", path: "/api/notes", body: { body: "text only" }, query: { draft: "1" }, headers: { "x-tag": "t" }, extract: { noteId: "id" }, auth: "default" },
+            { action: "assertResponse", check: "status", expected: 400 },
+            { action: "assertResponse", check: "matchesSchema", schema: { type: "object", required: ["error"] } },
+            { action: "request", method: "GET", path: "/api/notes/{{noteId}}", query: { page: "1" }, auth: "default" },
+        ];
+        // The checks come back in another order: a matchesSchema check is paired with the original's matchesSchema check.
+        const answer = [
+            { action: "request", method: "POST", path: "/api/notes", body: "{}", query: [], headers: [], auth: "default" },
+            { action: "assertResponse", check: "matchesSchema", schema: "{}" },
+            { action: "assertResponse", check: "status", expected: 422 },
+            { action: "request", method: "GET", path: "/api/notes/{{noteId}}", query: [{ name: "fresh", value: "1" }], extract: [{ name: "title", value: "title" }], auth: "default" },
+        ];
+        const m = new MockLanguageModelV3({
+            doGenerate: async (o) => {
+                const props = Object.keys(((o.responseFormat as { schema?: { properties?: object } }).schema?.properties ?? {}) as object);
+                return reply(props.includes("category") ? JSON.stringify({ category: "assertion", fixable: true, reason: "422, not 400" }) : JSON.stringify({ verdict: "fix", reason: "422", steps: answer }));
+            },
+        });
+        const llm = llmClientFromModel(new ResilientModel([{ name: "m", provider: "x", breakerKey: "x", model: m as unknown as ModelV3 }], { policy: fast }), "m");
+        const ctx: EngineContext = { config: loadConfig({}), llm, emit: () => {} };
+        const spec: TestSpec = TestSpecSchema.parse({ testId: "API-002", title: "Note without a title", kind: "api", steps: original });
+        const run = { testId: "API-002", status: "failed" as const, durationMs: 1, failedStepIndex: 1, steps: [], artifacts: [], responses: [], error: "expected 400, got 422" };
+        const out = await repairApi(ctx, spec, run, null);
+        expect(out.verdict).toBe("fixed");
+        expect(out.spec?.steps[0]).toMatchObject({ body: { body: "text only" }, query: { draft: "1" }, headers: { "x-tag": "t" }, extract: { noteId: "id" } });
+        expect(out.spec?.steps[1]).toMatchObject({ check: "matchesSchema", schema: { type: "object", required: ["error"] } });
+        expect(out.spec?.steps[2]).toMatchObject({ check: "status", expected: 422 });
+        // What the answer did give is used as given.
+        expect(out.spec?.steps[3]).toMatchObject({ query: { fresh: "1" }, extract: { title: "title" } });
+        expect((out.spec?.steps[3] as { query?: unknown }).query).toEqual({ fresh: "1" });
     });
 
     it("validation is unchanged: an answer the zod schema refuses is still refused", async () => {

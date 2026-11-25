@@ -111,7 +111,7 @@ export function workflowSteps(model: Pick<AppModel, "pages" | "workflows">): Arr
     return out;
 }
 
-const AiLinks = z.object({ links: z.array(z.object({ requirement: z.string(), file: z.string(), line: z.number().int().optional(), why: z.string().max(500) })).max(50) });
+export const AiLinks = z.object({ links: z.array(z.object({ requirement: z.string(), file: z.string(), line: z.number().int().optional(), why: z.string().max(500) })).max(50) });
 /** Long key-like string literals are not sent (tokens, keys); shortcut: a pattern, not a secret scanner, upgrade if real repositories need one. */
 const maskLine = (l: string) => l.replace(/(["'`])[A-Za-z0-9_+/=-]{20,}\1/g, "$1[hidden]$1");
 

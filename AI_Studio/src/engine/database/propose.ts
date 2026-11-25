@@ -14,7 +14,7 @@ import { validateCheck } from "./templates.js";
 
 export const MAX_ROW_RELATIONS = 8;
 
-const ProposalSchema = z.object({
+export const ProposalSchema = z.object({
     relations: z.array(z.object({ requirementId: z.string().max(80), table: z.string().max(63), expression: z.string().max(RELATION_MAX_CHARS) })).max(32),
 });
 
