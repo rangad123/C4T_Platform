@@ -99,6 +99,8 @@ beforeAll(async () => {
     const orders = spec("WEB-003", "A visitor cannot open /orders", [{ action: "navigate", url: "/orders" }, { action: "assert", check: "url", expected: "/login" }], "web");
     ids.orders = add(ids.first, orders, "NEEDS_REVIEW", { access: true }, "A visitor could open /orders.");
     add(ids.first, spec("WEB-004", "A visitor cannot open /account", [{ action: "navigate", url: "/account" }, { action: "assert", check: "url", expected: "/login" }], "web"), "NEEDS_REVIEW", { access: true }, "A visitor could open /account.");
+    const profile = spec("WEB-006", "A visitor cannot open /profile", [{ action: "navigate", url: "/profile" }, { action: "assert", check: "url", expected: "/login" }], "web");
+    ids.profile = add(ids.first, profile, "NEEDS_REVIEW", { access: true }, "A visitor could open /profile.");
     add(ids.stopped, spec("API-004", "Session cookies are protected (/)", [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "cookieFlags" }]), "PENDING", { security: true });
     add(ids.other, spec("WEB-002", "Home page looks the same as its approved baseline (/)", [{ action: "navigate", url: "/" }, { action: "assert", check: "screenshot", expected: 100 }], "web"), "VALIDATED", { visual: true });
     // The first run ran each of its checks once (its page shows what each found then).
@@ -124,6 +126,10 @@ beforeAll(async () => {
     // A person marked the folder listing not a bug: listed, never counted.
     const listed = (await store.upsert({ projectId: pid, jobId: ids.first, testId: ids.listing, finding: executionFinding({ id: ids.listing, title: listing.title, spec: listing }, failed("Security check failed: 1 detail about the server is exposed")) })).finding;
     await store.transition(pid, listed.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason: "It is our public downloads folder." });
+    // And the /profile access problem, while it was being verified: a person's verdict outranks the verification state.
+    const prof = (await store.upsert({ projectId: pid, jobId: ids.first, testId: ids.profile, finding: executionFinding({ id: ids.profile, title: profile.title, spec: profile }, failed("Expected /login, got /profile")) })).finding;
+    await store.transition(pid, prof.id, { to: "verification_pending", by: "engine" });
+    await store.transition(pid, prof.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason: "Profiles are public by design." });
 
     browser = await chromium.launch();
     page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
@@ -175,8 +181,11 @@ describe("the Security Testing Agent's page (W2c)", () => {
     it("Outcome: the counts by severity, the problems with their evidence or verification, the checks by area, nothing else", async () => {
         await visit(routes.projectAgent(pid, "security"));
         const out = page.getByTestId("security-outcome");
-        await pwExpect(out).toContainText("1 of 8 checks passed over 2 runs");
-        await pwExpect(out).toContainText("1 check a person marked not a bug is listed below and left out of these counts.");
+        await pwExpect(out).toContainText("1 of 9 checks passed over 2 runs");
+        await pwExpect(out).toContainText("2 checks a person marked not a bug are listed below and left out of these counts.");
+        const prof = page.getByTestId("security-area-access").getByTestId("security-check").filter({ hasText: "/profile" });
+        await pwExpect(prof).toContainText("Not a bug");
+        await pwExpect(prof.getByTestId("security-dismissed")).toHaveText("A person marked this not a bug: Profiles are public by design.");
         // The dismissed check: on its area with the person's reason, not among the problems, its high problem not counted.
         const dismissed = page.getByTestId("security-area-exposure").getByTestId("security-check").filter({ hasText: "Folders do not list their files" });
         await pwExpect(dismissed).toContainText("Not a bug");
@@ -204,7 +213,7 @@ describe("the Security Testing Agent's page (W2c)", () => {
         await pwExpect(headersItem).toContainText("GET /");
         await pwExpect(page.getByTestId("security-area-headers").getByTestId("security-check")).toHaveCount(2);
         await pwExpect(page.getByTestId("security-area-exposure").getByTestId("security-check")).toHaveCount(3);
-        await pwExpect(page.getByTestId("security-area-access").getByTestId("security-check")).toHaveCount(3);
+        await pwExpect(page.getByTestId("security-area-access").getByTestId("security-check")).toHaveCount(4);
         await pwExpect(page.getByTestId("security-area-exposure")).toContainText("Passed");
         // L2: a check opens the agent's run it comes from, never a test script page.
         await pwExpect(page.getByTestId("security-area-headers").getByRole("link", { name: "Browser security headers are set (/)" })).toHaveAttribute("href", routes.projectAgentRun(pid, "security", ids.first));
@@ -233,7 +242,7 @@ describe("the Security Testing Agent's page (W2c)", () => {
         await pwExpect(line).toHaveText("Access control was not checked: add test accounts in Settings.");
         await pwExpect(line.getByRole("link", { name: "Settings" })).toHaveAttribute("href", routes.projectSettings(pid, "accounts"));
         await visit(routes.projectAgentRun(pid, "security", ids.first));
-        await pwExpect(page.getByTestId("security-check")).toHaveCount(7);
+        await pwExpect(page.getByTestId("security-check")).toHaveCount(8);
         await pwExpect(page.getByTestId("security-finding")).toHaveCount(1);
         await axe("security run");
         await shot("run.png");

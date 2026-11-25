@@ -6,8 +6,8 @@
  *             state of the finding its problem became, and the newest of the runs that made or ran it
  *   problems  a rule-based check's failure is a fact, as an axe rule is for Accessibility: each "- [severity]" line of its message,
  *             with what was requested; counted whatever its finding's state. An access problem depends on the accounts' state, so it
- *             counts once verified, else as not verified yet. A rule-based problem a person marked "not a bug" is dismissed: listed,
- *             never counted (as Accessibility, dismissedTests)
+ *             counts once verified, else as not verified yet. A problem a person marked "not a bug" is dismissed, whatever its
+ *             verification state: listed, never counted (as Accessibility, dismissedTests)
  *   findings  the verified access problems only (VERIFIED_STATES), each with its reproduction: the check's steps and how many
  *             verification replays failed the same way
  *
@@ -51,7 +51,7 @@ export interface SecurityCheckItem {
     requested: string[];
     /** The newest of the agent's runs that made or ran it: its link opens that run. */
     jobId: string | null;
-    /** A rule-based problem a person marked "not a bug": who said so and why. It is listed and never counted. */
+    /** A problem a person marked "not a bug": who said so and why. It is listed and never counted. */
     dismissed: string | null;
 }
 
@@ -170,8 +170,10 @@ async function securityOutcome(ctx: AgentOutcomeCtx, runIds: readonly string[], 
         const problems = result === "problem" && area !== "access" ? problemsOf(reason ?? "") : [];
         // An access message's severity defaults to low, as parseAccessReason judges it.
         const severity = result !== "problem" ? null : area === "access" ? ((SEVERITIES as readonly string[]).includes(f?.severity ?? "") ? (f!.severity as Severity) : (parseAccessReason(reason ?? "") ?? "low")) : (worstTag(reason ?? "") ?? null);
-        const dismissed = result === "problem" && area !== "access" ? (notABug.get(t.id) ?? null) : null;
-        if (area !== "access") for (const x of dismissed ? [] : problems) counts[x.severity]++;
+        // A person's verdict outranks the verification state.
+        const dismissed = result === "problem" ? (notABug.get(t.id) ?? null) : null;
+        if (dismissed) void 0; // listed, never counted
+        else if (area !== "access") for (const x of problems) counts[x.severity]++;
         else if (severity) verified ? counts[severity]++ : counts.notVerified++;
         checks.push({
             testId: t.id,

@@ -7,8 +7,8 @@
  *   - an access-control problem waits for verification: verified means confirmed, classified or reported, as for the API agent (L1);
  *     only those are findings, each with its reproduction; one still being verified shows how far it got on its check;
  *   - each check names the newest of the agent's runs that made or ran it (its link opens that run, L2);
- *   - a rule-based problem a person marked "not a bug" is dismissed: listed with who said so and why, out of the counts and the
- *     headline (as Accessibility, dismissedTests);
+ *   - a problem a person marked "not a bug" is dismissed, rule-based or access (a person's verdict outranks the verification state):
+ *     listed with who said so and why, out of the counts and the headline (as Accessibility, dismissedTests);
  *   - nothing of another agent: a Responsive UI run in the same project adds nothing here;
  *   - `?run=` answers one run's part, a stopped run's checks included; another agent's run answers 404;
  *   - the Workspace card's headline.
@@ -78,6 +78,15 @@ const listing = spec("API-006", "The server does not reveal software versions or
     { action: "request", method: "GET", path: "/uploads/", auth: "none", description: "Request /uploads/ (read-only)" },
     { action: "assertResponse", check: "noInfoDisclosure", description: "No version banners or directory listings" },
 ]);
+const profile = spec(
+    "WEB-004",
+    "A visitor cannot open /profile",
+    [
+        { action: "navigate", url: "/profile", description: "Open /profile signed out" },
+        { action: "assert", check: "url", expected: "/login", description: "The visitor is sent to sign in" },
+    ],
+    "web",
+);
 const cookies = spec("API-003", "Session cookies are protected (/)", [
     { action: "request", method: "GET", path: "/", auth: "none", description: "Request / (read-only)" },
     { action: "assertResponse", check: "cookieFlags", expected: "httponly,samesite", description: "Session cookies have the protective flags" },
@@ -114,6 +123,7 @@ beforeAll(async () => {
     ids.access = add(ids.first, access, "NEEDS_REVIEW", { access: true }, "A visitor could open /admin.");
     ids.secrets = add(ids.first, secrets, "NEEDS_REVIEW", { security: true }, "Security check failed: 2 sensitive files are publicly readable\n- [critical] /.env can be downloaded by anyone (it holds secret settings).\n- [critical] /.git/HEAD can be downloaded by anyone.");
     ids.orders = add(ids.first, orders, "NEEDS_REVIEW", { access: true }, "A visitor could open /orders.");
+    ids.profile = add(ids.first, profile, "NEEDS_REVIEW", { access: true }, "A visitor could open /profile.");
     ids.listing = add(ids.first, listing, "NEEDS_REVIEW", { security: true }, "Security check failed: 1 detail about the server is exposed\n- [high] /uploads/ lists the files in a folder (directory listing).");
     ids.cookies = add(ids.stopped, cookies, "PENDING", { security: true });
     ids.legacySec = add(ids.legacy, spec("API-004", "The server does not reveal software versions or list folders", [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "noInfoDisclosure" }]), "VALIDATED", { security: true });
@@ -145,6 +155,10 @@ beforeAll(async () => {
     // A person marked the folder listing not a bug (it is a public downloads folder).
     const listed = (await store.upsert({ projectId: pid, jobId: ids.first, testId: ids.listing, finding: executionFinding({ id: ids.listing, title: listing.title, spec: listing }, failed("Security check failed: 1 detail about the server is exposed")) })).finding;
     await store.transition(pid, listed.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason: "It is our public downloads folder." });
+    // A person marked the /profile access problem not a bug while it was being verified (the page is public by design).
+    const prof = (await store.upsert({ projectId: pid, jobId: ids.first, testId: ids.profile, finding: executionFinding({ id: ids.profile, title: profile.title, spec: profile }, failed("Expected /login, got /profile")) })).finding;
+    await store.transition(pid, prof.id, { to: "verification_pending", by: "engine" });
+    await store.transition(pid, prof.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason: "Profiles are public by design." });
     ids.visualFinding = await finding(ids.visualTest, visual, "12 pixels are different", true, true);
 }, 60_000);
 
@@ -161,7 +175,10 @@ describe("the Security Testing Agent's outcome", () => {
         const o = r.body;
         expect(o.runs).toBe(3);
         const byKey = Object.fromEntries(o.checks.map((c: any) => [c.testKey, c]));
-        expect(Object.keys(byKey).sort()).toEqual(["API-001", "API-002", "API-003", "API-004", "API-005", "API-006", "WEB-001", "WEB-003"]);
+        expect(Object.keys(byKey).sort()).toEqual(["API-001", "API-002", "API-003", "API-004", "API-005", "API-006", "WEB-001", "WEB-003", "WEB-004"]);
+        // An access problem a person marked not a bug: dismissed too, not "not verified yet".
+        expect(byKey["WEB-004"]).toMatchObject({ area: "access", result: "problem", dismissed: "A person marked this not a bug: Profiles are public by design." });
+        expect(byKey["WEB-001"].dismissed).toBeNull();
         // Dismissed: listed with the person's reason, its high problem left out of the counts below.
         expect(byKey["API-006"]).toMatchObject({ result: "problem", dismissed: "A person marked this not a bug: It is our public downloads folder." });
         expect(byKey["API-001"].dismissed).toBeNull();
@@ -206,7 +223,7 @@ describe("the Security Testing Agent's outcome", () => {
     it("answers one run's part, a stopped run's checks kept, and refuses another agent's run", async () => {
         const first = await call(`/api/projects/${pid}/workspace/security/outcome?run=${ids.first}`);
         expect(first.status).toBe(200);
-        expect(first.body.checks.map((c: any) => c.testKey).sort()).toEqual(["API-001", "API-002", "API-005", "API-006", "WEB-001", "WEB-003"]);
+        expect(first.body.checks.map((c: any) => c.testKey).sort()).toEqual(["API-001", "API-002", "API-005", "API-006", "WEB-001", "WEB-003", "WEB-004"]);
         expect(first.body.findings).toHaveLength(1);
         const stopped = await call(`/api/projects/${pid}/workspace/security/outcome?run=${ids.stopped}`);
         expect(stopped.status).toBe(200);
@@ -266,6 +283,6 @@ describe("the Security Testing Agent's outcome", () => {
     it("says on the Workspace card what it found", async () => {
         const ws = await call(`/api/projects/${pid}/workspace`);
         // The critical and high problems are not hidden behind "no verified findings" (H2).
-        expect(ws.body.agents.find((a: any) => a.id === "security").headline).toBe("2 critical, 1 high, 1 medium, 1 access problem not verified yet, 2 of 8 checks passed");
+        expect(ws.body.agents.find((a: any) => a.id === "security").headline).toBe("2 critical, 1 high, 1 medium, 1 access problem not verified yet, 2 of 9 checks passed");
     });
 });
