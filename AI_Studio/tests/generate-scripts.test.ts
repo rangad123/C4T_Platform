@@ -117,7 +117,7 @@ describe("generate test scripts", () => {
         platform.repo.setJobStatus(job.id, "FAILED", "Cancelled");
     });
 
-    it("gives an Automated case imported from the test case workbook its page, preconditions and expected result, not its steps (SPEC R6.5)", async () => {
+    it("gives an Automated case imported from the test case workbook its page, preconditions, steps and expected result (SPEC R6.5, owner decision 2026-11-26)", async () => {
         const pid = platform.repo.createProject({ name: "Imported shop", platforms: ["web"], testingModes: ["code"] }).id as string;
         platform.repo.createApplication(pid, "http://127.0.0.1:7862", { ...DEFAULT_JOB_OPTIONS });
         const wb = buildXlsx([
@@ -126,13 +126,13 @@ describe("generate test scripts", () => {
                 header: true,
                 rows: [
                     ["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement"],
-                    ["TC-004", "Keep the basket after signing in again", "Automated", "High", "/cart", "Two items are in the basket\nAn address is saved", "Click here => ignored", "The basket lists two items\nIts total is unchanged", ""],
+                    ["TC-004", "Keep the basket after signing in again", "Automated", "High", "/cart", "Two items are in the basket\nAn address is saved", "1. Sign out and in again => The basket opens", "The basket lists two items\nIts total is unchanged", ""],
                 ],
             },
         ]);
         const imp = await call("POST", `/api/projects/${pid}/manual-cases/import`, { format: "xlsx", content: Buffer.from(wb).toString("base64") });
         expect(imp.status, JSON.stringify(imp.body)).toBe(201);
-        expect(imp.body).toMatchObject({ created: 1, stepsIgnored: 1 });
+        expect(imp.body).toMatchObject({ created: 1 });
         const r = await gen(pid, {}, { authorization: `Bearer ${editor}` });
         expect(r.status, JSON.stringify(r.body)).toBe(200);
         const job = platform.repo.getJob(r.body.started.jobId)!;
@@ -142,13 +142,16 @@ describe("generate test scripts", () => {
                 "Start on /cart",
                 "Before it starts: Two items are in the basket",
                 "Before it starts: An address is saved",
+                // An Automated row's steps are kept (owner decision 2026-11-26) and lead the script's description.
+                "1. Sign out and in again",
+                "Check that The basket opens",
                 "Check that The basket lists two items",
                 "Check that Its total is unchanged",
             ].join("\n"),
         );
         // The description reader takes the page as where the test starts and each line of the expected result as a check.
         expect(startPathOf(job.options.plainDescription!)).toBe("/cart");
-        expect(expectedOf(job.options.plainDescription!)).toEqual(["The basket lists two items", "Its total is unchanged"]);
+        expect(expectedOf(job.options.plainDescription!)).toEqual(["The basket opens", "The basket lists two items", "Its total is unchanged"]);
         platform.repo.setJobStatus(job.id, "FAILED", "Cancelled");
     });
 

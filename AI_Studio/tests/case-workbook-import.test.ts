@@ -115,7 +115,7 @@ afterAll(async () => {
 });
 
 describe("reading the Test cases sheet", () => {
-    it("matches Type and Priority without regard to case, keeps Steps only on Manual rows and counts the Automated rows whose Steps it ignored", () => {
+    it("matches Type and Priority without regard to case, keeps Steps on every row", () => {
         const r = casesFromWorkbook(
             handMade([
                 ["Sign in", "AUTOMATED", "HIGH", "TC-001", "/login", "Type the password => Signed in", "The account page opens", "An account exists\nIt is active", "REQ-1"],
@@ -125,7 +125,6 @@ describe("reading the Test cases sheet", () => {
                 ["Bad priority", "Manual", "urgent", "TC-005", "/", "", "", "", ""],
             ]),
         );
-        expect(r.stepsIgnored).toBe(1);
         expect(r.skipped).toEqual([
             { row: 5, reason: "Type “Robot” is not Automated or Manual" },
             { row: 6, reason: "Priority “urgent” is not one of critical, high, medium or low" },
@@ -135,7 +134,8 @@ describe("reading the Test cases sheet", () => {
             ["Look at the logo", "manual", "low"],
             ["Pay", "automated", "critical"],
         ]);
-        expect(r.cases[0]).toMatchObject({ steps: [], preconditions: ["An account exists", "It is active"], expected: "The account page opens", page: "/login", area: "/login", sourceRef: "TC-001", requirement: "REQ-1", requirementRef: "REQ-1" });
+        // An Automated row keeps its steps (owner decision 2026-11-26), like a Manual one.
+        expect(r.cases[0]).toMatchObject({ steps: [{ action: "Type the password", expected: "Signed in" }], preconditions: ["An account exists", "It is active"], expected: "The account page opens", page: "/login", area: "/login", sourceRef: "TC-001", requirement: "REQ-1", requirementRef: "REQ-1" });
         expect(r.cases[1]!.steps).toEqual([
             { action: "Open the page", expected: "The logo shows" },
             { action: "Zoom in", expected: "" },
@@ -166,7 +166,7 @@ describe("POST /api/projects/:id/manual-cases/import with format xlsx", () => {
         );
         const r = await importXlsx(pid, wb);
         expect(r.status, JSON.stringify(r.body)).toBe(201);
-        expect(r.body).toMatchObject({ created: 3, duplicates: 0, skipped: [], stepsIgnored: 0, total: 3 });
+        expect(r.body).toMatchObject({ created: 3, duplicates: 0, skipped: [], total: 3 });
         const saved = await casesOf(pid);
         expect(saved.map((c) => [c.ref, c.sourceRef, c.title, c.automation, c.priority, c.page])).toEqual([
             ["TC-001", "TC-001", "Sign in with a password", "automated", "critical", "/login"],
@@ -203,18 +203,23 @@ describe("POST /api/projects/:id/manual-cases/import with format xlsx", () => {
         expect(third).toMatchObject({ status: 200, body: { created: 0, duplicates: 1, total: 2 } });
     });
 
-    it("says how many Automated rows had steps that were not imported", async () => {
+    it("keeps the steps of Automated rows as of Manual ones, numbered or not (owner decision 2026-11-26)", async () => {
         const pid = await project("t-cora", "Steps code");
         const r = await importXlsx(
             pid,
             handMade([
-                ["One", "Automated", "", "TC-1", "/", "Click => Done", "", "", ""],
+                ["One", "Automated", "", "TC-1", "/", "1. Click => Done\n2. Look", "", "", ""],
                 ["Two", "automated", "", "TC-2", "/", "Click", "", "", ""],
                 ["Three", "Manual", "", "TC-3", "/", "Click => Done", "", "", ""],
             ]),
         );
-        expect(r.body).toMatchObject({ created: 3, stepsIgnored: 2 });
-        expect((await casesOf(pid)).map((c) => c.steps.length)).toEqual([0, 0, 1]);
+        expect(r.body).toMatchObject({ created: 3 });
+        expect(r.body).not.toHaveProperty("stepsIgnored");
+        expect((await casesOf(pid)).map((c) => c.steps)).toEqual([
+            [{ action: "Click", expected: "Done" }, { action: "Look", expected: "" }],
+            [{ action: "Click", expected: "" }],
+            [{ action: "Click", expected: "Done" }],
+        ]);
     });
 
     it("refuses the whole file when it would pass the project's 5,000 test cases, saying how many would fit", async () => {
@@ -314,7 +319,7 @@ describe("GET /api/projects/:id/manual-cases/export?format=xlsx (FX16)", () => {
 
         const to = await project("t-cora", "Workbook to");
         const back = await importXlsx(to, wb);
-        expect(back.body).toMatchObject({ created: 4, duplicates: 0, skipped: [], stepsIgnored: 0 });
+        expect(back.body).toMatchObject({ created: 4, duplicates: 0, skipped: [] });
         const original = await casesOf(from);
         const copy = await casesOf(to);
         expect(copy.map(same)).toEqual(original.map(same));

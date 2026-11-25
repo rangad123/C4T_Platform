@@ -7,8 +7,8 @@
  * Per row:
  * - Type is Automated or Manual and Priority critical, high, medium or low, both without regard to case; an empty Type is Manual (the
  *   platform's default for a new case), an empty Priority medium; any other word skips the row with a reason.
- * - Steps, one per line as `action => expected` (the rule the platform has always used), are kept only on a Manual row (Q1). An Automated
- *   row's Steps cell is ignored, and `stepsIgnored` counts those rows.
+ * - Steps, one per line as `action => expected` (the rule the platform has always used), numbered or not, are kept on every row,
+ *   Automated or Manual (owner decision 2026-11-26).
  * - Preconditions are one per line; Expected result is kept as written; Page is the page's path; ID is kept as the case's source ID.
  * - The case's area is its page (its first 80 characters), so cases are grouped by page and two cases with the same title on two pages
  *   are two cases (an import leaves out a case whose title and area the project already has); a row without a page is in "General".
@@ -29,8 +29,6 @@ export interface WorkbookCase extends ManualCaseInput {
 export interface WorkbookImport {
     cases: WorkbookCase[];
     skipped: Array<{ row: number; reason: string }>;
-    /** Automated rows whose Steps cell had text, which was not imported (steps belong to Manual test cases only). */
-    stepsIgnored: number;
 }
 
 /** `action => expected` per line; a line without `=>` is an action with no expected result; blank lines are ignored. */
@@ -62,7 +60,7 @@ const firstMessage = (err: { issues: Array<{ message: string; path: PropertyKey[
 /** Reads the workbook's bytes. Throws `XlsxReadError` (one sentence) when the file itself cannot be imported. */
 export function casesFromWorkbook(bytes: Uint8Array): WorkbookImport {
     const rows = readTable(bytes, WORKBOOK_SHEET, { columns: WORKBOOK_COLUMNS, required: ["Title"] });
-    const out: WorkbookImport = { cases: [], skipped: [], stepsIgnored: 0 };
+    const out: WorkbookImport = { cases: [], skipped: [] };
     for (const { row, values: v } of rows) {
         const type = v.Type!.trim().toLowerCase();
         if (type && type !== "automated" && type !== "manual") {
@@ -75,8 +73,7 @@ export function casesFromWorkbook(bytes: Uint8Array): WorkbookImport {
             out.skipped.push({ row, reason: `Priority “${v.Priority!.trim().slice(0, 20)}” is not one of critical, high, medium or low` });
             continue;
         }
-        const hasSteps = Boolean(v.Steps!.trim());
-        const steps = automation === "manual" ? stepsFromCell(v.Steps!) : [];
+        const steps = stepsFromCell(v.Steps!);
         if (steps.length > MAX_STEPS) {
             out.skipped.push({ row, reason: `A case can have at most ${MAX_STEPS} steps` });
             continue;
@@ -97,7 +94,6 @@ export function casesFromWorkbook(bytes: Uint8Array): WorkbookImport {
             out.skipped.push({ row, reason: firstMessage(parsed.error) });
             continue;
         }
-        if (automation === "automated" && hasSteps) out.stepsIgnored++;
         out.cases.push({ ...parsed.data, requirementRef: v.Requirement!.trim() });
     }
     return out;

@@ -128,7 +128,7 @@ describe("Import on the Test cases tab", () => {
         expect(saved).toMatchObject({ preconditions: ["An account exists", "It is active"], expected: "The account page opens\nIts name shows", page: "/login", sourceRef: "TC-001" });
     });
 
-    it("names what was already here, the rows it skipped with their reason, and the steps it left out of Automated rows", async () => {
+    it("names what was already here and the rows it skipped with their reason; an Automated row's steps are imported (owner decision 2026-11-26)", async () => {
         await page.goto("about:blank");
         await page.goto(casesUrl());
         await pwExpect(page.getByRole("heading", { name: "Test cases (3)" })).toBeVisible();
@@ -143,7 +143,7 @@ describe("Import on the Test cases tab", () => {
         );
         await pwExpect(
             page.getByText(
-                "Imported 1 test case. 3 test cases were already here and left out. 1 row could not be imported. The steps of 1 Automated row were not imported: an Automated test case’s steps are written when its test script is made.",
+                "Imported 1 test case. 3 test cases were already here and left out. 1 row could not be imported.",
                 { exact: true },
             ),
         ).toBeVisible();

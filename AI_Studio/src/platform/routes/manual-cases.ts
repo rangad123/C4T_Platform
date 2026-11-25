@@ -133,7 +133,6 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         const pid = projectId(req);
         const body = ImportBody.parse(req.body);
         let parsed;
-        let stepsIgnored: number | undefined;
         try {
             if (body.format === "xlsx") {
                 const wb = casesFromWorkbook(workbookBytes(body.content));
@@ -141,7 +140,6 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
                 // the text is kept as written.
                 const byRef = new Map((await requirements.list(pid)).map((r) => [refKey(r.ref), r.id]));
                 parsed = { cases: wb.cases.map(({ requirementRef, ...c }) => ({ ...c, requirementId: (requirementRef && byRef.get(refKey(requirementRef))) || undefined })), skipped: wb.skipped };
-                stepsIgnored = wb.stepsIgnored;
             } else {
                 // CSV was replaced by the workbook (owner 2026-11-20). Text without a format that is not JSON is what a CSV file used to be.
                 if (body.format === "csv" || (body.format === undefined && typeof body.content === "string" && !/^\s*[[{]/.test(body.content.replace(/^\uFEFF/, ""))))
@@ -169,7 +167,7 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
             throw e;
         }
         for (const c of r.created) await linkRequirement(pid, c);
-        return reply.code(r.created.length ? 201 : 200).send({ created: r.created.length, duplicates: r.duplicates, skipped: parsed.skipped, ...(stepsIgnored === undefined ? {} : { stepsIgnored }), total: store.countCases(pid) });
+        return reply.code(r.created.length ? 201 : 200).send({ created: r.created.length, duplicates: r.duplicates, skipped: parsed.skipped, total: store.countCases(pid) });
     });
 
     app.get("/api/projects/:id/manual-cases/export", async (req, reply) => {
