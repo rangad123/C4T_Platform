@@ -137,6 +137,15 @@ describe("every run of the agent starts from its settings", () => {
         finish(pid);
     });
 
+    it("an API agent run with saved settings stays API-only and uses the saved level", async () => {
+        const pid = await project("Api", ["api"]);
+        expect((await call("PUT", settingsUrl(pid, "api"), { level: "deep" })).status).toBe(200);
+        const r = await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, agentId: "api", targets: ["web", "api"], openApiUrl: `${SITE}/openapi.json` });
+        expect(r.status, JSON.stringify(r.body)).toBe(202);
+        expect(lastJob(pid).options).toMatchObject({ agentId: "api", targets: ["api"], level: "deep", maxPages: LEVEL_SETTINGS.deep.maxPages });
+        finish(pid);
+    });
+
     it("a schedule of the agent uses its settings too", async () => {
         const pid = await project("Scheduled", ["ux", "accessibility"]);
         await call("PUT", settingsUrl(pid, "ux"), { level: "deep", visionChecks: true });

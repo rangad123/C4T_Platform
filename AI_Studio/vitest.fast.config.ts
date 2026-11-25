@@ -409,6 +409,7 @@ export default defineConfig({
             "tests/responsive-sizes.test.ts",
             "tests/finding-evidence-detection-unit.test.ts",
             "tests/verify-model-cost-unit.test.ts",
+            "tests/agent-settings.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
