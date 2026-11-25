@@ -6,7 +6,8 @@
  *             state of the finding its problem became, and the newest of the runs that made or ran it
  *   problems  a rule-based check's failure is a fact, as an axe rule is for Accessibility: each "- [severity]" line of its message,
  *             with what was requested; counted whatever its finding's state. An access problem depends on the accounts' state, so it
- *             counts once verified, else as not verified yet
+ *             counts once verified, else as not verified yet. A rule-based problem a person marked "not a bug" is dismissed: listed,
+ *             never counted (as Accessibility, dismissedTests)
  *   findings  the verified access problems only (VERIFIED_STATES), each with its reproduction: the check's steps and how many
  *             verification replays failed the same way
  *
@@ -25,7 +26,8 @@ import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate
 import type { Row } from "../db.js";
 import { fromCandidate } from "../findings/adapters.js";
 import type { TestRow } from "../repo.js";
-import type { AgentOutcomeModule } from "./types.js";
+import { dismissedTests } from "./accessibility.js";
+import type { AgentOutcomeCtx, AgentOutcomeModule } from "./types.js";
 
 export type SecurityArea = "access" | "headers" | "exposure";
 export type CheckResult = "passed" | "problem" | "could-not-check" | "not-run";
@@ -49,6 +51,8 @@ export interface SecurityCheckItem {
     requested: string[];
     /** The newest of the agent's runs that made or ran it: its link opens that run. */
     jobId: string | null;
+    /** A rule-based problem a person marked "not a bug": who said so and why. It is listed and never counted. */
+    dismissed: string | null;
 }
 
 export interface SecurityFindingItem {
@@ -145,7 +149,9 @@ function resultInRun(p: Platform, t: TestRow, jobId: string): { result: CheckRes
 }
 
 /** The outcome over these runs; with `run`, that one run's part, each check as that run found it. */
-async function securityOutcome(p: Platform, projectId: string, runIds: readonly string[], run?: string): Promise<SecurityOutcome> {
+async function securityOutcome(ctx: AgentOutcomeCtx, runIds: readonly string[], run?: string): Promise<SecurityOutcome> {
+    const { p, projectId } = ctx;
+    const notABug = await dismissedTests(ctx);
     const tests = testsOfRuns(p, projectId, runIds, (t) => areaOf(t) !== undefined);
     const findingOf = await findingsOfTests(p, projectId, new Set(tests.map((t) => t.id)));
     const ranIn = new Set(
@@ -164,7 +170,8 @@ async function securityOutcome(p: Platform, projectId: string, runIds: readonly 
         const problems = result === "problem" && area !== "access" ? problemsOf(reason ?? "") : [];
         // An access message's severity defaults to low, as parseAccessReason judges it.
         const severity = result !== "problem" ? null : area === "access" ? ((SEVERITIES as readonly string[]).includes(f?.severity ?? "") ? (f!.severity as Severity) : (parseAccessReason(reason ?? "") ?? "low")) : (worstTag(reason ?? "") ?? null);
-        if (area !== "access") for (const x of problems) counts[x.severity]++;
+        const dismissed = result === "problem" && area !== "access" ? (notABug.get(t.id) ?? null) : null;
+        if (area !== "access") for (const x of dismissed ? [] : problems) counts[x.severity]++;
         else if (severity) verified ? counts[severity]++ : counts.notVerified++;
         checks.push({
             testId: t.id,
@@ -178,6 +185,7 @@ async function securityOutcome(p: Platform, projectId: string, runIds: readonly 
             problems,
             requested: t.spec.steps.flatMap((s) => (s.action === "request" ? [`${s.method} ${s.path}`] : [])),
             jobId: runIds.find((r) => r === t.jobId || ranIn.has(`${r} ${t.id}`)) ?? null,
+            dismissed,
         });
         if (!verified || area !== "access") continue;
         const v = fromCandidate(f, { id: t.id, title: t.title, spec: t.spec, meta: t.generationMeta });
@@ -203,8 +211,8 @@ async function securityOutcome(p: Platform, projectId: string, runIds: readonly 
 const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export const outcome: AgentOutcomeModule<SecurityOutcome> = {
-    outcome: (ctx) => securityOutcome(ctx.p, ctx.projectId, ctx.runs.map((j) => j.id)),
-    runOutcome: (ctx, jobId) => securityOutcome(ctx.p, ctx.projectId, [jobId], jobId),
+    outcome: (ctx) => securityOutcome(ctx, ctx.runs.map((j) => j.id)),
+    runOutcome: (ctx, jobId) => securityOutcome(ctx, [jobId], jobId),
     headline: (o) => {
         if (!o.checks.length) return null;
         const parts = SEVERITIES.flatMap((s) => (o.counts[s] ? [`${o.counts[s]} ${s}`] : []));

@@ -92,6 +92,8 @@ beforeAll(async () => {
     ]);
     add(ids.first, secrets, "NEEDS_REVIEW", { security: true }, "Security check failed: 2 sensitive files are publicly readable\n- [critical] /.env can be downloaded by anyone (it holds secret settings).\n- [critical] /.git/HEAD can be downloaded by anyone.");
     add(ids.first, spec("API-003", "The server does not reveal software versions or list folders", [{ action: "request", method: "GET", path: "/" }, { action: "assertResponse", check: "noInfoDisclosure" }]), "VALIDATED", { security: true });
+    const listing = spec("API-005", "Folders do not list their files", [{ action: "request", method: "GET", path: "/uploads/" }, { action: "assertResponse", check: "noInfoDisclosure" }]);
+    ids.listing = add(ids.first, listing, "NEEDS_REVIEW", { security: true }, "Security check failed: 1 detail about the server is exposed\n- [high] /uploads/ lists the files in a folder (directory listing).");
     const access = spec("WEB-001", "A visitor cannot open /admin", [{ action: "navigate", url: "/admin", description: "Open /admin signed out" }, { action: "assert", check: "url", expected: "/login", description: "The visitor is sent to sign in" }], "web");
     ids.access = add(ids.first, access, "NEEDS_REVIEW", { access: true }, "A visitor could open /admin: it answered the admin page instead of sending them to sign in.");
     const orders = spec("WEB-003", "A visitor cannot open /orders", [{ action: "navigate", url: "/orders" }, { action: "assert", check: "url", expected: "/login" }], "web");
@@ -119,6 +121,9 @@ beforeAll(async () => {
     await finding(ids.headers, headers, "Security check failed: 2 browser protections are missing.", true);
     await finding(ids.access, access, "Expected /login, got /admin", true, true);
     await finding(ids.orders, orders, "Expected /login, got /orders", false);
+    // A person marked the folder listing not a bug: listed, never counted.
+    const listed = (await store.upsert({ projectId: pid, jobId: ids.first, testId: ids.listing, finding: executionFinding({ id: ids.listing, title: listing.title, spec: listing }, failed("Security check failed: 1 detail about the server is exposed")) })).finding;
+    await store.transition(pid, listed.id, { to: "not_a_bug", by: "person", actor: { label: "Asha" }, reason: "It is our public downloads folder." });
 
     browser = await chromium.launch();
     page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
@@ -170,7 +175,12 @@ describe("the Security Testing Agent's page (W2c)", () => {
     it("Outcome: the counts by severity, the problems with their evidence or verification, the checks by area, nothing else", async () => {
         await visit(routes.projectAgent(pid, "security"));
         const out = page.getByTestId("security-outcome");
-        await pwExpect(out).toContainText("1 of 7 checks passed over 2 runs");
+        await pwExpect(out).toContainText("1 of 8 checks passed over 2 runs");
+        await pwExpect(out).toContainText("1 check a person marked not a bug is listed below and left out of these counts.");
+        // The dismissed check: on its area with the person's reason, not among the problems, its high problem not counted.
+        const dismissed = page.getByTestId("security-area-exposure").getByTestId("security-check").filter({ hasText: "Folders do not list their files" });
+        await pwExpect(dismissed).toContainText("Not a bug");
+        await pwExpect(dismissed.getByTestId("security-dismissed")).toHaveText("A person marked this not a bug: It is our public downloads folder.");
         // H2: the critical and high problems are counted, not hidden behind "no verified findings".
         const counts = page.getByTestId("security-counts");
         for (const [n, label] of [["2", "Critical"], ["1", "High"], ["1", "Medium"], ["1", "Low"], ["2", "Access problems not verified yet"]]) await pwExpect(counts).toContainText(`${n}${label}`);
@@ -193,7 +203,7 @@ describe("the Security Testing Agent's page (W2c)", () => {
         await pwExpect(headersItem).toContainText("MediumNo Content-Security-Policy. Add one.");
         await pwExpect(headersItem).toContainText("GET /");
         await pwExpect(page.getByTestId("security-area-headers").getByTestId("security-check")).toHaveCount(2);
-        await pwExpect(page.getByTestId("security-area-exposure").getByTestId("security-check")).toHaveCount(2);
+        await pwExpect(page.getByTestId("security-area-exposure").getByTestId("security-check")).toHaveCount(3);
         await pwExpect(page.getByTestId("security-area-access").getByTestId("security-check")).toHaveCount(3);
         await pwExpect(page.getByTestId("security-area-exposure")).toContainText("Passed");
         // L2: a check opens the agent's run it comes from, never a test script page.
@@ -223,7 +233,7 @@ describe("the Security Testing Agent's page (W2c)", () => {
         await pwExpect(line).toHaveText("Access control was not checked: add test accounts in Settings.");
         await pwExpect(line.getByRole("link", { name: "Settings" })).toHaveAttribute("href", routes.projectSettings(pid, "accounts"));
         await visit(routes.projectAgentRun(pid, "security", ids.first));
-        await pwExpect(page.getByTestId("security-check")).toHaveCount(6);
+        await pwExpect(page.getByTestId("security-check")).toHaveCount(7);
         await pwExpect(page.getByTestId("security-finding")).toHaveCount(1);
         await axe("security run");
         await shot("run.png");

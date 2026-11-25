@@ -28,6 +28,8 @@ interface Check {
     problems: Array<{ severity: Severity; text: string }>;
     requested: string[];
     jobId: string | null;
+    /** A person marked it not a bug: listed, never counted. */
+    dismissed: string | null;
 }
 interface Finding {
     id: string;
@@ -113,7 +115,7 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
             </div>
         );
     const passed = o.checks.filter((c) => c.result === "passed").length;
-    const problems = o.checks.filter((c) => c.result === "problem").sort((a, b) => RANK[a.severity ?? "low"] - RANK[b.severity ?? "low"]);
+    const problems = o.checks.filter((c) => c.result === "problem" && !c.dismissed).sort((a, b) => RANK[a.severity ?? "low"] - RANK[b.severity ?? "low"]);
     // The check's own run: on a run's page it is that run, so the title is plain text.
     const name = (c: Check) =>
         run || !c.jobId ? (
@@ -123,6 +125,7 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
                 {c.title}
             </a>
         );
+    const dismissed = o.checks.filter((c) => c.dismissed).length;
     const noAccounts = roles.data?.roles.length === 0 && !o.checks.some((c) => c.area === "access");
     return (
         <div className="stack" data-testid="security-outcome">
@@ -136,6 +139,7 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
                 </div>
                 <p className="section t-meta" style={{ margin: 0 }}>
                     {passed} of {o.checks.length} checks passed{run ? " in this run" : ` over ${o.runs === 1 ? "1 run" : `${o.runs} runs`}`}. Headers, cookies, cross-origin access, HTTPS and exposed files are judged by fixed rules, so what they find is a fact and is counted at once. An access-control problem depends on the test accounts, so it counts once a replay has confirmed it.
+                    {dismissed ? ` ${dismissed === 1 ? "1 check" : `${dismissed} checks`} a person marked not a bug ${dismissed === 1 ? "is" : "are"} listed below and left out of these counts.` : ""}
                 </p>
             </div>
             {problems.length > 0 && (
@@ -239,9 +243,14 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
                                 <li key={c.testId} className="stack-sm" style={{ padding: "8px 0" }} data-testid="security-check">
                                     <div className="row" style={ROW}>
                                         {name(c)}
-                                        <Badge tone={RESULT[c.result].tone}>{RESULT[c.result].label}</Badge>
-                                        {c.severity && <Sev s={c.severity} />}
+                                        {c.dismissed ? <Badge tone="neutral">Not a bug</Badge> : <Badge tone={RESULT[c.result].tone}>{RESULT[c.result].label}</Badge>}
+                                        {c.severity && !c.dismissed && <Sev s={c.severity} />}
                                     </div>
+                                    {c.dismissed && (
+                                        <span className="t-meta" style={{ overflowWrap: "anywhere" }} data-testid="security-dismissed">
+                                            {c.dismissed}
+                                        </span>
+                                    )}
                                     {c.result === "could-not-check" && c.reason && (
                                         <span className="t-meta" style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
                                             {c.reason}
