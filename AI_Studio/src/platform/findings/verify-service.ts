@@ -48,7 +48,8 @@ import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
 import { SecretBox } from "../secrets.js";
 import { ResetHookStore, sendResetRequest } from "../test-data-reset-store.js";
 import { attemptOf, executionFinding, fromCandidate, withStepRequests, type TestOf } from "./adapters.js";
-import { judgePageCheck, judgeRepeatRefusal, writtenExpectation } from "../../engine/findings/expectation.js";
+import { cutByMaxlength, fieldLimits, judgePageCheck, judgeRepeatRefusal, writtenExpectation } from "../../engine/findings/expectation.js";
+import { AppIntelStore } from "../app-intel-store.js";
 import { ANALYSIS_BLAMES_TEST } from "../../engine/validation/repair.js";
 
 /** A test the verification can run: its key, steps and framework. */
@@ -113,6 +114,8 @@ export interface VerifyDeps {
     signal?: AbortSignal;
     /** The project's model: explains a verified finding whose class the rules left open, and writes root cause's hypotheses. */
     llm?: LlmClient;
+    /** The longest text each form field takes (findings/expectation.ts fieldLimits), from the project's latest application model. */
+    fieldLimits?: () => Promise<ReadonlyMap<string, number>>;
     /** The project's code source for root cause (code-host/source.ts); without it, root cause says none is connected. */
     code?: () => Promise<{ code?: CodeSource; why?: string }>;
 }
@@ -296,8 +299,12 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
     );
     // Without a reset, an attempt that began from an earlier attempt's changes is not a reproduction (findings/reproduce.ts).
     if (!reset) tried.splice(0, tried.length, ...carriedOver(tried));
+    // A value longer than the field's maxlength never reached the application: the browser cut it, so the failing check is the test's own.
+    const cut = cutByMaxlength(spec, tried.find((a) => a.outcome === "failed" && !a.stepFault)?.failedStep, await d.fieldLimits?.().catch(() => undefined));
+    if (cut) tried.splice(0, tried.length, ...tried.map((a) => (a.outcome === "failed" ? { ...a, stepFault: cut } : a)));
     const view = judgedView(fromCandidate(f, test), f, test, tried);
     let verdict = verdictOf(view.view, tried, account);
+    if (cut) verdict = { ...verdict, reason: `${verdict.reason} ${cut}` };
     // An amount no API answer was compared with, or a check whose own failure analysis says the application is right (WEB-002), is never
     // confirmed by the vote alone: a person checks it.
     const disputed = test.validationReason?.includes(ANALYSIS_BLAMES_TEST) ? `When the test was made, ${clip(test.validationReason, 600)}` : undefined;
@@ -625,6 +632,7 @@ export function verifyDepsOf(p: Platform, job: JobRow, o: { execute?: VerifyDeps
         },
         emit: o.emit ?? jobEmitter(p, job.id),
         code: () => projectCodeSource(p, job.projectId),
+        fieldLimits: async () => fieldLimits((await new AppIntelStore(p.sql).latest(job.projectId))?.model ?? app.model ?? p.repo.getLatestAppModel(job.projectId)),
     };
 }
 
