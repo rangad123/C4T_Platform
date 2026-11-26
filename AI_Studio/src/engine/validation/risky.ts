@@ -25,3 +25,29 @@ export function riskyKindOf(spec: Pick<TestSpec, "steps" | "tags">): RiskyKind |
 export function riskyGateLine(spec: Pick<TestSpec, "steps" | "tags">): string {
     return riskyKindOf(spec) ? `    test.skip(process.env.TEST_RISKY_CHECKS !== "1", ${JSON.stringify(RISKY_SKIPPED)});\n` : "";
 }
+
+/**
+ * A call that ends a session or revokes a credential: sign-out, a revoke, a deleted token, session or API key, a password change (not a
+ * reset request, which only sends mail). Sent with the shared credentials it signs out or locks out every other test (N2D API-016: the
+ * store's logout revoked the project's saved token, and 22 later tests were refused).
+ */
+export function endsSession(method: string, path: string): boolean {
+    const m = method.toUpperCase();
+    if (m === "GET" || m === "HEAD" || m === "OPTIONS") return false;
+    const p = path.split("?")[0]!.toLowerCase();
+    if (/\/(?:log-?out|sign-?out|revoke)(?:\/|$)/.test(p)) return true;
+    if (m === "DELETE" && /\/(?:tokens?|sessions?|api-?keys?)(?:\/|$)/.test(p)) return true;
+    return /\/(?:change-?)?password(?:\/|$)/.test(p) && !/forgot|reset/.test(p);
+}
+
+/** The sentence a test gives when it would end the shared session. */
+export const SESSION_END_SKIPPED =
+    "Not run: it signs out, revokes a credential or changes a password with the project's shared credentials, which would sign every other test out. Generate it again, so it signs up an account of its own.";
+
+/** A saved test that sends a session-ending call with the shared credentials (the project's token or account). */
+export const endsSharedSession = (spec: Pick<TestSpec, "steps">): boolean => spec.steps.some((s) => s.action === "request" && s.auth !== "none" && endsSession(s.method, s.path));
+
+/** The first line of such a test's body: it never runs. Empty for any other test. */
+export function sessionEndLine(spec: Pick<TestSpec, "steps">): string {
+    return endsSharedSession(spec) ? `    test.skip(true, ${JSON.stringify(SESSION_END_SKIPPED)});\n` : "";
+}

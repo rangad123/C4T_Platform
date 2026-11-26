@@ -9,7 +9,7 @@
  * `data` object, so later `{{name}}` placeholders (paths, query, headers, bodies and assertion
  * expectations) resolve to them at runtime.
  */
-import { riskyGateLine } from "../validation/risky.js";
+import { riskyGateLine, sessionEndLine } from "../validation/risky.js";
 import { describeStep, placeholdersIn, repeatOf, type Step, type TestSpec } from "../spec/schema.js";
 import type { RenderContext, RenderedScript, ScriptGenerator } from "./types.js";
 import { dbCheckCall, dbCheckSetup, knownBugLine, relationCall, testDetails } from "./playwright.js";
@@ -364,7 +364,7 @@ ${helpers}
 ${signs || spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `// The sign-in and access helpers' pages are not this API test's evidence: no screenshot or recording of them is kept.\ntest.use({ screenshot: "off", video: "off" });\n` : ""}${DRIFT_HELPER_SOURCE}${security ? `\n${SECURITY_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "matchesSchema") ? `\n${CONTRACT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "relation") ? `\n${RELATION_HELPER_SOURCE}` : ""}${dbCheckSetup(spec.steps).helper}${spec.steps.some((s) => s.action === "request" && s.parallel !== undefined) ? `\n${PARALLEL_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "latency") ? `\n${LATENCY_HELPER_SOURCE}` : ""}${hasLoad ? `\n${LOAD_HELPER_SOURCE}${LOAD_CALL_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assertResponse" && s.check === "statusDenied") ? `\n${ACCESS_API_HELPER_SOURCE}` : ""}${signs ? `\n${API_SIGN_IN_SOURCE}${ACCESS_HELPER_SOURCE}` : ""}${cleanup ? `\n${CLEANUP_HELPER_SOURCE}${cleanupSource}` : ""}
 
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ request }) => {
-${knownBugLine(spec, ctx)}${riskyGateLine(spec)}${dataRows ? `    ${ROW_SETUP}\n    // Each row is judged on its own responses.\n    responses.length = 0;\n    calls.length = 0;\n` : ""}    ${hasLoad ? "// A load check runs for about 10 seconds (twice at most), may wait its turn behind another load check, and waits for slow answers: far more than the default time limit.\n    test.setTimeout(180_000);\n    " : ""}let last!: Call;
+${knownBugLine(spec, ctx)}${riskyGateLine(spec)}${sessionEndLine(spec)}${dataRows ? `    ${ROW_SETUP}\n    // Each row is judged on its own responses.\n    responses.length = 0;\n    calls.length = 0;\n` : ""}    ${hasLoad ? "// A load check runs for about 10 seconds (twice at most), may wait its turn behind another load check, and waits for slow answers: far more than the default time limit.\n    test.setTimeout(180_000);\n    " : ""}let last!: Call;
 ${dbCheckSetup(spec.steps).start}${steps}
 });
 ${dataRows ? "}\n" : ""}`;

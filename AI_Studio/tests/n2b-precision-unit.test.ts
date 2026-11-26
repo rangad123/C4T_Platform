@@ -26,6 +26,7 @@ import { ACCESS_API_HELPER_SOURCE, ACCESS_HELPER_SOURCE, generateApiListSpecs } 
 import { ScenarioSchema, TestSpecSchema, type Step, type TestSpec } from "../src/engine/spec/schema.js";
 import { checkRelation } from "../src/engine/validation/relation.js";
 import { repairApi, repairWeb } from "../src/engine/validation/repair.js";
+import { validateBatch } from "../src/engine/validation/validator.js";
 import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
@@ -348,5 +349,170 @@ describe("5. a stored-row check names the table of the resource the request wrot
         expect(persistenceCheck(req("PATCH", "/api/me", { name: "Test name {{unique}}" }), withName)).toBe("exists users where name = 'Test name {{unique}}'");
         // A write to a resource with no table of its own is not checked in another one that happens to hold its fields.
         expect(persistenceCheck(req("PUT", "/api/settings", { name: "x" }), probe)).toBeUndefined();
+    });
+});
+
+// ── round 2 (N2D: the saved suite run again on the practice store) ──
+
+/** The store's own sign-up, sign-out and password change, as its /openapi.json documents them. */
+const SESSION_DOC = {
+    ...STORE_DOC,
+    paths: {
+        ...STORE_DOC.paths,
+        "/api/auth/signup": {
+            post: {
+                summary: "Create an account",
+                requestBody: { required: true, ...json({ type: "object", required: ["email", "password"], properties: { name: { type: "string" }, email: { type: "string", format: "email" }, password: { type: "string", minLength: 8 } } }) },
+                responses: { 201: res("Created", { type: "object", properties: { ok: { type: "boolean" } } }), 400: res("Invalid input"), 409: res("Conflict with the current state") },
+            },
+        },
+        "/api/auth/logout": { post: { summary: "Sign out (ends the session or revokes the Bearer token)", responses: { 200: res("OK", { type: "object", properties: { ok: { type: "boolean" }, message: { type: "string" } } }) } } },
+        "/api/account/password": {
+            post: {
+                summary: "Change your password",
+                requestBody: { required: true, ...json({ type: "object", required: ["currentPassword", "newPassword"], properties: { currentPassword: { type: "string" }, newPassword: { type: "string", minLength: 8 } } }) },
+                responses: { 200: res("OK", { type: "object", properties: { ok: { type: "boolean" } } }), 400: res("Invalid input"), 401: res("Not signed in") },
+            },
+        },
+    },
+};
+const SESSION_APIS = parseOpenApi(SESSION_DOC, "http://127.0.0.1:8351/openapi.json").operations;
+
+/** API-016 as the run stored it: the store's sign-out sent with the project's shared credentials (its saved API token). */
+const API_016 = TestSpecSchema.parse({
+    testId: "API-016",
+    title: "POST /api/auth/logout: succeeds with a valid request",
+    description: "Sign out (ends the session or revokes the Bearer token)",
+    kind: "api",
+    category: "API · auth",
+    priority: "high",
+    steps: [
+        { action: "request", method: "POST", path: "/api/auth/logout", auth: "default", description: "Send a valid POST request" },
+        { action: "assertResponse", check: "statusClass", expected: "2xx", description: "Request succeeds" },
+    ],
+    expectedResults: ["Returns a successful response matching the documented contract"],
+    tags: ["api", "happy-path"],
+    source: { origin: "openapi" },
+});
+const noAi = { object: async () => { throw new Error("no AI call is expected"); } } as never;
+const apiTest = (n: number, steps: Step[]) => TestSpecSchema.parse({ testId: `API-${String(n).padStart(3, "0")}`, title: `API test ${n}`, kind: "api", steps, expectedResults: ["ok"], source: { origin: "openapi" } });
+const getCart: Step[] = [{ action: "request", method: "GET", path: "/api/cart/items", auth: "default", description: "Read the cart" }, { action: "assertResponse", check: "statusClass", expected: "2xx", description: "Readable" }] as Step[];
+async function validateApi(specs: TestSpec[], runs: Record<string, ScriptRun>, events: Array<{ kind: string; message: string }> = []) {
+    const config = loadConfig({});
+    const ctx = { config, llm: noAi, emit: (e: { kind: string; message: string }) => void events.push(e) } as unknown as EngineContext;
+    const scripts: Record<string, string> = {};
+    const executor = {
+        name: "fake",
+        async execute(_a: string, batch: { scripts: Array<{ testId: string; content: string }> }) {
+            for (const s of batch.scripts) scripts[s.testId] = s.content;
+            return batch.scripts.map((s) => runs[s.testId]!);
+        },
+    };
+    const outcomes = await validateBatch(
+        ctx,
+        { scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:7651", headless: true, apiToken: "store-token-n2d" }, render: { baseUrl: "http://127.0.0.1:7651" }, model: { pages: [], apis: [] } as never, maxRepairAttempts: 2, workers: 2, executor: executor as never },
+        specs.map((spec) => ({ spec, framework: "playwright-api" as const })),
+        { async onAttempt() {}, async onFinal() {} },
+    );
+    return { outcomes, scripts };
+}
+const passed = (id: string): ScriptRun => ({ testId: id, status: "passed", durationMs: 1, failedStepIndex: -1, steps: [], artifacts: [], responses: [{ method: "GET", path: "/api/cart/items", status: 200 }] });
+/** A run refused at its first request with "That API token is not valid or has expired" (HTTP 401). */
+const refused = (id: string): ScriptRun => ({ testId: id, status: "failed", durationMs: 1, failedStepIndex: 1, steps: [{ index: 0, title: "1. Read the cart", status: "passed" }, { index: 1, title: "2. Readable", status: "failed", error: "Error: expect(received).toBe(expected)\n\nExpected: 2\nReceived: 4" }], artifacts: [], responses: [{ method: "GET", path: "/api/cart/items", status: 401 }] });
+
+describe("6. a test that ends a session never uses the shared credentials (API-016)", () => {
+    it("generation: every request to sign-out or the password change goes on a fresh account of its own", () => {
+        const specs = generateApiSpecs(SESSION_APIS, { allowMutating: true, maxPerEndpoint: 6 }).specs;
+        const ending = specs.filter((s) => s.steps.some((x) => x.action === "request" && /logout|password/.test(x.path)));
+        expect(ending.length).toBeGreaterThan(0);
+        for (const s of ending) {
+            for (const r of s.steps) if (r.action === "request" && /logout|password/.test(r.path)) expect(r.auth, s.title).toBe("none");
+            expect(s.steps[0], s.title).toMatchObject({ action: "request", path: "/api/auth/signup" });
+        }
+    });
+
+    it("a saved test that sends it with the shared credentials skips itself and says why, with no repair", async () => {
+        const skipped: ScriptRun = { testId: "API-016", status: "skipped", durationMs: 0, failedStepIndex: -1, steps: [], artifacts: [], responses: [] };
+        const { outcomes, scripts } = await validateApi([API_016], { "API-016": skipped });
+        expect(scripts["API-016"]).toContain("test.skip(true,");
+        expect(outcomes[0]).toMatchObject({ status: "FAILED_VALIDATION", reason: expect.stringContaining("shared") });
+        // On a fresh account of its own it runs.
+        const own = TestSpecSchema.parse({ ...API_016, steps: [...signup, { ...API_016.steps[0], auth: "none" }, API_016.steps[1]] });
+        expect((await validateApi([own], { "API-016": passed("API-016") })).scripts["API-016"]).not.toContain("test.skip(true,");
+    });
+
+    it("the shared token refused part way through the run is one cause, not one failure per test, and nothing is repaired", async () => {
+        const specs = [1, 2, 3, 4].map((n) => apiTest(n, getCart));
+        const events: Array<{ kind: string; message: string }> = [];
+        const { outcomes } = await validateApi(specs, { "API-001": passed("API-001"), "API-002": refused("API-002"), "API-003": refused("API-003"), "API-004": refused("API-004") }, events);
+        expect(outcomes[0]!.status).toBe("VALIDATED");
+        const reasons = outcomes.slice(1).map((o) => [o.status, o.reason]);
+        for (const [status, reason] of reasons) {
+            expect(status).toBe("FAILED_VALIDATION");
+            expect(reason).toMatch(/API token stopped being accepted during this run/);
+        }
+        expect(new Set(reasons.map((r) => r[1])).size).toBe(1);
+        expect(events.filter((e) => e.kind === "api_token_refused")).toHaveLength(1);
+    });
+});
+
+describe("7. relation checks compare amounts, not floating-point noise (API-147, requirement 6.11)", () => {
+    const REQ_6_11 = "subtotal == round(subtotal, 2) and total == round(total, 2) and sum(items[*].lineTotal) == round(sum(items[*].lineTotal), 2)";
+    it("the run's own cart (27.99 + 22.50 = 50.49) holds; a real difference still fails", () => {
+        const cart = { subtotal: 50.49, total: 50.49, items: [{ lineTotal: 27.99 }, { lineTotal: 22.5 }] };
+        expect(checkRelation(REQ_6_11, { body: cart }, "6.11")).toMatchObject({ held: true });
+        expect(checkRelation(REQ_6_11, { body: { ...cart, total: 50.4899 } }, "6.11")).toMatchObject({ held: false });
+        expect(checkRelation("subtotal == 50.48", { body: cart })).toMatchObject({ held: false });
+        // Rounding is decimal: 1.005 to the cent is 1.01, as written.
+        expect(checkRelation("round(x, 2) == 1.01", { body: { x: 1.005 } })).toMatchObject({ held: true });
+        expect(checkRelation("0.1 + 0.2 <= 0.3 and 0.1 + 0.2 >= 0.3 and (0.1 + 0.2 > 0.3) == false", { body: {} })).toMatchObject({ held: true });
+    });
+});
+
+describe("8. an order from an empty cart: the refusal the document gives (API-150)", () => {
+    const ORDER = { type: "object", properties: { id: { type: "integer" }, status: { type: "string", enum: ["pending", "paid", "shipped", "delivered", "cancelled"] } } };
+    const ORDERS_DOC = {
+        openapi: "3.1.0",
+        info: { title: "Practice store", version: "1" },
+        paths: {
+            "/api/auth/signup": SESSION_DOC.paths["/api/auth/signup"],
+            "/api/cart/items": { post: { summary: "Add a product (adds to the line if it is already in the cart)", requestBody: json({ type: "object", properties: { productId: { type: "integer", minimum: 1 }, qty: { type: "integer", minimum: 1, maximum: 10 } } }), responses: { 201: res("Created", CART), 400: res("Invalid input") } } },
+            "/api/orders": { post: { summary: "Place an order from your cart", responses: { 201: res("Created", ORDER), 400: res("Invalid input"), 401: res("Not signed in"), 409: res("Conflict with the current state") } } },
+            "/api/orders/{id}": { get: { summary: "One of your orders", responses: { 200: res("OK", ORDER), 404: res("Not found") } } },
+            "/api/orders/{id}/cancel": { post: { summary: "Cancel your order while it is pending or paid", responses: { 200: res("OK", ORDER), 409: res("Conflict with the current state") } } },
+        },
+    };
+    it("a document that names neither 400 nor 409 for it accepts either documented refusal; the store's 400 holds", async () => {
+        const apis = parseOpenApi(ORDERS_DOC, "http://127.0.0.1:8351/openapi.json").operations;
+        const [m] = (await import("../src/engine/api/stateful.js")).stateModels(apis);
+        expect(m!.create!.needs.map((n) => n.label)).toEqual(["POST /api/cart/items"]);
+        // The store: an order from an empty cart is "Your cart is empty." (400); with a line it is placed (201, pending).
+        let next = 1000;
+        const orders = new Map<number, string>();
+        const client = () => {
+            let cart = 0;
+            return {
+                async send(method: string, path: string) {
+                    if (path === "/api/auth/signup") return { status: 201, json: { ok: true } };
+                    if (path === "/api/cart/items") return (cart++, { status: 201, json: {} });
+                    if (path === "/api/orders" && method === "POST") {
+                        if (!cart) return { status: 400, json: { error: { code: "empty_cart", message: "Your cart is empty." } } };
+                        cart = 0;
+                        orders.set(next, "pending");
+                        return { status: 201, json: { id: next++, status: "pending" } };
+                    }
+                    const m = /^\/api\/orders\/(\d+)(\/cancel)?$/.exec(path);
+                    const id = Number(m?.[1]);
+                    if (!m || !orders.has(id)) return { status: 404, json: {} };
+                    if (!m[2]) return { status: 200, json: { id, status: orders.get(id) } };
+                    if (!["pending", "paid"].includes(orders.get(id)!)) return { status: 409, json: {} };
+                    orders.set(id, "cancelled");
+                    return { status: 200, json: { id, status: "cancelled" } };
+                },
+            };
+        };
+        const r = await (await import("../src/engine/api/stateful.js")).runSequences(m!, { apis, dataChanges: true, newClient: async () => client() }, { seed: 2128578828 });
+        expect(r.message ?? "").not.toMatch(/expects HTTP 409/);
+        expect(r.outcome).toBe("held");
     });
 });

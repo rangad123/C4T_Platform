@@ -53,7 +53,8 @@ export interface StateModel {
     record: ApiEndpointModel;
     field: string;
     states: string[];
-    create?: { ep: ApiEndpointModel; needs: Needed[]; conflict?: number };
+    /** conflict: the documented refusal of a create that lacks a need, or `any` of them when the document does not say which. */
+    create?: { ep: ApiEndpointModel; needs: Needed[]; conflict?: Refusal };
     actions: StateAction[];
 }
 
@@ -105,6 +106,20 @@ function needsOf(create: ApiEndpointModel, apis: readonly ApiEndpointModel[]): A
     return out;
 }
 
+/**
+ * A create and what it needs; without a need it expects the documented refusal whose description names one ("Cart empty or no address"),
+ * else the one refusal documented, else any documented one (N2D API-150: the store documents 400 "Invalid input" and 409 "Conflict with
+ * the current state", names neither for an empty cart, and answers 400).
+ */
+function createOf(create: ApiEndpointModel, apis: readonly ApiEndpointModel[]): NonNullable<StateModel["create"]> {
+    const needs = needsOf(create, apis).map((ep) => ({ ep, label: `${ep.method.toUpperCase()} ${ep.path}` }));
+    const codes = [409, 400, 422].filter((c) => documents(create, c));
+    const words = needs.flatMap((n) => segments(n.ep.path)).map((w) => w.replace(/s$/, ""));
+    const named = codes.find((c) => words.some((w) => new RegExp(`\\b${w}`, "i").test(documents(create, c)!.description)));
+    const conflict: Refusal | undefined = named ?? (codes.length === 1 ? codes[0] : codes.length ? { any: codes } : undefined);
+    return { ep: create, needs, ...(conflict !== undefined ? { conflict } : {}) };
+}
+
 /** The state models of an API document: one per record with a documented status field and actions that document a conflict. */
 export function stateModels(apis: readonly ApiEndpointModel[], transitions: readonly Transition[] = []): StateModel[] {
     const out: StateModel[] = [];
@@ -133,7 +148,7 @@ export function stateModels(apis: readonly ApiEndpointModel[], transitions: read
             states,
             actions,
             ...(list ? { list } : {}),
-            ...(create ? { create: { ep: create, needs: needsOf(create, apis).map((ep) => ({ ep, label: `${ep.method.toUpperCase()} ${ep.path}` })), ...(documents(create, 409) ? { conflict: 409 } : {}) } } : {}),
+            ...(create ? { create: createOf(create, apis) } : {}),
         });
     }
     return out;
@@ -165,8 +180,11 @@ interface Real {
 class Mismatch extends Error {}
 class OverBudget extends Error {}
 
+type Refusal = number | { any: number[] };
+type Expected = "2xx" | Refusal;
 const is2xx = (s: number) => s >= 200 && s < 300;
-const matches = (status: number, expected: number | "2xx") => (expected === "2xx" ? is2xx(status) : status === expected);
+const matches = (status: number, expected: Expected) => (expected === "2xx" ? is2xx(status) : typeof expected === "number" ? status === expected : status >= 400 && status < 500);
+const shown = (e: Expected) => (e === "2xx" ? "2xx" : typeof e === "number" ? `HTTP ${e}` : `HTTP ${e.any.join(" or ")}`);
 function summary(sm: StateModel, m: Model): string {
     const needs = sm.create?.needs.map((n, i) => `${n.label}: ${m.needs[i] === "present" ? "done" : m.needs[i] === "absent" ? "not done" : "not known"}`) ?? [];
     const recs = m.records.map((s, i) => `${sm.entity} ${i + 1}: ${s ?? "not known"}`);
@@ -174,19 +192,25 @@ function summary(sm: StateModel, m: Model): string {
 }
 
 /** One step: send it, judge it against the model's expectation, record it, and move the model on. */
-async function step(sm: StateModel, m: Model, r: Real, o: { method: string; path: string; scriptPath: string; body?: unknown; expected?: number | "2xx"; extract?: string; label: string }, after: (status: number, json: unknown) => void) {
+async function step(sm: StateModel, m: Model, r: Real, o: { method: string; path: string; scriptPath: string; body?: unknown; expected?: Expected; extract?: string; label: string }, after: (status: number, json: unknown) => void) {
     const before = summary(sm, m);
     const res = await r.send(o.method, o.path, o.body);
     const json = res.json as Record<string, unknown> | undefined;
     after(res.status, json);
     const state = summary(sm, m);
-    const exp = o.expected === undefined ? undefined : o.expected === "2xx" ? "2xx" : `HTTP ${o.expected}`;
+    const exp = o.expected === undefined ? undefined : shown(o.expected);
     r.log.push({ request: `${o.method} ${o.path}`, status: res.status, ...(exp ? { expected: exp } : {}), state });
     // A create the model expects refused gets no capture: at replay the refusal is checked, not a missing id.
-    const extract = o.extract && is2xx(res.status) && typeof o.expected !== "number" ? { extract: { [o.extract]: "id" } } : {};
+    const extract = o.extract && is2xx(res.status) && (o.expected === undefined || o.expected === "2xx") ? { extract: { [o.extract]: "id" } } : {};
     r.steps.push({ action: "request", method: o.method as Method, path: o.scriptPath, auth: r.auth, description: o.label, ...(o.body === undefined ? {} : { body: o.body }), ...extract });
     if (o.expected !== undefined)
-        r.steps.push(o.expected === "2xx" ? { action: "assertResponse", check: "statusClass", expected: "2xx", description: `Accepted (before: ${before})`.slice(0, 300) } : { action: "assertResponse", check: "status", expected: o.expected, description: `Refused with the documented HTTP ${o.expected} (before: ${before})`.slice(0, 300) });
+        r.steps.push(
+            o.expected === "2xx"
+                ? { action: "assertResponse", check: "statusClass", expected: "2xx", description: `Accepted (before: ${before})`.slice(0, 300) }
+                : typeof o.expected === "number"
+                  ? { action: "assertResponse", check: "status", expected: o.expected, description: `Refused with the documented HTTP ${o.expected} (before: ${before})`.slice(0, 300) }
+                  : { action: "assertResponse", check: "statusClass", expected: "4xx", description: `Refused with a documented ${shown(o.expected)}; the document does not say which (before: ${before})`.slice(0, 300) },
+        );
     if (o.expected !== undefined && !matches(res.status, o.expected)) throw new Mismatch(`${o.method} ${o.path} answered HTTP ${res.status}, but the documented state model expects ${exp}`);
 }
 

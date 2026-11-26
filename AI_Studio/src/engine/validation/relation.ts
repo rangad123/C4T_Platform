@@ -18,7 +18,7 @@
  *            | "(" expr ")"
  *   suffix  := "." name | "[" digits "]" | "[*]"     ([*] maps the rest of the path over every element; nested ones flatten)
  *
- * Arithmetic and < > need numbers, == and != compare JSON values exactly (a path absent on both sides is the same), and / or / implies need true or false (and short-circuit).
+ * Arithmetic and < > need numbers, == and != compare JSON values exactly (numbers to within float noise, 1e-9 relative; a path absent on both sides is the same), and / or / implies need true or false (and short-circuit).
  * Arithmetic and < > also take lists of numbers ([*] paths) element by element, or a list with one number: `lines[*].lineTotal ==
  * lines[*].unitPrice * lines[*].quantity` compares two lists, and `lines[*].quantity <= 10` holds when every element keeps it.
  * Caps: 300 characters, 120 tokens, nesting 20, 12 path parts, 1000 list elements. Only own properties of the data are read.
@@ -219,8 +219,13 @@ function relationValue(raw) {
     if (/^\s*[\[{]/.test(raw)) { try { return JSON.parse(raw); } catch (e) { return raw; } }
     return raw;
 }
+// Amounts are compared as the decimals they print as: 27.99 + 22.5 is 50.489999999999995 in floating point, and that is 50.49.
+function relationNear(a, b) {
+    return a === b || Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+}
 function relationSame(a, b) {
     if (a === b) return true;
+    if (typeof a === "number" && typeof b === "number") return relationNear(a, b);
     if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
     const ka = Object.keys(a);
     const kb = Object.keys(b);
@@ -281,7 +286,8 @@ function relationRun(tree, text, body, vars, seen) {
                     const d = a[1] ? num(a[1], ev(a[1])) : 0;
                     if (!Number.isInteger(d) || d < 0 || d > 6) throw new Error("round() keeps 0 to 6 digits");
                     const f = Math.pow(10, d);
-                    return note(n, Math.round(x * f) / f);
+                    // Decimal rounding: 1.005 to the cent is 1.01 (1.005 * 100 is 100.49999999999999 in floating point).
+                    return note(n, Math.round(Number((x * f).toPrecision(15))) / f);
                 }
                 if (n.name === "sum") return note(n, list(a[0], ev(a[0])).reduce((t, x) => t + num(a[0], x), 0));
                 if (n.name === "count") return note(n, list(a[0], ev(a[0])).length);
@@ -322,10 +328,10 @@ function relationRun(tree, text, body, vars, seen) {
                 const one = (x, y) => {
                     num(n.l, x);
                     num(n.r, y);
-                    if (op === "<") return x < y;
-                    if (op === "<=") return x <= y;
-                    if (op === ">") return x > y;
-                    if (op === ">=") return x >= y;
+                    if (op === "<") return x < y && !relationNear(x, y);
+                    if (op === "<=") return x <= y || relationNear(x, y);
+                    if (op === ">") return x > y && !relationNear(x, y);
+                    if (op === ">=") return x >= y || relationNear(x, y);
                     if (op === "/" && y === 0) throw new Error(src(n.r) + " is 0, so " + src(n) + " has no value");
                     return num(n, op === "+" ? x + y : op === "-" ? x - y : op === "*" ? x * y : x / y);
                 };
