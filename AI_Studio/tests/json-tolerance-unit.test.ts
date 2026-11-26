@@ -144,8 +144,9 @@ describe("property: anything accepted passes the original schema", () => {
 
 describe("guard: task R reads with the schemas as they were", () => {
     // Pinned on p47-base (ca8ecf97). A change here must be a deliberate schema change, never a looser one for task R.
+    // PlanSchema re-pinned for sheet items 31-32: scenarios gained the optional `caseSteps` and `caseData` (spec/schema.ts); nothing else changed.
     const PINNED = {
-        PlanSchema: "a64e6fd22e8119f8",
+        PlanSchema: "1f9d1ed871547000",
         AnalysisSchema: "1139206e28d40aaa",
         LinkedAnalysisSchema: "134cd9ecd737369c",
     };
