@@ -16,6 +16,7 @@
 import { CONTRACT_MAX_SCHEMA_BYTES } from "../contracts/check.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
+import { answersJson, happyStatus, streamingReason } from "./documented-status.js";
 import { repeatAdds } from "./stated-source.js";
 import { resourceName, stripIdSuffix } from "./workflows.js";
 
@@ -33,6 +34,8 @@ export interface ApiGenOptions {
 export interface ApiGenResult {
     specs: DraftSpec[];
     skippedMutating: number;
+    /** Calls given no request test, and why (a WebSocket upgrade, an event stream). */
+    skipped: Array<{ endpoint: string; reason: string }>;
 }
 
 const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -232,6 +235,7 @@ export function freshAccountSteps(endpoints: ApiEndpointModel[]): Step[] {
 export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOptions): ApiGenResult {
     const specs: DraftSpec[] = [];
     let skippedMutating = 0;
+    const skipped: ApiGenResult["skipped"] = [];
     // Documented cases run on an account of their own where the application has a sign-up, so leftovers of other tests cannot hide a defect.
     const signUp = signUpOf(endpoints);
     const freshSteps = freshAccountSteps(endpoints);
@@ -242,6 +246,11 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
             continue;
         }
         const label = `${ep.method} ${ep.path}`;
+        const streaming = streamingReason(ep);
+        if (streaming) {
+            skipped.push({ endpoint: label, reason: streaming });
+            continue;
+        }
         const cat = category(ep);
         const origin = ep.source === "openapi" ? ("openapi" as const) : ("network" as const);
         const body = ep.spec?.requestBody;
@@ -285,12 +294,8 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
                 ...(listed ? [listed.step] : []),
                 ...refs.map((r) => r.step),
                 req(ep, happyPath, { query: queryObj, ...(hasBody ? { body: realBody } : {}) }, `Send a valid ${ep.method} request`),
-                resp(
-                    "statusClass",
-                    ep.source === "network" ? `${String(ep.statuses[0] ?? 200).charAt(0)}xx` : "2xx",
-                    undefined,
-                    "Request succeeds",
-                ),
+                // The document's answer: a success, or the one status a call that never succeeds lists (documented-status.ts).
+                ...[happyStatus(ep)].map((h) => resp(h.check, h.expected, undefined, h.check === "status" ? `Answers ${h.expected}, as documented` : "Request succeeds")),
             ];
             if (okSchema?.type === "object" || okSchema?.type === "array") {
                 // The documented schema is the contract: when it can be attached, the real response is validated against it
@@ -308,7 +313,12 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
             } else if (ep.source === "network" && ep.responseSchema && (ep.responseSchema as Schema).type) {
                 steps.push(resp("jsonType", (ep.responseSchema as Schema).type, undefined, "Response keeps its observed JSON shape"));
             }
-            local.push(make("succeeds with a valid request", "functional", "high", steps, ["Returns a successful response matching the documented contract"], ["happy-path"]));
+            const h = happyStatus(ep);
+            local.push(
+                h.check === "status"
+                    ? make(`answers its documented ${h.expected}`, "functional", "high", steps, [`Answers HTTP ${h.expected}, the only answer the API document lists`], ["happy-path"])
+                    : make("succeeds with a valid request", "functional", "high", steps, ["Returns a successful response matching the documented contract"], ["happy-path"]),
+            );
         }
 
         // 2 ── Unauthenticated access
@@ -398,9 +408,10 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
                         resp("statusBelow", 500, undefined, "No server error"),
                         req(ep, filledPath, withValue(XSS), "XSS payload"),
                         resp("statusBelow", 500, undefined, "No server error"),
-                        resp("bodyNotContains", XSS, undefined, "Payload is not reflected unescaped"),
+                        // A payload echoed inside a JSON answer is data, not markup: the reflection check is for answers that may be HTML.
+                        ...(answersJson(ep) ? [] : [resp("bodyNotContains", XSS, undefined, "Payload is not reflected unescaped")]),
                     ],
-                    ["No 5xx and no unescaped reflection of injection payloads"],
+                    [answersJson(ep) ? "No 5xx for injection payloads" : "No 5xx and no unescaped reflection of injection payloads"],
                     ["security", "injection"],
                 ),
             );
@@ -483,5 +494,5 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
         }
         specs.push(...documentedCases.slice(0, MAX_DOCUMENTED));
     }
-    return { specs, skippedMutating };
+    return { specs, skippedMutating, skipped };
 }
