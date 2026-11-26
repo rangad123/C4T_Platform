@@ -12,6 +12,7 @@
  *   - a running run shows the stages Exploring, Understanding and Writing test cases, on its page and on the Dashboard; when it ends, its
  *     last word "Test cases written: N (M new)" shows without a reload (FX9);
  *   - a run that ended with a problem says "Test cases written, with a problem", not "Ready, some tests need a look" (FX8);
+ *   - every ended run, in the list and on its page, downloads the test cases it wrote, as the latest run's are on Outcome (sheet #29);
  *   - a mixed project keeps every old part of the Runs place and the run page;
  *   - axe in light and dark, screenshots at 1280 and 390 px.
  *
@@ -161,6 +162,11 @@ describe("the Runs place of a Test Case Generation project", () => {
         // Only Test Case Generation's own runs are counted (W3 review M2): the old run of tests is not one of them.
         expect(await page.getByTestId("case-runs-others").count()).toBe(0);
         expect(await row(runs.first).getByRole("link", { name: "See what it found" }).getAttribute("href")).toBe(`#/projects/${tcg}/agents/test-generation/runs/${runs.first}`);
+        // Each ended run downloads its own test cases (sheet #29); the running one does not yet.
+        for (const id of [runs.first, runs.stopped, runs.partial]) expect(await row(id).getByTestId("case-run-download").count(), id).toBe(1);
+        expect(await row(runs.running).getByTestId("case-run-download").count()).toBe(0);
+        const [file] = await Promise.all([page.waitForEvent("download"), row(runs.first).getByTestId("case-run-download").click()]);
+        expect(file.suggestedFilename()).toMatch(/^Shop test cases test cases, run of \d{4}-\d{2}-\d{2}\.xlsx$/);
         await shot("runs.png");
         await axe("runs");
         await page.setViewportSize({ width: 390, height: 844 });
@@ -181,7 +187,9 @@ describe("the Runs place of a Test Case Generation project", () => {
         expect(await page.getByRole("tree").count()).toBe(1);
         expect(await page.getByRole("treeitem").count()).toBe(3);
         expect(await outcome.locator(".oc-case").count()).toBe(3);
-        expect(await outcome.getByTestId("outcome-download").count()).toBe(0);
+        // An earlier run's test cases download from its page too (sheet #29), as the latest run's do on Outcome.
+        const [file] = await Promise.all([page.waitForEvent("download"), outcome.getByTestId("outcome-download").click()]);
+        expect(file.suggestedFilename()).toMatch(/, run of \d{4}-\d{2}-\d{2}\.xlsx$/);
         const text = await mainText();
         for (const w of OLD_RUN_WORDS) expect(text, w).not.toContain(w);
         expect(await page.getByTestId("run-explore-tree").count()).toBe(0);

@@ -36,7 +36,7 @@ export const IOS_PROJECT = "The AI writes phone test scripts for Android apps on
 export const NO_APP_FOR_SCRIPTS = "This project has no Android app yet, and a phone test script is saved for the app it tests. Add the app under Settings, Mobile app, then generate the test scripts.";
 export const NO_ADDRESS_FOR_SCRIPTS = "This project has no application address yet, and a test script is saved for the address it tests. Add the address in Settings → General, then generate the test scripts.";
 /** How a web script is made from a test case: as Test scripts, Describe it makes one (src/platform/case-scripts.ts). */
-const BUILT_LIVE = "The AI does each test case's steps in a real browser on the application, signed in with the project's sign-in, keeps the steps that worked and checks what the page really shows, then runs the script.";
+const BUILT_LIVE = "The AI does each test case's steps in a real browser on the application, signed in with the project's sign-in, and keeps the steps that worked and checks what the page really shows. The scripts are not run: you run them with Run when you are ready.";
 const ON_DEVICE = "The AI has not seen the app: it finds each button and field by its visible text or accessibility label, so check each script on the device before approving it.";
 
 /** Phone cases sent per request, so the page can say how far it got (the server takes at most 20; it sends back the rest as "later"). */
@@ -115,6 +115,7 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
         let stop = false;
         let timer: number | undefined;
         let idle = 0;
+        let seen = 0;
         const tick = async () => {
             try {
                 const [list, jobs] = await Promise.all([api<CaseList>(`/projects/${projectId}/manual-cases`), api<Job[]>(`/projects/${projectId}/jobs`)]);
@@ -150,6 +151,12 @@ function useGenerateScripts(projectId: string, onDone?: () => void) {
                     return;
                 }
                 setState({ step: "building", caseIds: building, done });
+                // A script landed: the lists on this page and the Test scripts count show it now, not only when every case is done (sheet #26).
+                if (done > seen) {
+                    seen = done;
+                    announceProjectChanged(projectId);
+                    onDone?.();
+                }
             } catch {
                 // A missed look: the next one tries again.
             }
@@ -231,16 +238,16 @@ function Writing({ state }: { state: Extract<State, { step: "writing" }> }) {
     );
 }
 
-/** "Building test scripts: 1 of 3", while the server builds them one after the other in a real browser. */
+/** "Building test scripts: 1 of 3 generated", while the server builds them one after the other in a real browser. */
 function Building({ state }: { state: Extract<State, { step: "building" }> }) {
     const total = state.caseIds.length;
     return (
         <div className="stack-sm" role="status" aria-live="polite" data-testid="generate-scripts-building">
             <p className="t-card">
-                Building test scripts: {state.done} of {total}
+                Building test scripts: {state.done} of {total} generated
             </p>
             <progress className="gen-progress" max={total} value={state.done} aria-label="Test scripts built" />
-            <p className="t-meta">{BUILT_LIVE} One test case at a time; you can leave this page, and each script shows on its test case when it is ready.</p>
+            <p className="t-meta">{BUILT_LIVE} One test case at a time; you can leave this page, and each script shows on its test case and on Test scripts when it is ready.</p>
         </div>
     );
 }
@@ -257,7 +264,7 @@ function Outcome({ state, form, projectId, onClose, onRetry }: { state: Extract<
                         <p className="t-card">Test scripts generated</p>
                         <p className="t-secondary">
                             {plural(state.made, form === "phone" ? "phone test script" : "test script")} {state.made === 1 ? "has" : "have"} been created from your test cases.{" "}
-                            {form === "phone" ? `The AI wrote ${them} without seeing the app: check ${them} on the device, then approve ${them} to run ${them}.` : `${state.made === 1 ? "It was" : "Each was"} built on the application and run once: open ${them} to see whether ${state.made === 1 ? "it" : "they"} passed.`}
+                            {form === "phone" ? `The AI wrote ${them} without seeing the app: check ${them} on the device, then approve ${them} to run ${them}.` : `${state.made === 1 ? "It is" : "They are"} ready to run and ${state.made === 1 ? "has" : "have"} not been run yet: run ${them} from Test scripts with Run when you are ready.`}
                         </p>
                     </div>
                     <LinkButton size="sm" variant="primary" href={routes.tests(projectId)}>

@@ -3,7 +3,9 @@
  * never a real model, nothing runs). It lives on Test cases only (the card under the list): the New test script menu on Test scripts
  * does not repeat it. The card works on the cases chosen in the list; for an Android project the AI's phone script is saved as a
  * draft that Test scripts shows, saying it needs checking on the device. A project the AI cannot write for (iOS only, Android without
- * its app, web without its address) is told so on the card, before the click. Requires `web/dist` (vite build).
+ * its app, web without its address) is told so on the card, before the click. A web script is built, not run (sheet #27): the card says
+ * so, and while the scripts are built the case list and Test scripts fill by themselves, with the count (sheet #26). Requires `web/dist`
+ * (vite build).
  *
  *   TAQWRIGHT_HOME=/nonexistent-taqwright node scripts/with-lock.mjs browser -- npx vitest run tests/generate-scripts-ui.test.ts */
 import fs from "node:fs";
@@ -160,6 +162,7 @@ describe("Generate test scripts, on Test cases", () => {
         await card.getByRole("button", { name: "Generate test scripts", exact: true }).click();
         await pwExpect(card.getByText("Generate 1 test script?")).toBeVisible();
         await pwExpect(card).toContainText("The AI does each test case's steps in a real browser on the application, signed in with the project's sign-in");
+        await pwExpect(card).toContainText("The scripts are not run: you run them with Run when you are ready.");
         fake.reset();
         await card.getByRole("button", { name: "Generate 1 script", exact: true }).click();
         await pwExpect(card.getByTestId("generate-scripts-building")).toContainText("Building test scripts: 0 of 1");
@@ -176,7 +179,7 @@ describe("Generate test scripts, on Test cases", () => {
         platform.repo.setJobStatus(job!.id, "COMPLETED");
         expect(await afterCaseJob(platform.repo, job!)).toBeNull();
         await pwExpect(card.getByText("Test scripts generated")).toBeVisible({ timeout: 15_000 });
-        await pwExpect(card).toContainText("1 test script has been created from your test cases. It was built on the application and run once: open it to see whether it passed.");
+        await pwExpect(card).toContainText("1 test script has been created from your test cases. It is ready to run and has not been run yet: run it from Test scripts with Run when you are ready.");
         if (shots) await page.screenshot({ path: path.join(shots, "generate-web-scripts-done.png") });
     });
 
@@ -238,7 +241,10 @@ describe("Generate test scripts, on Test cases", () => {
         };
         const first = repo.listJobs(pid)[0]!;
         const second = (await end(first, true))!;
-        await pwExpect(card.getByTestId("generate-scripts-building")).toContainText("Building test scripts: 1 of 3", { timeout: 10_000 });
+        await pwExpect(card.getByTestId("generate-scripts-building")).toContainText("Building test scripts: 1 of 3 generated", { timeout: 10_000 });
+        // The case list shows the first script while the others are still being built, without a reload (sheet #26).
+        await pwExpect(page.getByRole("link", { name: new RegExp(`^Test script \\S+: ${three[0]!.title}$`) })).toBeVisible({ timeout: 10_000 });
+        await pwExpect(page.getByRole("link", { name: new RegExp(`^Test script \\S+: ${three[0]!.title}$`) })).toContainText("Not run yet");
         const third = (await end(second, false, "The search box could not be found"))!;
         expect(third.options.plainCaseId).toBe(three[2]!.id);
         expect(await end(third, true)).toBeNull();
@@ -252,6 +258,40 @@ describe("Generate test scripts, on Test cases", () => {
         expect(again.options).toMatchObject({ plainCaseId: three[1]!.id, plainCaseQueue: [] });
         expect(await end(again, true)).toBeNull();
         await pwExpect(card).toContainText("1 test script has been created", { timeout: 15_000 });
+    });
+
+    it("Test scripts fills by itself while scripts are made from test cases, also across the gap between two cases' jobs (sheet #26)", async () => {
+        const { repo } = platform;
+        const store = new ManualCaseStore(platform.db);
+        const pid = repo.createProject({ name: "Gap web shop", platforms: ["web"], testingModes: ["code"] }).id as string;
+        repo.createApplication(pid, "http://127.0.0.1:8523", { ...DEFAULT_JOB_OPTIONS });
+        const two = ["Verify the gap home page", "Verify the gap search"].map((title) => store.createCase(pid, ManualCaseInputSchema.parse({ title, automation: "automated", area: "Shop", steps: [{ action: "Open it", expected: "It shows" }] })));
+        const started = await server.inject({ method: "POST", url: `/api/projects/${pid}/manual-cases/generate-scripts`, headers: { "x-api-key": KEY }, payload: {} });
+        expect(started.statusCode, started.body).toBe(200);
+        await page.goto(`${BASE}/#/projects/${pid}/scripts`);
+        await pwExpect(page.getByText("Test scripts are being made from your test cases")).toBeVisible();
+        await pwExpect(page.getByText("They are not run: run them with Run when you are ready. 1 more test case after this one.")).toBeVisible();
+        if (shots) await page.screenshot({ path: path.join(shots, "test-scripts-being-made.png") });
+        const made = async (job: any) => {
+            const imported = await server.inject({ method: "POST", url: `/api/projects/${pid}/specs`, headers: { "x-api-key": KEY }, payload: { validate: false, specs: [{ title: job.options.plainDescription.split("\n")[0], kind: "web", category: "Plain English", steps: [{ action: "navigate", url: "/" }] }] } });
+            platform.db.run("UPDATE test_cases SET job_id = ? WHERE id = ?", job.id, JSON.parse(imported.body).tests[0].id);
+            repo.setJobStatus(job.id, "COMPLETED");
+        };
+        const first = repo.listJobs(pid)[0]!;
+        await made(first);
+        // The page looks while no job is going (the next case's job starts just after), then the next one starts.
+        await page.waitForTimeout(3500);
+        const second = (await afterCaseJob(repo, first))!;
+        expect(second.options.plainCaseId).toBe(two[1]!.id);
+        await made(second);
+        expect(await afterCaseJob(repo, second)).toBeNull();
+        const rows = page.getByTestId("script-row");
+        for (const c of two) await pwExpect(rows.filter({ hasText: c.title })).toBeVisible({ timeout: 15_000 });
+        await pwExpect(page.getByTestId("scripts-counts")).toHaveText("2 test scripts, 0 passing");
+        if (shots) await page.screenshot({ path: path.join(shots, "test-scripts-filled.png") });
+        await page.setViewportSize({ width: 375, height: 800 });
+        if (shots) await page.screenshot({ path: path.join(shots, "test-scripts-filled-375.png") });
+        await page.setViewportSize({ width: 1280, height: 900 });
     });
 
     it("says before the click why it cannot write here: an iOS-only project, an Android project without its app", async () => {

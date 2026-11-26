@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock, Download, FileJson, FileText, FileUp, FileX, MonitorSmartphone, MoreHorizontal, Pencil, Search, SlidersHorizontal, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { RunsOnLine } from "../features/agents/RunsOnLine";
 import { FrameworksLine } from "../features/frameworks/FrameworksLine";
 import { CheckVariantsPanel } from "../features/variants/CheckVariantsPanel";
@@ -64,8 +64,17 @@ interface RequirementLink {
 
 export function ProjectTests({ id }: { id: string }) {
     const route = useRoute();
-    const project = useFetch<ProjectDetail>(`/projects/${id}`, (d) => (isActive(d?.latestJob?.status) ? 3000 : null));
-    const tests = useFetch<TestSummary[]>(`/projects/${id}/tests`, () => (isActive(project.data?.latestJob?.status) ? 3000 : null));
+    // Scripts made from test cases are built one case after the other, the next job starting just after one ends (case-scripts.ts): a few
+    // more looks after a case's job ends, so the list keeps filling by itself across that gap (sheet #26).
+    const chainLooks = useRef(0);
+    const project = useFetch<ProjectDetail>(`/projects/${id}`, (d) => {
+        const j = d?.latestJob;
+        if (isActive(j?.status)) chainLooks.current = 3;
+        else if (j?.caseId && (j.casesLeft ?? 0) > 0 && chainLooks.current > 0) chainLooks.current--;
+        else chainLooks.current = 0;
+        return isActive(j?.status) || chainLooks.current > 0 ? 3000 : null;
+    });
+    const tests = useFetch<TestSummary[]>(`/projects/${id}/tests`, () => (isActive(project.data?.latestJob?.status) || chainLooks.current > 0 ? 3000 : null));
     // The Requirement column, and the Status column's word about drafts waiting for review (features/review).
     const reqLinks = useFetch<{ links: RequirementLink[] }>(`/projects/${id}/requirements/links`);
     const reviews = useFetch<{ scripts: ScriptRow[] }>(`/projects/${id}/scripts`);
@@ -262,8 +271,9 @@ export function ProjectTests({ id }: { id: string }) {
                 )}
                 <RunStrip projectId={id} />
                 {isActive(job?.status) && (job?.mode === "generate" || job?.mode === "plain" || job?.mode === undefined) && (
-                    <Callout tone="info" title={explores ? "Tests are still being created" : "Test scripts are being written"} actions={<a className="btn btn-sm" href={explores ? routes.project(id) : routes.run(id, job!.jobId)}>View progress</a>}>
+                    <Callout tone="info" title={explores ? "Tests are still being created" : job?.caseId ? "Test scripts are being made from your test cases" : "Test scripts are being written"} actions={<a className="btn btn-sm" href={explores ? routes.project(id) : routes.run(id, job!.jobId)}>View progress</a>}>
                         {explores ? "New tests appear here as soon as they’re ready." : "New test scripts appear here as soon as they’re ready."}
+                        {job?.caseId && ` They are not run: run them with Run when you are ready.${job.casesLeft ? ` ${plural(job.casesLeft, "more test case")} after this one.` : ""}`}
                     </Callout>
                 )}
 
