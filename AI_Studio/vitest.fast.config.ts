@@ -414,6 +414,7 @@ export default defineConfig({
             "tests/api-documented-status-unit.test.ts",
             "tests/case-script-build-only-unit.test.ts",
             "tests/tcg-case-checks-unit.test.ts",
+            "tests/n2e-maxlength-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
