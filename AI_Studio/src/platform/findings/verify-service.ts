@@ -48,7 +48,7 @@ import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
 import { SecretBox } from "../secrets.js";
 import { ResetHookStore, sendResetRequest } from "../test-data-reset-store.js";
 import { attemptOf, executionFinding, fromCandidate, withStepRequests, type TestOf } from "./adapters.js";
-import { cutByMaxlength, fieldLimits, judgePageCheck, judgeRepeatRefusal, writtenExpectation } from "../../engine/findings/expectation.js";
+import { citedRequirements, cutByMaxlength, fieldLimits, judgePageCheck, judgeRepeatRefusal, writtenExpectation } from "../../engine/findings/expectation.js";
 import { AppIntelStore } from "../app-intel-store.js";
 import { ANALYSIS_BLAMES_TEST } from "../../engine/validation/repair.js";
 
@@ -116,6 +116,8 @@ export interface VerifyDeps {
     llm?: LlmClient;
     /** The longest text each form field takes (findings/expectation.ts fieldLimits), from the project's latest application model. */
     fieldLimits?: () => Promise<ReadonlyMap<string, number>>;
+    /** The project's requirements' text by ref key (requirement-store.ts refKey): an address check is judged against the ones it cites. */
+    requirements?: () => Promise<ReadonlyMap<string, string>>;
     /** The project's code source for root cause (code-host/source.ts); without it, root cause says none is connected. */
     code?: () => Promise<{ code?: CodeSource; why?: string }>;
 }
@@ -300,9 +302,9 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
     // Without a reset, an attempt that began from an earlier attempt's changes is not a reproduction (findings/reproduce.ts).
     if (!reset) tried.splice(0, tried.length, ...carriedOver(tried));
     // A value longer than the field's maxlength never reached the application: the browser cut it, so the failing check is the test's own.
-    const cut = cutByMaxlength(spec, tried.find((a) => a.outcome === "failed" && !a.stepFault)?.failedStep, await d.fieldLimits?.().catch(() => undefined));
+    const cut = cutByMaxlength(spec, tried.find((a) => a.outcome === "failed" && !a.stepFault)?.failedStep, await d.fieldLimits?.().catch(() => undefined), f.finding.expected.text ?? "");
     if (cut) tried.splice(0, tried.length, ...tried.map((a) => (a.outcome === "failed" ? { ...a, stepFault: cut } : a)));
-    const view = judgedView(fromCandidate(f, test), f, test, tried);
+    const view = judgedView(fromCandidate(f, test), f, test, tried, await d.requirements?.().catch(() => undefined));
     let verdict = verdictOf(view.view, tried, account);
     if (cut) verdict = { ...verdict, reason: `${verdict.reason} ${cut}` };
     // An amount no API answer was compared with, or a check whose own failure analysis says the application is right (WEB-002), is never
@@ -315,12 +317,13 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
 }
 
 /** The view with the expectation check before the vote (findings/expectation.ts): an unstated or API-contradicted expectation, or why a person checks it. */
-function judgedView(view: ReturnType<typeof fromCandidate>, f: CandidateFindingRecord, test: VerifyTest, tried: readonly Attempt[]): { view: ReturnType<typeof fromCandidate>; review?: string } {
+function judgedView(view: ReturnType<typeof fromCandidate>, f: CandidateFindingRecord, test: VerifyTest, tried: readonly Attempt[], requirements?: ReadonlyMap<string, string>): { view: ReturnType<typeof fromCandidate>; review?: string } {
     const failedStep = tried.find((a) => a.outcome === "failed" && !a.stepFault)?.failedStep;
     const correlated = Boolean(f.finding.evidence.layers?.length || view.correlated?.disagreed.length);
     // An exploration finding stores the expected result it cites; an execution finding's text also holds the check's own value.
     const cited = view.source.kind === "exploration" ? view.expected.text : writtenExpectation(test.spec, failedStep);
-    const j = judgePageCheck({ spec: test.spec, ...(failedStep !== undefined ? { failedStep } : {}), cited, apiAmount: test.meta?.apiAmount, correlated }) ?? judgeRepeatRefusal(test.spec, failedStep);
+    const required = citedRequirements(cited, requirements);
+    const j = judgePageCheck({ spec: test.spec, ...(failedStep !== undefined ? { failedStep } : {}), cited, ...(required ? { required } : {}), apiAmount: test.meta?.apiAmount, correlated }) ?? judgeRepeatRefusal(test.spec, failedStep);
     if (!j) return { view };
     const expected = { ...view.expected, ...(j.unstated ? { stated: "none" as const } : {}), ...(j.contradictedBy ? { contradictedBy: j.contradictedBy.slice(0, 300) } : {}) };
     return { view: { ...view, expected }, ...(j.review ? { review: j.review } : {}) };
@@ -632,6 +635,13 @@ export function verifyDepsOf(p: Platform, job: JobRow, o: { execute?: VerifyDeps
         },
         emit: o.emit ?? jobEmitter(p, job.id),
         code: () => projectCodeSource(p, job.projectId),
+        requirements: async () =>
+            new Map(
+                (await p.sql.all<{ ref_key: string; title: string; description: string | null; acceptance_criteria: string | null }>("SELECT ref_key, title, description, acceptance_criteria FROM requirements WHERE project_id = ? AND status <> 'retired'", job.projectId)).map((r) => [
+                    r.ref_key,
+                    [r.title, r.description, r.acceptance_criteria].filter(Boolean).join(" "),
+                ]),
+            ),
         fieldLimits: async () => fieldLimits((await new AppIntelStore(p.sql).latest(job.projectId))?.model ?? app.model ?? p.repo.getLatestAppModel(job.projectId)),
     };
 }

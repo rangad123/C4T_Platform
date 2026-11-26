@@ -36,13 +36,20 @@ type Step = TestSpec["steps"][number];
 function expectedText(step: Step | undefined): string | undefined {
     if (!step || step.action !== "assert") return undefined;
     if (TEXT_CHECKS.has(step.check)) return typeof step.expected === "string" || typeof step.expected === "number" ? String(step.expected) : undefined;
-    if ((step.check === "visible" || step.check === "hidden") && step.locator?.by === "text") return step.locator.value;
+    // A role locator's name is a text the check expects to see, as a text locator's is (N2F WEB-038: a definition named "8").
+    if ((step.check === "visible" || step.check === "hidden") && (step.locator?.by === "text" || step.locator?.by === "role")) return step.locator.value;
     return undefined;
 }
 
-/** Undefined when the check is not a page check this judges, or what it expects is stated (by the expectation or the test's own data). */
-export function judgePageCheck(x: { spec: TestSpec; failedStep?: number; cited: string; apiAmount?: unknown; correlated?: boolean }): PageCheckJudgement | undefined {
+/**
+ * Undefined when the check is not a page check this judges, or what it expects is stated (by the expectation or the test's own data).
+ * `required`: the text of the requirements the cited expectation names (citedRequirements); an address check is judged against it, since
+ * the expected result is the test writer's own wording (N2F WEB-027: "The address bar shows /spa/#/dashboard (requirement 10.1)").
+ */
+export function judgePageCheck(x: { spec: TestSpec; failedStep?: number; cited: string; required?: string; apiAmount?: unknown; correlated?: boolean }): PageCheckJudgement | undefined {
     if (x.spec.kind !== "web" || x.correlated || x.failedStep === undefined) return undefined;
+    const step = x.spec.steps[x.failedStep - 1];
+    if (step?.action === "assert" && step.check === "url") return judgeAddress(x.spec, step.expected, x.required ?? x.cited);
     const want = expectedText(x.spec.steps[x.failedStep - 1])?.trim();
     if (!want) return undefined;
     // The test's own data ({{unique}}, a value a step typed) is stated by the test itself.
@@ -64,6 +71,36 @@ export function judgePageCheck(x: { spec: TestSpec; failedStep?: number; cited: 
     }
     if (amounts.length) return undefined;
     return cited.includes(w) ? undefined : { unstated: true };
+}
+
+const ORIGIN = /^[a-z][a-z0-9+.-]*:\/\/[^/]+/i;
+const decoded = (u: string) => {
+    try {
+        return decodeURIComponent(u);
+    } catch {
+        return u;
+    }
+};
+
+/** An address check: stated when the text names the address, or the test itself opened it or sent it in a query value (?next=/orders). */
+function judgeAddress(spec: TestSpec, expected: unknown, text: string): PageCheckJudgement | undefined {
+    const want = typeof expected === "string" ? expected.trim().replace(ORIGIN, "") : "";
+    if (!want || !norm(want)) return undefined;
+    const opened = spec.steps.flatMap((s) => (s.action === "navigate" ? [decoded(s.url)] : []));
+    if (opened.some((u) => u.replace(ORIGIN, "") === want || u.includes(`=${want}`))) return undefined;
+    return norm(text).includes(norm(want)) ? undefined : { unstated: true };
+}
+
+/**
+ * The text of the requirements a cited expectation names ("… (requirement 10.1)"), from the project's requirements by ref key
+ * (refKey); undefined when it names none the project holds.
+ * shortcut: one ref per "requirement" word; "requirements 3.4 and 10.2" reads 3.4 only.
+ */
+export function citedRequirements(cited: string, requirements: ReadonlyMap<string, string> | undefined): string | undefined {
+    if (!requirements?.size) return undefined;
+    const refs = [...cited.matchAll(/\brequirements?\s+([A-Za-z0-9][A-Za-z0-9._#-]*)/gi)].map((m) => m[1]!.replace(/\.+$/, "").toUpperCase());
+    const texts = refs.flatMap((r) => requirements.get(r) ?? []);
+    return texts.length ? texts.join(" ") : undefined;
 }
 
 /**
@@ -147,14 +184,15 @@ export function fieldLimits(model: unknown): Map<string, number> {
 /**
  * Why a web test's failing check is the test's own problem when an earlier step typed more than the field's maxlength allows: the browser
  * cut the value before anything was sent, so the application never saw it (N2E WEB-044: 81 characters into maxlength="80", then the
- * check that 81 is refused). Only a check about a length or limit (its text names the limit, characters, length or a maximum). Undefined
+ * check that 81 is refused). Only a check about a length or limit: its text, or the expectation the finding cites (`cited`), names the
+ * limit, characters, length or a maximum (N2F WEB-032 failed at an earlier check of the same test, whose text names none). Undefined
  * otherwise, or when no limit is known.
  */
-export function cutByMaxlength(spec: TestSpec, failedStep: number | undefined, limits: ReadonlyMap<string, number> | undefined): string | undefined {
+export function cutByMaxlength(spec: TestSpec, failedStep: number | undefined, limits: ReadonlyMap<string, number> | undefined, cited = ""): string | undefined {
     if (spec.kind !== "web" || failedStep === undefined || !limits?.size) return undefined;
     const check = spec.steps[failedStep - 1];
     if (check?.action !== "assert") return undefined;
-    const said = [typeof check.expected === "string" || typeof check.expected === "number" ? String(check.expected) : "", check.locator?.by === "text" ? check.locator.value : "", check.description ?? ""].join(" ");
+    const said = [typeof check.expected === "string" || typeof check.expected === "number" ? String(check.expected) : "", check.locator?.by === "text" ? check.locator.value : "", check.description ?? "", cited].join(" ");
     for (const s of spec.steps.slice(0, failedStep - 1)) {
         if (s.action !== "fill" || /\{\{/.test(s.value)) continue;
         const l = s.locator as { by?: string; value?: string; role?: string };
