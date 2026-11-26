@@ -158,17 +158,21 @@ const dbStep = (name: string, description: string, source?: string): Step => ({ 
 const isOk = (s: Step | undefined) => s?.action === "assertResponse" && ((s.check === "statusClass" && String(s.expected) === "2xx") || (s.check === "status" && /^2\d\d$/.test(String(s.expected))));
 
 /**
- * A data-changing test's steps with its database checks: after each 2xx write its persistence check, then at the end the absence checks
- * (integrity along the declared keys and the C5 relations over rows). `budget.left` is the run's remaining checks (DB_CHECKS_MAX in all).
+ * A data-changing test's steps with its database checks: after each 2xx write its persistence check, and right after its last write
+ * (before the API assertions on that answer and any read after it) the absence checks (integrity along the declared keys and the C5
+ * relations over rows). Placed there, a stored-data defect fails at the database check even when the API check after it would fail too
+ * (L8: a documented 409 that was accepted, a read-back that misses a record). `budget.left` is the run's remaining checks (DB_CHECKS_MAX
+ * in all).
  * shortcut: every data-changing test gets the same absence checks while the budget lasts; mapping writes to the tables they touch would
  * spread a large schema's checks better.
  */
 export function withDatabaseChecks(steps: readonly Step[], schema: DbSchema, absence: ReadonlyArray<{ name: string; source?: string }>, budget: { left: number }): Step[] {
+    const lastWrite = steps.findLastIndex((s) => s.action === "request" && (WRITES.has(s.method.toUpperCase()) || s.method.toUpperCase() === "DELETE"));
     const out: Step[] = [];
-    let wrote = false;
+    let at = -1;
     for (const [i, s] of steps.entries()) {
         out.push(s);
-        if (s.action === "request" && (WRITES.has(s.method.toUpperCase()) || s.method.toUpperCase() === "DELETE")) wrote = true;
+        if (i === lastWrite) at = out.length;
         const prev = steps[i - 1];
         if (prev?.action !== "request" || !isOk(s) || budget.left <= 0) continue;
         const name = persistenceCheck(prev, schema);
@@ -177,14 +181,25 @@ export function withDatabaseChecks(steps: readonly Step[], schema: DbSchema, abs
             budget.left--;
         }
     }
-    if (!wrote) return out;
+    if (at < 0) return out;
+    const absent: Step[] = [];
     for (const { name, source } of absence) {
         if (budget.left <= 0) break;
         if (name.length > DB_CHECK_NAME_MAX) continue;
-        out.push(dbStep(name, source ? "The stored rows keep the stated rule" : "The test left no stored row that breaks the database's keys", source));
+        absent.push(dbStep(name, source ? "The stored rows keep the stated rule" : "The test left no stored row that breaks the database's keys", source));
         budget.left--;
     }
+    out.splice(at, 0, ...absent);
     return out;
+}
+
+/** The duplicate checks (along a declared unique key) whose columns the test's writes all send: a documented 409's database view. */
+export function duplicateChecksOf(steps: readonly Step[], absence: ReadonlyArray<{ name: string; source?: string }>): Array<{ name: string; source?: string }> {
+    const sent = new Set(steps.flatMap((s) => (s.action === "request" && WRITES.has(s.method.toUpperCase()) && s.body && typeof s.body === "object" && !Array.isArray(s.body) ? Object.keys(s.body) : [])));
+    return absence.filter(({ name }) => {
+        const m = RE.duplicates.exec(name.trim());
+        return !!m && names(m[2]!).every((c) => sent.has(c));
+    });
 }
 
 /**

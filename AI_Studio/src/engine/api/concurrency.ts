@@ -10,7 +10,7 @@
  *     (loopback) (Q4); without it nothing is generated and the reason is given;
  *   - k is 3 by default and at most 5;
  *   - at most 10 requests at once in one test, counted by the pasted helper before anything is sent;
- *   - at most 3 checks a run, one per workflow.
+ *   - at most 3 checks a run, one per endpoint (a workflow step and the create endpoint of the same record may both be checked).
  */
 import type { Step } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";

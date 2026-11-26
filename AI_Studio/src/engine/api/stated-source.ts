@@ -67,19 +67,23 @@ export function withStatedSources(spec: TestSpec, apis: readonly Documented[]): 
     const reqIds = (spec.source.requirements ?? []).filter((r) => r.trim());
     let last: { method: string; path: string } | undefined;
     let afterParallel = false;
+    // The documented status the answer was just checked for: a documented refusal's schema is that refusal's, not the first 2xx's.
+    let status: string | undefined;
     for (const step of spec.steps as Array<Record<string, unknown>>) {
         if (step.action === "request") {
             last = { method: String(step.method), path: String(step.path) };
             afterParallel = typeof step.parallel === "number";
+            status = undefined;
             continue;
         }
+        if (step.action === "assertResponse" && step.check === "status") status = String(step.expected);
         if ((step.action !== "assertResponse" && step.action !== "assert") || step.source) continue;
         let doc: string | undefined;
         if (step.action === "assertResponse" && last) {
             const ep = endpointOf(apis, last.method, last.path);
             if (ep && step.check === "status" && documentedStatus(ep, String(step.expected))) doc = `${ep.method.toUpperCase()} ${ep.path} ${String(step.expected)}`;
             if (ep && step.check === "matchesSchema") {
-                const ok = ep.spec!.responses.find((r) => /^2/.test(r.status));
+                const ok = ep.spec!.responses.find((r) => r.status === status) ?? ep.spec!.responses.find((r) => /^2/.test(r.status));
                 if (ok) doc = `${ep.method.toUpperCase()} ${ep.path} ${ok.status}`;
             }
         }

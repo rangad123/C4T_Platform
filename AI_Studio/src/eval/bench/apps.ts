@@ -31,6 +31,11 @@ export interface BenchApp {
     credentials?: { username: string; password: string };
     /** Areas of the app by address prefix (a test reaches an area when it opens or calls an address under one of them). */
     workflows: Array<{ name: string; paths: string[] }>;
+    /**
+     * A dirty start (--dirty-start, CP-F): JSON requests sent as `credentials` after every start and reset, whatever they answer (a seeded
+     * behaviour may refuse one), so the explored account holds leftovers as a shared account does (Phase 4 Wave 0's set-up).
+     */
+    dirtyStart?: Array<{ method: "POST" | "PUT"; path: string; body?: Record<string, unknown> }>;
     /** Settings of the understanding benchmark only (the detection benchmark keeps `credentials` and the app's own data). */
     understanding?: UnderstandingSetup;
 }
@@ -60,6 +65,16 @@ export const BENCH_APPS: BenchApp[] = [
             { name: "Orders", paths: ["/orders", "/api/orders"] },
             { name: "Account", paths: ["/account", "/api/profile"] },
         ],
+        // Wave 0's dirty start: an earlier order, then three cart lines and SAVE10 applied.
+        dirtyStart: [
+            { method: "POST", path: "/api/cart/items", body: { productId: "p2", quantity: 1 } },
+            { method: "POST", path: "/api/checkout/address", body: { address: "1 Leftover Road" } },
+            { method: "POST", path: "/api/orders" },
+            { method: "POST", path: "/api/cart/items", body: { productId: "p3", quantity: 2 } },
+            { method: "POST", path: "/api/cart/items", body: { productId: "p4", quantity: 1 } },
+            { method: "POST", path: "/api/cart/items", body: { productId: "p5", quantity: 3 } },
+            { method: "POST", path: "/api/cart/discount", body: { code: "SAVE10" } },
+        ],
         understanding: {
             // The cart page shows "Check out" only with a line in the cart, and the seeded cart is empty.
             seed: [{ method: "POST", path: "/api/cart/items", body: { productId: "p1", quantity: 1 } }],
@@ -78,6 +93,8 @@ export const BENCH_APPS: BenchApp[] = [
             { name: "Administration", paths: ["/admin", "/api/admin"] },
             { name: "Account", paths: ["/account", "/api/me"] },
         ],
+        // Wave 0's dirty start: a leftover note.
+        dirtyStart: [{ method: "POST", path: "/api/notes", body: { title: "Leftover note", body: "x" } }],
         // Every signed-in screen of the answer key lists the admin role, and People (/admin/users) lists only admin: an admin crawl can
         // reach all of them, the user account all but People. The detection benchmark keeps the user account its seeded defects need.
         // The admin owns no note in the app's data, and a note page shows its edit, share, stop-sharing and delete controls to the owner
@@ -140,6 +157,8 @@ export class BenchAppHost {
         private readonly login: "html" | "js" = "html",
         /** The trial's database back end; none (the default) starts the app as Phase 3 did. */
         readonly database?: BenchDatabase,
+        /** Leave the app's dirty set-up behind after every start and reset (--dirty-start). */
+        private readonly dirty = false,
     ) {
         this.url = `http://127.0.0.1:${port}`;
     }
@@ -181,7 +200,7 @@ export class BenchAppHost {
         for (let i = 0; i < 100; i++) {
             if (child.exitCode !== null) throw new Error(`${this.app.id} could not start on port ${this.port} (is the port in use?)`);
             try {
-                if ((await fetch(this.url, { signal: AbortSignal.timeout(2000) })).status < 500) return;
+                if ((await fetch(this.url, { signal: AbortSignal.timeout(2000) })).status < 500) return await this.dirtyUp();
             } catch {
                 /* not listening yet */
             }
@@ -195,6 +214,21 @@ export class BenchAppHost {
     async reset(): Promise<void> {
         const res = await fetch(`${this.url}/__bench/reset`, { method: "POST", headers: { "x-bench-reset": this.token }, signal: AbortSignal.timeout(5000) });
         if (!res.ok) throw new Error(`${this.app.id} refused the data reset (HTTP ${res.status})`);
+        await this.dirtyUp();
+    }
+
+    /** The dirty set-up (--dirty-start): signed in as the explored account; what each request answers is not judged. */
+    private async dirtyUp(): Promise<void> {
+        const steps = this.dirty ? (this.app.dirtyStart ?? []) : [];
+        if (!steps.length) return;
+        const account = this.app.credentials;
+        if (!account) throw new Error(`${this.app.id} has a dirty start but no account to sign in with.`);
+        const send = (method: string, p: string, body: unknown, cookie?: string) =>
+            fetch(`${this.url}${p}`, { method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10_000) });
+        const login = await send("POST", "/api/login", { email: account.username, password: account.password });
+        const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+        if (!login.ok || !cookie) throw new Error(`Signing in for the dirty start of ${this.app.id} failed (HTTP ${login.status}).`);
+        for (const s of steps) await (await send(s.method, s.path, s.body, cookie)).arrayBuffer();
     }
 
     async stop(): Promise<void> {

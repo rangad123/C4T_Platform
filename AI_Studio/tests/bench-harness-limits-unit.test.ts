@@ -178,3 +178,49 @@ describe("the command's options", () => {
         expect(plain.jobTimeoutMin).toBeUndefined();
     });
 });
+
+describe("the reruns of a new trial (B3 stability)", () => {
+    it("run on the clean app; the replays after them still run with the defects in", async () => {
+        // Which behaviours the app had on when each run job started, and whether it carried allowMutatingApiTests (only replays do).
+        const seen: Array<{ kind: "rerun" | "replay"; defects: string[] }> = [];
+        const results = new Map<string, Array<{ id: string; state: Verdict }>>();
+        const tests = ["t1", "t2", "t3"].map((id, i) => ({ id, testId: `WEB-00${i + 1}`, title: `Test ${id}`, type: "functional", validationStatus: "NEEDS_REVIEW" }));
+        const client: PlatformClient = {
+            mode: "in-process",
+            upload: async () => ({ status: 404, body: {} }),
+            call: async (method, url, body): Promise<Answer> => {
+                if (method === "POST" && url === "/api/projects") return { status: 201, body: { id: "p1" } };
+                if (method === "PUT" && url === "/api/projects/p1/review-policy") return { status: 200, body: {} };
+                if (method === "POST" && url === "/api/projects/p1/test-generation") return { status: 202, body: { jobId: "plan1" } };
+                if (method === "GET" && url === "/api/projects/p1/plans/plan1") return { status: 200, body: { total: 3, pages: [], found: { pages: 1 }, ideas: [] } };
+                if (method === "POST" && url === "/api/projects/p1/plans/plan1/create") return { status: 202, body: { jobId: "c1" } };
+                if (method === "GET" && url === "/api/projects/p1/tests") return { status: 200, body: tests };
+                const detail = /^\/api\/tests\/(t\d)$/.exec(url);
+                if (method === "GET" && detail) return { status: 200, body: { spec: {}, generationMeta: null } };
+                if (method === "GET" && /^\/api\/tests\/t\d\/executions$/.test(url)) return { status: 200, body: [] };
+                if (method === "POST" && url === "/api/projects/p1/runs") {
+                    const b = body as { testIds: string[]; allowMutatingApiTests?: boolean };
+                    seen.push({ kind: b.allowMutatingApiTests ? "replay" : "rerun", defects: ((await (await fetch(`${URL_}/account`)).json()) as { defects: string[] }).defects });
+                    const jobId = `r${results.size + 1}`;
+                    const out: Array<{ id: string; state: Verdict }> = [];
+                    for (const id of b.testIds) out.push({ id, state: await runOne(id) });
+                    results.set(jobId, out);
+                    return { status: 202, body: { jobId } };
+                }
+                const run = /^\/api\/projects\/p1\/runs\/(\w+)$/.exec(url);
+                if (method === "GET" && run) return { status: 200, body: { tests: results.get(run[1]!) ?? [] } };
+                if (method === "GET" && /^\/api\/test-generation\/[^/]+$/.test(url)) return { status: 200, body: { status: "COMPLETED" } };
+                if (method === "GET" && /\/events(\?|$)/.test(url)) return { status: 200, body: [] };
+                if (method === "GET" && /^\/api\/jobs\/[^/]+\/usage$/.test(url)) return { status: 200, body: { totals: { calls: 0, inputTokens: 0, outputTokens: 0 } } };
+                if (method === "GET" && url.startsWith("/api/usage")) return { status: 200, body: { totals: { calls: 0, cost: 0 }, rows: [] } };
+                return { status: 404, body: { error: "not here" } };
+            },
+        };
+        const { benchmark } = await runBenchmark(client, { ...options({}), previous: undefined });
+        expect(benchmark.apps[0]!.status, benchmark.apps[0]!.reason).toBe("done");
+        expect(seen[0]).toEqual({ kind: "rerun", defects: [] });
+        expect(seen.find((s) => s.kind === "replay")).toEqual({ kind: "replay", defects: ["AC-1"] });
+        // The finding is still judged on the seeded app: t1 fails with AC-1 on and passes clean.
+        expect(byKey(benchmark.apps[0]!).t1).toMatchObject({ category: "confirmed", defects: ["AC-1"] });
+    }, 60_000);
+});

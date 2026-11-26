@@ -72,6 +72,10 @@ export const BENCH_USAGE = `Usage: node scripts/eval.mjs bench [options]
   --max                      the deepest run: --level everything --allow-data-changes --all-checks --single-model
   --repeat <n>               reruns of every created test, 1 to 10 (default 1)
   --job-timeout-min <n>      longest the exploration, a creation and each replay job may take, in minutes (default 45)
+  --dirty-start              every start of an app (exploration, each replay, each verification reset) leaves data behind first, as a
+                             shared account has: earlier orders, cart lines and a discount (bench-shop), a leftover note (bench-rbac)
+  --data-changes-off         data changes off and no risky-check gate (the free L9/L12 gate-off trial): no data-changing API tests,
+                             data operators or concurrency/identity-write/sign-in-limit checks may be made
   --isolated-replays         replay each finding alone, in a job of its own, on a freshly started app (every replay stage; slower, no AI)
   --verify-attempts <n>      verify each app's findings as the platform does after a job, n attempts each (1 to 5; AI explains open classes), and keep what
                              it left in the result (bench-report --verification scores it)
@@ -106,6 +110,8 @@ interface Args {
     repeat: number;
     jobTimeoutMin?: number;
     isolatedReplays: boolean;
+    dirtyStart?: boolean;
+    dataChangesOff?: boolean;
     verifyAttempts?: number;
     portBase: number;
     prices?: string;
@@ -166,6 +172,8 @@ export function parseBenchArgs(argv: string[]): Args {
         } else if (k === "--repeat") a.repeat = whole(1, 10);
         else if (k === "--job-timeout-min") a.jobTimeoutMin = whole(1, 24 * 60);
         else if (k === "--isolated-replays") a.isolatedReplays = true;
+        else if (k === "--dirty-start") a.dirtyStart = true;
+        else if (k === "--data-changes-off") a.dataChangesOff = true;
         else if (k === "--verify-attempts") a.verifyAttempts = whole(1, 5);
         else if (k === "--port-base") a.portBase = whole(1024, 65000);
         else if (k === "--prices") a.prices = path.resolve(value());
@@ -189,6 +197,7 @@ export function parseBenchArgs(argv: string[]): Args {
         else if (k === "--help" || k === "-h") a.help = true;
         else throw new Error(`Unknown option ${k}`);
     }
+    if (a.dataChangesOff && a.allowDataChanges) throw new Error("--data-changes-off cannot be combined with --allow-data-changes or --max");
     if (a.dataDir && path.resolve(a.dataDir) === path.resolve(REPO_ROOT, "data")) throw new Error("--data-dir must not be the platform's own ./data folder");
     if (!a.out) a.out = path.join(REPO_ROOT, "eval/results", defaultOutName(a.mode, a.login));
     if (a.layersOnly) {
@@ -260,7 +269,7 @@ export function writeState(out: string, state: object): void {
 }
 const RESUME_MAY_CHANGE = new Set(["--yes", "--approved-budget-usd", "--daily-call-cap", "--resume", "--out"]);
 /** Options that take no value. */
-const FLAGS = new Set(["--layers-only", "--allow-data-changes", "--isolated-replays", "--all-checks", "--single-model", "--max", "--estimate-only", "--baseline", "--resume", "--yes", "--help", "-h"]);
+const FLAGS = new Set(["--layers-only", "--allow-data-changes", "--isolated-replays", "--dirty-start", "--data-changes-off", "--all-checks", "--single-model", "--max", "--estimate-only", "--baseline", "--resume", "--yes", "--help", "-h"]);
 /** argv split into options, each with its value when it has one. */
 function optionsOf(argv: string[]): string[][] {
     const out: string[][] = [];
@@ -385,7 +394,8 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             // Data-changing operators are on for the benchmark's own platform only (its apps reset for every exploration and replay); the
             // platform's own default stays off.
             // The risky checks (C8, C3e; Q4) run on the benchmark's own platform only, against its loopback apps.
-            const started = await startPlatform(dataDir, { ...env, EXPLORE_DATA_OPERATORS: "true", BENCH_RISKY_CHECKS: "true" }, deps);
+            // --data-changes-off: neither, so no risky-check gate and no data operators (L9/L12 gate-off trial).
+            const started = await startPlatform(dataDir, args.dataChangesOff ? { ...env, EXPLORE_DATA_OPERATORS: "false", BENCH_RISKY_CHECKS: "false" } : { ...env, EXPLORE_DATA_OPERATORS: "true", BENCH_RISKY_CHECKS: "true" }, deps);
             stop = started.stop;
             client = started.client;
             platform = started.platform;
@@ -407,9 +417,9 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 level: args.level ?? "platform default",
                 login: args.login,
                 // On for every benchmark trial, both sides alike: the seeded behaviours include data-changing ones, and the apps reset.
-                allowMutatingApiTests: true,
+                allowMutatingApiTests: !args.dataChangesOff,
                 // What the benchmark's platform was started with, and whether its engine has data-changing operators to switch on.
-                exploreDataOperators: true,
+                exploreDataOperators: !args.dataChangesOff,
                 dataOperatorsInEngine: (started.platform.config as unknown as Record<string, unknown>).EXPLORE_DATA_OPERATORS === true,
                 checks: args.allChecks ? "all" : "platform defaults",
                 singleModel: args.singleModel,
@@ -418,6 +428,8 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
                 ...(args.roles ? { roles: args.roles } : {}),
                 ...(args.layersOnly ? { layersOnly: true } : {}),
                 ...(args.db ? { database: args.db } : {}),
+                ...(args.dirtyStart ? { dirtyStart: true } : {}),
+                ...(args.dataChangesOff ? { dataChangesOff: true } : {}),
                 ...configLimits(args).options,
             };
             config = {
@@ -486,7 +498,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
         const exploration: Record<string, unknown> = {
             targets: ["web", "api"],
             ...(args.level ? { level: args.level } : {}),
-            allowMutatingApiTests: true,
+            allowMutatingApiTests: !args.dataChangesOff,
             ...(args.allChecks ? Object.fromEntries(ALL_CHECKS.map((c) => [c, true])) : {}),
             ...(deps.exploration ?? {}),
         };
@@ -515,6 +527,7 @@ export async function benchMain(argv: string[], deps: BenchDeps = {}): Promise<n
             pollMs: deps.pollMs,
             ...(deps.root ? { root: deps.root } : {}),
             ...(args.roles ? { roles: (appId: string) => catalogueRoles(catalogue.accounts?.[appId] ?? []) } : {}),
+            ...(args.dirtyStart ? { dirtyStart: true } : {}),
             ...(args.db ? { database: args.db === "bench-data" ? { kind: "bench-data" as const } : { kind: "bench-sqlite" as const, dir: path.join(dataDir, "bench-db") } } : {}),
             ...configLimits(args).run,
             ...(args.verifyAttempts !== undefined ? { verify: verifierOf(platform, args.verifyAttempts, deps.root) } : {}),

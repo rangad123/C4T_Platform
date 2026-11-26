@@ -78,6 +78,8 @@ export interface BenchOptions {
     jobTimeoutMs?: number;
     /** One test per replay job, the app started fresh before each, in every replay stage (the command's --isolated-replays). */
     isolatedReplays?: boolean;
+    /** Every start and reset of an app leaves its dirty set-up behind first (the command's --dirty-start, CP-F). */
+    dirtyStart?: boolean;
     /** For tests: how long a stopped job gets to wind down (default WIND_DOWN_MS), and the validation run of a continued app (default CONTINUED_VALIDATION_MS). */
     windDownMs?: number;
     continuedValidationMs?: number;
@@ -130,7 +132,7 @@ export async function runBenchmark(client: PlatformClient, o: BenchOptions): Pro
                 if (e) entries.push(e);
                 continue;
             }
-            const host = new BenchAppHost(app, port, undefined, o.login ?? "html", o.database);
+            const host = new BenchAppHost(app, port, undefined, o.login ?? "html", o.database, o.dirtyStart);
             const all = defectsOf(o.catalogue, app.id);
             const seeded = (o.defects ? all.filter((d) => o.defects!.includes(d.id)) : all).map((d) => d.id);
             const version = o.config.apps.find((a) => a.id === app.id)?.version ?? "unknown";
@@ -248,6 +250,9 @@ async function benchApp(
         onCreated: ({ at, tests }) => {
             collected = { at, tests: tests as TestRow[] };
         },
+        // B3 stability: the reruns run on the clean app (a saved test passed when made; a failed clean rerun is instability, not a seed).
+        // The replays restart the app with their own switches after this.
+        ...(o.mode === "discovery" ? { beforeReruns: () => host.start("none") } : {}),
         onProject: async (projectId) => {
             await attachRequirements(client, projectId, app, o.root, log);
             const roles = o.roles?.(app.id);

@@ -416,6 +416,7 @@ export default defineConfig({
             "tests/tcg-case-checks-unit.test.ts",
             "tests/n2e-maxlength-unit.test.ts",
             "tests/n2g-fp-unit.test.ts",
+            "tests/bench-dirty-start-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

@@ -89,7 +89,7 @@ import { withStatedSources } from "./api/stated-source.js";
 import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
 import { apiOnAmount } from "./findings/expectation.js";
 import { benchProbeFor } from "./database/bench-data.js";
-import { DB_CHECKS_MAX, integrityChecks, webPersistenceChecks, withDatabaseChecks } from "./database/checks.js";
+import { DB_CHECKS_MAX, duplicateChecksOf, integrityChecks, webPersistenceChecks, withDatabaseChecks } from "./database/checks.js";
 import type { DbSchema } from "./database/probe.js";
 import { proposeRowRelations, type RowRelationReport } from "./database/propose.js";
 import { dbServiceFor, type DbCheckService } from "./database/service.js";
@@ -1382,6 +1382,22 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 ctx.emit({ stage: "generation", kind: "api_mutating_skipped", message: `Skipped ${skippedMutating} state-changing endpoints (enable allowMutatingApiTests to include them)` });
             }
             for (const k of skipped) ctx.emit({ stage: "generation", kind: "api_endpoint_skipped", message: `${k.endpoint} is not tested: ${k.reason}`, data: { endpoint: k.endpoint } });
+            // 4b0c. C10 database checks: from the schema's declared keys, plus one AI proposal of rules over rows (names only). Data changes only:
+            // every check follows a write.
+            if (ownApiTests && dbProbe && dataChanges) {
+                try {
+                    const schema = await dbProbe.schema();
+                    // A customer's probe runs the key and persistence checks only: no relation over rows is proposed for it.
+                    const rows = dbProbe.rowRelations === false ? { report: { proposed: 0, kept: 0, dropped: [] } as RowRelationReport, checks: [] } : await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req), probe: dbProbe });
+                    if (rows.report.proposed || rows.report.error) ctx.emit({ stage: "generation", kind: "db_rules_proposed", ...(rows.report.error ? { level: "warn" as const } : {}), message: rows.report.error ?? `${rows.report.kept} of ${rows.report.proposed} proposed stored-data rules kept (${rows.report.dropped.length} dropped)` });
+                    db = { schema, absence: [...integrityChecks(schema).map((name) => ({ name })), ...rows.checks], budget: dbBudget };
+                } catch (e) {
+                    const why = `the database could not be read (${(e instanceof Error ? e.message : String(e)).slice(0, 200)})`;
+                    dbLayer = { unavailable: why };
+                    ctx.emit({ stage: "generation", kind: "db_checks_skipped", level: "warn", message: `Database checks skipped: ${why}` });
+                }
+            }
+
             const docs = new Map(apis.map((a) => [`${a.method} ${a.path}`, a]));
             for (const d of specs as DraftSpec[]) {
                 const endpointKey = d.title.split(":")[0]!;
@@ -1389,7 +1405,15 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const endpointDoc = ep ? { method: ep.method, path: ep.path, statuses: ep.statuses, requiresAuth: ep.requiresAuth, summary: ep.summary, spec: ep.spec } : undefined;
                 if (await carried(d, { endpointDoc })) continue;
                 const key = await sink.nextTestKey("API");
-                const spec = TestSpecSchema.parse({ ...d, testId: key });
+                // A documented 409 (a repeat, the same email in other letter case) gets the database's duplicate checks over the fields it
+                // sends, before its 409 assertion: an accepted repeat then fails at the database layer (L8, BS-17).
+                const dup = db && d.steps.some((x) => x.action === "assertResponse" && x.check === "status" && Number(x.expected) === 409) ? duplicateChecksOf(d.steps, db.absence) : [];
+                const steps = db && dup.length ? withDatabaseChecks(d.steps, db.schema, dup, db.budget) : d.steps;
+                if (steps.length > d.steps.length && dbLayer && "checks" in dbLayer) {
+                    dbLayer.checks += steps.length - d.steps.length;
+                    dbTests++;
+                }
+                const spec = TestSpecSchema.parse({ ...d, steps, testId: key });
                 await persistNew(spec, "playwright-api", "PENDING", undefined, { endpoint: endpointKey });
                 pending.push({ spec, framework: "playwright-api", endpointDoc });
             }
@@ -1453,22 +1477,6 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     const spec = TestSpecSchema.parse({ ...d, testId: await sink.nextTestKey("API") });
                     await persistNew(spec, "playwright-api", "PENDING", undefined, { stateful: true });
                     pending.push({ spec, framework: "playwright-api" });
-                }
-            }
-
-            // 4b0c. C10 database checks: from the schema's declared keys, plus one AI proposal of rules over rows (names only). Data changes only:
-            // every check follows a write.
-            if (ownApiTests && dbProbe && dataChanges) {
-                try {
-                    const schema = await dbProbe.schema();
-                    // A customer's probe runs the key and persistence checks only: no relation over rows is proposed for it.
-                    const rows = dbProbe.rowRelations === false ? { report: { proposed: 0, kept: 0, dropped: [] } as RowRelationReport, checks: [] } : await proposeRowRelations(ctx, { requirements: requirementList, schema, secrets: authoringSecretsOf(req), probe: dbProbe });
-                    if (rows.report.proposed || rows.report.error) ctx.emit({ stage: "generation", kind: "db_rules_proposed", ...(rows.report.error ? { level: "warn" as const } : {}), message: rows.report.error ?? `${rows.report.kept} of ${rows.report.proposed} proposed stored-data rules kept (${rows.report.dropped.length} dropped)` });
-                    db = { schema, absence: [...integrityChecks(schema).map((name) => ({ name })), ...rows.checks], budget: dbBudget };
-                } catch (e) {
-                    const why = `the database could not be read (${(e instanceof Error ? e.message : String(e)).slice(0, 200)})`;
-                    dbLayer = { unavailable: why };
-                    ctx.emit({ stage: "generation", kind: "db_checks_skipped", level: "warn", message: `Database checks skipped: ${why}` });
                 }
             }
 

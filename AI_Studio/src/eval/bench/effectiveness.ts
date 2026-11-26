@@ -5,7 +5,7 @@
  *   time to first confirmed seed   job start (the earliest `job_started` of the app's jobs) to the earliest moment the platform named a
  *                                  test that the replays confirmed against a seeded defect: an event naming it, else its first failure
  *   suite stability                the saved suite (tests that passed in the run that made them) over the harness's reruns of every
- *                                  created test (`--repeat`): passed runs / runs that ran; no AI
+ *                                  created test on the clean app (`--repeat`): passed runs / runs that ran
  *   workflow coverage              the exploration's coverage record (workflow steps exercised / steps), and the harness's own count
  *                                  (catalogue workflows a test reached / workflows)
  *   reproduction rate              the replays' (findings that failed again with the defects on / findings) and Phase 5's (findings
@@ -86,7 +86,8 @@ export function effectiveness(trial: BenchAppResult, saved: SavedTrial | undefin
         time = best ? { measured: true, ...best } : { measured: true, value: null, seed: null, testKey: null, note: anyConfirmed ? "No event or failure time names a confirmed test." : "No seed was confirmed." };
     }
 
-    // Stability: shortcut: reruns are on the trial's app (defects in), not a clean app; a saved test passed there when made, so a failed rerun is instability. Upgrade with a clean-app rerun stage in the harness.
+    // Stability: the harness reruns the created tests on the clean app (controller.ts beforeReruns); a saved test passed when made, so a
+    // failed rerun is instability. Results from before 2026-11-26 reran on the seeded app.
     let stability: Effectiveness["stability"];
     const suite = (entryTests ?? []).filter((t) => t.firstRun === "passed");
     const ran = suite.map((t) => ({ t, runs: t.reruns.filter((v) => v !== "not_run") }));

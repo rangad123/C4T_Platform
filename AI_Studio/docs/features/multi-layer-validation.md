@@ -39,3 +39,20 @@ Deploy the platform before the runner.
 
 Database checks reach the database through a service of the run on the platform's own machine, so tests that run on a runner skip
 their database steps with a note in the test's result.
+
+## Known limits
+
+- **Where the database checks sit.** In a test that changes data, the checks over the database's keys and stated rules run right after
+  its last write, before the API checks on that answer and any read after it, so a stored-data fault fails at the database check
+  (`src/engine/database/checks.ts`, `withDatabaseChecks`). A documented refusal of a repeat (HTTP 409) gets only the duplicate checks over
+  the fields it sends. A record that is stored correctly but missing from a list fails at the list check: the database check before it
+  passes, because the stored data is right.
+- **Sign-in limit checks are recognised by their tag.** A test counts as a sign-in limit check (and needs the risky-check gate) when it
+  carries the tag `rate-limiting`, as the generated check does (`src/engine/validation/risky.ts`). A hand-written test that repeats
+  sign-ins without that tag runs without the gate.
+- **The "fixture" gate is for test fixtures only.** The platform gives a job the gate "bench" (the benchmark's own server) or
+  "authorization" (a current client authorization), never "fixture" (`src/platform/job-runner.ts`, `riskyChecksGateOf`).
+- **Concurrency checks are capped per run and per endpoint.** At most 3 checks a run, one per endpoint: a workflow step and the create
+  endpoint of the same record can both be checked (`src/engine/api/concurrency.ts`).
+- **Older runners skip risky checks with the general sentence.** A runner that predates the gate field ignores it, so its risky tests
+  skip with "Not run: it sends risky writes ..." and no sentence says the runner needs updating.

@@ -46,6 +46,8 @@ export interface HarnessOptions {
     onCreated?: (created: { projectId: string; at: string; tests: Array<Record<string, unknown>> }) => void | Promise<void>;
     /** Called once the project exists and before anything explores it (the benchmark imports the app's requirements document here). */
     onProject?: (projectId: string) => Promise<void>;
+    /** Called once after the creation and before the reruns (the benchmark restarts its app clean here, so stability is read there). */
+    beforeReruns?: () => Promise<void>;
 }
 
 const DONE = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
@@ -193,6 +195,7 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
             const firstOf = new Map<string, { state: string; reason?: string }>((first.tests ?? []).map((t: { id: string; state: string; reason?: string }) => [t.id, t]));
             const reruns = new Map<string, Verdict[]>(list.map((t) => [t.id, []]));
             const reasons = new Map<string, string | undefined>(list.map((t) => [t.id, firstOf.get(t.id)?.reason]));
+            if (o.repeat && list.length) await o.beforeReruns?.();
             for (let i = 1; i <= o.repeat && list.length; i++) {
                 log(`  rerun ${i} of ${o.repeat}...`);
                 const r = await client.call("POST", `/api/projects/${project.id}/runs`, { testIds: list.map((t) => t.id) });

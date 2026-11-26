@@ -38,9 +38,11 @@ const r = (s: string) => new RegExp(s, "is");
 
 /**
  * Per seed: the requirement of the bench's requirements document it breaks (the doc's own numbering, which the answer keys do not use)
- * and the signature of its wrong behaviour. bench-shop's are ROW233's tally (hand-checked there, ±10% recall).
- * shortcut: bench-rbac's signatures are written from the catalogue's wording and not yet checked on a trial (rbac trials stopped before
- * replays); check them by hand on the first rbac ladder trial.
+ * and the signature of its wrong behaviour. bench-shop's are ROW233's tally (hand-checked there, ±10% recall). bench-rbac's were
+ * hand-checked on five paid rbac trials (2026-11-23/24, 98 author explanations): every explanation of BR-01, BR-07 and BR-08 behaviour
+ * matches, no other explanation does. No author explanation in them showed BR-02 … BR-06 (those seeds were caught only
+ * by the deterministic checks, which keep no explanation), so their signatures are tightened from the catalogue's wording to match none
+ * of the 98 that do not describe them (the owner's own edits, the admin's People page).
  */
 export const SEED_SIGNS: Record<string, { requirement: string; sign: readonly Cond[] }> = {
     "BS-01": { requirement: "4.1", sign: [["both", r("save10|discount")], ["obs", r("(−|-)\\s?\\$\\d")], ["obs", r("10 ?% of|instead of|not (the )?(−|-)?\\$|expected (−|-)?\\$|which (is|does) not|too small|first (cart )?line|only th|does not match|not 10|is not 10|rather than")]] },
@@ -55,14 +57,14 @@ export const SEED_SIGNS: Record<string, { requirement: string; sign: readonly Co
     "BS-10": { requirement: "5.4", sign: [["obs", r("checkout/review")], ["obs", r('did not (send|redirect|go back)|does not send|did NOT send|not redirect|showed the .{0,30}review your order|empty "?deliver to|place order" button with an empty|stayed on /checkout/review|instead of sending')]] },
     "BS-11": { requirement: "4.5", sign: [["obs", r("exactly \\$?50(\\.00)?|reaches exactly|\\$50\\.00 subtotal|subtotal (of |is |reaches )?\\$50\\.00|at \\$50\\.00")], ["obs", r("(shipping|charge).{0,60}\\$5\\.00|\\$5\\.00.{0,40}shipping|still (shows|charges) shipping|not free|instead of free")]] },
     "BS-12": { requirement: "6.3", sign: [["obs", r("orders? (list|page)|/orders")], ["obs", r("(does not|doesn.t|did not|never) (list|show|include|contain|appear)|is missing from|not listed|not in the (orders )?list|missing: the list|is not listed|newest row is|never appears in|omits")], ["obs", r("ord-1001"), false]] },
-    "BR-01": { requirement: "3.8", sign: [["obs", r("(another|other|someone else.s|not (the )?owner|not shared).{0,200}note.{0,200}(opened|shown|displayed|visible|loaded|could (read|open|see)|200)")]] },
-    "BR-02": { requirement: "3.10", sign: [["obs", r("(shared|not the owner|non-?owner).{0,250}(changed|updated|saved|edit(ed)? .{0,40}(succeed|accepted)|200)")]] },
-    "BR-03": { requirement: "5.3", sign: [["both", r("people|users|roles")], ["obs", r("(user|manager|not an admin|non-?admin).{0,250}(list|emails|returned 200|got 200|received the|200 with)")]] },
+    "BR-01": { requirement: "3.8", sign: [["obs", r("(another|other|someone else.s|not (the )?owner|not shared).{0,200}note.{0,200}(opened|shown|showed|shows|displayed|visible|loaded|could (read|open|see)|200)")]] },
+    "BR-02": { requirement: "3.10", sign: [["obs", r("\\b(as|signed in as|the) (colleague|person (it|the note) (is|was) shared with|shared (user|person|account)|non-?owner|account (it|the note) (is|was) shared with)[^.]{0,200}(PUT|changed|updated|saved)[^.]{0,100}(200|accepted|succeeded|was saved|took effect)")]] },
+    "BR-03": { requirement: "5.3", sign: [["obs", r("/api/admin/users|people (list|api)|list of (people|accounts|users|everyone)")], ["obs", r("(user|manager|non-?admin|not an admin)[^.]{0,200}(200|received|returned|got)[^.]{0,80}(list|emails|roles)")]] },
     "BR-04": { requirement: "5.4", sign: [["obs", r("manager.{0,250}(changed|made .{0,30}admin|role (became|changed|is now)|accepted|200)")]] },
     "BR-05": { requirement: "2.12", sign: [["obs", r("(sign(ed|ing)? out|logout|log(ged)? out).{0,300}(still (works|worked|valid|gives|gave)|old (session|cookie).{0,80}(works|worked|accepted|200)|200)")]] },
     "BR-06": { requirement: "4.6", sign: [["obs", r("(stop(ped)? sharing|removed|unshar).{0,300}(still (read|open|see|access)|could (still )?(read|open)|200)")]] },
-    "BR-07": { requirement: "2.7", sign: [["title", r("password")], ["obs", r("(short|3.character|three.character|fewer than 8|less than 8).{0,250}(accepted|created|signed in|was not refused|no (error|message))")]] },
-    "BR-08": { requirement: "3.4", sign: [["title", r("title")], ["obs", r("(empty|blank|no|without( a)?) title.{0,250}(created|accepted|201|saved|was not refused|no (error|message))")]] },
+    "BR-07": { requirement: "2.7", sign: [["both", r("password")], ["obs", r("(short|[1-7].character|three.character|seven.character|fewer than 8|less than 8).{0,250}(accepted|created|signed in|was not refused|no (error|message)|not enforced)|accepted a password (below|under|shorter than)")]] },
+    "BR-08": { requirement: "3.4", sign: [["both", r("title")], ["obs", r("(empty|blank|no|without( a)?) title.{0,250}(created|accepted|201|saved|was not refused|no (error|message))|(saved|created) (the |a )?note (with (an? )?(empty|blank) title|without (a )?title)|\\(untitled\\)")]] },
 };
 
 /** The layer a catalogue category shows in, for the extension seeds (catalogue 2026-11-21.1); other categories show on the page. */

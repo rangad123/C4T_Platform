@@ -17,9 +17,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { parseOpenApi } from "../src/engine/api/openapi.js";
+import { generateApiSpecs } from "../src/engine/api/test-specs.js";
 import { generateApiWorkflowSpecs } from "../src/engine/api/workflows.js";
 import { benchDataProbe, registerBenchProbe } from "../src/engine/database/bench-data.js";
-import { integrityChecks, withDatabaseChecks } from "../src/engine/database/checks.js";
+import { duplicateChecksOf, integrityChecks, withDatabaseChecks } from "../src/engine/database/checks.js";
 import type { DatabaseProbe } from "../src/engine/database/probe.js";
 import { proposeRowRelations } from "../src/engine/database/propose.js";
 import { startDbCheckService } from "../src/engine/database/service.js";
@@ -78,6 +79,16 @@ const pick = (all: Awaited<ReturnType<typeof chains>>, title: string) => {
     if (!d) throw new Error(`no workflow "${title}"`);
     return d;
 };
+/** The C2 documented cases of the app, with the requirement that e-mails ignore letter case (bench-shop-requirements.md 2.6). */
+async function documentedCases(app: BenchApp, port: number) {
+    const requirementsText = "2.6 Email addresses are compared without regard to letter case or surrounding spaces.";
+    return generateApiSpecs(parseOpenApi(await benchOpenApi(app), `http://127.0.0.1:${port}/openapi.json`).operations, { allowMutating: true, maxPerEndpoint: 6, requirementsText }).specs;
+}
+const documented409 = (all: Awaited<ReturnType<typeof documentedCases>>) => {
+    const d = all.find((s) => s.title.startsWith("POST /api/register") && /already used, in other letter case/.test(s.title));
+    if (!d) throw new Error("no documented letter-case case for POST /api/register");
+    return d;
+};
 /** The checks the engine adds for this app (its schema's keys, and the scripted rule proposal over its names). */
 async function checksFor(probe: DatabaseProbe) {
     const schema = await probe.schema();
@@ -92,11 +103,17 @@ const SHOP: Plan = {
     credentials: { username: "alice@example.test", password: "Password1!" },
     specs: async (probe) => {
         const all = await chains("bench-shop", 9611);
+        const all409 = await documentedCases("bench-shop", 9611);
         const c = await checksFor(probe);
         return {
             profile: withChecks("API-001", pick(all, "Workflow: what is written is read back (PUT /api/profile"), c),
             orders: withChecks("API-002", pick(all, "Workflow: order lifecycle"), c),
             registerAgain: handSpec("API-003", "Register an existing e-mail in another case", withDatabaseChecks([req("POST", "/api/register", { auth: "none", body: { name: "Alice Again", email: "ALICE@example.test", password: "Password1!" } })], c.schema, c.absence, c.budget)),
+            // The documented 409 case the engine generates (C2), with the duplicate checks the orchestrator gives it (L8).
+            caseAgain: (() => {
+                const d = documented409(all409);
+                return TestSpecSchema.parse({ ...d, testId: "API-004", steps: withDatabaseChecks(d.steps, c.schema, duplicateChecksOf(d.steps, c.absence), c.budget) });
+            })(),
         };
     },
 };
@@ -142,7 +159,7 @@ async function runOn(plan: Plan, defects: string): Promise<{ verdicts: Record<st
 describe("the stored-data seeds through the generated database checks", () => {
     it("bench-shop clean: every test is green, and each carries its database checks", async () => {
         const { verdicts, specs } = await runOn(SHOP, "none");
-        expect(verdicts).toEqual({ profile: "green", orders: "green", registerAgain: "green" });
+        expect(verdicts).toEqual({ profile: "green", orders: "green", registerAgain: "green", caseAgain: "green" });
         const names = (s: TestSpec) => s.steps.flatMap((x) => (x.action === "assertResponse" && x.check === "dbCheck" ? [x.name] : []));
         expect(names(specs.profile!)).toContain("exists users where name = 'Test name {{unique}}w', address = 'test-address-{{unique}}w'");
         expect(names(specs.orders!)).toEqual(expect.arrayContaining(["exists orders where id = '{{orderId}}'", "exists orders where id = '{{orderId2}}'", "orphans cart_items(cartId) -> carts(id)", "duplicates users(email) any case", "relation order_lines: lineTotal == unitPrice * quantity", "relation orders: total == subtotal - discount + shipping"]));
@@ -173,6 +190,8 @@ describe("the stored-data seeds through the generated database checks", () => {
     it("BS-17: registering an existing e-mail in another case is red on the duplicate check", async () => {
         const { verdicts } = await runOn(SHOP, "BS-17");
         expect(verdicts.registerAgain).toMatch(/^red at dbCheck duplicates users\(email\) any case: .*1 more row/);
+        // L8: the generated documented case fails at the database check, not at its 409 assertion after it.
+        expect(verdicts.caseAgain).toMatch(/^red at dbCheck duplicates users\(email\) any case: .*1 more row/);
     }, 300_000);
 
     it("bench-rbac: green clean; BR-11 is red on the orphan check (note_shares → notes)", async () => {

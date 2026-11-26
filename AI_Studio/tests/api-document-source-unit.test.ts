@@ -28,6 +28,16 @@ describe("withStatedSources", () => {
         expect(sources(s)).toEqual([null, "API document: POST /api/items 400", null, "API document: GET /api/items/{id} 200", "API document: GET /api/items/{id} 200"]);
     });
 
+    it("credits the schema after a documented refusal to that refusal, not to the first 2xx", () => {
+        const s = spec([
+            { action: "request", method: "POST", path: "/api/items", body: { qty: -1 } },
+            { action: "assertResponse", check: "status", expected: 400 },
+            { action: "assertResponse", check: "matchesSchema", schema: { type: "object" } },
+        ]);
+        withStatedSources(s, APIS);
+        expect(sources(s)).toEqual([null, "API document: POST /api/items 400", "API document: POST /api/items 400"]);
+    });
+
     it("names nothing for an undocumented status, an endpoint only seen on the wire, or a status class", () => {
         const s = spec([
             { action: "request", method: "POST", path: "/api/items" },

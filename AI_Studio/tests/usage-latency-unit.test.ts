@@ -51,6 +51,37 @@ describe("percentile", () => {
 });
 
 describe("the job's AI call summary", () => {
+    it("times the authoring agent's direct model steps (P7-1: authoring latency was not recorded)", async () => {
+        const clock = { t: 1_000_000 };
+        const steps = [400, 100, 250];
+        const inner: LlmClient = {
+            modelName: "m",
+            usage: { inputTokens: 0, outputTokens: 0 },
+            model: {
+                specificationVersion: "v3",
+                provider: "scripted",
+                modelId: "m",
+                supportedUrls: {},
+                doGenerate: async () => {
+                    clock.t += steps.shift()!;
+                    return { content: [], finishReason: "stop", usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } }, warnings: [] };
+                },
+                doStream: async () => {
+                    throw new Error("no streaming here");
+                },
+            } as never,
+            object: (async () => ({})) as unknown as LlmClient["object"],
+            text: async () => "",
+        };
+        const events: EngineEvent[] = [];
+        const meter = new JobMeter({ backend: backend(), jobId: "j", projectId: "p", emit: (e) => void events.push(e), now: () => new Date(clock.t) });
+        const model = meter.wrap(inner).model as unknown as { doGenerate: (o: unknown) => Promise<unknown> };
+        for (let i = 0; i < 3; i++) await model.doGenerate({ prompt: [] });
+        meter.finish();
+        const purposes = (events.find((e) => e.kind === "ai_call_summary")!.data as { purposes: Record<string, { calls: number; latencyMs: { p50: number; p95: number } }> }).purposes;
+        expect(purposes.authoring).toMatchObject({ calls: 3, latencyMs: { p50: 250, p95: 400 } });
+    });
+
     it("gives back the scripted latency, output tokens and repairs per purpose", async () => {
         const clock = { t: 1_000_000 };
         const planning: Step[] = [

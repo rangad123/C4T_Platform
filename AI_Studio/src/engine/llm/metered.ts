@@ -180,16 +180,17 @@ export class JobMeter {
             wrapGenerate: async ({ doGenerate }: { doGenerate: () => PromiseLike<any> }) => {
                 const purpose = modelCallPurpose.getStore() ?? "authoring";
                 const token = this.enter(purpose, 0);
+                const t0 = this.now().getTime();
                 const slot: { model?: string } = {};
                 try {
                     const out = await answeredSlot.run(slot, () => doGenerate());
                     this.answered(slot);
-                    // Tokens arrive through the client's `usage` (the agent adds each step's numbers); only the call is counted here.
-                    this.leave(token, purpose, { ok: true, images: 0, count: true, estimate: false });
+                    // Tokens arrive through the client's `usage` (the agent adds each step's numbers); the call and its time are counted here.
+                    this.leave(token, purpose, { ok: true, images: 0, count: true, estimate: false, ms: this.now().getTime() - t0 });
                     return out;
                 } catch (e) {
                     this.answered(slot);
-                    this.leave(token, purpose, { ok: false, images: 0, count: true, estimate: false });
+                    this.leave(token, purpose, { ok: false, images: 0, count: true, estimate: false, ms: this.now().getTime() - t0 });
                     throw e;
                 }
             },
@@ -257,7 +258,7 @@ export class JobMeter {
             const repair = repairOf(this.seen, this.client!.usage);
             this.seen = snapshot(this.client!.usage);
             this.record(purpose, { calls: r.count ? 1 : 0, failedCalls: r.ok ? 0 : 1, inputTokens, outputTokens, images: r.images, estimatedCalls: estimated ? 1 : 0, ...cacheOf(delta), ...repair });
-            // The authoring agent's direct model steps have no time of their own here (`ms` missing): only whole calls are sampled.
+            // Every call is sampled, the authoring agent's direct model steps included (the middleware times them).
             if (r.ms !== undefined) this.samples.push({ purpose, ms: r.ms, outputTokens, ok: r.ok, ...repair });
             this.callsSinceRefresh++;
             // A cap can be reached by this very call: say so now rather than at the next one.

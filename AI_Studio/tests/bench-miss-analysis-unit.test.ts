@@ -117,3 +117,28 @@ describe("mainStage / mainStages", () => {
         expect(got).toEqual({ A: "not_executed", B: "not_generated" });
     });
 });
+
+describe("bench-rbac signatures (hand-checked on five paid rbac trials, B4)", () => {
+    const br = ["BR-01", "BR-02", "BR-03", "BR-04", "BR-05", "BR-06", "BR-07", "BR-08"];
+    const rbac = { seededDefects: br, defects: br.map((id) => ({ id, category: "x", detected: false })), findings: [] } as unknown as BenchAppResult;
+    // Explanations as the paid trials' authors wrote them (shortened): what each one saw.
+    const sees: Array<[string, string, string]> = [
+        ["BR-07", 'As stated: rule "R-1"', 'Rule R-1 (minimum password length 8) is not enforced at registration. I registered with a 7-character password and was signed in.'],
+        ["BR-07", "Registration refuses a password shorter than 8 characters", "no error was shown; the server accepted a password below the 8-character minimum."],
+        ["BR-08", "Title made of spaces only is refused", 'no such message appeared; the app saved the note with an empty title, showed the heading "(untitled)".'],
+        ["BR-08", 'As stated: rule "R-2"', 'Rule R-2 ("Every note has a title.") is not kept: a note was created as "(untitled)".'],
+        ["BR-01", "Unshared note shows Note not found to another user", "A colleague account (not the owner, not on the sharing list) opened /notes/n48. Instead of 'Note not found', the page showed the full note."],
+        // Not seeds: the owner's own edit, the admin's own People page, an 8-character password that works.
+        ["", "Saving changes shows Saved and keeps the note's sharing", 'Created a note, shared it with a colleague account, changed the title and clicked Save changes: the status "Saved." appeared.'],
+        ["", "People page lists every account with name, email and role", 'Signed in as the admin, opened People (/admin/users). The table lists Ana Silva (user), Ben Carter (user) and Mia Novak (manager).'],
+        ["", "Register succeeds with a password of exactly 8 characters", "Registration with an 8-character password succeeded: the app signed in."],
+    ];
+    const saved: SavedTrial = { tests: sees.map(([, title, obs], i) => test(`r${i}`, `WEB-0${i}`, title, obs)), events: [], rules: [], coverage: null, layers: null };
+    it("each explanation is a sighting of the seed it describes, and of no other", () => {
+        const m = missAnalysis(rbac, saved, []);
+        const sightedBy = Object.fromEntries(m.seeds.map((s) => [s.seed, s.sightings.map((x) => x.testKey).sort()]));
+        const want: Record<string, string[]> = {};
+        sees.forEach(([seed], i) => seed && (want[seed] = [...(want[seed] ?? []), `WEB-0${i}`].sort()));
+        for (const seed of br) expect(sightedBy[seed], seed).toEqual(want[seed] ?? []);
+    });
+});
