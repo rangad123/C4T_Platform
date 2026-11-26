@@ -62,7 +62,8 @@ describe("an API agent run tests the API only", () => {
 describe("the other agents' runs do their own work only", () => {
     const OWN: Record<string, { targets: string[]; on: string[] }> = {
         accessibility: { targets: ["web"], on: ["accessibility"] },
-        security: { targets: ["web"], on: ["securityChecks", "accessChecks"] },
+        // Owner 2026-11-26: its access checks of API calls need the API target too; the API agent's tests stay off.
+        security: { targets: ["web", "api"], on: ["securityChecks", "accessChecks"] },
         "responsive-ui": { targets: ["web"], on: ["visual"] },
         ux: { targets: ["web"], on: ["healthChecks"] },
         // Its timings of safe API calls and its load check need the API target; the API tests stay off.

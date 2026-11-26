@@ -285,4 +285,23 @@ describe("the Security Testing Agent's outcome", () => {
         // The critical and high problems are not hidden behind "no verified findings" (H2).
         expect(ws.body.agents.find((a: any) => a.id === "security").headline).toBe("2 critical, 1 high, 1 medium, 1 access problem not verified yet, 2 of 9 checks passed");
     });
+
+    // Owner 2026-11-26: the Security agent also tests the API. Its API access checks sit beside the page ones, each saying which it is.
+    it("tells its API access checks from its page ones", async () => {
+        const repo = platform.repo;
+        const hp = repo.createProject({ name: "API and pages", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await testingAgentsOf(platform).set(hp, ["security"] as never, "test");
+        const appId = repo.createApplication(hp, "http://127.0.0.1:6534", { ...DEFAULT_JOB_OPTIONS });
+        const suite = repo.getOrCreateSuite(hp, "General", "general");
+        const j = (await repo.createJob(hp, appId, { ...DEFAULT_JOB_OPTIONS, agentId: "security" } as never)).id;
+        const apiCheck = TestSpecSchema.parse({ ...spec("API-010", "A visitor cannot call GET /api/admin/users", [{ action: "request", method: "GET", path: "/api/admin/users", auth: "none", description: "Call it signed out" }, { action: "assertResponse", check: "statusDenied", expected: "{}", description: "Refused" }]), tags: ["security", "access-control", "api"] });
+        repo.insertTest({ projectId: hp, suiteId: suite, jobId: j, spec: apiCheck, framework: "playwright-api", validationStatus: "VALIDATED", meta: { access: true } });
+        repo.insertTest({ projectId: hp, suiteId: suite, jobId: j, spec: access, framework: "playwright", validationStatus: "VALIDATED", meta: { access: true } });
+        repo.insertTest({ projectId: hp, suiteId: suite, jobId: j, spec: headers, framework: "playwright-api", validationStatus: "VALIDATED", meta: { security: true } });
+        repo.setJobStatus(j, "COMPLETED");
+        for (const url of [`/api/projects/${hp}/workspace/security/outcome`, `/api/projects/${hp}/workspace/security/outcome?run=${j}`]) {
+            const by = Object.fromEntries((await call(url)).body.checks.map((c: any) => [c.testKey, c.layer]));
+            expect(by).toEqual({ "API-010": "api", "WEB-001": "web", "API-001": "web" });
+        }
+    });
 });

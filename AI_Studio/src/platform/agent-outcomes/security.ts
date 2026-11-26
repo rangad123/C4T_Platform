@@ -38,6 +38,8 @@ export interface SecurityCheckItem {
     testKey: string;
     title: string;
     area: SecurityArea;
+    /** What it checks: an API call (an access check of the API), or a page and the site's answers. */
+    layer: "api" | "web";
     result: CheckResult;
     /** Why it found a problem or could not check, in the run's words. */
     reason: string | null;
@@ -180,6 +182,7 @@ async function securityOutcome(ctx: AgentOutcomeCtx, runIds: readonly string[], 
             testKey: t.testKey,
             title: t.title,
             area,
+            layer: area === "access" && t.spec.tags.includes("api") ? "api" : "web",
             result,
             reason,
             finding: f ? { id: f.id, state: f.state, label: STATE_LABEL[f.state], verified } : null,

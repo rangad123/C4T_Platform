@@ -40,6 +40,8 @@ export interface ApiTestRow {
     result: ApiResult;
     /** The run this row comes from. */
     jobId: string;
+    /** The statuses that run saw for its endpoint (the report's and the Workspace card's "actual"). */
+    answered: number[];
     /** A failed test's evidence; null otherwise. */
     evidence: ApiEvidence | null;
 }
@@ -60,6 +62,8 @@ export interface ApiFinding {
 
 export interface ApiOutcome {
     runs: number;
+    /** One run's report (`?run=`): which run, numbered as in the Runs list. */
+    run?: { jobId: string; number: number; status: JobRow["status"]; createdAt: string };
     /** The card's line, said again above the table (apiHeadline). */
     headline: string;
     /** The counts the card's headline and the Outcome tab both say. */
@@ -104,6 +108,7 @@ function rowOf(t: TestRow, job: JobRow, ops: Record<string, { statuses: number[]
     const reason = t.validationReason ?? "";
     const contract: ContractMatch = reason.includes(CONTRACT_FAILURE_PREFIX) ? "differs" : hasContract(t) && t.validationStatus === "VALIDATED" ? "matches" : "not-checked";
     const result = RESULT[t.validationStatus] ?? "not-run";
+    const answered = statusesOf(ops, method, path);
     const body = req?.body === undefined ? null : clip(typeof req.body === "string" ? req.body : JSON.stringify(req.body, null, 2), 2000);
     return {
         testId: t.id,
@@ -116,9 +121,10 @@ function rowOf(t: TestRow, job: JobRow, ops: Record<string, { statuses: number[]
         contractNote: contract === "differs" ? contractNote(reason) : null,
         result,
         jobId: job.id,
+        answered,
         evidence:
             result === "fail"
-                ? { request: { method: req?.method ?? method, path: req?.path ?? path, query: req?.query ?? null, body }, response: { statuses: statusesOf(ops, method, path), reason: clip(reason.trim(), 1500) } }
+                ? { request: { method: req?.method ?? method, path: req?.path ?? path, query: req?.query ?? null, body }, response: { statuses: answered, reason: clip(reason.trim(), 1500) } }
                 : null,
     };
 }
@@ -172,8 +178,9 @@ export function apiHeadline(o: Pick<ApiOutcome, "summary" | "findings">): string
 export const outcome: AgentOutcomeModule<ApiOutcome> = {
     outcome: (ctx) => build(ctx, ctx.runs),
     runOutcome: async (ctx, jobId) => {
-        const run = ctx.runs.find((j) => j.id === jobId);
-        return run && build(ctx, [run]);
+        const at = ctx.runs.findIndex((j) => j.id === jobId);
+        const run = ctx.runs[at];
+        return run && { ...(await build(ctx, [run])), run: { jobId: run.id, number: ctx.runs.length - at, status: run.status, createdAt: run.createdAt } };
     },
     headline: (o) => (o.runs ? o.headline : null),
 };

@@ -1,4 +1,5 @@
 import { ArrowLeft, ShieldCheck, ShieldOff, Sparkles } from "lucide-react";
+import { Fragment } from "react";
 import type { Job } from "../../../api";
 import { JobProgress } from "../../../components/JobProgress";
 import { Badge, EmptyState, ErrorState, LinkButton, ListSkeleton, Metric } from "../../../components/ui";
@@ -7,7 +8,7 @@ import { isActive } from "../../../lib/labels";
 import { useFetch, useOnFinish } from "../../../lib/hooks";
 import { routes } from "../../../lib/router";
 import { useCan } from "../../auth/permissions";
-import type { AgentInputs } from "../../requirements/AgentInputs";
+import { agentInputsHref, type AgentInputs } from "../../requirements/AgentInputs";
 import { sec } from "../../security/security";
 import type { AgentView } from "../registry";
 
@@ -21,6 +22,8 @@ interface Check {
     testKey: string;
     title: string;
     area: Area;
+    /** An access check of an API call, or of a page (every other check reads the site's answers). */
+    layer: "api" | "web";
     result: "passed" | "problem" | "could-not-check" | "not-run";
     reason: string | null;
     finding: { id: string; state: string; label: string; verified: boolean } | null;
@@ -238,9 +241,16 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
                         <p className="t-meta" style={{ margin: 0 }}>
                             {a.what}
                         </p>
-                        <ul className="divided" style={LIST}>
-                            {list.map((c) => (
-                                <li key={c.testId} className="stack-sm" style={{ padding: "8px 0" }} data-testid="security-check">
+                        {(a.id === "access" ? (["web", "api"] as const).map((l) => ({ l, part: list.filter((c) => c.layer === l) })).filter((g) => g.part.length) : [{ l: null, part: list }]).map(({ l, part }) => (
+                            <Fragment key={l ?? "all"}>
+                                {l && (
+                                    <h4 className="t-meta" style={{ margin: "8px 0 0", fontWeight: "var(--fw-semibold)" }} data-testid={`security-access-${l}`}>
+                                        {l === "api" ? "API calls" : "Pages"}
+                                    </h4>
+                                )}
+                                <ul className="divided" style={LIST}>
+                                    {part.map((c) => (
+                                        <li key={c.testId} className="stack-sm" style={{ padding: "8px 0" }} data-testid="security-check">
                                     <div className="row" style={ROW}>
                                         {name(c)}
                                         {c.dismissed ? <Badge tone="neutral">Not a bug</Badge> : <Badge tone={RESULT[c.result].tone}>{RESULT[c.result].label}</Badge>}
@@ -257,8 +267,10 @@ function OutcomeBody({ projectId, run }: { projectId: string; run?: string }) {
                                         </span>
                                     )}
                                 </li>
-                            ))}
-                        </ul>
+                                    ))}
+                                </ul>
+                            </Fragment>
+                        ))}
                     </section>
                 );
             })}
@@ -299,6 +311,10 @@ function Setup({ projectId }: { projectId: string }) {
                 <dt>Application address</dt>
                 <dd>
                     {d.application?.url || "None yet"} · <a href={routes.projectSettings(projectId, "general")}>Settings → General</a>
+                </dd>
+                <dt>API calls</dt>
+                <dd>
+                    {d.openApiUrl ? `Its access checks also call the API described at ${d.openApiUrl}` : "Its access checks call the API calls found so far; an OpenAPI document adds the rest"} · <a href={agentInputsHref(projectId)}>Requirements</a>
                 </dd>
                 <dt>Test accounts</dt>
                 <dd>

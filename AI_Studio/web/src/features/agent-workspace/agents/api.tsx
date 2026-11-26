@@ -1,7 +1,8 @@
-import { Check, ChevronRight, LoaderCircle, Minus, Network, Play, X } from "lucide-react";
+import { Check, ChevronRight, Download, LoaderCircle, Minus, Network, Play, X } from "lucide-react";
 import { Fragment, useState } from "react";
-import type { Job, PhaseKey, Severity } from "../../../api";
-import { Badge, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, SeverityBadge } from "../../../components/ui";
+import { downloadFrom, type Job, type PhaseKey, type Severity } from "../../../api";
+import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, SeverityBadge } from "../../../components/ui";
+import { useCan } from "../../auth/permissions";
 import { useFetch, useOnFinish } from "../../../lib/hooks";
 import { friendlyError, isActive, progressPercent, type Tone } from "../../../lib/labels";
 import { routes } from "../../../lib/router";
@@ -9,6 +10,7 @@ import { StopRun } from "../../runs/StopDialog";
 import { agentInputsHref, type AgentInputs } from "../../requirements/AgentInputs";
 import { RelTime } from "../../runs/RunTime";
 import type { AgentView } from "../registry";
+import type { WorkspaceAgent } from "../workspace";
 import { RunStatus } from "../RunStatus";
 import "../../environments/environments.css";
 
@@ -27,12 +29,16 @@ interface ApiTestRow {
     contractNote: string | null;
     result: Result;
     jobId: string;
+    /** The statuses the run saw for this endpoint. */
+    answered: number[];
     evidence: { request: { method: string; path: string; query: Record<string, string> | null; body: string | null }; response: { statuses: number[]; reason: string } } | null;
 }
 
 /** GET /api/projects/:id/workspace/api/outcome (src/platform/agent-outcomes/api.ts). */
 interface ApiOutcome {
     runs: number;
+    /** One run's report (?run=): which run, numbered as in the Runs list. */
+    run?: { jobId: string; number: number; status: string; createdAt: string };
     headline: string;
     summary: { tests: number; passed: number; failed: number; notRun: number };
     tests: ApiTestRow[];
@@ -116,6 +122,86 @@ function TestRow({ t }: { t: ApiTestRow }) {
     );
 }
 
+const answeredText = (s: number[]) => (s.length ? `HTTP ${s.join(", ")}` : "no answer recorded");
+
+/** The report as a file (GET …/workspace/api/report, the same page as HTML or PDF), of one run or of every run; for who may export. */
+function ReportDownload({ projectId, run }: { projectId: string; run?: string }) {
+    const can = useCan();
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState<"html" | "pdf" | null>(null);
+    if (!can("ai_studio.reports.export")) return null;
+    const get = async (format: "html" | "pdf") => {
+        setError(null);
+        setBusy(format);
+        try {
+            await downloadFrom(`/projects/${projectId}/workspace/${ID}/report?${run ? `run=${run}&` : ""}format=${format}`, `api-report.${format}`);
+        } catch (e) {
+            setError(friendlyError((e as Error).message).body ?? (e as Error).message);
+        } finally {
+            setBusy(null);
+        }
+    };
+    return (
+        <div className="stack-sm">
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <Button size="sm" icon={Download} loading={busy === "html"} onClick={() => void get("html")}>
+                    Download report (web page)
+                </Button>
+                <Button size="sm" icon={Download} loading={busy === "pdf"} onClick={() => void get("pdf")}>
+                    Download report (PDF)
+                </Button>
+            </div>
+            {error && (
+                <Callout tone="danger" title="The report could not be downloaded">
+                    {error}
+                </Callout>
+            )}
+        </div>
+    );
+}
+
+/** The Workspace card's report: the latest finished run's counts and its failed endpoints (method, path, expected, actual), linking to that run. */
+function Card({ projectId, agent }: { projectId: string; agent: WorkspaceAgent }) {
+    const o = useFetch<ApiOutcome>(agent.runs ? `/projects/${projectId}/workspace/${ID}/outcome?run=latest` : null);
+    useOnFinish(agent.status === "running", () => void o.reload());
+    const r = o.data?.run;
+    if (!o.data || !r)
+        return agent.headline ? (
+            <p className="ws-headline" data-testid="agent-headline">
+                {agent.headline}
+            </p>
+        ) : null;
+    const failed = o.data.tests.filter((t) => t.result === "fail");
+    const MAX = 5;
+    return (
+        <div className="stack-sm" data-testid="api-latest-report">
+            <p className="ws-headline" data-testid="agent-headline">
+                {o.data.headline}
+            </p>
+            <p className="t-meta" style={{ margin: 0 }}>
+                Latest report: Run {r.number}, started <RelTime iso={r.createdAt} />
+            </p>
+            {failed.length > 0 && (
+                <ul className="ws-needs" data-testid="api-failed" aria-label="Failed endpoints">
+                    {failed.slice(0, MAX).map((t) => (
+                        <li key={t.testId}>
+                            <span className="mono" style={{ color: "var(--text-primary)", overflowWrap: "anywhere" }}>
+                                {t.method} {t.path}
+                            </span>
+                            <span style={{ display: "block" }}>
+                                Expected {t.expectedStatus ? `HTTP ${t.expectedStatus}` : "any answer"} · Got {answeredText(t.answered)}
+                                {t.contractNote ? `: ${t.contractNote}` : ""}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {failed.length > MAX && <p className="t-meta" style={{ margin: 0 }}>and {failed.length - MAX} more failed</p>}
+            <a href={routes.projectAgentRun(projectId, ID, r.jobId)}>Open the full report</a>
+        </div>
+    );
+}
+
 /** The API tests (PASS or FAIL) and the verified findings, of every run or of one. */
 function Body({ projectId, run, active }: { projectId: string; run?: string; active: boolean }) {
     const o = useFetch<ApiOutcome>(`/projects/${projectId}/workspace/${ID}/outcome${run ? `?run=${run}` : ""}`, () => (active ? 3000 : null));
@@ -139,6 +225,7 @@ function Body({ projectId, run, active }: { projectId: string; run?: string; act
                     <span className="ws-headline" data-testid="api-headline">{o.data.headline}</span>
                 </div>
                 <p className="t-meta" style={{ margin: 0 }}>Contract: whether the answer matches the OpenAPI document. Open a FAIL to see the request and the response.</p>
+                <ReportDownload projectId={projectId} run={run} />
                 {tests.length ? (
                     <div className="data-table-wrap" role="region" aria-label="API tests" tabIndex={0}>
                         <table className="data-table" data-testid="api-tests">
@@ -307,4 +394,4 @@ function Setup({ projectId }: { projectId: string }) {
     );
 }
 
-export const view: AgentView = { Outcome, Run, Setup };
+export const view: AgentView = { Outcome, Run, Setup, Card };

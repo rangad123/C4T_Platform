@@ -129,7 +129,8 @@ function parseResponses(spec: Json, op: Json): OpenApiOperation["responses"] {
             }
         }
         if (!schema && r.schema) schema = deref(spec, r.schema);
-        return { status: String(status), description: r.description ?? "", schema };
+        const contentType = Object.keys(r.content ?? {})[0];
+        return { status: String(status), description: r.description ?? "", schema, ...(contentType ? { contentType } : {}) };
     });
 }
 

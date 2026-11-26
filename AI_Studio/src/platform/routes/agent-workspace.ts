@@ -6,6 +6,9 @@
  *                                                           ?agent= answers that agent's card alone (an agent page); headlines: agent-workspace.ts headlineOf
  *   GET /api/projects/:id/workspace/:agentId/outcome[?run=]  → that agent's outcome (agent-outcomes/<agentId>.ts), or one run's part of it;
  *                                                           501 for an agent whose outcome is not built yet, 404 for an agent the project did not choose
+ *   GET /api/projects/:id/workspace/api/report[?run=][&format=html|pdf] → the API Testing Agent's report as a file (reports/api-report.ts),
+ *                                                           of one run or of all; exporting needs ai_studio.reports.export
+ *   ?run=latest is the agent's newest finished run (404 before one).
  *   GET /api/projects/:id/workspace/:agentId/runs            → that agent's runs only, newest first (the jobs list's shape), a check
  *                                                           agent's run with its own one line (`headline`: what that run found)
  *   GET /api/projects/:id/workspace/:agentId/settings        → { keys, settings }: the defaults this agent has and the ones saved (testing-agents.ts)
@@ -14,8 +17,12 @@
  * Who may read the project reads them; saving an agent's settings is a project setting (auth/roles.ts). A model is saved only when the
  * person saving may use it (as the project's AI model, routes/project-ai-model.ts).
  */
+import { z } from "zod";
 import { agentStatusOf, headlineOf, jobBelongsTo, resultsStamp, workspaceAgents } from "../agent-workspace.js";
+import { outcome as apiOutcome } from "../agent-outcomes/api.js";
 import { AGENT_OUTCOMES } from "../agent-outcomes/index.js";
+import { toPdf } from "../pdf.js";
+import { apiReportName, renderApiReportHtml } from "../reports/api-report.js";
 import type { AgentOutcomeCtx } from "../agent-outcomes/types.js";
 import { NO_ADDRESS_OR_REQUIREMENTS } from "../case-agent.js";
 import type { AppModelReader } from "../case-outcome.js";
@@ -59,6 +66,8 @@ export function registerAgentWorkspaceRoutes(ctx: RouteCtx, appModel: AppModelRe
         return { row, agent: a };
     };
     const outcomeCtx = (projectId: string, agentId: AgentId): AgentOutcomeCtx => ({ p, projectId, agentId, runs: runsOf(projectId, agentId), appModel });
+    /** `?run=`: one of this agent's runs, "latest" its newest finished one; undefined when it is neither. */
+    const runOf = (c: AgentOutcomeCtx, run: string) => (run === "latest" ? c.runs.find((j) => TERMINAL_STATES.includes(j.status)) : c.runs.find((j) => j.id === run));
 
     app.get("/api/projects/:id/workspace", async (req) => {
         const { id } = req.params as { id: string };
@@ -95,11 +104,31 @@ export function registerAgentWorkspaceRoutes(ctx: RouteCtx, appModel: AppModelRe
         const c = outcomeCtx(id, agent.id);
         const run = (req.query as { run?: unknown }).run;
         if (typeof run === "string" && run) {
-            const one = c.runs.some((j) => j.id === run) ? await module.runOutcome(c, run) : undefined;
+            const job = runOf(c, run);
+            const one = job ? await module.runOutcome(c, job.id) : undefined;
             if (!one) throw new HttpError(404, NO_SUCH_AGENT_RUN);
             return one;
         }
         return module.outcome(c);
+    });
+
+    app.get("/api/projects/:id/workspace/api/report", async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const { row } = await agentOf(id, "api");
+        const { format, run } = z.object({ format: z.enum(["html", "pdf"]).default("html"), run: z.string().optional() }).parse(req.query);
+        const c = outcomeCtx(id, "api");
+        const job = run ? runOf(c, run) : undefined;
+        if (run && !job) throw new HttpError(404, NO_SUCH_AGENT_RUN);
+        const outcome = job ? (await apiOutcome.runOutcome(c, job.id))! : await apiOutcome.outcome(c);
+        const generatedAt = new Date();
+        const latest = repo.getLatestApplicationPublic(id);
+        const html = renderApiReportHtml({ projectName: String(row.name), application: latest ? String(latest.url) : null, outcome, generatedAt });
+        const base = apiReportName(String(row.name), outcome, generatedAt);
+        if (format === "pdf") {
+            const pdf = await toPdf(html, p.config.HEADLESS);
+            return reply.header("content-type", "application/pdf").header("content-disposition", `attachment; filename="${base}.pdf"`).send(pdf);
+        }
+        return reply.header("content-type", "text/html; charset=utf-8").header("content-disposition", `attachment; filename="${base}.html"`).send(html);
     });
 
     app.get("/api/projects/:id/workspace/:agentId/runs", async (req) => {

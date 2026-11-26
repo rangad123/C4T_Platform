@@ -196,10 +196,38 @@ describe("the API Testing Agent's page", () => {
         await narrow("outcome-375.png");
     });
 
-    it("the Workspace card says what the Outcome tab says", async () => {
+    it("the Workspace card shows the latest run's report: its counts and each failed endpoint's method, path, expected and actual", async () => {
         await visit(routes.project(pid));
-        await pwExpect(page.getByText("3 API tests: 1 passed, 2 failed, 1 verified finding")).toBeVisible();
+        const report = page.locator('[data-agent="api"]').getByTestId("api-latest-report");
+        await pwExpect(report).toBeVisible();
+        // Run 2 is the newest finished run: its own counts, not every run's.
+        await pwExpect(report.getByTestId("agent-headline")).toHaveText("1 API test: 0 passed, 1 failed, 1 verified finding");
+        await pwExpect(report).toContainText("Run 2");
+        const failed = report.getByTestId("api-failed").locator("li");
+        await pwExpect(failed).toHaveCount(1);
+        await pwExpect(failed.first()).toContainText("GET /api/health");
+        await pwExpect(failed.first()).toContainText("Expected HTTP 200");
+        await pwExpect(failed.first()).toContainText("Got HTTP 500");
+        await axe("workspace api report");
+        await shot("workspace-1280.png");
+        await narrow("workspace-375.png");
+        await report.getByRole("link", { name: "Open the full report" }).click();
+        await pwExpect(page.getByTestId("agent-run")).toContainText("Run 2");
     });
+
+    it("each run's report downloads as a web page or a PDF, of that run only", async () => {
+        await visit(routes.projectAgentRun(pid, "api", jobs.first));
+        await pwExpect(page.getByTestId("api-outcome")).toBeVisible();
+        const [html] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download report (web page)" }).click()]);
+        expect(html.suggestedFilename()).toMatch(/^api-report-atlas-api-run-1-\d{4}-\d{2}-\d{2}\.html$/);
+        const text = fs.readFileSync((await html.path())!, "utf8");
+        expect(text).toContain("/api/orders");
+        expect(text).not.toContain("/api/health");
+        const [pdf] = await Promise.all([page.waitForEvent("download", { timeout: 60_000 }), page.getByRole("button", { name: "Download report (PDF)" }).click()]);
+        expect(pdf.suggestedFilename()).toMatch(/^api-report-atlas-api-run-1-.*\.pdf$/);
+        expect(fs.readFileSync((await pdf.path())!).subarray(0, 4).toString()).toBe("%PDF");
+        await shot("run-report-1280.png");
+    }, 90_000);
 
     it("a going run shows the API steps only: finding the calls, writing and running the API tests", async () => {
         jobs.going = await job("api", "VALIDATING");

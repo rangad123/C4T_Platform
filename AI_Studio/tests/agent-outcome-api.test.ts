@@ -15,6 +15,7 @@ import { loadConfig } from "../src/config.js";
 import { CONTRACT_FAILURE_PREFIX } from "../src/engine/contracts/check.js";
 import { findingFingerprint, type CandidateFindingInput } from "../src/engine/explore/finding.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
+import { permissionRuleFor } from "../src/platform/auth/roles.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { CandidateFindingStore } from "../src/platform/candidate-finding-store.js";
 import { recordObservations } from "../src/platform/drift-store.js";
@@ -205,5 +206,64 @@ describe("the API Testing Agent's outcome", () => {
         const empty = await get(`/api/projects/${bare}/workspace`);
         expect(empty.body.agents[0]).toMatchObject({ id: "api", status: "needs-input", headline: null });
         expect((await get(`/api/projects/${bare}/workspace/api/outcome`)).body).toEqual({ runs: 0, headline: "0 API tests: 0 passed, 0 failed", summary: { tests: 0, passed: 0, failed: 0, notRun: 0 }, tests: [], findings: [] });
+    });
+});
+
+/** Sheet 28: the latest API report on the Workspace, every run's own report, and the report as a file (HTML or PDF, as the project report). */
+describe("the API report", () => {
+    const raw = (url: string) => app.inject({ method: "GET", url, headers: { "x-api-key": KEY } });
+
+    it("?run=latest is the newest finished run, saying which run it is; a going run is passed over", async () => {
+        const going = await job("api", "VALIDATING");
+        try {
+            const r = await get(`/api/projects/${pid}/workspace/api/outcome?run=latest`);
+            expect(r.status).toBe(200);
+            // The stopped run 2 is the newest finished one: number 3 of the API agent's runs (the older exploration counts as run 1).
+            expect(r.body.run).toMatchObject({ jobId: ids.second, number: 3, status: "FAILED" });
+            expect(keys(r.body)).toEqual(["GET /health", "GET /users/{id}"]);
+            // What each test got back, for the "actual" of the report and the Workspace card.
+            expect(rows(r.body, "GET /health")[0].answered).toEqual([500]);
+            expect((await get(`/api/projects/${pid}/workspace/api/outcome?run=${ids.first}`)).body.run).toMatchObject({ jobId: ids.first, number: 2, status: "COMPLETED" });
+            // An older run, made before the API agent had its own runs, opens its own report too.
+            const old = await get(`/api/projects/${pid}/workspace/api/outcome?run=${ids.old}`);
+            expect(old.body.run).toMatchObject({ jobId: ids.old, number: 1 });
+            expect(keys(old.body)).toEqual(["GET /items/{id}"]);
+        } finally {
+            platform.repo.setJobStatus(going, "FAILED", "Cancelled");
+        }
+        const bare = platform.repo.createProject({ name: "No runs yet", platforms: ["web"], testingModes: ["agent"] }).id as string;
+        await testingAgentsOf(platform).set(bare, ["api"], "test");
+        expect((await get(`/api/projects/${bare}/workspace/api/outcome?run=latest`)).status).toBe(404);
+    });
+
+    it("downloads one run's report as a web page: the counts, each test with expected and actual, why each failure failed, its findings", async () => {
+        const r = await raw(`/api/projects/${pid}/workspace/api/report?run=${ids.first}&format=html`);
+        expect(r.statusCode).toBe(200);
+        expect(r.headers["content-type"]).toContain("text/html");
+        expect(r.headers["content-disposition"]).toMatch(/attachment; filename="api-report-api-store-run-2-\d{4}-\d{2}-\d{2}\.html"/);
+        const html = r.body;
+        expect(html).toContain("API Store");
+        expect(html).toContain("Run 2");
+        expect(html).toContain("3 API tests: 2 passed, 1 failed");
+        expect(html).toContain("/users/{id}");
+        // A failed row: what it expected and what came back, and the contract's difference, escaped.
+        expect(html).toMatch(/POST<\/td><td>\/orders.*HTTP 200.*HTTP 201/s);
+        expect(html).toContain("the field &quot;total&quot; is missing");
+        expect(html).not.toContain("<script");
+        // Only that run: not run 2's health test.
+        expect(html).not.toContain("/health");
+    });
+
+    it("the report of every run together; another agent's run or an unknown one is a 404", async () => {
+        const all = await raw(`/api/projects/${pid}/workspace/api/report`);
+        expect(all.statusCode).toBe(200);
+        expect(all.body).toContain("All runs");
+        expect(all.body).toContain("5 API tests: 3 passed, 2 failed, 1 verified finding");
+        expect(all.body).toContain("Answered 500.");
+        expect((await raw(`/api/projects/${pid}/workspace/api/report?run=${ids.security}`)).statusCode).toBe(404);
+        expect((await raw(`/api/projects/${pid}/workspace/api/report?run=nope`)).statusCode).toBe(404);
+        expect((await raw(`/api/projects/${pid}/workspace/api/report?format=doc`)).statusCode).toBe(400);
+        // A download, as the project report: who may export reports.
+        expect(permissionRuleFor("GET", "/api/projects/:id/workspace/api/report")).toBe("ai_studio.reports.export");
     });
 });

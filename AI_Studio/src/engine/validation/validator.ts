@@ -7,6 +7,7 @@
  *   NEEDS_REVIEW       failure is (or may be) a real application defect — a human should look
  *   FAILED_VALIDATION  could not be made to pass (environment problem, unfixable, attempts exhausted)
  */
+import { documentedCallerStatus } from "../api/documented-status.js";
 import { endsSession, endsSharedSession, RISKY_SKIPPED, riskyKindOf, SESSION_END_SKIPPED } from "./risky.js";
 import { RELATION_FAILURE_PREFIX } from "./relation.js";
 
@@ -359,6 +360,26 @@ export async function validateBatch(
                     logRun(ctx, t.spec, run, attempt);
                     continue;
                 }
+            }
+            // A valid API call this account is refused in a way the document lists for that call (403, a fixed address's 404): tested
+            // for that status, without AI (api/documented-status.ts).
+            const documented = !deps.repairsAreDrafts ? documentedCallerStatus(t.spec, run, t.endpointDoc) : undefined;
+            if (documented) {
+                t.spec = documented.spec;
+                await hooks.onRepaired?.(t, documented.spec, documented.reason);
+                ctx.emit({ stage: "validation", kind: "script_regenerated", message: `${t.spec.testId} regenerated (attempt ${attempt + 1}): ${documented.reason}` });
+                attempt++;
+                repairs++;
+                script = render(t.spec, t.framework);
+                const again = await runAgain(t, script);
+                if (!again) {
+                    outcome = cancelledOutcome(t, script, run, attempt);
+                    break;
+                }
+                run = again;
+                await hooks.onAttempt(t, attempt, script, run);
+                logRun(ctx, t.spec, run, attempt);
+                continue;
             }
             let repair;
             try {

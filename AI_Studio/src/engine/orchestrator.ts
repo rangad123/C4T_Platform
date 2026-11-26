@@ -1376,10 +1376,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
         if (wantApi && apis.length) {
             // Agent Workspace: a Performance agent run keeps the API target for its speed and load checks (4b2, 4b3), not the API tests.
             const ownApiTests = req.apiTests !== false;
-            const { specs, skippedMutating } = generateApiSpecs(ownApiTests ? apis : [], { allowMutating: req.allowMutatingApiTests, maxPerEndpoint: 6, contractChecks: req.contractChecks !== false, ...(req.requirements ? { requirementsText: req.requirements.text } : {}) });
+            const { specs, skippedMutating, skipped } = generateApiSpecs(ownApiTests ? apis : [], { allowMutating: req.allowMutatingApiTests, maxPerEndpoint: 6, contractChecks: req.contractChecks !== false, ...(req.requirements ? { requirementsText: req.requirements.text } : {}) });
             if (skippedMutating) {
                 ctx.emit({ stage: "generation", kind: "api_mutating_skipped", message: `Skipped ${skippedMutating} state-changing endpoints (enable allowMutatingApiTests to include them)` });
             }
+            for (const k of skipped) ctx.emit({ stage: "generation", kind: "api_endpoint_skipped", message: `${k.endpoint} is not tested: ${k.reason}`, data: { endpoint: k.endpoint } });
             const docs = new Map(apis.map((a) => [`${a.method} ${a.path}`, a]));
             for (const d of specs as DraftSpec[]) {
                 const endpointKey = d.title.split(":")[0]!;

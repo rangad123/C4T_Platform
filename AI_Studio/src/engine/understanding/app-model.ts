@@ -141,7 +141,8 @@ export interface OpenApiOperation {
     tags: string[];
     parameters: OpenApiParameter[];
     requestBody?: { required: boolean; contentType: string; schema: Record<string, unknown> };
-    responses: Array<{ status: string; description: string; schema?: Record<string, unknown> }>;
+    /** contentType: the answer's first documented media type ("application/json", "text/event-stream"), when the document gives one. */
+    responses: Array<{ status: string; description: string; schema?: Record<string, unknown>; contentType?: string }>;
     security: string[];
 }
 

@@ -528,7 +528,8 @@ export function agentRunOptions(agentId: AgentId, options: JobOptions, asked: As
     if (agentId === "api") return { ...rest, targets: ["api"] };
     // The Performance agent times safe API calls and runs the load check on the API target, without the API tests (the API agent's):
     // it keeps the target, unless the run asked for the web alone.
-    if (agentId === "performance" && (asked.targets ?? ["web", "api"]).includes("api") && !rest.targets.includes("api")) return { ...rest, targets: [...rest.targets, "api"], apiTests: false };
+    // The Security agent's access checks of API calls (orchestrator 4b1) need it too (owner 2026-11-26), again without the API tests.
+    if ((agentId === "performance" || agentId === "security") && (asked.targets ?? ["web", "api"]).includes("api") && !rest.targets.includes("api")) return { ...rest, targets: [...rest.targets, "api"], apiTests: false };
     // The Responsive UI agent checks the phone and tablet sizes beside desktop unless the run names its sizes (none: desktop only).
     if (agentId === "responsive-ui" && asked.variants === undefined) return { ...rest, variants: [...SIZE_VARIANT_IDS] };
     return rest;
