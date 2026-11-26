@@ -196,14 +196,16 @@ describe("test scripts from test cases", () => {
         const prompts = seenPrompts.join("\n");
         expect(prompts).toContain("The saved account exists");
         expect(prompts).toContain("The Account page opens");
-        expect(prompts).not.toContain("Type in the old way");
+        // An Automated row's steps are kept on import and lead the script's description (owner decision 2026-11-26, case-scripts.ts caseDescription).
+        expect(prompts).toContain("1. Type in the old way");
         const t = ((await call("GET", `/api/projects/${pid}/tests`)).body as any[])[0];
         const made = await detail(t.id);
         expect(made.validationStatus).toBe("PENDING");
         // It starts on the case's page: the first step opens /login.
         expect(made.spec.steps[0].action).toBe("navigate");
         expect(JSON.stringify(made.spec.steps[0])).toContain("/login");
-        expect(made.spec.expectedResults).toEqual(["The Account page opens"]);
+        // The kept step's own expected result is a check too, then the case's (case-scripts.ts caseDescription).
+        expect(made.spec.expectedResults).toEqual(["Ignored", "The Account page opens"]);
     }, 300_000);
 
     it("the same case gives the same script from Test scripts, Describe it as from Test cases", async () => {

@@ -151,7 +151,7 @@ describe.each(BENCH_APPS.map((a, i) => [a.id, a, PORT + i] as const))("the Test 
         const names = [...strFromU8(unzipSync(bytes)["xl/workbook.xml"]!).matchAll(/<sheet name="([^"]+)"/g)].map((m) => m[1]);
         expect(names).toEqual(["Test cases", "Pages", "Tree"]);
         const cases = readSheet(bytes, "Test cases");
-        expect(cases[0]).toEqual(["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement"]);
+        expect(cases[0]).toEqual(["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement", "Test data", "Check"]);
         expect(readSheet(bytes, "Pages")[0]).toEqual(["Page", "Address", "Purpose"]);
         expect(readSheet(bytes, "Tree")[0]).toEqual(["Node", "Parent", "Page"]);
         const rows = cases.slice(1).filter((r) => r.some(Boolean));
