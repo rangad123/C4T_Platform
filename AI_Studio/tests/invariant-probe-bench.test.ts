@@ -49,7 +49,9 @@ describe("invariant probe on bench-shop", () => {
         const text = readFileSync("examples/bench-shop/requirements/requirements.md", "utf8");
         const apis = apisAt(CLEAN);
         const p = await proposeInvariants({ llm: layersOnlyLlm() }, { requirements: parseRequirementsDeterministic(text), apis, origins: new Set([`http://127.0.0.1:${CLEAN}`]), dataChanges: true, secrets: [] });
-        expect(p.report).toMatchObject({ proposed: 3, kept: 3, dropped: [] });
+        // The scripted three, and the line-total rule requirement 3.8 states (statedLineTotals), kept beside them.
+        expect(p.report).toMatchObject({ proposed: 4, kept: 4, dropped: [] });
+        expect(p.invariants.find((i) => i.requirementId === "3.8")?.expression).toBe("lines[*].lineTotal == lines[*].unitPrice * lines[*].quantity");
     });
 
     it.each(BENCH_SHOP_INVARIANTS as Invariant[])("requirement $requirementId: red on its seed alone with the saved case, green clean from a dirty start", async (inv) => {

@@ -193,6 +193,37 @@ export function statedInvariants(input: InvariantInput): Invariant[] {
     return out;
 }
 
+/** "The line total must be price × quantity", "the line total is the unit price times the quantity". */
+const LINE_TOTAL = /\bline total\b[^.;]*?\b(?:unit )?price\s*(?:×|x|\*|times)\s*(?:the\s+)?(?:quantity|qty)\b/i;
+
+/**
+ * The line-total rule a requirement states (N2E SUBTOTAL: the model's only 6.6 invariant was its subtotal half, so a truncated line total
+ * was never checked): each line's total is its price times its quantity, rounded to the cent unless the amounts are whole cents. On a
+ * write whose answer lists lines with a total, a price and a quantity. Kept beside the model's invariants for the same requirement unless
+ * one of them already compares that total with that price.
+ */
+export function statedLineTotals(input: InvariantInput): Invariant[] {
+    const out: Invariant[] = [];
+    for (const r of input.requirements) {
+        if (!LINE_TOTAL.test(r.text)) continue;
+        for (const w of input.apis.filter((a) => a.method.toUpperCase() === "POST")) {
+            const fields = fieldPaths(answerSchema(w));
+            const lists = new Map<string, string[]>();
+            for (const k of fields.keys()) {
+                const m = /^(.*\[\*\])\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(k);
+                if (m) lists.set(m[1]!, [...(lists.get(m[1]!) ?? []), m[2]!]);
+            }
+            const hit = [...lists].map(([list, names]) => ({ list, total: names.find((n) => /^line_?total$/i.test(n)), price: names.find((n) => /^(?:unit_?)?price$/i.test(n)), qty: names.find((n) => /^(?:qty|quantity)$/i.test(n)) })).find((x) => x.total && x.price && x.qty);
+            if (!hit) continue;
+            const [t, p, q] = [hit.total, hit.price, hit.qty].map((n) => `${hit.list}.${n}`);
+            const cents = fields.get(t!) === "integer";
+            out.push({ requirementId: r.id, endpoint: `POST ${w.path}`, setup: [], write: `POST ${w.path}`, expression: cents ? `${t} == ${p} * ${q}` : `${t} == round(${p} * ${q}, 2)` });
+            break;
+        }
+    }
+    return out;
+}
+
 const MARKER = /<<<\s*(?:REQUIREMENTS|ENDPOINTS)|(?:REQUIREMENTS|ENDPOINTS)\s*>>>/gi;
 const line = (s: string, max = 300) => s.replace(MARKER, " ").replace(/\s+/g, " ").trim().slice(0, max);
 
@@ -234,7 +265,11 @@ export async function proposeInvariants(ctx: Pick<EngineContext, "llm">, input: 
     }
     const covered = new Set(proposed.map((p) => p.requirementId));
     // The stated ones first: they cost nothing and are never the ones the cap drops.
-    proposed = [...statedInvariants(input).filter((p) => !covered.has(p.requirementId)), ...proposed];
+    const lineTotals = statedLineTotals(input).filter((p) => {
+        const [total, price] = p.expression.split(/ == |round\(| \* /).filter(Boolean);
+        return !proposed.some((q) => q.requirementId === p.requirementId && q.expression.includes(total!) && q.expression.includes(price!));
+    });
+    proposed = [...statedInvariants(input).filter((p) => !covered.has(p.requirementId)), ...lineTotals, ...proposed];
     if (error && !proposed.length) return { invariants: [], report: { proposed: 0, kept: 0, dropped: [], error } };
     const ids = new Set(input.requirements.map((r) => r.id));
     const invariants: Invariant[] = [];

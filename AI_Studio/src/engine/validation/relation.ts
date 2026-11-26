@@ -13,7 +13,7 @@
  *   primary := number | "text" | true | false | null
  *            | $name suffix*          a test value ({{name}}): number text reads as a number, JSON object or array text as JSON
  *            | name suffix* | suffix+ a path into the latest answer's JSON body
- *            | round(x[, digits]) | sum(list) | count(list) | contains(textOrList, value)
+ *            | round(x[, digits]) (a list: each element) | sum(list) | count(list) | contains(textOrList, value)
  *            | number(textOrNumber)   the first amount in a text a page shows ("−$62.75" is -62.75, "$1,234.50" is 1234.5)
  *            | "(" expr ")"
  *   suffix  := "." name | "[" digits "]" | "[*]"     ([*] maps the rest of the path over every element; nested ones flatten)
@@ -282,12 +282,13 @@ function relationRun(tree, text, body, vars, seen) {
             case "fn": {
                 const a = n.args;
                 if (n.name === "round") {
-                    const x = num(a[0], ev(a[0]));
+                    const x = ev(a[0]);
                     const d = a[1] ? num(a[1], ev(a[1])) : 0;
                     if (!Number.isInteger(d) || d < 0 || d > 6) throw new Error("round() keeps 0 to 6 digits");
                     const f = Math.pow(10, d);
-                    // Decimal rounding: 1.005 to the cent is 1.01 (1.005 * 100 is 100.49999999999999 in floating point).
-                    return note(n, Math.round(Number((x * f).toPrecision(15))) / f);
+                    // Decimal rounding: 1.005 to the cent is 1.01 (1.005 * 100 is 100.49999999999999 in floating point). A list rounds each element.
+                    const r = (v) => Math.round(Number((num(a[0], v) * f).toPrecision(15))) / f;
+                    return note(n, Array.isArray(x) ? x.map(r) : r(x));
                 }
                 if (n.name === "sum") return note(n, list(a[0], ev(a[0])).reduce((t, x) => t + num(a[0], x), 0));
                 if (n.name === "count") return note(n, list(a[0], ev(a[0])).length);

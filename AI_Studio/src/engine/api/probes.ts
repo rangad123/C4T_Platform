@@ -332,7 +332,8 @@ async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
     }
     const signUp = up ? { ep: up, body: sample(bodySchema(up)) } : undefined;
     const props: Record<string, Schema> = bodySchema(write)?.properties ?? {};
-    const names = [...Object.keys(props).filter((k) => REFERENCE.test(k) && (props[k]!.type ?? "string") === "string" && !props[k]!.enum), ...[...write.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!)];
+    // An integer id is a reference too (the practice store's productId): drawn from the listed records, never guessed from its range.
+    const names = [...Object.keys(props).filter((k) => REFERENCE.test(k) && ["string", "integer"].includes(String(props[k]!.type ?? "string")) && !props[k]!.enum), ...[...write.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!)];
     const refs: Plan["refs"] = new Map();
     const lists = new Map<string, ApiEndpointModel>();
     for (const n of names) {
