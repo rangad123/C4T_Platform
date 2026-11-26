@@ -329,7 +329,8 @@ describe("nothing in test generation reads it yet", () => {
         // Impact analysis, the risk facts of the selection preview and a pull request's selection read workflows and rules to link a
         // change (Phase 6 I2/I3); they generate nothing. TCG 'What is missing' reads TCG-only intel: the Test Case Generation agent's outcome
         // shows the newest version not made during another agent's run (Agent Workspace W3 review M1).
+        // Verification reads only the form fields' maxlength, so a value the browser cut is the test's own fault (N2E WEB-044); it generates nothing.
         const outside = users.filter((u) => !u.startsWith("engine/intel/") && !u.startsWith("eval/bench/understanding/"));
-        expect(outside.sort()).toEqual(["engine/explore/objectives.ts", "engine/impact/analyze.ts", "platform/selection/risk-facts.ts", "platform/code-host/pr-impact.ts", "engine/planning/planner.ts", "eval/bench/repeat/run.ts", "eval/quality/score.ts", "platform/app-analysis.ts", "platform/app-intel-store.ts", "platform/agent-outcomes/test-generation.ts", "platform/db.ts", "platform/job-runner.ts", "platform/llm-response-cache-runner.ts", "platform/routes/app-intel.ts", "platform/routes/index.ts", "platform/routes/requirements.ts"].sort());
+        expect(outside.sort()).toEqual(["engine/explore/objectives.ts", "engine/impact/analyze.ts", "platform/selection/risk-facts.ts", "platform/code-host/pr-impact.ts", "engine/planning/planner.ts", "eval/bench/repeat/run.ts", "eval/quality/score.ts", "platform/app-analysis.ts", "platform/app-intel-store.ts", "platform/agent-outcomes/test-generation.ts", "platform/db.ts", "platform/findings/verify-service.ts", "platform/job-runner.ts", "platform/llm-response-cache-runner.ts", "platform/routes/app-intel.ts", "platform/routes/index.ts", "platform/routes/requirements.ts"].sort());
     });
 });
