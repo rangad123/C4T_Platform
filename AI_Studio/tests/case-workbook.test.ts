@@ -29,6 +29,7 @@ import { XLSX_MAX_ROWS as CASE_IMPORT_MAX_ROWS } from "../src/engine/manual/xlsx
 import { PLAN_ARTIFACT } from "../src/platform/plan-store.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { NO_CASE_RUNS, NO_SUCH_RUN, NOT_A_CASE_AGENT_PROJECT } from "../src/platform/routes/case-outcome.js";
+import { CASE_FLAGS } from "../src/platform/case-outcome.js";
 import { buildServer } from "../src/platform/server.js";
 
 type App = Awaited<ReturnType<typeof buildServer>>;
@@ -97,14 +98,14 @@ const model = (paths: string[]) => ({
     features: [],
     journeys: [],
 });
-async function seededRun(pid: string, paths: string[], ideas: Array<{ title: string; startPath: string }>, failed: string[] = []): Promise<string> {
+async function seededRun(pid: string, paths: string[], ideas: Array<{ title: string; startPath: string; caseData?: Array<{ field: string; kind: string; value: string; missing: boolean }> }>, failed: string[] = []): Promise<string> {
     const appId = platform.repo.getLatestApplicationPublic(pid)!.id as string;
     const job = await platform.repo.createJob(pid, appId, { ...DEFAULT_JOB_OPTIONS, planOnly: true, targets: ["web"], functionalTests: true });
     const plan: StoredPlan = {
         version: 1,
         createdAt: new Date().toISOString(),
         model: model(paths) as never,
-        scenarios: ideas.map((s, i) => ScenarioSchema.parse({ scenarioId: `S-${i + 1}`, title: s.title, description: s.title, category: "Browsing", priority: "high", startPath: s.startPath, preconditions: ["The shop is open"], expectedResults: [`${s.title}: done`] })),
+        scenarios: ideas.map((s, i) => ScenarioSchema.parse({ scenarioId: `S-${i + 1}`, title: s.title, description: s.title, category: "Browsing", priority: "high", startPath: s.startPath, preconditions: ["The shop is open"], expectedResults: [`${s.title}: done`], ...(s.caseData ? { caseData: s.caseData } : {}) })),
         analysed: true,
         specBaseTrusted: false,
         accessReach: [],
@@ -147,7 +148,7 @@ beforeAll(async () => {
     PB = await tcgProject("Bravo Shop", "org-b");
     for (const t of ["t-cora", "t-reader"]) expect((await asKey("POST", `/api/projects/${PA}/members`, { personId: await personOf(t) })).status).toBe(201);
     expect((await asKey("POST", `/api/projects/${PB}/members`, { personId: await personOf("t-bea") })).status).toBe(201);
-    firstRun = await seededRun(PA, ["/", "/products", "/about"], [{ title: "Browse the products", startPath: "/products" }, { title: "Read about us", startPath: "/about" }], ["/broken"]);
+    firstRun = await seededRun(PA, ["/", "/products", "/about"], [{ title: "Browse the products", startPath: "/products", caseData: [{ field: "Search", kind: "valid", value: "lamp", missing: false }] }, { title: "Read about us", startPath: "/about" }], ["/broken"]);
     await seededRun(PA, ["/", "/products", "/cart"], [{ title: "Browse the products", startPath: "/products" }, { title: "Add a product to the cart", startPath: "/cart" }]);
     bravoRun = await seededRun(PB, ["/", "/secret-page-of-bravo"], [{ title: "Bravo's own test case", startPath: "/" }]);
 }, 60_000);
@@ -246,6 +247,12 @@ describe("the workbook", () => {
         expect(cases.slice(1).map((c) => [c[0], c[1]])).toEqual([
             ["TC-001", "Browse the products"],
             ["TC-002", "Read about us"],
+        ]);
+        // An earlier run's download has the Test data and Check columns too (sheet items 29 and 31-33 together): its own data, and the check's flags.
+        expect(cases[0]!.slice(9)).toEqual(["Test data", "Check"]);
+        expect(cases.slice(1).map((c) => [c[9], c[10]])).toEqual([
+            ["Valid: Search = lamp", CASE_FLAGS.noSteps],
+            ["", CASE_FLAGS.noSteps],
         ]);
         expect(await as("t-cora", "GET", `/api/projects/${PA}/outcome/workbook?run=${bravoRun}`)).toMatchObject({ status: 404, body: { error: NO_SUCH_RUN } });
         expect((await as("t-reader", "GET", `/api/projects/${PA}/outcome/workbook?run=${firstRun}`)).status).toBe(403);
