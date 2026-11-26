@@ -16,6 +16,7 @@
 import { CONTRACT_MAX_SCHEMA_BYTES } from "../contracts/check.js";
 import type { Step, TestSpec } from "../spec/schema.js";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
+import { endsSession } from "../validation/risky.js";
 import { repeatAdds } from "./stated-source.js";
 import { resourceName, stripIdSuffix } from "./workflows.js";
 
@@ -227,6 +228,20 @@ export function freshAccountSteps(endpoints: ApiEndpointModel[]): Step[] {
     return signUp
         ? [req(signUp, signUp.path, { body: sample(signUp.spec!.requestBody!.schema as Schema) }, "Create a fresh account for this check"), resp("statusClass", "2xx", undefined, "The fresh account is created")]
         : [];
+}
+
+/**
+ * A test that signs out, revokes a credential or changes a password (risky.ts endsSession) sends that call on a fresh account of its own
+ * (signed up first, then its session alone: auth "none"), never with the shared token or account, which it would end for every other test.
+ * With no documented sign-up such a test is not made.
+ */
+function onOwnAccount(specs: DraftSpec[], fresh: Step[]): DraftSpec[] {
+    return specs.flatMap((s) => {
+        if (!s.steps.some((x) => x.action === "request" && x.auth !== "none" && endsSession(x.method, x.path))) return [s];
+        if (!fresh.length) return [];
+        const steps = s.steps.map((x) => (x.action === "request" && endsSession(x.method, x.path) ? { ...x, auth: "none" as const } : x));
+        return [{ ...s, steps: steps[0] === fresh[0] ? steps : [...fresh, ...steps] }];
+    });
 }
 
 export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOptions): ApiGenResult {
@@ -441,7 +456,7 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
             }
         }
 
-        specs.push(...local.slice(0, opts.maxPerEndpoint));
+        specs.push(...onOwnAccount(local.slice(0, opts.maxPerEndpoint), freshSteps));
 
         // 7 ── Documented cases (C2): each request breaks one documented rule and expects the status the API document gives for it.
         // Only on endpoints that change data (they all send a body), so none runs with data changes off.
@@ -481,7 +496,7 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
                 documentedCases.push(documentedCase(`rejects an "${email[0]}" already used, in other letter case`, conflict, [...first, req(ep, filledPath, { query: queryObj, body: again }, `Send it again with "${email[0]}" in capitals`)]));
             }
         }
-        specs.push(...documentedCases.slice(0, MAX_DOCUMENTED));
+        specs.push(...onOwnAccount(documentedCases.slice(0, MAX_DOCUMENTED), freshSteps));
     }
     return { specs, skippedMutating };
 }

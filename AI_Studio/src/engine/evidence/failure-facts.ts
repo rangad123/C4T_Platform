@@ -95,3 +95,24 @@ export function missingApiTokenReason(
     if (!last || !answer || answer.status !== 401 || last.auth === "none") return undefined;
     return credentials.signedIn ? SIGNED_IN_401_REASON : MISSING_API_TOKEN_REASON;
 }
+
+/** A run whose failure follows a request sent with the project's saved API token (auth "default") and answered 401: the token was refused. */
+export function apiTokenRefused(
+    spec: { kind: string; steps: Step[] },
+    run: { status: string; steps: Array<{ index: number; status: string }>; responses: Array<{ status: number }> },
+    credentials: { apiToken?: string; apiAuthHeader?: string },
+): boolean {
+    if (spec.kind !== "api" || run.status === "passed" || !(credentials.apiToken || credentials.apiAuthHeader)) return false;
+    const failed = run.steps.find((s) => s.status === "failed");
+    if (!failed) return false;
+    const requests = spec.steps.slice(0, failed.index + 1).filter((s): s is Extract<Step, { action: "request" }> => s.action === "request");
+    const last = requests.at(-1);
+    return Boolean(last && last.auth !== "none" && run.responses[requests.length - 1]?.status === 401);
+}
+
+/**
+ * Why the tests the token was refused for failed, once the same token served other tests of this run: it stopped being accepted part way
+ * (a test signed it out, or it expired). `enders` are this run's tests that send a session-ending call.
+ */
+export const apiTokenStoppedReason = (refused: number, enders: readonly string[]) =>
+    `The project's API token stopped being accepted during this run: ${refused} tests were refused with HTTP 401 after other tests had used it. ${enders.length ? `A test that signs out or revokes a credential may have ended it (${enders.slice(0, 5).join(", ")}). ` : ""}Save a fresh API token, then run these tests again.`;

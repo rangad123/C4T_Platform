@@ -6,7 +6,7 @@
  * trace, adds real assertions (autospec's replay files contain none), wraps every step in
  * `test.step` so the validator can pinpoint the failing step, and keeps secrets out of the file.
  */
-import { riskyGateLine, riskyKindOf } from "../validation/risky.js";
+import { riskyGateLine, riskyKindOf, sessionEndLine } from "../validation/risky.js";
 import { KNOWN_BUG_FAILURE } from "./types.js";
 import { A11Y_ALL_RULES_PREFIX, A11Y_ALL_RULES_TAG, A11Y_FAILURE_PREFIX, A11Y_NEEDS_REVIEW_PREFIX, A11Y_MAX_RULES, A11Y_MAX_TARGETS, a11yThreshold, WCAG_TAGS } from "../a11y/audit.js";
 import { EVIDENCE_HELPER_SOURCE } from "../evidence/capture.js";
@@ -453,7 +453,7 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 ${a11y ? `\n${a11yHelper(spec.tags.includes(A11Y_ALL_RULES_TAG))}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\nconst IGNORE_HTTPS_ERRORS = ${ignoresHttpsErrors(spec)};\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${dbCheckSetup(spec.steps).helper}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ page }) => {
-${knownBugLine(spec, ctx)}${riskyGateLine(spec)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${dbCheckSetup(spec.steps).start}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
+${knownBugLine(spec, ctx)}${riskyGateLine(spec)}${sessionEndLine(spec)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${dbCheckSetup(spec.steps).start}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
 });
 ${dataRows ? "}\n" : ""}`;
         return { framework: "playwright", filename: scriptFilename(spec), content, language: "typescript" };

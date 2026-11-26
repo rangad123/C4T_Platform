@@ -7,7 +7,7 @@
  *   NEEDS_REVIEW       failure is (or may be) a real application defect — a human should look
  *   FAILED_VALIDATION  could not be made to pass (environment problem, unfixable, attempts exhausted)
  */
-import { RISKY_SKIPPED, riskyKindOf } from "./risky.js";
+import { endsSession, endsSharedSession, RISKY_SKIPPED, riskyKindOf, SESSION_END_SKIPPED } from "./risky.js";
 import { RELATION_FAILURE_PREFIX } from "./relation.js";
 
 import { captchaFinding } from "../auth/captcha-run.js";
@@ -47,7 +47,7 @@ import { testStepFault } from "./test-fault.js";
 import { deterministicRepairOn } from "../llm/without-ai.js";
 import type { MobileRunEnv } from "./mobile-runner.js";
 import type { IosRunEnv } from "../mobile/ios-runner.js";
-import { apiTokenNeeded, MISSING_API_TOKEN_REASON, missingApiTokenReason, SIGNED_IN_401_REASON } from "../evidence/failure-facts.js";
+import { apiTokenNeeded, apiTokenRefused, apiTokenStoppedReason, MISSING_API_TOKEN_REASON, missingApiTokenReason, SIGNED_IN_401_REASON } from "../evidence/failure-facts.js";
 import { secretsOfRun } from "../evidence/model.js";
 import { KNOWN_BUG_FIXED, markUnfinishedAsNotRun, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
 // A phone run the phone itself could not carry out (device/infra.ts): said plainly, never a failing test of the app, never repaired.
@@ -217,6 +217,14 @@ export async function validateBatch(
         ctx.emit({ stage: "validation", kind: "account_lanes", message: `${shared} tests that sign in as the same account run one at a time` }),
     );
 
+    // The shared token refused part way through (N2D: a sign-out revoked it): one cause for every test it was refused for, said once, and
+    // none of them repaired. Only once the same token served another test of the run, so a token bad from the start reads as it did.
+    const tokenRefused = (t: TestUnderValidation, run: ScriptRun) => apiTokenRefused(t.spec, run, { apiToken: deps.env.apiToken, apiAuthHeader: deps.env.apiAuthHeader });
+    const refusedCount = current.filter((t, i) => tokenRefused(t, firstRuns[i]!)).length;
+    const tokenServed = current.some((t, i) => t.spec.kind === "api" && firstRuns[i]!.status === "passed" && t.spec.steps.some((s) => s.action === "request" && s.auth !== "none"));
+    const tokenStopped = refusedCount >= 2 && tokenServed && (deps.env.apiToken || deps.env.apiAuthHeader) ? apiTokenStoppedReason(refusedCount, current.filter((t) => t.spec.steps.some((s) => s.action === "request" && endsSession(s.method, s.path))).map((t) => t.spec.testId)) : undefined;
+    if (tokenStopped) ctx.emit({ stage: "validation", kind: "api_token_refused", level: "warn", message: tokenStopped });
+
     /** Another run of one script. Undefined when the job was cancelled before it gave a result (the run before it then stands). */
     const runAgain = async (t: TestUnderValidation, script: { filename: string; content: string }): Promise<ScriptRun | undefined> => {
         const [next] = (await execute(ctx, deps, [input(t, script)], 1)) as [ScriptRun];
@@ -275,6 +283,9 @@ export async function validateBatch(
         // a fail is a flaky pass (both results are recorded as executions), not a regression.
         // A load check is never run again straight away: a second round of up to 300 requests is exactly what it must not send (it confirms itself).
         // A risky check the run was not given the gate for skipped itself: no result, nothing changes, and one sentence says why.
+        // A test that would end the shared session skipped itself (risky.ts sessionEndLine): never repaired, the reason says why.
+        if (!outcome && run.status === "skipped" && endsSharedSession(t.spec)) outcome = { status: "FAILED_VALIDATION", reason: SESSION_END_SKIPPED, spec: t.spec, script, attempts: attempt, lastRun: run };
+        if (!outcome && tokenStopped && tokenRefused(t, run)) outcome = { status: "FAILED_VALIDATION", reason: tokenStopped, spec: t.spec, script, attempts: attempt, lastRun: run };
         if (!outcome && run.status === "skipped" && riskyKindOf(t.spec)) {
             ctx.emit({ stage: "validation", kind: "risky_check_skipped", level: "warn", message: `${t.spec.testId}: ${RISKY_SKIPPED}` });
             return await notRun(t, script, run);
