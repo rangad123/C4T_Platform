@@ -264,4 +264,32 @@ describe("the Security Testing Agent's page (W2c)", () => {
         await tabs().getByRole("link", { name: "Outcome" }).isVisible();
         expect(consoleErrors).toEqual([]);
     });
+
+    // Owner 2026-11-26: the Security agent also tests the API; its API access checks sit beside the page ones.
+    it("a run with API access checks shows them beside the page ones, under their own heading", async () => {
+        const repo = platform.repo;
+        const suite = repo.getOrCreateSuite(pid, "General", "general");
+        const appId = repo.getLatestApplicationPublic(pid)!.id as string;
+        const j = (await repo.createJob(pid, appId, { ...DEFAULT_JOB_OPTIONS, agentId: "security" } as never)).id;
+        const apiCheck = { ...spec("API-020", "A visitor cannot call GET /api/admin/users", [{ action: "request", method: "GET", path: "/api/admin/users", auth: "none", description: "Call it signed out" }, { action: "assertResponse", check: "statusDenied", expected: "{}", description: "Refused" }]), tags: ["security", "access-control", "api"] };
+        const insert = (s: ReturnType<typeof spec>, status: "VALIDATED" | "NEEDS_REVIEW", reason?: string) => {
+            const id = repo.insertTest({ projectId: pid, suiteId: suite, jobId: j, spec: s, framework: s.kind === "api" ? "playwright-api" : "playwright", validationStatus: status, meta: { access: true } });
+            if (reason) repo.updateTest(id, { reason });
+        };
+        insert(apiCheck as never, "NEEDS_REVIEW", "A visitor could call GET /api/admin/users: it answered 200.");
+        insert(spec("WEB-021", "A visitor cannot open /settings", [{ action: "navigate", url: "/settings" }, { action: "assert", check: "url", expected: "/login" }], "web"), "VALIDATED");
+        repo.setJobStatus(j, "COMPLETED");
+        await visit(routes.projectAgentRun(pid, "security", j));
+        const area = page.getByTestId("security-area-access");
+        await pwExpect(area.getByTestId("security-access-web")).toHaveText("Pages");
+        await pwExpect(area.getByTestId("security-access-api")).toHaveText("API calls");
+        await pwExpect(area.locator("ul").first().getByTestId("security-check")).toHaveText([/A visitor cannot open \/settings/]);
+        await pwExpect(area.locator("ul").last().getByTestId("security-check")).toHaveText([/A visitor cannot call GET \/api\/admin\/users/]);
+        await axe("security run with API checks");
+        await shot("run-api-1280.png");
+        await at375("run-api-375.png");
+        await visit(routes.projectAgent(pid, "security", "settings"));
+        await pwExpect(page.getByTestId("agent-setup")).toContainText("Its access checks call the API calls found so far");
+        expect(consoleErrors).toEqual([]);
+    });
 });
