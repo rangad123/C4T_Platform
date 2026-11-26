@@ -43,7 +43,7 @@ const key = AnswerKeySchema.parse({
 const catalogueWorkflows = ["cart", "cart-discount", "checkout"];
 
 // w-add: stated by a requirement; its one write is the key workflow cart's write -> identifies cart; a workflow objective.
-// w-code: identifies cart-discount by its write, but only inferred -> no workflow objective -> cart-discount is not covered.
+// w-code: identifies cart-discount by its write, but only inferred -> a workflow objective that is not stated (ranked last).
 // checkout: identifies checkout by id; stated by a prd -> a workflow objective.
 const modelOf = (codeSource: "inferred" | "requirement") =>
     AppModelSchema.parse({
@@ -93,11 +93,11 @@ describe("E5 objective coverage", () => {
     it("counts the rules a person may rely on that an objective cites, and the catalogue workflows a workflow objective covers", () => {
         const c = objectiveCoverage({ model, rules, key, catalogueWorkflows });
         expect(c.rules).toEqual({ found: 3, total: 3, value: 1, missed: [] });
-        // cart (w-add) and checkout are covered; cart-discount is identified only by an inferred workflow, which gets no objective.
-        expect(c.workflows).toEqual({ found: 2, total: 3, value: 2 / 3, missed: ["cart-discount"] });
-        expect(c.met).toBe(false);
-        // Objectives: rules R-1, R-2, R-8; workflows w-add, checkout; one constraint (the required code field). None left out by a cap.
-        expect(c.objectives).toEqual({ total: 6, overCap: 0, byKind: { rule: 3, workflow: 2, constraint: 1, transition: 0, "coverage-gap": 0 } });
+        // cart (w-add) and checkout are covered; cart-discount is identified only by an inferred workflow, whose objective is not stated.
+        expect(c.workflows).toEqual({ found: 3, total: 3, value: 1, missed: [] });
+        expect(c.met).toBe(true);
+        // Objectives: rules R-1, R-2, R-8; workflows w-add, checkout and the inferred one; one constraint (the required code field). None left out by a cap.
+        expect(c.objectives).toEqual({ total: 7, overCap: 0, byKind: { rule: 3, workflow: 3, constraint: 1, transition: 0, "coverage-gap": 0 } });
     });
 
     it("is met when every counted rule and every catalogue workflow has its objective", () => {
@@ -153,6 +153,15 @@ describe("E5 objective coverage", () => {
         };
         expect(objectiveCoverage({ model: m, rules, key, catalogueWorkflows }).workflows.missed).toEqual(["cart-discount"]);
         expect(objectiveCoverage({ model: m, rules, key, catalogueWorkflows, judgements: j }).workflows).toEqual({ found: 3, total: 3, value: 1, missed: [] });
+    });
+
+    it("reports the active requirements a counted rule cites, by source ref or evidence, as a line apart from met", () => {
+        const more = [...rules, rule({ ref: "R-9", status: "rejected", decidedBy: "lead", evidence: [{ kind: "quote", ref: "1.12" }] }), rule({ ref: "R-10", sourceRef: "requirements 2.3", evidence: [] })];
+        const c = objectiveCoverage({ model, rules: more, key, catalogueWorkflows, requirements: ["1.1", "1.12", "1.2", "2.3", "1.1"] });
+        // 1.1 (R-1, R-2, R-8 evidence) and 2.3 (R-10's source ref) are cited; 1.12 only by a rejected rule; 1.2 by none ("1.1" is not "1.12").
+        expect(c.requirements).toEqual({ found: 2, total: 4, value: 0.5, missed: ["1.12", "1.2"] });
+        expect(c.met).toBe(true);
+        expect(objectiveCoverage({ model, rules, key, catalogueWorkflows }).requirements).toBeUndefined();
     });
 
     it("the objectives are built once, from the stored model, its rules and its workflows: nothing of the answer key reaches them", () => {

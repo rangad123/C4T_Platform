@@ -7,6 +7,9 @@
  *   out is counted as missed rather than dropped from the denominator.
  * - Workflows: catalogue workflows identified, as U3 identifies them (score.ts `workflowRecall`, with the trial's recorded workflow
  *   links), by the model workflows that have a workflow objective / catalogue workflows.
+ * - Requirements (a report line, not part of `met`): the active requirements (refs given) that at least one counted rule cites by its
+ *   source ref or evidence / those requirements. A requirement no kept rule cites has no rule to give an objective, so the rule ratio
+ *   cannot show it.
  *
  * The objectives are built once, from the stored model, its rules and its workflows, exactly as an exploration would get them; the
  * answer key is used only afterwards, to name which catalogue workflow a model workflow is. The cap is the largest any level allows
@@ -26,6 +29,8 @@ export interface ObjectiveCoverage {
     workflows: Ratio;
     /** Every counted rule and every catalogue workflow has its objective (E5's 100% target). */
     met: boolean;
+    /** Active requirements cited by at least one counted rule; only when the requirement refs were given. */
+    requirements?: Ratio;
     objectives: { total: number; overCap: number; byKind: Record<ObjectiveKind, number> };
     /** Model workflows with an objective that fit several key workflows and have no recorded link (as in U3). */
     needsJudgement: string[];
@@ -36,7 +41,7 @@ const checkable = (expected: string) => /[\p{L}\p{N}]/u.test(expected) && !/^(?:
 const ratio = (found: number, total: number, missed: string[]): Ratio => ({ found, total, value: total === 0 ? null : found / total, missed: [...missed].sort() });
 
 export function objectiveCoverage(
-    input: { model: AppModel; rules: readonly ScoredRule[]; key: AnswerKey; catalogueWorkflows: readonly string[]; judgements?: Judgements },
+    input: { model: AppModel; rules: readonly ScoredRule[]; key: AnswerKey; catalogueWorkflows: readonly string[]; judgements?: Judgements; requirements?: readonly string[] },
     build: typeof objectivesFrom = objectivesFrom,
 ): ObjectiveCoverage {
     const { model } = input;
@@ -56,7 +61,8 @@ export function objectiveCoverage(
 
     const cited = (kind: ObjectiveKind) => new Set(built.objectives.filter((o) => o.kind === kind).map((o) => norm(o.source.ref)));
     const ruleRefs = cited("rule");
-    const counted = input.rules.filter((r) => !r.evidenceGone && r.status !== "rejected" && (r.explicitness === "explicit" || r.status === "confirmed") && checkable(r.expected)).map((r) => r.ref);
+    const countedRules = input.rules.filter((r) => !r.evidenceGone && r.status !== "rejected" && (r.explicitness === "explicit" || r.status === "confirmed") && checkable(r.expected));
+    const counted = countedRules.map((r) => r.ref);
     const uniqueCounted = [...new Set(counted)];
     const rulesMissed = uniqueCounted.filter((ref) => !ruleRefs.has(norm(ref)));
 
@@ -67,10 +73,18 @@ export function objectiveCoverage(
     const byKind = Object.fromEntries(OBJECTIVE_KINDS.map((k) => [k, built.objectives.filter((o) => o.kind === k).length])) as Record<ObjectiveKind, number>;
     const rulesRatio = ratio(uniqueCounted.length - rulesMissed.length, uniqueCounted.length, rulesMissed);
     const workflowsRatio: Ratio = { found: covered.found, total: covered.total, value: covered.value, missed: covered.missed };
+    // A requirement ref as a whole token of a rule's source ref or evidence: "1.1" is not "1.12" or "1.1.2".
+    const cites = countedRules.map((r) => [r.sourceRef, ...r.evidence.map((e) => e.ref)].join("\n"));
+    const reqRefs = [...new Set((input.requirements ?? []).map(norm).filter(Boolean))];
+    const reqMissed = reqRefs.filter((q) => {
+        const re = new RegExp(`(?<![\\w.])${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w]|\\.\\w)`);
+        return !cites.some((t) => re.test(t));
+    });
     return {
         rules: rulesRatio,
         workflows: workflowsRatio,
         met: rulesRatio.found === rulesRatio.total && workflowsRatio.found === workflowsRatio.total,
+        ...(input.requirements ? { requirements: ratio(reqRefs.length - reqMissed.length, reqRefs.length, reqMissed) } : {}),
         objectives: { total: built.objectives.length, overCap: built.overCap, byKind },
         needsJudgement: covered.needsJudgement,
     };

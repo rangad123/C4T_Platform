@@ -9,7 +9,7 @@
  * Automatic selection stays off: the row's mode is "full", and the run that follows is a full run unless a person or the API asks for a
  * focused one (routes/selection.ts). The same head commit is analysed once: a second delivery for it changes nothing.
  */
-import { analyzeImpact } from "../../engine/impact/analyze.js";
+import { analyzeImpact, BROWSER_DIR } from "../../engine/impact/analyze.js";
 import { isJsLike } from "../../engine/impact/diff.js";
 import { routesOf } from "../../engine/impact/routes.js";
 import { redactText } from "../../shared/redact-text.js";
@@ -39,7 +39,8 @@ const PARALLEL = 8;
 export async function repositorySources(client: Pick<GithubCodeHost, "tree" | "blob">, headSha: string, changed: string[]): Promise<{ sources: Record<string, string>; notes: string[] }> {
     const { files, truncated } = await client.tree(headSha);
     const first = new Set(changed);
-    const code = files.filter((f) => isJsLike(f.path) && !/(^|\/)node_modules\//.test(f.path));
+    // Page files in the browser folder too: they say which scripts a page loads (analyze.ts pagesOf).
+    const code = files.filter((f) => (isJsLike(f.path) || (BROWSER_DIR.test(f.path) && /\.html?$/i.test(f.path))) && !/(^|\/)node_modules\//.test(f.path));
     const tooBig = code.filter((f) => f.size > MAX_SOURCE_BYTES).length;
     const ordered = code.filter((f) => f.size <= MAX_SOURCE_BYTES).sort((a, b) => Number(first.has(b.path)) - Number(first.has(a.path)));
     const take = ordered.slice(0, MAX_SOURCE_FILES);
@@ -135,6 +136,8 @@ export async function processPrEvent(p: Platform, store: CodeHostStore, projectI
         requirements,
         findings: await pastFindings(p.sql, p.repo, projectId),
     });
+    // Files that are not application code are said so, and not counted as changed application files.
+    if (impact.notApp.length) notes.push(`Not counted as application changes: ${impact.notApp.slice(0, 5).map((n) => n.why).join(" ")}${impact.notApp.length > 5 ? ` …and ${impact.notApp.length - 5} more.` : ""}`);
 
     // As the preview route: a test no runner runs (unreadable, never approved, held back) is listed apart, never proposed.
     const approved = new Set(p.db.all<{ test_case_id: string }>("SELECT DISTINCT test_case_id FROM test_versions WHERE project_id = ? AND state = 'approved'", projectId).map((r) => r.test_case_id));

@@ -434,11 +434,12 @@ describe("6. a test that ends a session never uses the shared credentials (API-0
     it("a saved test that sends it with the shared credentials skips itself and says why, with no repair", async () => {
         const skipped: ScriptRun = { testId: "API-016", status: "skipped", durationMs: 0, failedStepIndex: -1, steps: [], artifacts: [], responses: [] };
         const { outcomes, scripts } = await validateApi([API_016], { "API-016": skipped });
-        expect(scripts["API-016"]).toContain("test.skip(true,");
+        // It skips whenever its run has shared credentials (a token, a header or the project's account): session-end-own-unit.test.ts.
+        expect(scripts["API-016"]).toContain("test.skip(!!(process.env.API_TOKEN || process.env.API_AUTH_HEADER || process.env.TEST_USERNAME),");
         expect(outcomes[0]).toMatchObject({ status: "FAILED_VALIDATION", reason: expect.stringContaining("shared") });
         // On a fresh account of its own it runs.
         const own = TestSpecSchema.parse({ ...API_016, steps: [...signup, { ...API_016.steps[0], auth: "none" }, API_016.steps[1]] });
-        expect((await validateApi([own], { "API-016": passed("API-016") })).scripts["API-016"]).not.toContain("test.skip(true,");
+        expect((await validateApi([own], { "API-016": passed("API-016") })).scripts["API-016"]).not.toContain("Not run: it signs out");
     });
 
     it("the shared token refused part way through the run is one cause, not one failure per test, and nothing is repaired", async () => {

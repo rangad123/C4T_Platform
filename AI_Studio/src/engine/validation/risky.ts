@@ -44,10 +44,28 @@ export function endsSession(method: string, path: string): boolean {
 export const SESSION_END_SKIPPED =
     "Not run: it signs out, revokes a credential or changes a password with the project's shared credentials, which would sign every other test out. Generate it again, so it signs up an account of its own.";
 
-/** A saved test that sends a session-ending call with the shared credentials (the project's token or account). */
-export const endsSharedSession = (spec: Pick<TestSpec, "steps">): boolean => spec.steps.some((s) => s.action === "request" && s.auth !== "none" && endsSession(s.method, s.path));
+/** A request that signs in or signs up: from then on the test has a session of its own. */
+const signsIn = (s: TestSpec["steps"][number]): boolean => s.action === "request" && s.method.toUpperCase() === "POST" && /\/(?:log-?in|sign-?in|sign-?up|register|sessions?)(?:\/|$)/.test(s.path.split("?")[0]!.toLowerCase());
 
-/** The first line of such a test's body: it never runs. Empty for any other test. */
-export function sessionEndLine(spec: Pick<TestSpec, "steps">): string {
-    return endsSharedSession(spec) ? `    test.skip(true, ${JSON.stringify(SESSION_END_SKIPPED)});\n` : "";
+/**
+ * Step `i` ends the test's own session: a session-ending call after the test signed in or signed up by itself. The script sends it without
+ * the shared credentials (generators/api.ts), so it signs out only that session (the frozen PR-bench suite's logout tests).
+ */
+export const endsOwnSession = (steps: TestSpec["steps"], i: number): boolean => {
+    const s = steps[i]!;
+    return s.action === "request" && endsSession(s.method, s.path) && steps.slice(0, i).some(signsIn);
+};
+
+/** A saved test that sends a session-ending call with the shared credentials (the project's token or account), not on a session of its own. */
+export const endsSharedSession = (spec: Pick<TestSpec, "steps">): boolean => spec.steps.some((s, i) => s.action === "request" && s.auth !== "none" && endsSession(s.method, s.path) && !endsOwnSession(spec.steps, i));
+
+/**
+ * The first line of such a test's body: it skips itself. An API test skips only when its run has shared credentials (a token, a header or
+ * the project's account) or it signs in as a named account; with none there is no shared session to end. A web test always skips (it may
+ * start signed in with the project's saved session). Empty for any other test.
+ */
+export function sessionEndLine(spec: Pick<TestSpec, "steps" | "kind" | "testData">): string {
+    if (!endsSharedSession(spec)) return "";
+    const when = spec.kind === "api" && !spec.testData.signInAs ? `!!(process.env.API_TOKEN || process.env.API_AUTH_HEADER || process.env.TEST_USERNAME)` : "true";
+    return `    test.skip(${when}, ${JSON.stringify(SESSION_END_SKIPPED)});\n`;
 }
