@@ -47,7 +47,8 @@ function sheets(bytes: Uint8Array): Array<{ name: string; rows: string[][]; xml:
     });
 }
 
-const CASE_HEADERS = ["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement"];
+// Sheet items 31-33: "Test data" and "Check" come after the columns a code project's Import reads.
+const CASE_HEADERS = ["ID", "Title", "Type", "Priority", "Page", "Preconditions", "Steps", "Expected result", "Requirement", "Test data", "Check"];
 
 function tc(n: number, over: Partial<CaseOutcomeCase> = {}): CaseOutcomeCase {
     return {
@@ -86,8 +87,13 @@ function outcome(over: Partial<CaseOutcome> = {}): CaseOutcome {
                 preconditions: ["Signed in as a shopper", "The cart is empty"],
                 expected: ["The cart badge shows 1", "The product is listed in the cart"],
                 requirement: "REQ-2",
-                // An Automated case may carry steps from the engine; the workbook does not show them (R7).
+                // Sheet item 32: every case has numbered steps, an Automated one too.
                 steps: [{ action: "Click Add to cart", expected: "Badge shows 1" }],
+                testData: [
+                    { field: "Quantity", kind: "valid", value: "1", missing: false },
+                    { field: "Quantity", kind: "boundary", value: "0", missing: false },
+                    { field: "Shopper account", kind: "valid", value: "", missing: true },
+                ],
             }),
             tc(2, {
                 title: "Paying with an expired card is refused",
@@ -128,12 +134,14 @@ describe("buildCaseWorkbook: the three sheets (R9, Q3)", () => {
             "High",
             "/",
             "Signed in as a shopper\nThe cart is empty",
-            "",
+            "1. Click Add to cart => Badge shows 1",
             "The cart badge shows 1\nThe product is listed in the cart",
             "REQ-2",
+            "Valid: Quantity = 1\nBoundary: Quantity = 0\nValid: Shopper account = MISSING (not known, fill in before running)",
+            "",
         ]);
         expect(cases!.rows[2]!.slice(0, 6)).toEqual(["TC-002", "Paying with an expired card is refused", "Manual", "Critical", "/cart/checkout", "One product in the cart"]);
-        expect(cases!.rows[2]!.slice(7)).toEqual(["The order is not placed", "Payments"]);
+        expect(cases!.rows[2]!.slice(7, 9)).toEqual(["The order is not placed", "Payments"]);
         expect(cases!.rows.every((r) => r.length <= CASE_HEADERS.length)).toBe(true);
     });
 
@@ -202,17 +210,22 @@ describe("buildCaseWorkbook: the three sheets (R9, Q3)", () => {
     });
 });
 
-describe("buildCaseWorkbook: steps only on Manual rows (R7)", () => {
-    it("Automated rows have an empty Steps cell; Manual rows hold one `action => expected` line per step", () => {
+describe("buildCaseWorkbook: numbered steps on every row (sheet item 32)", () => {
+    it("every row holds one numbered `n. action => expected` line per step", () => {
         const [cases] = sheets(buildCaseWorkbook(outcome()));
-        expect(cases!.rows[1]![6] ?? "").toBe("");
-        expect(cases!.rows[2]![6]).toBe("Enter an expired card => The card field is marked\nPress Pay");
+        expect(cases!.rows[1]![6]).toBe("1. Click Add to cart => Badge shows 1");
+        expect(cases!.rows[2]![6]).toBe("1. Enter an expired card => The card field is marked\n2. Press Pay");
+    });
+
+    it("the Check column says what the check after generation flagged, one per line (sheet items 31-33)", () => {
+        const [cases] = sheets(buildCaseWorkbook(outcome({ cases: [tc(1, { flags: ["No execution steps", "Not linked to a requirement"] })] })));
+        expect(cases!.rows[1]![10]).toBe("No execution steps\nNot linked to a requirement");
     });
 
     it("a line break inside a step does not split it into two steps", () => {
         const o = outcome({ cases: [tc(1, { type: "manual", steps: [{ action: "Type\nthe name", expected: "It is\r\nshown" }] })] });
         const [cases] = sheets(buildCaseWorkbook(o));
-        expect(cases!.rows[1]![6]).toBe("Type the name => It is shown");
+        expect(cases!.rows[1]![6]).toBe("1. Type the name => It is shown");
     });
 });
 

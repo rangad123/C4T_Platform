@@ -216,6 +216,24 @@ describe("outcome report", () => {
         if (SHOTS) await shot("outcome-case-open.png");
     });
 
+    it("shows every case's numbered steps, its test data with a missing value highlighted, what the check flagged, and the requirements with no case (sheet items 31-33)", async () => {
+        await open("checked");
+        const uncovered = page.getByTestId("outcome-uncovered");
+        expect(await uncovered.locator("h3").textContent()).toBe("2 requirements with no test case");
+        expect(await uncovered.locator("li").allTextContents()).toEqual(["REQ-4 Customers can save a wish list", "REQ-9 Refunds reach the card in five days"]);
+        const auto = page.locator('[data-case="TC-010"]');
+        expect(await auto.locator(".oc-flag-count").textContent()).toBe("Needs a look");
+        await auto.getByRole("button").click();
+        expect(await auto.locator(".oc-steps > li").count()).toBe(2);
+        expect(await auto.locator(".oc-data > li").allTextContents()).toEqual(["Valid Postcode: SW1A 1AA", "Invalid Postcode: 12", "Valid Gift card number: Missing, fill in before running"]);
+        expect(await auto.locator("mark.oc-data-missing").count()).toBe(1);
+        expect(await auto.getByTestId("case-flags").textContent()).toBe("Test data “Coupon” has no value and is not marked missing");
+        expect(await page.locator('[data-case="TC-009"] .oc-flag-count').count()).toBe(0);
+        const axe = await new AxeBuilder({ page }).include('[data-testid="case-outcome"]').analyze();
+        expect(axe.violations.map((v) => v.id)).toEqual([]);
+        if (SHOTS) await shot("outcome-case-checked.png");
+    });
+
     it("says a stopped run kept what it found", async () => {
         await open("stopped");
         expect(await page.getByTestId("outcome-run-note").textContent()).toBe("The last run was stopped. It kept the 3 pages and 4 test cases it found before then.");

@@ -70,8 +70,6 @@ export interface ImportResult {
     created: number;
     duplicates: number;
     skipped: Array<{ row: number; reason: string }>;
-    /** Workbook only: Automated rows whose Steps were not imported (steps belong to Manual test cases). */
-    stepsIgnored?: number;
     total: number;
 }
 
@@ -81,8 +79,7 @@ export function importSummary(r: ImportResult): { tone: "success" | "warning"; t
     const parts = [`Imported ${n(r.created, "test case", "test cases")}.`];
     if (r.duplicates) parts.push(`${n(r.duplicates, "test case was", "test cases were")} already here and left out.`);
     if (r.skipped.length) parts.push(`${n(r.skipped.length, "row", "rows")} could not be imported.`);
-    if (r.stepsIgnored) parts.push(`The steps of ${n(r.stepsIgnored, "Automated row were", "Automated rows were")} not imported: an Automated test case’s steps are written when its test script is made.`);
-    return { tone: r.skipped.length || r.stepsIgnored ? "warning" : "success", text: parts.join(" "), detail: r.skipped.map((s) => `Row ${s.row}: ${s.reason}`) };
+    return { tone: r.skipped.length ? "warning" : "success", text: parts.join(" "), detail: r.skipped.map((s) => `Row ${s.row}: ${s.reason}`) };
 }
 
 export interface ViewItem {

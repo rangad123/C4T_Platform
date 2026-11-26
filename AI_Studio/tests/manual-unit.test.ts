@@ -76,6 +76,14 @@ describe("steps in a cell", () => {
             { action: "Check", expected: "a => b" },
         ]);
     });
+
+    it("reads the numbered steps the Test Case Generation workbook writes without their numbers", () => {
+        expect(stepsFromCell("1. Open the cart => It shows\n2) Press Pay\n10. Type 3 items")).toEqual([
+            { action: "Open the cart", expected: "It shows" },
+            { action: "Press Pay", expected: "" },
+            { action: "Type 3 items", expected: "" },
+        ]);
+    });
 });
 
 describe("exporting JSON", () => {

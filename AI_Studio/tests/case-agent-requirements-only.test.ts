@@ -2,7 +2,7 @@
  * A Test Case Generation run from a requirements document alone (founder 2026-11-19 R16, owner decision Q7; PLAN.md C8), with a
  * scripted model (no paid AI, no browser):
  *   - R16.1: a TCG project with active requirements and no address starts a run; it writes test cases from the requirements with the
- *     requirements generator (Automated without steps, Manual with steps); the outcome has them with Page empty, the tree has one node
+ *     requirements generator (every case with numbered steps, sheet item 32; test data with a missing value marked, item 31); the outcome has them with Page empty, the tree has one node
  *     per requirement area, and the workbook's Page column is empty while its Tree sheet names the areas;
  *   - R16.2: no address and no active requirements: refused with "Add the application's address or a requirements document first.",
  *     and no job is made; another kind of project keeps its own refusal.
@@ -48,7 +48,7 @@ async function project(name: string, agents: string[]): Promise<string> {
     return made.body.id as string;
 }
 
-// The scripted model answers the requirements generator: per requirement, one Automated case (with steps it must drop) and one Manual case.
+// The scripted model answers the requirements generator: per requirement, one Automated case (with steps and test data) and one Manual case.
 const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
 const model = new MockLanguageModelV3({ doGenerate: async () => ({ content: [{ type: "text" as const, text: "done" }], finishReason: { unified: "stop" as const, raw: "stop" }, usage, warnings: [] }) });
 const scripted: LlmClient = {
@@ -60,7 +60,7 @@ const scripted: LlmClient = {
         const refs = [...prompt.matchAll(/^Reference: (\S+)$/gm)].map((m) => m[1]);
         return {
             cases: refs.flatMap((ref) => [
-                { requirement: ref, title: `Verify ${ref} works`, priority: "high", type: "automated", steps: [{ action: "Should be dropped", expected: "-" }] },
+                { requirement: ref, title: `Verify ${ref} works`, priority: "high", type: "automated", steps: [{ action: "Sign in", expected: "The home page shows" }], testData: [{ field: "Account", kind: "valid", value: "", missing: true }, { field: "Password", kind: "invalid", value: "x", missing: false }] },
                 { requirement: ref, title: `Check ${ref} by hand`, priority: "low", type: "manual", steps: [{ action: `Open ${ref}`, expected: "It opens" }] },
             ]),
         };
@@ -133,7 +133,17 @@ describe("R16.1: a run from the requirements alone", () => {
         expect(o.cases).toHaveLength(6);
         expect(o.cases.every((c: { page: string }) => c.page === "")).toBe(true);
         const auto = o.cases.find((c: { title: string }) => c.title === "Verify REQ-1 works");
-        expect(auto).toMatchObject({ type: "automated", priority: "high", steps: [], requirement: "REQ-1" });
+        expect(auto).toMatchObject({
+            type: "automated",
+            priority: "high",
+            steps: [{ action: "Sign in", expected: "The home page shows" }],
+            testData: [
+                { field: "Account", kind: "valid", value: "", missing: true },
+                { field: "Password", kind: "invalid", value: "x", missing: false },
+            ],
+            requirement: "REQ-1",
+            flags: [],
+        });
         expect(o.cases.find((c: { title: string }) => c.title === "Check REQ-2 by hand")).toMatchObject({ type: "manual", priority: "low", steps: [{ action: "Open REQ-2", expected: "It opens" }], requirement: "REQ-2" });
         expect(o.tree).toEqual([
             { node: "REQ-1 Sign in", parent: null, page: "", title: "REQ-1 Sign in", cases: 2 },

@@ -36,6 +36,14 @@ export interface CaseOutcomeStep {
     expected: string;
 }
 
+/** One value a test case uses (sheet item 31); `missing` when it cannot be known, and then `value` is empty. Same shape as engine/spec/schema.ts CaseData. */
+export interface CaseOutcomeData {
+    field: string;
+    kind: "valid" | "invalid" | "boundary";
+    value: string;
+    missing: boolean;
+}
+
 export interface CaseOutcomeCase {
     /** TC-001… by first appearance across runs, stable. */
     id: string;
@@ -46,7 +54,12 @@ export interface CaseOutcomeCase {
     preconditions: string[];
     steps: CaseOutcomeStep[];
     expected: string[];
+    /** The requirement reference(s) the case checks, comma-separated (sheet item 33). */
     requirement: string;
+    /** Its valid, invalid and boundary test data (sheet item 31). */
+    testData?: CaseOutcomeData[];
+    /** What the check after generation found missing (case-outcome.ts caseFlags): no steps, no requirement, unmarked missing data. */
+    flags?: string[];
     /** A case written from the requirements alone (SPEC R16): the requirement-area tree node it hangs on (its page stays empty). */
     area?: string;
     /** The case's own start page, when it is not a page of the tree (`page` is then the nearest page; F3 round 2 L10). */
@@ -73,6 +86,8 @@ export interface CaseOutcome {
     notOpened: number;
     /** The understanding's "what is missing" lines, if any. */
     missing: string[];
+    /** The project's active requirements no test case links to (sheet item 33). */
+    uncovered?: Array<{ ref: string; title: string }>;
 }
 
 /**
