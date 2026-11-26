@@ -235,7 +235,7 @@ describe("the Test cases list", () => {
         await pwExpect(table.getByRole("row")).toHaveCount(3);
     });
 
-    it("adds one by hand from the menu, with its type and requirement; steps only while the type is Manual", async () => {
+    it("adds one by hand from the menu, with its type and requirement; numbered steps for both types (owner decision 2026-11-26)", async () => {
         await open(casesUrl());
         // The button is "Add test case" (sheet P11): no "(manual)" anywhere on the tab.
         await pwExpect(page.getByText("(manual)")).toHaveCount(0);
@@ -249,31 +249,26 @@ describe("the Test cases list", () => {
         await form.getByLabel("Step 1, what to do").fill("Add two items");
         await form.getByLabel("Step 1, what should happen").fill("The total adds up");
         await pwExpect(form.getByRole("button", { name: "Add step" })).toBeVisible();
-        // Automated: a title only, no steps to write.
+        await shotBoth("form-manual");
+        // Automated: the same steps stay, and its test script is made from them.
         await form.getByRole("radio", { name: /Automated/ }).check();
-        await pwExpect(form.getByLabel("Step 1, what to do")).toHaveCount(0);
-        await pwExpect(form.getByRole("button", { name: "Add step" })).toHaveCount(0);
-        await pwExpect(form.getByText("Steps", { exact: true })).toHaveCount(0);
-        await form.getByLabel("Requirement", { exact: true }).selectOption({ label: "REQ-2 The basket keeps its items" });
-        await shotBoth("form-automated");
-        // Back to Manual: what was typed is still there.
-        await form.getByRole("radio", { name: /Manual/ }).check();
         await pwExpect(form.getByLabel("Step 1, what to do")).toHaveValue("Add two items");
         await pwExpect(form.getByRole("button", { name: "Add step" })).toBeVisible();
-        await shotBoth("form-manual");
-        await form.getByRole("radio", { name: /Automated/ }).check();
-        await pwExpect(form.getByLabel("Step 1, what to do")).toHaveCount(0);
-        // Saved as Automated, it is sent with no steps.
+        await pwExpect(form.getByText("Its test script is made from these steps.")).toBeVisible();
+        await pwExpect(form.getByText("An Automated test case is its title", { exact: false })).toHaveCount(0);
+        await form.getByLabel("Requirement", { exact: true }).selectOption({ label: "REQ-2 The basket keeps its items" });
+        await shotBoth("form-automated");
+        // Saved as Automated, it is sent with its steps.
         const sent = page.waitForRequest((r) => r.method() === "POST" && /\/manual-cases$/.test(r.url()));
         await form.getByRole("button", { name: "Add test case", exact: true }).click();
-        expect((await sent).postDataJSON()).toMatchObject({ title: "Verify the basket total", automation: "automated", steps: [] });
+        expect((await sent).postDataJSON()).toMatchObject({ title: "Verify the basket total", automation: "automated", steps: [{ action: "Add two items", expected: "The total adds up" }] });
         await pwExpect(page.getByText("Added TC-005 “Verify the basket total”.")).toBeVisible();
         const row = page.getByRole("table").getByRole("row").filter({ hasText: "Verify the basket total" });
         await pwExpect(row.getByRole("link", { name: "REQ-2" })).toBeVisible();
         await pwExpect(row).toContainText("Automated");
-        // The list counts steps for Manual cases only.
-        await pwExpect(row).not.toContainText("step");
-        await pwExpect(page.getByRole("table").getByRole("row").filter({ hasText: "Verify paying by card" })).not.toContainText("step");
+        // The list counts the steps of every case.
+        await pwExpect(row).toContainText("· 1 step");
+        await pwExpect(page.getByRole("table").getByRole("row").filter({ hasText: "Verify paying by card" })).toContainText("· 1 step");
         await pwExpect(page.getByRole("table").getByRole("row").filter({ hasText: "Check the printed receipt" })).toContainText("Medium priority · 1 step");
         await shotBoth("list");
     });
@@ -291,23 +286,19 @@ describe("the Test cases list", () => {
         await pwExpect(page.getByTestId("cases-chosen")).toContainText("2 test cases chosen");
     });
 
-    it("an Automated case saved with steps before: they are hidden, sent back unchanged, and shown again as Manual", async () => {
+    it("an Automated case saved with steps before: they are shown, numbered, and can be changed (owner decision 2026-11-26)", async () => {
         const steps = [{ action: "Open the old basket", expected: "It still has its items" }];
         const old = await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: "An older automated case", automation: "automated", steps });
         await open(casesUrl(shop, `?case=${old.id}`));
         const panel = page.getByTestId("case-open");
         await pwExpect(panel.getByLabel("Title", { exact: true })).toHaveValue("An older automated case");
-        await pwExpect(panel.getByLabel("Step 1, what to do")).toHaveCount(0);
-        await pwExpect(page.getByRole("table").getByRole("row").filter({ hasText: "An older automated case" })).not.toContainText("step");
-        await panel.getByLabel("Title", { exact: true }).fill("An older automated case, renamed");
+        await pwExpect(panel.getByLabel("Step 1, what to do")).toHaveValue("Open the old basket");
+        await pwExpect(page.getByRole("table").getByRole("row").filter({ hasText: "An older automated case" })).toContainText("· 1 step");
+        await panel.getByLabel("Step 1, what should happen").fill("It still has its two items");
         const sent = page.waitForRequest((r) => r.method() === "PUT" && r.url().includes(`/manual-cases/${old.id}`));
         await panel.getByRole("button", { name: "Save changes" }).click();
-        expect((await sent).postDataJSON()).toMatchObject({ automation: "automated", steps });
+        expect((await sent).postDataJSON()).toMatchObject({ automation: "automated", steps: [{ action: "Open the old basket", expected: "It still has its two items" }] });
         await pwExpect(page.getByText("Saved TC-")).toBeVisible();
-        // Switching it to Manual shows the steps it kept.
-        await open(casesUrl(shop, `?case=${old.id}`));
-        await page.getByTestId("case-open").getByRole("radio", { name: /Manual/ }).check();
-        await pwExpect(page.getByTestId("case-open").getByLabel("Step 1, what to do")).toHaveValue("Open the old basket");
     });
 
     it("lands an old ?section=manual link on the list with Manual chosen", async () => {
@@ -329,13 +320,14 @@ describe("an AI agent project", () => {
         await pwExpect(page.getByTestId("agent-project-tests")).toHaveAttribute("href", `#/projects/${agentShop.projectId}/scripts`);
         await pwExpect(page.getByRole("table")).toContainText("An older written case");
         await pwExpect(page.getByRole("button", { name: "Add test case", exact: true })).toHaveCount(0);
-        // Read only: an Automated case shows no steps, a Manual one shows its steps.
-        const auto = await api("POST", `/api/projects/${agentShop.projectId}/manual-cases`, { title: "An automated case to read", automation: "automated", steps: [{ action: "Hidden action", expected: "Hidden result" }] });
+        // Read only: every case shows its numbered steps (owner decision 2026-11-26); an Automated one says its script is made from them.
+        const auto = await api("POST", `/api/projects/${agentShop.projectId}/manual-cases`, { title: "An automated case to read", automation: "automated", steps: [{ action: "Automated action", expected: "Automated result" }] });
         const manual = await api("POST", `/api/projects/${agentShop.projectId}/manual-cases`, { title: "A manual case to read", automation: "manual", steps: [{ action: "Shown action", expected: "Shown result" }] });
         await open(casesUrl(agentShop, `?case=${auto.id}`));
         await pwExpect(page.getByTestId("case-open")).toContainText("An automated case to read");
-        await pwExpect(page.getByTestId("case-open")).not.toContainText("Hidden action");
-        await pwExpect(page.getByTestId("case-open")).not.toContainText("No steps written");
+        await pwExpect(page.getByTestId("case-open").locator("ol > li")).toHaveText(["Automated action → Automated result"]);
+        await pwExpect(page.getByTestId("case-open")).toContainText("Its test script is made from these steps.");
+        await pwExpect(page.getByTestId("case-open")).not.toContainText("An Automated test case is its title");
         await open(casesUrl(agentShop, `?case=${manual.id}`));
         await pwExpect(page.getByTestId("case-open")).toContainText("Shown action");
     });

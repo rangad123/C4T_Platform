@@ -170,7 +170,7 @@ describe("Import on the Test cases tab", () => {
         expect(await casesNow()).toHaveLength(4);
     });
 
-    it("the New test case form offers Preconditions and Expected result for both types, and Steps only for Manual (SPEC P10)", async () => {
+    it("the New test case form offers Preconditions and Expected result for both types, and numbered Steps for both (SPEC P10, owner decision 2026-11-26)", async () => {
         await page.goto("about:blank");
         await page.goto(casesUrl());
         await page.getByRole("button", { name: "Add test case" }).first().click();
@@ -180,7 +180,8 @@ describe("Import on the Test cases tab", () => {
         await pwExpect(form.getByLabel("Expected result (optional)")).toBeVisible();
         await pwExpect(form.getByLabel("Step 1, what to do")).toBeVisible();
         await form.getByRole("radio", { name: /Automated/ }).check();
-        await pwExpect(form.getByLabel("Step 1, what to do")).toHaveCount(0);
+        await pwExpect(form.getByLabel("Step 1, what to do")).toBeVisible();
+        await pwExpect(form.getByText("Its test script is made from these steps.")).toBeVisible();
         await pwExpect(form.getByLabel("Preconditions (optional)")).toBeVisible();
         await form.getByLabel("Title", { exact: true }).fill("Search shows no result for nonsense");
         await form.getByLabel("Preconditions (optional)").fill("The catalogue has products\n\nSearch is on");

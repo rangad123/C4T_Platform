@@ -15,12 +15,12 @@ export interface Step {
 export type Automation = "automated" | "manual";
 export const AUTOMATION_WORDS: Record<Automation, string> = { automated: "Automated", manual: "Manual" };
 export const AUTOMATION_HINT: Record<Automation, string> = {
-    automated: "A tool can check it, so a test script can be made from it. Its steps are written with the script.",
+    automated: "A tool can check it, so a test script is made from its steps.",
     manual: "A person does it by hand: how something looks, a printout, a device, a judgement call.",
 };
 
-/** Where the Steps would be, for an Automated case: it is a title only (owner, 2026-11-20). */
-export const AUTOMATED_NO_STEPS = "An Automated test case is its title. Its steps are written when its test script is made.";
+/** Under an Automated case's steps: every case has steps (owner decision 2026-11-26), and an Automated one's script is made from them. */
+export const AUTOMATED_STEPS_NOTE = "Its test script is made from these steps.";
 
 export interface ManualCase {
     id: string;
