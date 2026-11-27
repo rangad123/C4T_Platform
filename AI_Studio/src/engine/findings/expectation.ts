@@ -11,7 +11,8 @@
  */
 import { repeatAdds } from "../api/stated-source.js";
 import type { CapturedCall } from "../web/correlation.js";
-import type { TestSpec } from "../spec/schema.js";
+import { ROLE_MISSING, type TestSpec } from "../spec/schema.js";
+import { testStepFault } from "../validation/test-fault.js";
 
 /** What the API's answers said about the amount a page check expects (test meta `apiAmount`, set when the test was written). */
 export type ApiAmount = "holds" | "lacks";
@@ -243,10 +244,8 @@ export function ownCheckFault(spec: TestSpec, attempts: ReadonlyArray<{ outcome:
     if (never) return never;
     if (check?.action === "assert" && (check.check === "ariaSnapshot" || check.check === "urlPattern") && /\{\{[^}]*\}\}/.test(String(check.expected ?? "")))
         return `The check expects “${String(check.expected).match(/\{\{[^}]*\}\}/)![0]}” as written: a ${check.check === "ariaSnapshot" ? "structure snapshot" : "URL pattern"} does not fill placeholders, so no page can match it. The test needs the value itself or a pattern.`;
-    // An exact-text check on the element found by another text can never pass (paid L4 shop-3 WEB-053: the text "$52.00" must read "$50.75").
-    const byText = check?.action === "assert" && check.locator?.by === "text" ? (check.locator.value ?? "") : "";
-    if (check?.action === "assert" && check.check === "exactText" && byText && !norm(String(check.expected ?? "")).includes(norm(byText)))
-        return `The check finds the element by its text “${byText.slice(0, 80)}” and then expects its whole text to be “${String(check.expected).slice(0, 80)}”: no element can be both, so no page can pass it.`;
+    const other = check?.action === "assert" ? foundByOtherText(check) : undefined;
+    if (other) return other;
     const opened = new Set(spec.steps.flatMap((s) => (s.action === "navigate" ? [decoded(s.url).replace(ORIGIN, "").split(/[?#]/)[0]!] : [])));
     // A check that expects a refusal, on a page that answered a refusal itself: access was refused, only the page's words differ.
     const wantsRefusal = check?.action === "assert" && REFUSAL.test(`${check.description ?? ""} ${String(check.expected ?? "")} ${check.locator?.value ?? ""}`);
@@ -256,7 +255,70 @@ export function ownCheckFault(spec: TestSpec, attempts: ReadonlyArray<{ outcome:
     return page ? `The page the test opened, GET ${page.path}, answered ${page.status} in every failed attempt: the access was refused, as the check expects, so the failure is about how the page words the refusal, not about access. The test needs the application's own page and words for it.` : undefined;
 }
 
+/**
+ * Why a defect the test writer reported (web/author.ts, finish "defect") is the test's own fault, from its captured check alone: the facts
+ * the validator (test-fault.ts) and the verification judge (ownCheckFault) already read, applied before it is reported
+ * (orchestrator.ts keepAuthored), since a defect test never goes through the validator. Undefined when none holds.
+ *  - the captured failure is an element several match (strict mode violation): re-check shop-4 WEB-040/046/058, `getByText('Subtotal')`;
+ *  - the captured check can never pass (ownCheckFault: a placeholder in a snapshot, an element found by another text);
+ *  - the captured check reads an element that shows only the text it is found by (a label) for a value that text does not hold: the
+ *    value is in another element (re-check shop-4 WEB-048: “Discount (SAVE10)” must contain “−$4.70”, received “Discount (SAVE10)”).
+ *    Not when the expected text holds that text: the element can show it with more (rbac-5 WEB-032: “Bold x” must contain “<b>Bold x</b>”);
+ *  - the captured check could not run (a role locator without its role: shop-2 WEB-028);
+ *  - a whole text written with spaces between parts the element's text runs together (cells of a row, items of a list).
+ */
+export function authoredCheckFault(spec: TestSpec, captured: { source: string; observed: string } | undefined): string | undefined {
+    if (spec.kind !== "web" || !captured) return undefined;
+    let at = -1;
+    for (let i = spec.steps.length - 1; i >= 0 && at < 0; i--) if ((spec.steps[i] as { source?: string }).source === captured.source) at = i;
+    const check = spec.steps[at];
+    if (!check) return undefined;
+    // On a check only an element several match is the step's fault (an element not found is a claim about the page).
+    const ambiguous = testStepFault({ status: "failed", steps: [], error: captured.observed }, check);
+    if (ambiguous) return ambiguous;
+    // The step itself could not run: its role locator has no role (spec/schema.ts), so it never looked at the page.
+    if (captured.observed.includes(ROLE_MISSING)) return `The test needs fixing, not your application: its check could not run. ${ROLE_MISSING}`;
+    const own = ownCheckFault(spec, [{ outcome: "failed", failedStep: at + 1, requests: [] }]);
+    if (own || check.action !== "assert" || (check.check !== "text" && check.check !== "exactText")) return own;
+    const l = check.locator as { by?: string; role?: string; value?: string } | undefined;
+    const found = l?.by === "text" || (l?.by === "role" && NAMED_BY_TEXT.has(l.role ?? "")) ? (l.value ?? "") : "";
+    const received = captured.observed.match(/Received(?: string)?:\s*"([^"]*)"/)?.[1];
+    const want = norm(String(check.expected ?? ""));
+    // A whole text written with a space where the element's text has none: the parts are separate cells or items, whose text joins
+    // without one (re-check shop-3 WEB-013: “Headphones $59.99 Quantity 2 …”, received “Headphones$59.99Quantity …”).
+    const words = String(check.expected ?? "").trim().split(/\s+/);
+    const joined = check.check === "exactText" && received !== undefined ? words.slice(1).findIndex((b, i) => received.includes(words[i]! + b) && !received.includes(`${words[i]} ${b}`)) : -1;
+    if (joined >= 0)
+        return `The check expects the whole text “${String(check.expected).slice(0, 80)}”, with a space between “${words[joined]}” and “${words[joined + 1]}”, but the element’s text runs them together (“${words[joined]}${words[joined + 1]}”): they are separate parts of the page, so its text can never read as written. The test needs a check of each part.`;
+    if (found && received !== undefined && norm(received) === norm(found) && want && !norm(found).includes(want) && !want.includes(norm(found)))
+        return `The check reads the element that shows only “${found.slice(0, 80)}”, the text it finds it by, and expects it to contain “${String(check.expected).slice(0, 80)}”: that value is in another element, so no page laid out this way can pass it. The test needs the element that holds the value.`;
+    return undefined;
+}
+
 const REFUSAL = /\b40[13]\b|not allowed|forbidden|denied|refused|unauthori[sz]ed/i;
+/** Roles whose accessible name is their own text, so a name is text the element shows. */
+const NAMED_BY_TEXT = new Set(["heading", "link", "button"]);
+
+/**
+ * Why a text check can never pass, when the element is found by one text and then must show another:
+ *  - an exact-text check whose expected text does not hold the text (or, for a heading, link or button, the name) it finds the element
+ *    by (paid L4 shop-3 WEB-053: the text "$52.00" must read "$50.75"; re-check rbac-1 WEB-016: the heading named "Bold qa1r4o" must read
+ *    "<b>Bold</b> qa1r4o");
+ *  - a contains check on an element found by its exact text (or exact name) that does not hold the expected text (re-check shop-3 WEB-051:
+ *    the exact text "Free" must contain "$0.00"; shop-4 WEB-036: the link named exactly "Cart" must contain "2").
+ */
+function foundByOtherText(check: Extract<Step, { action: "assert" }>): string | undefined {
+    const l = check.locator as { by?: string; role?: string; value?: string; exact?: boolean } | undefined;
+    const by = l?.by === "text" ? "text" : l?.by === "role" && NAMED_BY_TEXT.has(l.role ?? "") ? "name" : undefined;
+    const found = by ? (l!.value ?? "") : "";
+    const want = norm(String(check.expected ?? ""));
+    if (!found || !norm(found) || !want) return undefined;
+    if (check.check === "exactText" && !want.includes(norm(found)))
+        return `The check finds the element by its ${by} “${found.slice(0, 80)}” and then expects its whole text to be “${String(check.expected).slice(0, 80)}”: no element can be both, so no page can pass it.`;
+    if (check.check === "text" && l!.exact && !norm(found).includes(want))
+        return `The check finds the element whose ${by} is exactly “${found.slice(0, 80)}” and then expects it to contain “${String(check.expected).slice(0, 80)}”: no element can be both, so no page can pass it.`;
+    return undefined;
+}
 
 /** The actions a test title can be about, each with the words a step that does it carries. */
 const ACTIONS: ReadonlyArray<{ word: string; title: RegExp; does: RegExp; method?: string }> = [

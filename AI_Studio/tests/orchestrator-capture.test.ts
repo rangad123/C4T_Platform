@@ -8,6 +8,8 @@
  *     objective the planner's model wrote into its reply is dropped (only the objective stage sets one: the finding of an objective
  *     scenario names it in explore-objectives-run and stated-source-unit), so the finding has none;
  *   - a defect the replays do not show again (the page is wrong on its first visit only): state dependent, confidence medium;
+ *   - a defect captured at a check whose element several match (strict mode violation): the test's own fault, not reported, a failed test
+ *     whose reason says why (findings/expectation.ts authoredCheckFault);
  *   - a defect claimed without a failing sourced check: still saved NEEDS_REVIEW, observed only, confidence low, no replays;
  *   - a defect whose failing check is of the planner's own expected result (tied to nothing stated, queue row 172): the same, observed only;
  *   - an observed-only defect whose saved test cannot pass a replay of its own steps (a check bound to what the authoring session saw,
@@ -116,6 +118,8 @@ beforeAll(async () => {
         if (req.url === "/cart") return void res.end(cart("$30.00"));
         if (req.url === "/once") return void res.end(cart(++onceVisits === 1 ? "$30.00" : "$25.00"));
         if (req.url === "/drift") return void res.end(cart(++driftVisits === 1 ? "$25.00" : "$30.00"));
+        // Two totals the same check finds: the check's element is ambiguous (strict mode violation), the test's own fault.
+        if (req.url === "/twice") return void res.end(cart("$30.00").replace("</main>", `<p>Total again: <output aria-label="Total">$30.00</output></p></main>`));
         res.end(page("Shop", "<h1>Shop</h1><p>Welcome to the shop.</p>"));
     });
     await new Promise<void>((r) => site.listen(PORT, "127.0.0.1", r));
@@ -288,6 +292,22 @@ describe("a defect test carries its candidate finding", () => {
         expect(finding.replays.map((r) => r.outcome)).toEqual(["passed", "passed"]);
         expect(test.validationReason).toContain("confidence medium");
         expect(defectEvent(events).data).toMatchObject({ capture: "captured", confidence: "medium", independence: "state_dependent" });
+    }, 300_000);
+
+    it("captured at a check whose element several match (strict mode violation): not reported, a failed test, the reason says why", async () => {
+        const projectId = (await call("POST", "/api/projects", { name: "Twice" })).body.id as string;
+        await statedRule(projectId);
+        plan = tiedScenario("/twice");
+        script = [heading, total("expected:2"), finishDefect];
+        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS);
+
+        expect(metaOf(test).capturedCheck).toMatchObject({ source: "expected:2", observed: expect.stringContaining("strict mode violation") });
+        expect(test.validationStatus).toBe("FAILED_VALIDATION");
+        expect(test.validationReason).toMatch(/^Not reported as a finding: The test needs fixing, not your application: .*Several elements match/);
+        expect(test.validationReason).toContain("The test writer's account: The total shows $30.00, not $25.00.");
+        expect(metaOf(test)).not.toHaveProperty("finding");
+        expect(events.filter((e) => e.kind === "possible_defect")).toHaveLength(0);
+        expect(events.filter((e) => e.kind === "defect_unverified").map((e) => e.data?.capture)).toEqual(["captured"]);
     }, 300_000);
 
     it("a defect without a failing sourced check: saved for review, observed only, confidence low, no replays", async () => {

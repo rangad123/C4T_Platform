@@ -88,7 +88,7 @@ import { createThumbnailer } from "./discovery/thumbnails.js";
 import { layerOfSpec, layerReport, layersOfSpec, type Layer, type LayerReport } from "./validation/layers.js";
 import { withStatedSources } from "./api/stated-source.js";
 import { proposeInvariants, type Invariant, type InvariantReport } from "./validation/invariants.js";
-import { apiOnAmount } from "./findings/expectation.js";
+import { apiOnAmount, authoredCheckFault } from "./findings/expectation.js";
 import { benchProbeFor } from "./database/bench-data.js";
 import { DB_CHECKS_MAX, duplicateChecksOf, integrityChecks, webPersistenceChecks, withDatabaseChecks } from "./database/checks.js";
 import type { DbSchema } from "./database/probe.js";
@@ -1062,6 +1062,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             if (outcome.status === "defect") {
                 // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
                 const capture = outcome.capture ?? "observed_only";
+                // The captured check is the test's own fault (findings/expectation.ts, no AI): a test to fix, never a finding.
+                const fault = capture === "captured" ? authoredCheckFault(spec, outcome.capturedCheck) : undefined;
+                if (fault) {
+                    const h = await persistNew(spec, "playwright", "PENDING", undefined, { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}) });
+                    await sink.updateTest(h, { validation: "FAILED_VALIDATION", reason: `Not reported as a finding: ${fault.replace(/\.+$/, "")}. The test writer's account: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.` });
+                    summary.testsFailedValidation++;
+                    await sink.counters({ testsFailedValidation: 1 }, true);
+                    ctx.emit({ stage: "generation", kind: "defect_unverified", level: "warn", message: `${h.testId} ${spec.title}: not reported as a finding; ${fault}`, data: { testKey: h.testId, capture, failedStep: null } });
+                    return h.testId;
+                }
                 const replayed = { steps: written.steps, testData: written.testData, ...(outcome.status === "defect" && outcome.capturedCheck ? { capturedSource: outcome.capturedCheck.source, capturedObserved: outcome.capturedCheck.observed } : {}), ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) };
                 // An observed-only defect test holds only steps that passed while authoring: replayed once (no AI), a step it stops at means
                 // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
