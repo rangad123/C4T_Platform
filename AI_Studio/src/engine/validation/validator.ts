@@ -51,7 +51,8 @@ import type { MobileRunEnv } from "./mobile-runner.js";
 import type { IosRunEnv } from "../mobile/ios-runner.js";
 import { apiTokenNeeded, apiTokenRefused, apiTokenStoppedReason, MISSING_API_TOKEN_REASON, missingApiTokenReason, SIGNED_IN_401_REASON } from "../evidence/failure-facts.js";
 import { secretsOfRun } from "../evidence/model.js";
-import { KNOWN_BUG_FIXED, markUnfinishedAsNotRun, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
+import { KNOWN_BUG_FIXED, markUnfinishedAsNotRun, parseAttemptNote, type FreshAccount, type RunEnv, type ScriptInput, type ScriptRun } from "./runner.js";
+import { writtenOnFreshAccount } from "../explore/clean-account.js";
 // A phone run the phone itself could not carry out (device/infra.ts): said plainly, never a failing test of the app, never repaired.
 import { isPhoneInfrastructure } from "../mobile/device/infra.js";
 
@@ -161,6 +162,13 @@ export interface ValidationDeps {
      * On unless set to false (then every test may run at once).
      */
     accountLanes?: boolean;
+    /**
+     * A test written as a newly registered account (row 235, explore/clean-account.ts writtenOnFreshAccount) runs as one again: each of
+     * its runs signs in as an account registered just before it through this sign-up page, as verification attempts do. Otherwise it
+     * would check, on the shared account, what it found on an empty one. Set only where the project allows tests that change data.
+     * Unset, or when no account can be made: the shared account, and the run's note says why.
+     */
+    freshAccount?: FreshAccount;
 }
 
 export { laneRounds, testAccountLane } from "./lanes.js";
@@ -169,7 +177,44 @@ export { laneRounds, testAccountLane } from "./lanes.js";
  * Run scripts with the runner their framework needs; results come back in input order. Scripts whose adapters share a runtime
  * (Playwright web and API) go out as one batch; batches run in adapter registration order (web first, then mobile), through the executor.
  */
-async function execute(ctx: EngineContext, deps: ValidationDeps, items: Array<ScriptInput & { framework: Framework }>, workers: number): Promise<ScriptRun[]> {
+async function execute(ctx: EngineContext, deps: ValidationDeps, items: Array<ScriptInput & { framework: Framework }>, workers: number, fresh?: ReadonlySet<string>): Promise<ScriptRun[]> {
+    const own = deps.freshAccount && fresh?.size ? items.map((x, i) => (fresh.has(x.testId) ? i : -1)).filter((i) => i >= 0) : [];
+    if (own.length) {
+        const out: ScriptRun[] = new Array(items.length);
+        const rest = items.map((_, i) => i).filter((i) => !own.includes(i));
+        if (rest.length) (await execute(ctx, deps, rest.map((i) => items[i]!), workers)).forEach((r, k) => (out[rest[k]!] = r));
+        (await freshRuns(ctx, deps, own.map((i) => items[i]!), workers)).forEach((r, k) => (out[own[k]!] = r));
+        return out;
+    }
+    return executeAs(ctx, deps, items, workers);
+}
+
+/**
+ * The runs of tests written as a newly registered account, each signed in as a new one (ValidationDeps.freshAccount). One at a time, so
+ * each run registers its own. A machine that cannot do this (a runner older than verification attempts) runs them on the shared
+ * account instead, and the note says so.
+ */
+async function freshRuns(ctx: EngineContext, deps: ValidationDeps, items: Array<ScriptInput & { framework: Framework }>, workers: number): Promise<ScriptRun[]> {
+    const out: ScriptRun[] = [];
+    for (const item of items) {
+        let runs: ScriptRun[];
+        try {
+            runs = await executeAs(ctx, deps, [item], workers, { attempts: 1, freshAccount: deps.freshAccount! });
+        } catch (err) {
+            if (ctx.signal?.aborted) throw err;
+            const why = (err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 300);
+            runs = (await executeAs(ctx, deps, [item], workers)).map((r) => ({ ...r, notes: [`On the shared test account: a newly registered account could not be used (${why})`, ...(r.notes ?? [])] }));
+        }
+        // The attempt's own note ("Attempt 1 of 1 (clean state): ...") read as the account the run signed in as.
+        out.push(...runs.map((r) => {
+            const a = parseAttemptNote(r.notes?.[0]);
+            return a ? { ...r, notes: [a.clean ? "Signed in as a newly registered account, as the test was written" : `Not on a newly registered account: ${a.note}`, ...(r.notes ?? []).slice(1)] } : r;
+        }));
+    }
+    return out;
+}
+
+async function executeAs(ctx: EngineContext, deps: ValidationDeps, items: Array<ScriptInput & { framework: Framework }>, workers: number, account?: { attempts: 1; freshAccount: FreshAccount }): Promise<ScriptRun[]> {
     const out: ScriptRun[] = new Array(items.length);
     const executor = deps.executor ?? ctx.executor ?? localExecutor;
     for (const { adapter, entries } of groupByRuntime(items, (item) => item.framework)) {
@@ -178,7 +223,7 @@ async function execute(ctx: EngineContext, deps: ValidationDeps, items: Array<Sc
         const env = { run: deps.cleanup && adapter.traits.cleanupLedger ? { ...deps.env, cleanup: deps.cleanup.enabled ? ("platform" as const) : ("off" as const) } : deps.env, mobile: deps.mobile, ...(deps.ios ? { ios: deps.ios } : {}) };
         let runs: ScriptRun[];
         try {
-            runs = await executor.execute(adapter.id, { scratchDir: deps.scratchDir, scripts: group.map(({ item }) => item), ...(deps.helpers?.length && group.some(({ item }) => item.custom) ? { helpers: deps.helpers } : {}) }, env, { workers, signal: ctx.signal, ...(deps.video === false ? { video: false as const } : {}) });
+            runs = await executor.execute(adapter.id, { scratchDir: deps.scratchDir, scripts: group.map(({ item }) => item), ...(deps.helpers?.length && group.some(({ item }) => item.custom) ? { helpers: deps.helpers } : {}) }, env, { workers, signal: ctx.signal, ...(deps.video === false ? { video: false as const } : {}), ...(account ?? {}) });
         } catch (err) {
             // A cancelled job: whatever was on its way has no result. That is "not run", not a failure of any test.
             if (!ctx.signal?.aborted) throw err;
@@ -215,7 +260,8 @@ export async function validateBatch(
     ctx.emit({ stage: "validation", kind: "validation_started", message: `Executing ${tests.length} generated scripts` });
     const inputs = scripts.map((s, i) => input(current[i]!, s));
     const lanes = current.map((t) => (deps.accountLanes === false ? undefined : testAccountLane(t)));
-    const firstRuns = await runInLanes(inputs, lanes, deps.workers, (batch) => execute(ctx, deps, batch, deps.workers), (shared) =>
+    const fresh = new Set(current.filter((t) => !t.custom && writtenOnFreshAccount(t.spec)).map((t) => t.spec.testId));
+    const firstRuns = await runInLanes(inputs, lanes, deps.workers, (batch) => execute(ctx, deps, batch, deps.workers, fresh), (shared) =>
         ctx.emit({ stage: "validation", kind: "account_lanes", message: `${shared} tests that sign in as the same account run one at a time` }),
     );
 
@@ -229,7 +275,7 @@ export async function validateBatch(
 
     /** Another run of one script. Undefined when the job was cancelled before it gave a result (the run before it then stands). */
     const runAgain = async (t: TestUnderValidation, script: { filename: string; content: string }): Promise<ScriptRun | undefined> => {
-        const [next] = (await execute(ctx, deps, [input(t, script)], 1)) as [ScriptRun];
+        const [next] = (await execute(ctx, deps, [input(t, script)], 1, fresh)) as [ScriptRun];
         return next.notRun ? undefined : next;
     };
     /** A test that ran and failed, whose repair or re-run the cancel cut off: the failure it had stays, with the reason said. */
@@ -471,7 +517,7 @@ export async function validateBatch(
         const repeats = deps.repeatPasses ?? 0;
         if (!outcome && run.status === "passed" && repeats > 0 && t.scenario && !t.custom && t.spec.kind === "web" && !ctx.signal?.aborted) {
             const copies = Array.from({ length: repeats }, (_, k) => ({ ...input(t, script), filename: script.filename.replace(/(\.spec\.ts)?$/, (ext) => `.repeat${k + 1}${ext}`) }));
-            const again = (await execute(ctx, deps, copies, 1)).filter((r) => !r.notRun);
+            const again = (await execute(ctx, deps, copies, 1, fresh)).filter((r) => !r.notRun);
             const failing = again.find((r) => r.status !== "passed");
             if (failing) {
                 attempt++;

@@ -20,6 +20,7 @@ import { scenarioAccountLane } from "../src/engine/validation/lanes.js";
 import { runVariantChecks } from "../src/engine/validation/variants.js";
 import { scoreTests } from "../src/engine/mutation/faults.js";
 import { ScenarioSchema } from "../src/engine/spec/schema.js";
+import { FRESH_ACCOUNT_PRECONDITION, freshAccountScenario, writtenOnFreshAccount } from "../src/engine/explore/clean-account.js";
 
 type Span = { id: string; lane: string | undefined; start: number; end: number };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -274,5 +275,67 @@ describe("scenarioAccountLane: the account a planned scenario will sign in as", 
         expect(scenarioAccountLane(plan({}), undefined, true)).toBeUndefined();
         // The job did not sign in: nobody shares the account.
         expect(scenarioAccountLane(plan({ requiresAuth: true }), undefined, false)).toBeUndefined();
+    });
+});
+
+describe("validateBatch: a test written as a newly registered account runs as one again (row 235, lane I)", () => {
+    const config = loadConfig({});
+    const ctx: EngineContext = { config, llm: undefined as never, emit: () => undefined };
+    const model = { pages: [], apis: [] } as unknown as AppModel;
+    const fresh = TestSpecSchema.parse({ ...spec(1, signIn()), preconditions: [FRESH_ACCOUNT_PRECONDITION] });
+    const shared = spec(2, signIn());
+    const signup = { signupPath: "/register", loginPath: "/login" };
+
+    /** A fake executor that records the options of each call and the scripts in it; `refuseFresh`: it throws on a fresh-account call (an old runner). */
+    function calls(o: { refuseFresh?: boolean; registered?: boolean } = {}) {
+        const seen: Array<{ ids: string[]; attempts?: number; freshAccount?: unknown }> = [];
+        const executor: ScriptExecutor = {
+            name: "fake",
+            async execute(_adapter, batch, _env, opts) {
+                seen.push({ ids: batch.scripts.map((s) => s.testId), ...(opts.attempts !== undefined ? { attempts: opts.attempts } : {}), ...(opts.freshAccount ? { freshAccount: opts.freshAccount } : {}) });
+                if (opts.freshAccount && o.refuseFresh) throw new Error("Your runner is too old to verify findings");
+                // As validation/runner.ts runAttempts notes the account of an attempt.
+                const note = opts.freshAccount ? [o.registered === false ? "Attempt 1 of 1 (shared account): on the shared test account (a new account could not be registered: no sign-up form)" : "Attempt 1 of 1 (clean state): as a newly registered account"] : undefined;
+                return batch.scripts.map((s): ScriptRun => ({ testId: s.testId, status: "passed", durationMs: 1, failedStepIndex: -1, steps: [], artifacts: [], responses: [], ...(note ? { notes: note } : {}) }));
+            },
+        };
+        return { seen, executor };
+    }
+    const deps = (executor: ScriptExecutor, freshAccount?: typeof signup) => ({ scratchDir: config.scratchDir, env: { baseUrl: "http://127.0.0.1:1", headless: true }, render: { baseUrl: "http://127.0.0.1:1" }, model, maxRepairAttempts: 0, workers: 3, executor, ...(freshAccount ? { freshAccount } : {}) });
+    const run = async (executor: ScriptExecutor, freshAccount?: typeof signup) => {
+        const runs = new Map<string, ScriptRun>();
+        await validateBatch(ctx, deps(executor, freshAccount), [fresh, shared].map((s) => ({ spec: s, framework: "playwright" as const })), { async onAttempt(t, _a, _s, r) { runs.set(t.spec.testId, r); }, async onFinal() {} });
+        return runs;
+    };
+
+    it("the fresh-written test runs with a new account; the shared-account test runs as before", async () => {
+        const { seen, executor } = calls();
+        const runs = await run(executor, signup);
+        expect(seen).toContainEqual({ ids: ["WEB-001"], attempts: 1, freshAccount: signup });
+        expect(seen.filter((c) => c.ids.includes("WEB-002"))).toEqual([{ ids: ["WEB-002"] }]);
+        expect(runs.get("WEB-001")!.notes?.[0]).toBe("Signed in as a newly registered account, as the test was written");
+        expect(runs.get("WEB-002")!.notes).toBeUndefined();
+    });
+
+    it("without a sign-up page or data changes (no freshAccount) every test runs on the shared account", async () => {
+        const { seen, executor } = calls();
+        await run(executor);
+        expect(seen.every((c) => c.freshAccount === undefined)).toBe(true);
+    });
+
+    it("an account that could not be registered, or a runner that cannot make one, runs on the shared account and says why", async () => {
+        const notMade = calls({ registered: false });
+        expect((await run(notMade.executor, signup)).get("WEB-001")!.notes?.[0]).toMatch(/^Not on a newly registered account: on the shared test account \(a new account could not be registered/);
+        const old = calls({ refuseFresh: true });
+        const r = (await run(old.executor, signup)).get("WEB-001")!;
+        expect(r.status).toBe("passed");
+        expect(r.notes?.[0]).toMatch(/^On the shared test account: a newly registered account could not be used \(Your runner is too old/);
+        expect(old.seen.filter((c) => c.ids.includes("WEB-001"))).toEqual([{ ids: ["WEB-001"], attempts: 1, freshAccount: signup }, { ids: ["WEB-001"] }]);
+    });
+
+    it("the marker is the precondition the writer was given (freshAccountScenario)", () => {
+        expect(writtenOnFreshAccount(fresh)).toBe(true);
+        expect(writtenOnFreshAccount(shared)).toBe(false);
+        expect(freshAccountScenario({ title: "t", description: "", preconditions: [], requiredData: [], expectedResults: [] }).preconditions).toContain(FRESH_ACCOUNT_PRECONDITION);
     });
 });

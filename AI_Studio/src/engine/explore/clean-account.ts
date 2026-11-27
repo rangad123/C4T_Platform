@@ -98,9 +98,15 @@ export function cleanAuthoringPlan(p: { scenario: Pick<Scenario, "title" | "desc
     return { register: true, signupPath: p.signupPath };
 }
 
+/** The precondition a test written as a newly registered account carries (freshAccountScenario): its runs sign in as a new one too. */
+export const FRESH_ACCOUNT_PRECONDITION = "Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps";
+
+/** The test was written as a newly registered account (row 235), so it runs as one again (validation/validator.ts ValidationDeps.freshAccount). */
+export const writtenOnFreshAccount = (spec: { preconditions?: readonly string[] }): boolean => spec.preconditions?.includes(FRESH_ACCOUNT_PRECONDITION) === true;
+
 /** The scenario as written on a new account: it starts empty, and a total is checked on two or more lines the test adds itself (BS-01, BS-02). */
 export function freshAccountScenario<S extends Pick<Scenario, "title" | "description" | "preconditions" | "requiredData" | "expectedResults">>(s: S): S {
-    const lines = ["Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps"];
+    const lines = [FRESH_ACCOUNT_PRECONDITION];
     if (TOTAL_WORDS.test(scenarioText(s))) lines.push("The test checks a total: add at least two different products to the cart with its own steps, the last with quantity 2 or more, before checking it, so every amount comes from the test's own steps");
     return { ...s, preconditions: [...s.preconditions, ...lines] };
 }

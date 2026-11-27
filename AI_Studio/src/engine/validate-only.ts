@@ -28,6 +28,7 @@ import type { Scenario, TestSpec } from "./spec/schema.js";
 import { dataSetNameOf, resolveRows, truncationNote } from "./testdata/dataset.js";
 import type { AppModel } from "./understanding/app-model.js";
 import { validateBatch, type TestUnderValidation, type ValidationOutcome } from "./validation/validator.js";
+import { signupPathOf } from "./explore/clean-account.js";
 import { benchProbeFor } from "./database/bench-data.js";
 import { dbServiceFor } from "./database/service.js";
 import { runVariantChecks, type VariantTest } from "./validation/variants.js";
@@ -65,6 +66,8 @@ export interface ValidationOnlyRequest {
     siteNotes?: import("./memory/notes.js").SiteNote[];
     /** The Q4 gate the job checked for this run (validation/risky.ts). Unset: risky saved tests skip themselves. */
     riskyChecks?: "bench" | "fixture" | "authorization";
+    /** The project allows tests that change data: a test written as a newly registered account runs as a new one again (row 235). */
+    dataChanges?: boolean;
 }
 
 export interface TestToValidate {
@@ -215,6 +218,8 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
         const dbService = await dbServiceFor(ctx.dbProbe ?? benchProbeFor(origin), pending.map((t) => t.spec), ctx.executor?.remote === true);
         try {
             const apiToken = await resolveApiToken(ctx, req.credentials);
+            const signupPath = req.dataChanges === true ? signupPathOf(model) : undefined;
+            const freshAccount = signupPath ? { signupPath, ...(model.authentication?.loginPath ? { loginPath: model.authentication.loginPath } : {}) } : undefined;
             const batch = (items: TestUnderValidation[]): Promise<ValidationOutcome[]> => validateBatch(
                 ctx,
                 {
@@ -232,6 +237,8 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
                     ...(ios.env ? { ios: ios.env } : {}),
                     cleanup: req.cleanup,
                     ...(req.helpers?.length ? { helpers: req.helpers } : {}),
+                    // A test written as a newly registered account runs as one (row 235), where the project allows it as it did then.
+                    ...(freshAccount ? { freshAccount } : {}),
                 },
                 items,
                 {
