@@ -6,7 +6,7 @@
  *
  * - one per usable rule (stated by a source or confirmed by a person, never rejected, its evidence not gone; `usableRules`) whose
  *   expected result can be checked;
- * - one per workflow a source states (`usableWorkflows`);
+ * - one per workflow a source states (`usableWorkflows`), and one per workflow only followed while exploring (`stated: false`, last);
  * - one per form field whose page declares a constraint (required, a typed value, limits, a pattern, a list of options);
  * - one per stated transition; a coverage gap per transition nobody states.
  *
@@ -147,6 +147,8 @@ interface Draft {
     ref: string;
     /** false: the expected text is the engine's wording, not a source's (see `stated` on the objective). */
     stated?: false;
+    /** A workflow no source states: ranked after every other objective. */
+    inferred?: true;
     evidence?: string;
     question: string;
     expected: string;
@@ -170,20 +172,31 @@ const fromRules = (rules: readonly KnowledgeRule[]): Draft[] =>
 /** The engine's own wording around a workflow's expected result (`engineWordingIn` in perturb.ts refuses an assert of it). */
 export const WORKFLOW_WORDING = { after: "Afterwards:", steps: "Every step completes:" } as const;
 
-const fromWorkflows = (workflows: readonly KnowledgeWorkflow[]): Draft[] =>
-    usableWorkflows(workflows).map((w) => {
+/**
+ * A workflow a source states gets its stated postconditions as the expected result. A workflow only followed while exploring (inferred)
+ * gets one too, `stated: false`, checking only that its steps can be done (never what the application showed afterwards: that is not a
+ * source), so E5 covers it; these come after every other objective (`objectivesFrom`), so they only use what the cap leaves.
+ */
+const fromWorkflows = (workflows: readonly KnowledgeWorkflow[]): Draft[] => {
+    const stated = new Set(usableWorkflows(workflows));
+    return workflows.map((w) => {
+        const inferred = !stated.has(w);
         const steps = [...w.steps].sort((a, b) => a.order - b.order || (a.action < b.action ? -1 : a.action > b.action ? 1 : 0)).map((s) => norm(s.action));
-        const post = w.postconditions.map(norm).filter(Boolean);
+        const post = inferred ? [] : w.postconditions.map(norm).filter(Boolean);
         return {
             kind: "workflow",
             ref: w.id,
-            question: `Can the workflow ${quote(w.name)} be completed as stated, and does it hold when repeated, interrupted or reached out of order?`,
+            question: inferred
+                ? `Can the workflow ${quote(w.name)}, followed while exploring and stated by no source, be completed, and does it hold when repeated, interrupted or reached out of order?`
+                : `Can the workflow ${quote(w.name)} be completed as stated, and does it hold when repeated, interrupted or reached out of order?`,
             expected: post.length ? `${WORKFLOW_WORDING.after} ${post.join("; ")}` : `${WORKFLOW_WORDING.steps} ${steps.join(" -> ")}`,
             // No postconditions: nothing a source states can be checked, only that the steps can be done (row 228: WEB-064, WEB-065).
             ...(post.length ? {} : { stated: false as const }),
-            priority: { sourceText: [w.name, ...steps, ...post].join(" "), stated: "explicit", workflowSteps: steps.length },
+            ...(inferred ? { inferred: true as const } : {}),
+            priority: { sourceText: [w.name, ...steps, ...post].join(" "), stated: inferred ? "none" : "explicit", workflowSteps: steps.length },
         };
     });
+};
 
 /** Types whose value the browser checks itself, so declaring one is a constraint. */
 const TYPED = new Set(["email", "number", "url", "tel", "date", "datetime-local", "time", "month", "week", "range", "color"]);
@@ -251,6 +264,7 @@ export function objectivesFrom(model: ObjectiveModel, rules: readonly KnowledgeR
     const explored = new Set(opts.explored ?? []);
 
     const byFingerprint = new Map<string, Objective>();
+    const inferred = new Set<string>();
     for (const d of [...fromRules(rules), ...fromWorkflows(workflows), ...fromForms(model), ...fromTransitions(model)]) {
         const ref = clip(d.ref, REF_MAX);
         const expected = d.kind === "coverage-gap" ? "" : clip(d.expected, EXPECTED_MAX);
@@ -269,9 +283,11 @@ export function objectivesFrom(model: ObjectiveModel, rules: readonly KnowledgeR
             reason,
             fingerprint,
         });
+        if (d.inferred) inferred.add(fingerprint);
         const kept = byFingerprint.get(fingerprint);
         if (!kept || compare(objective, kept) < 0) byFingerprint.set(fingerprint, objective);
     }
-    const all = [...byFingerprint.values()].sort(compare);
+    const sorted = [...byFingerprint.values()].sort(compare);
+    const all = [...sorted.filter((o) => !inferred.has(o.fingerprint)), ...sorted.filter((o) => inferred.has(o.fingerprint))];
     return { objectives: all.slice(0, opts.maxObjectives), overCap: Math.max(0, all.length - opts.maxObjectives) };
 }

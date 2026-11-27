@@ -9,7 +9,7 @@
  * `data` object, so later `{{name}}` placeholders (paths, query, headers, bodies and assertion
  * expectations) resolve to them at runtime.
  */
-import { riskyGateLine, sessionEndLine } from "../validation/risky.js";
+import { endsOwnSession, riskyGateLine, sessionEndLine } from "../validation/risky.js";
 import { describeStep, placeholdersIn, repeatOf, type Step, type TestSpec } from "../spec/schema.js";
 import type { RenderContext, RenderedScript, ScriptGenerator } from "./types.js";
 import { dbCheckCall, dbCheckSetup, knownBugLine, relationCall, testDetails } from "./playwright.js";
@@ -338,7 +338,9 @@ export const apiGenerator: ScriptGenerator = {
             .map((step, i) => {
                 const title = `${i + 1}. ${describeStep(step)}`;
                 const prev = spec.steps.slice(0, i).reverse().find((s): s is Extract<Step, { action: "request" }> => s.action === "request");
-                return `    await test.step(${lit(title)}, async () => {\n        ${renderStep(step, declared, prev)}\n    });`;
+                // A sign-out on the test's own session goes without the shared credentials, so it ends only that session (risky.ts).
+                const sent = step.action === "request" && endsOwnSession(spec.steps, i) ? { ...step, auth: "none" as const } : step;
+                return `    await test.step(${lit(title)}, async () => {\n        ${renderStep(sent, declared, prev)}\n    });`;
             })
             .join("\n");
         // Passive security checks look at the application's own origin (BASE_URL, not a separate API base), and

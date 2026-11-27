@@ -23,7 +23,7 @@ import type { LlmClient } from "../llm/provider.js";
 import type { CoverageItem, TestCoverage } from "../../platform/selection/coverage.js";
 import { matchesChange, readChanges, type ChangeItem } from "../../platform/selection/preview.js";
 import { analyzeFile, isJsLike, type FileChangeInput } from "./diff.js";
-import { describeRoute, routesForChange, type RouteEntry } from "./routes.js";
+import { describeRoute, routesForChange, routeTemplate, type RouteEntry } from "./routes.js";
 
 /** A finding seen before, by where it happened (the platform reads them from the findings list: platform/findings/past.ts). */
 export interface PastFinding {
@@ -82,6 +82,8 @@ export interface ImpactAnalysis {
     findings: Link[];
     /** Changed files with no evidence-backed route, and why. */
     unmapped: Array<{ path: string; why: string[] }>;
+    /** Changed files that are not application code (the repository's own tests, build scripts), with why: not in `files` or `unmapped`. */
+    notApp: Array<{ path: string; why: string }>;
     /** Changed code that runs outside every route handler, so it reaches every request. */
     shared: string[];
     /** The reached routes as a change set for the preview (selection/preview.ts readChanges). */
@@ -145,7 +147,63 @@ async function aiRequirementLinks(ai: NonNullable<ImpactInput["ai"]>, files: Fil
 }
 
 /** shortcut: by folder name, not by reading how the server serves files; upgrade if a repository serves its browser code from elsewhere. */
-const BROWSER_DIR = /(^|\/)(public|static|www|wwwroot)\//;
+export const BROWSER_DIR = /(^|\/)(public|static|www|wwwroot)\//;
+const HTML = /\.html?$/i;
+/** The repository's own tests: they change no application behaviour. */
+const TEST_FILE = /(^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/i;
+/** A script folder outside the server: a script there that writes into the browser folder is a build script (its output is analysed itself). */
+const TOOL_DIR = /(^|\/)(?:scripts|tools|bin)\//;
+const writesBrowserFiles = (src: string | undefined) => !!src && /\bwrite(?:File|FileSync)\b/.test(src) && /(["'`])(?:\.\.?\/)*(?:public|static|www|wwwroot)\1|\/(?:public|static|www|wwwroot)(["'`])/.test(src);
+
+/** The address a browser-folder file is served at ("/assets/order.js"). */
+function servedAt(file: string): string | undefined {
+    const m = BROWSER_DIR.exec(file);
+    return m ? `/${file.slice(m.index + m[0].length)}` : undefined;
+}
+
+/** Scripts a page or module loads: <script src>, import … from, import(). */
+const LOADS = /(?:\bsrc\s*=\s*|\bfrom\s+|\bimport\s*\(?\s*)["']([^"'?#]+\.m?js)["']/g;
+
+/**
+ * The pages a changed browser-folder file is part of, each with its evidence. A page file: a server file that names it on the same line
+ * as an address (a page table: `['/checkout/review', 'checkout-review.html']`), else its own address or that address without `.html`
+ * when the app's tests or model open a page there. A script: the pages of every page or script in the browser folder that loads it.
+ */
+function pagesOf(file: string, sources: Record<string, string>, known: Set<string>, seen = new Set<string>()): Array<{ route: RouteEntry; evidence: string[] }> {
+    const at = servedAt(file);
+    if (!at || seen.has(file)) return [];
+    seen.add(file);
+    if (HTML.test(file)) {
+        // An address and the file's name side by side (`'/checkout/review', 'checkout-review.html'`), in either order.
+        const name = at.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const pair = new RegExp(`(["'\`])(\\/[^"'\`\\s]*)\\1\\s*,\\s*(["'\`])${name}\\3|(["'\`])${name}\\4\\s*,\\s*(["'\`])(\\/[^"'\`\\s]*)\\5`, "g");
+        const out: Array<{ route: RouteEntry; evidence: string[] }> = [];
+        for (const [src, text] of Object.entries(sources)) {
+            if (BROWSER_DIR.test(src) || TEST_FILE.test(src) || !isJsLike(src)) continue;
+            text.split("\n").forEach((l, i) => {
+                for (const m of l.matchAll(pair)) {
+                    const addr = (m[2] ?? m[6])!;
+                    const route: RouteEntry = { file: src, method: "GET", path: routeTemplate(addr), line: i + 1, start: i + 1, end: i + 1, style: "table" };
+                    out.push({ route, evidence: [`${src}:${i + 1} serves ${file} at ${addr}`] });
+                }
+            });
+        }
+        if (out.length) return out;
+        const bare = at.replace(/(?:\/index)?\.html?$/i, "") || "/";
+        return [...new Set([at, bare])]
+            .filter((p) => known.has(p))
+            .map((p) => ({ route: { file, method: "GET", path: routeTemplate(p), line: 1, start: 1, end: 1, style: "table" }, evidence: [`${file} is served from the browser folder at ${p}, a page the app's tests or model open`] }));
+    }
+    const out: Array<{ route: RouteEntry; evidence: string[] }> = [];
+    for (const [src, text] of Object.entries(sources)) {
+        const from = servedAt(src);
+        if (!from || src === file) continue;
+        const loads = [...text.matchAll(LOADS)].some((m) => new URL(m[1]!, `http://x${from}`).pathname === at);
+        if (!loads) continue;
+        for (const p of pagesOf(src, sources, known, seen)) out.push({ route: p.route, evidence: [`${src} loads ${at}`, ...p.evidence] });
+    }
+    return out;
+}
 
 /** Documents a requirement can be written in. */
 const DOC = /\.(?:md|markdown|txt|rst|adoc)$/i;
@@ -179,7 +237,9 @@ function requirementsOn(text: string, reqs: NonNullable<ImpactInput["requirement
 export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis> {
     const files: ImpactAnalysis["files"] = [];
     const unmapped: ImpactAnalysis["unmapped"] = [];
+    const notApp: ImpactAnalysis["notApp"] = [];
     const shared: string[] = [];
+    const known = new Set([...(input.model?.pages ?? []).map((p) => p.path), ...(input.tests ?? []).flatMap((t) => t.items.filter((i) => i.kind === "page").map((i) => i.path))].map((p) => p.replace(/(.)\/$/, "$1")));
     const endpoints = new Map<string, ImpactEndpoint & { entry: RouteEntry }>();
     const changedReqs = new Map<string, { link: Link; at: string }>();
     for (const f of input.files) {
@@ -196,9 +256,14 @@ export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis>
                 continue;
             }
         }
-        if (BROWSER_DIR.test(f.path) && isJsLike(f.path)) {
-            files.push({ path: f.path, functions: [], mapped: false });
-            unmapped.push({ path: f.path, why: [`${f.path} is served to the browser (page code): it runs in the pages that load it, not in a route handler on the server.`] });
+        if (BROWSER_DIR.test(f.path) && (isJsLike(f.path) || HTML.test(f.path))) {
+            const pages = pagesOf(f.path, input.sources, known);
+            for (const p of pages) {
+                const key = `${p.route.method} ${p.route.path}`;
+                if (!endpoints.has(key)) endpoints.set(key, { route: describeRoute(p.route), method: p.route.method, path: p.route.path, evidence: p.evidence, entry: p.route });
+            }
+            files.push({ path: f.path, functions: [], mapped: pages.length > 0 });
+            if (!pages.length) unmapped.push({ path: f.path, why: [`${f.path} is served to the browser (page code): it runs in the pages that load it, not in a route handler on the server.`] });
             continue;
         }
         const change = analyzeFile(f, input.sources[f.path]);
@@ -209,6 +274,10 @@ export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis>
         }
         // routes.ts words a use in code outside every handler (a check before routing) this way: that code runs for every request.
         shared.push(...r.unresolved.filter((u) => / is used at .*, outside every route handler\.$/.test(u)));
+        if (!r.hits.length && (TEST_FILE.test(f.path) || (TOOL_DIR.test(f.path) && writesBrowserFiles(input.sources[f.path])))) {
+            notApp.push({ path: f.path, why: TEST_FILE.test(f.path) ? `${f.path} is one of the repository's own tests.` : `${f.path} is a build script: it writes files into the browser folder, and those files are analysed themselves.` });
+            continue;
+        }
         files.push({ path: f.path, functions: change.functions.map((x) => x.name), mapped: r.hits.length > 0 });
         if (!r.hits.length) {
             const why = [...(change.note ? [change.note] : []), ...r.unresolved];
@@ -309,6 +378,7 @@ export async function analyzeImpact(input: ImpactInput): Promise<ImpactAnalysis>
         requirementTests: [...requirementTests.values()],
         findings,
         unmapped,
+        notApp,
         shared,
         changes,
         ...(input.ai ? { ai: await aiRequirementLinks(input.ai, input.files) } : {}),

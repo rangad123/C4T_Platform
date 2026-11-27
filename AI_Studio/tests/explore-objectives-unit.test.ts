@@ -86,8 +86,17 @@ describe("objectivesFrom", () => {
         const flows = [workflow("W-1"), workflow("W-guess", { sourceType: "inferred" }), workflow("W-seen", { sourceType: "observed" })];
         const { objectives } = objectivesFrom(model, [], flows, options);
         const kinds = (k: string) => objectives.filter((o) => o.kind === k);
-        expect(kinds("workflow").map((o) => o.source.ref)).toEqual(["W-1"]);
+        // The stated workflow first; the two no source states come after every other objective, each checking only that its steps can be done.
+        expect(kinds("workflow")[0].source.ref).toBe("W-1");
+        expect(kinds("workflow").map((o) => o.source.ref).sort()).toEqual(["W-1", "W-guess", "W-seen"]);
         expect(kinds("workflow")[0].expected).toContain("W-1 is done");
+        expect(kinds("workflow")[0].stated).toBeUndefined();
+        for (const o of kinds("workflow").slice(1)) {
+            expect(o.stated).toBe(false);
+            expect(o.expected).toMatch(/^Every step completes:/);
+            expect(o.expected).not.toContain("is done");
+        }
+        expect(objectives.slice(-2).map((o) => o.source.ref).sort()).toEqual(["W-guess", "W-seen"]);
         // email (required, type) and nickname (max length) are constrained; comment declares nothing.
         expect(kinds("constraint").map((o) => o.source.ref).sort()).toEqual(["P-signup/signup/email", "P-signup/signup/nickname"]);
         expect(kinds("constraint").find((o) => o.source.ref.endsWith("nickname"))!.expected).toMatch(/20/);
@@ -140,6 +149,18 @@ describe("objectivesFrom", () => {
         expect(overCap).toBe(8);
         expect(objectives[0].source.ref).toBe("R-pay");
         for (let i = 1; i < objectives.length; i++) expect(objectives[i - 1].priority).toBeGreaterThanOrEqual(objectives[i].priority);
+    });
+
+    it("ranks a workflow no source states after every other objective, so it only uses what the cap leaves", () => {
+        // Money, order and payment words and many steps would outrank the plain rules on priority alone.
+        const seen = workflow("W-pay", { name: "Pay for the order total with a discount", sourceType: "observed", steps: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ order: n, action: `Pay step ${n}` })) });
+        const flows = [seen, workflow("W-1")];
+        const capped = objectivesFrom({}, [rule("R-1"), rule("R-2")], flows, { ...options, maxObjectives: 3 });
+        expect(capped.objectives.map((o) => o.source.ref).sort()).toEqual(["R-1", "R-2", "W-1"]);
+        expect(capped.overCap).toBe(1);
+        const all = objectivesFrom({}, [rule("R-1"), rule("R-2")], flows, options).objectives;
+        expect(all.at(-1)).toMatchObject({ kind: "workflow", source: { ref: "W-pay" }, stated: false });
+        expect(all.at(-1)!.priority).toBeGreaterThan(all[0]!.priority);
     });
 
     it("takes budgets only from the options and operators only from the objective's kind, whatever page text says", () => {

@@ -538,6 +538,21 @@ export class ReviewStore {
             const first = this.db.get<{ script_id: string }>("SELECT script_id FROM test_executions WHERE job_id = ? AND test_case_id = ? AND script_id IS NOT NULL ORDER BY attempt, started_at LIMIT 1", jobId, r.test_case_id);
             if (first) this.db.run("UPDATE test_versions SET script_id = ? WHERE id = ? AND code IS NULL AND script_id IS NULL", first.script_id, r.version_id);
         }
+        // A job that pinned no versions (a creation: the AI tries its own drafts) ran its tests' steps as they are now, through their
+        // current scripts. Those executions name the latest version when it holds exactly those steps and existed when they ran, so
+        // change-aware selection does not treat every test of a creation as out of date. Earlier attempts with other scripts stay unlinked.
+        if (this.db.get("SELECT 1 AS x FROM test_run_versions WHERE job_id = ?", jobId)) return;
+        for (const r of this.db.all<{ test_case_id: string; script_id: string }>(
+            "SELECT DISTINCT e.test_case_id, e.script_id FROM test_executions e JOIN generated_scripts g ON g.id = e.script_id AND g.is_current = 1 WHERE e.job_id = ? AND e.test_version_id IS NULL",
+            jobId,
+        )) {
+            const v = this.latest(r.test_case_id);
+            const cur = this.currentContent(r.test_case_id);
+            const row = v ? this.db.get<{ spec_json: string; code: string | null; created_at: string }>("SELECT spec_json, code, created_at FROM test_versions WHERE id = ?", v.id) : undefined;
+            if (!v || !cur || !row || cur.code !== null || row.code !== null || canonicalJson(row.spec_json) !== canonicalJson(cur.specJson)) continue;
+            this.db.run("UPDATE test_executions SET test_version_id = ? WHERE job_id = ? AND test_case_id = ? AND script_id = ? AND test_version_id IS NULL AND started_at >= ?", v.id, jobId, r.test_case_id, r.script_id, row.created_at);
+            this.db.run("UPDATE test_versions SET script_id = ? WHERE id = ? AND code IS NULL AND script_id IS NULL", r.script_id, v.id);
+        }
     }
 
     /**

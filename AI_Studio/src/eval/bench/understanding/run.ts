@@ -445,9 +445,11 @@ async function runTrial(
         let objectives: ObjectiveCoverage | { error: string } | undefined;
         if (o.inputs === "full") {
             try {
-                objectives = objectiveCoverage({ model, rules, key: o.key, catalogueWorkflows: o.catalogueWorkflows, ...(judged.judgements ? { judgements: judged.judgements } : {}) });
+                // The requirement line needs one record per requirement (--doc records); a whole document is one record.
+                const reqs = o.doc === "records" && o.requirementsText ? requirementsOf(o.requirementsText).map((r) => r.ref) : undefined;
+                objectives = objectiveCoverage({ model, rules, key: o.key, catalogueWorkflows: o.catalogueWorkflows, ...(judged.judgements ? { judgements: judged.judgements } : {}), ...(reqs ? { requirements: reqs } : {}) });
                 const pct = (r: { found: number; total: number }) => `${r.found}/${r.total}`;
-                o.log(`  E5 objectives: rules ${pct(objectives.rules)}, workflows ${pct(objectives.workflows)}${objectives.met ? "" : " (not met)"}.`);
+                o.log(`  E5 objectives: rules ${pct(objectives.rules)}, workflows ${pct(objectives.workflows)}${objectives.met ? "" : " (not met)"}${objectives.requirements ? `; requirements cited by a counted rule ${pct(objectives.requirements)}` : ""}.`);
             } catch (e) {
                 objectives = { error: (e instanceof Error ? e.message : String(e)).slice(0, 500) };
                 o.log(`  E5 objectives could not be worked out: ${objectives.error}`);
