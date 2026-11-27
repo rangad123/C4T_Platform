@@ -274,7 +274,7 @@ Export your project's tests once (**Tests → More actions → Export… → Exp
 
 ## 8. Deploy trigger
 
-On **Runs → After a deploy**, create a **trigger token** (shown once, revocable). Your pipeline calls `POST /api/triggers/<token>/run` with optional `{ environment, commit }` and polls `GET /api/triggers/<token>/status/<jobId>`. The token is the only credential for those two calls (no `x-api-key`). The limit is one run per 30 seconds per token. A busy project answers 409. A token can also start a run sequence instead of a plain re-run. More: [healing-and-triggers.md](features/healing-and-triggers.md).
+On **Runs → After a deploy**, create a **trigger token** (shown once, revocable). Your pipeline calls `POST /api/triggers/<token>/run` with optional `{ environment, commit }` and polls `GET /api/triggers/<token>/status/<jobId>`. The token is the only credential for those two calls (no `x-api-key`). The limit is one run per 30 seconds per token. A busy project answers 409. A token can also start a run sequence instead of a plain re-run. In an AI agent project a token runs one testing agent, chosen when it is made (`agentId`), and the run answer names it (`agentId` instead of `testCount`); `selection: "focused"` is refused there (400). More: [healing-and-triggers.md](features/healing-and-triggers.md).
 
 ## 9. Use the platform from an AI tool (MCP)
 

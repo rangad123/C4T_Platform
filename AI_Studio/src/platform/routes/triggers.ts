@@ -14,6 +14,8 @@ import type { TriggerToken } from "../trigger-store.js";
 import { makerIdOfActor } from "../agent-store.js";
 import { actorOf } from "../auth/access.js";
 import { currentActor } from "../auth/actor.js";
+import { agentById, runAgentOf } from "../testing-agents.js";
+import { testingAgentsOf } from "./testing-agents.js";
 import type { RouteCtx } from "./types.js";
 
 const MAX_ACTIVE_TOKENS = 10;
@@ -24,6 +26,8 @@ const CreateBody = z.object({
     allowUrl: z.boolean().default(false),
     /** Start a run of this runbook instead of a plain re-run (see routes/runbooks.ts). */
     runbookId: z.string().min(1).max(64).nullable().optional(),
+    /** An Agent Workspace project: the testing agent the token runs (D1), as a schedule keeps one. */
+    agentId: z.string().min(1).max(64).optional(),
 });
 
 const publicToken = (t: TriggerToken) => ({
@@ -34,6 +38,8 @@ const publicToken = (t: TriggerToken) => ({
     createdAt: t.createdAt,
     lastUsedAt: t.lastUsedAt,
     revokedAt: t.revokedAt,
+    agentId: t.agentId,
+    agentName: t.agentId ? (agentById(t.agentId)?.name ?? null) : null,
 });
 
 export function registerTriggerRoutes(ctx: RouteCtx): void {
@@ -55,11 +61,13 @@ export function registerTriggerRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/triggers", async (req, reply) => {
         const { id } = req.params as { id: string };
         project(id);
-        const { runbookId, ...body } = CreateBody.parse(req.body ?? {});
+        const { runbookId, agentId: asked, ...body } = CreateBody.parse(req.body ?? {});
         if (runbookId && runbooks.get(runbookId)?.projectId !== id) throw new HttpError(404, "This project has no runbook with that id.");
+        // A Workspace project's token runs one agent (refused with a sentence when it is not one of the project's agents); other projects' none.
+        const agentId = runbookId ? undefined : await runAgentOf(testingAgentsOf(p), project(id), asked);
         if (svc.store.list(id).filter((t) => !t.revokedAt).length >= MAX_ACTIVE_TOKENS) throw new HttpError(409, `A project can have ${MAX_ACTIVE_TOKENS} active tokens. Revoke one you no longer use first.`);
         // Who made it: its runs go to that person's runner (round 45).
-        const { token, record } = svc.store.create(id, { ...body, createdBy: makerIdOfActor(actorOf(req) ?? currentActor()) });
+        const { token, record } = svc.store.create(id, { ...body, createdBy: makerIdOfActor(actorOf(req) ?? currentActor()), agentId: agentId ?? null });
         // The only time the token is ever shown: only its hash is kept.
         if (runbookId) runbooks.setTokenLink(record.id, runbookId);
         return reply.code(201).send({ ...withRunbook(record), token });
@@ -83,7 +91,7 @@ export function registerTriggerRoutes(ctx: RouteCtx): void {
             const run = svc.store.getRun(job.id);
             return reply
                 .code(202)
-                .send({ jobId: job.id, state: "queued", testCount, commit: run?.commit ?? null, environment: run?.environment ?? null, ...(ignored.length ? { ignored } : {}), ...(selection === "focused" ? { selection, ...(fullRunReasons ? { fullRunReasons } : {}) } : {}) });
+                .send({ jobId: job.id, state: "queued", ...(job.options.agentId ? { agentId: job.options.agentId } : { testCount }), commit: run?.commit ?? null, environment: run?.environment ?? null, ...(ignored.length ? { ignored } : {}), ...(selection === "focused" ? { selection, ...(fullRunReasons ? { fullRunReasons } : {}) } : {}) });
         } catch (e) {
             if (e instanceof RateLimited) return reply.header("retry-after", String(e.retryAfterSec)).code(429).send({ error: e.message, retryAfterSeconds: e.retryAfterSec });
             throw e;

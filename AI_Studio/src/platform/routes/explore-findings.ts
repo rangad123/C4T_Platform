@@ -12,7 +12,8 @@
  *                                                     verification attempts' screenshots, the
  *                                                     likely cause with its label (root-cause.ts; null, with `noCause` saying why,
  *                                                     while none was found), the state's name and rank, and whether a person may Confirm or
- *                                                     call it Not a bug (lifecycle.ts), and the issue it was filed as (or null).
+ *                                                     call it Not a bug (lifecycle.ts), the issue it was filed as (or null), and how
+ *                                                     its latest fix check went (`fixCheck`, its history line, or null).
  *                                                     Computed here, so the page has no rule of its own.
  *   GET /api/projects/:id/objectives                  → { available: true, objectives: [{ id, kind, source, question, expected, operators,
  *                                                     priority, reason }], overCap } from the latest analysed model, worked out the way
@@ -90,6 +91,8 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
             personMay: { confirm: moversOf(r.state, "confirmed").includes("person"), notABug: moversOf(r.state, "not_a_bug").includes("person") },
             // The issue it was filed as (the link is kept with its test, routes/integrations.ts), so a reload still says so.
             issue: (r.testId ? issues.linksForTest(r.testId)[0] : undefined) ?? null,
+            // How the latest fix check went, in its history's words (findings/regression-service.ts): asked, still reproduces, or Fixed.
+            fixCheck: (await store.history(r.projectId, r.id)).filter((e) => e.reason && /^(Fix claimed|Fixed: )/.test(e.reason)).at(-1)?.reason ?? null,
         };
     };
 

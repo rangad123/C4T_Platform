@@ -39,7 +39,7 @@ export function RunsPage({ id }: { id: string }) {
         // Runs that start by themselves; each agent's own runs are on its page. After a deploy also holds the pull request lines.
         const only: HubSection[] = [
             { key: "schedules", label: "Schedules", hint: "Run an agent on a timetable", render: () => <ProjectSchedule id={id} section="schedules" agentId={query.get("agent")} workspace /> },
-            { key: "deploys", label: "After a deploy", hint: "Run when your pipeline says a new version is out; pull request lines", render: () => <ProjectSchedule id={id} section="deploys" /> },
+            { key: "deploys", label: "After a deploy", hint: "Run when your pipeline says a new version is out; pull request lines", render: () => <ProjectSchedule id={id} section="deploys" workspace /> },
         ];
         return <ProjectHub id={id} place="runs" title="Schedules" subtitle="Run a testing agent on a timetable or after a deploy. Each run is that agent’s, with its own checks only, and its results are on the agent’s page." sections={only} current={section === "deploys" ? "deploys" : "schedules"} hrefOf={(k) => routes.runs(id, k as RunsSection)} />;
     }

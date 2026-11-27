@@ -63,6 +63,8 @@ export interface FindingReview {
     personMay: { confirm: boolean; notABug: boolean };
     /** The issue it was filed as; older answers lack it. */
     issue?: IssueLink | null;
+    /** How the latest Check the fix went, as its history says it (asked, still reproduces, or Fixed); null when none was asked. */
+    fixCheck?: string | null;
 }
 
 /** One stored finding (src/platform/candidate-finding-store.ts CandidateFindingRecord). */
@@ -160,9 +162,13 @@ export function findingSections(list: readonly FindingRecord[]): { confirmed: Fi
 /** States a finding can be filed as an issue from (routes/integrations.ts FILABLE). */
 const FILABLE: readonly FindingState[] = ["confirmed", "classified", "needs_manual_review"];
 
-/** Which of the four actions a finding offers a person who may change it: only moves the lifecycle allows a person. */
-export function actionsOf(r: Pick<FindingRecord, "state" | "groupId" | "review">, hasTracker: boolean): { confirm: boolean; notABug: boolean; split: boolean; fileIssue: boolean } {
+/** States a fix is checked from (findings/regression-service.ts FIX_STATES): a bug a person or the engine stands behind. */
+const FIX_STATES: readonly FindingState[] = ["confirmed", "classified", "reported", "needs_manual_review"];
+
+/** Which actions a finding offers a person who may change it: only moves the lifecycle allows a person; Check the fix needs its saved test. */
+export function actionsOf(r: Pick<FindingRecord, "state" | "groupId" | "review" | "testId">, hasTracker: boolean): { confirm: boolean; notABug: boolean; split: boolean; fileIssue: boolean; checkFix: boolean } {
     return {
+        checkFix: FIX_STATES.includes(r.state) && Boolean(r.testId),
         confirm: r.review.personMay.confirm,
         notABug: r.review.personMay.notABug,
         split: r.groupId !== null,

@@ -162,7 +162,7 @@ control.
 
 | Request | What it does |
 |---|---|
-| `POST /api/projects/:id/triggers` `{ label?, allowUrl? }` | Creates a token. `201`; the answer includes `token` once. Up to 10 active tokens per project. |
+| `POST /api/projects/:id/triggers` `{ label?, allowUrl?, agentId? }` | Creates a token. In an Agent Workspace project the token runs one agent: `agentId` (default: the only agent, or Test Case Generation; several others: 400 asking to choose; an agent the project does not have: 409). Each run is that agent's run, as a schedule starts it (`scheduler.ts startScheduledJob`). `201`; the answer includes `token` once. Up to 10 active tokens per project. |
 | `GET /api/projects/:id/triggers` | Lists tokens (name, last four characters, created, last used, revoked, allowUrl). Never the token. |
 | `DELETE /api/projects/:id/triggers/:tid` | Revokes it. |
 

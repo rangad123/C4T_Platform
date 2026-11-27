@@ -6,15 +6,19 @@ import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { useHere } from "../auth/project-access";
 import { describeApiError, friendlyError } from "../../lib/labels";
+import type { WorkspaceAnswer } from "../agent-workspace/workspace";
 import { curlExample, type TriggerList, type TriggerToken } from "./triggers";
 import "./triggers.css";
 
 /**
  * Deploy triggers: a way for a pipeline to run this project's tests the moment a deploy finishes, without a schedule.
  * A token is shown once when it is made; only a fingerprint is kept, and it can be revoked at any time.
+ * In an Agent Workspace project a token runs one testing agent, chosen when it is made, as a schedule does (D1).
  */
-export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string; reloadKey?: number }) {
+export function TriggersPanel({ projectId, reloadKey = 0, workspace }: { projectId: string; reloadKey?: number; /** An Agent Workspace project. */ workspace?: boolean }) {
     const list = useFetch<TriggerList>(`/projects/${projectId}/triggers`);
+    const ws = useFetch<WorkspaceAnswer>(workspace ? `/projects/${projectId}/workspace` : null);
+    const agents = ws.data?.workspace ? ws.data.agents : [];
     useEffect(() => {
         if (reloadKey > 0) void list.reload();
     }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -47,7 +51,7 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
                 <>
                     {active.length === 0 && !adding && !fresh && (
                         <EmptyState icon={KeyRound} title="No deploy tokens yet" actions={<Button variant="primary" icon={Plus} disabled={Boolean(noManage)} tip={noManage} onClick={() => setAdding(true)}>Create a token</Button>}>
-                            Give your deploy pipeline a token and it can start a re-run of all tests as soon as a release is live, then ask for the result.
+                            {workspace ? "Give your deploy pipeline a token and it runs a testing agent you choose as soon as a release is live, then ask for the result." : "Give your deploy pipeline a token and it can start a re-run of all tests as soon as a release is live, then ask for the result."}
                         </EmptyState>
                     )}
                     {fresh && <NewTokenNotice token={fresh.token} label={fresh.label} onDone={() => setFresh(null)} />}
@@ -63,6 +67,7 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
                     {adding && !noManage && (
                         <NewTokenForm
                             projectId={projectId}
+                            agents={agents}
                             onCancel={() => setAdding(false)}
                             onCreated={(token, label) => {
                                 setAdding(false);
@@ -105,6 +110,7 @@ function TokenRow({ t, projectId, onChanged, mayRevoke }: { t: TriggerToken; pro
                 <h3 className="t-card">{name}</h3>
                 <Badge tone="neutral" tip="The token’s last 4 characters, to tell tokens apart. The whole token was shown only once, when it was made.">ends in {t.hint}</Badge>
                 {t.allowUrl && <Badge tone="warning" tip="The pipeline may send another address, such as a preview deploy. The run then tests that address with the project’s sign-in details.">May change the address</Badge>}
+                {t.agentName && <Badge tone="info" tip="Each deploy starts a run of this agent; its results are on the agent’s page.">Runs the {t.agentName}</Badge>}
                 {t.runbookName && <Badge tone="info" title="A deploy starts this run sequence instead of a plain re-run">Runs the run sequence “{t.runbookName}”</Badge>}
             </div>
             <div className="facts">
@@ -129,8 +135,10 @@ function TokenRow({ t, projectId, onChanged, mayRevoke }: { t: TriggerToken; pro
     );
 }
 
-function NewTokenForm({ projectId, onCancel, onCreated }: { projectId: string; onCancel: () => void; onCreated: (token: string, label: string | null) => void }) {
+function NewTokenForm({ projectId, agents, onCancel, onCreated }: { projectId: string; agents: Array<{ id: string; name: string }>; onCancel: () => void; onCreated: (token: string, label: string | null) => void }) {
     const [label, setLabel] = useState("");
+    const [agentId, setAgentId] = useState("");
+    const agent = agentId || agents[0]?.id;
     const [allowUrl, setAllowUrl] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -139,7 +147,7 @@ function NewTokenForm({ projectId, onCancel, onCreated }: { projectId: string; o
         setBusy(true);
         setError("");
         try {
-            const out = await api<{ token: string; label: string | null }>(`/projects/${projectId}/triggers`, { method: "POST", body: { ...(label.trim() ? { label: label.trim() } : {}), allowUrl } });
+            const out = await api<{ token: string; label: string | null }>(`/projects/${projectId}/triggers`, { method: "POST", body: { ...(label.trim() ? { label: label.trim() } : {}), allowUrl, ...(agent ? { agentId: agent } : {}) } });
             onCreated(out.token, out.label);
         } catch (e) {
             setError(describeApiError(e));
@@ -161,6 +169,19 @@ function NewTokenForm({ projectId, onCancel, onCreated }: { projectId: string; o
                 <input id="trig-label" className="input" value={label} maxLength={60} placeholder="For example: GitHub Actions" onChange={(e) => setLabel(e.target.value)} />
                 <p className="hint">Helps you tell tokens apart. It also appears next to the runs this token starts.</p>
             </div>
+            {agents.length > 0 && (
+                <div className="field">
+                    <label htmlFor="trig-agent">Agent to run after each deploy</label>
+                    <select id="trig-agent" className="input" value={agent} onChange={(e) => setAgentId(e.target.value)}>
+                        {agents.map((a) => (
+                            <option key={a.id} value={a.id}>
+                                {a.name}
+                            </option>
+                        ))}
+                    </select>
+                    <p className="hint">Each deploy starts one run of this agent, as its Run button does. Make one token per agent you want to run.</p>
+                </div>
+            )}
             <label className="check">
                 <input type="checkbox" checked={allowUrl} onChange={(e) => setAllowUrl(e.target.checked)} />
                 <span>

@@ -11,6 +11,9 @@ export interface TriggerToken {
     /** The runbook this token starts instead of a plain re-run (see features/runbooks). */
     runbookId?: string | null;
     runbookName?: string | null;
+    /** An Agent Workspace project: the testing agent the token runs. */
+    agentId?: string | null;
+    agentName?: string | null;
 }
 
 export interface TriggerList {

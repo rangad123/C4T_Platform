@@ -120,11 +120,16 @@ describe("the rules (no browser)", () => {
     });
     it("offers only the moves the lifecycle allows a person", () => {
         // The verdicts come from the server's lifecycle check (personMay); split needs a group, File issue a tracker and a filable state.
-        const a = (state: FindingRecord["state"], confirm: boolean, notABug: boolean, groupId: string | null = null, tracker = true) =>
-            actionsOf({ state, groupId, review: { personMay: { confirm, notABug } } as FindingRecord["review"] }, tracker);
-        expect(a("candidate", false, true)).toEqual({ confirm: false, notABug: true, split: false, fileIssue: false });
-        expect(a("needs_manual_review", true, true)).toEqual({ confirm: true, notABug: true, split: false, fileIssue: true });
-        expect(a("confirmed", false, true, "g1")).toEqual({ confirm: false, notABug: true, split: true, fileIssue: true });
+        // Check the fix needs a bug someone stands behind and its saved test (findings/regression-service.ts claimFix refuses the rest).
+        const a = (state: FindingRecord["state"], confirm: boolean, notABug: boolean, groupId: string | null = null, tracker = true, testId: string | null = "t1") =>
+            actionsOf({ state, groupId, testId, review: { personMay: { confirm, notABug } } as FindingRecord["review"] }, tracker);
+        expect(a("candidate", false, true)).toEqual({ confirm: false, notABug: true, split: false, fileIssue: false, checkFix: false });
+        expect(a("needs_manual_review", true, true)).toEqual({ confirm: true, notABug: true, split: false, fileIssue: true, checkFix: true });
+        expect(a("confirmed", false, true, "g1")).toEqual({ confirm: false, notABug: true, split: true, fileIssue: true, checkFix: true });
+        expect(a("reported", false, true).checkFix).toBe(true);
+        expect(a("confirmed", false, true, null, true, null).checkFix).toBe(false);
+        expect(a("fixed", false, false).checkFix).toBe(false);
+        expect(a("unconfirmed", false, true).checkFix).toBe(false);
         expect(a("confirmed", false, true, null, false).fileIssue).toBe(false);
         expect(a("reported", false, true).fileIssue).toBe(false);
     });
@@ -511,6 +516,23 @@ describe("a person's actions, from the keyboard", () => {
         await f.getByRole("button", { name: "Split" }).click();
         await pwExpect(f.getByRole("alert")).toHaveText("This finding is not grouped with others, so there is nothing to split.");
     }, 60_000);
+
+    it("Check the fix runs the finding's test again and the finding says how the check went; a finding nobody stands behind offers none (fresh review 2, step 8)", async () => {
+        await visit(run);
+        await pwExpect(row("The wishlist page answered something else.").getByRole("button", { name: "Check the fix" })).toHaveCount(0); // unconfirmed
+        const f = row("The search page answered something else.");
+        await tabTo(f.getByRole("button", { name: "Check the fix" }));
+        await page.keyboard.press("Enter");
+        const verify = platform.repo.listJobs(projectId).find((j) => j.options.mode === "verify")!;
+        expect(verify.options.fixCheck?.findingIds).toEqual([ids.possible]);
+        expect(verify.options.testIds).toEqual([(await store.get(projectId, ids.possible))!.testId]);
+        await pwExpect(f.getByTestId("finding-fix-check")).toContainText(`it is checked on the fixed build (verification run ${verify.id.slice(0, 8)})`);
+        // The check's verdict is the finding's history line (regression-service.ts checkFix writes it); a reload shows the latest.
+        await store.note(projectId, ids.possible, { by: "engine", reason: "Fix claimed — still reproduces: it failed in 2 of 3 attempts on the application as it is now (Test lead)." });
+        platform.repo.setJobStatus(verify.id, "COMPLETED"); // as a finished check leaves it, so later starts are not "still running"
+        await visit(run);
+        await pwExpect(row("The search page answered something else.").getByTestId("finding-fix-check")).toHaveText("Fix claimed — still reproduces: it failed in 2 of 3 attempts on the application as it is now (Test lead).");
+    }, 60_000);
 });
 
 describe("an agent project's findings are on the agent that found them (fresh review, step 4)", () => {
@@ -539,6 +561,27 @@ describe("an agent project's findings are on the agent that found them (fresh re
         await pwExpect(page.getByRole("tab", { name: "Outcome" }).or(page.getByText("Outcome").first())).toBeVisible();
         await page.waitForTimeout(500);
         await pwExpect(page.getByTestId("run-findings")).toHaveCount(0);
+    }, 60_000);
+
+    it("in a Test Case Generation project a finding lists its steps and offers no 'Open the saved test', which would end on the no-scripts notice", async () => {
+        const p3 = (await call("POST", "/api/projects", { name: "Case findings", platforms: ["web"], testingModes: ["agent"] })).body.id as string;
+        expect((await call("PUT", `/api/projects/${p3}/testing-agents`, { agents: ["test-generation", "security"] })).status).toBe(200);
+        const app3 = platform.repo.createApplication(p3, "https://shop.example.test", { ...DEFAULT_JOB_OPTIONS });
+        const job = (await platform.repo.createJob(p3, app3, { ...DEFAULT_JOB_OPTIONS, mode: "generate", agentId: "security" })).id;
+        platform.repo.setJobStatus(job, "COMPLETED");
+        const suite = platform.repo.getOrCreateSuite(p3, "Exploration", "exploration");
+        const testId = platform.repo.insertTest({ projectId: p3, suiteId: suite, jobId: job, spec: TestSpecSchema.parse({ testId: "WEB-001", title: "Orders stay private", kind: "web", category: "Security", priority: "high", steps: STEPS }), framework: "playwright", validationStatus: "NEEDS_REVIEW" });
+        const fid = (await store.upsert({ projectId: p3, jobId: job, testId, finding: verified("orders") })).finding.id;
+        await store.transition(p3, fid, { to: "verification_pending", by: "engine" });
+        await store.transition(p3, fid, { to: "reproduced", by: "engine", set: { severity: "high", attempts: ATTEMPTS, confidence: score("high", "the same failure in 2 of 3 attempts") } });
+        await store.transition(p3, fid, { to: "confirmed", by: "engine" });
+        await page.goto("about:blank");
+        await page.goto(`${BASE}/#/projects/${p3}/agents/security`);
+        const mine = page.getByTestId("run-findings");
+        await pwExpect(mine.getByTestId("finding-steps")).toHaveCount(1);
+        await pwExpect(mine).toContainText("Each lists the steps of its test.");
+        await pwExpect(mine.getByRole("link", { name: /Open the saved test/ })).toHaveCount(0);
+        await pwExpect(mine.getByRole("button", { name: "Check the fix" })).toBeVisible();
     }, 60_000);
 });
 

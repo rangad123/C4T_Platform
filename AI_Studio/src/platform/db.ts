@@ -330,6 +330,7 @@ ALTER TABLE projects ADD COLUMN ai_model TEXT;`,
     /* 73: one run = one agent (Agent Workspace D1): the testing agent an Explore again schedule runs (schedule-store.ts; existing schedules have none: null, and run as before or as the project's only agent) */ `ALTER TABLE schedules ADD COLUMN agent_id TEXT;`,
     /* 74: the likely cause verification found for a finding (root_cause_json; schema lives in candidate-finding-store.ts; existing findings have none until verified again) */ FINDING_ROOT_CAUSE_MIGRATION,
     /* 75: each testing agent's own saved defaults in a project, its Settings tab: level, model, sizes, screen review (schema lives in testing-agents.ts; existing projects have none, so each run uses the project's level and model as before) */ AGENT_SETTINGS_MIGRATION,
+    /* 76: one run = one agent after a deploy too: the testing agent a deploy token of an Agent Workspace project runs (trigger-store.ts; existing tokens have none: null, and run as before or as the project's only agent) */ `ALTER TABLE trigger_tokens ADD COLUMN agent_id TEXT;`,
 ];
 
 /** TypeScript that belongs to a slot, run right after its SQL in the same transaction (what portable SQL cannot do). */

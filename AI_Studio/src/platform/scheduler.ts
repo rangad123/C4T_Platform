@@ -72,8 +72,9 @@ export async function runnableTestIds(repo: Repo, projectId: string, shape: RunS
  * Create the job a schedule stands for. "validate" re-runs every test that can run on this machine (no LLM
  * needed); "generate" analyzes the application again with the settings its latest analysis was started with.
  * Throws a plain-language Error when there is nothing to run, and OverlapError when the project is busy.
+ * `started`: a deploy token of an Agent Workspace project starts its agent's run the same way (trigger-services.ts), as the deploy's.
  */
-export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow> {
+export async function startScheduledJob(repo: Repo, s: Pick<Schedule, "id" | "projectId" | "kind" | "agentId" | "createdBy" | "retryFailures">, started?: Required<Pick<JobOptions, "trigger" | "startedBy" | "deploy">>): Promise<JobRow> {
     const app = repo.getLatestApplicationPublic(s.projectId);
     if (!app) throw new Error("This project has no application yet. Run an analysis or import tests first.");
     const url = app.url as string;
@@ -123,10 +124,13 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
         }
     }
     if (!options.agentId) options = await caseAgentOptions(repo, s.projectId, options); // a Test Case Generation project explores plan-only (case-agent.ts)
-    options.trigger = "schedule";
-    options.scheduleId = s.id;
-    // Who the run belongs to: the schedule and the person who made it (a person's own runner takes only that person's runs).
-    options.startedBy = scheduleStarter(s);
+    if (started) Object.assign(options, started);
+    else {
+        options.trigger = "schedule";
+        options.scheduleId = s.id;
+        // Who the run belongs to: the schedule and the person who made it (a person's own runner takes only that person's runs).
+        options.startedBy = scheduleStarter(s);
+    }
 
     // Synchronous from here to the insert: no other job can slip in between the check and the create.
     const busy = await activeJobOf(repo, s.projectId, { verifyYields: true });

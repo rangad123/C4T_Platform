@@ -51,8 +51,8 @@ export function ProjectSchedule({ id, section, agentId, workspace }: { id: strin
             )}
             {section === "deploys" && (
                 <>
-                    <TriggersPanel projectId={id} reloadKey={reloadKey} />
-                    <SelectionPreviewCard projectId={id} />
+                    <TriggersPanel projectId={id} reloadKey={reloadKey} workspace={workspace} />
+                    <SelectionPreviewCard projectId={id} workspace={workspace} />
                 </>
             )}
         </div>

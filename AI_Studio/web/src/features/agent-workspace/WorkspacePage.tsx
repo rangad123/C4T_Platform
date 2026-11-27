@@ -13,7 +13,7 @@ import { sec } from "../security/security";
 import { AgentAvatar } from "../testing-agents/testing-agents";
 import { SetupChecklist } from "../workspace/SetupChecklist";
 import { AGENT_VIEWS } from "./registry";
-import { statusWords, type WorkspaceAgent, type WorkspaceAnswer } from "./workspace";
+import { failedWhy, statusWords, type WorkspaceAgent, type WorkspaceAnswer } from "./workspace";
 import "./workspace.css";
 
 /**
@@ -78,6 +78,7 @@ export function Workspace({ id, p, needsSecrets }: { id: string; p: ProjectDetai
 
 function AgentCard({ projectId, a }: { projectId: string; a: WorkspaceAgent }) {
     const s = statusWords(a);
+    const why = failedWhy(a);
     return (
         <article className="card card-pad ws-card" data-agent={a.id} aria-labelledby={`ws-${a.id}-h`}>
             <div className="ws-card-head">
@@ -87,6 +88,11 @@ function AgentCard({ projectId, a }: { projectId: string; a: WorkspaceAgent }) {
                 </h3>
             </div>
             <Badge tone={s.tone}>{s.label}</Badge>
+            {why && (
+                <p className="t-secondary" data-testid="agent-failed-why">
+                    {why}
+                </p>
+            )}
             <p className="t-secondary">{a.summary}</p>
             {(() => {
                 const Card = AGENT_VIEWS[a.id]?.Card;
@@ -109,11 +115,11 @@ function AgentCard({ projectId, a }: { projectId: string; a: WorkspaceAgent }) {
             <div className="row ws-actions">
                 {a.status !== "running" && (
                     <LinkButton size="sm" variant="primary" icon={Play} href={routes.newProject({ project: projectId, agent: a.id })}>
-                        Run
+                        Run<span className="sr-only"> the {a.name}</span>
                     </LinkButton>
                 )}
                 <LinkButton size="sm" icon={ArrowRight} href={routes.projectAgent(projectId, a.id)}>
-                    Open
+                    Open<span className="sr-only"> the {a.name}</span>
                 </LinkButton>
             </div>
         </article>

@@ -70,6 +70,8 @@ export interface TriggerToken {
     revokedAt: string | null;
     /** Who made it (migration 55), whose runner runs its runs; null for a token made before (its runs are refused with a sentence). */
     createdBy: string | null;
+    /** The testing agent its runs start in an Agent Workspace project (migration 76); null: as runAgentOf picks (testing-agents.ts). */
+    agentId: string | null;
 }
 
 const toToken = (r: Record<string, any>): TriggerToken => ({
@@ -83,6 +85,7 @@ const toToken = (r: Record<string, any>): TriggerToken => ({
     lastRunAt: r.last_run_at,
     revokedAt: r.revoked_at,
     createdBy: r.created_by ?? null,
+    agentId: r.agent_id ?? null,
 });
 
 export interface TriggerRunRow {
@@ -103,12 +106,12 @@ export class TriggerStore {
     ) {}
 
     /** The only moment the plaintext token exists on the server side: it is returned here and never kept. */
-    create(projectId: string, input: { label?: string; allowUrl?: boolean; createdBy?: string | null }): { token: string; record: TriggerToken } {
+    create(projectId: string, input: { label?: string; allowUrl?: boolean; createdBy?: string | null; agentId?: string | null }): { token: string; record: TriggerToken } {
         const token = newToken();
         const id = randomUUID();
         this.db.run(
-            "INSERT INTO trigger_tokens (id, project_id, label, token_hash, hint, allow_url, created_at, created_by) VALUES (?,?,?,?,?,?,?,?)",
-            id, projectId, input.label?.trim() || null, hashToken(token), token.slice(-4), input.allowUrl ? 1 : 0, new Date(this.clock()).toISOString(), input.createdBy ?? null,
+            "INSERT INTO trigger_tokens (id, project_id, label, token_hash, hint, allow_url, created_at, created_by, agent_id) VALUES (?,?,?,?,?,?,?,?,?)",
+            id, projectId, input.label?.trim() || null, hashToken(token), token.slice(-4), input.allowUrl ? 1 : 0, new Date(this.clock()).toISOString(), input.createdBy ?? null, input.agentId ?? null,
         );
         return { token, record: this.get(id)! };
     }

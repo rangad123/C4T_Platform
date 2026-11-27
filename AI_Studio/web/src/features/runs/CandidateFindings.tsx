@@ -35,8 +35,12 @@ const STATUS_TONE = { confirmed: "danger", review: "warning", rest: "neutral" } 
 /** What a person may change: the actions the lifecycle allows them, a reason for Not a bug, and the issue it was filed as. */
 interface Act {
     write: boolean;
+    /** May run tests here: Check the fix runs the finding's test (routes/findings.ts). */
+    run: boolean;
     tracker: Integration | undefined;
     onChanged: () => void;
+    /** A Test Case Generation project shows no test scripts (case-agent.tsx): the finding's steps above are its test. */
+    noScripts: boolean;
 }
 
 /** The issue a finding was filed as, a link to it in its tracker. */
@@ -60,7 +64,8 @@ function Actions({ rec, projectId, act }: { rec: FindingRecord; projectId: strin
     const [reason, setReason] = useState("");
     const [filed, setFiled] = useState<IssueLink | null>(rec.review.issue ?? null);
     const can = actionsOf(rec, act.tracker !== undefined);
-    if (!act.write || !(can.confirm || can.notABug || can.split || can.fileIssue)) return filed ? <FiledAs link={filed} /> : null;
+    const checkFix = can.checkFix && act.run;
+    if (!act.write || !(can.confirm || can.notABug || can.split || can.fileIssue || checkFix)) return filed ? <FiledAs link={filed} /> : null;
 
     async function run(go: () => Promise<unknown>): Promise<boolean> {
         setBusy(true);
@@ -77,6 +82,8 @@ function Actions({ rec, projectId, act }: { rec: FindingRecord; projectId: strin
     }
     const move = (action: "confirm" | "not_a_bug" | "split", why?: string) =>
         run(() => api(`/projects/${projectId}/findings/${rec.id}/transition`, { method: "POST", body: { action, ...(why ? { reason: why } : {}) } })).then((ok) => ok && act.onChanged());
+    // A person says the fix is in: the finding's test runs again on the application; only a passing check makes it Fixed (regression-service.ts).
+    const askCheck = () => run(() => api(`/projects/${projectId}/findings/${rec.id}/transition`, { method: "POST", body: { action: "check_fix" } })).then((ok) => ok && act.onChanged());
     const fileIssue = () => run(async () => setFiled((await api<{ link: IssueLink }>(`/projects/${projectId}/findings/${rec.id}/issue`, { method: "POST", body: { integrationId: act.tracker!.id } })).link));
     function notABug(e: FormEvent) {
         e.preventDefault();
@@ -105,6 +112,11 @@ function Actions({ rec, projectId, act }: { rec: FindingRecord; projectId: strin
                 {can.fileIssue && !filed && (
                     <Button size="sm" disabled={busy} tip={`Create an issue in ${TRACKER_LABEL[act.tracker!.kind]} (${act.tracker!.name}).`} onClick={() => void fileIssue()}>
                         File issue
+                    </Button>
+                )}
+                {checkFix && (
+                    <Button size="sm" disabled={busy} tip="Say the bug is fixed: its test runs again on the application, and the finding becomes Fixed only if every attempt passes." onClick={() => void askCheck()}>
+                        Check the fix
                     </Button>
                 )}
             </div>
@@ -288,7 +300,7 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                 </div>
             </details>
             <p className="t-meta fnd-foot">
-                {rec.testId ? (
+                {rec.testId && act.noScripts ? null : rec.testId ? (
                     <a href={routes.test(rec.testId)}>
                         Open the saved test <ChevronRight size={14} aria-hidden />
                     </a>
@@ -297,6 +309,12 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
                 )}
                 {rec.seenCount > 1 && <span> Seen in {plural(rec.seenCount, "run")}.</span>}
             </p>
+            {/* How the latest Check the fix went: asked and running, still reproduces, or Fixed (its history line). */}
+            {rv.fixCheck && (
+                <p className="t-meta" role="status" data-testid="finding-fix-check">
+                    {rv.fixCheck}
+                </p>
+            )}
             <Actions rec={rec} projectId={projectId} act={act} />
         </li>
     );
@@ -315,13 +333,15 @@ export function CandidateFindings({ projectId, jobId, agentId, explores }: { pro
     const got = useFetch<FindingsAnswer>(`/projects/${projectId}/candidate-findings?${jobId ? `job=${encodeURIComponent(jobId)}` : `agent=${encodeURIComponent(agentId ?? "")}`}`);
     const here = useHere(projectId);
     const write = !here.why("ai_studio.tests.write");
+    const mayRun = !here.why("ai_studio.tests.run");
     const trackers = useFetch<Integration[]>(write ? `/projects/${projectId}/integrations` : null);
     const codeHost = useFetch<{ connected: boolean }>(`/projects/${projectId}/code-host`);
+    const noScripts = useFetch<{ caseAgent?: boolean }>(`/projects/${projectId}/testing-agents`).data?.caseAgent === true;
     const list = got.data?.findings ?? [];
     const sections = useMemo(() => findingSections(got.data?.findings ?? []), [got.data]);
     if (got.loading || (!got.data && !got.error)) return null;
     if (!got.error && list.length === 0 && !explores) return null;
-    const act: Act = { write, tracker: trackers.data?.[0], onChanged: () => void got.reload() };
+    const act: Act = { write, run: mayRun, tracker: trackers.data?.[0], onChanged: () => void got.reload(), noScripts };
     let n = 0;
     const rows = (rs: FindingRecord[]) => (
         <ul className="fnd-list">
@@ -343,7 +363,7 @@ export function CandidateFindings({ projectId, jobId, agentId, explores }: { pro
                 </p>
             ) : (
                 <>
-                    <p className="t-secondary">Found by the AI. Confirmed bugs come first, then findings a person needs to check. Open a finding’s saved test to see what it does.</p>
+                    <p className="t-secondary">Found by the AI. Confirmed bugs come first, then findings a person needs to check. {noScripts ? "Each lists the steps of its test." : "Open a finding’s saved test to see what it does."}</p>
                     {codeHost.data?.connected === false && (
                         <p className="t-meta" data-testid="run-findings-no-repo">
                             No likely cause in the code: no code repository is connected. Connect GitHub in <a href={routes.integrations}>Integrations</a>.

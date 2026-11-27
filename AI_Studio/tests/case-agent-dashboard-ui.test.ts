@@ -555,8 +555,12 @@ describe("the Agent Workspace (W1)", () => {
         await pwExpect(card("performance").locator(".badge")).toHaveText("Not run yet");
         await pwExpect(card("api").locator(".badge")).toHaveText("Needs input");
         await pwExpect(card("api").getByTestId("agent-needs")).toContainText("OpenAPI document");
-        await pwExpect(card("performance").getByRole("link", { name: "Run" })).toHaveAttribute("href", routes.newProject({ project: team, agent: "performance" }));
-        await pwExpect(card("performance").getByRole("link", { name: "Open" })).toHaveAttribute("href", routes.projectAgent(team, "performance"));
+        await pwExpect(card("performance").getByRole("link", { name: "Run the Performance Testing Agent" })).toHaveAttribute("href", routes.newProject({ project: team, agent: "performance" }));
+        await pwExpect(card("performance").getByRole("link", { name: "Open the Performance Testing Agent" })).toHaveAttribute("href", routes.projectAgent(team, "performance"));
+        // A screen reader hears which agent each Run and Open is for (fresh review 2, step 4): no two links share a name.
+        const names = await page.locator(".ws-card .ws-actions a").evaluateAll((as) => as.map((a) => (a.textContent ?? "").replace(/\s+/g, " ").trim()));
+        expect(names.length).toBeGreaterThan(5);
+        expect(new Set(names).size).toBe(names.length);
         const flow = page.getByTestId("workspace-flow");
         await pwExpect(flow).toContainText("Every agent’s run adds to the site memory that later runs reuse. The tree you see is built by the Test Case Generation agent."); // W3 review M5
         await pwExpect(flow).toContainText("Test cases to a code project");
@@ -578,7 +582,7 @@ describe("the Agent Workspace (W1)", () => {
 
     it("Open shows the agent's own page: its own outcome (W2b), and its Runs are its runs only", async () => {
         await visit(routes.project(team));
-        await card("accessibility").getByRole("link", { name: "Open" }).click();
+        await card("accessibility").getByRole("link", { name: "Open the Accessibility Testing Agent" }).click();
         await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Accessibility Testing Agent");
         await pwExpect(page.getByTestId("accessibility-outcome")).toBeVisible();
         await pwExpect(page.getByText("Not shown here yet")).toHaveCount(0);
@@ -621,6 +625,45 @@ describe("the Agent Workspace (W1)", () => {
         await visit(`#/projects/${store}/runs/${first}`);
         await page.waitForURL(`**${routes.projectAgentRun(store, "test-generation", first)}`);
         await pwExpect(page.getByTestId("case-run-summary")).toBeVisible();
+    });
+
+    it("a failed agent says why on its card and its Outcome tab, not only 'Failed' (fresh review 2, step 5)", async () => {
+        const broken = await project("Broken Store", ["agent"], ["ux", "accessibility"]);
+        const app = platform.repo.getLatestApplicationPublic(broken)!.id as string;
+        platform.repo.setJobStatus((await platform.repo.createJob(broken, app, { ...DEFAULT_JOB_OPTIONS, agentId: "ux" })).id, "FAILED", "The AI's answer could not be used after 3 tries");
+        const why = "The AI model answered in a form AI Studio could not read, even after asking again.";
+        await visit(routes.project(broken));
+        await pwExpect(card("ux").locator(".badge")).toHaveText("Failed");
+        await pwExpect(card("ux").getByTestId("agent-failed-why")).toContainText(why);
+        await pwExpect(card("accessibility").getByTestId("agent-failed-why")).toHaveCount(0);
+        await visit(routes.projectAgent(broken, "ux"));
+        await pwExpect(page.getByTestId("agent-failed-why")).toContainText(why);
+        await axe("failed agent outcome");
+    });
+
+    it("After a deploy runs an agent: a new token chooses one, and a pull request offers an agent's run instead of a run of some tests (fresh review 2, step 8)", async () => {
+        await visit(routes.runs(team, "deploys"));
+        await pwExpect(page.locator("h1").first()).toBeVisible();
+        await page.getByRole("button", { name: "Create a token" }).click();
+        const pick = page.getByLabel("Agent to run after each deploy");
+        expect(await pick.locator("option").allTextContents()).toEqual(["API Testing Agent", "Accessibility Testing Agent", "Security Testing Agent", "Performance Testing Agent", "Test Case Generation Agent"]);
+        await pick.selectOption("accessibility");
+        await page.getByRole("button", { name: "Create token" }).click();
+        await pwExpect(page.getByTestId("new-token")).toBeVisible();
+        await page.getByRole("button", { name: "I have copied it" }).click();
+        await pwExpect(page.locator(".trig-row").first()).toContainText("Runs the Accessibility Testing Agent");
+        expect((await api("GET", `/api/projects/${team}/triggers`)).body.tokens[0]).toMatchObject({ agentId: "accessibility" });
+        await axe("after a deploy, agent token");
+        // A pull request line: its tests are explained, and the run it offers is an agent's.
+        platform.db.run("INSERT INTO pr_selections (id, project_id, pr, head_sha, mode, selected_json, reasons_json, created_at) VALUES (?,?,?,?,?,?,?,?)", "ws-pr", team, 42, "d".repeat(40), "full", "[]", JSON.stringify({ tests: [], fullRunRecommended: false, fullRunReasons: [], endpoints: [], unmapped: [], shared: [], findings: [], notes: [] }), new Date().toISOString());
+        await visit(routes.runs(team, "deploys"));
+        const pr = page.locator('[data-pr="42"]');
+        await pwExpect(pr).toBeVisible();
+        await pwExpect(pr.getByRole("button", { name: /Run only the proposed tests|Run all tests/ })).toHaveCount(0);
+        await pr.getByLabel("Agent to run on this change").selectOption("security");
+        await pwExpect(pr.getByRole("link", { name: "Run the agent" })).toHaveAttribute("href", routes.newProject({ project: team, agent: "security" }));
+        await axe("after a deploy, pull request");
+        await bothWidths("after-a-deploy");
     });
 
     it("an agent project of other agents lands on the Workspace too, with no requirements coverage (P6)", async () => {

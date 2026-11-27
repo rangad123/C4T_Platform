@@ -213,8 +213,6 @@ describe("making test scripts or running tests in a Test Case Generation project
         const schedule = (await call("POST", `/api/projects/${pid}/schedules`, { kind: "validate", cadence: { type: "daily", time: "04:00" }, enabled: false })).body.id as string;
         const suite = await call("POST", `/api/projects/${pid}/test-suites`, { name: "Smoke", testIds: [testId] });
         expect(suite.status, JSON.stringify(suite.body)).toBe(201);
-        const token = (await call("POST", `/api/projects/${pid}/triggers`, { label: "CI" })).body.token as string;
-        expect(token).toBeTruthy();
         const before = jobsOf(pid).length;
         const tests = platform.repo.listTests(pid).length;
         const refused: Array<[string, string, unknown, string, boolean?]> = [
@@ -230,7 +228,6 @@ describe("making test scripts or running tests in a Test Case Generation project
             ["a validate schedule's Run now", `/api/projects/${pid}/schedules/${schedule}/run`, undefined, CASE_AGENT_RUN_REFUSED],
             ["a suite run", `/api/projects/${pid}/test-suites/${suite.body.id}/run`, {}, CASE_AGENT_RUN_REFUSED],
             ["an agent run", `/api/projects/${pid}/agent-runs`, { objective: "A customer can reach the shop" }, CASE_AGENT_RUN_REFUSED],
-            ["a deploy trigger", `/api/triggers/${token}/run`, {}, CASE_AGENT_RUN_REFUSED, false],
         ];
         for (const [what, url, body, message, key] of refused) {
             const r = await call("POST", url, body, key ?? true);
@@ -241,6 +238,35 @@ describe("making test scripts or running tests in a Test Case Generation project
         // Scripts from test cases were already for code projects only; still refused here.
         const cases = await call("POST", `/api/projects/${pid}/manual-cases/generate-scripts`, {});
         expect(cases.status).toBe(409);
+        expect(jobsOf(pid).length).toBe(before);
+    });
+
+    it("a deploy token runs the agent it was made for, never the old test scripts (After a deploy, one run = one agent)", async () => {
+        const made = async (agentId?: string) => (await call("POST", `/api/projects/${pid}/triggers`, { label: "CI", ...(agentId ? { agentId } : {}) })).body as { token: string; agentId: string | null; agentName: string | null };
+        // No agent named: the test case run (the project's default agent); one named: that agent's own run.
+        for (const [asked, own] of [[undefined, "test-generation"], ["accessibility", "accessibility"]] as const) {
+            const t = await made(asked);
+            expect(t.agentId).toBe(own);
+            const r = await call("POST", `/api/triggers/${t.token}/run`, { commit: "abc1234" }, false);
+            expect(r.status, JSON.stringify(r.body)).toBe(202);
+            expect(r.body.agentId).toBe(own);
+            const job = platform.repo.getJob(r.body.jobId)!;
+            expect(job.options).toMatchObject({ agentId: own, mode: "generate", trigger: "deploy", deploy: { commit: "abc1234", label: "CI" } });
+            expect(job.options.testIds ?? []).not.toContain(testId);
+            if (own === "test-generation") expect(job.options.planOnly).toBe(true);
+            // The pipeline can follow it like any deploy run.
+            expect((await call("GET", `/api/triggers/${t.token}/status/${r.body.jobId}`, undefined, false)).body).toMatchObject({ jobId: r.body.jobId, state: "queued" });
+            settle(r.body.jobId);
+        }
+        // An agent the project does not have is refused when the token is made, with a sentence.
+        const other = await call("POST", `/api/projects/${pid}/triggers`, { label: "CI", agentId: "security" });
+        expect(other.status).toBe(409);
+        expect(other.body.error).toMatch(/not one of this project's testing agents/);
+        // A run of only some tests is a code project's: refused with a sentence, nothing queued.
+        const before = jobsOf(pid).length;
+        const focused = await call("POST", `/api/triggers/${(await made("accessibility")).token}/run`, { selection: "focused", pages: ["/cart"] }, false);
+        expect(focused.status).toBe(400);
+        expect(focused.body.error).toMatch(/runs a testing agent/);
         expect(jobsOf(pid).length).toBe(before);
     });
 

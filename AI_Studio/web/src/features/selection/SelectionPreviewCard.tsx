@@ -1,7 +1,8 @@
 import { ChevronRight, GitBranch, GitPullRequest, Play, ScanSearch } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../api";
-import { Badge, Button, Callout, Metric } from "../../components/ui";
+import { Badge, Button, Callout, LinkButton, Metric } from "../../components/ui";
+import type { WorkspaceAnswer } from "../agent-workspace/workspace";
 import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
@@ -11,9 +12,9 @@ import { linesOf, SOURCE_WORDS, type DetectedChanges, type PullRequestSelection,
 /**
  * "Which tests would a change call for?" beside the deploy tokens. A person names changed pages and endpoints (or takes the ones the
  * platform detected) and sees which tests touch them and why. It is a recommendation only: nothing is run or skipped, and a deploy
- * still runs every runnable test.
+ * still runs every runnable test. In an Agent Workspace project a run is an agent's (D1), so a pull request offers an agent's run instead.
  */
-export function SelectionPreviewCard({ projectId }: { projectId: string }) {
+export function SelectionPreviewCard({ projectId, workspace }: { projectId: string; /** An Agent Workspace project. */ workspace?: boolean }) {
     const [pages, setPages] = useState("");
     const [endpoints, setEndpoints] = useState("");
     const [busy, setBusy] = useState<"preview" | "detected" | null>(null);
@@ -55,7 +56,7 @@ export function SelectionPreviewCard({ projectId }: { projectId: string }) {
 
     const manual = (
         <div className="card-pad stack-sm">
-            <p className="t-secondary">Name the pages and endpoints a release changes. The preview shows which tests open or call them, and why. The preview runs nothing, and a deploy still runs every runnable test.</p>
+            <p className="t-secondary">Name the pages and endpoints a release changes. The preview shows which tests open or call them, and why. The preview runs nothing{workspace ? "." : ", and a deploy still runs every runnable test."}</p>
             <div className="field">
                 <label htmlFor="sel-pages">Changed pages, one per line</label>
                 <textarea id="sel-pages" className="input" rows={3} maxLength={20_000} value={pages} placeholder={"/checkout\n/orders/{id}"} onChange={(e) => setPages(e.target.value)} />
@@ -84,7 +85,7 @@ export function SelectionPreviewCard({ projectId }: { projectId: string }) {
                 <ScanSearch size={18} aria-hidden />
                 <h2 className="t-section" id="selection-title">Which tests a change calls for</h2>
             </div>
-            <PullRequests projectId={projectId} list={prList} />
+            <PullRequests projectId={projectId} list={prList} workspace={workspace} />
             {prList.length > 0 ? (
                 <details className="disclosure" data-testid="selection-by-hand">
                     <summary className="card-pad">
@@ -210,7 +211,11 @@ function Group({ title, tests, testId, collapsed }: { title: string; tests: Sele
 }
 
 /** The latest pull requests whose tests were chosen from the change (code-host/pr-impact.ts), each with why and both runs. Nothing runs until a person picks one; a full run is the default. */
-function PullRequests({ projectId, list }: { projectId: string; list: PullRequestSelection[] }) {
+function PullRequests({ projectId, list, workspace }: { projectId: string; list: PullRequestSelection[]; workspace?: boolean }) {
+    const ws = useFetch<WorkspaceAnswer>(workspace && list.length ? `/projects/${projectId}/workspace` : null);
+    const agents = ws.data?.workspace ? ws.data.agents : [];
+    const [agentId, setAgentId] = useState("");
+    const agent = agentId || agents[0]?.id;
     const [busy, setBusy] = useState<string | null>(null);
     const [started, setStarted] = useState<{ key: string; jobId: string; testCount: number } | null>(null);
     const [error, setError] = useState<{ key: string; text: string } | null>(null);
@@ -262,6 +267,26 @@ function PullRequests({ projectId, list }: { projectId: string; list: PullReques
                                 "This commit has not been run yet."
                             )}
                         </p>
+                        {workspace ? (
+                            agents.length > 0 && (
+                                <div className="row wrap" data-testid="pr-agent-run">
+                                    <label htmlFor={`pr-agent-${p.pr}`} className="t-secondary">
+                                        Agent to run on this change
+                                    </label>
+                                    <select id={`pr-agent-${p.pr}`} className="input" style={{ width: "auto" }} value={agent} onChange={(e) => setAgentId(e.target.value)}>
+                                        {agents.map((a) => (
+                                            <option key={a.id} value={a.id}>
+                                                {a.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <LinkButton variant="primary" icon={Play} href={routes.newProject({ project: projectId, agent })}>
+                                        Run the agent
+                                    </LinkButton>
+                                    <span className="t-meta">An agent explores the whole application again; a run of only the proposed tests belongs to a code project.</span>
+                                </div>
+                            )
+                        ) : (
                         <div className="row wrap">
                             <Button variant="primary" icon={Play} loading={busy === `${p.pr}-full`} disabled={busy !== null} onClick={() => void start(p, "full")}>
                                 Run all tests
@@ -270,6 +295,7 @@ function PullRequests({ projectId, list }: { projectId: string; list: PullReques
                                 Run only the proposed tests
                             </Button>
                         </div>
+                        )}
                         {started?.key === String(p.pr) && (
                             <p className="t-meta" role="status">
                                 Started a run of {plural(started.testCount, "test")}. <a href={routes.run(projectId, started.jobId)}>Open the run</a>

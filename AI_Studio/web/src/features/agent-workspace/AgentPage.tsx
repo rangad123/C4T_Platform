@@ -12,7 +12,7 @@ import type { AgentDetail, AgentId } from "../testing-agents/testing-agents";
 import { AgentDefaults } from "./AgentSettings";
 import { AGENT_VIEWS } from "./registry";
 import { RunStatus } from "./RunStatus";
-import { RUN_STATUS_HELP, runStatusOf, statusWords, type AgentRun, type WorkspaceAnswer } from "./workspace";
+import { failedWhy, RUN_STATUS_HELP, runStatusOf, statusWords, type AgentRun, type WorkspaceAnswer } from "./workspace";
 import "./workspace.css";
 
 /**
@@ -34,6 +34,12 @@ export function AgentPage({ id, agentId, tab, runId }: { id: string; agentId: st
             hint: "What this agent found: its result only",
             render: body(() => (
                 <div className="stack">
+                    {/* Test Case Generation's Outcome says why its run failed in its own words; every other agent's says it here. */}
+                    {agentId !== "test-generation" && failedWhy(a!) && (
+                        <Callout tone="danger" title="The last run failed">
+                            <span data-testid="agent-failed-why">{failedWhy(a!)}</span>
+                        </Callout>
+                    )}
                     {view ? <view.Outcome projectId={id} /> : <NotShownYet name={a!.name} />}
                     {/* What a check agent found, to Confirm, call Not a bug or file as an issue; shown only when it found any. */}
                     {agentId !== "test-generation" && <CandidateFindings projectId={id} agentId={agentId} explores={false} />}

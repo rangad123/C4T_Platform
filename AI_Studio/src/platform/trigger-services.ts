@@ -2,7 +2,8 @@ import { runnerOwnerOf } from "./agent-store.js";
 /**
  * Deploy triggers wired to one platform: start a re-run of the project's tests for a token, report its progress and result,
  * and deliver the optional callback when the run ends. The job is the same one a schedule starts (a "validate" job over every
- * test this machine can run), labelled as started by a deploy.
+ * test this machine can run), labelled as started by a deploy. In an Agent Workspace project a token runs one agent (D1): the run its
+ * Explore again schedule would start, of the agent the token keeps.
  */
 import { noteCustomSkipped } from "./custom-policy.js";
 import { notePluginSkipped } from "./plugin-policy.js";
@@ -19,7 +20,9 @@ import { ignoredNote } from "../engine/quarantine/rules.js";
 import { passRate } from "../engine/summary/pass-rate.js";
 import { gateJob } from "./quarantine-service.js";
 import { DEFAULT_JOB_OPTIONS, TERMINAL_STATES, type JobOptions, type JobRow } from "./repo.js";
-import { activeJobOf, runnableTestIds } from "./scheduler.js";
+import { activeJobOf, OverlapError, runnableTestIds, startScheduledJob } from "./scheduler.js";
+import { workspaceAgents } from "./agent-workspace.js";
+import { TestingAgentStore } from "./testing-agents.js";
 import { refuseUnlessRunsStart } from "./suite-run.js";
 import { SecretBox } from "./secrets.js";
 import { projectCoverage } from "./selection/facts.js";
@@ -165,7 +168,10 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
             if (input.selection === "focused" && !input.pages?.length && !input.endpoints?.length) throw new HttpError(400, "A focused run needs the changed pages or endpoints.");
             // The run is the token maker's, with nobody signed in: a Crowd4Test maker is asked about first (c4t-service.ts).
             await assertC4tOwnerMayRun(p, token.createdBy);
-            await refuseTestsInCaseAgentProject(repo, token.projectId); // a Test Case Generation project runs no tests (case-agent.ts)
+            const row = repo.getProject(token.projectId);
+            const agentRun = Boolean(row && (await workspaceAgents(new TestingAgentStore(repo.db.sql, repo), row))?.length);
+            if (!agentRun) await refuseTestsInCaseAgentProject(repo, token.projectId); // a Test Case Generation project runs no tests (case-agent.ts)
+            if (agentRun && input.selection === "focused") throw new HttpError(400, "This token runs a testing agent, which explores the whole application: leave out selection, pages and endpoints.");
 
             const app = repo.getLatestApplicationPublic(token.projectId);
             if (!app) throw new HttpError(409, "This project has no application yet. Run an analysis or import tests first.");
@@ -192,6 +198,22 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
             if (input.callbackUrl) await assertAllowedTarget(input.callbackUrl);
 
             refuseUnlessRunsStart(p); // tests switched off on this server: the pipeline is told, nothing is queued
+            const startedBy = { kind: "trigger", id: token.id, ownerId: token.createdBy };
+            const deploy = { ...(input.commit ? { commit: input.commit } : {}), ...(input.environment ? { environment: input.environment } : {}), ...(token.label ? { label: token.label } : {}) };
+            if (agentRun) {
+                const busy = await activeJobOf(repo, token.projectId, { verifyYields: true });
+                if (busy) throw new HttpError(409, `An agent is already running in this project (${busy.status.toLowerCase().replace(/_/g, " ")}). Try again when that run has finished.`);
+                if (!store.claimSlot(token.id, minGap)) throw new RateLimited(Math.max(1, Math.ceil(store.waitMs(store.find(presented) ?? token, minGap) / 1000)));
+                let job: JobRow;
+                try {
+                    job = await startScheduledJob(repo, { id: token.id, projectId: token.projectId, kind: "generate", agentId: token.agentId, createdBy: token.createdBy, retryFailures: 0 }, { trigger: "deploy", startedBy, deploy });
+                } catch (e) {
+                    if (e instanceof HttpError) throw e;
+                    throw new HttpError(409, e instanceof OverlapError ? "An agent is already running in this project. Try again when that run has finished." : (e as Error).message);
+                }
+                store.addRun({ jobId: job.id, tokenId: token.id, commit: input.commit, environment: input.environment, callbackUrl: input.callbackUrl });
+                return { job, testCount: 0, ignored, selection: "full" };
+            }
             const coverage = input.selection === "focused" ? await projectCoverage(repo, p.store, token.projectId) : undefined;
             // From here to the insert nothing is awaited: no other job can slip in between the checks and the create.
             let testIds = await runnableTestIds(repo, token.projectId, "validate", runnerOwnerOf(token.createdBy));
@@ -211,8 +233,8 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
                 testIds,
                 trigger: "deploy",
                 // Whose runner runs it: the person who made the token (round 45; null for an older token, refused by the job gate).
-                startedBy: { kind: "trigger", id: token.id, ownerId: token.createdBy },
-                deploy: { ...(input.commit ? { commit: input.commit } : {}), ...(input.environment ? { environment: input.environment } : {}), ...(token.label ? { label: token.label } : {}) },
+                startedBy,
+                deploy,
             };
             const job = await repo.createJob(token.projectId, applicationId, options);
             await noteCustomSkipped(repo, job.id, token.projectId);

@@ -5,7 +5,7 @@
  */
 import type { Job } from "../../api";
 import type { Tone } from "../../lib/labels";
-import { isActive, runningLabel } from "../../lib/labels";
+import { friendlyError, isActive, runningLabel } from "../../lib/labels";
 import { relativeTime } from "../../lib/format";
 import type { AgentId } from "../testing-agents/testing-agents";
 
@@ -48,6 +48,12 @@ export const RUN_STATUS_HELP: Partial<Record<AgentStatus, string>> = {
 
 /** A queued run, explained: what it waits for. */
 export const QUEUED_HELP = "Nothing has started this run yet: it waits for the AI Studio worker, or for your runner when runs go to runners. It starts as soon as one is free.";
+
+/** Why the agent's newest run failed, in the words its run page uses; null unless its status is Failed with a reason. */
+export function failedWhy(a: Pick<WorkspaceAgent, "status" | "lastRun">): string | null {
+    const e = a.status === "failed" ? a.lastRun?.error : null;
+    return e && e !== "Cancelled" ? friendlyError(e).body : null;
+}
 
 /** The status as the card says it (SPEC §1): Not run yet, Running n%, Done (when), Stopped (what it found is kept), Failed, Needs input. */
 export function statusWords(a: Pick<WorkspaceAgent, "status" | "lastRun">): { label: string; tone: Tone } {
