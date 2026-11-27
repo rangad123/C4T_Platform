@@ -1,7 +1,8 @@
 /**
  * A failure caused by the test's own step: the step could not find or could not pick its element (not found, several match, the
  * field-by-label sentence, a timeout waiting for the element). That is a test to fix, never a finding about the application, whatever a
- * model said: only a check of what the application shows or answers (an assertion) or an application error can be a finding.
+ * model said: only a check of what the application shows or answers (an assertion) or an application error can be a finding. An
+ * element Playwright found but could not use (disabled, hidden, read-only, from its call log) is the application's state, not the step.
  * Console errors and failed requests of the page (blocked third-party fonts, mixed content) are evidence only and never decide this.
  */
 import type { Step } from "../spec/schema.js";
@@ -11,6 +12,8 @@ import type { ScriptRun } from "./runner.js";
 const AMBIGUOUS = /strict mode violation|No field labelled "[^"]*", and \d+ fields/i;
 /** The step's element was not there (or not found in time). */
 const NOT_FOUND = /No field labelled "|element\(s\) not found|resolved to 0 elements|waiting for (getBy\w+|locator|frameLocator|selector)\(|waiting for selector/i;
+/** Playwright found the element, but the page kept it from being used (disabled, hidden, read-only): the application's state, not the step. */
+const FOUND_BUT_UNUSABLE = /locator resolved to <[\s\S]*?element is not (?:enabled|visible|editable)\b/;
 /** A Playwright expectation: a claim about the page, whose element missing is a result about the application. */
 const EXPECTATION = /^(Error: )?expect\(/;
 
@@ -25,7 +28,7 @@ export function testStepFault(run: Pick<ScriptRun, "status" | "steps" | "error">
     if (!error) return undefined;
     const ambiguous = AMBIGUOUS.test(error);
     if (!ambiguous) {
-        if (!NOT_FOUND.test(error)) return undefined;
+        if (!NOT_FOUND.test(error) || FOUND_BUT_UNUSABLE.test(error)) return undefined;
         const isCheck = step ? step.action === "assert" : EXPECTATION.test(error);
         if (isCheck) return undefined;
     }

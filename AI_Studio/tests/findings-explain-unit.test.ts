@@ -153,4 +153,42 @@ describe("explainGroup", () => {
         expect(r).toMatchObject({ class: "open", aiClass: false, explanation: null });
         expect(r.warnings.join(" ")).toMatch(/provider down/);
     });
+
+    // V4 with a real model (Haiku): one failed attempt, a described-only finding or a state-bound replay was called app_defect on the
+    // model's word. The facts decide whether the pick stands; the model's explanation is kept either way.
+    describe("a pick the facts do not support stays open", () => {
+        const timeout = fail({ check: undefined, value: undefined, error: "TimeoutError: locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Check out' })", stepFault: "The test needs fixing, not your application: Step 7 could not use its element." });
+        const unsupported: Array<[string, FindingView, string, RegExp]> = [
+            ["one failed attempt", view({ attempts: [fail()] }), "app_defect", /1 of 1 attempts/],
+            ["no attempt failed (described only)", view({ attempts: [{ outcome: "passed" }] }), "app_defect", /0 of 1 attempts/],
+            ["nothing recorded, the planner's guess", view({ attempts: [], expected: { text: "A required-field message shows.", source: null, stated: "inferred" } }), "app_defect", /no source states/],
+            ["reproduced only on the shared account's state", view({ attempts: [fail(), fail(), fail()], independence: "not_on_clean_state" }), "app_defect", /shared account/],
+            ["a lone locator timeout", view({ attempts: [timeout] }), "automation", /element was missing/],
+        ];
+        it.each(unsupported)("%s", async (_name, f, pick, why) => {
+            expect(classify(f).candidates).toContain(pick);
+            const r = await explainGroup(scripted(says(pick)), [f]);
+            expect(r).toMatchObject({ class: "open", aiClass: false, explanation: "The total adds one line twice." });
+            expect(r.confidence.confidence).toBe(confidenceScore(f).confidence);
+            expect(r.warnings.join(" ")).toMatch(why);
+        });
+
+        it("takes app_defect when the facts show it, and flaky on one attempt", async () => {
+            // Reproduced 2 of 3 against a stated source (the third attempt a network error).
+            expect((await explainGroup(scripted(says("app_defect")), [OPEN()])).class).toBe("app_defect");
+            // One attempt, but the application's own server answered 500: a deterministic oracle.
+            const own500 = view({ attempts: [fail({ requests: [{ method: "POST", path: "/api/cart", status: 500, own: true }] })] });
+            expect(classify(own500).class).toBe("open");
+            expect((await explainGroup(scripted(says("app_defect")), [own500])).class).toBe("app_defect");
+            const one = view({ attempts: [fail()] });
+            expect(await explainGroup(scripted(says("flaky")), [one])).toMatchObject({ class: "flaky", aiClass: true });
+        });
+
+        it("tells the model when app_defect is supported", async () => {
+            const llm = scripted(says(undefined));
+            await explainGroup(llm, [OPEN()]);
+            expect(llm.seen.systems[0]).toMatch(/app_defect only when the facts show it/);
+            expect(llm.seen.systems[0]).toMatch(/does not itself require is incorrect_expectation/);
+        });
+    });
 });

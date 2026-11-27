@@ -55,6 +55,9 @@ function causeOf(a: Attempt): Cause {
 /** Playwright's own sentence for a locator action that waited out its timeout, and nothing more specific. */
 const BARE_LOCATOR_TIMEOUT = /^(?:TimeoutError: )?locator\.\w+: Timeout \d+ms exceeded\.?$/;
 
+/** One attempt, no replay, and it only timed out waiting for an element: nothing shows whether the element was missing or the step wrong. */
+export const loneLocatorTimeout = (attempts: readonly Attempt[]) => attempts.length === 1 && BARE_LOCATOR_TIMEOUT.test(attempts[0]!.error?.split("\n")[0]?.trim() ?? "");
+
 const CAUSE_WORDS: Record<Cause, string> = {
     automation: "the test's own step",
     network: "a network error",
@@ -103,7 +106,7 @@ export function classify(f: Pick<FindingView, "attempts" | "expected" | "layer" 
     }
     const cause = causes[0]!;
     const n = f.attempts.length;
-    if (cause === "automation" && n === 1 && BARE_LOCATOR_TIMEOUT.test(f.attempts[0]!.error?.split("\n")[0]?.trim() ?? ""))
+    if (cause === "automation" && loneLocatorTimeout(f.attempts))
         return open(["automation", "app_defect"], "One attempt timed out waiting for an element, with no replay: the step may be wrong, or the application never showed the element.", rep);
     if (cause !== "app") return decided(cause, `${failing.length} of ${n} attempts failed because of ${CAUSE_WORDS[cause]}.`, rep);
 

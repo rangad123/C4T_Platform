@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { classify, FINDING_CLASSES, type FindingClass } from "../src/engine/findings/classify.js";
 import { FindingViewSchema, type FindingView, type FindingViewInput } from "../src/engine/findings/view.js";
+import { testStepFault } from "../src/engine/validation/test-fault.js";
 
 type AttemptIn = NonNullable<FindingViewInput["attempts"]>[number];
 const fail = (o: Partial<AttemptIn> = {}): AttemptIn => ({ outcome: "failed", failedStep: 4, check: "value", target: "Delivery address", value: "1 Test Road", error: "Error: expect(locator).toHaveValue(expected) failed", ...o });
@@ -150,6 +151,28 @@ describe("classify on the W0-1 corpus rows", () => {
             const r = byId(id);
             expect(r.truth.seed, id).toMatch(/^BS-/);
             expect(classify(r.v).candidates, id).toContain("app_defect");
+        }
+    });
+
+    // CP5-A Observation 2: the same two seeds, with the call log the runner stores for each attempt. Playwright found the element but
+    // the page would not let it be used: the application's state, never the test's own step, also when every attempt fails that way.
+    it("does not call a seed's locator timeout automation when the call log shows the element was there (d1-haiku-p2 BS-06, BS-12)", () => {
+        const logs: Record<string, string> = {
+            "d1-haiku-p2/5491b0e3": "TimeoutError: locator.fill: Timeout 10000ms exceeded.\nCall log:\n  - waiting for getByLabel('Name', { exact: true })\n    - locator resolved to <input id=\"name\" name=\"name\" readonly/>\n    - fill(\"Alice qawxzl 1\")\n  - attempting fill action\n    2 × waiting for element to be visible, enabled and editable\n      - element is not editable",
+            "d1-haiku-p2/6ef7a5bf": "TimeoutError: locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Check out' })\n    - locator resolved to <a href=\"/checkout\" aria-disabled=\"true\">Check out</a>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is not enabled",
+        };
+        for (const [id, error] of Object.entries(logs)) {
+            const r = byId(id);
+            const run = { status: "failed" as const, error, steps: [{ index: 4, title: "Step", status: "failed" as const, error }] };
+            expect(testStepFault(run), id).toBeUndefined();
+            const attempt = { ...r.view.attempts![0]!, error, stepFault: testStepFault(run) };
+            for (const n of [1, 2]) {
+                const c = classify(FindingViewSchema.parse({ ...r.view, attempts: Array.from({ length: n }, () => attempt) }));
+                expect(c.candidates, `${id} x${n}`).not.toContain("automation");
+            }
+            // The element never found stays the test's own step once replays agree.
+            const missing = "TimeoutError: locator.fill: Timeout 10000ms exceeded.\nCall log:\n  - waiting for getByLabel('Name', { exact: true })";
+            expect(testStepFault({ ...run, error: missing, steps: [{ ...run.steps[0]!, error: missing }] }), id).toMatch(/^The test needs fixing/);
         }
     });
 
