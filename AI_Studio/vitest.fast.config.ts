@@ -422,6 +422,7 @@ export default defineConfig({
             "tests/impact-page-code-unit.test.ts",
             "tests/l4-evidence-unit.test.ts",
             "tests/authored-check-fault-unit.test.ts",
+            "tests/explore-account-reach-unit.test.ts",
             "tests/finding-report-standalone-unit.test.ts",
             "tests/plain-status-words-unit.test.ts",
         ],
