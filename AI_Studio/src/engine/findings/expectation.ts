@@ -49,14 +49,30 @@ function expectedText(step: Step | undefined): string | undefined {
 export function judgePageCheck(x: { spec: TestSpec; failedStep?: number; cited: string; required?: string; apiAmount?: unknown; correlated?: boolean }): PageCheckJudgement | undefined {
     if (x.spec.kind !== "web" || x.correlated || x.failedStep === undefined) return undefined;
     const step = x.spec.steps[x.failedStep - 1];
-    if (step?.action === "assert" && step.check === "url") return judgeAddress(x.spec, step.expected, x.required ?? x.cited);
+    // A check that the page stays where it is (a refused form keeps its page) is about the refusal, not an address the writer chose
+    // (paid L4 rbac-4 WEB-035 BR-09: "… and the page stays on /login (requirement 2.14)").
+    if (step?.action === "assert" && (step.check === "url" || step.check === "urlPattern")) return STAYS.test(`${x.cited} ${step.description ?? ""}`) ? undefined : judgeAddress(x.spec, step.expected, x.required ?? x.cited);
     const want = expectedText(x.spec.steps[x.failedStep - 1])?.trim();
     if (!want) return undefined;
-    // The test's own data ({{unique}}, a value a step typed) is stated by the test itself.
-    const typed = x.spec.steps.flatMap((s) => (s.action === "fill" ? [norm(s.value.replace(/\{\{[^}]*\}\}/g, " "))] : [])).filter((t) => t.length >= 3);
+    // The test's own data ({{unique}}, a value a step typed) is stated by the test itself, where it was typed. Shown elsewhere it is
+    // stated only when the cited requirement speaks of the field it was typed into (paid L4 shop-1 WEB-025: the typed name expected in
+    // the navigation, under 1.10 "A new account is signed in straight away …", which says nothing of a name).
     const w = norm(want);
-    if (/\{\{/.test(want) || typed.some((t) => w.includes(t) || (w.length >= 3 && t.includes(w)))) return undefined;
-    const cited = norm(x.cited);
+    const fills = x.spec.steps.flatMap((s) => (s.action === "fill" ? [s] : []));
+    const typedInto = fills.find((s) => {
+        const t = norm(s.value.replace(/\{\{[^}]*\}\}/g, " "));
+        return (/\{\{/.test(want) && s.value.includes(want)) || (t.length >= 3 && (w.includes(t) || (w.length >= 3 && t.includes(w))));
+    });
+    if (typedInto || /\{\{/.test(want)) {
+        const field = typedInto ? (typedInto.locator as { value?: string }).value : undefined;
+        const sameField = field && step?.action === "assert" && (step.locator as { value?: string } | undefined)?.value === field;
+        return x.required && field && !sameField && !norm(x.required).includes(norm(field)) ? { unstated: true } : undefined;
+    }
+    // A text is stated by the requirement the expected result cites, when the project holds it: the expected result is the test writer's
+    // own wording (paid L4 shop-4 WEB-004: "The Add to cart button is visible (requirement 1.1)", where 1.1 says only that anyone may
+    // browse). A word inside an address ("/notes") is not a text the page shows (rbac-1 WEB-027: heading "Notes" from "The URL becomes /notes").
+    // A number is the data the writer saw (a count of orders), which a requirement never lists: it stays judged on the expected result.
+    const cited = norm((/^\d+$/.test(w) ? x.cited : (x.required ?? x.cited)).replace(/(?:^|\s)\/[^\s()]*/g, " "));
     const amounts = [...want.matchAll(MONEY)].map((m) => m[0]);
     const plain = x.cited.replace(/,/g, "");
     const states = (a: string) => {
@@ -74,6 +90,7 @@ export function judgePageCheck(x: { spec: TestSpec; failedStep?: number; cited: 
 }
 
 const ORIGIN = /^[a-z][a-z0-9+.-]*:\/\/[^/]+/i;
+const STAYS = /\b(?:stays?|remains?|still on)\b/i;
 const decoded = (u: string) => {
     try {
         return decodeURIComponent(u);
@@ -99,7 +116,8 @@ function judgeAddress(spec: TestSpec, expected: unknown, text: string): PageChec
 export function citedRequirements(cited: string, requirements: ReadonlyMap<string, string> | undefined): string | undefined {
     if (!requirements?.size) return undefined;
     const refs = [...cited.matchAll(/\brequirements?\s+([A-Za-z0-9][A-Za-z0-9._#-]*)/gi)].map((m) => m[1]!.replace(/\.+$/, "").toUpperCase());
-    const texts = refs.flatMap((r) => requirements.get(r) ?? []);
+    // A clause of a requirement ("3.13.b", the writer's split of 3.13) is read as the requirement it belongs to.
+    const texts = refs.flatMap((r) => requirements.get(r) ?? requirements.get(r.replace(/\.?[A-Z]$/, "")) ?? []);
     return texts.length ? texts.join(" ") : undefined;
 }
 
@@ -203,4 +221,29 @@ export function cutByMaxlength(spec: TestSpec, failedStep: number | undefined, l
         return `The test typed ${s.value.length} characters into “${name}”, whose maxlength is ${max}: the browser cut the value to ${max} before anything was sent, so the application never received the longer value. The limit was enforced by the field itself; check it by sending the long value to the API instead.`;
     }
     return undefined;
+}
+
+/**
+ * Why a web test's failing check is the test's own problem, from the test and the attempts alone, if it is:
+ *  - the check expects a placeholder that check reads as written ({{…}} in an ARIA snapshot or an address pattern, generators/playwright.ts),
+ *    so no page can match it (paid L4 shop-1 WEB-026: "textbox \"Name\": Test User {{unique}}");
+ *  - an exact-text check on an element it finds by a different text;
+ *  - the page the test itself opened answered 404 at the failing step: the application has no such page, so the check never saw the page it
+ *    was written for (paid L4 rbac-3 WEB-049: GET /people → 404, the People page is elsewhere).
+ */
+export function ownCheckFault(spec: TestSpec, attempts: ReadonlyArray<{ outcome: string; failedStep?: number; requests: ReadonlyArray<{ method: string; path: string; status: number | null; own: boolean }> }>): string | undefined {
+    if (spec.kind !== "web") return undefined;
+    const failed = attempts.filter((a) => a.outcome === "failed" && a.failedStep !== undefined);
+    if (!failed.length) return undefined;
+    const check = spec.steps[failed[0]!.failedStep! - 1];
+    if (check?.action === "assert" && (check.check === "ariaSnapshot" || check.check === "urlPattern") && /\{\{[^}]*\}\}/.test(String(check.expected ?? "")))
+        return `The check expects “${String(check.expected).match(/\{\{[^}]*\}\}/)![0]}” as written: a ${check.check === "ariaSnapshot" ? "structure snapshot" : "URL pattern"} does not fill placeholders, so no page can match it. The test needs the value itself or a pattern.`;
+    // An exact-text check on the element found by another text can never pass (paid L4 shop-3 WEB-053: the text "$52.00" must read "$50.75").
+    const byText = check?.action === "assert" && check.locator?.by === "text" ? (check.locator.value ?? "") : "";
+    if (check?.action === "assert" && check.check === "exactText" && byText && !norm(String(check.expected ?? "")).includes(norm(byText)))
+        return `The check finds the element by its text “${byText.slice(0, 80)}” and then expects its whole text to be “${String(check.expected).slice(0, 80)}”: no element can be both, so no page can pass it.`;
+    const opened = new Set(spec.steps.flatMap((s) => (s.action === "navigate" ? [decoded(s.url).replace(ORIGIN, "").split(/[?#]/)[0]!] : [])));
+    const missing = (a: (typeof failed)[number]) => a.requests.find((r) => r.own && r.method.toUpperCase() === "GET" && r.status === 404 && opened.has(r.path.split(/[?#]/)[0]!));
+    const page = failed.every(missing) ? missing(failed[0]!) : undefined;
+    return page ? `The page the test opened, GET ${page.path}, answered 404 in every failed attempt: the application has no such page, so the check never saw the page it was written for. The test needs the application's own address for it.` : undefined;
 }

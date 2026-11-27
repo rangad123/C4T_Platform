@@ -13,7 +13,7 @@ import fc from "fast-check";
 import type { ApiEndpointModel } from "../understanding/app-model.js";
 import type { Step } from "../spec/schema.js";
 import { checkRelation } from "../validation/relation.js";
-import type { Invariant } from "../validation/invariants.js";
+import { answerSchema, fieldPaths, type Invariant } from "../validation/invariants.js";
 import { sample, signUpOf, type DraftSpec } from "./test-specs.js";
 import { resourceName, stripIdSuffix } from "./workflows.js";
 
@@ -152,7 +152,7 @@ export const uniqueNow = (v: unknown, tag: string): unknown => JSON.parse(JSON.s
 interface Plan {
     write: ApiEndpointModel;
     read?: ApiEndpointModel;
-    setup: Array<{ ep: ApiEndpointModel; body?: unknown }>;
+    setup: Array<{ ep: ApiEndpointModel; body?: unknown; given?: boolean }>;
     signUp?: { ep: ApiEndpointModel; body: unknown };
     /** Reference values per field or path parameter, from the list endpoints; and the listed records (boundary aim). */
     refs: Map<string, { values: unknown[]; records: Body[] }>;
@@ -312,6 +312,23 @@ export async function listSession(env: ProbeEnv, signUp: ApiEndpointModel | unde
     return client;
 }
 
+/** The body fields of an operation that name a listed record (productId), by the REFERENCE rule. */
+function refFields(ep: ApiEndpointModel): string[] {
+    const props: Record<string, Schema> = bodySchema(ep)?.properties ?? {};
+    return Object.keys(props).filter((k) => REFERENCE.test(k) && ["string", "integer"].includes(String(props[k]!.type ?? "string")) && !props[k]!.enum);
+}
+
+/**
+ * A documented operation that adds a listed record to the list the checked answer holds: a POST without path parameters, with a
+ * reference that has a documented list, whose 2xx answer has the same fields as the checked one (POST /api/cart/items for a Cart).
+ */
+function addsToChecked(checked: ApiEndpointModel, apis: readonly ApiEndpointModel[], signUp: ApiEndpointModel | undefined): ApiEndpointModel | undefined {
+    const shape = (ep: ApiEndpointModel) => [...fieldPaths(answerSchema(ep)).keys()].sort().join(",");
+    const want = shape(checked);
+    if (!want.includes("[*]")) return undefined;
+    return apis.find((a) => a !== checked && a !== signUp && a.method.toUpperCase() === "POST" && !a.path.includes("{") && !SIGN_IN.test(a.path) && refFields(a).some((f) => listFor(f, apis)) && shape(a) === want);
+}
+
 /** What the probe needs from the API document for one invariant, or why it cannot run. */
 async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
     const write = endpointOf(inv.write, env.apis);
@@ -328,12 +345,22 @@ async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
         // and the probe knows no password to send (paid shop-4/-5: "the setup POST /api/login answered HTTP 401" stopped every probe).
         if (ep.method.toUpperCase() === "POST" && SIGN_IN.test(ep.path)) continue;
         const schema = bodySchema(ep);
-        setup.push({ ep, body: inv.setupBodies?.[i] ?? (schema ? sample(schema) : undefined) });
+        const given = inv.setupBodies?.[i];
+        setup.push({ ep, body: given ?? (schema ? sample(schema) : undefined), ...(given ? { given: true } : {}) });
     }
     const signUp = up ? { ep: up, body: sample(bodySchema(up)) } : undefined;
     const props: Record<string, Schema> = bodySchema(write)?.properties ?? {};
+    // The state the rule reads is built before the writes. When the write adds no listed record itself (applying a discount code), the
+    // records the checked answer lists (cart lines) come from setup: a documented operation that adds to that list is added when no setup
+    // does, and each such setup is sent with two different listed records, below (paid shop L4: 4.1 was probed on an empty cart, or on
+    // one line with a made-up productId, so a discount taken from the first line only never showed).
+    const writeAdds = refFields(write).length > 0;
+    if (!writeAdds && !setup.some((s) => refFields(s.ep).length)) {
+        const adds = addsToChecked(read ?? write, env.apis, up);
+        if (adds) setup.push({ ep: adds, body: sample(bodySchema(adds)) });
+    }
     // An integer id is a reference too (the practice store's productId): drawn from the listed records, never guessed from its range.
-    const names = [...Object.keys(props).filter((k) => REFERENCE.test(k) && ["string", "integer"].includes(String(props[k]!.type ?? "string")) && !props[k]!.enum), ...[...write.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!)];
+    const names = [...new Set([...refFields(write), ...[...write.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!), ...setup.flatMap((s) => (s.given ? [] : refFields(s.ep)))])];
     const refs: Plan["refs"] = new Map();
     const lists = new Map<string, ApiEndpointModel>();
     for (const n of names) {
@@ -351,6 +378,17 @@ async function planOf(inv: Invariant, env: ProbeEnv): Promise<Plan | string> {
             await client.close?.().catch(() => undefined);
         }
     }
+    // A setup's reference is a listed record, never a sampled text ("test-productId-…" was refused, or quietly added nothing).
+    const built: Plan["setup"] = [];
+    for (const s of setup) {
+        const field = s.given ? undefined : refFields(s.ep).find((f) => refs.get(f)?.values.length);
+        if (!field) {
+            built.push(s);
+            continue;
+        }
+        for (const v of refs.get(field)!.values.slice(0, writeAdds ? 1 : 2)) built.push({ ...s, body: { ...(s.body as Body), [field]: v } });
+    }
+    setup.splice(0, setup.length, ...built);
     const numbers: Plan["numbers"] = [];
     const others = new Map<string, unknown>();
     for (const [k, s] of Object.entries(props)) {

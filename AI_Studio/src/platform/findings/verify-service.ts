@@ -15,7 +15,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { cleanReplayPlan, signupPathOf } from "../../engine/explore/clean-account.js";
 import { dedupe } from "../../engine/findings/dedupe.js";
-import { attemptsSetting, carriedOver, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type BudgetRun, type VerifyBudget } from "../../engine/findings/reproduce.js";
+import { attemptsSetting, carriedOver, resetHookProblem, verdictOf, withinBudget, VERIFY_BUDGET, type AttemptAccount, type BudgetRun, type Verdict, type VerifyBudget } from "../../engine/findings/reproduce.js";
 import { confidenceScore, severityOf } from "../../engine/findings/score.js";
 import { concurrencyAllowed, riskyGateFor } from "../../engine/api/concurrency.js";
 import { hasCurrentAuthorization } from "../../security/authorization-gate.js";
@@ -48,7 +48,7 @@ import { DEFAULT_JOB_OPTIONS, type JobRow } from "../repo.js";
 import { SecretBox } from "../secrets.js";
 import { ResetHookStore, sendResetRequest } from "../test-data-reset-store.js";
 import { attemptOf, executionFinding, fromCandidate, withStepRequests, type TestOf } from "./adapters.js";
-import { citedRequirements, cutByMaxlength, fieldLimits, judgePageCheck, judgeRepeatRefusal, writtenExpectation } from "../../engine/findings/expectation.js";
+import { citedRequirements, cutByMaxlength, fieldLimits, judgePageCheck, judgeRepeatRefusal, ownCheckFault, writtenExpectation } from "../../engine/findings/expectation.js";
 import { AppIntelStore } from "../app-intel-store.js";
 import { ANALYSIS_BLAMES_TEST } from "../../engine/validation/repair.js";
 
@@ -304,8 +304,20 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
     // A value longer than the field's maxlength never reached the application: the browser cut it, so the failing check is the test's own.
     const cut = cutByMaxlength(spec, tried.find((a) => a.outcome === "failed" && !a.stepFault)?.failedStep, await d.fieldLimits?.().catch(() => undefined), f.finding.expected.text ?? "");
     if (cut) tried.splice(0, tried.length, ...tried.map((a) => (a.outcome === "failed" ? { ...a, stepFault: cut } : a)));
-    const view = judgedView(fromCandidate(f, test), f, test, tried, await d.requirements?.().catch(() => undefined));
-    let verdict = verdictOf(view.view, tried, account);
+    const judged = judgeAttempts(f, test, tried, account, await d.requirements?.().catch(() => undefined), cut);
+    return { runs, notes, account, tried: judged.tried, view: judged.view, verdict: judged.verdict };
+}
+
+/**
+ * The judge once the attempts ran: the expectation check, the vote, and what sends a reproduced failure to a person. Pure and without
+ * AI, so stored attempts can be judged again.
+ */
+export function judgeAttempts(f: CandidateFindingRecord, test: VerifyTest, tried: readonly Attempt[], account: AttemptAccount, requirements?: ReadonlyMap<string, string>, cut?: string): { tried: Attempt[]; view: ReturnType<typeof fromCandidate>; verdict: Verdict } {
+    // A check no page could pass, or a page the application does not have, is the test's own step (findings/expectation.ts).
+    const own = ownCheckFault(test.spec, tried);
+    const judged = own ? tried.map((a) => (a.outcome === "failed" ? { ...a, stepFault: a.stepFault ?? own } : a)) : [...tried];
+    const view = judgedView(fromCandidate(f, test), f, test, judged, requirements);
+    let verdict = verdictOf(view.view, judged, account);
     if (cut) verdict = { ...verdict, reason: `${verdict.reason} ${cut}` };
     // An amount no API answer was compared with, or a check whose own failure analysis says the application is right (WEB-002), is never
     // confirmed by the vote alone: a person checks it.
@@ -313,7 +325,7 @@ export async function attemptsOn(d: Omit<VerifyDeps, "findings">, f: CandidateFi
     const review = view.review ?? disputed;
     if (review && verdict.to === "reproduced")
         verdict = { to: "needs_manual_review", reason: `${verdict.reason} ${review}`, classification: { ...verdict.classification, class: "open", candidates: ["app_defect", "incorrect_expectation"] } };
-    return { runs, notes, account, tried, view: view.view, verdict };
+    return { tried: judged, view: view.view, verdict };
 }
 
 /** The view with the expectation check before the vote (findings/expectation.ts): an unstated or API-contradicted expectation, or why a person checks it. */

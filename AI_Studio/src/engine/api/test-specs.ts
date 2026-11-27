@@ -214,6 +214,30 @@ const IGNORES_CASE = /\b(?:not|in)[- ]?case[- ]?(?:sensitive|insensitive)|\bcase
 const emailCaseStated = (ep: ApiEndpointModel, conflict: string, requirements = "") =>
     IGNORES_CASE.test(`${ep.summary ?? ""}\n${responseOf(ep, conflict)?.description ?? ""}`) || requirements.split(/\n/).some((line) => /e-?mail/i.test(line) && IGNORES_CASE.test(line));
 
+/**
+ * Lead decision (paid L4 C2 type cases): a value of the wrong type that the API accepts is a defect only where that refusal is stated:
+ * a documented 4xx of the operation that speaks of types or of that field being invalid ("Invalid quantity"), or a requirement line that
+ * says wrong types are refused. A generic "Invalid input" or "Missing title" does not say a number for a text field is refused.
+ */
+export const TYPE_UNSTATED = "type-unstated";
+export function typeRefusalStated(ep: ApiEndpointModel, field: string, requirements = ""): boolean {
+    const names = new RegExp(`\\b${field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    const refusals = (ep.spec?.responses ?? []).filter((r) => /^4/.test(r.status)).map((r) => r.description ?? "");
+    if (refusals.some((d) => /\btypes?\b/i.test(d) || (names.test(d) && /\b(?:invalid|wrong|must be)\b/i.test(d)))) return true;
+    return requirements.split(/\n/).some((l) => /\b(?:wrong|invalid)\s+(?:value\s+)?types?\b|\btypes?\b[^.]{0,80}\b(?:refused|rejected)\b/i.test(l));
+}
+
+/** A wrong-type case with no stated refusal (TYPE_UNSTATED) that the API accepted: an expectation issue, said as such; else undefined. */
+export function unstatedTypeAccepted(spec: { kind: string; tags: readonly string[]; steps: readonly Step[] }, run: { steps: ReadonlyArray<{ index: number; status: string }>; responses: ReadonlyArray<{ method: string; path: string; status: number }> }): string | undefined {
+    if (spec.kind !== "api" || !spec.tags.includes(TYPE_UNSTATED)) return undefined;
+    const failed = run.steps.find((s) => s.status === "failed");
+    const step = failed ? spec.steps[failed.index] : undefined;
+    if (!failed || step?.action !== "assertResponse" || step.check !== "statusClass" || step.expected !== "4xx") return undefined;
+    const last = run.responses.slice(0, spec.steps.slice(0, failed.index + 1).filter((s) => s.action === "request").length).at(-1);
+    if (!last || last.status < 200 || last.status >= 300) return undefined;
+    return `Expectation issue, not an application defect: ${last.method} ${last.path} accepted a value of the wrong type (HTTP ${last.status}), and neither its API document nor a requirement states that such a request is refused.`;
+}
+
 /** The same address in other letter case, placeholders kept as they are. */
 const otherCase = (v: string) => v.split(/(\{\{[^}]+\}\})/).map((part, i) => (i % 2 ? part : part.toUpperCase())).join("");
 
@@ -385,7 +409,7 @@ export function generateApiSpecs(endpoints: ApiEndpointModel[], opts: ApiGenOpti
                             resp("statusClass", "4xx", undefined, "Validation error"),
                         ],
                         ["Type validation error (4xx)"],
-                        ["validation"],
+                        typeRefusalStated(ep, field, opts.requirementsText) ? ["validation"] : ["validation", TYPE_UNSTATED],
                     ),
                 );
             }

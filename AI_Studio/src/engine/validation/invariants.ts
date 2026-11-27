@@ -75,7 +75,7 @@ const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 const tmpl = (p: string) => p.replace(/\{[^}]*\}/g, "{}");
 
 /** The 2xx answer schema of an operation (the documented one first, else the shape seen on the wire). */
-function answerSchema(ep: ApiEndpointModel): Schema | undefined {
+export function answerSchema(ep: ApiEndpointModel): Schema | undefined {
     const ok = ep.spec?.responses.find((r) => /^2/.test(r.status) && r.schema);
     return (ok?.schema ?? ep.responseSchema) as Schema | undefined;
 }
