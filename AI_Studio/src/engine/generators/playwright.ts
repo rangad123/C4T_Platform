@@ -46,7 +46,7 @@ import { DIALOG_HELPER_SOURCE, DOWNLOAD_HELPER_SOURCE, overlayHelperSource, over
 import { renderClock, renderCondition, renderPinnedTime } from "../web/conditions.js";
 import { RELATION_HELPER_SOURCE } from "../validation/relation.js";
 import { DB_CHECK_HELPER_SOURCE, dbCheckVars, isAbsenceCheck, parseDbCheck } from "../database/checks.js";
-import { classPattern, KEPT_CALL_HELPER_SOURCE, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
+import { classPattern, isItemTextCheck, ITEM_TEXT_HELPER_SOURCE, KEPT_CALL_HELPER_SOURCE, needsPlaywrightLine, newerPlaywrightNeeded, REMEMBER_HELPER_SOURCE, SOFT_CHECKS, urlPatternRegex, webRequestHelperSource, webRequestProblems } from "../web/checks.js";
 import { ignoresHttpsErrors, jsonExpr, recordExpr } from "./api.js";
 import { LABEL_FIELD_HELPER_SOURCE, nearbyTargets, type FieldClue } from "../web/label-fallback.js";
 
@@ -194,6 +194,11 @@ function renderAssert(step: Extract<Step, { action: "assert" }>, snapshotName: s
           ? `page.getByText(${expr(String(step.expected))})`
           : `page.locator("body")`;
     const exp = step.expected !== undefined ? expr(String(step.expected)) : '""';
+    // A whole row or list item, read as its accessible name, as the writer read it (web/checks.ts isItemTextCheck).
+    if (isItemTextCheck(step)) {
+        const want = `String(${exp}).replace(/\\s+/g, " ").trim()`;
+        return `await ${E(`await itemText(${target}, ${want}, ${step.check === "exactText"})`)}.${step.check === "exactText" ? "toBe" : "toContain"}(${want});`;
+    }
     switch (step.check) {
         case "visible":
             return `await ${E(target)}.toBeVisible();`;
@@ -451,7 +456,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }, testInfo) => {
     await evidenceAttach(page, testInfo);
 });
-${a11y ? `\n${a11yHelper(spec.tags.includes(A11Y_ALL_RULES_TAG))}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\nconst IGNORE_HTTPS_ERRORS = ${ignoresHttpsErrors(spec)};\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${dbCheckSetup(spec.steps).helper}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
+${a11y ? `\n${a11yHelper(spec.tags.includes(A11Y_ALL_RULES_TAG))}` : ""}${usesCredentials ? `\n${CREDENTIAL_ORIGIN_HELPER_SOURCE}` : ""}${needsTotp(spec) ? `\n${TOTP_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "accessDenied") ? `\nconst IGNORE_HTTPS_ERRORS = ${ignoresHttpsErrors(spec)};\n${ACCESS_HELPER_SOURCE}` : ""}${health ? `\n${HEALTH_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "pageSpeed") ? `\n${PERF_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "inputHandling") ? `\n${INPUT_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && s.check === "looksRight") ? `\n${VISION_HELPER_SOURCE}` : ""}${uploads ? `\n${UPLOAD_HELPER_SOURCE}` : ""}${remembers ? `\n${REMEMBER_HELPER_SOURCE}` : ""}${spec.steps.some((s) => s.action === "assert" && isItemTextCheck(s)) ? `\n${ITEM_TEXT_HELPER_SOURCE}` : ""}${requests ? `\n${webRequestHelperSource(lit(ctx.apiBaseUrl ?? ctx.baseUrl))}` : ""}${spec.steps.some((s) => s.action === "wait" && !!s.extract) ? `\n${KEPT_CALL_HELPER_SOURCE}` : ""}${spec.steps.some(isRelation) ? `\n${RELATION_HELPER_SOURCE}` : ""}${dbCheckSetup(spec.steps).helper}${interruptions}${usesLabelField(spec) ? `\n${LABEL_FIELD_HELPER_SOURCE}\n` : ""}${usesEmail(spec) ? `\n${EMAIL_HELPER_SOURCE}` : ""}${runTag ? `\n${CLEANUP_HELPER_SOURCE}${webCleanupScriptSource({ testId: spec.testId, tag: runTag })}` : ""}
 ${dataRows ? "for (const [rowIndex, row] of ROWS.entries()) {\n" : ""}test(${dataRows ? rowTitle(spec) : lit(`${spec.testId}: ${spec.title}`)}, ${testDetails(spec)}, async ({ page }) => {
 ${knownBugLine(spec, ctx)}${riskyGateLine(spec)}${sessionEndLine(spec)}${dataRows ? `    ${ROW_SETUP}\n` : ""}${spec.pinnedTime ? renderPinnedTime(spec.pinnedTime) : ""}${dbCheckSetup(spec.steps).start}${healthSetup}${responseSetup}${popupSetup}${steps}${healthEnd}
 });

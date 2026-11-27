@@ -178,6 +178,7 @@ export default defineConfig({
             "tests/relation.test.ts",
             "tests/dsl-relation.test.ts",
             "tests/relation-render.test.ts",
+            "tests/item-text-check-unit.test.ts",
             "tests/invariants-proposal.test.ts",
             "tests/db-bench-sqlite.test.ts",
             "tests/db-bench-data.test.ts",

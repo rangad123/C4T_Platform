@@ -113,6 +113,62 @@ export function ariaTemplate(snapshot: string): string {
         .join("\n");
 }
 
+// ── the text of a list item or table row ───────────────────────────────────
+
+/** Item roles whose name the test writer reads as a whole (a cart row, a list item): the same set as web/leftovers.ts ITEM_ROLES. */
+const ITEM_TEXT_ROLES = new Set(["row", "listitem", "article", "option", "treeitem", "gridcell"]);
+
+/**
+ * A text check of a whole row or list item (lane I, E2). The writer reads the item by its accessible name, "Desk Lamp $34.50 Quantity 2
+ * Update $69.00 Remove": cells apart, and a field's value in it. Playwright's text matchers read textContent instead, "Desk
+ * Lamp$34.50Quantity  Update$69.00Remove", so such a check failed on every app (5 ladder L4 shop findings). It is checked against
+ * ITEM_TEXT_SOURCE's reading, which is what toHaveAccessibleName (Playwright 1.44, newer than the generated code may use) would compare.
+ */
+export const isItemTextCheck = (step: Extract<Step, { action: "assert" }>): boolean =>
+    (step.check === "exactText" || step.check === "text") && step.locator?.by === "role" && ITEM_TEXT_ROLES.has(step.locator.role ?? "") && step.expected !== undefined;
+
+/**
+ * The item's text as its accessible name reads it (plain JavaScript source of a function, given to `locator.evaluate`: written into
+ * scripts, and made a function for the live run, so both read alike): the text of what is shown, with a space between elements that are not inline, a field's value in place of the field, and
+ * spacing folded.
+ */
+export const ITEM_TEXT_SOURCE = `(el) => {
+    const out = [];
+    const walk = (n) => {
+        if (n.nodeType === 3) return void out.push(n.textContent ?? "");
+        if (n.nodeType !== 1) return;
+        const style = getComputedStyle(n);
+        if (style.display === "none" || style.visibility === "hidden") return;
+        const tag = n.tagName.toLowerCase();
+        if (tag === "select") return void out.push(" ", n.selectedOptions[0]?.textContent ?? "", " ");
+        if (tag === "textarea" || (tag === "input" && !["hidden", "checkbox", "radio", "button", "submit", "reset", "image", "file"].includes(n.type))) return void out.push(" ", n.value ?? "", " ");
+        const apart = style.display !== "inline";
+        if (apart) out.push(" ");
+        for (const c of n.childNodes) walk(c);
+        if (apart) out.push(" ");
+    };
+    walk(el);
+    return out.join("").replace(/\\s+/g, " ").trim();
+}`;
+
+/** Spacing folded as ITEM_TEXT_SOURCE folds it, for the expected text. */
+export const foldSpacing = (s: string): string => s.replace(/\s+/g, " ").trim();
+
+/** How long an item text check waits for the text it wants, as the scripts' other checks do (8 s). */
+export const ITEM_TEXT_WAIT_MS = 8_000;
+
+/** Pasted into scripts with an item text check: reads the item (ITEM_TEXT_SOURCE) until it shows the wanted text or the wait is over. */
+export const ITEM_TEXT_HELPER_SOURCE = `/** A row's or list item's text as its accessible name reads it (cells apart, a field's value in place of the field). */
+async function itemText(target: { evaluate(f: (el: any) => string): Promise<string> }, want: string, exact: boolean): Promise<string> {
+    const until = Date.now() + ${ITEM_TEXT_WAIT_MS};
+    for (;;) {
+        const got = await target.evaluate(${ITEM_TEXT_SOURCE});
+        if ((exact ? got === want : got.includes(want)) || Date.now() > until) return got;
+        await new Promise((r) => setTimeout(r, 250));
+    }
+}
+`;
+
 // ── remembered values ──────────────────────────────────────────────────────
 
 /** The first number in a text ("$1,234.50" → 1234.5), or NaN. The same rule in the script (REMEMBER_HELPER_SOURCE) and here. */

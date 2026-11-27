@@ -19,7 +19,7 @@ import { dialogProblem, downloadProblem, generatedSample } from "./interruptions
 import { labelledField, LABEL_WAIT_MS, type FieldClue } from "./label-fallback.js";
 import { applyClock, applyCondition } from "./conditions.js";
 import { interpolate, ROLE_MISSING, type Locator, type PlainLocator, type Step } from "../spec/schema.js";
-import { ARIA_TEMPLATE_MAX, classPattern, ariaTemplate, DB_CHECK_NOT_YET, numberIn, urlPatternRegex, WEB_REQUEST_RULE, WEB_RESPONSE_CHECKS } from "./checks.js";
+import { ARIA_TEMPLATE_MAX, classPattern, ariaTemplate, DB_CHECK_NOT_YET, foldSpacing, isItemTextCheck, ITEM_TEXT_SOURCE, numberIn, urlPatternRegex, WEB_REQUEST_RULE, WEB_RESPONSE_CHECKS } from "./checks.js";
 import { checkRelation } from "../validation/relation.js";
 
 export type RuntimeData = Record<string, string>;
@@ -356,6 +356,9 @@ async function runOneStep(top: Page, step: Step, data: RuntimeData, baseUrl: str
     }
 }
 
+/** ITEM_TEXT_SOURCE as a function: `locator.evaluate` runs a function it is given, not one written as text. */
+const readItemText = new Function(`return ${ITEM_TEXT_SOURCE}`)() as (el: Element) => string;
+
 async function executeAssert(page: Page, step: Extract<Step, { action: "assert" }>, data: RuntimeData, timeout: number): Promise<void> {
     const opt = { timeout };
     const exp = step.expected !== undefined ? interpolate(String(step.expected), data) : "";
@@ -365,6 +368,18 @@ async function executeAssert(page: Page, step: Extract<Step, { action: "assert" 
           ? page.getByText(exp)
           : page.locator("body");
     const re = new RegExp(exp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    // A whole row or list item, read as its accessible name, as the script reads it (web/checks.ts isItemTextCheck).
+    if (isItemTextCheck(step)) {
+        const want = foldSpacing(exp);
+        const exact = step.check === "exactText";
+        const until = Date.now() + timeout;
+        for (;;) {
+            const got = await target.evaluate(readItemText, undefined, { timeout });
+            if (exact ? got === want : got.includes(want)) return;
+            if (Date.now() > until) throw new Error(`expect(locator).${exact ? "toHaveText" : "toContainText"}(expected) failed\n\nExpected${exact ? "" : " substring"}: ${JSON.stringify(want)}\nReceived${exact ? "" : " string"}: ${JSON.stringify(got)}`);
+            await page.waitForTimeout(250);
+        }
+    }
     switch (step.check) {
         case "visible":
             return expect(target).toBeVisible(opt);
