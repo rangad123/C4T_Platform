@@ -68,6 +68,24 @@ describe("captured checks that are the test's own fault: not reported", () => {
     });
 });
 
+describe("rbac-4 WEB-063: the page the test opened answered 404 in the fresh replays", () => {
+    const check = { action: "assert", check: "visible", locator: { by: "text", value: "Not allowed" }, source: "expected:1" };
+    const spec = TestSpecSchema.parse({
+        testId: "WEB-063", title: "As stated: a user who is not an admin is refused the People page", kind: "web", category: "Access", type: "workflow", priority: "high",
+        steps: [{ action: "navigate", url: "/people" }, check], expectedResults: ["The page shows Not allowed (403)"], source: { origin: "browser-agent", requirements: [] },
+    });
+    const captured = { source: "expected:1", observed: "expect(locator).toBeVisible() failed Locator: getByText('Not allowed') Expected: visible Timeout: 6000ms Error: element(s) not found" };
+    const replay = (status: number, failedStep = 2) => ({ outcome: "failed" as const, failedStep, requests: [{ method: "GET", path: "/people", status, own: true }] });
+    it("both replays stopped at the captured check and GET /people answered 404: not reported", () => {
+        expect(authoredCheckFault(spec, captured, [replay(404), replay(404)])).toMatch(/GET \/people, answered 404/);
+    });
+    it("without the replays' pages, or with the page found, or stopped elsewhere: reported", () => {
+        expect(authoredCheckFault(spec, captured)).toBeUndefined();
+        expect(authoredCheckFault(spec, captured, [replay(200), replay(200)])).toBeUndefined();
+        expect(authoredCheckFault(spec, captured, [replay(404, 1), replay(404, 1)])).toBeUndefined();
+    });
+});
+
 describe("captured checks a correct page can pass: still reported", () => {
     it("rbac-5 WEB-032 (BR-10): the markup check whose expected text holds the heading's name", () => {
         expect(

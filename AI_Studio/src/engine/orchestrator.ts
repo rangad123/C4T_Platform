@@ -1063,15 +1063,16 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 // S1: a captured defect is replayed twice in fresh browsers (no AI), and the test carries its candidate finding.
                 const capture = outcome.capture ?? "observed_only";
                 // The captured check is the test's own fault (findings/expectation.ts, no AI): a test to fix, never a finding.
-                const fault = capture === "captured" ? authoredCheckFault(spec, outcome.capturedCheck) : undefined;
-                if (fault) {
+                const notReported = async (fault: string) => {
                     const h = await persistNew(spec, "playwright", "PENDING", undefined, { ...meta, capture, ...(outcome.capturedCheck ? { capturedCheck: outcome.capturedCheck } : {}) });
                     await sink.updateTest(h, { validation: "FAILED_VALIDATION", reason: `Not reported as a finding: ${fault.replace(/\.+$/, "")}. The test writer's account: ${outcome.explanation.trim().replace(/\.+$/, "").slice(0, 1_000)}.` });
                     summary.testsFailedValidation++;
                     await sink.counters({ testsFailedValidation: 1 }, true);
                     ctx.emit({ stage: "generation", kind: "defect_unverified", level: "warn", message: `${h.testId} ${spec.title}: not reported as a finding; ${fault}`, data: { testKey: h.testId, capture, failedStep: null } });
                     return h.testId;
-                }
+                };
+                const fault = capture === "captured" ? authoredCheckFault(spec, outcome.capturedCheck) : undefined;
+                if (fault) return notReported(fault);
                 const replayed = { steps: written.steps, testData: written.testData, ...(outcome.status === "defect" && outcome.capturedCheck ? { capturedSource: outcome.capturedCheck.source, capturedObserved: outcome.capturedCheck.observed } : {}), ...(asAccount ? { credentials: asAccount.credentials } : creds && authState.loggedIn ? { credentials: creds } : {}) };
                 // An observed-only defect test holds only steps that passed while authoring: replayed once (no AI), a step it stops at means
                 // the test cannot pass its own steps, so it is a broken test, not a finding. Saved as a failed test, without a candidate finding.
@@ -1134,6 +1135,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     capture === "captured" && replayAllowed(2 * written.steps.length, "the two fresh replays of the independence check")
                         ? await checkIndependence(browser, origin, replayed, { prepare, ...(shoot ? { shoot } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
+                // The pages the replays loaded: a page the test opened that answered 404 at the captured check is the test's fault too.
+                const pageFault = "attempts" in checked && checked.attempts ? authoredCheckFault({ ...spec, steps: written.steps }, outcome.capturedCheck, checked.attempts) : undefined;
+                if (pageFault) return notReported(pageFault);
                 // No picture yet (an observed-only test, or the independence check did not run or kept none): the own-steps replay's, else one
                 // more replay of the saved steps that only takes it, when the exploration's limits allow it.
                 const picture = checked.screenshots?.length

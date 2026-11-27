@@ -9,7 +9,8 @@
  *     scenario names it in explore-objectives-run and stated-source-unit), so the finding has none;
  *   - a defect the replays do not show again (the page is wrong on its first visit only): state dependent, confidence medium;
  *   - a defect captured at a check whose element several match (strict mode violation): the test's own fault, not reported, a failed test
- *     whose reason says why (findings/expectation.ts authoredCheckFault);
+ *     whose reason says why (findings/expectation.ts authoredCheckFault); the same for a page the test opened that answered 404 in both
+ *     fresh replays (the replays record the pages they load);
  *   - a defect claimed without a failing sourced check: still saved NEEDS_REVIEW, observed only, confidence low, no replays;
  *   - a defect whose failing check is of the planner's own expected result (tied to nothing stated, queue row 172): the same, observed only;
  *   - an observed-only defect whose saved test cannot pass a replay of its own steps (a check bound to what the authoring session saw,
@@ -114,6 +115,8 @@ const scripted: LlmClient = {
 beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     site = http.createServer((req, res) => {
+        // A cart page served with 404: the address is not the application's page (the check never saw the page it was written for).
+        if (req.url === "/gone") return void res.writeHead(404, { "content-type": "text/html; charset=utf-8" }).end(cart("$30.00"));
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         if (req.url === "/cart") return void res.end(cart("$30.00"));
         if (req.url === "/once") return void res.end(cart(++onceVisits === 1 ? "$30.00" : "$25.00"));
@@ -308,6 +311,19 @@ describe("a defect test carries its candidate finding", () => {
         expect(metaOf(test)).not.toHaveProperty("finding");
         expect(events.filter((e) => e.kind === "possible_defect")).toHaveLength(0);
         expect(events.filter((e) => e.kind === "defect_unverified").map((e) => e.data?.capture)).toEqual(["captured"]);
+    }, 300_000);
+
+    it("captured on a page the test opened that answered 404 in both fresh replays: not reported, a failed test, the reason says why", async () => {
+        const projectId = (await call("POST", "/api/projects", { name: "Gone" })).body.id as string;
+        await statedRule(projectId);
+        plan = tiedScenario("/gone");
+        script = [heading, total("expected:2"), finishDefect];
+        const { test, events } = await explore(projectId, OBJECTIVE_PURSUITS);
+
+        expect(test.validationStatus).toBe("FAILED_VALIDATION");
+        expect(test.validationReason).toMatch(/^Not reported as a finding: The page the test opened, GET \/gone, answered 404 in every failed attempt/);
+        expect(metaOf(test)).not.toHaveProperty("finding");
+        expect(events.filter((e) => e.kind === "possible_defect")).toHaveLength(0);
     }, 300_000);
 
     it("a defect without a failing sourced check: saved for review, observed only, confidence low, no replays", async () => {

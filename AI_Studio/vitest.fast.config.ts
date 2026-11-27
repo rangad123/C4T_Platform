@@ -423,6 +423,7 @@ export default defineConfig({
             "tests/l4-evidence-unit.test.ts",
             "tests/authored-check-fault-unit.test.ts",
             "tests/explore-account-reach-unit.test.ts",
+            "tests/documented-casing-unit.test.ts",
             "tests/finding-report-standalone-unit.test.ts",
             "tests/plain-status-words-unit.test.ts",
         ],

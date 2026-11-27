@@ -197,6 +197,30 @@ export function generateCase(plan: Pick<Plan, "write" | "refs" | "numbers" | "ot
     return fc.sample(fc.array(writeArbitrary(plan), { minLength: n, maxLength: n }), { seed, numRuns: 1 })[0]!;
 }
 
+/** Every text value the schema lists (`enum`), at any depth. */
+function enumTexts(schema: Schema | undefined, out = new Set<string>(), depth = 0): Set<string> {
+    if (!schema || typeof schema !== "object" || depth > 8) return out;
+    for (const v of Array.isArray(schema.enum) ? schema.enum : []) if (typeof v === "string") out.add(v);
+    for (const v of Object.values(schema.properties ?? {})) enumTexts(v as Schema, out, depth + 1);
+    for (const part of [...(schema.allOf ?? []), ...(schema.oneOf ?? []), ...(schema.anyOf ?? []), schema.items]) enumTexts(part as Schema, out, depth + 1);
+    return out;
+}
+
+/**
+ * The expression's quoted texts in the API document's own spelling: a text the checked answer's schema lists (an enum) only in another
+ * letter case is that listed value, since the document states how the API writes it (re-check shop-1 API-063: requirement 6.1's
+ * "Placed" for the documented "placed"). A text the document lists as written, lists in two casings, or does not list is kept.
+ */
+export function documentedCasing(expression: string, schema: Schema | undefined): string {
+    const listed = [...enumTexts(schema)];
+    if (!listed.length) return expression;
+    return expression.replace(/"((?:[^"\\]|\\.)*)"/g, (q, text: string) => {
+        if (listed.includes(text)) return q;
+        const same = listed.filter((v) => v.toLowerCase() === text.toLowerCase());
+        return same.length === 1 ? JSON.stringify(same[0]) : q;
+    });
+}
+
 /** Numbers the expression compares with (5000 in "subtotal - discount >= 5000"), outside quoted text; 0, 1 and fractions are not aims. */
 export function expressionConstants(expression: string): number[] {
     const bare = expression.replace(/"(?:[^"\\]|\\.)*"/g, '""');
@@ -407,6 +431,8 @@ export async function probeInvariant(inv: Invariant, env: ProbeEnv, opts: { seed
     if (!env.dataChanges) return { ...base, outcome: "skipped", reason: "data changes are off, so the probe sends no write" };
     const plan = await planOf(inv, env);
     if (typeof plan === "string") return { ...base, outcome: "skipped", reason: plan };
+    inv = { ...inv, expression: documentedCasing(inv.expression, answerSchema(plan.read ?? plan.write)) };
+    base.expression = inv.expression;
     let writes = 0;
     let requests = 0;
     let failing: { writes: ProbeWrite[]; message: string; held: number } | undefined;

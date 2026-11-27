@@ -224,6 +224,9 @@ export function cutByMaxlength(spec: TestSpec, failedStep: number | undefined, l
     return undefined;
 }
 
+/** Attempts of a test as the judge reads them: where each stopped and the requests (or pages) it saw. */
+type OwnFaultAttempts = ReadonlyArray<{ outcome: string; failedStep?: number; requests: ReadonlyArray<{ method: string; path: string; status: number | null; own: boolean }> }>;
+
 /**
  * Why a web test's failing check is the test's own problem, from the test and the attempts alone, if it is:
  *  - the check expects a placeholder that check reads as written ({{…}} in an ARIA snapshot or an address pattern, generators/playwright.ts),
@@ -235,7 +238,7 @@ export function cutByMaxlength(spec: TestSpec, failedStep: number | undefined, l
  *  - the action the test is about (its title: delete, remove, archive) is done by none of its steps, so the checks after it never saw its
  *    result (paid L4 rbac-1 WEB-027, rbac-2 WEB-047, rbac-5 WEB-049: "delete a note" tests that never press Delete).
  */
-export function ownCheckFault(spec: TestSpec, attempts: ReadonlyArray<{ outcome: string; failedStep?: number; requests: ReadonlyArray<{ method: string; path: string; status: number | null; own: boolean }> }>): string | undefined {
+export function ownCheckFault(spec: TestSpec, attempts: OwnFaultAttempts): string | undefined {
     if (spec.kind !== "web") return undefined;
     const failed = attempts.filter((a) => a.outcome === "failed" && a.failedStep !== undefined);
     if (!failed.length) return undefined;
@@ -265,9 +268,11 @@ export function ownCheckFault(spec: TestSpec, attempts: ReadonlyArray<{ outcome:
  *    value is in another element (re-check shop-4 WEB-048: “Discount (SAVE10)” must contain “−$4.70”, received “Discount (SAVE10)”).
  *    Not when the expected text holds that text: the element can show it with more (rbac-5 WEB-032: “Bold x” must contain “<b>Bold x</b>”);
  *  - the captured check could not run (a role locator without its role: shop-2 WEB-028);
- *  - a whole text written with spaces between parts the element's text runs together (cells of a row, items of a list).
+ *  - a whole text written with spaces between parts the element's text runs together (cells of a row, items of a list);
+ *  - with `replays` (the independence check's, stopped at the captured check): the page the test opened answered 404 in each (ownCheckFault;
+ *    re-check rbac-4 WEB-063: GET /people, where the People page is elsewhere).
  */
-export function authoredCheckFault(spec: TestSpec, captured: { source: string; observed: string } | undefined): string | undefined {
+export function authoredCheckFault(spec: TestSpec, captured: { source: string; observed: string } | undefined, replays?: OwnFaultAttempts): string | undefined {
     if (spec.kind !== "web" || !captured) return undefined;
     let at = -1;
     for (let i = spec.steps.length - 1; i >= 0 && at < 0; i--) if ((spec.steps[i] as { source?: string }).source === captured.source) at = i;
@@ -278,7 +283,9 @@ export function authoredCheckFault(spec: TestSpec, captured: { source: string; o
     if (ambiguous) return ambiguous;
     // The step itself could not run: its role locator has no role (spec/schema.ts), so it never looked at the page.
     if (captured.observed.includes(ROLE_MISSING)) return `The test needs fixing, not your application: its check could not run. ${ROLE_MISSING}`;
-    const own = ownCheckFault(spec, [{ outcome: "failed", failedStep: at + 1, requests: [] }]);
+    // The fresh replays' pages (independence.ts), when they stopped at the captured check: the page-status rule reads them.
+    const atCheck = replays?.filter((r) => r.outcome === "failed" && r.failedStep === at + 1);
+    const own = ownCheckFault(spec, atCheck?.length ? atCheck : [{ outcome: "failed", failedStep: at + 1, requests: [] }]);
     if (own || check.action !== "assert" || (check.check !== "text" && check.check !== "exactText")) return own;
     const l = check.locator as { by?: string; role?: string; value?: string } | undefined;
     const found = l?.by === "text" || (l?.by === "role" && NAMED_BY_TEXT.has(l.role ?? "")) ? (l.value ?? "") : "";

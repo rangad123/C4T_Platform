@@ -51,6 +51,19 @@ export interface IndependenceCheck {
     screenshots?: string[];
     /** Every replay ran on clean account state (clean-account.ts): a newly registered account, or a test that never signs in. */
     clean?: boolean;
+    /**
+     * Each replay as an attempt: where it stopped and the pages it loaded, for the judge of a check the test itself is at fault for
+     * (findings/expectation.ts ownCheckFault: a page the test opened that answered 404). Not part of the finding's evidence.
+     */
+    attempts?: Array<{ outcome: IndependenceReplay["outcome"]; failedStep?: number; requests: PageLoad[] }>;
+}
+
+/** A page a replay loaded: its address path, method, HTTP status and whether it is the application's own origin. */
+export interface PageLoad {
+    method: string;
+    path: string;
+    status: number | null;
+    own: boolean;
 }
 
 export interface IndependenceOptions {
@@ -187,7 +200,7 @@ async function replay(
     account: ReplayAccount = { clean: true, note: "" },
     /** Also a picture of the last page when every step passed. */
     shootAtEnd = false,
-): Promise<IndependenceReplay & { screenshot?: string; notReached?: boolean; failure?: FailureKind; clean: boolean }> {
+): Promise<IndependenceReplay & { screenshot?: string; notReached?: boolean; failure?: FailureKind; clean: boolean; pages?: PageLoad[] }> {
     // A replay as a newly registered account signs in with that account's credentials (clean-account.ts); its summary says who it was.
     const credentials = account.credentials ?? test.credentials;
     const secrets = [credentials?.password ?? "", credentials?.totpSecret ?? "", test.credentials?.password ?? ""].filter(Boolean);
@@ -200,6 +213,13 @@ async function replay(
         return { label, outcome: "error", summary: `${who}: the fresh browser could not start (${cleanMessage(e, secrets)}).`, clean };
     }
     session.page.setDefaultTimeout(stepTimeoutMs);
+    const pages: PageLoad[] = [];
+    const own = new URL(baseUrl).origin;
+    session.page.on("response", (r) => {
+        if (r.request().resourceType() !== "document") return;
+        const u = new URL(r.url());
+        pages.push({ method: r.request().method(), path: u.pathname + u.search, status: r.status(), own: u.origin === own });
+    });
     const data = runtimeData(test.testData ?? {}, credentials);
     const deadline = Date.now() + test.steps.length * stepTimeoutMs;
     try {
@@ -223,7 +243,7 @@ async function replay(
                     const kept = failureKind(asKept(raw, observedTextSecrets(secrets)));
                     if (kept.kind === "value") failure = kept;
                 }
-                return { label, outcome: "failed", failedStep: i + 1, summary: `${who}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}`, ...(screenshot ? { screenshot } : {}), ...(e instanceof NotReached ? { notReached: true } : {}), failure, clean };
+                return { label, outcome: "failed", failedStep: i + 1, summary: `${who}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}`, ...(screenshot ? { screenshot } : {}), ...(e instanceof NotReached ? { notReached: true } : {}), failure, clean, pages };
             }
         }
         const screenshot = shoot && shootAtEnd ? await within(shoot(session.page), SHOT_MS).catch(() => undefined) : undefined;
@@ -246,7 +266,7 @@ export async function replayOwnSteps(
     opts: { stepTimeoutMs?: number; prepare?: IndependenceOptions["prepare"]; /** A picture of the page where the replay stopped, or of its last page when every step passed (the finding's evidence). */ shoot?: IndependenceOptions["shoot"] } = {},
 ): Promise<IndependenceReplay & { clean: boolean; screenshot?: string }> {
     const account = await accountFor(test, opts.prepare);
-    const { notReached: _n, failure: _f, ...r } = await replay(browser, baseUrl, test, "Replay of the saved test in a fresh browser", opts.stepTimeoutMs ?? STEP_TIMEOUT_MS, opts.shoot, undefined, account, true);
+    const { notReached: _n, failure: _f, pages: _p, ...r } = await replay(browser, baseUrl, test, "Replay of the saved test in a fresh browser", opts.stepTimeoutMs ?? STEP_TIMEOUT_MS, opts.shoot, undefined, account, true);
     return r;
 }
 
@@ -271,7 +291,8 @@ export async function checkIndependence(browser: Browser, baseUrl: string, test:
     // ran out before the check, never ran it (CP3b R-3).
     const reproduced = (r: (typeof shot)[number]) => r.outcome === "failed" && r.failedStep === captured && !r.notReached && sameWay(r.failure);
     // The finding's replay entries carry no picture: the references are listed apart.
-    const replays: IndependenceReplay[] = shot.map(({ screenshot: _s, notReached, failure, clean: _c, ...r }) => {
+    const attempts = shot.map((r) => ({ outcome: r.outcome, ...(r.failedStep !== undefined ? { failedStep: r.failedStep } : {}), requests: r.pages ?? [] }));
+    const replays: IndependenceReplay[] = shot.map(({ screenshot: _s, notReached, failure, clean: _c, pages: _p, ...r }) => {
         const said = r.summary.replace(/\.+$/, "");
         if (r.outcome !== "failed" || r.failedStep === undefined) return r;
         if (r.failedStep < captured) return { ...r, summary: `${said}. It did not reach the captured check (step ${captured}), so it does not reproduce the defect.` };
@@ -286,8 +307,8 @@ export async function checkIndependence(browser: Browser, baseUrl: string, test:
         return r;
     });
     const screenshots = opts.shoot ? { screenshots: shot.flatMap((r) => (r.screenshot ? [r.screenshot] : [])) } : {};
-    if (replays.some((r) => r.outcome === "error")) return { independence: "not_run", replays, ...screenshots, clean };
+    if (replays.some((r) => r.outcome === "error")) return { independence: "not_run", replays, ...screenshots, clean, attempts };
     // Reproduced on the shared account only: not checked on clean state, so never `independent` (row 227: leftovers reproduce too).
     const result: IndependenceResult = shot.every(reproduced) ? (clean ? "independent" : "not_on_clean_state") : "state_dependent";
-    return { independence: result, replays, ...screenshots, clean };
+    return { independence: result, replays, ...screenshots, clean, attempts };
 }
