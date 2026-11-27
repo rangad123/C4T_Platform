@@ -316,7 +316,7 @@ export function judgeAttempts(f: CandidateFindingRecord, test: VerifyTest, tried
     // A check no page could pass, or a page the application does not have, is the test's own step (findings/expectation.ts).
     const own = ownCheckFault(test.spec, tried);
     const judged = own ? tried.map((a) => (a.outcome === "failed" ? { ...a, stepFault: a.stepFault ?? own } : a)) : [...tried];
-    const view = judgedView(fromCandidate(f, test), f, test, judged, requirements);
+    const view = judgedView(fromCandidate(f, test, judged), f, test, judged, requirements);
     let verdict = verdictOf(view.view, judged, account);
     if (cut) verdict = { ...verdict, reason: `${verdict.reason} ${cut}` };
     // An amount no API answer was compared with, or a check whose own failure analysis says the application is right (WEB-002), is never

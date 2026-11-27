@@ -20,6 +20,7 @@ import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { classifyFailedRun } from "../src/engine/validation/validator.js";
 import { confidenceScore } from "../src/engine/findings/score.js";
 import { judgeAttempts } from "../src/platform/findings/verify-service.js";
+import { executionFingerprint } from "../src/platform/findings/adapters.js";
 import { actionNeverDone, ownCheckFault } from "../src/engine/findings/expectation.js";
 
 // rbac L4 trial 4, WEB-019: the C11 stored-injection page check made by security/functional.ts storedInjectionSpec.
@@ -266,5 +267,46 @@ describe("a check that never exercised the stated behaviour is not an applicatio
         expect(actionNeverDone(spec("Deleting a note returns to the list", [fill, { action: "click", locator: { by: "role", role: "button", value: "Delete note" } }, check]))).toBeUndefined();
         expect(actionNeverDone(spec("Owner deletes a note", [{ action: "request", method: "DELETE", path: "/api/notes/n1" }, check]))).toBeUndefined();
         expect(actionNeverDone(spec("Saving a note returns to the list", [fill, check]))).toBeUndefined();
+    });
+});
+
+// Lane M (re-check shop-1 API-015, BS-17): the database check placed before the 409 assertion (a68da7de) failed at detection, so the
+// finding was stored with that check's expectation, which has no source. Verification's 3 attempts all failed at the sourced 409 check
+// (the database check passed there): the verdict reads the expectation from those attempts, as a later read of the finding does.
+describe("a finding stored from an unsourced database check takes the source of the check its attempts fail at", () => {
+    const spec = TestSpecSchema.parse({
+        testId: "API-015",
+        title: 'POST /api/register: rejects an "email" already used, in other letter case',
+        kind: "api",
+        type: "negative",
+        priority: "medium",
+        steps: [
+            { action: "request", method: "POST", path: "/api/register", body: { name: "test-name-{{unique}}", email: "qa+{{unique}}@example.com", password: "test-password-{{unique}}" }, auth: "default", description: "Send a valid request" },
+            { action: "assertResponse", check: "statusClass", expected: "2xx", description: "The first one is accepted" },
+            { action: "request", method: "POST", path: "/api/register", body: { name: "test-name-{{unique}}", email: "QA+{{unique}}@EXAMPLE.COM", password: "test-password-{{unique}}" }, auth: "default", description: 'Send it again with "email" in capitals' },
+            { action: "assertResponse", check: "dbCheck", name: "duplicates users(email) any case", description: "The test left no stored row that breaks the database's keys" },
+            { action: "assertResponse", check: "status", expected: 409, description: "Answered with the documented HTTP 409", source: "API document: POST /api/register 409" },
+        ],
+        expectedResults: ["HTTP 409 (Email already used (whatever the letter case)), as the API document says"],
+        source: { origin: "openapi" },
+    });
+    const expected = { text: "HTTP 409 (Email already used (whatever the letter case)), as the API document says", source: null };
+    const requests = [{ method: "POST", path: "/api/register", status: 201, own: true }, { method: "POST", path: "/api/register", status: 201, own: true }];
+    const rec = {
+        id: "f1", projectId: "p", status: "candidate", firstJobId: null, lastJobId: null, testId: "t1", fingerprint: executionFingerprint("API-015", expected), confidence: "low", capture: "observed_only",
+        seenCount: 1, firstSeenAt: "2026-11-27T13:03:07.026Z", lastSeenAt: "2026-11-27T13:03:07.026Z", state: "verification_pending", findingClass: null, severity: null, confidenceDetail: null, groupId: null, attempts: [], appVersion: null, rootCause: null,
+        finding: { objective: null, actions: { stepCount: 5 }, expected, observed: "Error: Database check failed: duplicates users(email) any case: 1 more row(s) break it than before the test (0 before, 1 now).", evidence: { screenshots: [], requests: ["POST /api/register -> 201", "POST /api/register -> 201"], console: [] }, capture: "observed_only", independence: "not_run", confidence: "low", fingerprint: executionFingerprint("API-015", expected), modelVersion: null, replays: [] },
+    };
+    const test = { id: "t1", title: spec.title, spec, testKey: "API-015", framework: "playwright-api" };
+    const judge = (attempt: Record<string, unknown>) => {
+        const attempts = [attempt, attempt, attempt].map((a) => ({ outcome: "failed", requests, stack: [], account: "in a fresh browser", ...a }));
+        const { tried, view, verdict } = judgeAttempts(rec as never, test as never, attempts as never, { clean: true, note: "in a fresh browser" });
+        return { to: verdict.to, confidence: confidenceScore({ ...view, attempts: tried, independence: "independent" }).confidence, source: view.expected.source };
+    };
+    it("attempts that fail at the documented 409 check: reproduced at high confidence (Confirmed)", () => {
+        expect(judge({ failedStep: 5, check: "status", value: "409", error: "Error: expect(received).toBe(expected)\n\nExpected: 409\nReceived: 201" })).toEqual({ to: "reproduced", confidence: "high", source: "API document: POST /api/register 409" });
+    });
+    it("attempts that fail at the unsourced database check itself stay low (not Confirmed)", () => {
+        expect(judge({ failedStep: 4, check: "dbCheck", error: "Error: Database check failed: duplicates users(email) any case: 1 more row(s) break it than before the test (0 before, 1 now)." })).toMatchObject({ to: "reproduced", confidence: "low", source: null });
     });
 });

@@ -159,7 +159,8 @@ export function executionFinding(test: TestOf, run: ScriptRun): CandidateFinding
  * A stored candidate finding: an exploration finding, or (its fingerprint says so, executionFingerprint) a failed run of an ordinary test
  * or layer check. Recorded attempts (slot 71) win; else the detection and the engine's own replays.
  */
-export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): FindingView {
+/** `tried`: the attempts a verification is judging now (not yet stored on `r`): the expectation is read from them (failingExpectation). */
+export function fromCandidate(r: CandidateFindingRecord, test?: TestOf, tried?: readonly Attempt[]): FindingView {
     const f = r.finding;
     const execution = test !== undefined && r.fingerprint === executionFingerprint(test.spec.testId, f.expected);
     const layer = execution ? str(test.meta?.layer) : undefined;
@@ -174,7 +175,7 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
     // An execution finding stores the first line of its error; the attempts carry it in full (masked), so the headline comes from them.
     const error = recorded.find((a) => a.outcome === "failed" && a.error)?.error;
     const observed = error && error.split("\n")[0]!.trim() === f.observed.trim() ? headlineOf(error) : f.observed;
-    const expected = failingExpectation(f.expected, test?.spec, recorded);
+    const expected = failingExpectation(f.expected, test?.spec, tried ?? recorded);
     return FindingViewSchema.parse({
         id: r.id,
         projectId: r.projectId,
@@ -190,7 +191,8 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
         attempts: attempts.slice(0, 6),
         requirements: (test?.spec.source.requirements ?? []).slice(0, 20),
         ...(test ? { priority: test.spec.priority } : {}),
-        capture: f.capture,
+        // The attempts captured the failing sourced check (failingExpectation took its source).
+        capture: expected.source !== null && f.expected.source === null ? "captured" : f.capture,
         independence: f.independence,
         confidence: f.confidence,
         ...(layer ? { layer } : {}),
@@ -201,14 +203,17 @@ export function fromCandidate(r: CandidateFindingRecord, test?: TestOf): Finding
 
 /**
  * The expectation the attempts' failing check names (V10 R10): a check of `expected:<n>` quotes that expected result, not the one the
- * finding was first stored with (another check of the same test, which passed). Anything else stays as stored.
+ * finding was first stored with (another check of the same test, which passed). A finding stored from a check with no source (a database
+ * key check that ran first, lane M: re-check shop API-015, API-069) whose attempts fail at a sourced check takes that check's source.
+ * Anything else stays as stored.
  */
 function failingExpectation(stored: { text: string; source: string | null }, spec: TestSpec | undefined, attempts: readonly Attempt[]): { text: string; source: string | null } {
     const at = attempts.find((a) => a.outcome === "failed" && a.failedStep !== undefined)?.failedStep;
     const source = spec && at !== undefined ? str(field(spec.steps[at - 1] ?? ({} as Step), "source")) : undefined;
     const n = /^expected:(\d+)$/.exec(source ?? "")?.[1];
     const text = n ? spec!.expectedResults[Number(n) - 1] : undefined;
-    return text && source !== stored.source ? { text, source: source! } : stored;
+    if (text && source !== stored.source) return { text, source: source! };
+    return source && stored.source === null ? { text: stored.text, source } : stored;
 }
 
 /** "Request: PUT /api/notes/n3 {…} -> HTTP 200": a request an access check sent itself (identity/access.ts, identity-writes.ts). */
